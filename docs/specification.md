@@ -1658,6 +1658,12 @@ left open.
   view SHALL default to the active world with a toggle to all worlds.
   - **WHEN** two worlds are open and both dispatch **THEN** their jobs serialize against one
     shared rate limit, and the week's spend totals both.
+- **R-ACT-4** The needs-you queue SHALL be ordered by a defined urgency class before recency, so
+  that unresolved spend and blocked work precede routine review.
+  - **WHEN** a job awaits reconciliation and forty takes await review **THEN** the reconciliation
+    is listed first.
+- **R-ACT-5** Needs-you items for worlds that are not open SHALL be presented as counts with the
+  time they were last computed, and SHALL NOT be presented as current.
 
 ---
 
