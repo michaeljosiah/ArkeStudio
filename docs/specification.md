@@ -1031,6 +1031,12 @@ exists at any version, the dispatch is treated exactly as a sketch citation (§1
 - **R-REF-3** A compiled model sheet SHALL record the sheet version and the tile set it was
   compiled from, and the UI SHALL flag it as stale when either has advanced.
 - **R-REF-4** The classic-grid format SHALL compile locally with no provider call and no cost.
+- **R-REF-5** Where a dispatch's references exceed the target model's accepted count, selection
+  SHALL be deterministic and the dropped references SHALL be named before the user commits.
+  - **WHEN** a shot cites four sheets and the model accepts two references **THEN** the two
+    carried are stated, the two dropped are named, and no reference is silently discarded.
+- **R-REF-6** Exactly one compilation per sheet SHALL be designated the one that rides along with
+  dispatches, defaulting to the newest accepted and overridable by the user.
 
 ---
 
