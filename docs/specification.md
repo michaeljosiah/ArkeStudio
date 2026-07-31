@@ -439,15 +439,26 @@ reviewed twice has two lines, the later winning.
 
 ### 2.3.7 Shot selection
 
-Which take a shot currently uses is a property of the **shot**, in the scene file
-(`acceptedTakeId`), set by the accept gate. Three separate things that the earlier draft
-conflated into one mutable `status` field:
+Which take a shot currently uses lives in `productions/<p>/selections.json`, **not** in the scene
+file:
+
+```json
+{ "sh_12": { "acceptedTakeId": "tk_01J8F...", "startFrameTakeId": "tk_01J8A..." } }
+```
+
+Selections are **operational** (§3.1), and scenes are **gated**. Putting a selection inside the
+scene file would mean accepting a take mutates a gated entity — which would either drag every
+take review through a proposal and ripple check, or quietly punch a hole in the gate. Separating
+them keeps the scene file purely authored structure and lets review stay the fast, reversible act
+it needs to be.
+
+Three separate things that the earlier draft conflated into one mutable `status` field:
 
 | Concern | Lives in | Mutability |
 |---|---|---|
 | What the provider produced | `take.json` | Immutable, write-once |
 | What a human decided about it | `reviews.jsonl` | Append-only |
-| What the cut currently uses | `shot.acceptedTakeId` | Mutable, single-valued |
+| What the cut currently uses | `selections.json` | Mutable, single-valued |
 
 This is why the cut can recompute when a selection changes without any take being rewritten,
 and why a rejection is a durable record rather than an edit to the thing being rejected.
@@ -1310,10 +1321,15 @@ belonging to a single shot. Passes are therefore first-class:
 }
 ```
 
-**Segmentation.** The pass's shot plan comes from the shot durations sent in the brief, so the
-boundaries are known before dispatch rather than inferred afterwards. On arrival the clip is
-segmented locally with ffmpeg into one derived take per shot, each carrying `passId` and the
-same provenance. The full-pass take is retained as the source; the segments are what shots cite.
+**Segmentation is virtual.** The pass's shot plan comes from the shot durations sent in the brief,
+so boundaries are known before dispatch rather than inferred afterwards. On arrival, one derived
+take is created per shot — each carrying `passId`, the same provenance, and an **in/out range into
+the pass's media** rather than a file of its own.
+
+Cutting real files would force a choice between re-encoding every segment, which costs quality and
+time on media the user may reject, and keyframe-aligned copying, which lands boundaries wherever
+the keyframes happen to be rather than where the shots are. A range costs nothing, is exact, and
+keeps the pass as the single stored artifact; the one encode happens at export.
 
 **Cost allocation.** The pass carries the real charge; segments carry an allocated share
 pro-rata by duration, marked as allocated rather than measured. The ledger records the pass, not
