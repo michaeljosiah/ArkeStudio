@@ -100,9 +100,3 @@ follow here.
 ## Licence
 
 Intended: MIT. The `LICENSE` file lands with the first code.
-
----
-
-<div align="center"><sub>
-Arke Studio is part of the <a href="https://github.com/michaeljosiah/Arke">Arke</a> family of tools.
-</sub></div>
