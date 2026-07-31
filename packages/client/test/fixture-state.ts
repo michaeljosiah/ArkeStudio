@@ -1,0 +1,310 @@
+import { ClientStateSchema, type ClientState } from "@arke-studio/contracts";
+import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+
+/**
+ * A compact but schema-valid ClientState mirroring the committed fixture world's ids, so the
+ * navigation test renders every screen against honest data. The full on-disk fixture is
+ * covered by the coordinator's provider tests; this one is validated at both compile time
+ * (the type) and runtime (the parse below).
+ */
+
+const AT = "2026-07-30T18:22:00Z";
+
+const state: ClientState = {
+  app: {
+    version: "0.1.0-test",
+    health: {
+      coordinator: { status: "healthy" },
+      harness: { status: "unavailable", reason: "OpenCode is not configured" },
+      voice: { status: "unavailable", reason: "Voxa is not configured" },
+    },
+    jobs: [
+      {
+        id: "jb_01J8E0000000000000000000J5",
+        idempotencyKey: "01J8E1000000000000000000K5",
+        worldId: FIXTURE_WORLD_ID,
+        productionId: "saltlight",
+        target: { kind: "shot", id: "sh_14", coversShots: ["sh_14"] },
+        provider: "fal",
+        model: "seedance-2.0",
+        params: {},
+        estimatedMicroUsd: 110000,
+        status: "running",
+        providerJobId: "fal_q5e",
+        error: null,
+        createdAt: AT,
+        updatedAt: AT,
+      },
+    ],
+    ledger: [
+      {
+        ts: AT,
+        worldId: FIXTURE_WORLD_ID,
+        productionId: "saltlight",
+        jobId: "jb_01J8E0000000000000000000J2",
+        provider: "fal",
+        model: "seedance-2.0",
+        outcome: "succeeded",
+        estimatedMicroUsd: 130000,
+        actualMicroUsd: 128400,
+        actualSource: "provider-reported",
+      },
+    ],
+  },
+  worlds: [
+    {
+      worldId: FIXTURE_WORLD_ID,
+      slug: "the-undersong",
+      name: "The Undersong",
+      logline: "A drowned god still sings beneath the harbour.",
+      counts: { characters: 3, locations: 2, factions: 1, canonEntries: 6, productions: 1 },
+      updated: AT,
+    },
+  ],
+  world: {
+    meta: {
+      worldId: FIXTURE_WORLD_ID,
+      slug: "the-undersong",
+      schemaVersion: 1,
+      name: "The Undersong",
+      logline: "A drowned god still sings beneath the harbour.",
+      tone: "quiet dread",
+      genre: "coastal fantasy",
+      canonRevision: 42,
+      nextCanonId: 45,
+      created: "2026-05-02T09:14:00Z",
+      updated: AT,
+    },
+    sheets: [
+      {
+        id: "maren-kest",
+        type: "character",
+        name: "Maren Kest",
+        role: "Tide-caller",
+        billing: "lead",
+        version: 4,
+        status: "locked",
+        voice: { provider: "elevenlabs", voiceId: "v_8Kq2", label: "Low tide", assignedAtVersion: 4 },
+        canonRules: ["CANON-002"],
+        links: ["the-vigil"],
+        created: "2026-05-02",
+        updated: "2026-07-14",
+        sections: [
+          { heading: "Essence", body: "Tide-caller. She hears the verse under the harbour." },
+          { heading: "Appearance", body: "Salt-crusted braids, pale grey eyes." },
+        ],
+      },
+      {
+        id: "the-vigil",
+        type: "location",
+        name: "The Vigil",
+        region: "Harbour mouth",
+        version: 2,
+        status: "locked",
+        canonRules: [],
+        links: ["maren-kest"],
+        created: "2026-05-02",
+        updated: "2026-06-30",
+        sections: [{ heading: "Look", body: "A watchtower of black stone at the harbour mouth." }],
+      },
+      {
+        id: "the-ebb-council",
+        type: "faction",
+        name: "The Ebb Council",
+        version: 1,
+        status: "locked",
+        canonRules: [],
+        links: [],
+        created: "2026-05-21",
+        updated: "2026-05-21",
+        sections: [{ heading: "Wants", body: "The Undersong kept quiet." }],
+      },
+    ],
+    canon: [
+      {
+        id: "CANON-002",
+        type: "rule",
+        title: "Tide-calling",
+        status: "settled",
+        introducedAt: 1,
+        settledAt: 12,
+        amendedAt: 42,
+        links: ["maren-kest"],
+        body: "A caller cannot move a tide she has not stood in.",
+      },
+      {
+        id: "CANON-044",
+        type: "thread",
+        title: "Who taught the Chorister?",
+        status: "open",
+        introducedAt: 41,
+        links: ["maren-kest"],
+        body: "True notes are taught, not overheard.",
+      },
+    ],
+    referenceKits: [
+      {
+        sheetId: "maren-kest",
+        tiles: [
+          { angle: "head-front", status: "locked", file: "head-front.png", sheetVersion: 4 },
+          { angle: "body-full", status: "draft", file: "body-full.png", sheetVersion: 3 },
+          { angle: "head-profile", status: "empty" },
+        ],
+        modelSheet: {
+          file: "model-sheet-v4.png",
+          sheetVersion: 4,
+          compiledAt: "2026-07-14T09:00:00Z",
+          tiles: ["head-front", "body-full"],
+        },
+      },
+    ],
+    artifacts: [
+      {
+        id: "ar_01J8G0000000000000000000R1",
+        kind: "audio",
+        file: "harbour-bells.wav",
+        hash: "sha256:6a1e02b9c44d7f31",
+        origin: { by: "user" },
+        links: ["the-vigil"],
+        created: "2026-06-11T10:00:00Z",
+      },
+    ],
+    productions: [
+      {
+        meta: {
+          id: "saltlight",
+          format: "video",
+          title: "Saltlight",
+          logline: "One night on the Vigil, the verse rises early.",
+          status: "in-progress",
+          created: "2026-06-01T10:00:00Z",
+          updated: AT,
+        },
+        story: null,
+        treatment: "A short film. One night's watch on the Vigil, told at the pace of the water.",
+        chapters: [],
+        scenes: [
+          {
+            id: "sc_04",
+            number: 4,
+            slug: "the-verse-rises",
+            title: "The verse rises",
+            status: "accepted",
+            version: 2,
+            inherits: { location: "the-vigil", timeOfDay: "night", tone: "quiet dread" },
+            board: { version: 2, compiledAt: "2026-07-29T11:02:00Z", image: "board-v2.png" },
+            shots: [
+              {
+                id: "sh_12",
+                number: 12,
+                title: "Maren at the rail, listening",
+                description: "@maren-kest grips the rail of @the-vigil.",
+                camera: "MCU · slow push-in",
+                audio: { kind: "vo", speaker: "maren-kest", line: "the verse, under the water" },
+                durationSec: 4,
+              },
+              {
+                id: "sh_13",
+                number: 13,
+                title: "The lamps answer",
+                description: "The lamps flare and settle.",
+                camera: "WS · static",
+                audio: { kind: "sfx", line: "bells, far under" },
+                durationSec: 6,
+              },
+            ],
+          },
+        ],
+        takes: [
+          {
+            id: "tk_01J8F0000000000000000000B2",
+            jobId: "jb_01J8E0000000000000000000J2",
+            coversShots: ["sh_12"],
+            kind: "clip",
+            provider: "fal",
+            model: "seedance-2.0",
+            provenance: { canonRevision: 42, sheets: { "maren-kest": 4, "the-vigil": 2 } },
+            prompt: "Maren at the rail…",
+            references: ["references/maren-kest/model-sheet-v4.png"],
+            params: { aspect: "16:9" },
+            cost: { estimatedMicroUsd: 130000, actualMicroUsd: 128400, actualSource: "provider-reported" },
+            dispatchedAt: "2026-07-30T14:01:12Z",
+            completedAt: "2026-07-30T14:02:04Z",
+            media: "clip.mp4",
+          },
+          {
+            id: "tk_01J8A0000000000000000000A1",
+            jobId: "jb_01J8E0000000000000000000J1",
+            coversShots: ["sh_12"],
+            kind: "frame",
+            provider: "fal",
+            model: "flux-pro-1.1",
+            provenance: { canonRevision: 41, sheets: { "maren-kest": 4 } },
+            references: [],
+            params: {},
+            cost: { estimatedMicroUsd: 40000, actualMicroUsd: 38000, actualSource: "provider-reported" },
+            dispatchedAt: "2026-07-30T13:40:02Z",
+            completedAt: "2026-07-30T13:40:41Z",
+            media: "frame.png",
+          },
+        ],
+        reviews: [
+          {
+            ts: "2026-07-30T14:04:11Z",
+            takeId: "tk_01J8F0000000000000000000B2",
+            shotId: "sh_12",
+            decision: "accept",
+            by: "user",
+          },
+        ],
+        selections: {
+          sh_12: {
+            acceptedTakeId: "tk_01J8F0000000000000000000B2",
+            startFrameTakeId: "tk_01J8A0000000000000000000A1",
+          },
+        },
+      },
+    ],
+    proposals: [
+      {
+        proposal: {
+          id: "pr_01J8H0000000000000000000P1",
+          kind: "sheet-edit",
+          summary: "Maren pays for scene four — her left ear is gone",
+          targets: [
+            { path: "characters/maren-kest.md", baseVersion: 4, baseHash: "sha256:9f2c66a1b0e4d8c2" },
+          ],
+          baseCanonRevision: 42,
+          reservedCanonIds: [],
+          source: "chat:sess_9f2",
+          created: "2026-07-30T18:00:00Z",
+        },
+        ripple: {
+          computedAt: "2026-07-30T18:00:01Z",
+          governing: false,
+          items: [
+            {
+              kind: "stale-reference-tiles",
+              summary: "3 tiles predate v5 — regenerate looks after accept",
+              targets: ["references/maren-kest"],
+            },
+          ],
+        },
+      },
+    ],
+    changes: [
+      {
+        ts: "2026-07-14T09:00:00Z",
+        entity: "characters/maren-kest",
+        fromVersion: 3,
+        toVersion: 4,
+        fieldsChanged: ["appearance"],
+        source: "chat:sess_9f2",
+        canonRevisionAfter: 41,
+      },
+    ],
+  },
+};
+
+/** Runtime-validated on import so a drifted fixture fails the suite immediately. */
+export const FIXTURE_STATE: ClientState = ClientStateSchema.parse(state);

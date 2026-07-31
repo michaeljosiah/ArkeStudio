@@ -1,0 +1,26 @@
+{
+  "computedAt": "2026-07-30T18:00:01Z",
+  "governing": false,
+  "items": [
+    {
+      "kind": "stale-reference-tiles",
+      "summary": "3 reference tiles and the compiled model sheet were made against v4 — regenerate looks after accept",
+      "targets": ["references/maren-kest"]
+    },
+    {
+      "kind": "productions-pick-up",
+      "summary": "Saltlight has unfinished shots citing maren-kest — its next dispatch picks up v5",
+      "targets": ["saltlight"]
+    },
+    {
+      "kind": "takes-pinned-to-old-version",
+      "summary": "2 accepted takes stay pinned to v4; the cut keeps playing them",
+      "targets": ["tk_01J8F0000000000000000000B2", "tk_01J8A0000000000000000000A1"]
+    },
+    {
+      "kind": "owning-canon-rules",
+      "summary": "CANON-002 owns tide-calling's cost — the sheet change must not restate the rule",
+      "targets": ["CANON-002"]
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{"ts":"2026-06-30T16:10:00Z","entity":"locations/the-vigil","fromVersion":1,"toVersion":2,"fieldsChanged":["sound"],"source":"form","canonRevisionAfter":40}
+{"ts":"2026-07-02T09:05:00Z","entity":"characters/the-chorister","fromVersion":null,"toVersion":1,"fieldsChanged":["essence","appearance"],"source":"chat:sess_3aa","canonRevisionAfter":40}
+{"ts":"2026-07-12T11:30:00Z","entity":"canon/CANON-044","fromVersion":null,"toVersion":41,"fieldsChanged":["body"],"source":"chat:sess_3aa","canonRevisionAfter":41}
+{"ts":"2026-07-14T09:00:00Z","entity":"characters/maren-kest","fromVersion":3,"toVersion":4,"fieldsChanged":["appearance","voice-written"],"source":"chat:sess_9f2","canonRevisionAfter":41,"proposalId":"pr_01J8H0000000000000000000P0"}
+{"ts":"2026-07-29T11:02:00Z","entity":"productions/saltlight/scenes/sc_04","fromVersion":1,"toVersion":2,"fieldsChanged":["shots","board"],"source":"form","canonRevisionAfter":41}
+{"ts":"2026-07-30T12:00:00Z","entity":"canon/CANON-002","fromVersion":41,"toVersion":42,"fieldsChanged":["body"],"source":"chat:sess_9f2","canonRevisionAfter":42,"proposalId":"pr_01J8H0000000000000000000P2"}

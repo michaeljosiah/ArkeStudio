@@ -3,3 +3,12 @@ design-system/uploads/
 
 # Tool-generated thumbnail cache
 .thumbnail
+
+# Dependencies and build output
+node_modules/
+dist/
+release/
+*.tsbuildinfo
+
+# Local dev scratch (dev coordinator change log, etc.)
+.dev/

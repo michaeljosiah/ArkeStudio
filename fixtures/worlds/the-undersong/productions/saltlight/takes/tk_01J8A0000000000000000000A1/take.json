@@ -1,0 +1,16 @@
+{
+  "id": "tk_01J8A0000000000000000000A1",
+  "jobId": "jb_01J8E0000000000000000000J1",
+  "coversShots": ["sh_12"],
+  "kind": "frame",
+  "provider": "fal",
+  "model": "flux-pro-1.1",
+  "provenance": { "canonRevision": 41, "sheets": { "maren-kest": 4, "the-vigil": 2 } },
+  "prompt": "Maren Kest at the black stone rail of the Vigil at night, green-white lamplight, quiet dread, MCU start frame",
+  "references": ["references/maren-kest/model-sheet-v4.png"],
+  "params": { "aspect": "16:9", "resolution": "1080p", "seed": 2201 },
+  "cost": { "estimatedMicroUsd": 40000, "actualMicroUsd": 38000, "actualSource": "provider-reported" },
+  "dispatchedAt": "2026-07-30T13:40:02Z",
+  "completedAt": "2026-07-30T13:40:41Z",
+  "media": "frame.png"
+}

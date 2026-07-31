@@ -1,0 +1,32 @@
+{
+  "name": "arke-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Arke Studio — a local-first worldbuilding and production studio. The world lives in a folder; the app is a lens over it.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/michaeljosiah/ArkeStudio.git"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace @arke-studio/client",
+    "dev:coordinator": "npm run dev --workspace @arke-studio/coordinator",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "oxlint packages apps",
+    "format": "prettier --write \"packages/**/*.{ts,tsx,css,json}\" \"apps/**/*.{ts,tsx,json}\"",
+    "test": "npm run test --workspaces --if-present",
+    "start": "npm run start --workspace @arke-studio/desktop"
+  },
+  "devDependencies": {
+    "oxlint": "^0.15.0",
+    "prettier": "^3.4.2"
+  }
+}

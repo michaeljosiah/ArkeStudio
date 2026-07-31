@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "client",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace", "@arke-studio/client"],
+      "port": 5173
+    },
+    {
+      "name": "coordinator",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace", "@arke-studio/coordinator"],
+      "port": 8791
+    }
+  ]
+}

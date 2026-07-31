@@ -1,0 +1,16 @@
+{
+  "id": "tk_01J8C0000000000000000000C3",
+  "jobId": "jb_01J8E0000000000000000000J3",
+  "coversShots": ["sh_12"],
+  "kind": "clip",
+  "provider": "fal",
+  "model": "seedance-2.0",
+  "provenance": { "canonRevision": 41, "sheets": { "maren-kest": 3, "the-vigil": 2 } },
+  "prompt": "Maren Kest grips the rail of the Vigil, head tilted. Night, lamps, dread. MCU push-in.",
+  "references": ["references/maren-kest/model-sheet-v4.png"],
+  "params": { "aspect": "16:9", "resolution": "720p", "durationSec": 6, "seed": 3110 },
+  "cost": { "estimatedMicroUsd": 130000, "actualMicroUsd": 131000, "actualSource": "provider-reported" },
+  "dispatchedAt": "2026-07-30T13:52:20Z",
+  "completedAt": "2026-07-30T13:53:15Z",
+  "media": "clip.mp4"
+}

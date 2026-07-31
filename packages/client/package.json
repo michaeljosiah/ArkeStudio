@@ -1,0 +1,30 @@
+{
+  "name": "@arke-studio/client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The React client: the SpecOne design baseline over the coordinator's snapshot/event stream, every v1 screen reachable (SPEC-001 R-7).",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"test/**/*.test.tsx\" \"test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@arke-studio/contracts": "*",
+    "@fontsource/geist-mono": "^5.2.5",
+    "@fontsource/geist-sans": "^5.2.5",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router": "^8.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vite": "^7.3.6"
+  }
+}

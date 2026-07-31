@@ -1,0 +1,134 @@
+/* ============================================================
+   SpecOne · Color tokens — shadcn/ui "neutral" theme
+   Deliberately unbranded monochrome: white surfaces, near-black
+   primary, neutral grays, one red for destructive. Built on the
+   shadcn variable contract so the system re-skins cleanly.
+   ============================================================ */
+:root {
+  /* ---- shadcn core tokens (light) -------------------------- */
+  --background:            #FFFFFF;
+  --foreground:            #0A0A0A;   /* neutral-950 */
+  --card:                  #FFFFFF;
+  --card-foreground:       #0A0A0A;
+  --popover:               #FFFFFF;
+  --popover-foreground:    #0A0A0A;
+  --primary:               #171717;   /* neutral-900 */
+  --primary-foreground:    #FAFAFA;   /* neutral-50 */
+  --secondary:             #F5F5F5;   /* neutral-100 */
+  --secondary-foreground:  #171717;
+  --muted:                 #F5F5F5;
+  --muted-foreground:      #737373;   /* neutral-500 */
+  --accent:                #F5F5F5;
+  --accent-foreground:     #171717;
+  --destructive:           #E7000B;   /* red-600 */
+  --destructive-foreground:#FAFAFA;
+  --border:                #E5E5E5;   /* neutral-200 */
+  --input:                 #E5E5E5;
+  --ring:                  #A1A1A1;   /* neutral-400 focus ring */
+
+  /* ---- Restrained status palette (use sparingly) ---------- */
+  --success:        #16A34A;  /* green-600 — passing / agreement */
+  --success-bg:     #F0FDF4;
+  --warning:        #D97706;  /* amber-600 — waiting / caution */
+  --warning-bg:     #FFFBEB;
+  --info:           #0A0A0A;  /* monochrome — uses foreground */
+  --danger:         var(--destructive);
+  --danger-bg:      #FEF2F2;
+
+  /* ---- Neutral ramp (for fine control) -------------------- */
+  --neutral-50:  #FAFAFA;
+  --neutral-100: #F5F5F5;
+  --neutral-200: #E5E5E5;
+  --neutral-300: #D4D4D4;
+  --neutral-400: #A1A1A1;
+  --neutral-500: #737373;
+  --neutral-600: #525252;
+  --neutral-700: #404040;
+  --neutral-800: #262626;
+  --neutral-900: #171717;
+  --neutral-950: #0A0A0A;
+
+  /* ============================================================
+     Semantic aliases — prefer shadcn tokens above; these map the
+     system's older names onto the monochrome theme so everything
+     resolves neutral with no legacy accent leaking through.
+     ============================================================ */
+  --bg-app:        var(--background);
+  --bg-surface:    var(--card);
+  --bg-recessed:   var(--muted);
+
+  --surface:       var(--card);
+  --surface-2:     var(--muted);
+  --paper:         var(--background);
+
+  --text-primary:   var(--foreground);
+  --text-secondary: var(--neutral-700);
+  --text-muted:     var(--muted-foreground);
+  --text-placeholder: var(--neutral-400);
+
+  --ink:        var(--foreground);
+  --ink-soft:   var(--neutral-700);
+  --muted-c:    var(--muted-foreground);
+  --faint:      var(--neutral-400);
+
+  --line:       var(--border);
+  --line-soft:  var(--neutral-100);
+  --line-strong:var(--foreground);
+
+  --focus-ring:  var(--ring);
+  --selection-bg: var(--neutral-200);
+  --selection-fg: var(--foreground);
+
+  /* Legacy brand names → monochrome, so nothing renders teal/orange */
+  --teal:        var(--primary);
+  --teal-700:    #000000;
+  --bright:      var(--muted-foreground);
+  --bright-2:    var(--neutral-400);
+  --signal:      var(--destructive);
+  --signal-700:  #B91C1C;
+  --teal-tint:   var(--muted);
+  --teal-tint-2: var(--muted);
+  --signal-tint: var(--danger-bg);
+  --ok:          var(--success);
+  --ok-tint:     var(--success-bg);
+  --warn:        var(--warning);
+  --warn-tint:   var(--warning-bg);
+  --dark:        var(--primary);
+  --on-dark:     var(--primary-foreground);
+  --on-dark-soft:var(--neutral-400);
+  --on-dark-mute:var(--neutral-500);
+}
+
+/* ============================================================
+   Dark theme — apply `class="dark"` on a root element.
+   ============================================================ */
+.dark {
+  --background:            #0A0A0A;
+  --foreground:            #FAFAFA;
+  --card:                  #171717;
+  --card-foreground:       #FAFAFA;
+  --popover:               #171717;
+  --popover-foreground:    #FAFAFA;
+  --primary:               #FAFAFA;
+  --primary-foreground:    #171717;
+  --secondary:             #262626;
+  --secondary-foreground:  #FAFAFA;
+  --muted:                 #262626;
+  --muted-foreground:      #A1A1A1;
+  --accent:                #262626;
+  --accent-foreground:     #FAFAFA;
+  --destructive:           #EF4444;
+  --destructive-foreground:#FAFAFA;
+  --border:                #2A2A2A;
+  --input:                 #2A2A2A;
+  --ring:                  #707070;
+
+  --success-bg: #0B1F12;
+  --warning-bg: #241803;
+  --danger-bg:  #2A0E0E;
+
+  --ink-soft:   var(--neutral-300);
+  --line-soft:  #1F1F1F;
+}
+
+::selection { background: var(--selection-bg); color: var(--selection-fg); }

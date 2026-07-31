@@ -1,0 +1,316 @@
+/* Component layer — every value a token (SPEC-001 R-11). */
+
+/* ---- Button ------------------------------------------------ */
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--control-pad-y) var(--control-pad-x);
+  border-radius: var(--radius-control);
+  border: var(--border-1) solid transparent;
+  font: var(--type-ui);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.ui-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.ui-btn--primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.ui-btn--primary:hover:not(:disabled) {
+  background: var(--neutral-800);
+}
+.dark .ui-btn--primary:hover:not(:disabled) {
+  background: var(--neutral-200);
+}
+.ui-btn--secondary {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  border-color: var(--border);
+}
+.ui-btn--secondary:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--neutral-300);
+}
+.ui-btn--ghost {
+  background: transparent;
+  color: var(--foreground);
+}
+.ui-btn--ghost:hover:not(:disabled) {
+  background: var(--accent);
+}
+.ui-btn--destructive {
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+}
+
+.ui-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-8);
+  height: var(--space-8);
+  border-radius: var(--radius-control);
+  border: var(--border-1) solid transparent;
+  background: transparent;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.ui-iconbtn:hover {
+  background: var(--accent);
+}
+
+/* ---- Inputs ------------------------------------------------ */
+.ui-input {
+  width: 100%;
+  padding: var(--control-pad-y) var(--space-3);
+  border-radius: var(--radius-control);
+  border: var(--border-1) solid var(--input);
+  background: var(--background);
+  color: var(--foreground);
+  font: var(--type-ui);
+  font-weight: var(--weight-regular);
+  transition: var(--transition-control);
+}
+.ui-input::placeholder {
+  color: var(--text-placeholder);
+}
+.ui-input:focus-visible {
+  border-color: var(--ring);
+  box-shadow: var(--shadow-focus);
+}
+.ui-textarea {
+  min-height: calc(var(--space-16) + var(--space-12));
+  line-height: var(--leading-normal);
+  resize: vertical;
+}
+
+/* ---- Switch ------------------------------------------------ */
+.ui-switch {
+  position: relative;
+  width: var(--space-10);
+  height: var(--space-5);
+  border-radius: var(--radius-pill);
+  border: var(--border-1) solid var(--border);
+  background: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  transition: var(--transition-control);
+}
+.ui-switch--on {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.ui-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ui-switch__thumb {
+  position: absolute;
+  top: var(--space-0);
+  left: var(--space-0);
+  margin: calc(var(--space-1) / 2);
+  width: var(--space-4);
+  height: var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--background);
+  box-shadow: var(--shadow-xs);
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+.ui-switch--on .ui-switch__thumb {
+  transform: translateX(var(--space-5));
+}
+
+/* ---- Tabs -------------------------------------------------- */
+.ui-tabs {
+  display: inline-flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border-radius: var(--radius-control);
+  background: var(--muted);
+}
+.ui-tab {
+  padding: calc(var(--space-1) + var(--space-0)) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: var(--type-ui);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.ui-tab--active {
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: var(--shadow-xs);
+}
+.ui-tabpanel {
+  margin-top: var(--stack);
+}
+
+/* ---- Card -------------------------------------------------- */
+.ui-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-4);
+  border: var(--border-1) solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: var(--shadow-card);
+}
+.ui-card--clickable {
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.ui-card--clickable:hover {
+  border-color: var(--neutral-300);
+  box-shadow: var(--shadow-sm);
+}
+.dark .ui-card--clickable:hover {
+  border-color: var(--neutral-700);
+}
+
+/* ---- Badge ------------------------------------------------- */
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: calc(var(--space-1) / 2) var(--space-2);
+  border-radius: var(--radius-pill);
+  font: var(--type-label);
+  letter-spacing: var(--tracking-wide);
+  white-space: nowrap;
+}
+.ui-badge--neutral {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+.ui-badge--outline {
+  background: transparent;
+  color: var(--muted-foreground);
+  border: var(--border-1) solid var(--border);
+}
+.ui-badge--success {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.ui-badge--warning {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.ui-badge--danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+/* ---- StatusDot --------------------------------------------- */
+.ui-statusdot {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: var(--type-ui);
+  color: var(--text-secondary);
+}
+.ui-statusdot__dot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+}
+.ui-statusdot__dot--ok {
+  background: var(--success);
+}
+.ui-statusdot__dot--warn {
+  background: var(--warning);
+}
+.ui-statusdot__dot--danger {
+  background: var(--danger);
+}
+.ui-statusdot__dot--muted {
+  background: var(--neutral-300);
+}
+.ui-statusdot__dot--busy {
+  background: var(--foreground);
+  animation: launch-pulse var(--dur-slow) var(--ease-standard) infinite;
+  animation-duration: 1200ms;
+}
+
+/* ---- Callout ----------------------------------------------- */
+.ui-callout {
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-1) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  font: var(--type-ui);
+  font-weight: var(--weight-regular);
+  color: var(--text-secondary);
+}
+.ui-callout__title {
+  font-weight: var(--weight-semibold);
+  color: var(--foreground);
+  margin-bottom: var(--space-1);
+}
+.ui-callout--warning {
+  background: var(--warning-bg);
+  border-color: var(--warning);
+  color: var(--warning);
+}
+.ui-callout--warning .ui-callout__title {
+  color: var(--warning);
+}
+.ui-callout--danger {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.ui-callout--danger .ui-callout__title {
+  color: var(--danger);
+}
+.ui-callout--success {
+  background: var(--success-bg);
+  border-color: var(--success);
+  color: var(--success);
+}
+
+/* ---- Avatar ------------------------------------------------ */
+.ui-avatar {
+  width: var(--space-8);
+  height: var(--space-8);
+  border-radius: var(--radius-pill);
+  object-fit: cover;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ui-avatar--initials {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font: var(--type-label);
+}
+
+/* ---- AgentMessage ------------------------------------------ */
+.ui-agentmsg {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  max-width: var(--width-text);
+}
+.ui-agentmsg--you {
+  background: var(--background);
+  border: var(--border-1) solid var(--border);
+}
+.ui-agentmsg__author {
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.ui-agentmsg__body {
+  font: var(--type-body);
+}

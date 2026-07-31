@@ -1,0 +1,9 @@
+{
+  "id": "ar_01J8G0000000000000000000R3",
+  "kind": "board",
+  "file": "board-v2.png",
+  "hash": "sha256:b7d24c90a13e58f6",
+  "origin": { "by": "system", "producedBy": "board-compile:saltlight/sc_04@v2" },
+  "links": ["saltlight", "sc_04"],
+  "created": "2026-07-29T11:02:00Z"
+}

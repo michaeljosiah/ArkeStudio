@@ -1,0 +1,21 @@
+{
+  "sheetId": "maren-kest",
+  "tiles": [
+    { "angle": "head-front", "status": "locked", "file": "head-front.png", "sheetVersion": 4 },
+    {
+      "angle": "head-left-three-quarter",
+      "status": "locked",
+      "file": "head-left-three-quarter.png",
+      "sheetVersion": 4
+    },
+    { "angle": "body-full", "status": "draft", "file": "body-full.png", "sheetVersion": 3 },
+    { "angle": "head-profile", "status": "empty" },
+    { "angle": "expression", "status": "empty" }
+  ],
+  "modelSheet": {
+    "file": "model-sheet-v4.png",
+    "sheetVersion": 4,
+    "compiledAt": "2026-07-14T09:00:00Z",
+    "tiles": ["head-front", "head-left-three-quarter", "body-full"]
+  }
+}

@@ -1,0 +1,20 @@
+# Working electron-builder target (SPEC-001 scope note). Signing, publish channels and the
+# real update flow arrive with SPEC-016.
+appId: studio.arke.app
+productName: Arke Studio
+directories:
+  output: release
+files:
+  - dist/**
+  - package.json
+extraResources:
+  - from: ../../packages/client/dist
+    to: client
+  - from: ../../fixtures
+    to: fixtures
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: true
+  perMachine: false

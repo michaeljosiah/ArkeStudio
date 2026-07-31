@@ -1,0 +1,48 @@
+{
+  "id": "sc_04",
+  "number": 4,
+  "slug": "the-verse-rises",
+  "title": "The verse rises",
+  "status": "accepted",
+  "version": 2,
+  "inherits": { "location": "the-vigil", "timeOfDay": "night", "tone": "quiet dread" },
+  "board": { "version": 2, "compiledAt": "2026-07-29T11:02:00Z", "image": "board-v2.png" },
+  "shots": [
+    {
+      "id": "sh_12",
+      "number": 12,
+      "title": "Maren at the rail, listening",
+      "description": "@maren-kest grips the rail of @the-vigil, head tilted. She hears it first.",
+      "camera": "MCU · slow push-in",
+      "audio": { "kind": "vo", "speaker": "maren-kest", "line": "the verse, under the water" },
+      "durationSec": 4
+    },
+    {
+      "id": "sh_13",
+      "number": 13,
+      "title": "The lamps answer",
+      "description": "The green-white lamps of @the-vigil flare and settle, one by one, down the rail.",
+      "camera": "WS · static",
+      "audio": { "kind": "sfx", "line": "bells, far under" },
+      "durationSec": 6
+    },
+    {
+      "id": "sh_14",
+      "number": 14,
+      "title": "Bray stops mid-story",
+      "description": "@bray-half-hitch on the stair, a story dying in his mouth as the water goes wrong.",
+      "camera": "MS · handheld",
+      "audio": { "kind": "dialogue", "speaker": "bray-half-hitch", "line": "…tell you the rest after." },
+      "durationSec": 5
+    },
+    {
+      "id": "sh_15",
+      "number": 15,
+      "title": "The harbour holds its breath",
+      "description": "From the rail: the whole harbour flat as glass, tide a hand-span too high against @the-saltmarket pilings.",
+      "camera": "EWS · slow tilt down",
+      "audio": { "kind": "silence" },
+      "durationSec": 4.5
+    }
+  ]
+}
