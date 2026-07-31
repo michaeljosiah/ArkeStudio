@@ -267,16 +267,39 @@ item later replaced by `Canon`, and canon already carries a `timeline` entry typ
 
 ```json
 {
-  "id": "the-undersong",
+  "worldId": "01J8F3K2QW9VZX4N7M0RTYB6HC",
+  "slug": "the-undersong",
+  "schemaVersion": 1,
   "name": "The Undersong",
   "logline": "A drowned god still sings beneath the harbour.",
   "tone": "quiet dread",
   "genre": "coastal fantasy",
   "canonRevision": 42,
+  "nextCanonId": 45,
   "created": "2026-05-02T09:14:00Z",
   "updated": "2026-07-30T18:22:00Z"
 }
 ```
+
+**`worldId` is a ULID, not the slug.** The slug is a filename and a user can rename a world;
+the queue and the ledger are global and outlive any one world. Keying global records on a slug
+would mean a rename orphans a world's spend history, and two users' `the-undersong` folders
+collide in one ledger. Global records key on `worldId`; the slug is display and path only.
+
+**Clone policy.** A world folder copied on disk carries its `worldId`, which makes the copy
+indistinguishable from the original to the queue and ledger. On open, the application detects a
+`worldId` already registered at a different path and asks: *this is the same world moved* — keep
+the id and update the registered path — or *this is a copy* — mint a new `worldId`, leaving the
+original's history with the original. It never guesses, because both answers are reasonable and
+only the user knows which happened.
+
+**`nextCanonId` is the allocation counter.** Canon ids must be monotonic and never reused
+(R-CANON-4), which cannot be satisfied by taking the maximum of existing ids: retire CANON-043
+and the maximum drops, so the next entry reuses 43 and every citation to the retired entry now
+resolves to a different one. The counter is persisted, and reserved atomically — a proposal that
+will create an entry reserves its id at proposal time under the world lock, so two concurrent
+proposals cannot receive the same number. A reservation abandoned by a discarded proposal is
+simply a gap; gaps are correct and reuse is not.
 
 ### 2.3.2 A sheet — `characters/maren-kest.md`
 
@@ -374,13 +397,16 @@ assembly and are what makes a shot's cast computable rather than guessed.
 
 ### 2.3.5 A take — `productions/saltlight/takes/tk_01J8F.../take.json`
 
+A take is an **immutable generation record**. It has no status, because status is a review
+decision and review decisions are not properties of what a provider returned.
+
 ```json
 {
   "id": "tk_01J8F...",
-  "shotId": "sh_12",
-  "index": 3,
-  "kind": "clip",         // clip | frame | still | voice | sheet
-  "status": "accepted",   // unreviewed | accepted | rejected
+  "jobId": "jb_01J8E...",
+  "passId": "ps_01J8E...",           // present when produced by a whole-scene pass (§10.3)
+  "coversShots": ["sh_12"],          // one shot per-shot; several for a pass segment
+  "kind": "clip",                    // clip | frame | still | voice | sheet
   "provider": "fal",
   "model": "seedance-2.0",
   "provenance": {
@@ -398,7 +424,33 @@ assembly and are what makes a shot's cast computable rather than guessed.
 }
 ```
 
-Takes are **immutable**. A rejection appends a `rejection` object; it never edits the take.
+### 2.3.6 Review decisions — `productions/saltlight/reviews.jsonl`
+
+Append-only. One line per decision. A take is never edited by being reviewed, and a take
+reviewed twice has two lines, the later winning.
+
+```json
+{"ts":"2026-07-30T14:04:11Z","takeId":"tk_01J8F...","shotId":"sh_12",
+ "decision":"accept","by":"user"}
+{"ts":"2026-07-30T13:58:02Z","takeId":"tk_01J8C...","shotId":"sh_12",
+ "decision":"reject","by":"user",
+ "citation":{"sheet":"maren-kest","field":"appearance","note":"coat drifted off-sheet"}}
+```
+
+### 2.3.7 Shot selection
+
+Which take a shot currently uses is a property of the **shot**, in the scene file
+(`acceptedTakeId`), set by the accept gate. Three separate things that the earlier draft
+conflated into one mutable `status` field:
+
+| Concern | Lives in | Mutability |
+|---|---|---|
+| What the provider produced | `take.json` | Immutable, write-once |
+| What a human decided about it | `reviews.jsonl` | Append-only |
+| What the cut currently uses | `shot.acceptedTakeId` | Mutable, single-valued |
+
+This is why the cut can recompute when a selection changes without any take being rewritten,
+and why a rejection is a durable record rather than an edit to the thing being rejected.
 
 **Requirements**
 
@@ -432,6 +484,36 @@ every other sheet. The reason: sheets are cited individually, so a take must rec
 **Provenance records both.** Every take carries `{ canonRevision, sheets: {…} }`. That pair is
 what makes *"accepted takes stay on the version they were made with"* and *"14 reference images
 predate v5"* computable rather than decorative.
+
+### 2.4.1 What is versioned, and what is not
+
+Not every gated entity earns a version. A version exists so that something else can *cite* it;
+where nothing cites an entity, a version is ceremony that must still be maintained correctly,
+which is a cost with no return.
+
+| Entity | Versioned | Cited by | History |
+|---|---|---|---|
+| Canon entry | By world canon revision | takes, sheets, entries, threads | Yes |
+| Character / location / faction sheet | Own monotonic version | takes, shots, tiles, model sheets | Yes |
+| Story chapter | Own monotonic version | nothing; the reader is the consumer | Yes |
+| Scene | Own monotonic version | shots inherit from it; boards compile from it | Yes |
+| Story overview | Own monotonic version | scene drafting cites it | Yes |
+| Production metadata | Unversioned | nothing | Change logged only |
+| Cut | Unversioned, derived | nothing; recomputed from selections | Not applicable |
+| Artifact | Unversioned, immutable | anything may link it | Superseding files a new artifact |
+| Reference tile | Unversioned; carries source sheet version | model sheets | Superseding regenerates |
+| Model sheet | Carries source sheet version and tile set | dispatches | Superseding recompiles |
+
+Three consequences worth stating outright, because each was ambiguous in the earlier draft:
+
+- **Scenes are versioned.** They are cited — shots inherit a scene's location and tone, and a
+  board compiles from a scene at a point in time — so *"board v2, in step with shots"* needs a
+  scene version to be in step *with*.
+- **The cut is derived, never versioned.** It is a projection of shot selections; versioning a
+  projection creates a second truth about what the film is. Restoring an earlier cut means
+  restoring the selections that produced it.
+- **Artifacts are immutable.** Replacing an artifact files a new one and relinks; editing one in
+  place would silently change what a three-month-old citation refers to.
 
 **Requirements**
 
@@ -513,48 +595,119 @@ Tables: `entities`, `citations` (who references what, and at which version), `ta
 
 ## 2.7 Concurrency and external edits
 
-One process owns a world at a time, enforced by a lock file. Hand edits made while the world is
-closed are picked up by the scan on open. Hand edits made while it is open are detected by a
-watcher, which marks the index stale and prompts a reload rather than merging.
+One process owns a world at a time, enforced by a lock file. Hand edits made while a world is
+open are detected by a watcher, which marks the index stale and prompts a reload rather than
+merging.
+
+**Hand edits made while the world was closed need an explicit reconciliation**, because simply
+scanning them in would let a change enter the record with no version bump, no snapshot and no
+audit line — quietly defeating the gate for anyone with a text editor.
+
+On open, every entity file's hash is compared against the hash recorded at its last commit. A
+mismatch is an **external edit**, and it is reconciled, not absorbed:
+
+1. The world opens read-only, listing the externally-edited files.
+2. Each is validated against its schema. Files that no longer parse are reported and excluded;
+   the user fixes or reverts them.
+3. The user accepts the external edits as a single reconciliation commit, or reverts them from
+   `.history/`.
+4. Accepting runs the ordinary commit transaction: snapshots the last-committed version, bumps
+   each affected entity's version, bumps the canon revision if canon changed, and writes a
+   `changes.jsonl` line with `source: "external-edit"`.
+
+The result is that hand-editing remains fully supported — it is a promise the format makes —
+while the version history stays a true account of what happened. What is not supported is a hand
+edit that leaves no trace.
+
+Reconciliation is skipped for one case: a world whose `.history/` and `changes.jsonl` are absent
+is being opened for the first time — an imported or hand-authored folder — and is adopted as-is
+at version 1.
 
 ---
 
 # 3 · The accept gate
 
-## 3.1 The universal pattern
+## 3.1 The mutation matrix
 
-Every mutation to the world — from any source, agent or human, prose or form — passes through
-the same four states:
+The gate does not apply to everything a world contains, and the earlier draft's claim that it
+did was wrong — it contradicted chapter autosave, board compilation, take arrival and the
+change log itself. What the gate protects is **the authored record**: the facts a production
+cites. Four classes, with different rules:
+
+| Class | Members | Rule |
+|---|---|---|
+| **Gated** | canon entries, sheets, scenes, story overviews, production metadata, artifact links, agent-drafted chapters | Proposal → ripple → accept. Versioned, snapshotted, logged. |
+| **Direct authored** | chapter prose after acceptance (§8.3) | Written by the author, autosaved. Versioned at save-points, snapshotted, logged. No proposal. |
+| **Operational** | `changes.jsonl`, the job queue, the ledger, review decisions, lock files, the index, shot selections | Written by the system as work happens. Append-only where applicable. Never versioned, never gated — these *are* the record of gating, and gating them would be circular. |
+| **Generated media** | takes and their binaries, compiled boards, extracted frames | Written on arrival by the job queue or a local compile. Immutable and content-addressed. Not gated for *existing*; gated for **admission** — what a shot cites and what enters the cut. |
+
+The distinction that resolves the contradiction is between **existing** and **being cited**. A
+take exists the moment a provider returns it, and pretending otherwise would mean holding
+generated media in limbo outside the world. What requires acceptance is a take becoming the
+shot's answer. The same is true of a compiled board: compiling files it, accepting it makes it
+the scene's board.
+
+*"Nothing changes until you accept"* remains true of everything a production cites. It was never
+true of the audit trail, and should not have been claimed.
+
+## 3.2 The gated pattern
 
 ```
 draft → proposed → ripple-checked → accepted | discarded
 ```
 
-The UI copy is consistent and load-bearing: *"Nothing changes until you accept."* This is a
-single implementation used by canon, sheets, scenes, story overviews and locations. Takes use
-a variant (§10.5) because their content is a binary that already exists.
+One implementation, used by every gated member above.
 
-## 3.2 Proposals
+## 3.3 Proposals
 
 A proposal is a directory under `.proposals/<proposalId>/` containing the *complete proposed
 files*, not patches:
 
 ```
 .proposals/pr_01J8H.../
-  proposal.json      kind, target entity, source, session id, created
+  proposal.json      kind, targets, base hashes, reserved ids, source, session, created
   characters/maren-kest.md      the full proposed file
-  ripple.json        computed consequences (§3.3)
+  ripple.json        ripples as computed at propose time — advisory preview only
 ```
 
-The authoring agent writes here and nowhere else (§17.3). Because the proposal is whole files,
-accepting is a move, and the UI's side-by-side "current vs proposed" is a plain two-file
-comparison with no patch application to get wrong.
+Because proposals are whole files, accepting is a move and the side-by-side comparison is a
+plain two-file diff with no patch application to get wrong.
 
-## 3.3 Ripple checks
+**Every proposal records the base it was drafted against.** `proposal.json` carries, per target,
+the entity's version and a content hash at the moment drafting began:
+
+```json
+{
+  "id": "pr_01J8H...",
+  "targets": [
+    { "path": "characters/maren-kest.md", "baseVersion": 4, "baseHash": "sha256:9f2c…" }
+  ],
+  "baseCanonRevision": 42,
+  "reservedCanonIds": [],
+  "source": "chat:sess_9f2"
+}
+```
+
+Without this a proposal can silently destroy newer work: two authoring sessions open on one
+sheet, or one session open while the file is hand-edited, and the second accept overwrites the
+first with no indication. **Accept verifies every base hash under the world lock** and refuses
+a stale proposal, offering to rebase it onto current content and recompute its ripples. Staleness
+is detected, never merged.
+
+## 3.4 Ripple checks
 
 Ripples are **computed from the index, never asked of the model.** The LLM writes the prose
 that explains a ripple; it does not determine what the ripples are. This is what makes
 *"14 reference images predate v5, regenerate looks after accept"* trustworthy.
+
+**Ripples are computed twice.** The set shown while a proposal is open is a preview against the
+world as it was then. The set that governs is recomputed **at accept, under the world lock,
+after base-hash verification** — because between drafting and accepting, a take may have landed,
+a tile may have been locked, or another proposal may have been accepted. Accepting against a
+stale ripple list would show a user one set of consequences and produce another.
+
+Where the recomputed set differs materially from the preview, the difference is surfaced and the
+accept is re-confirmed rather than completed silently.
 
 Computed ripples for a sheet change:
 
@@ -570,22 +723,92 @@ For a canon change, additionally: contradiction candidates (lexical overlap agai
 entries, surfaced for human judgement, never auto-blocking), entries gaining a cross-reference,
 and productions whose next dispatch will see the new revision.
 
+## 3.5 The accept transaction
+
+Renaming files one at a time cannot give all-or-nothing across a multi-file accept: a crash
+between the first rename and the last leaves the world half-changed, with `world.json`,
+`.history/` and `changes.jsonl` all potentially out of step. The filesystem offers no
+transaction, so the specification must define one.
+
+**An intent journal**, at `.commit/<commitId>.json`, written and flushed *before* any live file
+is touched. It records the complete plan:
+
+```json
+{
+  "commitId": "cm_01J8H...",
+  "proposalId": "pr_01J8H...",
+  "phase": "prepared",
+  "canonRevisionFrom": 42, "canonRevisionTo": 43,
+  "files": [
+    { "path": "canon/CANON-044.md",
+      "action": "create",
+      "newHash": "sha256:1a4b…",
+      "historyPath": null },
+    { "path": "characters/maren-kest.md",
+      "action": "replace",
+      "baseHash": "sha256:9f2c…", "newHash": "sha256:77de…",
+      "historyPath": ".history/characters/maren-kest/v4.md" }
+  ]
+}
+```
+
+**Commit sequence.** Each step is durable before the next begins:
+
+1. Acquire the world lock. Verify every `baseHash`. Recompute ripples. Reserve any canon ids.
+2. Write the journal with `phase: "prepared"`. Flush.
+3. Write every `.history/` snapshot. Flush.
+4. Write staged copies of every new file alongside their targets. Flush.
+5. Set `phase: "committing"`. Flush. **This is the point of no return.**
+6. Rename every staged file into place, and write `world.json` last of all — its
+   `canonRevision` is the world's single observable statement about which revision it is at.
+7. Append to `changes.jsonl`. Flush.
+8. Set `phase: "done"`, then delete the journal and the proposal directory.
+
+**Recovery on open**, driven by the journal's phase:
+
+| Phase found | Meaning | Action |
+|---|---|---|
+| `prepared` | Crashed before the point of no return | **Roll back.** Delete staged files and snapshots written by this commit. The world is untouched. |
+| `committing` | Crashed mid-apply | **Roll forward.** Re-run steps 6–8 idempotently; hashes identify which renames already happened. |
+| `done` | Crashed during cleanup | Delete the journal and proposal directory. |
+
+Roll-forward is safe because every step from 6 on is idempotent against the recorded hashes: a
+file already matching `newHash` is skipped, and `changes.jsonl` is appended only if its line for
+this `commitId` is absent. Roll-back is safe because before step 5 nothing live has changed.
+
+Two commits are never in flight at once — the world lock guarantees it — so a journal found on
+open is unambiguous.
+
 **Requirements**
 
-- **R-GATE-1** No world file outside `.proposals/` SHALL be written except by an accept.
-  - **WHEN** an authoring agent runs to completion without a human accept **THEN** the live
-    world is byte-identical to before.
+- **R-GATE-1** No **gated** entity (§3.1) SHALL be written to the live world except by an
+  accept.
+  - **WHEN** an authoring agent runs to completion without a human accept **THEN** no gated
+    entity has changed.
+  - **AND** operational records, direct-authored chapter prose, and generated media follow their
+    own rules in §3.1 and are not covered by this requirement.
 - **R-GATE-2** Ripple facts SHALL be computed from the index; model output SHALL only supply
   their human-readable explanation.
   - **WHEN** the model's prose and the computed ripple set disagree **THEN** the computed set
     is displayed and the prose is suppressed.
-- **R-GATE-3** Accepting SHALL be atomic across all files in the proposal.
-  - **WHEN** a proposal touches a sheet and two canon entries **THEN** either all three land
-    with one canon-revision bump, or none do.
-- **R-GATE-4** Discarding a proposal SHALL delete its staging directory and leave no trace in
-  the world other than a `changes.jsonl` line recording the discard.
+- **R-GATE-3** Accepting SHALL be atomic across every file in the proposal, implemented by the
+  journal protocol in §3.5.
+  - **WHEN** the process is killed at any point during an accept **THEN** on next open the world
+    reflects either all of the change or none of it, including `world.json`, `.history/` and
+    `changes.jsonl`.
+- **R-GATE-4** Discarding a proposal SHALL delete its staging directory, release any reserved
+  canon ids without reusing them, and leave no trace in the world other than a `changes.jsonl`
+  line recording the discard.
+- **R-GATE-6** Accepting SHALL verify every recorded base hash under the world lock, and SHALL
+  refuse a proposal whose base has moved.
+  - **WHEN** a sheet advanced from v4 to v5 while a proposal against v4 was open **THEN** the
+    accept is refused and a rebase is offered; the newer content is never overwritten.
+- **R-GATE-7** Ripples SHALL be recomputed at accept, under the lock, and a material difference
+  from the preview SHALL be surfaced for re-confirmation.
+- **R-GATE-8** Canon ids reserved by a proposal SHALL be allocated atomically under the world
+  lock and SHALL NOT be reused if the proposal is discarded.
 
-## 3.4 Chat and form duality
+## 3.6 Chat and form duality
 
 Canon entries, sheets, locations and scenes are all authorable two ways, and the prototype
 shows both as tabs on the same screen: **Chat** (talk it out, the model drafts) and **Form**
@@ -628,23 +851,58 @@ answer this, and it won't guess"* — reports the search performed (*"Searched a
 cites the closest non-answering entries by BM25 rank, and offers *"Draft an answer in context"*
 and *"Open as thread · CANON-043"*.
 
-Refusal is decided by **retrieval, not by the model's self-assessment.** If lexical retrieval
-returns no entry above a relevance floor, the refusal state renders without an LLM call at
-all. When retrieval does return candidates, the model is given those candidates only, and is
-instructed that it may answer solely from them.
+Refusal is decided in **two independent stages**, and both must pass for an answer to render.
+
+**Stage one — retrieval.** If lexical retrieval returns no entry above the relevance floor, the
+refusal state renders with no LLM call at all. This is cheap, fast, and impossible for a model
+to talk itself out of.
+
+**Stage two — grounding.** Clearing the floor is *not* evidence that an entry answers the
+question. BM25 ranks by shared vocabulary, so a question about who collects rent in the Drowned
+Quarter will surface the entry describing the Drowned Quarter at a high score while that entry
+says nothing about rent. A model handed that entry and asked to answer will produce a fluent
+answer with a real citation attached to a claim the entry does not support — which is precisely
+the failure the product exists to prevent, made *more* dangerous by looking sourced.
+
+So the model does not return prose. It returns a structured response:
+
+```json
+{
+  "outcome": "answered",            // answered | cannot_answer
+  "claims": [
+    { "text": "No. A caller cannot move a tide she has not stood in.",
+      "entryId": "CANON-002",
+      "excerpt": "A caller cannot move a tide she has not stood in." }
+  ]
+}
+```
+
+Every claim must name a supporting entry **and quote the span of that entry supporting it**. The
+model is instructed that if the retrieved entries do not support an answer, the correct response
+is `cannot_answer` — and that returning it is a success, not a failure.
+
+**Excerpts are then verified mechanically.** Each excerpt must appear in the entry it cites,
+normalised for whitespace. An unverifiable excerpt means a fabricated citation, so the claim is
+dropped; if no claim survives, the response becomes a refusal. This is a deterministic check the
+model cannot argue with, and it is what turns "cites an entry" into "is supported by an entry".
 
 **Requirements**
 
-- **R-CANON-1** A canon answer SHALL cite at least one canon entry id, and SHALL be generated
-  from retrieved entry text only.
-  - **WHEN** the model returns an answer citing no entry **THEN** the answer is discarded and
-    the refusal state renders.
+- **R-CANON-1** A canon answer SHALL consist of claims, each naming a supporting entry and
+  quoting the span of that entry which supports it.
+  - **WHEN** a claim's excerpt does not appear in the entry it cites **THEN** the claim is
+    dropped.
+  - **AND WHEN** no claim survives verification **THEN** the refusal state renders.
 - **R-CANON-2** When retrieval returns no entry above the relevance floor, the refusal state
   SHALL render without dispatching an LLM call.
 - **R-CANON-3** The refusal state SHALL report the number of entries searched and cite the
   closest non-answering entries.
-- **R-CANON-4** Canon entry ids SHALL be allocated monotonically and never reused, including
-  after an entry is deleted.
+- **R-CANON-4** Canon entry ids SHALL be allocated monotonically from the persisted
+  `nextCanonId` counter and never reused, including after retirement or a discarded reservation.
+- **R-CANON-6** The response contract SHALL offer the model an explicit `cannot_answer` outcome,
+  and that outcome SHALL render as a refusal rather than an error.
+  - **WHEN** entries clear the relevance floor but none answers the question **THEN** the product
+    refuses, citing them as closest matches.
 
 ## 4.4 Threads
 
@@ -746,10 +1004,22 @@ take against its model sheet is designed for and deferred.
 
 **Requirements**
 
-- **R-REF-1** Every dispatch citing a sheet SHALL attach that sheet's current compiled model
+**A locked sheet may have no compilation matching its current version** — lock a sheet at v5 when
+the newest model sheet compiled at v4, and R-REF-1's "attach the current model sheet" and
+R-REF-3's "flag it stale" are in tension. The resolution is that the dispatch **attaches the
+newest available compilation and names the gap**: *"model sheet is v4; Maren is at v5"*, with
+recompiling offered inline. It does not block, because the alternative to a slightly stale
+reference is no reference at all, which is strictly worse for consistency. Where no compilation
+exists at any version, the dispatch is treated exactly as a sketch citation (§10.3).
+
+- **R-REF-1** Every dispatch citing a sheet SHALL attach that sheet's newest compiled model
   sheet as a reference, where the target model accepts reference images.
   - **WHEN** the model accepts no references **THEN** the dispatch dialog states so before the
     user commits, and the sheet's identity is carried in the prompt.
+  - **AND WHEN** the newest compilation predates the sheet's current version **THEN** it is
+    attached anyway, the version gap is named before commit, and recompiling is offered.
+  - **AND WHEN** no compilation exists at any version **THEN** the dispatch is treated as a
+    sketch citation under R-DISP-8.
 - **R-REF-2** Full-body turnaround generation SHALL be blocked until the head turnaround is
   fully locked.
 - **R-REF-3** A compiled model sheet SHALL record the sheet version and the tile set it was
@@ -955,11 +1225,34 @@ than world-level so the Activity screen can show everything at once. Each job re
 world, production, target entity, provider, model, parameters, estimated cost, status and
 timestamps.
 
-States: `queued → running → succeeded | failed | cancelled`. Jobs survive restart; on start-up
-the queue reconciles `running` jobs against provider status where the provider supports it,
-and marks them `failed` with a stated reason where it does not.
+States: `queued → submitting → running → succeeded | failed | cancelled`.
 
-Failures are not charged and say so (*"provider timeout · not charged"*), and offer retry.
+**Durability alone does not prevent duplicate dispatch.** An append-only queue records intent,
+but a crash between the provider accepting a request and Arke Studio recording the returned job
+id leaves work that is running, paid for, and invisible. On restart the job looks un-submitted
+and is sent again — a second charge for a generation the user did not ask for twice.
+
+The queue therefore uses an **outbox with idempotency keys**:
+
+1. A job is written `queued` with a generated **idempotency key**, durable before any network
+   call.
+2. It moves to `submitting`, durable, *then* the provider is called — with the idempotency key
+   attached where the provider honours one.
+3. The provider's job id is recorded and the state moves to `running`, durable.
+
+A job found in `submitting` on restart is of **unknown remote state** and is never blindly
+resent. It is reconciled: providers that support lookup by idempotency key are queried and the
+existing remote job adopted; providers that support listing recent jobs are searched by the key
+carried in request metadata; providers that support neither leave the job `needs-reconciliation`
+and the user is asked, with the estimated cost of a possible duplicate stated plainly.
+
+Reconciliation runs on start-up and on reconnect, and it is the only path that resumes a
+`submitting` job.
+
+**Terminal outcomes are always reconciled against provider-reported charges** (§14.4). Arke
+Studio cannot promise a failed job was not billed — providers charge for timeouts, partial
+completions and some cancellations — so it records what the provider says rather than asserting
+zero.
 
 ## 10.2 Prompt assembly
 
@@ -978,6 +1271,42 @@ cast stays pinned per shot. Cost is the sum of the shots.
 continuity, but a retry re-runs the whole pass. Where the scene exceeds the model's per-clip
 cap, it is **packed into passes** — the prototype's *"19.5s over the 15s cap · packs into 2
 passes"* — and the packing is computed from the model manifest's duration limit.
+
+### 10.3.1 The pass model
+
+A whole-scene pass returns **one clip spanning several shots**, which does not fit a take
+belonging to a single shot. Passes are therefore first-class:
+
+```json
+{
+  "id": "ps_01J8E...",
+  "sceneId": "sc_04",
+  "shotPlan": [
+    { "shotId": "sh_12", "startSec": 0.0, "endSec": 4.0 },
+    { "shotId": "sh_13", "startSec": 4.0, "endSec": 9.0 },
+    { "shotId": "sh_14", "startSec": 9.0, "endSec": 13.5 }
+  ],
+  "takeId": "tk_01J8G...",
+  "costUsd": 0.34
+}
+```
+
+**Segmentation.** The pass's shot plan comes from the shot durations sent in the brief, so the
+boundaries are known before dispatch rather than inferred afterwards. On arrival the clip is
+segmented locally with ffmpeg into one derived take per shot, each carrying `passId` and the
+same provenance. The full-pass take is retained as the source; the segments are what shots cite.
+
+**Cost allocation.** The pass carries the real charge; segments carry an allocated share
+pro-rata by duration, marked as allocated rather than measured. The ledger records the pass, not
+the segments, so totals never double-count.
+
+**Review granularity.** Segments are reviewed individually — a user may accept two shots from a
+pass and reject the third. Rejecting a segment does not invalidate the pass or the other
+segments. But because a retry re-runs the whole pass, the dispatch dialog says so before commit:
+*"a retry re-runs all three shots"*.
+
+**Frame chaining** takes the last frame of the **pass**, not of its final segment, so a pass
+boundary and a shot boundary that coincide do not produce a duplicated frame.
 
 Shots without an accepted frame are called out before dispatch, with the option to generate
 from the brief alone or to go back and pin a frame first.
@@ -998,14 +1327,25 @@ the pipeline rather than of the prompt.
 
 Frame extraction is local, via the bundled ffmpeg.
 
-## 10.5 Takes
+## 10.5 Takes and review
 
-Takes arrive `unreviewed` and are reviewed one at a time: **Accept** locks the take into the
-cut; **Reject** requires citing what drifted, by sheet and field.
+Per §2.3.5–2.3.7, three things stay separate: the immutable take, the append-only review
+decision, and the shot's current selection.
 
-Rejections are **logged only in v1**. The record is written to `changes.jsonl` and surfaced in
-the shot's history, so that the eventual "rejections teach the shot" behaviour has a corpus to
-learn from — but v1 does not mutate prompts from rejections.
+A take is **unreviewed** when no decision line in `reviews.jsonl` names it — a derived state,
+not a stored one, which is why a take is never rewritten by being reviewed.
+
+**Accept** appends an accept decision and sets the shot's `acceptedTakeId`. Both happen in one
+commit, because a decision without a selection would leave the cut disagreeing with the record.
+**Reject** appends a decision citing what drifted, by sheet and field, and leaves any existing
+selection alone.
+
+Re-reviewing is ordinary: a later decision line supersedes an earlier one for the same take, and
+selecting a different take moves `acceptedTakeId`. Nothing is erased, so the shot's history reads
+as what actually happened.
+
+Rejections are **logged only in v1** — the corpus for the eventual "rejections teach the shot"
+behaviour, which v1 does not implement.
 
 **Requirements**
 
@@ -1014,13 +1354,31 @@ learn from — but v1 does not mutate prompts from rejections.
   cap and display the resulting pass count and cost before commit.
 - **R-DISP-3** A dispatch SHALL record the canon revision and each cited sheet's version onto
   every take it produces.
-- **R-DISP-4** Failed jobs SHALL NOT be charged to the ledger, SHALL state the failure reason,
-  and SHALL offer retry.
+- **R-DISP-4** Every terminal job outcome SHALL record the provider-reported charge where one is
+  available, including failures, partial completions and cancellations, and SHALL state the
+  failure reason and offer retry.
+  - **WHEN** a provider bills for a timed-out generation **THEN** the ledger records that charge
+    rather than asserting zero.
+  - **AND WHEN** a provider reports no charge, or reports none **THEN** the entry records zero
+    and marks it as provider-reported rather than assumed.
 - **R-DISP-5** Accepting a take SHALL extract its final frame and make it available as the
-  following shot's start frame.
+  following shot's start frame; for a pass, the frame SHALL be taken from the pass rather than
+  from its final segment.
 - **R-DISP-6** Rejecting a take SHALL require a cited sheet and field, and SHALL record the
-  citation without modifying the shot's prompt.
-- **R-DISP-7** The queue SHALL survive process restart with no job lost or silently duplicated.
+  citation without modifying the shot's prompt or the take.
+- **R-DISP-7** The queue SHALL survive process restart with no job lost and none dispatched
+  twice.
+  - **WHEN** the process is killed between a provider accepting a request and the job id being
+    recorded **THEN** the job is reconciled by idempotency key on restart, never blindly resent.
+  - **AND WHEN** a provider supports neither key lookup nor recent-job listing **THEN** the job
+    is held for the user to decide, with the cost of a possible duplicate stated.
+- **R-DISP-9** A whole-scene pass SHALL carry an explicit shot plan, SHALL be segmented locally
+  into per-shot takes, and SHALL allocate cost pro-rata to segments while recording the real
+  charge once against the pass.
+  - **WHEN** a pass covering three shots completes **THEN** three segments are reviewable
+    independently and the ledger shows one charge, not four.
+- **R-DISP-10** A take SHALL be immutable once written, and review decisions SHALL be recorded
+  append-only rather than by editing the take.
 - **R-DISP-8** A dispatch citing a sketch SHALL name that sketch before commit and state that no
   model sheet will accompany the generation, and SHALL allow the dispatch to proceed.
   - **WHEN** a shot cites two locked sheets and one sketch **THEN** only the sketch is named,
@@ -1034,11 +1392,18 @@ The cut is **assembled from accepted takes only**. It is not a timeline the user
 moves because the work moved. Gaps are explicit and are what is left to shoot
 (*"13 of 15 shots covered · 2 gaps · 30s uncovered"*).
 
-`cut.json` holds the ordered shot references, the audio tracks, and nothing that duplicates a
-take's own record.
+`cut.json` holds the audio tracks and their placement, and nothing else — **the picture cut is
+derived**, not stored. It is the ordered shots of the production's scenes, each resolved through
+its `acceptedTakeId`. Storing the sequence would create a second answer to "what is the film",
+and the two would drift the first time a selection changed.
 
-- **R-CUT-1** The cut SHALL contain only accepted takes, and SHALL recompute when a take's
-  accepted status changes.
+This is why §2.4.1 leaves the cut unversioned: restoring an earlier cut means restoring the
+selections that produced it, which the shot histories already hold.
+
+- **R-CUT-1** The picture cut SHALL be derived from shot selections rather than stored, and SHALL
+  reflect a changed selection without any separate reconciliation step.
+  - **WHEN** a shot's accepted take changes **THEN** the cut reflects it immediately, and no
+    stored sequence can disagree with the shots.
 - **R-CUT-2** Uncovered shots SHALL render as explicit gaps with their shot labels and durations.
 
 ---
@@ -1140,10 +1505,36 @@ zero cost (R-PROV-6).
 
 ## 14.2 Keys
 
-Keys are stored via Electron's **`safeStorage`** (DPAPI-backed on Windows), never in a world,
-never in an export, never in a log, and never in a diagnostics bundle. Keys are written into
-OpenCode's configuration by Studio at harness start-up (§17.2) — Studio owns them and passes
-them down.
+**`safeStorage` is an encryption primitive, not a store.** It encrypts and decrypts against an
+OS-held key (DPAPI on Windows); the resulting ciphertext is Arke Studio's to place. Saying "keys
+live in the OS credential store" is imprecise, and the imprecision hides the decisions that
+matter.
+
+**At rest.** Ciphertext is written to `%USERPROFILE%\ArkeStudio\credentials.dat`, outside every
+world folder so no world export can carry it. The file's ACL is reset on write to the current
+user only, inherited permissions removed. Plaintext exists only in main-process memory, for the
+duration of a request.
+
+**Reaching the harness.** OpenCode needs provider credentials, and writing them into its
+configuration file would put plaintext keys on disk — undoing the whole arrangement. Two rules:
+
+- Credentials are passed to the harness **by environment variable at spawn**, never written to
+  its configuration file. The bundled harness is launched by Arke Studio, so its environment is
+  Arke Studio's to set.
+- Where a harness version genuinely cannot read credentials from the environment, a
+  configuration file is written to a per-session directory with a user-only ACL, and **deleted
+  when the session ends and on next start-up** — a crash must not leave keys on disk
+  indefinitely.
+
+An existing user-installed OpenCode may hold its own credentials in its own configuration. Arke
+Studio does not read, modify or take responsibility for those; it passes its own by environment
+and states in Settings which provider credentials came from where, so a user is never confused
+about which key is paying.
+
+**In logs.** A redaction filter is applied at the logging boundary, not at each call site, so a
+new call site cannot leak by omission. Anything matching a configured provider key, or the
+common key shapes, is replaced before a line is written. Diagnostics bundles are generated
+through the same filter and contain no world content.
 
 ## 14.3 The model manifest
 
@@ -1174,10 +1565,21 @@ by provider, and the alert threshold is checked against it.
 
 - **R-PROV-1** A provider key SHALL be entered once and satisfy every capability that provider
   declares.
-- **R-PROV-2** Keys SHALL be stored only in the OS credential store, and SHALL never appear in
-  a world file, an export, a log or a diagnostics bundle.
+- **R-PROV-2** Keys SHALL be stored as `safeStorage` ciphertext in an app-level file with a
+  user-only ACL, outside every world folder, and SHALL never appear in a world file, an export,
+  a log or a diagnostics bundle.
   - **WHEN** a diagnostics bundle is generated **THEN** it contains no key material and no world
     content.
+  - **AND WHEN** a world is exported **THEN** it carries no credential, because none was ever
+    inside it.
+- **R-PROV-8** Credentials SHALL reach the harness by environment variable at spawn; where a
+  configuration file is unavoidable it SHALL be per-session, user-only, and deleted on session
+  end and on next start-up.
+  - **WHEN** the application is killed with a session open **THEN** no plaintext credential
+    file survives the next start-up.
+- **R-PROV-9** Log redaction SHALL be applied at the logging boundary rather than at call sites.
+  - **WHEN** a new code path logs an object containing a key **THEN** it is redacted without that
+    path having been changed.
 - **R-PROV-3** Local runtimes the machine cannot run SHALL be listed, disabled, and annotated
   with the specific reason.
 - **R-PROV-4** Pre-dispatch estimates SHALL come from the model manifest and SHALL NOT require
@@ -1270,9 +1672,46 @@ user never configures OpenCode directly and is never asked for a key twice.
 
 ## 17.3 Confinement
 
-Each authoring session runs with the world folder as its working directory and **write
-permission scoped to `.proposals/`**. This is what makes the accept gate structural rather than
-advisory: an authoring agent cannot modify the live world even if it tries.
+The earlier draft claimed an authoring agent "cannot modify the live world even if it tries",
+enforced by scoping write permission to `.proposals/`. **That claim was false.** A harness
+permission prompt is a check inside the harness's own tool loop; a process running as the user
+with the world reachable on disk can write to it through any path the prompt does not mediate —
+a shell tool, a script it authors and runs, a library call. And since an existing user-installed
+OpenCode is *preferred* (R-HARNESS-2), Arke Studio does not control which tools are present.
+
+Confinement is therefore layered, with each layer doing what it can actually do, and the residual
+risk stated rather than assumed away.
+
+**1 · The world is never the working directory.** An authoring session's cwd is its proposal
+directory, pre-populated with copies of exactly the entities in scope, plus read-only context the
+agent needs. The agent edits those copies. Every relative path it touches lands in the proposal
+by construction, and changed files become the proposal's targets on session end. This is not a
+restriction the agent is asked to respect — it is the only world it is shown.
+
+Materialisation is also where base hashes are captured (§3.3), so the copy and the staleness
+check come from one act.
+
+**2 · Escape-capable tools are denied.** Shell, process execution and network tools are disabled
+in the session's harness configuration. This is best-effort — it depends on the harness honouring
+its own configuration — and is treated as reducing likelihood, not as a boundary.
+
+**3 · Out-of-band writes are detected, not prevented.** This is the layer that actually holds.
+Base-hash verification at accept (R-GATE-6) compares every target against the world as last
+committed. A write that reached the live world by any route changes its hash, the accept refuses,
+and the user is told the file changed outside the gate. The world lock ensures no legitimate
+writer competes. Detection is achievable where prevention is not, and detection at the gate is
+sufficient for the gate's purpose: nothing enters the *record* unnoticed.
+
+**4 · Reconciliation catches the rest.** An out-of-band write that is never followed by an accept
+is caught on next open by external-edit reconciliation (§2.7), which forces it through versioning,
+snapshotting and the audit log rather than letting it pass silently.
+
+**Residual risk, stated.** A sufficiently determined or malfunctioning agent with shell access
+can corrupt or destroy world files between commits. Arke Studio detects this and preserves
+history, but does not prevent it. True prevention needs an OS boundary — a restricted token, job
+object or AppContainer on Windows, confining the harness process to its proposal directory —
+which is the correct hardening and is deferred, because it must be validated against a harness
+Arke Studio does not own and would otherwise block the foundation. §20.1 records it.
 
 ## 17.4 Permissions
 
@@ -1282,9 +1721,17 @@ across restarts and are revocable, reusing Arke's `grant-store`.
 
 **Requirements**
 
-- **R-HARNESS-1** Authoring sessions SHALL be confined to `.proposals/` for writes.
-  - **WHEN** an authoring agent attempts to write a live world file **THEN** the write is
-    refused and the attempt recorded.
+- **R-HARNESS-1** An authoring session's working directory SHALL be its proposal directory,
+  pre-populated with copies of the entities in scope; the live world SHALL NOT be the working
+  directory.
+  - **WHEN** an agent writes to any relative path **THEN** the write lands inside the proposal.
+- **R-HARNESS-6** A write that reaches a live world file outside the gate SHALL be detected —
+  at accept by base-hash verification, or at next open by external-edit reconciliation — and
+  SHALL NOT be silently absorbed.
+  - **WHEN** a world file changes between materialisation and accept **THEN** the accept is
+    refused and the change reported.
+- **R-HARNESS-7** Shell, process-execution and network tools SHALL be disabled in authoring
+  sessions, and this SHALL be documented as risk reduction rather than as a security boundary.
 - **R-HARNESS-2** The application SHALL prefer an existing OpenCode installation over the
   bundled one, and SHALL report which it is using.
 - **R-HARNESS-3** Studio SHALL write the harness's provider configuration from its own settings,
@@ -1367,14 +1814,43 @@ reasoning survives the decision.
 | 5 | Sketch citation | Warn per-dispatch naming the specific sketches; never block. | §10.3 |
 | 6 | Ollama's role | Dual-routed: direct for cheap non-authoring work, through the harness as an authoring fallback. | §14.1.1 |
 
-## 20.1 Still open
+## 20.1 Corrections from specification review
 
-- **Cost denomination.** §14.4 specifies USD where the prototype shows credits. Flagged as the
-  one deliberate, visible departure from the approved design; reversible if credits are wanted
-  as a display unit.
+A review of the first draft found fifteen defects, five of them contradictions rather than gaps.
+Recorded here because the reasoning matters more than the fix.
+
+| # | Defect | Correction | Where |
+|---|---|---|---|
+| 1 | The accept gate claimed to cover every world write, contradicting chapter autosave, the change log, board compilation and take arrival | Mutation matrix: gated / direct-authored / operational / generated media, distinguishing *existing* from *being cited* | §3.1 |
+| 2 | Harness confinement claimed to be structural; permission prompts cannot bind a process running as the user | Layered: proposal directory as cwd, escape tools denied, out-of-band writes **detected** at accept and on open. Residual risk stated | §17.3 |
+| 3 | Multi-file atomicity claimed from ordinary renames | Intent journal with prepare / commit / done phases and roll-back or roll-forward recovery | §3.5 |
+| 4 | Proposals had no base version, so a second accept could destroy newer work | Base hashes per target, verified under the lock; ripples recomputed at accept | §3.3, §3.4 |
+| 5 | Refusal rested on BM25 score and a citation check, which permits sourced-looking unsupported answers | Claims must quote a supporting span; excerpts verified mechanically; explicit `cannot_answer` outcome | §4.3 |
+| 6 | Takes were called immutable but carried mutable status | Split: immutable take, append-only `reviews.jsonl`, mutable shot selection | §2.3.5–2.3.7 |
+| 7 | A whole-scene pass spans shots; a take belonged to one | First-class pass with a shot plan, local segmentation, pro-rata cost, per-segment review | §10.3.1 |
+| 8 | A durable queue cannot prevent duplicate dispatch after a crash mid-submit | Outbox with idempotency keys and a reconciliation path per provider capability | §10.1 |
+| 9 | "Failed jobs are not charged" is not ours to promise | Provider-reported charges recorded for every terminal outcome | §10.1, R-DISP-4 |
+| 10 | Closed-world hand edits were absorbed by scanning, bypassing versioning and audit | Explicit reconciliation commit with snapshots, version bumps and a logged source | §2.7 |
+| 11 | `safeStorage` was described as a credential store, and harness config would put keys on disk | Ciphertext file with a user-only ACL; credentials by environment at spawn; boundary-level log redaction | §14.2 |
+| 12 | `world.id` was a slug, but queue and ledger are global and copies share it | ULID `worldId` plus an explicit moved-or-copied prompt | §2.3.1 |
+| 13 | Canon ids could be reused after retirement | Persisted `nextCanonId`, reserved atomically under the lock; discarded reservations leave gaps | §2.3.1, R-CANON-4 |
+| 14 | Versioning was undefined for scenes, overviews, productions, cuts and artifacts | Explicit table of what is versioned, cited and snapshotted | §2.4.1 |
+| 15 | A locked sheet with no matching compilation had undefined dispatch behaviour | Attach newest, name the gap, offer recompile; treat absent compilation as a sketch citation | §6.3 |
+
+## 20.2 Still open
+
+- **An OS confinement boundary for the harness.** §17.3 detects out-of-band writes but does not
+  prevent them. A restricted token, job object or AppContainer would, and needs validating
+  against a harness Arke Studio does not own. The highest-value hardening after v1.
+- **Cost denomination.** §14.4 specifies USD where the prototype shows credits. The one
+  deliberate, visible departure from the approved design; reversible if credits are wanted as a
+  display unit.
+- **The relevance floor.** §4.3's two stages make refusal robust, but the floor's value is not
+  knowable without a real world and a question set. Configuration until evidence sets it.
 - **Extraction quality bar.** §13.1 commits to lifting facts from imported documents. What
-  precision is acceptable before the proposal list becomes noise the user stops reading is a
-  question only real documents can answer.
+  precision keeps the proposal list readable is a question only real documents can answer.
 - **Chapter save-points.** §8.3 cuts a version on accepted drafts and explicit save-points.
-  Whether authors want a manual save-point control, or expect versions purely from drafts,
-  should be settled against a real writing session.
+  Whether authors want a manual control should be settled against a real writing session.
+- **Pass segmentation fidelity.** §10.3.1 segments on the shot plan's boundaries. Whether a
+  model honours requested shot durations closely enough for those boundaries to land on the
+  intended cuts is an empirical question about each video model.
