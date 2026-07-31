@@ -1,0 +1,11 @@
+# Normalize text files to LF in the repository, regardless of platform
+* text=auto eol=lf
+
+# Binary assets — never touch line endings, never diff as text
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.pdf binary
+*.mp4 binary
