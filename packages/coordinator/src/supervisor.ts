@@ -111,6 +111,7 @@ export class ChildSupervisor extends EventEmitter {
       this.setStatus("unconfigured", `${this.id} is not configured`);
       return;
     }
+    if (this.child !== null) return; // already running — a second start must not double-spawn
     this.stopping = false;
     this.restarts = 0;
     await this.spawnOnce();
