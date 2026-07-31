@@ -237,9 +237,10 @@ intent → agent or form → proposal staged in .proposals/
           head-left-three-quarter.png
           model-sheet-v5.png
       artifacts\
-        artifacts.json            index of filed artifacts and their links
         harbour-bells.wav
+        harbour-bells.wav.json    sidecar: id, kind, hash, origin, links
         undersong-treatment.pdf
+        undersong-treatment.pdf.json
       productions\
         saltlight\
           production.json         format, title, status, timestamps
@@ -1476,11 +1477,14 @@ optional and always gated.
 always happens, never fails on content, and is complete on its own: the user has their material
 in the world, linkable to anything.
 
-**Stage two — lift.** An extraction pass reads the filed documents and **proposes** canon
-entries and sheets from them. Each candidate is a separate proposal citing the artifact and the
-location within it that produced it, so acceptance is per-fact rather than all-or-nothing. A
-document that yields thirty candidates produces thirty proposals the user works through, not
-one bulk import that silently rewrites the world.
+**Stage two — lift.** An extraction pass reads the filed documents and **proposes** canon entries
+and sheets from them, each citing the artifact and the location within it that produced it, so
+acceptance is per-fact rather than all-or-nothing.
+
+Candidates are reviewed as **one batch**, not as thirty open proposals. Per-fact acceptance is the
+requirement; thirty entries queued for review is not, and would bury the needs-you queue under a
+single import. The batch is one item awaiting the user, and each candidate accepted within it
+commits on its own.
 
 Nothing extracted enters the world without an accept, and every accepted entry keeps a link
 back to the source artifact — so months later, "where did this come from" has an answer.
