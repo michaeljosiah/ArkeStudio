@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/colors.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/typography.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/effects.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/styles.css">
+<script src="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/_ds_bundle.js"></script>
+<script src="image-slot.js"></script>
+<style>
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--background);color:#0A0A0A;font-family:var(--font-sans),system-ui,sans-serif}
+a{color:#0A0A0A;text-decoration:none}a:hover{color:#525252}
+@keyframes fadeUp{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:none}}
+@keyframes drift{from{transform:translateY(0)}to{transform:translateY(-8px)}}
+@keyframes kenburns{from{transform:scale(1)}to{transform:scale(1.07)}}
+@keyframes bannerFade{0%{opacity:0}9%{opacity:1}33%{opacity:1}42%{opacity:0}100%{opacity:0}}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden">
+  <div style="position:sticky;top:0;z-index:50;background:rgba(255,255,255,.86);backdrop-filter:blur(12px);border-bottom:1px solid var(--border)">
+    <div style="max-width:1200px;margin:0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:16px 26px;min-height:58px;padding:10px 24px">
+      <span style="font:650 16px var(--font-sans);letter-spacing:-0.02em">Arke Kids</span>
+      <span style="font:400 10px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em;margin-top:2px">BY ARKE · FOR FAMILIES</span>
+      <span style="flex:1"></span>
+      <nav style="display:flex;flex-wrap:wrap;gap:10px 22px;font:400 13.5px var(--font-sans)">
+        <a href="#worlds">Their worlds</a>
+        <a href="#makes">Books &amp; videos</a>
+        <a href="#helpers">The helpers</a>
+        <a href="#safety">For parents</a>
+        <a href="#publish">Publish</a>
+        <a href="#pricing">Pricing</a>
+      </nav>
+      <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="sm" hint-size="170px,32px">Start your world · free</x-import>
+    </div>
+  </div>
+  <sc-if value="{{ heroBanner }}" hint-placeholder-val="{{ false }}">
+  <section style="position:relative;height:min(88vh,880px);min-height:640px;overflow:hidden">
+    <div style="position:absolute;inset:-3%;animation:kenburns 24s ease-in-out infinite alternate">
+      <img src="assets/kids-singalong.png" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">
+      <img src="assets/kids-hero.png" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;animation:bannerFade 27s ease-in-out 9s infinite">
+      <img src="assets/kids-spread.png" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;animation:bannerFade 27s ease-in-out 18s infinite">
+      <img src="assets/kids-singalong.png" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;animation:bannerFade 27s ease-in-out 0s infinite">
+    </div>
+    <div style="position:absolute;inset:0;background:linear-gradient(to top,rgba(10,10,10,.82) 0%,rgba(10,10,10,.38) 42%,rgba(10,10,10,0) 68%)"></div>
+    <div style="position:absolute;left:0;right:0;bottom:0;padding-bottom:58px">
+      <div style="max-width:1200px;margin:0 auto;padding:0 24px;color:#fff">
+        <div style="font:500 12px var(--font-sans);letter-spacing:.2em;color:rgba(255,255,255,.75);animation:fadeUp .6s var(--ease-out) both">ARKE KIDS · THE FAMILY STORY STUDIO</div>
+        <h1 style="margin:16px 0 0;font:650 clamp(32px,6vw,80px)/1.04 var(--font-sans);letter-spacing:-0.038em;max-width:1050px;text-wrap:balance;animation:fadeUp .7s var(--ease-out) .06s both">Turn your child's imagination into real books, videos and songs.</h1>
+        <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:20px 30px;margin-top:24px;animation:fadeUp .7s var(--ease-out) .14s both">
+          <p style="margin:0;font:400 17px/1.6 var(--font-sans);color:rgba(255,255,255,.82);max-width:500px;text-wrap:pretty">You talk, it listens, so a child who can’t yet type can drive the whole story. Invent the character once and Arke Kids remembers them, in every bedtime book, sing-along and hardcover after that.</p>
+          <span style="flex:1"></span>
+          <sc-if value="{{ ctaFree }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;gap:10px;flex:none">
+            <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="secondary" size="lg" hint-size="200px,46px">Start your world · free</x-import>
+            <span style="display:inline-flex;align-items:center;padding:0 22px;border:1px solid rgba(255,255,255,.35);border-radius:10px;font:500 14px var(--font-sans);color:#fff;cursor:pointer;transition:var(--transition-control)" style-hover="background:rgba(255,255,255,.12)">See a world grow</span>
+          </div>
+          </sc-if>
+          <sc-if value="{{ ctaWaitlist }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;gap:8px;flex:none">
+            <span style="display:flex;align-items:center;width:260px;border:1px solid rgba(255,255,255,.35);border-radius:10px;padding:0 14px;font:400 13.5px var(--font-sans);color:rgba(255,255,255,.55);cursor:text;background:rgba(10,10,10,.35)">you@example.com</span>
+            <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="secondary" size="lg" hint-size="160px,46px">Join the waitlist</x-import>
+          </div>
+          </sc-if>
+        </div>
+        <div style="margin-top:16px;font:400 11px var(--font-mono);color:rgba(255,255,255,.6);animation:fadeUp .7s var(--ease-out) .2s both">talk to it, no typing · nothing to install · you approve everything</div>
+      </div>
+    </div>
+  </section>
+  </sc-if>
+  <sc-if value="{{ heroCollage }}" hint-placeholder-val="{{ true }}">
+  <section style="max-width:1200px;margin:0 auto;padding:64px 24px 0;width:100%;box-sizing:border-box">
+    <div style="display:flex;flex-wrap:wrap;gap:clamp(30px,4vw,54px);align-items:center">
+      <div style="flex:1 1 380px;min-width:0">
+        <div style="font:500 11px var(--font-sans);letter-spacing:.18em;color:var(--muted-foreground);animation:fadeUp .6s var(--ease-out) both">INVENTED AT BEDTIME · KEPT FOR CHILDHOOD</div>
+        <h1 style="margin:18px 0 0;font:650 clamp(34px,5.4vw,60px)/1.04 var(--font-sans);letter-spacing:-0.035em;text-wrap:balance;animation:fadeUp .7s var(--ease-out) .06s both">Their world grows with them.</h1>
+        <p style="margin:20px 0 0;font:400 17px/1.65 var(--font-sans);color:var(--muted-foreground);max-width:460px;text-wrap:pretty;animation:fadeUp .7s var(--ease-out) .14s both">Invent a character out loud. No typing, so a four-year-old can lead. Arke Kids remembers everything about them, and tonight’s bedtime book, next month’s sing-along and next year’s chapter book all star the same friend.</p>
+        <sc-if value="{{ ctaFree }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;gap:10px;margin-top:28px;animation:fadeUp .7s var(--ease-out) .2s both">
+          <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="200px,44px">Start your world · free</x-import>
+          <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="lg" hint-size="160px,44px">See a world grow</x-import>
+        </div>
+        </sc-if>
+        <sc-if value="{{ ctaWaitlist }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;gap:8px;margin-top:28px;animation:fadeUp .7s var(--ease-out) .2s both">
+          <span style="display:flex;align-items:center;width:260px;border:1px solid var(--border);border-radius:10px;padding:0 14px;font:400 13.5px var(--font-sans);color:var(--text-placeholder);cursor:text;background:var(--background)">you@example.com</span>
+          <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="150px,44px">Join the waitlist</x-import>
+        </div>
+        </sc-if>
+        <div style="margin-top:14px;font:400 11px var(--font-mono);color:var(--neutral-400);animation:fadeUp .7s var(--ease-out) .24s both">nothing to install · private by default · you approve everything</div>
+      </div>
+      <div style="flex:1.05 1 400px;min-width:0;position:relative;height:clamp(430px,45vw,560px);animation:fadeUp .8s var(--ease-out) .18s both">
+        <div style="position:absolute;left:0;top:0;width:78%;height:clamp(320px,34vw,440px);border-radius:16px;overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow-lg)"><image-slot id="kids-hero" src="assets/kids-hero.png" shape="rect" placeholder="PHOTO: parent & child inventing at the kitchen table"></image-slot></div>
+        <div style="position:absolute;right:0;top:64px;width:34%;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-lg);padding:8px 8px 12px;transform:rotate(2.5deg);animation:drift 8s ease-in-out infinite alternate">
+          <div style="height:clamp(140px,15vw,190px)"><image-slot id="kids-hero-char" src="assets/kids-pip-harbour.png" radius="7" placeholder="ART: Pip the harbour fox, character portrait"></image-slot></div>
+          <div style="font:600 12px var(--font-sans);margin:9px 4px 0">Pip the harbour fox</div>
+          <div style="font:400 10px var(--font-mono);color:var(--neutral-400);margin:2px 4px 0">by Ivy, age 4 · scared of the sea</div>
+        </div>
+        <div style="position:absolute;left:16%;bottom:0;width:44%;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-xl);padding:8px 8px 12px;transform:rotate(-2deg)">
+          <div style="height:clamp(125px,14vw,170px)"><image-slot id="kids-hero-book" src="assets/kids-hardcover.png" radius="7" placeholder="PHOTO: the hardcover, in small hands"></image-slot></div>
+          <div style="font:600 12px var(--font-sans);margin:9px 4px 0">Pip Won't Swim, hardcover</div>
+          <div style="font:400 10px var(--font-mono);color:var(--neutral-400);margin:2px 4px 0">made together on a Tuesday · printed by Friday</div>
+        </div>
+      </div>
+    </div>
+  </section>
+  </sc-if>
+  <section id="worlds" style="max-width:1200px;margin:0 auto;padding:clamp(56px,9vw,110px) 24px 0;width:100%;box-sizing:border-box">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px">
+      <h2 style="margin:0;font:650 clamp(25px,3.4vw,34px)/1.1 var(--font-sans);letter-spacing:-0.028em">Invented by kids this week.</h2>
+      <span style="font:400 11px var(--font-mono);color:var(--neutral-400)">every one remembered, forever themselves</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:14px;margin-top:24px">
+      <div><div style="height:clamp(132px,13vw,170px);border-radius:12px;overflow:hidden;border:1px solid var(--border)"><image-slot id="kids-char1" src="assets/kids-pip-cozy.png" shape="rect" placeholder="ART: Pip, fox"></image-slot></div><div style="font:600 12.5px var(--font-sans);margin-top:8px">Pip</div><div style="font:400 10px var(--font-mono);color:var(--neutral-400)">harbour fox · Ivy, 4</div></div>
+      <div><div style="height:clamp(132px,13vw,170px);border-radius:12px;overflow:hidden;border:1px solid var(--border)"><image-slot id="kids-char2" src="assets/kids-juno.png" shape="rect" placeholder="ART: Juno, cloud whale"></image-slot></div><div style="font:600 12.5px var(--font-sans);margin-top:8px">Juno</div><div style="font:400 10px var(--font-mono);color:var(--neutral-400)">cloud whale · Theo, 6</div></div>
+      <div><div style="height:clamp(132px,13vw,170px);border-radius:12px;overflow:hidden;border:1px solid var(--border)"><image-slot id="kids-char3" src="assets/kids-wobble.png" shape="rect" placeholder="ART: Sir Wobble, jelly knight"></image-slot></div><div style="font:600 12.5px var(--font-sans);margin-top:8px">Sir Wobble</div><div style="font:400 10px var(--font-mono);color:var(--neutral-400)">jelly knight · Max, 5</div></div>
+      <div><div style="height:clamp(132px,13vw,170px);border-radius:12px;overflow:hidden;border:1px solid var(--border)"><image-slot id="kids-char4" src="assets/kids-mabel.png" shape="rect" placeholder="ART: Mabel, moth ballerina"></image-slot></div><div style="font:600 12.5px var(--font-sans);margin-top:8px">Mabel</div><div style="font:400 10px var(--font-mono);color:var(--neutral-400)">ballerina · Sana, 7</div></div>
+      <div><div style="height:clamp(132px,13vw,170px);border-radius:12px;overflow:hidden;border:1px solid var(--border)"><image-slot id="kids-char5" src="assets/kids-rex.png" shape="rect" placeholder="ART: Rex, pocket T-rex"></image-slot></div><div style="font:600 12.5px var(--font-sans);margin-top:8px">Rex</div><div style="font:400 10px var(--font-mono);color:var(--neutral-400)">pocket t-rex · Leo, 5</div></div>
+      <div><div style="height:clamp(132px,13vw,170px);border-radius:12px;overflow:hidden;border:1px solid var(--border)"><image-slot id="kids-char6" src="assets/kids-alienman.png" shape="rect" placeholder="ART: Alien Man, space cat"></image-slot></div><div style="font:600 12.5px var(--font-sans);margin-top:8px">Alien Man</div><div style="font:400 10px var(--font-mono);color:var(--neutral-400)">space cat · Ethan, 10</div></div>
+    </div>
+    <div style="margin-top:14px;font:400 11px var(--font-mono);color:var(--neutral-400)">a character is one conversation: how they look, how they talk, what they're afraid of · the world keeps it all</div>
+  </section>
+  <section id="makes" style="max-width:1200px;margin:0 auto;padding:clamp(56px,9vw,110px) 24px 0;width:100%;box-sizing:border-box">
+    <h2 style="margin:0;font:650 clamp(25px,3.4vw,34px)/1.1 var(--font-sans);letter-spacing:-0.028em;max-width:560px;text-wrap:balance">One world. Books, videos, songs.</h2>
+    <p style="margin:12px 0 0;font:400 15px/1.65 var(--font-sans);color:var(--muted-foreground);max-width:560px;text-wrap:pretty">Never templates. Everything is made <em>from</em> the character your child invented, and they stay exactly themselves in all of it.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:22px;margin-top:30px">
+      <div style="flex:1.5 1 420px;min-width:0;border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow-md)">
+        <div style="height:clamp(260px,32vw,400px)"><image-slot id="kids-spread" src="assets/kids-spread.png" shape="rect" placeholder="ART: open picture-book spread: Pip at the harbour"></image-slot></div>
+        <div style="display:flex;align-items:center;gap:10px;padding:13px 18px;border-top:1px solid var(--border)"><span style="font:600 13px var(--font-sans)">The bedtime book</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">eight words a page · read on any device, or printed</span></div>
+      </div>
+      <div style="flex:1 1 300px;min-width:0;min-height:340px;display:flex;flex-direction:column;gap:22px">
+        <div style="flex:1;border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow-md);position:relative">
+          <div style="position:absolute;inset:0"><image-slot id="kids-video1" src="assets/kids-singalong.png" shape="rect" placeholder="ART: sing-along video still: Pip counts the boats"></image-slot></div>
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none"><span style="width:52px;height:52px;border-radius:99px;background:rgba(255,255,255,.92);box-shadow:var(--shadow-lg);display:flex;align-items:center;justify-content:center;pointer-events:auto;cursor:pointer;transition:transform .2s var(--ease-out)" style-hover="transform:scale(1.08)"><svg width="19" height="19" viewBox="0 0 24 24" fill="#0A0A0A" style="margin-left:2px"><path d="M7 5l12 7-12 7z"></path></svg></span></div>
+          <div style="position:absolute;left:0;right:0;bottom:0;background:rgba(10,10,10,.55);padding:9px 14px;display:flex;align-items:center;gap:8px"><span style="font:500 11.5px var(--font-sans);color:#fff">The sing-along, for the car</span><span style="margin-left:auto;font:400 9.5px var(--font-mono);color:rgba(255,255,255,.7)">1:10</span></div>
+        </div>
+        <div style="flex:1;border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow-md);position:relative">
+          <div style="position:absolute;inset:0"><image-slot id="kids-video2" src="assets/kids-video2.png" shape="rect" placeholder="ART: birthday episode still: Pip & cousin's dragon"></image-slot></div>
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none"><span style="width:52px;height:52px;border-radius:99px;background:rgba(255,255,255,.92);box-shadow:var(--shadow-lg);display:flex;align-items:center;justify-content:center;pointer-events:auto;cursor:pointer;transition:transform .2s var(--ease-out)" style-hover="transform:scale(1.08)"><svg width="19" height="19" viewBox="0 0 24 24" fill="#0A0A0A" style="margin-left:2px"><path d="M7 5l12 7-12 7z"></path></svg></span></div>
+          <div style="position:absolute;left:0;right:0;bottom:0;background:rgba(10,10,10,.55);padding:9px 14px;display:flex;align-items:center;gap:8px"><span style="font:500 11.5px var(--font-sans);color:#fff">The birthday episode, with her cousin's dragon</span><span style="margin-left:auto;font:400 9.5px var(--font-mono);color:rgba(255,255,255,.7)">2:04</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-xs);background:var(--neutral-50);margin-top:22px;padding:24px 28px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font:600 15px var(--font-sans)">The same fox, three years running</span><span style="font:400 11px var(--font-mono);color:var(--neutral-400)">the reading level grows with the reader</span></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:18px;margin-top:16px">
+        <div><div style="height:clamp(145px,15vw,180px);border:1px solid var(--border);border-radius:10px;overflow:hidden"><image-slot id="kids-age4" src="assets/kids-age4.png" shape="rect" placeholder="ART: age 4: picture-book page, big type"></image-slot></div><div style="font:600 13px var(--font-sans);margin-top:10px">Age 4, the bedtime book</div><div style="font:400 12px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:3px">Eight words a page. Pip won't go near the water.</div></div>
+        <div><div style="height:clamp(145px,15vw,180px);border:1px solid var(--border);border-radius:10px;overflow:hidden"><image-slot id="kids-age5" src="assets/kids-age5.png" shape="rect" placeholder="ART: age 5: sing-along frame"></image-slot></div><div style="font:600 13px var(--font-sans);margin-top:10px">Age 5, the sing-along</div><div style="font:400 12px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:3px">Pip counts the boats. Same white ear, same harbour.</div></div>
+        <div><div style="height:clamp(145px,15vw,180px);border:1px solid var(--border);border-radius:10px;overflow:hidden"><image-slot id="kids-age7" src="assets/kids-age7.png" shape="rect" placeholder="ART: age 7: chapter-book page, dense type"></image-slot></div><div style="font:600 13px var(--font-sans);margin-top:10px">Age 7, the chapter book</div><div style="font:400 12px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:3px">Pip finally learns to swim. Your child reads it alone.</div></div>
+      </div>
+    </div>
+  </section>
+  <section style="max-width:1200px;margin:0 auto;padding:clamp(56px,9vw,110px) 24px 0;width:100%;box-sizing:border-box">
+    <div style="display:flex;flex-wrap:wrap;gap:clamp(28px,4vw,56px);align-items:center">
+      <div style="flex:1 1 380px;min-width:0">
+        <div style="border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow-lg);height:clamp(260px,32vw,400px)"><img src="assets/voice-hero.png" alt="A child talking to the studio" style="width:100%;height:100%;object-fit:cover;object-position:center 35%;display:block"></div>
+      </div>
+      <div style="flex:1 1 380px;min-width:0">
+        <div style="font:500 11px var(--font-sans);letter-spacing:.18em;color:var(--muted-foreground)">VOICE FIRST</div>
+        <h2 style="margin:14px 0 0;font:650 clamp(25px,3.4vw,34px)/1.1 var(--font-sans);letter-spacing:-0.028em;max-width:460px;text-wrap:balance">A child who cannot type can still tell the story.</h2>
+        <p style="margin:14px 0 0;font:400 15px/1.65 var(--font-sans);color:var(--muted-foreground);max-width:460px;text-wrap:pretty">They talk, the studio talks back, and it reads its own questions aloud. Nobody has to spell anything. A parent can take over with a sentence at any point, and every word either of you says is kept.</p>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:20px;font:400 14px/1.6 var(--font-sans);color:var(--muted-foreground)">
+          <span style="display:flex;align-items:center;gap:10px"><span style="width:6px;height:6px;border-radius:99px;background:var(--foreground);flex:none"></span>No reading or typing needed to make something</span>
+          <span style="display:flex;align-items:center;gap:10px"><span style="width:6px;height:6px;border-radius:99px;background:var(--foreground);flex:none"></span>You see the transcript, and who said what</span>
+          <span style="display:flex;align-items:center;gap:10px"><span style="width:6px;height:6px;border-radius:99px;background:var(--foreground);flex:none"></span>Only the words are kept, never the recording</span>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section id="helpers" style="max-width:1200px;margin:0 auto;padding:clamp(56px,9vw,110px) 24px 0;width:100%;box-sizing:border-box">
+    <div style="font:500 11px var(--font-sans);letter-spacing:.18em;color:var(--muted-foreground)">THE HELPERS</div>
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px 40px;margin-top:14px">
+      <h2 style="margin:0;font:650 clamp(25px,3.4vw,34px)/1.1 var(--font-sans);letter-spacing:-0.028em;max-width:520px;text-wrap:balance">Your child meets six helpers, not six features.</h2>
+      <p style="margin:0;font:400 15px/1.65 var(--font-sans);color:var(--muted-foreground);max-width:440px;text-wrap:pretty">Each one does a single job and shows up by name while it works, so a child knows who’s drawing and who’s singing, and a parent knows exactly what touched the story.</p>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow-xs);margin-top:28px;background:var(--neutral-50)"><img src="assets/helpers-group.png" alt="The six helpers at their workbench" style="width:100%;height:clamp(180px,26vw,320px);object-fit:cover;object-position:center 80%;display:block"></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:18px;margin-top:18px">
+      <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--card);box-shadow:var(--shadow-xs)"><div style="height:clamp(130px,14vw,170px);background:var(--neutral-50)"><img src="assets/helper-pockets.png" alt="Pockets" style="width:100%;height:100%;object-fit:cover;object-position:center 35%"></div><div style="padding:14px 16px 16px"><div style="font:650 16px var(--font-sans);letter-spacing:-0.015em">Pockets</div><div style="font:400 12px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Listens, and keeps every idea, even the ones you wander away from.</div></div></div>
+      <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--card);box-shadow:var(--shadow-xs)"><div style="height:clamp(130px,14vw,170px);background:var(--neutral-50)"><img src="assets/helper-quill.png" alt="Quill" style="width:100%;height:100%;object-fit:cover;object-position:center 35%"></div><div style="padding:14px 16px 16px"><div style="font:650 16px var(--font-sans);letter-spacing:-0.015em">Quill</div><div style="font:400 12px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Writes it down, using your child’s own words wherever they fit.</div></div></div>
+      <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--card);box-shadow:var(--shadow-xs)"><div style="height:clamp(130px,14vw,170px);background:var(--neutral-50)"><img src="assets/helper-inko.png" alt="Inko" style="width:100%;height:100%;object-fit:cover;object-position:center 35%"></div><div style="padding:14px 16px 16px"><div style="font:650 16px var(--font-sans);letter-spacing:-0.015em">Inko</div><div style="font:400 12px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Paints the pictures, and matches anything your child drew by hand.</div></div></div>
+      <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--card);box-shadow:var(--shadow-xs)"><div style="height:clamp(130px,14vw,170px);background:var(--neutral-50)"><img src="assets/helper-trill.png" alt="Trill" style="width:100%;height:100%;object-fit:cover;object-position:center 35%"></div><div style="padding:14px 16px 16px"><div style="font:650 16px var(--font-sans);letter-spacing:-0.015em">Trill</div><div style="font:400 12px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Reads it aloud and writes the songs, or teaches your voice to do it.</div></div></div>
+      <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--card);box-shadow:var(--shadow-xs)"><div style="height:clamp(130px,14vw,170px);background:var(--neutral-50)"><img src="assets/helper-barnaby.png" alt="Barnaby" style="width:100%;height:100%;object-fit:cover;object-position:center 35%"></div><div style="padding:14px 16px 16px"><div style="font:650 16px var(--font-sans);letter-spacing:-0.015em">Barnaby</div><div style="font:400 12px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Binds the real book, wraps it in brown paper, puts it in the post.</div></div></div>
+      <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--card);box-shadow:var(--shadow-xs)"><div style="height:clamp(130px,14vw,170px);background:var(--neutral-50)"><img src="assets/helper-nan.png" alt="Nan" style="width:100%;height:100%;object-fit:cover;object-position:center 35%"></div><div style="padding:14px 16px 16px"><div style="font:650 16px var(--font-sans);letter-spacing:-0.015em">Nan</div><div style="font:400 12px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Stops anything that needs a grown-up and holds it for you. Never scolds.</div></div></div>
+    </div>
+    <div style="margin-top:16px;font:400 11px var(--font-mono);color:var(--neutral-400)">every page lists which helpers touched it, and what came from your family instead</div>
+  </section>
+  <section id="safety" style="max-width:1200px;margin:0 auto;padding:clamp(56px,9vw,110px) 24px 0;width:100%;box-sizing:border-box">
+    <div style="display:flex;flex-wrap:wrap;gap:clamp(30px,4vw,60px);align-items:center">
+      <div style="flex:1 1 380px;min-width:0;animation:drift 8s ease-in-out infinite alternate">
+        <div style="border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow-lg);height:clamp(280px,34vw,420px)"><image-slot id="kids-safety" src="assets/kids-safety.png" shape="rect" placeholder="PHOTO: parent & child reviewing a page together on the sofa"></image-slot></div>
+      </div>
+      <div style="flex:1 1 380px;min-width:0">
+        <div style="font:500 11px var(--font-sans);letter-spacing:.18em;color:var(--muted-foreground)">FOR PARENTS</div>
+        <h2 style="margin:14px 0 0;font:650 clamp(27px,3.8vw,38px)/1.1 var(--font-sans);letter-spacing:-0.03em;text-wrap:balance">You approve everything. It's how the whole thing is built.</h2>
+        <p style="margin:16px 0 0;font:400 15px/1.7 var(--font-sans);color:var(--muted-foreground);text-wrap:pretty">Arke Kids runs on the same engine studios use, and its one unbreakable rule is that nothing becomes real without an accept. Here, the accept is yours.</p>
+        <div style="display:flex;flex-direction:column;gap:9px;margin-top:22px;font:400 13.5px var(--font-sans)">
+          <span style="display:flex;align-items:center;gap:10px"><span style="width:6px;height:6px;border-radius:99px;background:var(--foreground);flex:none"></span>Parent review gate on every page, frame and song</span>
+          <span style="display:flex;align-items:center;gap:10px"><span style="width:6px;height:6px;border-radius:99px;background:var(--foreground);flex:none"></span>Age-tuned models, so stories stay in your child's world</span>
+          <span style="display:flex;align-items:center;gap:10px"><span style="width:6px;height:6px;border-radius:99px;background:var(--foreground);flex:none"></span>Private by default: your world is never training data</span>
+          <span style="display:flex;align-items:center;gap:10px"><span style="width:6px;height:6px;border-radius:99px;background:var(--foreground);flex:none"></span>No ads, no feed, no strangers. COPPA-compliant</span>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin-top:22px;background:var(--neutral-50)">
+          <div style="font:600 14.5px var(--font-sans)">And a screen you can safely hand over.</div>
+          <div style="font:400 13px/1.65 var(--font-sans);color:var(--muted-foreground);margin-top:6px;text-wrap:pretty">Pass the tablet to your child and it becomes their screen: bigger, simpler, voice-led, with no route to settings, payments or anyone outside the family. Getting back out takes a grown-up. Everything they make comes to you first.</div>
+        </div>
+        <div style="font:400 11px var(--font-mono);color:var(--neutral-400);margin-top:18px">no accounts for children · you share what you choose, with whom you choose</div>
+      </div>
+    </div>
+  </section>
+  <section id="print" style="max-width:1200px;margin:0 auto;padding:clamp(56px,9vw,110px) 24px 0;width:100%;box-sizing:border-box">
+    <div style="border-radius:18px;overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow-lg);position:relative;height:clamp(320px,42vw,520px)">
+      <div style="position:absolute;inset:0"><image-slot id="kids-print" src="assets/kids-print.png" shape="rect" placeholder="PHOTO: child reading the hardcover in bed, lamp light"></image-slot></div>
+      <div style="position:absolute;left:0;right:0;bottom:0;background:linear-gradient(transparent,rgba(10,10,10,.72));padding:clamp(70px,11vw,110px) clamp(20px,3vw,32px) 26px;color:#fff">
+        <h2 style="margin:0;font:650 clamp(26px,3.6vw,36px)/1.1 var(--font-sans);letter-spacing:-0.03em;max-width:560px;text-wrap:balance">Some things belong on the shelf, not the screen.</h2>
+        <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin-top:10px"><span style="font:400 14px/1.6 var(--font-sans);color:rgba(255,255,255,.75);max-width:520px">Any book becomes a hardcover, with their name on the spine, their character on the cover, and their own crayon drawing on page one. You see a full proof before anything is printed.</span><span style="margin-left:auto;font:400 11px var(--font-mono);color:rgba(255,255,255,.6)">printed hardcover $27.99 · delivered to your door</span></div>
+      </div>
+    </div>
+  </section>
+  <section id="publish" style="max-width:1200px;margin:0 auto;padding:clamp(56px,9vw,110px) 24px 0;width:100%;box-sizing:border-box">
+    <div style="font:500 11px var(--font-sans);letter-spacing:.18em;color:var(--muted-foreground)">PUBLISH</div>
+    <h2 style="margin:14px 0 0;font:650 clamp(25px,3.4vw,34px)/1.1 var(--font-sans);letter-spacing:-0.028em;max-width:600px;text-wrap:balance">Made here. Published everywhere they are.</h2>
+    <p style="margin:12px 0 0;font:400 15px/1.65 var(--font-sans);color:var(--muted-foreground);max-width:580px;text-wrap:pretty">When you say yes to something, we put it where your family already watches and reads. You never touch a file, a format or an upload.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(258px,1fr));gap:22px;margin-top:32px">
+      <div style="border:1px solid var(--border);border-radius:14px;padding:22px 24px;box-shadow:var(--shadow-xs);background:var(--card)">
+        <div style="font:400 10px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">VIDEO</div>
+        <div style="font:600 16px var(--font-sans);margin-top:8px">YouTube &amp; YouTube Kids</div>
+        <div style="font:400 12.5px/1.65 var(--font-sans);color:var(--muted-foreground);margin-top:6px">Sing-alongs and little films go up unlisted on your own channel, so they play on the family telly. Titled and captioned for you.</div>
+        <div style="font:400 10px var(--font-mono);color:var(--neutral-400);margin-top:14px">connect once · only ever after your OK</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:14px;padding:22px 24px;box-shadow:var(--shadow-xs);background:var(--card)">
+        <div style="font:400 10px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">EBOOK</div>
+        <div style="font:600 16px var(--font-sans);margin-top:8px">Amazon Kids+ &amp; Kindle</div>
+        <div style="font:400 12.5px/1.65 var(--font-sans);color:var(--muted-foreground);margin-top:6px">Books land on the tablets and readers your family already uses, so bedtime works away from home too.</div>
+        <div style="font:400 10px var(--font-mono);color:var(--neutral-400);margin-top:14px">also Apple Books · and a private link for grandparents</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:14px;padding:22px 24px;box-shadow:var(--shadow-xs);background:var(--card)">
+        <div style="font:400 10px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">PRINT</div>
+        <div style="font:600 16px var(--font-sans);margin-top:8px">A real book in the post</div>
+        <div style="font:400 12.5px/1.65 var(--font-sans);color:var(--muted-foreground);margin-top:6px">Choose hardcover, board book or softcover, check the proof, and Barnaby posts it. Extra copies go straight to grandparents, and you never see their address.</div>
+        <div style="font:400 10px var(--font-mono);color:var(--neutral-400);margin-top:14px">hardcover $27.99 · nothing prints until you approve the proof</div>
+      </div>
+    </div>
+    <div style="margin-top:16px;font:400 11px var(--font-mono);color:var(--neutral-400)">one shelf holds it all: what’s where, which version, always yours to take down</div>
+  </section>
+  <section id="pricing" style="max-width:1200px;margin:0 auto;padding:clamp(56px,9vw,110px) 24px 0;width:100%;box-sizing:border-box">
+    <div style="text-align:center">
+      <div style="font:500 11px var(--font-sans);letter-spacing:.18em;color:var(--muted-foreground)">PRICING</div>
+      <h2 style="margin:14px auto 0;font:650 clamp(27px,3.8vw,38px)/1.1 var(--font-sans);letter-spacing:-0.03em;max-width:520px;text-wrap:balance">Simple, because it has to be.</h2>
+    </div>
+    <p style="margin:14px auto 0;font:400 15px/1.65 var(--font-sans);color:var(--muted-foreground);max-width:520px;text-align:center;text-wrap:pretty">Start free and stay free if you like. Everything else is a monthly plan you can leave whenever you want.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(198px,1fr));gap:14px;max-width:1080px;margin:40px auto 0;align-items:stretch">
+      <div style="border:1px solid var(--border);border-radius:16px;padding:26px 22px;box-shadow:var(--shadow-xs);background:var(--card);box-sizing:border-box;position:relative;display:flex;flex-direction:column">
+        <div style="font:650 19px var(--font-sans);letter-spacing:-0.018em">Peek</div>
+        <div style="font:400 12.5px var(--font-sans);color:var(--muted-foreground);margin-top:3px">Try it for an evening.</div>
+        <div style="display:flex;align-items:baseline;gap:5px;margin-top:16px;flex-wrap:nowrap;white-space:nowrap"><span style="font:650 31px var(--font-sans);letter-spacing:-0.028em">$0</span><span style="font:400 12.5px var(--font-sans);color:var(--muted-foreground)"></span></div>
+        <div style="height:1px;background:var(--border);margin:18px 0"></div>
+        <div style="display:flex;flex-direction:column;gap:9px;font:400 13px/1.5 var(--font-sans);color:var(--muted-foreground);flex:1">
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span><span style="color:var(--foreground);font-weight:600">1</span> story to keep</span></span>
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span>Picture book with read-aloud</span></span>
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span>A handful of art styles</span></span>
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span>Free, forever</span></span>
+        </div>
+        <div style="margin-top:22px"><a href="Arke Kids App.dc.html#plan=peek" style="display:block;text-decoration:none"><x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" hint-size="100%,40px">Start free</x-import></a></div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:16px;padding:26px 22px;box-shadow:var(--shadow-xs);background:var(--card);box-sizing:border-box;position:relative;display:flex;flex-direction:column">
+        <div style="font:650 19px var(--font-sans);letter-spacing:-0.018em">Spark</div>
+        <div style="font:400 12.5px var(--font-sans);color:var(--muted-foreground);margin-top:3px">For the regular storytellers.</div>
+        <div style="display:flex;align-items:baseline;gap:5px;margin-top:16px;flex-wrap:nowrap;white-space:nowrap"><span style="font:650 31px var(--font-sans);letter-spacing:-0.028em">$9.99</span><span style="font:400 12.5px var(--font-sans);color:var(--muted-foreground)">/ month</span></div>
+        <div style="height:1px;background:var(--border);margin:18px 0"></div>
+        <div style="display:flex;flex-direction:column;gap:9px;font:400 13px/1.5 var(--font-sans);color:var(--muted-foreground);flex:1">
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span><span style="color:var(--foreground);font-weight:600">6</span> stories a month</span></span>
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span>Books, comics and story videos</span></span>
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span>Every art style, in HD</span></span>
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span><span style="color:var(--foreground);font-weight:600">1</span> child profile</span></span>
+        </div>
+        <div style="margin-top:22px"><a href="Arke Kids App.dc.html#plan=spark" style="display:block;text-decoration:none"><x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" hint-size="100%,40px">Choose Spark</x-import></a></div>
+      </div>
+      <div style="border:1.5px solid var(--foreground);border-radius:16px;padding:26px 22px;box-shadow:var(--shadow-md);background:var(--card);box-sizing:border-box;position:relative;display:flex;flex-direction:column">
+        <span style="position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--primary);color:var(--primary-foreground);border-radius:999px;padding:3px 13px;font:500 10px var(--font-sans);letter-spacing:.09em;white-space:nowrap">MOST LOVED</span>
+        <div style="font:650 19px var(--font-sans);letter-spacing:-0.018em">Family</div>
+        <div style="font:400 12.5px var(--font-sans);color:var(--muted-foreground);margin-top:3px">Room for the whole family.</div>
+        <div style="display:flex;align-items:baseline;gap:5px;margin-top:16px;flex-wrap:nowrap;white-space:nowrap"><span style="font:650 31px var(--font-sans);letter-spacing:-0.028em">$19.99</span><span style="font:400 12.5px var(--font-sans);color:var(--muted-foreground)">/ month</span></div>
+        <div style="height:1px;background:var(--border);margin:18px 0"></div>
+        <div style="display:flex;flex-direction:column;gap:9px;font:400 13px/1.5 var(--font-sans);color:var(--muted-foreground);flex:1">
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span><span style="color:var(--foreground);font-weight:600">8</span> stories a month</span></span>
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span>Everything in Spark</span></span>
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span><span style="color:var(--foreground);font-weight:600">2</span> animated videos a month</span></span>
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span>Up to <span style="color:var(--foreground);font-weight:600">3</span> child profiles</span></span>
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span>Faster helpers</span></span>
+        </div>
+        <div style="margin-top:22px"><a href="Arke Kids App.dc.html#plan=family" style="display:block;text-decoration:none"><x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" hint-size="100%,40px">Choose Family</x-import></a></div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:16px;padding:26px 22px;box-shadow:var(--shadow-xs);background:var(--card);box-sizing:border-box;position:relative;display:flex;flex-direction:column">
+        <div style="font:650 19px var(--font-sans);letter-spacing:-0.018em">Studio</div>
+        <div style="font:400 12.5px var(--font-sans);color:var(--muted-foreground);margin-top:3px">For big imaginations.</div>
+        <div style="display:flex;align-items:baseline;gap:5px;margin-top:16px;flex-wrap:nowrap;white-space:nowrap"><span style="font:650 31px var(--font-sans);letter-spacing:-0.028em">$39.99</span><span style="font:400 12.5px var(--font-sans);color:var(--muted-foreground)">/ month</span></div>
+        <div style="height:1px;background:var(--border);margin:18px 0"></div>
+        <div style="display:flex;flex-direction:column;gap:9px;font:400 13px/1.5 var(--font-sans);color:var(--muted-foreground);flex:1">
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span><span style="color:var(--foreground);font-weight:600">16</span> stories a month</span></span>
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span><span style="color:var(--foreground);font-weight:600">4</span> animated videos a month</span></span>
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span>Up to <span style="color:var(--foreground);font-weight:600">5</span> child profiles</span></span>
+          <span style="display:flex;gap:9px;align-items:flex-start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:3px"><path d="M20 6 9 17l-5-5"></path></svg><span>First to try new helpers and styles</span></span>
+        </div>
+        <div style="margin-top:22px"><a href="Arke Kids App.dc.html#plan=studio" style="display:block;text-decoration:none"><x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" hint-size="100%,40px">Choose Studio</x-import></a></div>
+      </div>
+    </div>
+    <div style="max-width:1080px;margin:56px auto 0;text-align:center">
+      <h3 style="margin:0;font:650 clamp(22px,3vw,30px)/1.15 var(--font-sans);letter-spacing:-0.025em">Add a little extra</h3>
+      <p style="margin:8px auto 0;font:400 14px/1.6 var(--font-sans);color:var(--muted-foreground)">Available on any plan, whenever you want it.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-top:26px;text-align:left">
+        <div style="display:flex;align-items:center;gap:16px;border:1px solid var(--border);border-radius:16px;padding:20px 24px;background:var(--card);box-shadow:var(--shadow-xs)">
+          <span style="width:44px;height:44px;border-radius:99px;background:var(--secondary);display:inline-flex;align-items:center;justify-content:center;flex:none"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg></span>
+          <div style="flex:1;min-width:0"><div style="font:650 17px var(--font-sans);letter-spacing:-0.015em">Extra animated video</div><div style="font:400 12.5px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:3px">Bring any story to life with motion.</div></div>
+          <span style="font:650 22px var(--font-sans);letter-spacing:-0.02em;flex:none">$3.99</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px;border:1px solid var(--border);border-radius:16px;padding:20px 24px;background:var(--card);box-shadow:var(--shadow-xs)">
+          <span style="width:44px;height:44px;border-radius:99px;background:var(--secondary);display:inline-flex;align-items:center;justify-content:center;flex:none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></span>
+          <div style="flex:1;min-width:0"><div style="font:650 17px var(--font-sans);letter-spacing:-0.015em">Printed hardcover</div><div style="font:400 12.5px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:3px">Order a real book of your story, delivered to your door.</div></div>
+          <span style="font:650 22px var(--font-sans);letter-spacing:-0.02em;flex:none">$27.99</span>
+        </div>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:16px;font:400 11px var(--font-mono);color:var(--neutral-400)">cancel any time · your worlds export as readable files, they’re yours always</div>
+  </section>
+  <section style="margin-top:120px;background:var(--neutral-950);color:#fff">
+    <div style="max-width:1200px;margin:0 auto;padding:clamp(64px,9vw,100px) 24px clamp(56px,8vw,90px);text-align:center">
+      <h2 style="margin:0 auto;font:650 clamp(32px,5vw,54px)/1.05 var(--font-sans);letter-spacing:-0.032em;max-width:640px;text-wrap:balance">Start with one character.</h2>
+      <p style="margin:18px auto 0;font:400 15px/1.65 var(--font-sans);color:rgba(255,255,255,.6);max-width:440px">A name and one funny detail are enough. Tonight's bedtime story can be the first thing their world makes.</p>
+      <div style="display:flex;gap:10px;justify-content:center;margin-top:30px">
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="secondary" size="lg" hint-size="200px,44px">Start your world · free</x-import>
+      </div>
+      <div style="margin-top:clamp(44px,6vw,70px);border-top:1px solid rgba(255,255,255,.14);padding-top:26px;display:flex;flex-wrap:wrap;align-items:center;gap:12px 22px;font:400 11px var(--font-mono);color:rgba(255,255,255,.45)">
+        <span style="font:650 14px var(--font-sans);letter-spacing:-0.02em;color:rgba(255,255,255,.8)">Arke Kids</span>
+        <a href="#worlds" style="color:inherit">their worlds</a>
+        <a href="#safety" style="color:inherit">for parents</a>
+        <a href="#publish" style="color:inherit">publish</a>
+        <a href="#pricing" style="color:inherit">pricing</a>
+        <span style="flex:1;min-width:0"></span>
+        <span>built on the open-source Arke engine · COPPA compliant · privacy policy</span>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;heroStyle&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;collage&quot;,&quot;banner&quot;],&quot;default&quot;:&quot;banner&quot;,&quot;tsType&quot;:&quot;'collage' | 'banner'&quot;,&quot;section&quot;:&quot;Hero&quot;},&quot;ctaMode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;free&quot;,&quot;waitlist&quot;],&quot;default&quot;:&quot;waitlist&quot;,&quot;tsType&quot;:&quot;'free' | 'waitlist'&quot;,&quot;section&quot;:&quot;Hero&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const mode = this.props.ctaMode ?? 'free';
+    const hero = this.props.heroStyle ?? 'collage';
+    return { ctaFree: mode === 'free', ctaWaitlist: mode === 'waitlist', heroCollage: hero === 'collage', heroBanner: hero === 'banner' };
+  }
+}
+</script>
+</body>
+</html>

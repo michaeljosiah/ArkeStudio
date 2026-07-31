@@ -1,0 +1,59 @@
+/* ============================================================
+   SpecOne · Typography tokens — shadcn / Geist
+   One sans family (Geist) for everything; Geist Mono for code,
+   IDs and technical values. No display/mono-label split — the
+   shadcn look is quiet, sans, with small medium-weight labels.
+   ============================================================ */
+:root {
+  /* ---- Families ------------------------------------------- */
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Back-compat aliases (display/body both map to sans) */
+  --font-display: var(--font-sans);
+  --font-body:    var(--font-sans);
+
+  /* ---- Weights -------------------------------------------- */
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* ---- Type scale (px) — shadcn uses a tight, small scale -- */
+  --text-xs:   12px;
+  --text-sm:   13px;   /* default UI text (text-sm) */
+  --text-base: 14px;   /* body */
+  --text-md:   15px;
+  --text-lg:   18px;   /* card titles */
+  --text-xl:   20px;
+  --text-2xl:  24px;   /* page heading */
+  --text-3xl:  30px;
+  --text-4xl:  36px;
+  --text-5xl:  48px;
+
+  /* ---- Line heights --------------------------------------- */
+  --leading-none:   1;
+  --leading-tight:  1.15;
+  --leading-snug:   1.3;
+  --leading-normal: 1.5;
+  --leading-body:   1.6;
+
+  /* ---- Letter spacing ------------------------------------- */
+  --tracking-tighter: -0.02em;  /* large headings */
+  --tracking-tight:   -0.01em;
+  --tracking-normal:  0;
+  --tracking-wide:    0.025em;
+  --tracking-label:   0.05em;    /* small uppercase labels (sans) */
+
+  /* ============================================================
+     Semantic roles (shadcn-flavoured)
+     ============================================================ */
+  --type-title:   var(--weight-semibold) var(--text-2xl)/var(--leading-tight) var(--font-sans);
+  --type-h2:      var(--weight-semibold) var(--text-xl)/var(--leading-snug)   var(--font-sans);
+  --type-h3:      var(--weight-semibold) var(--text-lg)/var(--leading-snug)   var(--font-sans);
+  --type-lead:    var(--weight-regular)  var(--text-lg)/var(--leading-normal) var(--font-sans);
+  --type-body:    var(--weight-regular)  var(--text-base)/var(--leading-body) var(--font-sans);
+  --type-ui:      var(--weight-medium)   var(--text-sm)/1.4                   var(--font-sans);
+  --type-label:   var(--weight-medium)   var(--text-xs)/1.2                   var(--font-sans);
+  --type-mono:    var(--weight-regular)  var(--text-sm)/1.5                   var(--font-mono);
+}
