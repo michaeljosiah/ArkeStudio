@@ -882,17 +882,23 @@ model is instructed that if the retrieved entries do not support an answer, the 
 is `cannot_answer` — and that returning it is a success, not a failure.
 
 **Excerpts are then verified mechanically.** Each excerpt must appear in the entry it cites,
-normalised for whitespace. An unverifiable excerpt means a fabricated citation, so the claim is
-dropped; if no claim survives, the response becomes a refusal. This is a deterministic check the
-model cannot argue with, and it is what turns "cites an entry" into "is supported by an entry".
+normalised for whitespace. This is a deterministic check the model cannot argue with, and it is
+what turns "cites an entry" into "is supported by an entry".
+
+**Verification is all-or-nothing.** A single unverifiable excerpt fails the whole answer, which is
+retried once with the failure named, and refused if it fails again. Dropping the bad claim and
+showing the rest would be worse than it sounds: an answer of *"No, she cannot"* plus *"unless she
+has stood in that water before"* becomes a false absolute when the second claim is silently
+removed. A partial answer is the same plausible-but-unsupported failure in a subtler form, and
+refusal is a safe outcome where distortion is not.
 
 **Requirements**
 
 - **R-CANON-1** A canon answer SHALL consist of claims, each naming a supporting entry and
   quoting the span of that entry which supports it.
-  - **WHEN** a claim's excerpt does not appear in the entry it cites **THEN** the claim is
-    dropped.
-  - **AND WHEN** no claim survives verification **THEN** the refusal state renders.
+  - **WHEN** any claim's excerpt does not appear in the entry it cites **THEN** the whole answer
+    is rejected, retried once with the specific failure named, and refused if it fails again.
+  - **AND** no answer SHALL be rendered from a partially verified claim set.
 - **R-CANON-2** When retrieval returns no entry above the relevance floor, the refusal state
   SHALL render without dispatching an LLM call.
 - **R-CANON-3** The refusal state SHALL report the number of entries searched and cite the
