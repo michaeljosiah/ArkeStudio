@@ -842,9 +842,34 @@ productions' loose ends. This is the thesis made visible at the moment it matter
 
 ## 8.3 Story
 
-Prose and scripts drafted inside the canon, with a story overview (spine, acts, gaps) authored
-through the same chat gate. The overview steers scene drafting and never overwrites a locked
-scene.
+A story production is a **chapter tree**, not one document. The overview (spine, acts, gaps) is
+authored through the chat gate and steers drafting; chapters hang beneath it.
+
+```
+productions/undersong/
+  production.json
+  story.json              overview: logline, acts, spine, target length
+  chapters/
+    01-the-tide-lower-than-ever.md
+    02-what-the-water-left.md
+```
+
+A chapter carries frontmatter — number, title, status, version, word count, the sheets and
+canon entries it draws on — and prose in the body.
+
+**Chapter prose is not gated.** The accept gate protects *the world*, and chapter prose is
+production output, not world state. Gating every paragraph of a novel would make the product
+unusable for the thing it claims to do. The line is the same one takes draw: generated content
+is gated on arrival, human-authored content is not.
+
+So: an agent-drafted chapter arrives as a proposal and is accepted or discarded like anything
+else, and accepting cuts a new chapter version with a `.history/` snapshot. Once accepted, the
+chapter is a document the author edits directly, autosaving in place without cutting versions.
+A new version is cut only by an accepted draft or an explicit save-point.
+
+What *is* gated is anything a chapter implies about the world. When drafting surfaces a new
+fact — a name, a rule, a place — it is proposed as a canon entry or a sheet edit through the
+ordinary gate, separately from the prose.
 
 ## 8.4 Video
 
@@ -855,10 +880,35 @@ The deepest surface: scenes, shots, boards, dispatch, takes, the cut, audio, exp
 Frame sets generated from sheets and locations without a timeline. Shares dispatch, takes and
 the accept gate; skips the cut.
 
+**Stills is not a separate entity model.** A stills *frame* is a shot minus duration, camera
+motion and audio direction. `production.format` drives which fields and panels render, so the
+dispatch, take and accept paths are the same code. Forking the entity would fork the pipeline
+for a format that shares almost all of it, which is where the two paths would begin to drift.
+
+Stills does need one surface video does not: a **contact sheet**. A visual album is judged on
+coherence across the set, which cannot be assessed one take at a time in a shot card. The
+contact sheet shows every frame at its accepted take, at size, in a grid, with accept and
+reject inline. It is a re-rendering of existing data, and the same view backs video's Board tab.
+
+**Requirements**
+
 - **R-PROD-1** Creating a production SHALL NOT copy world entities into it; productions
   reference the world.
   - **WHEN** a sheet advances **THEN** every production sees the new version at its next
     dispatch without any per-production migration.
+- **R-PROD-2** A story production SHALL hold its prose as one file per chapter beneath the
+  production, each independently versioned.
+- **R-PROD-3** Direct human edits to chapter prose SHALL save without passing through the accept
+  gate and without cutting a version; agent-drafted chapters SHALL arrive as proposals and cut a
+  version on accept.
+  - **WHEN** an author types into an accepted chapter **THEN** no proposal is created and no
+    ripple check runs.
+- **R-PROD-4** World facts surfaced while drafting SHALL be proposed as canon or sheet changes
+  through the ordinary gate, separately from the prose that surfaced them.
+- **R-PROD-5** Stills frames SHALL share the shot entity, dispatch path and take model with
+  video, differing only in which fields the format renders.
+- **R-PROD-6** A stills production SHALL provide a contact-sheet view of every frame at its
+  accepted take, supporting accept and reject without leaving the view.
 
 ---
 
@@ -932,6 +982,14 @@ passes"* — and the packing is computed from the model manifest's duration limi
 Shots without an accepted frame are called out before dispatch, with the option to generate
 from the brief alone or to go back and pin a frame first.
 
+**Sketch-cited shots get the same treatment.** A sketch has no locked tiles, therefore no
+compiled model sheet, therefore no identity reference rides along — a materially different
+generation, and the exact failure this product exists to prevent. The dispatch dialog names the
+specific sketches the shot cites, states the consequence, and offers to lock them first. It
+does **not** block: generating first looks is how a sketch becomes locked, so blocking would
+close the only path out of sketch-hood. The Cast screen's locked/sketch count is ambient world
+information and is not a substitute for this per-dispatch notice.
+
 ## 10.4 Continuity chaining
 
 Each clip opens on the **last frame of the clip before it**. The queue extracts the final frame
@@ -963,6 +1021,10 @@ learn from — but v1 does not mutate prompts from rejections.
 - **R-DISP-6** Rejecting a take SHALL require a cited sheet and field, and SHALL record the
   citation without modifying the shot's prompt.
 - **R-DISP-7** The queue SHALL survive process restart with no job lost or silently duplicated.
+- **R-DISP-8** A dispatch citing a sketch SHALL name that sketch before commit and state that no
+  model sheet will accompany the generation, and SHALL allow the dispatch to proceed.
+  - **WHEN** a shot cites two locked sheets and one sketch **THEN** only the sketch is named,
+    and the dispatch is not blocked.
 
 ---
 
@@ -1005,10 +1067,36 @@ provenance.
 Cross-production filing is automatic: *"everything that cited this sheet at dispatch"* is a
 query against the `citations` table, not a curated list.
 
+## 13.1 World import
+
+*"Already have a canon in documents? Import a folder."* Import is two stages, and the second is
+optional and always gated.
+
+**Stage one — file.** Every importable file is copied into `artifacts/` and indexed. This
+always happens, never fails on content, and is complete on its own: the user has their material
+in the world, linkable to anything.
+
+**Stage two — lift.** An extraction pass reads the filed documents and **proposes** canon
+entries and sheets from them. Each candidate is a separate proposal citing the artifact and the
+location within it that produced it, so acceptance is per-fact rather than all-or-nothing. A
+document that yields thirty candidates produces thirty proposals the user works through, not
+one bulk import that silently rewrites the world.
+
+Nothing extracted enters the world without an accept, and every accepted entry keeps a link
+back to the source artifact — so months later, "where did this come from" has an answer.
+
+**Requirements**
+
 - **R-ART-1** Filing an artifact SHALL copy it into the world folder, never reference it in
   place.
 - **R-ART-2** Every artifact SHALL record whether it was user-filed or system-produced, and
   system-produced artifacts SHALL record what produced them.
+- **R-ART-3** Importing a folder SHALL file every importable file as an artifact before any
+  extraction is attempted, and SHALL succeed at that stage regardless of extraction outcome.
+- **R-ART-4** Extraction SHALL produce one proposal per candidate fact, each citing its source
+  artifact and location within it.
+  - **WHEN** a user accepts three of thirty candidates **THEN** the other twenty-seven leave no
+    trace in the world, and the three carry links to their source.
 
 ---
 
@@ -1023,7 +1111,7 @@ query against the `citations` table, not a curated list.
 | **OpenAI** | LLM, image | Direct |
 | **Anthropic** | LLM | Direct |
 | **ElevenLabs** | voice TTS, cloning | Direct |
-| **Ollama** | LLM | Local runtime |
+| **Ollama** | LLM | Local runtime — dual-routed, see §14.1.1 |
 | **Kokoro** | voice TTS | Local, via Voxa |
 | **whisper.cpp** | voice STT | Local, via Voxa |
 
@@ -1034,6 +1122,21 @@ per dispatch.
 Local runtimes that this machine cannot run stay **visible and disabled with the reason**
 (*"Needs 24 GB VRAM. This machine has 12 GB. Cloud video still works."*), which is a
 deliberate product behaviour, not an error state.
+
+### 14.1.1 Ollama is dual-routed
+
+Ollama is reached two ways, and this is the only provider for which that is true:
+
+- **Directly by Studio**, for cheap non-authoring work that never touches the accept gate:
+  prompt assembly, summarising a take's rejection, naming and slug suggestions, matching a
+  voice candidate against a written voice description. These are short, high-frequency calls
+  where a round-trip through the harness would add latency and cost for no benefit.
+- **Through the harness**, as an authoring provider, when no online LLM provider is configured
+  or selected. Studio writes it into OpenCode's configuration alongside the cloud providers
+  (§17.2), so authoring degrades to local rather than becoming unavailable.
+
+The two routes are the same runtime and the same models; only the caller differs. Both record
+zero cost (R-PROV-6).
 
 ## 14.2 Keys
 
@@ -1082,13 +1185,30 @@ by provider, and the alert threshold is checked against it.
 - **R-PROV-5** The ledger SHALL record estimate and actual separately, and SHALL never be
   rewritten.
 - **R-PROV-6** Local runs SHALL be recorded at zero cost and labelled as unmetered.
+- **R-PROV-7** Studio SHALL call Ollama directly for non-authoring work, and SHALL additionally
+  offer it as a harness authoring provider when no online LLM provider is configured or selected.
+  - **WHEN** no cloud LLM key is present but Ollama is running **THEN** authoring remains
+    available through the harness rather than being disabled.
 
 ---
 
 # 15 · Activity
 
-One screen for everything the application is doing and what it costs, across all worlds:
-**Running**, **Needs you**, **Earlier today**, and the week's spend by provider.
+One screen for everything the application is doing and what it costs: **Running**, **Needs
+you**, **Earlier today**, and the week's spend by provider.
+
+**Global, with a world filter defaulting to the active world.** Three reasons the underlying
+queue and ledger are global rather than per-world:
+
+- **Spend is per-key, not per-world.** One API key produces one bill. A weekly alert threshold
+  that counted a single world would under-report and fail the only job it has.
+- **Jobs compete for shared limits.** Rate limits, key quotas and the machine itself are shared.
+  A per-world queue gives two open worlds no place to serialize against one rate limit.
+- **Needs-you is better global.** Returning after a week, the useful question is "what is waiting
+  on me", not per-world archaeology.
+
+The filter keeps the common case quiet: most work happens inside one world, so the view opens
+scoped to it with a visible toggle to All.
 
 The needs-you queue is the product's task list, and it is computed rather than curated:
 unreviewed takes, scene drafts awaiting acceptance, board images awaiting approval, proposals
@@ -1097,6 +1217,10 @@ left open.
 - **R-ACT-1** The needs-you queue SHALL be computed from world and queue state, and SHALL NOT
   be a stored list.
 - **R-ACT-2** Model downloads SHALL appear as running work with progress, alongside generations.
+- **R-ACT-3** The job queue and the spend ledger SHALL be global across worlds, and the Activity
+  view SHALL default to the active world with a toggle to all worlds.
+  - **WHEN** two worlds are open and both dispatch **THEN** their jobs serialize against one
+    shared rate limit, and the week's spend totals both.
 
 ---
 
@@ -1140,8 +1264,9 @@ installation first** and prefers it. Whichever is used, its capabilities are pro
 OpenAPI document rather than assumed (§1.4).
 
 Studio owns provider keys and writes OpenCode's configuration at start-up, passing down the
-LLM providers the user configured in Settings. The user never configures OpenCode directly and
-is never asked for a key twice.
+LLM providers the user configured in Settings — including a running Ollama, so that authoring
+degrades to local rather than becoming unavailable when no cloud key is present (§14.1.1). The
+user never configures OpenCode directly and is never asked for a key twice.
 
 ## 17.3 Confinement
 
@@ -1214,7 +1339,7 @@ Capability specs break out of this document in dependency order. Each becomes it
 | SPEC-012 | Productions, scenes, shots and boards | 004, 007 |
 | SPEC-013 | Takes, the cut, audio and exports | 009, 012 |
 | SPEC-014 | Activity, needs-you and spend | 003, 009 |
-| SPEC-015 | Artifacts and world import | 002, 003 |
+| SPEC-015 | Artifacts, world import and fact extraction | 002, 003, 004 |
 | SPEC-016 | First run, onboarding and packaging | all |
 
 **Phase 1 — prove the loop.** 001 → 002 → 003 → 004 → 005 → 007. A world can be created, a
@@ -1228,19 +1353,28 @@ scenes dispatch, takes assemble a cut.
 
 ---
 
-# 20 · Open questions
+# 20 · Resolved decisions
 
-1. **Story format depth.** The prototype shows the story overview and drafting gate, but not
-   the prose editor. How much of a writing surface does v1 owe a novel — a chapter tree, or a
-   single document per production?
-2. **Stills production surface.** Defined here as dispatch without a cut. Does it need its own
-   review grid, or does the Hymnal-style *"24 of 24 rendered"* card suffice for v1?
-3. **World import.** *"Import a folder · it files into artifacts, ready to link"* — does v1
-   attempt any extraction from imported documents into canon, or purely file them?
-4. **Multi-world scope on Activity.** Specified here as global. Confirm that a user with three
-   worlds wants one queue rather than per-world queues.
-5. **Sketch citation.** A sketch is referenceable but not canon-grade. Should dispatch warn when
-   a shot cites a sketch, or is the Cast screen's count sufficient?
-6. **Ollama's role.** Listed as a local LLM runtime. Does it route through OpenCode as a
-   provider, or does Studio call it directly for cheap non-authoring work such as prompt
-   assembly?
+The questions this document opened during review, and how they were settled. Recorded so the
+reasoning survives the decision.
+
+| # | Question | Resolution | Where |
+|---|---|---|---|
+| 1 | Story format depth | Chapter tree, one file per chapter. Prose edits are ungated; agent drafts are gated. | §8.3 |
+| 2 | Stills surface | Same entity and pipeline as video, format-driven rendering, plus one contact sheet. | §8.5 |
+| 3 | World import | Two stages: always file as artifacts, then optionally lift facts as per-candidate proposals. | §13.1 |
+| 4 | Activity scope | Global queue and ledger, view filtered to the active world by default. | §15 |
+| 5 | Sketch citation | Warn per-dispatch naming the specific sketches; never block. | §10.3 |
+| 6 | Ollama's role | Dual-routed: direct for cheap non-authoring work, through the harness as an authoring fallback. | §14.1.1 |
+
+## 20.1 Still open
+
+- **Cost denomination.** §14.4 specifies USD where the prototype shows credits. Flagged as the
+  one deliberate, visible departure from the approved design; reversible if credits are wanted
+  as a display unit.
+- **Extraction quality bar.** §13.1 commits to lifting facts from imported documents. What
+  precision is acceptable before the proposal list becomes noise the user stops reading is a
+  question only real documents can answer.
+- **Chapter save-points.** §8.3 cuts a version on accepted drafts and explicit save-points.
+  Whether authors want a manual save-point control, or expect versions purely from drafts,
+  should be settled against a real writing session.
