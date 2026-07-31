@@ -1,7 +1,5 @@
 # Arke Studio, image prompts
 
-> Arke **Kids** prompts all live in `image-prompts-kids-app.md`. This sheet is the grown-up product only.
-
 The UI chrome is monochrome, so the imagery carries all the colour. To keep the set coherent, every prompt below ends with the same **style suffix**:
 
 > …painterly cinematic concept art, muted palette with one warm accent, soft volumetric fog, filmic lighting, high detail, no text, no watermark, no border
