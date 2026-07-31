@@ -1327,7 +1327,7 @@ Capability specs break out of this document in dependency order. Each becomes it
 |---|---|---|
 | SPEC-001 | Foundation — monorepo, contracts, coordinator, Electron shell | — |
 | SPEC-002 | The world on disk — layout, schemas, versioning, history | 001 |
-| SPEC-003 | The derived index and the change log | 002 |
+| SPEC-003 | The derived index and its queries | 002 |
 | SPEC-004 | The accept gate — proposals, ripples, chat/form duality | 002, 003 |
 | SPEC-005 | Harness adapter — OpenCode lifecycle, confinement, permissions | 001, 004 |
 | SPEC-006 | Canon — entries, revisions, grounded Q&A, refusal, threads | 004, 005 |
