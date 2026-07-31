@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/colors.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/typography.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/effects.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/styles.css">
+<script src="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/_ds_bundle.js"></script>
+<script src="image-slot.js"></script>
+<style>
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--background);color:#0A0A0A;font-family:var(--font-sans),system-ui,sans-serif}
+a{color:#0A0A0A;text-decoration:none}a:hover{color:#525252}
+@keyframes fadeUp{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:none}}
+@keyframes drift{from{transform:translateY(0)}to{transform:translateY(-8px)}}
+@keyframes kenburns{from{transform:scale(1)}to{transform:scale(1.07)}}
+@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-direction:column">
+  <sc-if value="{{ showAnnouncement }}" hint-placeholder-val="{{ false }}">
+  <div style="background:var(--primary);color:var(--primary-foreground);text-align:center;padding:9px 20px;font:400 12.5px var(--font-sans)">v0.4 is out, the cut assembles itself. <a href="#loop" style="color:inherit;text-decoration:underline;text-underline-offset:3px">See what changed</a></div>
+  </sc-if>
+  <div style="position:sticky;top:0;z-index:50;background:rgba(255,255,255,.86);backdrop-filter:blur(12px);border-bottom:1px solid var(--border)">
+    <div style="max-width:1160px;margin:0 auto;display:flex;align-items:center;gap:26px;height:58px;padding:0 24px">
+      <span style="font:650 16px var(--font-sans);letter-spacing:-0.02em">Arke</span>
+      <span style="font:400 10px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em;margin-top:2px">OPEN-SOURCE AI STUDIO</span>
+      <span style="flex:1"></span>
+      <nav style="display:flex;gap:22px;font:400 13.5px var(--font-sans)">
+        <a href="#loop">How it works</a>
+        <a href="#canon">Canon</a>
+        <a href="#consistency">Consistency</a>
+        <a href="#local">Open source</a>
+      </nav>
+      <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="sm" hint-size="92px,32px">GitHub ↗</x-import>
+      <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="sm" hint-size="100px,32px">Download</x-import>
+    </div>
+  </div>
+  <section style="max-width:1160px;margin:0 auto;padding:88px 24px 30px;text-align:center">
+    <div style="font:500 11px var(--font-sans);letter-spacing:.18em;color:var(--muted-foreground);animation:fadeUp .6s var(--ease-out) both">FILMS · STORIES · GAMES · FROM ONE WORLD</div>
+    <h1 style="margin:20px auto 0;font:650 76px/1.02 var(--font-sans);letter-spacing:-0.035em;max-width:820px;text-wrap:balance;animation:fadeUp .7s var(--ease-out) .06s both">The world is the asset.</h1>
+    <p style="margin:22px auto 0;font:400 18px/1.65 var(--font-sans);color:var(--muted-foreground);max-width:600px;text-wrap:pretty;animation:fadeUp .7s var(--ease-out) .14s both">Arke holds your characters, places and canon as one living source, and every film, story and game you produce cites it. Author once. Produce everywhere.</p>
+    <sc-if value="{{ ctaDownload }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;gap:10px;justify-content:center;margin-top:30px;animation:fadeUp .7s var(--ease-out) .2s both">
+      <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="180px,44px">Download for macOS</x-import>
+      <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="lg" hint-size="150px,44px">View on GitHub</x-import>
+    </div>
+    </sc-if>
+    <sc-if value="{{ ctaWaitlist }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;gap:8px;justify-content:center;margin-top:30px;animation:fadeUp .7s var(--ease-out) .2s both">
+      <span style="display:flex;align-items:center;width:300px;border:1px solid var(--border);border-radius:10px;padding:0 14px;font:400 13.5px var(--font-sans);color:var(--text-placeholder);cursor:text;background:var(--background)">you@example.com</span>
+      <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="140px,44px">Join the beta</x-import>
+    </div>
+    </sc-if>
+    <div style="margin-top:14px;font:400 11px var(--font-mono);color:var(--neutral-400);animation:fadeUp .7s var(--ease-out) .24s both">free · MIT licence · macOS, Windows, Linux · your keys stay in your keychain</div>
+  </section>
+  <section style="max-width:1160px;margin:0 auto;padding:26px 24px 0;width:100%;box-sizing:border-box">
+    <div style="border-radius:18px;overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow-lg);position:relative;height:600px;background:var(--neutral-950);animation:fadeUp .8s var(--ease-out) .22s both">
+      <div style="position:absolute;inset:-3%;animation:kenburns 26s ease-in-out infinite alternate"><image-slot id="site-hero" src="assets/world-undersong.png" shape="rect" placeholder="Hero reel: drop a trailer still or loop"></image-slot></div>
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none"><span style="width:74px;height:74px;border-radius:99px;background:rgba(255,255,255,.93);box-shadow:var(--shadow-lg);display:flex;align-items:center;justify-content:center;pointer-events:auto;cursor:pointer;transition:transform .2s var(--ease-out)" style-hover="transform:scale(1.08)"><svg width="26" height="26" viewBox="0 0 24 24" fill="#0A0A0A" style="margin-left:3px"><path d="M7 5l12 7-12 7z"></path></svg></span></div>
+      <div style="position:absolute;left:0;right:0;bottom:0;background:rgba(10,10,10,.6);padding:13px 20px;display:flex;align-items:center;gap:12px">
+        <span style="width:6px;height:6px;border-radius:99px;background:#fff;animation:pulseDot 1.6s ease-in-out infinite"></span>
+        <span style="font:400 12.5px var(--font-sans);color:#fff">Saltlight, a short film produced end to end inside Arke, from the sample world The Undersong.</span>
+        <span style="margin-left:auto;font:400 10px var(--font-mono);color:rgba(255,255,255,.7)">2:40 · watch</span>
+      </div>
+    </div>
+  </section>
+  <section id="loop" style="max-width:1160px;margin:0 auto;padding:110px 24px 0;width:100%;box-sizing:border-box">
+    <div style="font:500 11px var(--font-sans);letter-spacing:.18em;color:var(--muted-foreground)">THE LOOP</div>
+    <h2 style="margin:14px 0 0;font:650 42px/1.08 var(--font-sans);letter-spacing:-0.03em;max-width:560px;text-wrap:balance">Author once. Produce everywhere.</h2>
+    <p style="margin:14px 0 0;font:400 15px/1.65 var(--font-sans);color:var(--muted-foreground);max-width:560px;text-wrap:pretty">Most tools scope your characters to a project and forget them when it ends. In Arke the world comes first, productions are projections of it, and a change to a sheet changes it everywhere.</p>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px;margin-top:38px">
+      <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-xs);background:var(--card);transition:transform .3s var(--ease-out),box-shadow .3s var(--ease-out)" style-hover="transform:translateY(-5px);box-shadow:var(--shadow-lg)">
+        <div style="height:300px;border-bottom:1px solid var(--border)"><image-slot id="site-loop1" src="assets/site-loop1.png" shape="rect" placeholder="Screenshot: the cast ledger"></image-slot></div>
+        <div style="padding:18px 22px 20px"><div style="display:flex;align-items:baseline;gap:10px"><span style="font:400 11px var(--font-mono);color:var(--neutral-400)">01</span><span style="font:600 17px var(--font-sans);letter-spacing:-0.01em">A world, not a project</span></div>
+        <div style="font:400 13px/1.6 var(--font-sans);color:var(--muted-foreground);margin-top:6px">Characters, locations, factions and canon live as sheets: locked when they hold, sketches while they don't.</div></div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-xs);background:var(--card);transition:transform .3s var(--ease-out),box-shadow .3s var(--ease-out)" style-hover="transform:translateY(-5px);box-shadow:var(--shadow-lg)">
+        <div style="height:300px;border-bottom:1px solid var(--border)"><image-slot id="site-loop2" src="assets/site-loop2.png" shape="rect" placeholder="Screenshot: scene shot cards"></image-slot></div>
+        <div style="padding:18px 22px 20px"><div style="display:flex;align-items:baseline;gap:10px"><span style="font:400 11px var(--font-mono);color:var(--neutral-400)">02</span><span style="font:600 17px var(--font-sans);letter-spacing:-0.01em">Scenes drafted in conversation</span></div>
+        <div style="font:400 13px/1.6 var(--font-sans);color:var(--muted-foreground);margin-top:6px">Talk the scene out; shots arrive as cards, frame, camera, audio, named sheet references. Nothing renders until you accept.</div></div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-xs);background:var(--card);transition:transform .3s var(--ease-out),box-shadow .3s var(--ease-out)" style-hover="transform:translateY(-5px);box-shadow:var(--shadow-lg)">
+        <div style="height:300px;border-bottom:1px solid var(--border)"><image-slot id="site-loop3" src="assets/site-loop3.png" shape="rect" placeholder="Screenshot: generate workspace"></image-slot></div>
+        <div style="padding:18px 22px 20px"><div style="display:flex;align-items:baseline;gap:10px"><span style="font:400 11px var(--font-mono);color:var(--neutral-400)">03</span><span style="font:600 17px var(--font-sans);letter-spacing:-0.01em">Takes, judged against the sheet</span></div>
+        <div style="font:400 13px/1.6 var(--font-sans);color:var(--muted-foreground);margin-top:6px">Every generation carries the sheets as references. Accept locks a take into the cut; a rejection teaches the shot.</div></div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-xs);background:var(--card);transition:transform .3s var(--ease-out),box-shadow .3s var(--ease-out)" style-hover="transform:translateY(-5px);box-shadow:var(--shadow-lg)">
+        <div style="height:300px;border-bottom:1px solid var(--border)"><image-slot id="site-loop4" src="assets/site-loop4.png" shape="rect" placeholder="Screenshot: the cut timeline"></image-slot></div>
+        <div style="padding:18px 22px 20px"><div style="display:flex;align-items:baseline;gap:10px"><span style="font:400 11px var(--font-mono);color:var(--neutral-400)">04</span><span style="font:600 17px var(--font-sans);letter-spacing:-0.01em">A cut that assembles itself</span></div>
+        <div style="font:400 13px/1.6 var(--font-sans);color:var(--muted-foreground);margin-top:6px">Accepted takes land in place on the timeline. The gaps are what's left to shoot, a card moves because the work moved.</div></div>
+      </div>
+    </div>
+  </section>
+  <section id="canon" style="max-width:1160px;margin:0 auto;padding:110px 24px 0;width:100%;box-sizing:border-box">
+    <div style="display:flex;gap:60px;align-items:center">
+      <div style="flex:1;min-width:0">
+        <div style="font:500 11px var(--font-sans);letter-spacing:.18em;color:var(--muted-foreground)">CANON</div>
+        <h2 style="margin:14px 0 0;font:650 42px/1.08 var(--font-sans);letter-spacing:-0.03em;text-wrap:balance">It never invents behind your back.</h2>
+        <p style="margin:16px 0 0;font:400 15px/1.7 var(--font-sans);color:var(--muted-foreground);text-wrap:pretty">Ask the world anything and the answer cites its sources, entry by entry. When canon is silent, Arke says so and opens a thread instead of guessing. Every rule is versioned, every change shows what it ripples into before you accept it.</p>
+        <div style="display:flex;flex-direction:column;gap:9px;margin-top:22px;font:400 13.5px var(--font-sans)">
+          <span style="display:flex;align-items:center;gap:10px"><span style="width:6px;height:6px;border-radius:99px;background:var(--foreground);flex:none"></span>Answers grounded in canon only, with citations</span>
+          <span style="display:flex;align-items:center;gap:10px"><span style="width:6px;height:6px;border-radius:99px;background:var(--foreground);flex:none"></span>Refusal with receipts when the world hasn't decided</span>
+          <span style="display:flex;align-items:center;gap:10px"><span style="width:6px;height:6px;border-radius:99px;background:var(--foreground);flex:none"></span>One accept gate on everything that enters the record</span>
+        </div>
+      </div>
+      <div style="flex:1.1;min-width:0;animation:drift 8s ease-in-out infinite alternate">
+        <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-lg);height:420px"><image-slot id="site-canon" src="assets/site-canon.png" shape="rect" placeholder="Screenshot: canon Q&amp;A, the refusal state"></image-slot></div>
+      </div>
+    </div>
+  </section>
+  <section id="consistency" style="max-width:1160px;margin:0 auto;padding:110px 24px 0;width:100%;box-sizing:border-box;text-align:center">
+    <div style="font:500 11px var(--font-sans);letter-spacing:.18em;color:var(--muted-foreground)">CONSISTENCY</div>
+    <h2 style="margin:14px auto 0;font:650 42px/1.08 var(--font-sans);letter-spacing:-0.03em;max-width:620px;text-wrap:balance">One sheet, every frame.</h2>
+    <p style="margin:14px auto 0;font:400 15px/1.65 var(--font-sans);color:var(--muted-foreground);max-width:560px;text-wrap:pretty">Locked reference angles compile into a model sheet, one image that rides along with every generation, on every provider. Drift gets flagged, not filed.</p>
+    <div style="margin-top:36px;border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow-lg);background:var(--card)">
+      <div style="height:640px"><image-slot id="site-modelsheet" src="assets/maren-model-sheet.png" shape="rect" placeholder="Maren: compiled model sheet"></image-slot></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px;border-top:1px solid var(--border)">
+        <span style="font:500 10px var(--font-mono);letter-spacing:.08em">MAREN KEST · MODEL SHEET</span>
+        <span style="font:400 10px var(--font-mono);color:var(--neutral-400)">compiled from locked tiles · sheet v4 · THE UNDERSONG</span>
+      </div>
+    </div>
+  </section>
+  <section id="local" style="max-width:1160px;margin:0 auto;padding:110px 24px 0;width:100%;box-sizing:border-box">
+    <div style="font:500 11px var(--font-sans);letter-spacing:.18em;color:var(--muted-foreground)">OPEN SOURCE · LOCAL FIRST</div>
+    <h2 style="margin:14px 0 0;font:650 42px/1.08 var(--font-sans);letter-spacing:-0.03em;max-width:600px;text-wrap:balance">Your worlds never leave your machine.</h2>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;margin-top:36px">
+      <div style="border:1px solid var(--border);border-radius:14px;padding:24px 26px;box-shadow:var(--shadow-xs);background:var(--neutral-50)">
+        <div style="font:600 16px var(--font-sans);letter-spacing:-0.01em">Keys in your keychain</div>
+        <div style="font:400 13px/1.65 var(--font-sans);color:var(--muted-foreground);margin-top:8px">Provider keys live in the OS keychain, never inside a world, never in an export. One key per provider, however many jobs it does.</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:14px;padding:24px 26px;box-shadow:var(--shadow-xs);background:var(--neutral-50)">
+        <div style="font:600 16px var(--font-sans);letter-spacing:-0.01em">Local when it can be</div>
+        <div style="font:400 13px/1.65 var(--font-sans);color:var(--muted-foreground);margin-top:8px">Ollama for drafting, Komoro for speech, Wan 2.2 for video, downloaded once, metered never. Cloud is a choice, not a dependency.</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:14px;padding:24px 26px;box-shadow:var(--shadow-xs);background:var(--neutral-50)">
+        <div style="font:600 16px var(--font-sans);letter-spacing:-0.01em">Open, end to end</div>
+        <div style="font:400 13px/1.65 var(--font-sans);color:var(--muted-foreground);margin-top:8px">MIT-licensed and self-hostable. Your canon is a readable format, not a proprietary lock, leave any time and take the world with you.</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:26px;align-items:center">
+      <span style="font:400 11px var(--font-mono);color:var(--neutral-400)">works with:</span>
+      <span style="border:1px solid var(--border);border-radius:999px;padding:4px 13px;font:500 12px var(--font-sans)">OpenAI</span>
+      <span style="border:1px solid var(--border);border-radius:999px;padding:4px 13px;font:500 12px var(--font-sans)">Claude</span>
+      <span style="border:1px solid var(--border);border-radius:999px;padding:4px 13px;font:500 12px var(--font-sans)">ElevenLabs</span>
+      <span style="border:1px solid var(--border);border-radius:999px;padding:4px 13px;font:500 12px var(--font-sans)">Mistral AI</span>
+      <span style="border:1px solid var(--border);border-radius:999px;padding:4px 13px;font:500 12px var(--font-sans)">RunwayML</span>
+      <span style="border:1px solid var(--border);border-radius:999px;padding:4px 13px;font:500 12px var(--font-sans)">LTX Studio</span>
+      <span style="border:1px solid var(--border);border-radius:999px;padding:4px 13px;font:500 12px var(--font-sans)">Higgsfield</span>
+      <span style="border:1px solid var(--border);border-radius:999px;padding:4px 13px;font:500 12px var(--font-sans)">Ollama</span>
+      <span style="border:1px solid var(--border);border-radius:999px;padding:4px 13px;font:500 12px var(--font-sans)">Wan 2.2</span>
+    </div>
+  </section>
+  <section style="margin-top:120px;background:var(--neutral-950);color:#fff">
+    <div style="max-width:1160px;margin:0 auto;padding:100px 24px 90px;text-align:center">
+      <h2 style="margin:0 auto;font:650 54px/1.05 var(--font-sans);letter-spacing:-0.032em;max-width:640px;text-wrap:balance">Begin in your world.</h2>
+      <p style="margin:18px auto 0;font:400 15px/1.65 var(--font-sans);color:rgba(255,255,255,.6);max-width:460px">A name and a sentence are enough. Arke holds everything it becomes.</p>
+      <div style="display:flex;gap:10px;justify-content:center;margin-top:30px">
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="secondary" size="lg" hint-size="180px,44px">Download for macOS</x-import>
+        <span style="display:inline-flex;align-items:center;padding:0 22px;border:1px solid rgba(255,255,255,.25);border-radius:10px;font:500 14px var(--font-sans);color:#fff;cursor:pointer;transition:var(--transition-control)" style-hover="background:rgba(255,255,255,.1)">View on GitHub ↗</span>
+      </div>
+      <div style="margin-top:70px;border-top:1px solid rgba(255,255,255,.14);padding-top:26px;display:flex;align-items:center;gap:22px;font:400 11px var(--font-mono);color:rgba(255,255,255,.45)">
+        <span style="font:650 14px var(--font-sans);letter-spacing:-0.02em;color:rgba(255,255,255,.8)">Arke</span>
+        <a href="#loop" style="color:inherit">how it works</a>
+        <a href="#canon" style="color:inherit">canon</a>
+        <a href="#local" style="color:inherit">open source</a>
+        <span style="flex:1"></span>
+        <span>MIT licence · the sample world The Undersong ships with the app</span>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;ctaMode&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;download&quot;, &quot;waitlist&quot;], &quot;default&quot;: &quot;download&quot;, &quot;tsType&quot;: &quot;'download' | 'waitlist'&quot;, &quot;section&quot;: &quot;Hero&quot;}, &quot;announcement&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Hero&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const mode = this.props.ctaMode ?? 'download';
+    return {
+      ctaDownload: mode === 'download',
+      ctaWaitlist: mode === 'waitlist',
+      showAnnouncement: this.props.announcement ?? false,
+    };
+  }
+}
+</script>
+</body>
+</html>

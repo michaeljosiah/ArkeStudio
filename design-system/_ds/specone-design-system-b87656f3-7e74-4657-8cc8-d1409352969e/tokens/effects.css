@@ -1,0 +1,50 @@
+/* ============================================================
+   SpecOne · Effects — radius, borders, shadows, motion
+   shadcn/ui contract: a single --radius (0.625rem) with derived
+   steps, and the shadcn shadow scale (shadow-xs … shadow-lg).
+   ============================================================ */
+:root {
+  /* ---- Radius (shadcn: --radius drives the rest) ----------- */
+  --radius:      0.625rem;                      /* 10px base */
+  --radius-sm:   calc(var(--radius) - 4px);     /* 6px  */
+  --radius-md:   calc(var(--radius) - 2px);     /* 8px  */
+  --radius-lg:   var(--radius);                 /* 10px */
+  --radius-xl:   calc(var(--radius) + 4px);     /* 14px */
+  --radius-2xl:  calc(var(--radius) + 8px);     /* 18px */
+  --radius-pill: 999px;
+
+  /* control / card aliases */
+  --radius-control: var(--radius-md);  /* buttons, inputs */
+  --radius-card:    var(--radius-xl);  /* cards */
+  --radius-panel:   var(--radius-xl);
+  --radius-xs:      var(--radius-sm);
+
+  /* ---- Border widths -------------------------------------- */
+  --border-hair:   1px;
+  --border-1:      1px;
+  --border-2:      2px;
+  --border-accent: 4px;
+  --boundary-dash: 6px 4px; /* @kind other */
+
+  /* ---- Shadows — shadcn scale (neutral, low) -------------- */
+  --shadow-2xs: 0 1px rgba(0,0,0,0.05);
+  --shadow-xs:  0 1px 2px 0 rgba(0,0,0,0.05);
+  --shadow-sm:  0 1px 3px 0 rgba(0,0,0,0.10), 0 1px 2px -1px rgba(0,0,0,0.10);
+  --shadow-md:  0 4px 6px -1px rgba(0,0,0,0.10), 0 2px 4px -2px rgba(0,0,0,0.10);
+  --shadow-lg:  0 10px 15px -3px rgba(0,0,0,0.10), 0 4px 6px -4px rgba(0,0,0,0.10);
+  --shadow-xl:  0 20px 25px -5px rgba(0,0,0,0.10), 0 8px 10px -6px rgba(0,0,0,0.10);
+  --shadow-focus: 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent);
+
+  /* aliases */
+  --shadow-none: none;
+  --shadow-card: var(--shadow-xs);
+  --shadow-pop:  var(--shadow-md);
+
+  /* ---- Motion (shadcn: quick, ease-out) ------------------- */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1); /* @kind other */
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1); /* @kind other */
+  --dur-fast:   150ms; /* @kind other */
+  --dur-base:   200ms; /* @kind other */
+  --dur-slow:   300ms; /* @kind other */
+  --transition-control: color var(--dur-fast) var(--ease-standard), background-color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard); /* @kind other */
+}
