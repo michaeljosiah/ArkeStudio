@@ -1062,6 +1062,13 @@ Surface consumed by v1:
 | `GET /health` | Readiness and model-download state. |
 | `WS /voice` | Mounted, unused in v1. |
 
+**The sidecar serves local inference only.** Voxa ships speech packages for ElevenLabs, OpenAI
+and others, and Arke Studio does not use them: cloud voice routes through the ordinary provider
+path (§14) and the job queue (§10.1), so there is one money path, one idempotency protocol and
+one ledger. Routing cloud speech through the sidecar would put cost capture and reconciliation
+inside a process that knows nothing about either. The voice picker presents local and cloud
+voices uniformly; only the routing beneath differs.
+
 Local models download on first use, not at install: **Kokoro** for TTS (92 MB int8 / 163 MB
 fp16 / 325 MB fp32, plus the espeak-ng phonemizer) and **whisper.cpp** for STT. The design
 prototype's *"Local voice · 2.1 GB"* is wrong by an order of magnitude and the download screen
