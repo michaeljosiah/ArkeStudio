@@ -1,0 +1,64 @@
+/**
+ * The §2.9 screen inventory. Every id here renders exactly one <Screen data-screen={id}>,
+ * and the navigation test walks every samplePath asserting it mounts (SPEC-001 R-7).
+ * Sample params come from the fixture world.
+ */
+
+export const FIXTURE_WORLD_ID = "01J8F3K2QW9VZX4N7M0RTYB6HC";
+
+const W = `/w/${FIXTURE_WORLD_ID}`;
+const P = `${W}/p/saltlight`;
+
+export interface ScreenEntry {
+  id: string;
+  samplePath: string;
+}
+
+export const SCREENS: ScreenEntry[] = [
+  // Shell
+  { id: "launch", samplePath: "/" },
+  { id: "first-run", samplePath: "/first-run" },
+  { id: "world-picker", samplePath: "/worlds" },
+  { id: "new-world", samplePath: "/worlds/new" },
+  { id: "settings-providers", samplePath: "/settings/providers" },
+  { id: "settings-local-runtime", samplePath: "/settings/local-runtime" },
+  { id: "settings-who-does-what", samplePath: "/settings/who-does-what" },
+  { id: "settings-about", samplePath: "/settings/about" },
+  { id: "activity", samplePath: "/activity" },
+
+  // World
+  { id: "world-overview", samplePath: W },
+  { id: "cast", samplePath: `${W}/cast` },
+  { id: "character-detail", samplePath: `${W}/cast/maren-kest` },
+  { id: "character-edit", samplePath: `${W}/cast/maren-kest/edit` },
+  { id: "reference-kit", samplePath: `${W}/cast/maren-kest/kit` },
+  { id: "model-sheet-generate", samplePath: `${W}/cast/maren-kest/model-sheet` },
+  { id: "voice-picker", samplePath: `${W}/cast/maren-kest/voice` },
+  { id: "new-character", samplePath: `${W}/cast/new` },
+  { id: "locations", samplePath: `${W}/locations` },
+  { id: "location-detail", samplePath: `${W}/locations/the-vigil` },
+  { id: "new-location", samplePath: `${W}/locations/new` },
+  { id: "factions", samplePath: `${W}/factions` },
+  { id: "canon", samplePath: `${W}/canon` },
+  { id: "canon-entry", samplePath: `${W}/canon/CANON-002` },
+  { id: "canon-thread", samplePath: `${W}/canon/CANON-044/thread` },
+  { id: "new-canon", samplePath: `${W}/canon/new` },
+  { id: "artifacts", samplePath: `${W}/artifacts` },
+  { id: "productions", samplePath: `${W}/productions` },
+  { id: "new-production", samplePath: `${W}/productions/new` },
+
+  // Production
+  { id: "production-dashboard", samplePath: P },
+  { id: "story-overview", samplePath: `${P}/story` },
+  { id: "chapter-tree", samplePath: `${P}/story/chapters` },
+  { id: "scenes", samplePath: `${P}/scenes` },
+  { id: "scene-detail", samplePath: `${P}/scenes/sc_04` },
+  { id: "new-scene", samplePath: `${P}/scenes/new` },
+  { id: "generate-workspace", samplePath: `${P}/generate` },
+  { id: "dispatch-dialog", samplePath: `${P}/generate/dispatch` },
+  { id: "voice-line-dialog", samplePath: `${P}/generate/voice-line` },
+  { id: "cut", samplePath: `${P}/cut` },
+  { id: "audio", samplePath: `${P}/audio` },
+  { id: "exports", samplePath: `${P}/exports` },
+  { id: "stills-contact-sheet", samplePath: `${P}/stills` },
+];

@@ -1,0 +1,282 @@
+/* Domain primitives — tokens only (R-11). */
+
+/* ---- SheetCard --------------------------------------------- */
+.dom-sheetcard {
+  display: grid;
+  gap: var(--space-3);
+}
+.dom-sheetcard__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.dom-sheetcard__idblock {
+  flex: 1;
+  min-width: 0;
+}
+.dom-sheetcard__name {
+  font: var(--type-h3);
+}
+.dom-sheetcard__role {
+  font: var(--type-ui);
+  font-weight: var(--weight-regular);
+  color: var(--muted-foreground);
+}
+.dom-sheetcard__essence {
+  font: var(--type-ui);
+  font-weight: var(--weight-regular);
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.dom-sheetcard__foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font: var(--type-label);
+  color: var(--muted-foreground);
+}
+
+/* ---- CanonEntryRow ----------------------------------------- */
+.dom-canonrow {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  border-bottom: var(--border-1) solid var(--line-soft);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.dom-canonrow:hover {
+  background: var(--accent);
+}
+.dom-canonrow__id {
+  color: var(--muted-foreground);
+}
+.dom-canonrow__title {
+  font: var(--type-ui);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dom-canonrow__lineage {
+  font: var(--type-label);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+/* ---- ShotCard ---------------------------------------------- */
+.dom-shotcard {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-4);
+}
+.dom-shotcard__frame {
+  width: calc(var(--space-20) + var(--space-10));
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font: var(--type-label);
+}
+.dom-shotcard__title {
+  font: var(--type-ui);
+}
+.dom-shotcard__meta {
+  margin-top: var(--space-1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font: var(--type-label);
+  color: var(--muted-foreground);
+}
+
+/* ---- TakeStrip --------------------------------------------- */
+.dom-takestrip {
+  display: flex;
+  gap: var(--space-3);
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+.dom-takestrip--empty {
+  font: var(--type-ui);
+  font-weight: var(--weight-regular);
+  color: var(--muted-foreground);
+}
+.dom-take {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  min-width: calc(var(--space-20) * 2);
+  padding: var(--space-3);
+  border: var(--border-1) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.dom-take:hover {
+  border-color: var(--neutral-300);
+}
+.dom-take--selected {
+  border-color: var(--foreground);
+  box-shadow: var(--shadow-sm);
+}
+.dom-take--rejected {
+  opacity: 0.6;
+}
+.dom-take__thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font: var(--type-label);
+}
+.dom-take__meta {
+  display: grid;
+  gap: calc(var(--space-1) / 2);
+  font: var(--type-label);
+  color: var(--muted-foreground);
+}
+
+/* ---- ProposalPanel / RippleList ---------------------------- */
+.dom-proposal {
+  display: grid;
+  gap: var(--space-3);
+}
+.dom-proposal__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.dom-proposal__kind {
+  color: var(--muted-foreground);
+}
+.dom-proposal__source {
+  font: var(--type-label);
+  color: var(--faint);
+}
+.dom-proposal__summary {
+  font: var(--type-h3);
+}
+.dom-proposal__targets {
+  display: grid;
+  gap: var(--space-1);
+}
+.dom-proposal__target {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  color: var(--text-secondary);
+}
+.dom-proposal__base {
+  color: var(--muted-foreground);
+}
+.dom-proposal__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.dom-proposal__why {
+  font: var(--type-label);
+  color: var(--warning);
+}
+
+.dom-ripples {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: var(--border-accent) solid var(--border);
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+}
+.dom-ripples--none {
+  font: var(--type-ui);
+  font-weight: var(--weight-regular);
+  color: var(--muted-foreground);
+}
+.dom-ripples__item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font: var(--type-ui);
+  font-weight: var(--weight-regular);
+}
+.dom-ripples__note {
+  font: var(--type-label);
+  color: var(--muted-foreground);
+}
+
+/* ---- ReferenceTile ----------------------------------------- */
+.dom-reftile {
+  display: grid;
+  gap: var(--space-2);
+}
+.dom-reftile__image {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font: var(--type-label);
+}
+.dom-reftile--empty .dom-reftile__image {
+  background: transparent;
+  border: var(--border-1) dashed var(--border);
+}
+.dom-reftile__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.dom-reftile__angle {
+  font: var(--type-label);
+  color: var(--text-secondary);
+}
+
+/* ---- JobRow ------------------------------------------------ */
+.dom-jobrow {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto auto;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border-1) solid var(--line-soft);
+  font: var(--type-ui);
+  font-weight: var(--weight-regular);
+}
+.dom-jobrow__model {
+  color: var(--muted-foreground);
+}
+.dom-jobrow__cost,
+.dom-jobrow__when {
+  font: var(--type-label);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.dom-jobrow__error {
+  grid-column: 2 / -1;
+  font: var(--type-label);
+  color: var(--danger);
+}

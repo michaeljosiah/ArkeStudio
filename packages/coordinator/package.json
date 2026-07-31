@@ -1,0 +1,26 @@
+{
+  "name": "@arke-studio/coordinator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The application's domain layer, embedded in the Electron main process: WebSocket transport with sequenced frames, read model, append-only change log, world provider, and the generic child-process supervisor (SPEC-001 §2.6).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx src/dev.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@arke-studio/contracts": "*",
+    "ws": "^8.18.0",
+    "yaml": "^2.6.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "tk_01J8D0000000000000000000D4",
+  "jobId": "jb_01J8E0000000000000000000J4",
+  "coversShots": ["sh_13"],
+  "kind": "clip",
+  "provider": "fal",
+  "model": "seedance-2.0",
+  "provenance": { "canonRevision": 42, "sheets": { "the-vigil": 2 } },
+  "prompt": "The green-white lamps of the Vigil flare and settle one by one down the rail. Night, wide static shot, bells far under the water.",
+  "references": [],
+  "params": { "aspect": "16:9", "resolution": "720p", "durationSec": 6, "seed": 908 },
+  "cost": { "estimatedMicroUsd": 130000, "actualMicroUsd": null },
+  "dispatchedAt": "2026-07-30T14:03:00Z",
+  "completedAt": "2026-07-30T14:03:55Z",
+  "media": "clip.mp4"
+}

@@ -1,0 +1,16 @@
+{
+  "id": "pr_01J8H0000000000000000000P1",
+  "kind": "sheet-edit",
+  "summary": "Maren pays for scene four — her left ear is gone, and the sheet should say so",
+  "targets": [
+    {
+      "path": "characters/maren-kest.md",
+      "baseVersion": 4,
+      "baseHash": "sha256:9f2c66a1b0e4d8c2f7a31d5e"
+    }
+  ],
+  "baseCanonRevision": 42,
+  "reservedCanonIds": [],
+  "source": "chat:sess_9f2",
+  "created": "2026-07-30T18:00:00Z"
+}
