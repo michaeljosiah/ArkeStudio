@@ -16,7 +16,8 @@ import {
   discoverOpenCode,
   OpenCodeAdapter,
 } from "@arke-studio/adapter-opencode";
-import { createProviderClients, probeRuntime, SHIPPED_MANIFEST } from "@arke-studio/providers";
+import { createProviderClients, ElevenLabsClient, probeRuntime, SHIPPED_MANIFEST } from "@arke-studio/providers";
+import { KOKORO_PRESETS, localCandidates, sidecarState, VoxaClient } from "@arke-studio/voice";
 
 /**
  * The Electron-ABI SQLite binding (SPEC-003 R-7). Aliased so the Node-ABI copy used by tests
@@ -103,6 +104,21 @@ async function start(): Promise<void> {
   // One client set serves validation (SPEC-008) and dispatch (SPEC-009).
   const providerClients = createProviderClients((url, init) => fetch(url, init));
 
+  // The Voxa sidecar (SPEC-011): supervised like the harness; local inference only (D1).
+  // The client resolves the supervisor's port lazily so restarts keep working.
+  const voxaSupervisor = new ChildSupervisor({
+    ...childSpec("voxa", "ARKE_VOXA_CMD", "ARKE_VOXA_ARGS"),
+    healthPath: "/health",
+    readyTimeoutMs: 30_000,
+  });
+  const voxaAt = () => new VoxaClient((url, init) => fetch(url, init), `http://127.0.0.1:${voxaSupervisor.port ?? 0}`);
+  const voxaSidecar = {
+    listVoices: () => voxaAt().listVoices(),
+    synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }) =>
+      voxaAt().synthesize(input),
+    transcribe: (audio: Uint8Array, contentType: string) => voxaAt().transcribe(audio, contentType),
+  };
+
   coordinator = new Coordinator({
     provider,
     adapter,
@@ -117,12 +133,23 @@ async function start(): Promise<void> {
     manifest: SHIPPED_MANIFEST,
     probeRuntime: () => probeRuntime(appRoot),
     dispatchClients: providerClients,
+    voice: {
+      sidecar: voxaSidecar,
+      sidecarHealth: async () => sidecarState(await voxaAt().health()),
+      localPresets: localCandidates(KOKORO_PRESETS),
+      cloudSources: [
+        {
+          provider: "elevenlabs",
+          list: (key: string) => new ElevenLabsClient((url, init) => fetch(url, init)).listVoicesCatalog(key),
+        },
+      ],
+    },
   });
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
   // and the affected features carry a stated reason (R-6).
   coordinator.superviseAs("harness", opencodeSupervisor);
-  coordinator.superviseAs("voice", new ChildSupervisor(childSpec("voxa", "ARKE_VOXA_CMD", "ARKE_VOXA_ARGS")));
+  coordinator.superviseAs("voice", voxaSupervisor);
 
   const { port } = await coordinator.start(0);
 

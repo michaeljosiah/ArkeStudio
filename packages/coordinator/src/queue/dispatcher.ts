@@ -60,7 +60,7 @@ export interface EnqueueInput {
   model: string;
   params: Record<string, unknown>;
   estimatedMicroUsd: number;
-  landing?: { dir: string };
+  landing?: { dir: string; name?: string };
 }
 
 export interface JobQueueOptions {
@@ -76,6 +76,11 @@ export interface JobQueueOptions {
   onProviderFault?: (provider: string, message: string) => void;
   /** Fired after a job reaches terminal state and its ledger entry landed (SPEC-010 tile flows). */
   onTerminal?: (job: Job) => void | Promise<void>;
+  /**
+   * Wrap the landing writes (SPEC-011): the coordinator supplies the open world's suppression
+   * envelope so our own artifact writes never read as external edits. Default: run directly.
+   */
+  aroundLand?: (worldId: string, fn: () => Promise<void>) => Promise<void>;
   clock?: () => string;
   rng?: () => number;
   maxAttempts?: number;
@@ -465,26 +470,34 @@ export class JobQueue {
           return;
         }
       }
-      // Stage outside the visible dir, rename in (R-12) — the SPEC-002 discipline.
+      // Stage outside the visible dir, rename in (R-12) — the SPEC-002 discipline. The whole
+      // landing runs inside the world's suppression envelope when one is supplied, so our own
+      // writes never trip the external-edit watcher.
       const stagingDir = join(worldDir, ".staging", job.id);
       const targetDir = join(worldDir, job.landing.dir);
-      try {
-        await mkdir(toExtendedLength(stagingDir), { recursive: true });
-        await mkdir(toExtendedLength(targetDir), { recursive: true });
-        const staged: Array<{ from: string; to: string; rel: string }> = [];
-        for (const artifact of artifacts) {
-          const from = join(stagingDir, artifact.name);
-          await writeFile(toExtendedLength(from), artifact.data);
-          staged.push({ from, to: join(targetDir, artifact.name), rel: `${job.landing.dir}/${artifact.name}` });
+      const landing = job.landing;
+      const land = async (): Promise<void> => {
+        try {
+          await mkdir(toExtendedLength(stagingDir), { recursive: true });
+          await mkdir(toExtendedLength(targetDir), { recursive: true });
+          const staged: Array<{ from: string; to: string; rel: string }> = [];
+          for (const [index, artifact] of artifacts.entries()) {
+            const name = index === 0 && landing.name !== undefined ? landing.name : artifact.name;
+            const from = join(stagingDir, name);
+            await writeFile(toExtendedLength(from), artifact.data);
+            staged.push({ from, to: join(targetDir, name), rel: `${landing.dir}/${name}` });
+          }
+          if (this.disposed) return; // killed during download/staging: nothing visible (R-12)
+          for (const s of staged) {
+            await rename(toExtendedLength(s.from), toExtendedLength(s.to));
+            landed.push(s.rel);
+          }
+        } finally {
+          await rm(toExtendedLength(stagingDir), { recursive: true, force: true }).catch(() => {});
         }
-        if (this.disposed) return; // killed during download/staging: nothing visible (R-12)
-        for (const s of staged) {
-          await rename(toExtendedLength(s.from), toExtendedLength(s.to));
-          landed.push(s.rel);
-        }
-      } finally {
-        await rm(toExtendedLength(stagingDir), { recursive: true, force: true }).catch(() => {});
-      }
+      };
+      if (this.opts.aroundLand) await this.opts.aroundLand(job.worldId, land);
+      else await land();
     }
     if (this.disposed) return;
     await this.terminalize({ ...job, ...(landed.length > 0 ? { landedFiles: landed } : {}) }, "succeeded", null, costMicroUsd);

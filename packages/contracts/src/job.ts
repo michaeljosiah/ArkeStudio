@@ -53,7 +53,14 @@ export const JobSchema = z
     /** Submission attempts consumed (SPEC-009 R-9). Offline holds never burn one (R-17). */
     attempt: z.number().int().min(0).default(0),
     /** Where artifacts land, world-relative — the caller's meaning, not this spec's (§1.2). */
-    landing: z.object({ dir: z.string().min(1) }).strict().optional(),
+    landing: z
+      .object({
+        dir: z.string().min(1),
+        /** Rename the first artifact on landing (cache-keyed previews, SPEC-011 R-10). */
+        name: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
     /** Files landed on success, world-relative, in artifact order. */
     landedFiles: z.array(z.string()).optional(),
     error: z.string().nullable().default(null),

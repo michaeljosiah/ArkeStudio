@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate, useParams } from "react-router";
 import {
   compilationIsStale,
   designatedCompilation,
+  formatMicroUsd,
   headGate,
   tileIsStale,
   type CanonEntry,
@@ -41,12 +42,19 @@ import {
   stageCanonAmendment as stageAmendmentMsg,
   stageCanonEntry as stageEntryMsg,
   stageSheetEdit,
+  requestVoiceCandidates,
+  requestVoicePreview,
+  transcribeDictation,
   useAskResults,
   useCanonRefs,
   useCanonSearches,
+  useDictation,
   usePermissions,
   useSheetRefs,
   useStore,
+  useVoiceCandidates,
+  useVoicePreviews,
+  useVoiceSidecar,
   useWorld,
 } from "../lib/store.js";
 import { HealthDot } from "./shell.js";
@@ -650,10 +658,13 @@ export function CharacterEditScreen() {
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
           />
-          <span className="scr-field__hint">
-            The agent drafts inside a proposal — its own copy of this sheet — and reads the rest
-            of the world through canon search, never the folder. You accept or discard the result.
-          </span>
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+            <DictationButton onText={(text) => setInstruction((prev) => (prev ? `${prev} ${text}` : text))} />
+            <span className="scr-field__hint">
+              The agent drafts inside a proposal — its own copy of this sheet — and reads the rest
+              of the world through canon search, never the folder. You accept or discard the result.
+            </span>
+          </div>
         </div>
         <div style={{ display: "flex", gap: "var(--space-2)" }}>
           <Button
@@ -678,6 +689,71 @@ export function CharacterEditScreen() {
         <DegradedBanner component="harness" />
       </div>
     </Screen>
+  );
+}
+
+/**
+ * Push-to-talk dictation (SPEC-011 R-17, R-18): recorded here, transcribed on loopback by
+ * whisper.cpp — audio never leaves the machine — and inserted as editable text, never
+ * submitted. A mis-transcribed instruction that submits itself is a proposal nobody meant.
+ */
+export function DictationButton({ onText }: { onText: (text: string) => void }) {
+  const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
+  const [requestId, setRequestId] = useState<string | null>(null);
+  const sidecar = useVoiceSidecar();
+  const dictation = useDictation();
+  const result = requestId ? dictation[requestId] : undefined;
+  useEffect(() => {
+    if (result?.text) {
+      onText(result.text);
+      setRequestId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result?.text]);
+  const unavailable = sidecar !== null && sidecar.state !== "ready";
+  const start = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (e) => chunks.push(e.data);
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const id = `dict-${Date.now()}`;
+        setRequestId(id);
+        void new Blob(chunks, { type: rec.mimeType }).arrayBuffer().then((buf) => {
+          let binary = "";
+          const bytes = new Uint8Array(buf);
+          for (const b of bytes) binary += String.fromCharCode(b);
+          transcribeDictation(id, btoa(binary), rec.mimeType || "audio/webm");
+        });
+      };
+      rec.start();
+      setRecorder(rec);
+    } catch {
+      /* microphone denied — the button simply does nothing further */
+    }
+  };
+  return (
+    <span style={{ display: "inline-flex", gap: "var(--space-2)", alignItems: "center" }}>
+      <Button
+        variant="ghost"
+        disabled={unavailable}
+        title={unavailable ? (sidecar?.detail ?? "local voice is off") : "Audio is transcribed locally and never sent to a provider"}
+        onClick={() => {
+          if (recorder) {
+            recorder.stop();
+            setRecorder(null);
+          } else {
+            void start();
+          }
+        }}
+      >
+        {recorder ? "Stop · transcribe" : "🎤 Dictate"}
+      </Button>
+      {requestId && !result && <span className="scr-field__hint">transcribing locally…</span>}
+      {result?.error && <span className="scr-field__hint">{result.error}</span>}
+    </span>
   );
 }
 
@@ -996,16 +1072,112 @@ export function VoicePickerScreen() {
         </div>
       </Section>
       <DegradedBanner component="voice" />
-      <Section title="Local voices" aside={<span>Voxa · Kokoro — free, on this machine</span>}>
-        <EmptyState
-          title="Local catalogue loads from the sidecar"
-          hint="Kokoro ships a fixed voice set; matching is by honest attribute overlap, never a fake clone (SPEC-011)."
-        />
-      </Section>
-      <Section title="Cloud voices" aside={<span>ElevenLabs · OpenAI — need a key</span>}>
-        <EmptyState title="Add a provider key in Settings" hint="Cloud catalogues and cloning arrive with SPEC-008/SPEC-011." />
-      </Section>
+      <VoiceCandidatesPanel worldId={worldId} sheetId={sheetId} sheetPath={sheetPath} />
     </Screen>
+  );
+}
+
+function VoiceCandidatesPanel({
+  worldId,
+  sheetId,
+  sheetPath,
+}: {
+  worldId: string | undefined;
+  sheetId: string | undefined;
+  sheetPath: string | null;
+}) {
+  const candidates = useVoiceCandidates()[sheetId ?? ""];
+  const previews = useVoicePreviews();
+  const sidecar = useVoiceSidecar();
+  return (
+    <>
+      {sidecar && sidecar.state !== "ready" && (
+        <Callout tone="warning" title={`Local voice — ${sidecar.state}`}>
+          {sidecar.detail}
+        </Callout>
+      )}
+      <Section
+        title="Find a voice"
+        aside={<span>ranked by attribute overlap with the written voice — not a similarity score</span>}
+      >
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+          <Button
+            variant="primary"
+            onClick={() => {
+              if (worldId && sheetId) requestVoiceCandidates(worldId, sheetId);
+            }}
+          >
+            Match against the written voice
+          </Button>
+          {candidates && (
+            <span className="scr-field__hint">
+              matched on: {candidates.extracted.join(" · ") || "nothing extractable"} — previews read{" "}
+              {candidates.previewLine.source === "own-line"
+                ? "her own line"
+                : candidates.previewLine.source === "drafted"
+                  ? "a line drafted from the sheet"
+                  : "a stock sentence (nothing else exists)"}
+            </span>
+          )}
+        </div>
+        {candidates && (
+          <div className="scr-sectionlist">
+            {candidates.ranked.slice(0, 8).map(({ candidate, matched, overlap }) => {
+              const key = `${candidate.provider}/${candidate.voiceId}`;
+              const preview = previews[key];
+              return (
+                <div key={key} className="scr-sheetsection">
+                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+                    <strong style={{ font: "var(--type-ui)" }}>{candidate.label}</strong>
+                    <span style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>
+                      {candidate.provider}
+                      {candidate.local ? " · local — fixed catalogue, cannot be cloned" : ""}
+                    </span>
+                    <span style={{ marginLeft: "auto" }}>
+                      <Badge tone="outline">{Math.round(overlap * 100)}% attribute overlap</Badge>
+                    </span>
+                  </div>
+                  {matched.length > 0 && (
+                    <span className="scr-field__hint">matched to: {matched.join(" · ")}</span>
+                  )}
+                  <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        if (worldId && sheetId) requestVoicePreview(worldId, sheetId, candidate.provider, candidate.voiceId);
+                      }}
+                    >
+                      {candidate.local
+                        ? "Preview — free, local"
+                        : `Preview${candidates.cloudPreviewMicroUsd !== null ? ` · ${formatMicroUsd(candidates.cloudPreviewMicroUsd)}` : ""}`}
+                    </Button>
+                    {preview?.file && <Badge tone="success">ready — replays free</Badge>}
+                    {preview?.error && <span className="scr-field__hint">{preview.error}</span>}
+                    <Button
+                      onClick={() => {
+                        if (worldId && sheetPath)
+                          assignVoice(worldId, sheetPath, {
+                            provider: candidate.provider,
+                            voiceId: candidate.voiceId,
+                            label: candidate.label,
+                          });
+                      }}
+                    >
+                      Assign
+                    </Button>
+                    {candidate.canClone ? (
+                      <span className="scr-field__hint">cloning available — rights to a recorded voice are yours to hold</span>
+                    ) : (
+                      candidate.local && <span className="scr-field__hint">no cloning — local means presets</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Section>
+    </>
   );
 }
 

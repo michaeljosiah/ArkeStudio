@@ -10,11 +10,13 @@ import {
   type HarnessAdapter,
   type HealthComponent,
   gateLocalRuntimes,
+  previewLineFor,
   type Job,
   type LedgerEntry,
   type ModelManifest,
   type ProviderId,
   type RuntimeProbes,
+  type VoiceCandidate,
 } from "@arke-studio/contracts";
 import { AppLog } from "./app-log.js";
 import { AppSettingsFile, routingFaults } from "./app-settings.js";
@@ -23,6 +25,8 @@ import { CredentialStore, type Cipher } from "./credentials/store.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "./queue/dispatcher.js";
+import { previewCacheFile, VoiceService, type CloudVoiceSource, type SidecarLike } from "./voice/service.js";
+import { fromPortable, toExtendedLength } from "./world/paths.js";
 import { establishRequests, imageModelFor, missingTileAngles, tileRequest } from "./references/generate.js";
 import {
   chooseAnchor,
@@ -91,6 +95,14 @@ export interface CoordinatorOptions {
   probeRuntime?: () => Promise<RuntimeProbes>;
   /** SPEC-009: dispatch clients (submit/poll/fetch/cancel + declarations), per provider. */
   dispatchClients?: Record<string, DispatchClient>;
+  /** SPEC-011: the Voxa sidecar and voice catalogue sources, injected from the desktop. */
+  voice?: {
+    sidecar: SidecarLike | null;
+    /** Poll the sidecar's degradation state; null health = not started. */
+    sidecarHealth?: () => Promise<{ state: "not-started" | "downloading" | "unavailable" | "ready"; detail: string }>;
+    localPresets: VoiceCandidate[];
+    cloudSources: CloudVoiceSource[];
+  };
 }
 
 const SUPERVISOR_HEALTH: Record<SupervisorStatus, { status: "starting" | "healthy" | "unhealthy" | "unavailable" }> = {
@@ -122,6 +134,8 @@ export class Coordinator {
   private readonly appSettings: AppSettingsFile | null;
   /** SPEC-009: the dispatch engine. Null without an app root, clients and a ledger. */
   private readonly jobQueue: JobQueue | null;
+  /** SPEC-011: catalogue, matching, previews and dictation. Null without voice wiring. */
+  private readonly voiceService: VoiceService | null;
 
   constructor(private readonly opts: CoordinatorOptions) {
     this.readModel = new ReadModel(opts.appVersion);
@@ -151,8 +165,24 @@ export class Coordinator {
             },
             onProviderFault: (provider, message) => this.reportProviderFault(provider as ProviderId, message),
             onTerminal: (job) => this.onJobTerminal(job),
+            aroundLand: async (worldId, fn) => {
+              // Our own landings never read as external edits (SPEC-011): the open world's
+              // suppression envelope wraps the writes and rescans after.
+              const store = this.opts.provider.openStore?.();
+              if (store && store.worldId === worldId) await store.gateOp(fn);
+              else await fn();
+            },
           })
         : null;
+    this.voiceService = opts.voice
+      ? new VoiceService({
+          sidecar: opts.voice.sidecar,
+          localPresets: opts.voice.localPresets,
+          cloudSources: opts.voice.cloudSources,
+          getKey: async (provider) => (this.credentials ? this.credentials.get(provider as ProviderId) : null),
+          emit: (event) => this.emit(event),
+        })
+      : null;
     this.transport = new Transport({
       getSnapshot: () => this.getState(),
       onMessage: (msg) => void this.handleClientMessage(msg),
@@ -273,6 +303,22 @@ export class Coordinator {
       this.readModel.setHealth("voice", { status: "unavailable", reason: "Voxa is not configured" });
     }
 
+    // The sidecar's four degradation states (SPEC-011 §2.10), polled gently; the app is fully
+    // usable in every one of them (R-4).
+    if (this.opts.voice?.sidecarHealth) {
+      const pollSidecar = async (): Promise<void> => {
+        try {
+          const status = await this.opts.voice!.sidecarHealth!();
+          this.emit({ at: new Date().toISOString(), type: "voice.sidecar", ...status });
+        } catch {
+          /* the supervisor's own health covers a dead process */
+        }
+      };
+      void pollSidecar();
+      const timer = setInterval(() => void pollSidecar(), 20_000);
+      timer.unref?.();
+    }
+
     for (const supervisor of this.supervisors.values()) {
       void supervisor.start();
     }
@@ -356,6 +402,22 @@ export class Coordinator {
       if (!sheet || !angle) return;
       const withinKit = job.landedFiles[0].replace(`references/${sheetId}/`, "");
       await supersedeTile(store, sheetId, angle, { file: withinKit, sheetVersion: sheet.version }).catch(() => {});
+    }
+    if (job.target.kind === "voice-preview" && job.landedFiles?.[0] !== undefined) {
+      // The audition is ready; the landed file IS the cache entry (R-10).
+      const [sheetId, provider, voiceId] = (job.target.id ?? "").split("/");
+      if (sheetId && provider && voiceId) {
+        this.emit({
+          at: new Date().toISOString(),
+          type: "voice.preview",
+          worldId: job.worldId,
+          sheetId,
+          provider,
+          voiceId,
+          file: job.landedFiles[0],
+          error: null,
+        });
+      }
     }
     await this.refreshWorldSnapshot(job.worldId).catch(() => {});
   }
@@ -854,6 +916,87 @@ export class Coordinator {
           type: "spend.status",
           spend: evaluateSpend(entries, settings.spend, new Date()),
         });
+        return;
+      }
+      case "voice-candidates": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.voiceService) return;
+        const sheet = store.getBundle().sheets.find((s) => s.id === msg.sheetId);
+        if (!sheet) return;
+        await this.voiceService
+          .candidates(msg.worldId, store.getBundle(), sheet, this.opts.manifest ?? null)
+          .catch(() => {});
+        return;
+      }
+      case "voice-preview": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.voiceService) return;
+        const bundle = store.getBundle();
+        const sheet = bundle.sheets.find((s) => s.id === msg.sheetId);
+        if (!sheet) return;
+        const line = previewLineFor(sheet, bundle.productions);
+        if (msg.provider === "kokoro") {
+          // Local: sidecar synthesis, no queue, no ledger, zero cost (R-2).
+          try {
+            const file = await this.voiceService.localPreview(store, sheet, msg.voiceId, line);
+            this.emit({
+              at: new Date().toISOString(),
+              type: "voice.preview",
+              worldId: msg.worldId,
+              sheetId: msg.sheetId,
+              provider: msg.provider,
+              voiceId: msg.voiceId,
+              file,
+              error: null,
+            });
+            await this.refreshWorldSnapshot(msg.worldId);
+          } catch (err) {
+            this.emit({
+              at: new Date().toISOString(),
+              type: "voice.preview",
+              worldId: msg.worldId,
+              sheetId: msg.sheetId,
+              provider: msg.provider,
+              voiceId: msg.voiceId,
+              file: null,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+          return;
+        }
+        // Cloud: cache hit replays free; a miss dispatches through the queue (R-2, R-10).
+        const cached = previewCacheFile(msg.provider, msg.voiceId, line.text, "mp3");
+        try {
+          await readFile(toExtendedLength(join(store.dir, fromPortable(cached))));
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.preview",
+            worldId: msg.worldId,
+            sheetId: msg.sheetId,
+            provider: msg.provider,
+            voiceId: msg.voiceId,
+            file: cached,
+            error: null,
+          });
+          return;
+        } catch {
+          /* miss → enqueue */
+        }
+        const model = this.opts.manifest?.models.find(
+          (m) => m.provider === msg.provider && m.capability === "voice-tts",
+        );
+        if (!model || !this.jobQueue) return;
+        const request = this.voiceService.cloudPreviewRequest(msg.worldId, sheet, msg.provider, msg.voiceId, line, model);
+        await this.jobQueue.enqueue(request.input).catch(() => {});
+        return;
+      }
+      case "transcribe-dictation": {
+        if (!this.voiceService) return;
+        await this.voiceService.dictate(
+          msg.requestId,
+          Uint8Array.from(Buffer.from(msg.audioBase64, "base64")),
+          msg.contentType,
+        );
         return;
       }
       case "establish-look": {

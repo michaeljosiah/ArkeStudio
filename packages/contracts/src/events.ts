@@ -13,6 +13,7 @@ import {
   SpendStatusSchema,
 } from "./settings.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
+import { RankedVoiceSchema } from "./voice.js";
 
 /**
  * The normalised domain-event union (SPEC-001 R-2, R-3). Everything the coordinator pushes to
@@ -82,6 +83,55 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("queue.status"), queue: QueueStatusSchema }).strict(),
   /** What start-up reconciliation resolved, reported once (SPEC-009 R-18). */
   z.object({ ...base, type: z.literal("queue.reconciled"), report: z.array(ReconcileActionSchema) }).strict(),
+
+  /** Ranked voice candidates for a sheet, matched attributes shown (SPEC-011 R-7, R-8). */
+  z
+    .object({
+      ...base,
+      type: z.literal("voice.candidates"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      extracted: z.array(z.string()),
+      ranked: z.array(RankedVoiceSchema),
+      previewLine: z
+        .object({ text: z.string(), source: z.enum(["own-line", "drafted", "stock"]) })
+        .strict(),
+      /** Stated before any preview that will incur a charge (R-10); null when no cloud model. */
+      cloudPreviewMicroUsd: z.number().int().min(0).nullable(),
+    })
+    .strict(),
+  /** A preview is ready (or failed): the cached file replays without a provider call (R-10). */
+  z
+    .object({
+      ...base,
+      type: z.literal("voice.preview"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      provider: z.string().min(1),
+      voiceId: z.string().min(1),
+      file: z.string().nullable(),
+      error: z.string().nullable(),
+    })
+    .strict(),
+  /** Local transcription result — editable text, never auto-submitted (SPEC-011 R-17, R-18). */
+  z
+    .object({
+      ...base,
+      type: z.literal("dictation.result"),
+      requestId: z.string().min(1),
+      text: z.string().nullable(),
+      error: z.string().nullable(),
+    })
+    .strict(),
+  /** The sidecar's four degradation states, each with its copy (SPEC-011 §2.10). */
+  z
+    .object({
+      ...base,
+      type: z.literal("voice.sidecar"),
+      state: z.enum(["not-started", "downloading", "unavailable", "ready"]),
+      detail: z.string(),
+    })
+    .strict(),
 
   z
     .object({
