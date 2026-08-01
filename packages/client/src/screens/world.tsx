@@ -23,6 +23,7 @@ import {
   assignVoice,
   chooseAnchor as chooseAnchorMsg,
   compileGrid as compileGridMsg,
+  createProduction,
   createSheetFromSentence,
   designateCompilation,
   draftWithStudio,
@@ -2079,75 +2080,170 @@ export function ArtifactsScreen() {
 
 // ---- Productions -----------------------------------------------------------
 
+const PRODUCTION_TILT = [
+  { rotate: -1.6, top: 0, drift: "7.6s" },
+  { rotate: 1.2, top: -8, drift: "8.3s" },
+  { rotate: -1, top: 0, drift: "7.9s" },
+] as const;
+
 export function ProductionsScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const productions = world?.productions ?? [];
+  const artOf = (p: (typeof productions)[number]): string => {
+    const board = p.scenes.find((s) => s.board)?.board;
+    if (board) return `productions/${p.meta.id}/${board.image}`;
+    const take = p.takes.find((t) => t.media);
+    if (take) return `productions/${p.meta.id}/takes/${take.id}/${take.media}`;
+    return "world-art.png";
+  };
   return (
-    <Screen id="productions">
-      <PageHeader
-        title="Productions"
-        meta={<span>lenses over the world — each inherits the whole cast and canon</span>}
-        actions={
-          <Button variant="primary" onClick={() => navigate(`/w/${worldId}/productions/new`)}>
-            New production
-          </Button>
-        }
-      />
-      {productions.length === 0 ? (
-        <EmptyState title="No productions yet" hint="A production joins the world and shares everything it knows." />
-      ) : (
-        <div className="lay-cardgrid">
-          {productions.map((p) => (
-            <Card key={p.meta.id} className="scr-worldcard" onClick={() => navigate(`/w/${worldId}/p/${p.meta.id}`)}>
-              <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
-                <span className="scr-worldcard__name">{p.meta.title}</span>
-                <Badge tone="outline">{p.meta.format}</Badge>
-              </div>
-              {p.meta.logline && <div className="scr-worldcard__logline">{p.meta.logline}</div>}
-              <div className="scr-worldcard__counts">
-                <span>{p.meta.status}</span>
-                <span>{p.scenes.length} scenes</span>
-                <span>{p.takes.length} takes</span>
-              </div>
-            </Card>
-          ))}
+    <div data-screen="productions">
+      <div className="fy-hero">
+        <div className="fy-hero__eyebrow">
+          {world?.meta.name} · shared cast, shared canon
         </div>
-      )}
-    </Screen>
+        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+          Productions
+        </h1>
+        <p className="fy-hero__lede" style={{ fontSize: 16, maxWidth: 480 }}>
+          {productions.length === 1 ? "One lens" : `${productions.length || "New"} lenses`} over one world. Change a
+          character once and it lands in all of them.
+        </p>
+      </div>
+      <div className="fy-prodcards">
+        {productions.map((p, i) => {
+          const tilt = PRODUCTION_TILT[i % PRODUCTION_TILT.length]!;
+          const shots = p.scenes.flatMap((s) => s.shots);
+          const covered = shots.filter((s) => p.selections[s.id]?.acceptedTakeId).length;
+          const active = p.meta.status !== "complete" && shots.length > 0 && covered < shots.length;
+          return (
+            <div key={p.meta.id} style={{ animation: `fy-drift ${tilt.drift} ease-in-out infinite alternate`, marginTop: tilt.top }}>
+              <div
+                className={cx("fy-prodcard", active && "fy-prodcard--active")}
+                style={{ transform: `rotate(${tilt.rotate}deg)` }}
+                onClick={() => navigate(`/w/${worldId}/p/${p.meta.id}`)}
+              >
+                <div className="fy-prodcard__frame">
+                  <Portrait worldSlug={world?.meta.slug} path={artOf(p)} label={`${p.meta.title}: frame`} radius={0} />
+                </div>
+                <div className="fy-prodcard__body">
+                  <div className="fy-prodcard__meta">
+                    <Badge tone="outline">{p.meta.format}</Badge>
+                    {active && <span className="fy-dot fy-dot--warn" />}
+                    <span style={{ marginLeft: "auto" }} className="fy-mono">
+                      {shots.length > 0 ? `${covered} of ${shots.length} shots` : `${p.takes.length} takes`}
+                    </span>
+                  </div>
+                  <div className="fy-prodcard__name">{p.meta.title}</div>
+                  <div className="fy-prodcard__sub">{p.meta.logline ?? p.meta.status}</div>
+                  <div className="fy-progress">
+                    <div className="fy-progress__fill" style={{ width: `${shots.length > 0 ? Math.round((covered / shots.length) * 100) : 0}%` }} />
+                  </div>
+                  <div style={{ marginTop: 14 }}>
+                    <Button variant={active ? "primary" : "secondary"}>Open the workspace</Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        <button type="button" className="fy-newprodcard" onClick={() => navigate(`/w/${worldId}/productions/new`)}>
+          <span className="fy-newprodcard__ring">
+            <Plus size={18} />
+          </span>
+          <span style={{ font: "600 14px var(--font-sans)" }}>New production</span>
+          <span style={{ font: "400 12px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center", maxWidth: 140 }}>
+            Same cast. Any format: film, stills, book.
+          </span>
+        </button>
+      </div>
+    </div>
   );
 }
+
+const FORMAT_CHOICES = [
+  {
+    id: "story",
+    label: "Story",
+    body: "Prose and scripts, drafted inside the canon with the world as editor.",
+    kinds: "novel · script · serial",
+  },
+  {
+    id: "video",
+    label: "Video",
+    body: "Boards and shots, dispatched to video models with references attached.",
+    kinds: "short film · music video · series",
+  },
+  {
+    id: "stills",
+    label: "Stills",
+    body: "Frames judged as a set — a visual album, key art, a lookbook.",
+    kinds: "visual album · key art",
+  },
+] as const;
 
 export function NewProductionScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
+  const navigate = useNavigate();
+  const [format, setFormat] = useState<"story" | "video" | "stills">("video");
+  const [title, setTitle] = useState("");
   const characters = world?.sheets.filter((s) => s.type === "character").length ?? 0;
   return (
-    <Screen id="new-production">
-      <PageHeader
-        title="New production"
-        meta={world && <span>joins {world.meta.name} · shares all {characters} characters, every location and the whole canon</span>}
-      />
-      <div className="lay-cardgrid">
-        {(
-          [
-            ["story", "Story", "novel · script · serial"],
-            ["video", "Video", "short film · music video · series"],
-            ["stills", "Stills", "visual album · key art"],
-          ] as const
-        ).map(([id, label, kinds]) => (
-          <Card key={id} className="scr-worldcard">
-            <div className="scr-worldcard__name">{label}</div>
-            <div className="scr-worldcard__logline">{kinds}</div>
-          </Card>
-        ))}
+    <div className="fy-dialogwrap" data-screen="new-production">
+      <div className="fy-dialog" style={{ maxWidth: 780 }}>
+        <div>
+          <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>New production</div>
+          <div style={{ font: "400 13px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 6 }}>
+            Pick a format. Whichever you choose, it draws from the same world: cast, canon and tone come along
+            automatically.
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>
+          {FORMAT_CHOICES.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              className={cx("fy-radio", format === f.id && "fy-radio--on")}
+              onClick={() => setFormat(f.id)}
+            >
+              <div className="fy-radio__head">
+                <span className="fy-radio__dot" />
+                {f.label}
+              </div>
+              <div style={{ font: "400 12px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 7 }}>{f.body}</div>
+              <div className="fy-mono" style={{ marginTop: 14 }}>
+                {f.kinds}
+              </div>
+            </button>
+          ))}
+        </div>
+        <Input placeholder="Name it · working titles are fine" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <span className="fy-mono">
+            joins {world?.meta.name ?? "the world"} · shares all {characters} characters, every location and the whole
+            canon
+          </span>
+          <span style={{ flex: 1 }} />
+          <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/productions`)}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={title.trim().length === 0}
+            onClick={() => {
+              if (worldId) {
+                createProduction(worldId, title.trim(), format);
+                navigate(`/w/${worldId}/productions`);
+              }
+            }}
+          >
+            Create production
+          </Button>
+        </div>
       </div>
-      <div>
-        <Button variant="primary" disabled title="Production creation arrives with SPEC-012">
-          Create production
-        </Button>
-      </div>
-    </Screen>
+    </div>
   );
 }
