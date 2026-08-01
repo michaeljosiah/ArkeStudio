@@ -163,6 +163,31 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /** First-run environment verification (SPEC-016 R-2, D4): checked once, reported plainly. */
+  z
+    .object({
+      ...base,
+      type: z.literal("env.check"),
+      pathBudgetOk: z.boolean(),
+      pathBudgetDetail: z.string().nullable(),
+      diskFreeMb: z.number().int().nullable(),
+      nativeIndexOk: z.boolean(),
+      nativeIndexDetail: z.string().nullable(),
+    })
+    .strict(),
+  /** Update lifecycle (SPEC-016 R-12, R-13): check and download; install happens at exit. */
+  z
+    .object({
+      ...base,
+      type: z.literal("update.status"),
+      status: z.enum(["checking", "available", "none", "downloading", "downloaded", "error"]),
+      version: z.string().nullable(),
+      detail: z.string().nullable(),
+    })
+    .strict(),
+  /** A diagnostics bundle, already through the redaction boundary (SPEC-016 R-15, D9). */
+  z.object({ ...base, type: z.literal("diagnostics.ready"), bundle: z.string() }).strict(),
+
   /** The sidecar's four degradation states, each with its copy (SPEC-011 §2.10). */
   z
     .object({
