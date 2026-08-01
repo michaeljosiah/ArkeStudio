@@ -81,6 +81,79 @@ function draftingAdapter(): HarnessAdapter & { created: string[] } {
   return adapter;
 }
 
+/**
+ * An adapter that behaves like the models actually do: it holds the conversation and never
+ * touches draft.json. It answers the narrow follow-up with JSON — fenced, with a sentence in
+ * front of it, because that is how the answer really arrives.
+ */
+function talkingAdapter(json = DRAFT_JSON): HarnessAdapter & { prompts: string[] } {
+  const subscribers = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null }>();
+  const push = (event: HarnessEvent) => {
+    for (const sub of subscribers) {
+      sub.queue.push(event);
+      sub.wake?.();
+      sub.wake = null;
+    }
+  };
+  const adapter: HarnessAdapter & { prompts: string[] } = {
+    prompts: [] as string[],
+    id: "talker",
+    capabilities: () => new Set([]),
+    readiness: () => ({ ready: true }),
+    async createSession() {
+      return { sessionId: "gen_talk" };
+    },
+    async sendMessage(input) {
+      return { sessionId: input.sessionId, correlationId: "c" };
+    },
+    async dispatchAsync(input) {
+      const text = input.parts.map((p) => p.text).join("");
+      adapter.prompts.push(text);
+      const asked = adapter.prompts.length > 1;
+      void (async () => {
+        push({
+          type: "message.completed",
+          sessionId: input.sessionId,
+          text: asked ? `Here it is:\n\n\`\`\`json\n${json}\n\`\`\`` : "The Pallid Beacon — pale stone in black water.",
+        });
+      })();
+      return { sessionId: input.sessionId, correlationId: "c" };
+    },
+    streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {
+      const sub: { queue: HarnessEvent[]; wake: (() => void) | null } = { queue: [], wake: null };
+      subscribers.add(sub);
+      return {
+        async *[Symbol.asyncIterator]() {
+          try {
+            while (!signal?.aborted) {
+              const next = sub.queue.shift();
+              if (next) {
+                yield next;
+                continue;
+              }
+              await new Promise<void>((resolve) => {
+                signal?.addEventListener("abort", () => resolve(), { once: true });
+                sub.wake = resolve;
+              });
+            }
+          } finally {
+            subscribers.delete(sub);
+          }
+        },
+      };
+    },
+  };
+  return adapter;
+}
+
+const DRAFT_JSON = JSON.stringify({
+  name: "The Pallid Beacon",
+  logline: "A drowned lighthouse that only appears in fog.",
+  tone: "eerie, liminal",
+  locations: [{ name: "The Pallid Beacon", line: "Rises from the water only when the fog is thick." }],
+  threads: ["Does it warn, lure, or simply exist?"],
+});
+
 describe("genesis conversations in the sandbox (prototype 12a)", () => {
   it("runs the world-author in the sandbox, records both turns, and surfaces the draft", async () => {
     const dir = await tempDir("arke-genesis-");
@@ -116,5 +189,42 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     genesis.release("gen-abc");
     await genesis.run(dir, "gen-abc", "One more thing.");
     assert.equal(adapter.created.length, 2, "a released conversation starts fresh");
+  });
+
+  it("asks for the draft when the agent only talks, and writes it here", async () => {
+    // What a real model does most of the time: answer the question, ignore the file. Measured
+    // against OpenCode 1.18.10 — nought for four before this path existed.
+    const dir = await tempDir("arke-genesis-talker-");
+    const events: DomainEvent[] = [];
+    const adapter = talkingAdapter();
+    const genesis = new GenesisService(adapter, (e) => events.push(e), {
+      buildConfig: () => buildSessionConfig({}),
+    });
+
+    await genesis.run(dir, "gen-talk", "A lighthouse that only appears in fog.");
+
+    const draft = events.find((e) => e.type === "genesis.draft");
+    assert.ok(draft && draft.type === "genesis.draft", "the rail is populated even so");
+    assert.equal(draft.draft.name, "The Pallid Beacon");
+    // The file is still the record — whoever typed it.
+    const onDisk = JSON.parse(await readFile(join(dir, "draft.json"), "utf8")) as { name?: string };
+    assert.equal(onDisk.name, "The Pallid Beacon");
+    assert.equal(adapter.prompts.length, 2, "one conversation turn, then one narrow ask");
+    const statuses = events.filter((e) => e.type === "genesis.status").map((e) => (e.type === "genesis.status" ? e.status : ""));
+    assert.deepEqual(statuses, ["running", "completed"]);
+  });
+
+  it("a turn that settles nothing is not an error, and does not flicker the rail", async () => {
+    const dir = await tempDir("arke-genesis-empty-");
+    const events: DomainEvent[] = [];
+    const genesis = new GenesisService(talkingAdapter("{}"), (e) => events.push(e), {
+      buildConfig: () => buildSessionConfig({}),
+    });
+
+    await genesis.run(dir, "gen-empty", "Tell me about fog.");
+
+    assert.ok(!events.some((e) => e.type === "genesis.draft"), "nothing settled, nothing emitted");
+    const statuses = events.filter((e) => e.type === "genesis.status").map((e) => (e.type === "genesis.status" ? e.status : ""));
+    assert.deepEqual(statuses, ["running", "completed"], "and it is still a completed turn");
   });
 });

@@ -1,6 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { GenesisDraftSchema, type DomainEvent, type HarnessAdapter } from "@arke-studio/contracts";
+import {
+  GenesisDraftSchema,
+  type DomainEvent,
+  type GenesisDraft,
+  type HarnessAdapter,
+} from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 
 /**
@@ -24,6 +29,19 @@ interface ActiveTurn {
 
 const DEFAULT_WALL_CLOCK_MS = 3 * 60_000;
 const DEFAULT_TOKEN_BUDGET = 120_000;
+/** The follow-up that asks for the draft alone is short work; it does not get the full clock. */
+const DRAFT_ASK_MS = 60_000;
+
+/** Asked only when the agent replied without touching draft.json. */
+const DRAFT_REQUEST = `Now write ./draft.json for the world as it stands after that reply, and return its
+contents as your whole message — JSON only, no prose, no code fence. Same shape as before:
+
+{"name": "...", "logline": "one sentence", "tone": "two or three words", "genre": "...",
+ "characters": [{"name": "...", "line": "one line on who they are"}],
+ "locations": [{"name": "...", "line": "one line on the place"}],
+ "threads": ["an open question worth pulling later"]}
+
+Omit anything not settled. If nothing has been settled yet, return {}.`;
 
 /** Sent once, ahead of the first user message — the draft.json contract. */
 const PROTOCOL = `You are shaping a brand-new story world in conversation with its author. Reply briefly and
@@ -101,6 +119,9 @@ export class GenesisService {
       }
     }
 
+    // What the rail already holds, so we can tell a draft the agent updated from one it ignored.
+    const draftBefore = await this.readDraft(dir);
+
     this.emit({ at: at(), type: "genesis.turn", genesisId, role: "user", text });
 
     const run: ActiveTurn = { sessionId, cancelled: false };
@@ -161,23 +182,109 @@ export class GenesisService {
       this.turns.delete(genesisId);
     }
 
-    const final = ending ?? { state: "failed" as const, detail: "the event stream ended unexpectedly" };
+    const final = ending ?? {
+      state: "failed" as const,
+      detail: "the studio stopped replying before it finished — nothing was written",
+    };
     if (final.state !== "completed") this.sessions.delete(genesisId);
     if (final.state === "completed") {
       if (replyText.trim().length > 0) {
         this.emit({ at: at(), type: "genesis.turn", genesisId, role: "gate", text: replyText.trim() });
       }
-      // The draft is whatever the agent wrote — tolerant parse, absent file is simply no draft.
-      try {
-        const raw = await readFile(join(dir, "draft.json"), "utf8");
-        const parsed = GenesisDraftSchema.safeParse(JSON.parse(raw));
-        if (parsed.success) {
-          this.emit({ at: at(), type: "genesis.draft", genesisId, draft: parsed.data });
-        }
-      } catch {
-        /* no draft yet — the rail keeps its last state */
+      // The draft the agent wrote, if it wrote one. Asking a model to hold a conversation AND
+      // keep a file up to date gets the conversation and not the file most of the time — so
+      // when the file has not moved, we ask for the draft on its own and write it ourselves.
+      // The file stays the record either way; only who typed it changes.
+      let draft = await this.readDraft(dir);
+      if (draft === null || sameDraft(draft, draftBefore)) {
+        const recovered = await this.askForDraft(sessionId, dir);
+        if (recovered !== null) draft = recovered;
+      }
+      if (draft !== null && !sameDraft(draft, draftBefore)) {
+        this.emit({ at: at(), type: "genesis.draft", genesisId, draft });
       }
     }
     status(final.state, final.detail);
   }
+
+  /** The draft as it stands on disk. Absent or malformed reads as no draft, never as an error. */
+  private async readDraft(dir: string): Promise<GenesisDraft | null> {
+    try {
+      const parsed = GenesisDraftSchema.safeParse(JSON.parse(await readFile(join(dir, "draft.json"), "utf8")));
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The agent talked but did not update the draft. Ask for the draft alone — one narrow turn,
+   * no conversation to compete with — and write the file here. Returns null if that fails too,
+   * which leaves the rail exactly as it was: a turn that adds nothing is not an error.
+   */
+  private async askForDraft(sessionId: string, dir: string): Promise<GenesisDraft | null> {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), DRAFT_ASK_MS);
+    try {
+      const events = this.adapter.streamEvents(abort.signal);
+      await this.adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: DRAFT_REQUEST }] });
+      let reply = "";
+      for await (const event of events) {
+        if (!("sessionId" in event) || event.sessionId !== sessionId) continue;
+        if (event.type === "message.delta") reply = event.text;
+        else if (event.type === "message.completed") {
+          reply = event.text;
+          break;
+        } else if (event.type === "session.error" || event.type === "session.ended") break;
+      }
+      const draft = parseDraftFrom(reply);
+      if (draft === null) return null;
+      await atomicWriteFile(join(dir, "draft.json"), JSON.stringify(draft, null, 2) + "\n");
+      return draft;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+      abort.abort();
+    }
+  }
+}
+
+/** Has anything actually been settled? Empty lists and no title is a draft of nothing. */
+function saysSomething(draft: GenesisDraft): boolean {
+  return (
+    draft.name !== undefined ||
+    draft.logline !== undefined ||
+    draft.tone !== undefined ||
+    draft.genre !== undefined ||
+    draft.characters.length > 0 ||
+    draft.locations.length > 0 ||
+    draft.threads.length > 0
+  );
+}
+
+/** Two drafts are the same when they say the same thing — the rail should not flicker. */
+function sameDraft(a: GenesisDraft | null, b: GenesisDraft | null): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Pull the draft out of a reply. Models fence JSON, prefix it with a sentence, or answer with
+ * it bare; all three are the same answer. The outermost braces win, and the schema decides.
+ */
+export function parseDraftFrom(reply: string): GenesisDraft | null {
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(reply);
+  const candidates = [fenced?.[1], reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1), reply];
+  for (const candidate of candidates) {
+    if (candidate === undefined || candidate.trim() === "") continue;
+    try {
+      const parsed = GenesisDraftSchema.safeParse(JSON.parse(candidate));
+      // `{}` parses cleanly — the schema fills the lists — but says nothing. A draft that
+      // settles nothing must not overwrite one that settled something.
+      if (parsed.success && saysSomething(parsed.data)) return parsed.data;
+    } catch {
+      /* try the next shape */
+    }
+  }
+  return null;
 }
