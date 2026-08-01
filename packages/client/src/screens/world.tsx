@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { NavLink, Outlet, useNavigate, useParams } from "react-router";
+import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import {
   compilationIsStale,
   deriveCut,
@@ -13,9 +13,10 @@ import {
 import { DegradedBanner, EmptyState, PageHeader, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
 import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
-import { ActivityIcon, ChevronRight, Plus, Sliders } from "../components/icons.js";
+import { ActivityIcon, ChevronLeft, ChevronRight, Mic, Play, Plus, Search, Sliders } from "../components/icons.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
+import { Wave } from "./production.js";
 import { shortDateTime } from "../lib/format.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
@@ -472,31 +473,130 @@ export function CastScreen() {
   );
 }
 
+/** First sentence of a sheet's first section — the card sub-line. */
+function sheetLede(sheet: { sections: Array<{ body: string }> }): string {
+  const body = sheet.sections[0]?.body ?? "";
+  const stop = body.indexOf(". ");
+  return stop > 0 && stop < 120 ? body.slice(0, stop + 1) : body.slice(0, 120);
+}
+
 export function LocationsScreen() {
   const { worldId } = useParams();
+  const world = useOpenWorldGuard(worldId);
+  const navigate = useNavigate();
+  const places = (world?.sheets ?? []).filter((s) => s.type === "location" && !s.retired);
   return (
-    <SheetGrid
-      kind="location"
-      screenId="locations"
-      title="Locations"
-      hint="Where the world happens — look, sound, customs."
-      newPath={`/w/${worldId}/locations/new`}
-      detailPath={(id) => `/w/${worldId}/locations/${id}`}
-    />
+    <div data-screen="locations">
+      <div className="fy-corner">
+        <Button variant="primary" onClick={() => navigate(`/w/${worldId}/locations/new`)}>
+          New location
+        </Button>
+      </div>
+      <div className="fy-hero">
+        <div className="fy-hero__eyebrow">
+          {world?.meta.name} · {places.length} place{places.length === 1 ? "" : "s"}
+        </div>
+        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+          Locations
+        </h1>
+        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 480 }}>
+          Every place is a sheet, look, sound, customs. Scenes inherit them; generations cite them.
+        </p>
+      </div>
+      <div className="fy-cardgrid" style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(places.length, 2), 4)}, minmax(0, 1fr))` }}>
+        {places.map((s) => (
+          <button key={s.id} type="button" className="fy-gridcard fy-gridcard--media" onClick={() => navigate(`/w/${worldId}/locations/${s.id}`)}>
+            <div className="fy-gridcard__frame" style={{ height: 270 }}>
+              <Portrait worldSlug={world?.meta.slug} path={sheetPortraitPath(s.id)} label={`${s.name}: establishing view`} />
+            </div>
+            <div className="fy-gridcard__pad">
+              <div className="fy-gridcard__title" style={{ margin: "12px 0 0" }}>
+                {s.name}
+                <span className={`fy-dot fy-dot--${s.status === "locked" ? "ok" : "sketch"}`} style={{ width: 6, height: 6 }} />
+              </div>
+              <div className="fy-gridcard__body" style={{ fontSize: 12, marginTop: 3 }}>{sheetLede(s)}</div>
+              <div className="fy-gridcard__foot" style={{ marginTop: 9 }}>
+                {s.status === "locked" ? `locked · v${s.version}` : `sketch · v${s.version}`}
+                {s.canonRules.length > 0 ? ` · ${s.canonRules.join(", ")}` : ""}
+              </div>
+            </div>
+          </button>
+        ))}
+        {places.length === 0 && <EmptyState title="No locations yet" hint="Where the world happens — look, sound, customs." />}
+      </div>
+    </div>
   );
 }
 
 export function FactionsScreen() {
   const { worldId } = useParams();
+  const world = useOpenWorldGuard(worldId);
+  const navigate = useNavigate();
+  const factions = (world?.sheets ?? []).filter((s) => s.type === "faction" && !s.retired);
+  const facet = (s: (typeof factions)[number], heading: string) =>
+    s.sections.find((x) => x.heading.toLowerCase().includes(heading))?.body ?? null;
   return (
-    <SheetGrid
-      kind="faction"
-      screenId="factions"
-      title="Factions"
-      hint="Groups with wants and fears."
-      newPath={`/w/${worldId}/factions/new`}
-      detailPath={(id) => `/w/${worldId}/factions/${id}`}
-    />
+    <div data-screen="factions">
+      <div className="fy-hero">
+        <div className="fy-hero__eyebrow">
+          {world?.meta.name} · {factions.length} faction{factions.length === 1 ? "" : "s"}
+        </div>
+        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+          Factions
+        </h1>
+        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 460 }}>
+          Who wants what, and what they'd never admit. Scenes borrow their pressure.
+        </p>
+      </div>
+      <div className="fy-cardgrid" style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(factions.length, 2), 3)}, minmax(0, 1fr))`, padding: "32px 150px 46px" }}>
+        {factions.map((s) => {
+          const wants = facet(s, "want");
+          const fears = facet(s, "fear");
+          return (
+            <button key={s.id} type="button" className="fy-gridcard fy-gridcard--media" onClick={() => navigate(`/w/${worldId}/factions/${s.id}`)}>
+              <div className="fy-gridcard__frame" style={{ height: 210 }}>
+                <Portrait worldSlug={world?.meta.slug} path={sheetPortraitPath(s.id)} label={`${s.name}: emblem or scene`} />
+              </div>
+              <div className="fy-gridcard__pad" style={{ padding: "2px 8px 0" }}>
+                <div className="fy-gridcard__title" style={{ margin: "13px 0 0", fontSize: 16 }}>
+                  {s.name}
+                  <span className={`fy-dot fy-dot--${s.status === "locked" ? "ok" : "sketch"}`} style={{ width: 6, height: 6 }} />
+                </div>
+                <div className="fy-gridcard__body" style={{ marginTop: 4 }}>{sheetLede(s)}</div>
+                {(wants || fears) && (
+                  <div className="fy-wants">
+                    {wants && (
+                      <>
+                        <b>wants:</b> {wants.split(". ")[0]}
+                        <br />
+                      </>
+                    )}
+                    {fears && (
+                      <>
+                        <b>fears:</b> {fears.split(". ")[0]}
+                      </>
+                    )}
+                  </div>
+                )}
+                {s.links.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
+                    {s.links.slice(0, 3).map((l) => (
+                      <span key={l} className="fy-pill" style={{ padding: "2px 10px", fontSize: 11 }}>
+                        {l}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="fy-gridcard__foot" style={{ marginTop: 10 }}>
+                  {s.status === "locked" ? "locked" : "sketch"} · v{s.version}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+        {factions.length === 0 && <EmptyState title="No factions yet" hint="Groups with wants and fears." />}
+      </div>
+    </div>
   );
 }
 
@@ -533,9 +633,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const kitTiles = (kit?.tiles ?? []).filter((t) => t.status !== "empty" && t.file !== undefined);
   const nextAngle = (kit?.tiles ?? []).find((t) => t.status === "empty")?.angle;
   const slug = world.meta.slug;
-  return (
-    <div className="fy-sheet" data-screen={screenId}>
-      {isCharacter && (
+  const side = isCharacter ? (
         <div className="fy-sheet__side">
           <div className="fy-fan__drift">
             <div className="fy-designcard">
@@ -565,14 +663,17 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
             </button>
           </div>
         </div>
-      )}
-      <div className="fy-sheet__main">
+  ) : null;
+  const main = (
+      <div className={isCharacter ? "fy-sheet__main" : undefined} style={isCharacter ? undefined : { display: "grid", gap: "var(--space-4)", alignContent: "start" }}>
         <div>
           <div className="fy-sheet__eyebrow">
             {sheet.type}
             {sheet.role ? ` · ${sheet.role}` : ""}
           </div>
-          <h1 className="fy-sheet__name">{sheet.name}</h1>
+          <h1 className={isCharacter ? "fy-sheet__name" : "fy-locdetail__name"} style={isCharacter ? undefined : { marginTop: 10 }}>
+            {sheet.name}
+          </h1>
           <div className="fy-sheet__badges">
             <Badge tone={sheet.status === "sketch" ? "outline" : "neutral"}>
               {sheet.status === "sketch" ? `sketch · v${sheet.version}` : `v${sheet.version} · locked`}
@@ -690,10 +791,15 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
       {staged.map((p) => (
         <ConnectedProposalPanel key={p.proposal.id} staged={p} />
       ))}
-      <div className="fy-sheet__grid">
+      <div className="fy-sheet__grid" style={isCharacter ? undefined : { gridTemplateColumns: "1fr", gap: 14 }}>
         {sheet.sections.map((s) => (
           <div key={s.heading}>
-            <div className="fy-sheet__sechead">{s.heading}</div>
+            <div className="fy-sheet__sechead" style={isCharacter ? undefined : { display: "flex", alignItems: "center", gap: 8 }}>
+              {s.heading}
+              {!isCharacter && (
+                <span className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`} style={{ width: 5, height: 5 }} />
+              )}
+            </div>
             <div className="fy-sheet__secbody">{s.body}</div>
           </div>
         ))}
@@ -770,6 +876,24 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         </Section>
       )}
       </div>
+  );
+  if (isCharacter) {
+    return (
+      <div className="fy-sheet" data-screen={screenId}>
+        {side}
+        {main}
+      </div>
+    );
+  }
+  // Locations and factions (prototype 23b): full-height establishing view, facts to the right.
+  return (
+    <div className="fy-locdetail" data-screen={screenId}>
+      <div className="fy-locdetail__hero">
+        <div style={{ width: "100%", height: "100%" }}>
+          <Portrait worldSlug={slug} path={sheetPortraitPath(sheet.id)} label={`${sheet.name}: establishing view`} radius={12} />
+        </div>
+      </div>
+      <div className="fy-locdetail__side">{main}</div>
     </div>
   );
 }
@@ -794,24 +918,145 @@ export function CharacterEditScreen() {
     body: edited[s.heading] ?? s.body,
   }));
   const dirty = sections.some((s, i) => s.body !== sheet?.sections[i]?.body);
+  const changed = sections.filter((s, i) => s.body !== sheet?.sections[i]?.body);
+  const [mode, setMode] = useState<"form" | "chat">("form");
+  const worldSlug = useOpenWorldGuard(worldId)?.meta.slug;
 
   return (
-    <Screen id="character-edit">
-      <PageHeader
-        title={sheet ? `Edit — ${sheet.name}` : "Edit"}
-        meta={sheet && <span>editing against v{sheet.version} · accepting cuts v{sheet.version + 1}</span>}
-      />
-      <div className="scr-form">
-        {sections.map((s) => (
-          <div key={s.heading} className="scr-field">
-            <label className="scr-field__label">{s.heading}</label>
-            <Textarea
-              value={s.body}
-              onChange={(e) => setEdited((prev) => ({ ...prev, [s.heading]: e.target.value }))}
-            />
+    <div className="fy-gate" data-screen="character-edit">
+      <div className="fy-gate__main">
+        <div className="fy-gate__head">
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="fy-eyebrow-sm">EDIT SHEET{sheet ? ` · v${sheet.version}` : ""}</span>
+              {sheet && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <span className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`} style={{ width: 6, height: 6 }} />
+                  <span className="fy-mono">
+                    {sheet.status === "locked" ? "canon locked, edits are proposed" : "sketch — still yours to shape"}
+                  </span>
+                </span>
+              )}
+            </div>
+            <h1 className="fy-story__h1">
+              {mode === "chat" ? `What has changed about ${sheet ? sheet.name.split(" ")[0] : "them"}?` : "The sheet, field by field."}
+            </h1>
           </div>
-        ))}
-        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+          <span className="fy-seg" style={{ marginTop: 4 }}>
+            <button type="button" className={cx("fy-seg__item", mode === "chat" && "fy-seg__item--active")} onClick={() => setMode("chat")}>
+              Chat
+            </button>
+            <button type="button" className={cx("fy-seg__item", mode === "form" && "fy-seg__item--active")} onClick={() => setMode("form")}>
+              Form
+            </button>
+          </span>
+        </div>
+        <div className="fy-gate__body" style={{ gap: 14 }}>
+          {mode === "form" ? (
+            sections.map((s, i) => {
+              const isChanged = s.body !== sheet?.sections[i]?.body;
+              return (
+                <div key={s.heading}>
+                  <div className="fy-fieldlabel">
+                    {s.heading}
+                    {isChanged && <span className="fy-changedtag">· changed</span>}
+                  </div>
+                  <Textarea value={s.body} onChange={(e) => setEdited((prev) => ({ ...prev, [s.heading]: e.target.value }))} />
+                </div>
+              );
+            })
+          ) : (
+            <>
+              <div className="fy-bubble--gate">
+                Tell the studio what has changed. It drafts inside a proposal — its own copy of this sheet — and reads
+                the rest of the world through canon search, never the folder.
+                <div className="fy-bubble__note">you accept or discard the result · nothing lands until then</div>
+              </div>
+              <div style={{ marginTop: "auto" }}>
+                <Textarea
+                  placeholder="Give her a scar from the night the verse rose early — appearance and relationships should both feel it."
+                  value={instruction}
+                  onChange={(e) => setInstruction(e.target.value)}
+                  style={{ minHeight: 110 }}
+                />
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
+                  <DictationButton onText={(text) => setInstruction((prev) => (prev ? `${prev} ${text}` : text))} />
+                  <span className="fy-h1row__push" />
+                  <Button
+                    variant="primary"
+                    disabled={!harnessReady || !sheet || !worldId || instruction.trim().length === 0}
+                    title={harnessReady ? undefined : "Authoring needs OpenCode running"}
+                    onClick={() => {
+                      if (!sheet || !worldId) return;
+                      const dir = sheet.type === "character" ? "characters" : `${sheet.type}s`;
+                      draftWithStudio(worldId, `${dir}/${sheet.id}.md`, instruction.trim(), `Studio draft: ${sheet.name}`);
+                      const base = sheet.type === "character" ? "cast" : `${sheet.type}s`;
+                      navigate(`/w/${worldId}/${base}/${sheet.id}`);
+                    }}
+                  >
+                    Draft with the studio
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+          <DegradedBanner component="harness" />
+        </div>
+      </div>
+      <div className="fy-gate__side">
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div style={{ font: "600 15px var(--font-sans)" }}>Proposed sheet</div>
+          <span className="fy-mono" style={{ color: dirty ? "var(--warning)" : undefined }}>
+            {sheet ? `v${sheet.version + 1} draft · ${changed.length} field${changed.length === 1 ? "" : "s"} changed` : ""}
+          </span>
+        </div>
+        <div className="fy-draftcard">
+          <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+            <span style={{ width: 38, height: 44, borderRadius: 6, overflow: "hidden", flex: "none" }}>
+              <Portrait worldSlug={worldSlug} path={sheet ? sheetPortraitPath(sheet.id) : ""} label="" radius={6} />
+            </span>
+            <div>
+              <div style={{ font: "600 15px var(--font-sans)" }}>{sheet?.name}</div>
+              <div className="fy-mono" style={{ marginTop: 2 }}>
+                {sheet ? `v${sheet.version} → v${sheet.version + 1}${changed.length > 0 ? ` · ${changed.map((c) => c.heading.toLowerCase()).join(", ")}` : ""}` : ""}
+              </div>
+            </div>
+          </div>
+          {changed.slice(0, 3).map((c) => (
+            <div key={c.heading} style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <span style={{ font: "600 12.5px var(--font-sans)" }}>{c.heading}</span>
+                <span className="fy-changedtag">changed</span>
+              </div>
+              <div style={{ font: "400 12px/1.6 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 3 }}>
+                {c.body.length > 160 ? `${c.body.slice(0, 157)}…` : c.body}
+              </div>
+            </div>
+          ))}
+          {changed.length === 0 && (
+            <div className="fy-mono" style={{ marginTop: 12 }}>
+              nothing changed yet — edits preview here before they stage
+            </div>
+          )}
+        </div>
+        <div className="fy-draftcard">
+          <div style={{ font: "600 13px var(--font-sans)" }}>Ripples</div>
+          <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+            <span className="fy-ripplerow">
+              <span className="fy-dot fy-dot--warn" />
+              reference tiles made against v{sheet?.version ?? "…"} will age
+            </span>
+            <span className="fy-ripplerow">
+              <span className="fy-dot fy-dot--sketch" />
+              productions pick the change up on their next dispatch
+            </span>
+          </div>
+          <div className="fy-mono" style={{ marginTop: 10 }}>
+            computed precisely on the staged proposal · nothing lands until you accept
+          </div>
+        </div>
+        <div style={{ flex: 1, minHeight: 16 }} />
+        <div style={{ display: "grid", gap: 8 }}>
           <Button
             variant="primary"
             disabled={!sheet || !worldId || !dirty || stagedAt !== null}
@@ -825,55 +1070,14 @@ export function CharacterEditScreen() {
               navigate(`/w/${worldId}/${base}/${sheet.id}`);
             }}
           >
-            {stagedAt ? "Staging…" : "Stage proposal"}
+            {stagedAt ? "Staging…" : `Stage proposal · the sheet becomes v${(sheet?.version ?? 0) + 1}`}
           </Button>
           <Button variant="ghost" onClick={() => setEdited({})} disabled={!dirty}>
-            Reset
+            Discard edits · v{sheet?.version ?? "…"} stands
           </Button>
         </div>
-        <Callout title="Edits go through the gate">
-          Staging opens a proposal with its computed ripples — reference tiles that age,
-          productions that pick the change up — and nothing lands until you accept it on the
-          sheet page.
-        </Callout>
-        <div className="scr-field">
-          <label className="scr-field__label">Or tell the studio what to change</label>
-          <Textarea
-            placeholder="Give her a scar from the night the verse rose early — appearance and relationships should both feel it."
-            value={instruction}
-            onChange={(e) => setInstruction(e.target.value)}
-          />
-          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
-            <DictationButton onText={(text) => setInstruction((prev) => (prev ? `${prev} ${text}` : text))} />
-            <span className="scr-field__hint">
-              The agent drafts inside a proposal — its own copy of this sheet — and reads the rest
-              of the world through canon search, never the folder. You accept or discard the result.
-            </span>
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: "var(--space-2)" }}>
-          <Button
-            disabled={!harnessReady || !sheet || !worldId || instruction.trim().length === 0}
-            title={harnessReady ? undefined : "Authoring needs OpenCode running — see the sidebar"}
-            onClick={() => {
-              if (!sheet || !worldId) return;
-              const dir = sheet.type === "character" ? "characters" : `${sheet.type}s`;
-              draftWithStudio(
-                worldId,
-                `${dir}/${sheet.id}.md`,
-                instruction.trim(),
-                `Studio draft: ${sheet.name}`,
-              );
-              const base = sheet.type === "character" ? "cast" : `${sheet.type}s`;
-              navigate(`/w/${worldId}/${base}/${sheet.id}`);
-            }}
-          >
-            Draft with the studio
-          </Button>
-        </div>
-        <DegradedBanner component="harness" />
       </div>
-    </Screen>
+    </div>
   );
 }
 
@@ -966,148 +1170,190 @@ export function ReferenceKitScreen() {
       .flatMap((j) => j.landedFiles ?? []) ?? [];
   const [style, setStyle] = useState<string | null>(null);
   const styleValue = style ?? kit?.styleOverride ?? "";
-  return (
-    <Screen id="reference-kit">
-      <PageHeader
-        title={sheet ? `Reference kit — ${sheet.name}` : "Reference kit"}
-        meta={
-          hasAnchor ? (
-            <span>anchor set — every generation carries it</span>
-          ) : (
-            <span>no anchor yet — establish a look first</span>
-          )
-        }
-        actions={
-          <Button variant="primary" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/model-sheet`)}>
-            Model sheet
-          </Button>
-        }
-      />
-      {staleTiles.length > 0 && sheet && (
-        <Callout tone="warning" title={`${staleTiles.length} tile${staleTiles.length === 1 ? "" : "s"} predate v${sheet.version}`}>
-          Made against an older sheet — regenerate looks to catch up. They still reference; the gap is
-          named, not enforced.
-        </Callout>
-      )}
-      {!hasAnchor && (
-        <Section title="Establish a look" aside={<span>Candidates from the sentence and the world's tone</span>}>
-          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
-            <Button
-              variant="primary"
-              onClick={() => {
-                if (worldId && sheetId) establishLook(worldId, sheetId, 4);
-              }}
-            >
-              Generate first looks ×4
-            </Button>
-            <span className="scr-field__hint">Pick one and it becomes the face everything inherits.</span>
-          </div>
-          {candidates.length > 0 && (
-            <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
-              {candidates.map((file) => (
-                <Button
-                  key={file}
-                  onClick={() => {
-                    if (worldId && sheetId)
-                      chooseAnchorMsg(worldId, sheetId, file.replace(`references/${sheetId}/`, ""));
-                  }}
-                >
-                  Choose {file.split("/").pop()}
-                </Button>
-              ))}
-            </div>
-          )}
-        </Section>
-      )}
-      <Section
-        title="Head turnaround"
-        aside={
-          gate.ready ? (
-            <Badge tone="success">complete — body unlocked</Badge>
-          ) : (
-            <span>
-              {4 - gate.outstanding.length} of 4 locked · outstanding: {gate.outstanding.join(", ")}
-            </span>
-          )
-        }
-      >
-        <div className="lay-cardgrid">
-          {(kit?.tiles ?? []).filter((t) => t.angle.startsWith("head")).map((tile, i) => (
-            <div key={`${tile.angle}-${i}`}>
-              <ReferenceTile tile={tile} worldSlug={world?.meta.slug} sheetId={sheetId} />
-              {tile.status === "generated" && (
-                <Button
-                  onClick={() => {
-                    if (worldId && sheetId) lockTileMsg(worldId, sheetId, tile.angle);
-                  }}
-                >
-                  Lock
-                </Button>
-              )}
-            </div>
-          ))}
-        </div>
-        <Button
-          variant="ghost"
-          disabled={!hasAnchor}
-          onClick={() => {
-            if (worldId && sheetId) generateMissingTiles(worldId, sheetId, "head");
-          }}
-        >
-          Generate missing head angles
-        </Button>
-      </Section>
-      <Section
-        title="Body turnaround"
-        aside={!gate.ready ? <span>blocked — a body without a locked face is a different person</span> : undefined}
-      >
-        <div className="lay-cardgrid">
-          {(kit?.tiles ?? []).filter((t) => t.angle.startsWith("body")).map((tile, i) => (
-            <div key={`${tile.angle}-${i}`}>
-              <ReferenceTile tile={tile} worldSlug={world?.meta.slug} sheetId={sheetId} />
-              {tile.status === "generated" && (
-                <Button
-                  onClick={() => {
-                    if (worldId && sheetId) lockTileMsg(worldId, sheetId, tile.angle);
-                  }}
-                >
-                  Lock
-                </Button>
-              )}
-            </div>
-          ))}
-        </div>
-        <Button
-          variant="ghost"
-          disabled={!gate.ready}
-          title={gate.ready ? undefined : `outstanding: ${gate.outstanding.join(", ")}`}
-          onClick={() => {
-            if (worldId && sheetId) generateMissingTiles(worldId, sheetId, "body");
-          }}
-        >
-          {gate.ready ? "Generate missing body angles" : `Body blocked · ${gate.outstanding.length} head angle${gate.outstanding.length === 1 ? "" : "s"} outstanding`}
-        </Button>
-      </Section>
-      <Section title="Rendering style" aside={<span>Override travels with this sheet only — canon doesn't change</span>}>
-        <div style={{ display: "flex", gap: "var(--space-2)" }}>
-          <Input
-            placeholder="inherits the world's art direction"
-            value={styleValue}
-            onChange={(e) => setStyle(e.target.value)}
-          />
+  const compilation = [...(kit?.compilations ?? [])].reverse().find((c) => c.accepted) ?? null;
+  const slug = world?.meta.slug;
+  const tileBlock = (tile: (NonNullable<typeof kit>["tiles"])[number], i: number) => (
+    <div key={`${tile.angle}-${i}`} className="fy-tile" style={{ width: "auto" }}>
+      <ReferenceTile tile={tile} worldSlug={slug} sheetId={sheetId} />
+      {tile.status === "generated" && (
+        <div style={{ marginTop: 6 }}>
           <Button
             onClick={() => {
-              if (worldId && sheetId) {
-                setStyleOverrideMsg(worldId, sheetId, styleValue.trim() === "" ? null : styleValue.trim());
-                setStyle(null);
-              }
+              if (worldId && sheetId) lockTileMsg(worldId, sheetId, tile.angle);
             }}
           >
-            Set
+            Lock
           </Button>
         </div>
-      </Section>
-    </Screen>
+      )}
+    </div>
+  );
+  return (
+    <div data-screen="reference-kit">
+      <div className="fy-kithead">
+        <span className="fy-kithead__avatar">
+          <Portrait worldSlug={slug} path={sheetId ? sheetPortraitPath(sheetId) : ""} label="" radius={99} />
+        </span>
+        <div>
+          <h1 className="fy-kithead__name">{sheet?.name ?? "Reference kit"}</h1>
+          <div className="fy-mono" style={{ marginTop: 2 }}>
+            reference kit · design v{sheet?.version ?? "…"} ·{" "}
+            {hasAnchor ? "anchor set — every generation carries it" : "no anchor yet — establish a look first"}
+          </div>
+        </div>
+        <span className="fy-h1row__push" />
+        <span className="fy-seg">
+          <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}`)}>
+            Overview
+          </button>
+          <span className="fy-seg__item fy-seg__item--active">Reference</span>
+          <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/voice`)}>
+            Voice
+          </button>
+        </span>
+      </div>
+      <div className="fy-kit">
+        <div className="fy-kit__main">
+          {staleTiles.length > 0 && sheet && (
+            <Callout tone="warning" title={`${staleTiles.length} tile${staleTiles.length === 1 ? "" : "s"} predate v${sheet.version}`}>
+              Made against an older sheet — regenerate looks to catch up. They still reference; the gap is named, not
+              enforced.
+            </Callout>
+          )}
+          {!hasAnchor && (
+            <div>
+              <div className="fy-listhead" style={{ marginBottom: 10 }}>
+                Establish a look
+                <span className="fy-mono">candidates from the sentence and the world's tone</span>
+              </div>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    if (worldId && sheetId) establishLook(worldId, sheetId, 4);
+                  }}
+                >
+                  Generate first looks ×4
+                </Button>
+                <span className="fy-mono">pick one and it becomes the face everything inherits</span>
+              </div>
+              {candidates.length > 0 && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                  {candidates.map((file) => (
+                    <Button
+                      key={file}
+                      onClick={() => {
+                        if (worldId && sheetId) chooseAnchorMsg(worldId, sheetId, file.replace(`references/${sheetId}/`, ""));
+                      }}
+                    >
+                      Choose {file.split("/").pop()}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <div>
+            <div className="fy-listhead" style={{ marginBottom: 10 }}>
+              Head · turnaround
+              <span className={gate.ready ? "fy-mono" : "fy-mono"} style={gate.ready ? { color: "var(--success)" } : undefined}>
+                {gate.ready ? "complete — body unlocked" : `${4 - gate.outstanding.length} of 4 locked · outstanding: ${gate.outstanding.join(", ")}`}
+              </span>
+            </div>
+            <div className="fy-tilerow">{(kit?.tiles ?? []).filter((t) => t.angle.startsWith("head")).map(tileBlock)}</div>
+            <div style={{ marginTop: 10 }}>
+              <Button
+                variant="ghost"
+                disabled={!hasAnchor}
+                onClick={() => {
+                  if (worldId && sheetId) generateMissingTiles(worldId, sheetId, "head");
+                }}
+              >
+                Generate missing head angles
+              </Button>
+            </div>
+          </div>
+          <div>
+            <div className="fy-listhead" style={{ marginBottom: 10 }}>
+              Full body · turnaround
+              <span className="fy-mono">{gate.ready ? "unlocked" : "waiting on head lock — a body without a locked face is a different person"}</span>
+            </div>
+            <div className="fy-tilerow">{(kit?.tiles ?? []).filter((t) => t.angle.startsWith("body")).map(tileBlock)}</div>
+            <div style={{ marginTop: 10 }}>
+              <Button
+                variant="ghost"
+                disabled={!gate.ready}
+                title={gate.ready ? undefined : `outstanding: ${gate.outstanding.join(", ")}`}
+                onClick={() => {
+                  if (worldId && sheetId) generateMissingTiles(worldId, sheetId, "body");
+                }}
+              >
+                {gate.ready
+                  ? "Generate missing body angles"
+                  : `Body blocked · ${gate.outstanding.length} head angle${gate.outstanding.length === 1 ? "" : "s"} outstanding`}
+              </Button>
+            </div>
+          </div>
+        </div>
+        <div className="fy-kit__rail">
+          <div className="fy-boardcard fy-boardcard--quiet">
+            <div style={{ font: "600 14px var(--font-sans)" }}>How this stays consistent</div>
+            <div className="fy-boardcard__body">
+              Locked angles ride along as reference with every generation. New angles are judged against them · drift
+              gets flagged, not filed.
+            </div>
+          </div>
+          <div className="fy-boardcard">
+            <div className="fy-boardcard__head">
+              Model sheet
+              {staleTiles.length > 0 && <span className="fy-boardcard__state" style={{ color: "var(--warning)" }}>tiles newer than last sheet</span>}
+            </div>
+            <div style={{ marginTop: 8, border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", background: "var(--background)" }}>
+              <div style={{ height: 196 }}>
+                <Portrait
+                  worldSlug={slug}
+                  path={compilation && sheetId ? `references/${sheetId}/${compilation.file}` : ""}
+                  label={`${sheet?.name ?? "sheet"}: compiled model sheet`}
+                  radius={0}
+                />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 9px", borderTop: "1px solid var(--border)" }}>
+                <span style={{ font: "500 8px var(--font-mono)", letterSpacing: "0.08em", textTransform: "uppercase" }}>{sheet?.name}</span>
+                <span style={{ font: "400 8px var(--font-mono)", color: "var(--neutral-400)" }}>
+                  SHEET v{sheet?.version} · {world?.meta.name?.toUpperCase()}
+                </span>
+              </div>
+            </div>
+            <div className="fy-boardcard__mono">
+              the single reference where a model takes only one · generated from the sheet + locked tiles · lands here
+              on accept
+            </div>
+            <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+              <Button variant="primary" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/model-sheet`)}>
+                Generate sheet…
+              </Button>
+            </div>
+          </div>
+          <div className="fy-boardcard">
+            <div className="fy-boardcard__head">Rendering style</div>
+            <div className="fy-boardcard__body">Override travels with this sheet only — canon doesn't change.</div>
+            <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+              <Input placeholder="inherits the world's art direction" value={styleValue} onChange={(e) => setStyle(e.target.value)} />
+              <Button
+                onClick={() => {
+                  if (worldId && sheetId) {
+                    setStyleOverrideMsg(worldId, sheetId, styleValue.trim() === "" ? null : styleValue.trim());
+                    setStyle(null);
+                  }
+                }}
+              >
+                Set
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1186,79 +1432,111 @@ export function ModelSheetScreen() {
 
 export function VoicePickerScreen() {
   const { worldId, sheetId } = useParams();
+  const world = useOpenWorldGuard(worldId);
+  const navigate = useNavigate();
   const sheet = useSheet(worldId, sheetId);
   const [provider, setProvider] = useState("elevenlabs");
   const [voiceId, setVoiceId] = useState("");
   const [label, setLabel] = useState("");
+  const [manual, setManual] = useState(false);
   const sheetPath = sheet ? `characters/${sheet.id}.md` : null;
   return (
-    <Screen id="voice-picker">
-      <PageHeader
-        title={sheet ? `Voice — ${sheet.name}` : "Voice"}
-        meta={
-          sheet?.voice ? (
-            <span>
-              assigned · {sheet.voice.label ?? sheet.voice.voiceId} ({sheet.voice.provider}) at sheet v
-              {sheet.voice.assignedAtVersion}
-            </span>
-          ) : (
-            <span>no voice assigned</span>
-          )
-        }
-        actions={
-          sheet?.voice && (
-            <Button
-              variant="ghost"
-              onClick={() => {
-                if (worldId && sheetPath) assignVoice(worldId, sheetPath, null);
-              }}
-            >
-              Clear voice
-            </Button>
-          )
-        }
-      />
-      <Section title="Assign directly" aside={<span>a gated sheet change — it versions and ripples</span>}>
-        <div className="scr-form">
-          <div className="scr-field">
-            <label className="scr-field__label">Provider</label>
-            <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
-              {["elevenlabs", "openai", "voxa"].map((p) => (
-                <Button key={p} variant={p === provider ? "primary" : "secondary"} onClick={() => setProvider(p)}>
-                  {p}
+    <div className="fy-app" data-screen="voice-picker" style={{ minHeight: "calc(100vh - 44px)" }}>
+      <div className="fy-scrim">
+        {sheet && (
+          <div className="fy-scrim__art">
+            <Portrait worldSlug={world?.meta.slug} path={sheetPortraitPath(sheet.id)} label="" radius={0} />
+          </div>
+        )}
+        <div className="fy-scrim__wash" />
+        <div className="fy-scrim__center">
+          <div className="fy-dialog" style={{ maxWidth: 660 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ width: 34, height: 34, borderRadius: 99, overflow: "hidden", flex: "none" }}>
+                <Portrait worldSlug={world?.meta.slug} path={sheet ? sheetPortraitPath(sheet.id) : ""} label="" radius={99} />
+              </span>
+              <div style={{ flex: 1 }}>
+                <div style={{ font: "650 20px var(--font-sans)", letterSpacing: "-0.02em" }}>
+                  {sheet ? `Choose ${sheet.name.split(" ")[0]}'s voice` : "Choose a voice"}
+                </div>
+                <div style={{ font: "400 12px var(--font-sans)", color: "var(--muted-foreground)", marginTop: 2 }}>
+                  Previews read their own lines from the canon, not a stock sentence.
+                </div>
+              </div>
+              {sheet?.voice && (
+                <span className="fy-mono">
+                  current · {sheet.voice.label ?? sheet.voice.voiceId} ({sheet.voice.provider}) at v{sheet.voice.assignedAtVersion}
+                </span>
+              )}
+            </div>
+            <DegradedBanner component="voice" />
+            <VoiceCandidatesPanel worldId={worldId} sheetId={sheetId} sheetPath={sheetPath} />
+            <div>
+              <button
+                type="button"
+                className="fy-mono"
+                style={{ border: "none", background: "transparent", cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3 }}
+                onClick={() => setManual((m) => !m)}
+              >
+                {manual ? "Hide direct assignment" : "Assign directly · provider + voice id"}
+              </button>
+              {manual && (
+                <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                  <div className="fy-choicerow">
+                    {["elevenlabs", "openai", "voxa"].map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        className={cx("fy-filterchip", p === provider && "fy-filterchip--active")}
+                        style={{ border: p === provider ? "none" : "1px solid var(--border)" }}
+                        onClick={() => setProvider(p)}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Input placeholder="Voice id · v_8Kq2" value={voiceId} onChange={(e) => setVoiceId(e.target.value)} />
+                    <Input placeholder="Label · Low tide" value={label} onChange={(e) => setLabel(e.target.value)} />
+                    <Button
+                      variant="primary"
+                      disabled={!worldId || !sheetPath || voiceId.trim().length === 0}
+                      onClick={() => {
+                        if (!worldId || !sheetPath) return;
+                        assignVoice(worldId, sheetPath, {
+                          provider,
+                          voiceId: voiceId.trim(),
+                          ...(label.trim() ? { label: label.trim() } : {}),
+                        });
+                      }}
+                    >
+                      Stage assignment
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <span className="fy-mono">a gated sheet change — it versions and ripples · assigning updates every production</span>
+              <span style={{ flex: 1 }} />
+              {sheet?.voice && (
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    if (worldId && sheetPath) assignVoice(worldId, sheetPath, null);
+                  }}
+                >
+                  Clear voice
                 </Button>
-              ))}
+              )}
+              <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}`)}>
+                Back to the sheet
+              </Button>
             </div>
           </div>
-          <div className="scr-field">
-            <label className="scr-field__label">Voice id</label>
-            <Input placeholder="v_8Kq2" value={voiceId} onChange={(e) => setVoiceId(e.target.value)} />
-          </div>
-          <div className="scr-field">
-            <label className="scr-field__label">Label</label>
-            <Input placeholder="Low tide" value={label} onChange={(e) => setLabel(e.target.value)} />
-          </div>
-          <div>
-            <Button
-              variant="primary"
-              disabled={!worldId || !sheetPath || voiceId.trim().length === 0}
-              onClick={() => {
-                if (!worldId || !sheetPath) return;
-                assignVoice(worldId, sheetPath, {
-                  provider,
-                  voiceId: voiceId.trim(),
-                  ...(label.trim() ? { label: label.trim() } : {}),
-                });
-              }}
-            >
-              Stage assignment
-            </Button>
-          </div>
         </div>
-      </Section>
-      <DegradedBanner component="voice" />
-      <VoiceCandidatesPanel worldId={worldId} sheetId={sheetId} sheetPath={sheetPath} />
-    </Screen>
+      </div>
+    </div>
   );
 }
 
@@ -1281,87 +1559,77 @@ function VoiceCandidatesPanel({
           {sidecar.detail}
         </Callout>
       )}
-      <Section
-        title="Find a voice"
-        aside={<span>ranked by attribute overlap with the written voice — not a similarity score</span>}
-      >
-        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
-          <Button
-            variant="primary"
-            onClick={() => {
-              if (worldId && sheetId) requestVoiceCandidates(worldId, sheetId);
-            }}
-          >
-            Match against the written voice
-          </Button>
-          {candidates && (
-            <span className="scr-field__hint">
-              matched on: {candidates.extracted.join(" · ") || "nothing extractable"} — previews read{" "}
-              {candidates.previewLine.source === "own-line"
-                ? "her own line"
-                : candidates.previewLine.source === "drafted"
-                  ? "a line drafted from the sheet"
-                  : "a stock sentence (nothing else exists)"}
-            </span>
-          )}
-        </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <Button
+          variant="primary"
+          onClick={() => {
+            if (worldId && sheetId) requestVoiceCandidates(worldId, sheetId);
+          }}
+        >
+          Match against the written voice
+        </Button>
         {candidates && (
-          <div className="scr-sectionlist">
-            {candidates.ranked.slice(0, 8).map(({ candidate, matched, overlap }) => {
-              const key = `${candidate.provider}/${candidate.voiceId}`;
-              const preview = previews[key];
-              return (
-                <div key={key} className="scr-sheetsection">
-                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-                    <strong style={{ font: "var(--type-ui)" }}>{candidate.label}</strong>
-                    <span style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>
-                      {candidate.provider}
-                      {candidate.local ? " · local — fixed catalogue, cannot be cloned" : ""}
-                    </span>
-                    <span style={{ marginLeft: "auto" }}>
-                      <Badge tone="outline">{Math.round(overlap * 100)}% attribute overlap</Badge>
-                    </span>
-                  </div>
-                  {matched.length > 0 && (
-                    <span className="scr-field__hint">matched to: {matched.join(" · ")}</span>
-                  )}
-                  <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        if (worldId && sheetId) requestVoicePreview(worldId, sheetId, candidate.provider, candidate.voiceId);
-                      }}
-                    >
-                      {candidate.local
-                        ? "Preview — free, local"
-                        : `Preview${candidates.cloudPreviewMicroUsd !== null ? ` · ${formatMicroUsd(candidates.cloudPreviewMicroUsd)}` : ""}`}
-                    </Button>
-                    {preview?.file && <Badge tone="success">ready — replays free</Badge>}
-                    {preview?.error && <span className="scr-field__hint">{preview.error}</span>}
-                    <Button
-                      onClick={() => {
-                        if (worldId && sheetPath)
-                          assignVoice(worldId, sheetPath, {
-                            provider: candidate.provider,
-                            voiceId: candidate.voiceId,
-                            label: candidate.label,
-                          });
-                      }}
-                    >
-                      Assign
-                    </Button>
-                    {candidate.canClone ? (
-                      <span className="scr-field__hint">cloning available — rights to a recorded voice are yours to hold</span>
-                    ) : (
-                      candidate.local && <span className="scr-field__hint">no cloning — local means presets</span>
-                    )}
+          <span className="fy-mono">
+            matched to: {candidates.extracted.join(" · ") || "nothing extractable"} · previews read{" "}
+            {candidates.previewLine.source === "own-line"
+              ? "their own line"
+              : candidates.previewLine.source === "drafted"
+                ? "a line drafted from the sheet"
+                : "a stock sentence"}
+          </span>
+        )}
+      </div>
+      {candidates && (
+        <div style={{ display: "grid", gap: 8 }}>
+          {candidates.ranked.slice(0, 6).map(({ candidate, matched, overlap }, idx) => {
+            const key = `${candidate.provider}/${candidate.voiceId}`;
+            const preview = previews[key];
+            return (
+              <div key={key} className={cx("fy-voicerow", idx === 0 && "fy-voicerow--selected")} style={{ cursor: "default" }}>
+                <span className="fy-voicerow__icon" aria-hidden>
+                  <Play size={12} />
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="fy-voicerow__name">{candidate.label}</div>
+                  <div className="fy-voicerow__sub">
+                    {candidate.provider}
+                    {candidate.local ? " · local — fixed catalogue, cannot be cloned" : candidate.canClone ? " · cloning available" : ""}
+                    {matched.length > 0 ? ` · matched to: ${matched.join(", ")}` : ""}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </Section>
+                <span className="fy-mono" style={{ whiteSpace: "nowrap" }}>
+                  {Math.round(overlap * 100)}% match
+                </span>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    if (worldId && sheetId) requestVoicePreview(worldId, sheetId, candidate.provider, candidate.voiceId);
+                  }}
+                >
+                  {preview?.file
+                    ? "Replay · free"
+                    : candidate.local
+                      ? "Preview · free"
+                      : `Preview${candidates.cloudPreviewMicroUsd !== null ? ` · ${formatMicroUsd(candidates.cloudPreviewMicroUsd)}` : ""}`}
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (worldId && sheetPath)
+                      assignVoice(worldId, sheetPath, {
+                        provider: candidate.provider,
+                        voiceId: candidate.voiceId,
+                        label: candidate.label,
+                      });
+                  }}
+                >
+                  Assign
+                </Button>
+                {preview?.error && <span className="fy-mono">{preview.error}</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </>
   );
 }
@@ -1383,59 +1651,215 @@ function NewSheetScreen({
   const { state } = useStore();
   const [name, setName] = useState("");
   const [sentence, setSentence] = useState("");
+  const [tab, setTab] = useState<"sentence" | "image" | "duplicate">("sentence");
+  const [copyName, setCopyName] = useState("");
+  const [copySource, setCopySource] = useState<string | null>(null);
   const harnessReady = state?.app.health.harness.status === "healthy";
-  const characters = world?.sheets.filter((s) => s.type === "character").length ?? 0;
+  const characters = world?.sheets.filter((s) => s.type === "character" && !s.retired) ?? [];
   const listPath = sheetType === "character" ? "cast" : `${sheetType}s`;
+  const contextPills = (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+      <span className="fy-mono">drafts with:</span>
+      <span className="fy-pill">
+        {world?.meta.name} · canon v{world?.meta.canonRevision}
+      </span>
+      {world?.meta.tone && <span className="fy-pill">Tone · {world.meta.tone}</span>}
+      <span className="fy-pill">
+        {characters.length} existing character{characters.length === 1 ? "" : "s"}
+      </span>
+    </div>
+  );
+  const draftCta = (
+    <Button
+      variant="primary"
+      disabled={!worldId || name.trim().length === 0 || sentence.trim().length === 0}
+      onClick={() => {
+        if (!worldId) return;
+        createSheetFromSentence(worldId, sheetType, name.trim(), sentence.trim());
+        navigate(`/w/${worldId}/${listPath}`);
+      }}
+    >
+      {harnessReady ? "Draft the sheet" : "Create as sketch"}
+    </Button>
+  );
 
+  if (sheetType === "character") {
+    // Prototype 5b: the cast-join dialog over the world's key art.
+    return (
+      <div className="fy-app" data-screen={screenId} style={{ minHeight: "calc(100vh - 44px)" }}>
+        <div className="fy-scrim">
+          <div className="fy-scrim__art">
+            <Portrait worldSlug={world?.meta.slug} path="world-art.png" label="" radius={0} />
+          </div>
+          <div className="fy-scrim__wash" />
+          <div className="fy-scrim__center">
+            <div className="fy-dialog" style={{ maxWidth: 620 }}>
+              <div>
+                <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>Who's joining the cast?</div>
+                <div style={{ font: "400 13px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 6 }}>
+                  Start with a sentence. The sheet gets drafted from it, inside the canon, alongside the{" "}
+                  {characters.length} who already live here.
+                </div>
+              </div>
+              <span className="fy-seg" style={{ width: "fit-content" }}>
+                {(
+                  [
+                    ["sentence", "From a sentence"],
+                    ["image", "From an image"],
+                    ["duplicate", "Duplicate a sheet"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button key={id} type="button" className={cx("fy-seg__item", tab === id && "fy-seg__item--active")} onClick={() => setTab(id)}>
+                    {label}
+                  </button>
+                ))}
+              </span>
+              {tab === "sentence" && (
+                <>
+                  <Input placeholder="Their name" value={name} onChange={(e) => setName(e.target.value)} />
+                  <Textarea
+                    placeholder="A ferryman who refuses payment in coin, only in secrets."
+                    value={sentence}
+                    onChange={(e) => setSentence(e.target.value)}
+                    style={{ minHeight: 96, font: "400 15px/1.6 var(--font-sans)" }}
+                  />
+                  {contextPills}
+                </>
+              )}
+              {tab === "image" && (
+                <div className="fy-notecard" style={{ marginTop: 0 }}>
+                  <span className="fy-dot fy-dot--sketch" />
+                  Drafting from an image arrives later. Meanwhile: file the image under Artifacts, then draft from a
+                  sentence — appearance can cite it.
+                </div>
+              )}
+              {tab === "duplicate" && (
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                    {characters.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        className="fy-minisheet"
+                        style={copySource === s.id ? { border: "1.5px solid var(--foreground)", background: "var(--neutral-50)" } : undefined}
+                        onClick={() => setCopySource(s.id)}
+                      >
+                        <span className="fy-minisheet__thumb">
+                          <Portrait worldSlug={world?.meta.slug} path={sheetPortraitPath(s.id)} label="" radius={5} />
+                        </span>
+                        <span style={{ minWidth: 0 }}>
+                          <span className="fy-minisheet__name" style={{ display: "block" }}>
+                            {s.name}
+                          </span>
+                          <span className="fy-minisheet__sub">
+                            sheet v{s.version} · {s.status}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+                    <Input placeholder="Name the copy · e.g. Bray's brother" value={copyName} onChange={(e) => setCopyName(e.target.value)} />
+                    <span className="fy-mono" style={{ flex: "none" }}>
+                      copies as a new sketch · links to the source · the source is untouched
+                    </span>
+                  </div>
+                </>
+              )}
+              <DegradedBanner component="harness" />
+              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <span style={{ font: "400 11.5px/1.5 var(--font-sans)", color: "var(--muted-foreground)" }}>
+                  Lands as a sketch. Nothing is canon until you lock it.
+                </span>
+                <span style={{ flex: 1 }} />
+                <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/${listPath}`)}>
+                  Cancel
+                </Button>
+                {tab === "duplicate" ? (
+                  <Button
+                    variant="primary"
+                    disabled={!worldId || copySource === null || copyName.trim().length === 0}
+                    onClick={() => {
+                      if (!worldId || !copySource) return;
+                      duplicateSheet(worldId, `characters/${copySource}.md`, copyName.trim());
+                      navigate(`/w/${worldId}/${listPath}`);
+                    }}
+                  >
+                    Duplicate as sketch
+                  </Button>
+                ) : (
+                  draftCta
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Prototype 10a: the location form beside its live draft preview.
   return (
-    <Screen id={screenId}>
-      <PageHeader title={title} />
-      {world && (
-        <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
-          <Badge tone="outline">{world.meta.name}</Badge>
-          <Badge tone="outline">canon v{world.meta.canonRevision}</Badge>
-          {world.meta.tone && <Badge tone="outline">tone · {world.meta.tone}</Badge>}
-          <Badge tone="outline">{characters} existing characters</Badge>
+    <div className="fy-gate" data-screen={screenId}>
+      <div className="fy-gate__main">
+        <div className="fy-gate__head">
+          <div style={{ flex: 1 }}>
+            <div className="fy-eyebrow-sm">{title.toUpperCase()}</div>
+            <h1 className="fy-story__h1">Just the fields.</h1>
+          </div>
         </div>
-      )}
-      <div className="scr-form">
-        <div className="scr-field">
-          <label className="scr-field__label">Name</label>
-          <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+        <div className="fy-gate__body">
+          <div>
+            <div className="fy-fieldlabel">Name</div>
+            <Input placeholder="The Bell Market" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <div className="fy-fieldlabel">One sentence to draft from</div>
+            <Textarea
+              placeholder="A church that forgot it was one — stalls in the nave, the great bell still hanging."
+              value={sentence}
+              onChange={(e) => setSentence(e.target.value)}
+            />
+            <span className="fy-mono" style={{ display: "block", marginTop: 6 }}>
+              {harnessReady
+                ? "the studio drafts look, sound and customs from this, against canon and tone"
+                : "without OpenCode running, the sentence seeds the sheet as-is — still a sketch through the gate"}
+            </span>
+          </div>
+          {contextPills}
+          <DegradedBanner component="harness" />
         </div>
-        <div className="scr-field">
-          <label className="scr-field__label">One sentence to draft from</label>
-          <Textarea
-            placeholder="A rope-seller who remembers every knot she has ever sold, and who bought it."
-            value={sentence}
-            onChange={(e) => setSentence(e.target.value)}
-          />
-          <span className="scr-field__hint">
-            {harnessReady
-              ? "The studio drafts the full sheet from this, against canon, tone and the existing cast; it lands as a sketch you accept."
-              : "Without OpenCode running, the sentence seeds the sheet as-is — still a sketch through the gate."}
+      </div>
+      <div className="fy-gate__side">
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div style={{ font: "600 15px var(--font-sans)" }}>{title} draft</div>
+          <span className="fy-mono" style={{ color: "var(--warning)" }}>
+            proposed
           </span>
         </div>
-        <div style={{ display: "flex", gap: "var(--space-2)" }}>
-          <Button
-            variant="primary"
-            disabled={!worldId || name.trim().length === 0 || sentence.trim().length === 0}
-            onClick={() => {
-              if (!worldId) return;
-              createSheetFromSentence(worldId, sheetType, name.trim(), sentence.trim());
-              navigate(`/w/${worldId}/${listPath}`);
-            }}
-          >
-            {harnessReady ? "Draft as sketch" : "Create as sketch"}
-          </Button>
+        <div className="fy-draftcard" style={{ padding: 14 }}>
+          <div style={{ width: "100%", height: 130 }}>
+            <Portrait worldSlug={world?.meta.slug} path="" label="Establishing view: drop or generate" />
+          </div>
+          <div style={{ padding: "12px 4px 2px" }}>
+            <div style={{ font: "600 16px var(--font-sans)", letterSpacing: "-0.01em" }}>{name.trim() || "Unnamed"}</div>
+            <div style={{ font: "400 12px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 8 }}>
+              {sentence.trim() || "The sheet drafts from your sentence — look, sound and customs land here."}
+            </div>
+          </div>
         </div>
-        <Callout title="Sketch first, lock later">
-          A new sheet starts as a sketch — citable, visibly provisional. Locking it is its own
-          gated change, and needs no image to exist first.
-        </Callout>
+        <div style={{ flex: 1, minHeight: 16 }} />
+        <div style={{ display: "grid", gap: 8 }}>
+          {draftCta}
+          <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/${listPath}`)}>
+            Discard · nothing saved
+          </Button>
+          <div style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center" }}>
+            Lands as a sketch. Lock it when the look settles.
+          </div>
+        </div>
       </div>
-      <DegradedBanner component="harness" />
-    </Screen>
+    </div>
   );
 }
 
@@ -1585,22 +2009,29 @@ export function CanonScreen() {
   };
 
   const result = askId ? askResults[askId] : undefined;
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const typeCounts = new Map<string, number>();
+  for (const c of world?.canon ?? []) typeCounts.set(c.type, (typeCounts.get(c.type) ?? 0) + 1);
+  const shown = entries.filter((e) => typeFilter === null || e.type === typeFilter);
 
   return (
-    <Screen id="canon">
-      <PageHeader
-        title="Canon"
-        meta={world && <span>revision v{world.meta.canonRevision} · {world.canon.length} entries</span>}
-        actions={
-          <Button variant="primary" onClick={() => navigate(`/w/${worldId}/canon/new`)}>
-            New entry
-          </Button>
-        }
-      />
-      <div className="scr-form">
-        <div style={{ display: "flex", gap: "var(--space-2)" }}>
-          <Input
-            placeholder="Ask the canon — “can Maren call a tide she has not stood in?”"
+    <div data-screen="canon">
+      <div className="fy-corner">
+        <Button variant="primary" onClick={() => navigate(`/w/${worldId}/canon/new`)}>
+          New entry
+        </Button>
+      </div>
+      <div className="fy-hero">
+        <div className="fy-hero__eyebrow">
+          {world?.meta.name} · {world?.canon.length ?? 0} entries · v{world?.meta.canonRevision}
+        </div>
+        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+          Canon
+        </h1>
+        <div className="fy-askbar">
+          <Search size={15} />
+          <input
+            placeholder="Ask the world anything: “who rings the bells?”"
             value={query}
             onChange={(e) => runSearch(e.target.value)}
             onKeyDown={(e) => {
@@ -1616,27 +2047,65 @@ export function CanonScreen() {
             Ask
           </Button>
         </div>
-        <span className="scr-field__hint">
-          Answers come only from entries, with verified quotes. When canon has not decided, it says
-          so and shows what it searched.
-        </span>
+        <div className="fy-mono" style={{ marginTop: 8 }}>
+          answers come only from entries, with verified quotes · when canon has not decided, it says so
+        </div>
+        <div className="fy-filterrow">
+          <button type="button" className={cx("fy-filterchip", typeFilter === null && "fy-filterchip--active")} onClick={() => setTypeFilter(null)}>
+            All {world?.canon.length ?? 0}
+          </button>
+          {[...typeCounts.entries()].map(([t, n]) => (
+            <button key={t} type="button" className={cx("fy-filterchip", typeFilter === t && "fy-filterchip--active")} onClick={() => setTypeFilter(t)}>
+              {t.charAt(0).toUpperCase() + t.slice(1)} {n}
+            </button>
+          ))}
+        </div>
       </div>
-      {askId && !result && <Callout title="Asking canon…">Retrieval first, then a grounded read of the candidates.</Callout>}
-      {result && worldId && <AskOutcome worldId={worldId} question={askedQuestion} result={result} />}
-      {serverSearch && (
-        <span className="scr-field__hint">
-          {serverSearch.candidates.length} match{serverSearch.candidates.length === 1 ? "" : "es"} across{" "}
-          {serverSearch.searched} searchable entries (open threads and retired entries are not
-          searched).
-        </span>
+      {(result || (askId && !result) || serverSearch) && (
+        <div style={{ maxWidth: 720, margin: "20px auto 0", padding: "0 24px", display: "grid", gap: 10 }}>
+          {askId && !result && <Callout title="Asking canon…">Retrieval first, then a grounded read of the candidates.</Callout>}
+          {result && worldId && <AskOutcome worldId={worldId} question={askedQuestion} result={result} />}
+          {serverSearch && (
+            <span className="fy-mono">
+              {serverSearch.candidates.length} match{serverSearch.candidates.length === 1 ? "" : "es"} across{" "}
+              {serverSearch.searched} searchable entries · open threads and retired entries are not searched
+            </span>
+          )}
+        </div>
       )}
-      <div className="scr-sectionlist">
-        {entries.map((entry) => (
-          <CanonEntryRow key={entry.id} entry={entry} onOpen={() => navigate(`/w/${worldId}/canon/${entry.id}`)} />
-        ))}
-        {entries.length === 0 && <EmptyState title="No matches" hint="The closest entries appear in the ask refusal above." />}
+      <div className="fy-cardgrid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+        {shown.map((entry) =>
+          entry.status === "open" ? (
+            <div key={entry.id} className="fy-gridcard fy-gridcard--quiet">
+              <div className="fy-gridcard__id" style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <span className="fy-dot fy-dot--warn" style={{ width: 7, height: 7 }} />
+                {entry.id} · open thread
+              </div>
+              <div className="fy-gridcard__title">{entry.title}</div>
+              <div className="fy-gridcard__body">{entry.body.length > 150 ? `${entry.body.slice(0, 147)}…` : entry.body}</div>
+              <div style={{ marginTop: 12 }}>
+                <Button onClick={() => navigate(`/w/${worldId}/canon/${entry.id}/thread`)}>Draft in context</Button>
+              </div>
+            </div>
+          ) : (
+            <button key={entry.id} type="button" className="fy-gridcard" onClick={() => navigate(`/w/${worldId}/canon/${entry.id}`)}>
+              <div className="fy-gridcard__id">
+                {entry.id} · {entry.type}
+                {entry.retired ? " · retired" : ""}
+              </div>
+              <div className="fy-gridcard__title">{entry.title}</div>
+              <div className="fy-gridcard__body">{entry.body.length > 150 ? `${entry.body.slice(0, 147)}…` : entry.body}</div>
+              <div className="fy-gridcard__foot">
+                written v{entry.introducedAt}
+                {entry.settledAt !== undefined ? ` · settled v${entry.settledAt}` : ""}
+                {entry.amendedAt !== undefined ? ` · amended v${entry.amendedAt}` : ""}
+              </div>
+            </button>
+          ),
+        )}
+        {shown.length === 0 && <EmptyState title="No matches" hint="The closest entries appear in the ask refusal above." />}
       </div>
-    </Screen>
+    </div>
   );
 }
 
@@ -1668,28 +2137,142 @@ export function CanonEntryScreen() {
   const detail = refs[entry.id];
   const history = (world?.changes ?? []).filter((c) => c.entity === `canon/${entry.id}`);
   return (
-    <Screen id="canon-entry">
-      <PageHeader
-        title={entry.title}
-        meta={
-          <>
-            <span className="mono">{entry.id}</span>
-            <Badge tone="outline">{entry.type}</Badge>
-            {entry.retired && <Badge tone="danger">retired</Badge>}
-            <span>
-              written v{entry.introducedAt}
-              {entry.settledAt !== undefined && ` · settled v${entry.settledAt}`}
-              {entry.amendedAt !== undefined && ` · amended v${entry.amendedAt}`}
+    <div className="fy-entry" data-screen="canon-entry">
+      <div className="fy-entry__main">
+        <div style={{ animation: "fy-fade-up 0.6s var(--ease-out) both" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span className="fy-mono">
+              {entry.id} · {entry.type}
             </span>
-          </>
-        }
-        actions={
-          entry.status === "open" ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span className={`fy-dot fy-dot--${entry.status === "open" ? "warn" : "ok"}`} style={{ width: 6, height: 6 }} />
+              <span className="fy-mono">{entry.status === "open" ? "open thread" : "settled"}</span>
+            </span>
+            {entry.retired && <Badge tone="danger">retired</Badge>}
+          </div>
+          <h1 className="fy-entry__title">{entry.title}</h1>
+          <div className="fy-entry__body">{entry.body}</div>
+          <div className="fy-mono" style={{ marginTop: 14 }}>
+            written v{entry.introducedAt}
+            {entry.settledAt !== undefined && ` · settled v${entry.settledAt}`}
+            {entry.amendedAt !== undefined && ` · last amended v${entry.amendedAt}`}
+          </div>
+          {detail && (detail.citedBy.sheets.length > 0 || detail.citedBy.entries.length > 0) && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 16 }}>
+              {detail.citedBy.sheets.map((s) => (
+                <span key={s.id} className="fy-pill">
+                  <span className="fy-pill__avatar">
+                    <Portrait worldSlug={world?.meta.slug} path={sheetPortraitPath(s.id)} label="" radius={99} />
+                  </span>
+                  {s.id}
+                  {s.atVersion !== null ? ` · v${s.atVersion}` : ""}
+                </span>
+              ))}
+              {detail.citedBy.entries.map((id) => (
+                <span key={id} className="fy-pill" style={{ cursor: "pointer" }} onClick={() => navigate(`/w/${worldId}/canon/${id}`)}>
+                  {id}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        {detail && (detail.citedBy.sheets.length > 0 || detail.citedBy.entries.length > 0) && (
+          <div style={{ marginTop: 30, animation: "fy-fade-up 0.7s var(--ease-out) 0.15s both" }}>
+            <div style={{ font: "600 13px var(--font-sans)", marginBottom: 4 }}>Cited by</div>
+            {detail.citedBy.sheets.map((s) => (
+              <div key={s.id} className="fy-citerow">
+                <span style={{ flex: 1 }}>
+                  {s.id}
+                  {s.atVersion !== null ? `, sheet v${s.atVersion}` : ""}
+                </span>
+                <span className="fy-mono">from the index, at the version cited</span>
+                <ChevronRight size={13} />
+              </div>
+            ))}
+            {detail.citedBy.entries.map((id) => (
+              <div key={id} className="fy-citerow" style={{ cursor: "pointer" }} onClick={() => navigate(`/w/${worldId}/canon/${id}`)}>
+                <span style={{ flex: 1 }}>{id}</span>
+                <span className="fy-mono">canon cross-reference</span>
+                <ChevronRight size={13} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="fy-entry__side">
+        <div style={{ font: "600 13px var(--font-sans)" }}>History</div>
+        <div style={{ marginTop: 4 }}>
+          {history.length === 0 && <div className="fy-mono" style={{ padding: "9px 0" }}>no recorded changes yet</div>}
+          {[...history].reverse().map((c, i) => (
+            <div key={i} className="fy-historyrow">
+              <span className="fy-historyrow__v" style={i === 0 ? { color: "var(--foreground)" } : undefined}>
+                v{String(c.canonRevisionAfter ?? c.toVersion ?? "?")}
+              </span>
+              <div className="fy-historyrow__text">
+                <div style={i === 0 ? { color: "var(--foreground)" } : undefined}>
+                  {c.fieldsChanged ? c.fieldsChanged.join(", ") : "changed"}
+                </div>
+                <div className="fy-historyrow__when">
+                  {shortDateTime(c.ts)} · {c.source}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        {detail && detail.ripples.length > 0 && (
+          <div className="fy-draftcard">
+            <div style={{ font: "600 13px var(--font-sans)" }}>Changing this ripples</div>
+            <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+              {detail.ripples.map((r, i) => (
+                <span key={i} className="fy-ripplerow">
+                  <span className="fy-dot fy-dot--warn" />
+                  {r.kind} · {r.summary}
+                </span>
+              ))}
+            </div>
+            <div className="fy-mono" style={{ marginTop: 10 }}>
+              a change is proposed, ripple-checked, then versioned · same gate as everything else
+            </div>
+          </div>
+        )}
+        {amending && worldId && (
+          <div className="fy-draftcard">
+            <div className="fy-fieldlabel">Amended statement</div>
+            <Textarea value={statement} onChange={(e) => setStatement(e.target.value)} />
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <Button
+                variant="primary"
+                disabled={statement.trim().length === 0 || statement.trim() === entry.body.trim()}
+                onClick={() => {
+                  stageAmendmentMsg(worldId, entry.id, statement.trim());
+                  setAmending(false);
+                }}
+              >
+                Stage amendment
+              </Button>
+              <Button variant="ghost" onClick={() => setAmending(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+        <div style={{ flex: 1, minHeight: 16 }} />
+        <div style={{ display: "grid", gap: 8 }}>
+          {entry.status === "open" ? (
             <Button variant="primary" onClick={() => navigate(`/w/${worldId}/canon/${entry.id}/thread`)}>
               Open thread
             </Button>
           ) : (
             <>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setStatement(entry.body);
+                  setAmending(true);
+                }}
+              >
+                Propose a change
+              </Button>
               <Button
                 variant="ghost"
                 disabled={entry.retired === true}
@@ -1700,92 +2283,11 @@ export function CanonEntryScreen() {
               >
                 Retire
               </Button>
-              <Button
-                variant="primary"
-                onClick={() => {
-                  setStatement(entry.body);
-                  setAmending(true);
-                }}
-              >
-                Propose amendment
-              </Button>
             </>
-          )
-        }
-      />
-      <Card>
-        <div className="scr-prose">{entry.body}</div>
-      </Card>
-      {amending && worldId && (
-        <Card className="scr-form">
-          <div className="scr-field">
-            <label className="scr-field__label">Amended statement</label>
-            <Textarea value={statement} onChange={(e) => setStatement(e.target.value)} />
-          </div>
-          <div style={{ display: "flex", gap: "var(--space-2)" }}>
-            <Button
-              variant="primary"
-              disabled={statement.trim().length === 0 || statement.trim() === entry.body.trim()}
-              onClick={() => {
-                stageAmendmentMsg(worldId, entry.id, statement.trim());
-                setAmending(false);
-              }}
-            >
-              Stage amendment
-            </Button>
-            <Button variant="ghost" onClick={() => setAmending(false)}>
-              Cancel
-            </Button>
-          </div>
-        </Card>
-      )}
-      {detail && (detail.citedBy.sheets.length > 0 || detail.citedBy.entries.length > 0) && (
-        <Section title="Cited by" aside={<span>from the index, at the versions cited</span>}>
-          <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
-            {detail.citedBy.sheets.map((s) => (
-              <Badge key={s.id} tone="outline">
-                {s.id}
-                {s.atVersion !== null ? ` @ v${s.atVersion}` : ""}
-              </Badge>
-            ))}
-            {detail.citedBy.entries.map((id) => (
-              <Button key={id} variant="secondary" onClick={() => navigate(`/w/${worldId}/canon/${id}`)}>
-                {id}
-              </Button>
-            ))}
-          </div>
-        </Section>
-      )}
-      {detail && detail.ripples.length > 0 && (
-        <Section title="Changing this ripples" aside={<span>computed speculatively for display</span>}>
-          <ul className="dom-ripples">
-            {detail.ripples.map((r, i) => (
-              <li key={i} className="dom-ripples__item">
-                <Badge tone="outline">{r.kind}</Badge>
-                <span>{r.summary}</span>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
-      <Section title="History" aside={<span>keyed by canon revision</span>}>
-        {history.length === 0 ? (
-          <EmptyState title="No recorded changes yet" />
-        ) : (
-          <div className="scr-sectionlist scr-changelist">
-            {[...history].reverse().map((c, i) => (
-              <div key={i} className="scr-change">
-                <span className="scr-change__entity mono">v{String(c.canonRevisionAfter ?? c.toVersion ?? "?")}</span>
-                <span>
-                  {c.fieldsChanged ? c.fieldsChanged.join(", ") : "changed"} · {c.source}
-                </span>
-                <span className="scr-change__when">{shortDateTime(c.ts)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
-    </Screen>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1797,61 +2299,85 @@ export function CanonThreadScreen() {
   const [resolvedType, setResolvedType] = useState<(typeof SETTLE_TYPES)[number]>("lore");
   const [statement, setStatement] = useState("");
   return (
-    <Screen id="canon-thread">
-      <PageHeader
-        title={entry ? entry.title : "Thread"}
-        meta={entry && (
-          <>
-            <span className="mono">{entry.id}</span>
-            <Badge tone="warning">open since v{entry.introducedAt}</Badge>
-          </>
-        )}
-      />
-      {entry && (
-        <Card>
-          <div className="scr-prose">{entry.body}</div>
-        </Card>
-      )}
-      <Section title="Settle it" aside={<span>the answer becomes the entry; the number stays</span>}>
-        <div className="scr-form">
-          <div className="scr-field">
-            <label className="scr-field__label">What it turned out to be</label>
-            <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+    <div className="fy-gate" data-screen="canon-thread">
+      <div className="fy-gate__main">
+        <div className="fy-gate__head">
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="fy-dot fy-dot--warn" style={{ width: 7, height: 7 }} />
+              <span className="fy-eyebrow-sm">OPEN THREAD{entry ? ` · ${entry.id} · since v${entry.introducedAt}` : ""}</span>
+            </div>
+            <h1 className="fy-story__h1">{entry ? entry.title : "Thread"}</h1>
+          </div>
+        </div>
+        <div className="fy-gate__body" style={{ gap: 14 }}>
+          {entry && <div className="fy-bubble--gate">{entry.body}</div>}
+          <div className="fy-bubble--gate">
+            Settle it: pick what it turned out to be, write the settled statement, and stage it. The
+            answer becomes the entry; the number stays.
+            <div className="fy-bubble__note">settling is an ordinary accept — the staged proposal shows its ripples first</div>
+          </div>
+          <div style={{ marginTop: "auto" }}>
+            <div className="fy-fieldlabel">What it turned out to be</div>
+            <div className="fy-choicerow">
               {SETTLE_TYPES.map((t) => (
-                <Button key={t} variant={t === resolvedType ? "primary" : "secondary"} onClick={() => setResolvedType(t)}>
+                <button
+                  key={t}
+                  type="button"
+                  className={cx("fy-filterchip", t === resolvedType && "fy-filterchip--active")}
+                  style={{ border: t === resolvedType ? "none" : "1px solid var(--border)" }}
+                  onClick={() => setResolvedType(t)}
+                >
                   {t}
-                </Button>
+                </button>
               ))}
             </div>
-          </div>
-          <div className="scr-field">
-            <label className="scr-field__label">The settled statement</label>
+            <div className="fy-fieldlabel" style={{ marginTop: 15 }}>
+              The settled statement
+            </div>
             <Textarea
               placeholder="The Chorister was taught by the god itself, in the winter it walked in…"
               value={statement}
               onChange={(e) => setStatement(e.target.value)}
             />
           </div>
-          <div>
-            <Button
-              variant="primary"
-              disabled={!entry || !worldId || statement.trim().length === 0}
-              onClick={() => {
-                if (!entry || !worldId) return;
-                settleThread(worldId, entry.id, resolvedType, statement.trim());
-                navigate(`/w/${worldId}/canon/${entry.id}`);
-              }}
-            >
-              Stage settlement
-            </Button>
-          </div>
-          <Callout title="Settling is an ordinary accept">
-            The staged proposal shows its ripples; accepting settles the entry, closes the thread
-            and moves the canon revision once.
-          </Callout>
         </div>
-      </Section>
-    </Screen>
+      </div>
+      <div className="fy-gate__side">
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div style={{ font: "600 15px var(--font-sans)" }}>Proposed entry</div>
+          <span className="fy-mono" style={{ color: "var(--warning)" }}>
+            settles the thread
+          </span>
+        </div>
+        <div className="fy-draftcard">
+          <div className="fy-gridcard__id">
+            {entry?.id ?? "CANON-…"} · {resolvedType}
+          </div>
+          <div style={{ font: "600 16px var(--font-sans)", letterSpacing: "-0.01em", marginTop: 7 }}>{entry?.title}</div>
+          <div style={{ font: "400 12.5px/1.65 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 8, whiteSpace: "pre-wrap" }}>
+            {statement.trim() || "The settled statement appears here as you write it."}
+          </div>
+        </div>
+        <div style={{ flex: 1, minHeight: 16 }} />
+        <div style={{ display: "grid", gap: 8 }}>
+          <Button
+            variant="primary"
+            disabled={!entry || !worldId || statement.trim().length === 0}
+            onClick={() => {
+              if (!entry || !worldId) return;
+              settleThread(worldId, entry.id, resolvedType, statement.trim());
+              navigate(`/w/${worldId}/canon/${entry.id}`);
+            }}
+          >
+            Stage settlement · close the thread
+          </Button>
+          <div style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center" }}>
+            Nothing changes until you accept the staged proposal. Then the canon revision moves once.
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1859,37 +2385,85 @@ export function NewCanonScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
+  const location = useLocation();
+  const seed = (location.state as { seed?: string } | null)?.seed;
   const [entryType, setEntryType] = useState<(typeof SETTLE_TYPES)[number]>("rule");
   const [title, setTitle] = useState("");
-  const [statement, setStatement] = useState("");
+  const [statement, setStatement] = useState(seed ?? "");
   const nextId = world ? `CANON-${String(world.meta.nextCanonId).padStart(3, "0")}` : "CANON-…";
   return (
-    <Screen id="new-canon">
-      <PageHeader title="New canon entry" meta={<span>takes {nextId} at staging, and keeps it</span>} />
-      <div className="scr-form">
-        <div className="scr-field">
-          <label className="scr-field__label">Type</label>
-          <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
-            {SETTLE_TYPES.map((t) => (
-              <Button key={t} variant={t === entryType ? "primary" : "secondary"} onClick={() => setEntryType(t)}>
-                {t}
-              </Button>
-            ))}
+    <div className="fy-gate" data-screen="new-canon">
+      <div className="fy-gate__main">
+        <div className="fy-gate__head">
+          <div style={{ flex: 1 }}>
+            <div className="fy-eyebrow-sm">NEW CANON ENTRY · WILL BE {nextId}</div>
+            <h1 className="fy-story__h1">The entry, field by field.</h1>
           </div>
         </div>
-        <div className="scr-field">
-          <label className="scr-field__label">Title</label>
-          <Input placeholder="Tide-calling" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <div className="fy-gate__body">
+          <div>
+            <div className="fy-fieldlabel">Type</div>
+            <div className="fy-choicerow">
+              {SETTLE_TYPES.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className={cx("fy-filterchip", t === entryType && "fy-filterchip--active")}
+                  style={{ border: t === entryType ? "none" : "1px solid var(--border)" }}
+                  onClick={() => setEntryType(t)}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="fy-fieldlabel">Title</div>
+            <Input placeholder="Tide-calling" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </div>
+          <div>
+            <div className="fy-fieldlabel">Statement</div>
+            <Textarea
+              placeholder="A caller cannot move a tide she has not stood in…"
+              value={statement}
+              onChange={(e) => setStatement(e.target.value)}
+            />
+          </div>
+          <div className="fy-mono">
+            ids are permanent — the entry reserves {nextId} at staging and keeps it forever · retired ids are never
+            reused, so citations never drift
+          </div>
         </div>
-        <div className="scr-field">
-          <label className="scr-field__label">Statement</label>
-          <Textarea
-            placeholder="A caller cannot move a tide she has not stood in…"
-            value={statement}
-            onChange={(e) => setStatement(e.target.value)}
-          />
+      </div>
+      <div className="fy-gate__side">
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div style={{ font: "600 15px var(--font-sans)" }}>Proposed entry</div>
+          <span className="fy-mono" style={{ color: "var(--warning)" }}>
+            draft · enters as proposed
+          </span>
         </div>
-        <div>
+        <div className="fy-draftcard">
+          <div className="fy-gridcard__id">
+            {nextId} · {entryType}
+          </div>
+          <div style={{ font: "600 16px var(--font-sans)", letterSpacing: "-0.01em", marginTop: 7 }}>
+            {title.trim() || "Untitled"}
+          </div>
+          <div style={{ font: "400 12.5px/1.65 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 8, whiteSpace: "pre-wrap" }}>
+            {statement.trim() || "The statement appears here as you write it."}
+          </div>
+        </div>
+        <div className="fy-draftcard">
+          <div style={{ font: "600 13px var(--font-sans)" }}>Ripples</div>
+          <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+            <span className="fy-ripplerow">
+              <span className="fy-dot fy-dot--sketch" />
+              contradiction candidates appear on the proposal as an aid · nothing blocks
+            </span>
+          </div>
+        </div>
+        <div style={{ flex: 1, minHeight: 16 }} />
+        <div style={{ display: "grid", gap: 8 }}>
           <Button
             variant="primary"
             disabled={!worldId || title.trim().length === 0 || statement.trim().length === 0}
@@ -1899,16 +2473,14 @@ export function NewCanonScreen() {
               navigate(`/w/${worldId}/canon`);
             }}
           >
-            Stage entry
+            Add as proposed · {nextId}
+          </Button>
+          <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/canon`)}>
+            Discard · nothing saved
           </Button>
         </div>
-        <Callout title="Ids are permanent">
-          The entry reserves the next CANON number at staging and keeps it forever — retired ids
-          are never reused, so citations never drift. Contradiction candidates appear on the
-          proposal as an aid; nothing blocks.
-        </Callout>
       </div>
-    </Screen>
+    </div>
   );
 }
 
@@ -1928,35 +2500,47 @@ export function ArtifactsScreen() {
   const kinds = [...new Set(artifacts.map((a) => a.kind))];
   const batches = artifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
   return (
-    <Screen id="artifacts">
-      <PageHeader
-        title="Artifacts"
-        meta={
-          <span>
-            {visible.length} filed against the world
-            {superseded.size > 0 ? ` · ${superseded.size} superseded (history keeps them)` : ""}
-          </span>
-        }
-        actions={
-          <div style={{ display: "flex", gap: "var(--space-2)" }}>
-            <Input
-              placeholder="C:\\path\\to\\your\\notes"
-              value={importPath}
-              onChange={(e) => setImportPath(e.target.value)}
-              style={{ minWidth: 280 }}
-            />
-            <Button
-              variant="primary"
-              disabled={importPath.trim().length === 0}
-              onClick={() => {
-                if (worldId) importFolder(worldId, importPath.trim());
-              }}
-            >
-              Import folder
-            </Button>
-          </div>
-        }
-      />
+    <div data-screen="artifacts">
+      <div className="fy-hero">
+        <div className="fy-hero__eyebrow">
+          {world?.meta.name} · {visible.length} file{visible.length === 1 ? "" : "s"}
+          {superseded.size > 0 ? ` · ${superseded.size} superseded — history keeps them` : ""}
+        </div>
+        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+          Artifacts
+        </h1>
+        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 500 }}>
+          Recordings, documents and references: filed against the world, attachable to any generation.
+        </p>
+        <div className="fy-filterrow">
+          <button type="button" className={cx("fy-filterchip", kindFilter === null && "fy-filterchip--active")} onClick={() => setKindFilter(null)}>
+            All {artifacts.filter((a) => !superseded.has(a.id)).length}
+          </button>
+          {kinds.map((k) => (
+            <button key={k} type="button" className={cx("fy-filterchip", kindFilter === k && "fy-filterchip--active")} onClick={() => setKindFilter(k)}>
+              {k.charAt(0).toUpperCase() + k.slice(1)} {artifacts.filter((a) => a.kind === k && !superseded.has(a.id)).length}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 16 }}>
+          <Input
+            placeholder="C:\\path\\to\\your\\notes"
+            value={importPath}
+            onChange={(e) => setImportPath(e.target.value)}
+            style={{ minWidth: 280 }}
+          />
+          <Button
+            variant="primary"
+            disabled={importPath.trim().length === 0}
+            onClick={() => {
+              if (worldId) importFolder(worldId, importPath.trim());
+            }}
+          >
+            Import folder
+          </Button>
+        </div>
+      </div>
+      <div style={{ maxWidth: 860, margin: "0 auto", padding: "12px 24px 0", display: "grid", gap: 10 }}>
       {notices.map((n, i) => (
         <Callout key={`${n.sourcePath}-${i}`} tone="warning" title={n.outcome === "needs-consent" ? "Large file" : "Filing refused"}>
           {n.reason}
@@ -2032,49 +2616,78 @@ export function ArtifactsScreen() {
           </div>
         </Section>
       ))}
-      <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
-        <Button variant={kindFilter === null ? "primary" : "ghost"} onClick={() => setKindFilter(null)}>
-          all · {artifacts.filter((a) => !superseded.has(a.id)).length}
-        </Button>
-        {kinds.map((k) => (
-          <Button key={k} variant={kindFilter === k ? "primary" : "ghost"} onClick={() => setKindFilter(k)}>
-            {k} · {artifacts.filter((a) => a.kind === k && !superseded.has(a.id)).length}
-          </Button>
-        ))}
       </div>
-      {artifacts.length === 0 ? (
-        <EmptyState title="Nothing filed yet" hint="Drop recordings, documents, boards or images to file them against the world." />
-      ) : (
-        <div className="lay-cardgrid">
-          {visible.map((a) => (
-            <Card key={a.id} className="scr-worldcard">
-              <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
-                <Badge tone="outline">{a.kind}</Badge>
-                <span className="mono" style={{ fontSize: "var(--text-xs)" }}>{a.file}</span>
-              </div>
-              <div className="scr-worldcard__counts">
-                <span>{a.origin.by === "user" ? "filed by you" : `produced by ${a.origin.producedBy}`}</span>
-                {a.origin.by === "user" && a.origin.importedFrom !== undefined && <span>from {a.origin.importedFrom}</span>}
-                {a.links.length > 0 && <span>links {a.links.join(", ")}</span>}
-                {a.supersedes !== undefined && <span>supersedes {a.supersedes.slice(0, 10)}…</span>}
-              </div>
-              {a.kind === "document" && (
-                <div>
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      if (worldId) extractArtifact(worldId, a.id);
-                    }}
-                  >
-                    Lift facts — gated, grounded, optional
-                  </Button>
+      <div className="fy-cardgrid" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", paddingTop: 24 }}>
+        {visible.map((a) => {
+          const name = a.file.split("/").pop() ?? a.file;
+          const isImage = a.kind === "image" || /\.(png|jpe?g|webp|gif)$/i.test(a.file);
+          const meta = [
+            name.includes(".") ? name.split(".").pop() : a.kind,
+            a.origin.by === "user" ? "filed by you" : `produced by ${a.origin.producedBy}`,
+            ...(a.links.length > 0 ? [`linked: ${a.links.slice(0, 2).join(", ")}`] : []),
+          ].join(" · ");
+          return (
+            <div key={a.id} className="fy-gridcard" style={isImage ? { padding: "10px 10px 14px" } : { padding: 16 }}>
+              {isImage ? (
+                <div style={{ width: "100%", height: 110 }}>
+                  <Portrait worldSlug={world?.meta.slug} path={`artifacts/${a.file}`} label={name} />
+                </div>
+              ) : a.kind === "audio" ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span className="fy-audiorow__play" aria-hidden>
+                    <Play size={11} />
+                  </span>
+                  <span style={{ color: "var(--neutral-400)", overflow: "hidden" }}>
+                    <Wave seed={a.file} width={120} height={18} />
+                  </span>
+                </div>
+              ) : (
+                <div className="fy-doclines">
+                  <span style={{ width: "80%" }} />
+                  <span style={{ width: "95%" }} />
+                  <span style={{ width: "60%" }} />
                 </div>
               )}
-            </Card>
-          ))}
+              <div style={isImage ? { padding: "0 6px" } : undefined}>
+                <div style={{ font: "600 14px var(--font-sans)", margin: "12px 0 3px" }}>{name}</div>
+                <div className="fy-mono">{meta}</div>
+                {a.supersedes !== undefined && <div className="fy-mono">supersedes {a.supersedes.slice(0, 10)}…</div>}
+                {a.kind === "document" && (
+                  <div style={{ marginTop: 10 }}>
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        if (worldId) extractArtifact(worldId, a.id);
+                      }}
+                    >
+                      Lift facts — gated, grounded, optional
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        <div
+          className="fy-gridcard fy-gridcard--quiet"
+          style={{ gridColumn: "span 2", border: "1.5px dashed var(--neutral-300)", background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", gap: 14, minHeight: 120, boxShadow: "none" }}
+        >
+          <span className="fy-newprodcard__ring" style={{ width: 40, height: 40 }}>
+            <Plus size={18} />
+          </span>
+          <div style={{ maxWidth: 320 }}>
+            <div style={{ font: "600 14px var(--font-sans)" }}>Drop anything</div>
+            <div style={{ font: "400 12px/1.5 var(--font-sans)", color: "var(--muted-foreground)" }}>
+              Audio, documents, boards, stems: filed here via Import folder above, linkable to characters, canon and
+              shots.
+            </div>
+          </div>
         </div>
-      )}
-    </Screen>
+        {artifacts.length === 0 && (
+          <EmptyState title="Nothing filed yet" hint="Drop recordings, documents, boards or images to file them against the world." />
+        )}
+      </div>
+    </div>
   );
 }
 
