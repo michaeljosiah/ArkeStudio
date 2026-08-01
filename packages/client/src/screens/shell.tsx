@@ -150,83 +150,6 @@ function mb(bytes: number): string {
   return m >= 1024 ? `${(m / 1024).toFixed(1)} GB` : `${Math.round(m)} MB`;
 }
 
-/**
- * The local runtimes arriving in the background: what each one is for, how far along, and the
- * way out of every one of them. Nothing here blocks Continue.
- */
-function SetupDownloads() {
-  const setup = useSetup();
-  if (!setup || setup.components.length === 0) return null;
-  const done = setup.components.filter((c) => c.state === "ready" || c.state === "present").length;
-  const totalBytes = setup.components.reduce((s, c) => s + c.bytesTotal, 0);
-  const doneBytes = setup.components.reduce((s, c) => s + (c.state === "present" ? c.bytesTotal : c.bytesDone), 0);
-  const speed = setup.components.find((c) => c.state === "downloading")?.bytesPerSecond ?? null;
-
-  return (
-    <div style={{ marginTop: 18 }}>
-      <div className="fy-launch__row">
-        <span className="fy-launch__title">On this machine</span>
-        <span style={{ flex: 1 }} />
-        <span className="fy-mono">
-          {done} of {setup.components.length} ready · {mb(doneBytes)} of {mb(totalBytes)}
-          {speed !== null && speed > 0 ? ` · ${mb(speed)}/s` : ""}
-        </span>
-      </div>
-      <div className="fy-setuplist">
-        {setup.components.map((c) => {
-          const pct = c.bytesTotal > 0 ? Math.min(100, Math.round((c.bytesDone / c.bytesTotal) * 100)) : 0;
-          const settled = c.state === "ready" || c.state === "present";
-          return (
-            <div key={c.id} className="fy-setuprow" style={{ display: "block", padding: "9px 2px" }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-                <span className="fy-setuprow__label">{c.displayName}</span>
-                <span className="fy-mono" style={{ fontSize: 10 }}>
-                  {c.state === "downloading" ? `${mb(c.bytesDone)} of ${mb(c.bytesTotal)}` : `${c.sizeMb >= 1024 ? `${(c.sizeMb / 1024).toFixed(1)} GB` : `${c.sizeMb} MB`}`}
-                </span>
-                <span className="fy-setuprow__state">
-                  {c.state === "present" ? "already here" : c.state === "downloading" ? `${pct}%` : c.state}
-                </span>
-                {!settled && c.state !== "skipped" && (
-                  <button type="button" className="fy-setuprow__act" onClick={() => setupSkip(c.id)}>
-                    Skip
-                  </button>
-                )}
-                {(c.state === "skipped" || c.state === "failed" || c.state === "blocked") && (
-                  <button type="button" className="fy-setuprow__act" onClick={() => setupRetry(c.id)}>
-                    Retry
-                  </button>
-                )}
-              </div>
-              <div style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)", marginTop: 2 }}>
-                {c.purpose}
-              </div>
-              {c.state === "downloading" && (
-                <div className="fy-setupbar" style={{ height: 3, marginTop: 6 }}>
-                  <div className="fy-setupbar__fill" style={{ width: `${pct}%` }} />
-                </div>
-              )}
-              {c.detail !== undefined && c.state !== "downloading" && (
-                <div className="fy-mono" style={{ marginTop: 3 }}>
-                  {c.detail}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      {setup.running && (
-        <div style={{ display: "flex", marginTop: 8 }}>
-          <span className="fy-mono">these arrive in the background — you can carry on without them</span>
-          <span style={{ flex: 1 }} />
-          <button type="button" className="fy-setuprow__act" onClick={() => setupCancel()}>
-            Stop all
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function LaunchScreen() {
   const { connection, state } = useStore();
   const navigate = useNavigate();
@@ -238,9 +161,42 @@ export function LaunchScreen() {
   // first run; otherwise the picker, R-8).
   const ready = connection === "open" && state !== null;
   const steps = setupSteps(connection, state, env !== null);
-  const settled = steps.filter((s) => s.settled).length;
-  const percent = Math.round((settled / steps.length) * 100);
-  const current = steps.find((s) => !s.settled);
+  const components = setup?.components ?? [];
+
+  // One bar over the whole job. A check counts 1 once settled; a component counts its own
+  // fraction of bytes — and counts as done when it is skipped, blocked or failed, because
+  // those are settled outcomes too and the bar must not stall on something never coming.
+  const parts = steps.length + components.length;
+  const doneParts =
+    steps.filter((s) => s.settled).length +
+    components.reduce(
+      (sum, c) =>
+        sum +
+        (c.state === "downloading" || c.state === "installing"
+          ? c.bytesTotal > 0
+            ? Math.min(1, c.bytesDone / c.bytesTotal)
+            : 0
+          : c.state === "queued"
+            ? 0
+            : 1),
+      0,
+    );
+  const percent = parts === 0 ? 0 : Math.round((doneParts / parts) * 100);
+
+  // What is happening right now, in the product's words — one line, never a list.
+  const active = components.find((c) => c.state === "downloading" || c.state === "installing");
+  const outstanding = steps.find((s) => !s.settled);
+  const activity = active
+    ? `${active.state === "installing" ? "installing" : "downloading"} ${active.displayName.toLowerCase()}`
+    : outstanding
+      ? `checking ${outstanding.label.toLowerCase()}`
+      : "everything ready";
+
+  // Bytes and time remaining, only while there is something to measure.
+  const totalBytes = components.reduce((sum, c) => sum + c.bytesTotal, 0);
+  const doneBytes = components.reduce((sum, c) => sum + (c.state === "queued" ? 0 : c.state === "downloading" || c.state === "installing" ? c.bytesDone : c.bytesTotal), 0);
+  const speed = active?.bytesPerSecond ?? null;
+  const remaining = speed !== null && speed > 0 ? Math.round((totalBytes - doneBytes) / speed) : null;
 
   return (
     <div className="fy-app" data-screen="launch">
@@ -258,28 +214,20 @@ export function LaunchScreen() {
         <div className="fy-launch__panel">
           <div className="fy-launch__row">
             <span className="fy-launch__title">Setting up your studio.</span>
+          </div>
+          <div className="fy-launch__row" style={{ marginTop: 10 }}>
+            <span className="fy-mono">{activity}</span>
             <span style={{ flex: 1 }} />
-            <span className="fy-mono">{current ? current.label.toLowerCase() : "everything settled"}</span>
+            {speed !== null && speed > 0 && <span className="fy-mono">{mb(speed)}/s</span>}
           </div>
           <div className="fy-setupbar">
             <div className="fy-setupbar__fill" style={{ width: `${percent}%` }} />
           </div>
           <div className="fy-launch__row" style={{ marginTop: 8 }}>
-            <span className="fy-mono">
-              {settled} of {steps.length} checks settled
-            </span>
+            <span className="fy-mono">{totalBytes > 0 ? `${mb(doneBytes)} of ${mb(totalBytes)}` : ""}</span>
             <span style={{ flex: 1 }} />
-            <span className="fy-mono">these are checks — the downloads are below</span>
+            <span className="fy-mono">{remaining !== null ? aboutLeft(remaining) : ""}</span>
           </div>
-          <div className="fy-setuplist">
-            {steps.map((s) => (
-              <div key={s.label} className="fy-setuprow">
-                <span className="fy-setuprow__label">{s.label}</span>
-                <span className="fy-setuprow__state">{s.state}</span>
-              </div>
-            ))}
-          </div>
-          <SetupDownloads />
           {connection === "closed" && (
             <Callout tone="warning" title="Waiting for the coordinator">
               The app keeps retrying on its own. If this is a dev browser session, start it with
@@ -288,7 +236,7 @@ export function LaunchScreen() {
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14, justifyContent: "center" }}>
             <span style={{ font: "400 11.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
-              Arke runs on your machine. Your worlds never leave it.
+              One-time setup. After this, Arke runs on your machine. Your worlds never leave it.
             </span>
             <Button
               variant="primary"
@@ -303,6 +251,13 @@ export function LaunchScreen() {
       </div>
     </div>
   );
+}
+
+/** "about 3 min left" — rounded, because a precise wrong number is worse than a vague right one. */
+function aboutLeft(seconds: number): string {
+  if (seconds < 45) return "under a minute left";
+  const mins = Math.round(seconds / 60);
+  return mins <= 1 ? "about a minute left" : `about ${mins} min left`;
 }
 
 // ---- First run -------------------------------------------------------------
@@ -1062,6 +1017,62 @@ const RUNTIME_TONE: Record<"ready" | "disabled" | "unknown", StatusDotTone> = {
   unknown: "busy",
 };
 
+/**
+ * The local runtimes on this machine: what arrived, what is still coming, and the way into
+ * each one. Setup shows a bar and nothing else; this is where the detail lives (prototype 22a).
+ */
+function SetupComponents() {
+  const setup = useSetup();
+  if (!setup || setup.components.length === 0) return null;
+  const size = (mbytes: number) => (mbytes >= 1024 ? `${(mbytes / 1024).toFixed(1)} GB` : `${mbytes} MB`);
+  return (
+    <Section
+      title="Runtimes on this machine"
+      aside={
+        setup.running ? (
+          <Button variant="ghost" onClick={() => setupCancel()}>
+            Stop all
+          </Button>
+        ) : (
+          <span>fetched once, then left alone</span>
+        )
+      }
+    >
+      <div className="scr-sectionlist">
+        {setup.components.map((c) => {
+          const settled = c.state === "ready" || c.state === "present";
+          const pct = c.bytesTotal > 0 ? Math.min(100, Math.round((c.bytesDone / c.bytesTotal) * 100)) : 0;
+          return (
+            <div key={c.id} className="scr-sheetsection">
+              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+                <StatusDot tone={settled ? "ok" : c.state === "failed" ? "danger" : "muted"} label={c.displayName} />
+                <span style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>{size(c.sizeMb)}</span>
+                <span style={{ marginLeft: "auto", display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+                  <Badge tone={settled ? "success" : "outline"}>
+                    {c.state === "present" ? "already here" : c.state === "downloading" ? `${pct}%` : c.state}
+                  </Badge>
+                  {!settled && c.state !== "skipped" && (
+                    <Button variant="ghost" onClick={() => setupSkip(c.id)}>
+                      Skip
+                    </Button>
+                  )}
+                  {(c.state === "skipped" || c.state === "failed" || c.state === "blocked") && (
+                    <Button variant="ghost" onClick={() => setupRetry(c.id)}>
+                      Retry
+                    </Button>
+                  )}
+                </span>
+              </div>
+              <span className="scr-field__hint">{c.purpose}</span>
+              {c.detail !== undefined && <span className="scr-field__hint">{c.detail}</span>}
+            </div>
+          );
+        })}
+      </div>
+    </Section>
+  );
+}
+
 export function SettingsLocalRuntimeScreen() {
   const { state } = useStore();
   const runtime = state?.app.runtime ?? null;
@@ -1093,6 +1104,7 @@ export function SettingsLocalRuntimeScreen() {
           <EmptyState title="Not yet measured" hint="Detection runs on demand and at start-up." />
         )}
       </Section>
+      <SetupComponents />
       <Section title="Local models" aside={<span>Shown even when they cannot run — with the measured reason</span>}>
         <div className="scr-sectionlist">
           {(runtime?.models ?? []).map((m) => (
