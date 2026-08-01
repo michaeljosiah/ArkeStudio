@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DomainEvent, SetupStatus } from "@arke-studio/contracts";
 import { LocalSetupService, type SetupDeps } from "../../src/setup/local-setup.js";
-import type { CatalogueEntry } from "../../src/setup/catalogue.js";
+import { catalogueTotalMb, type CatalogueEntry } from "../../src/setup/catalogue.js";
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
 
@@ -53,6 +53,7 @@ function bytes(n: number, lead: readonly number[] = GGML_MAGIC): Uint8Array {
 
 interface FakeOpts {
   installed?: boolean;
+  listOutput?: string;
   chunks?: Uint8Array[];
   contentLength?: number | null;
   status?: number;
@@ -81,7 +82,7 @@ function deps(opts: FakeOpts = {}): SetupDeps & { calls: string[] } {
     async run(command, args) {
       calls.push(`run ${command} ${args.join(" ")}`);
       if (command.endsWith("OllamaSetup.exe")) installed = true;
-      if (command === "ollama" && args[0] === "list") return { code: 0, output: installed ? "" : "" };
+      if (command === "ollama" && args[0] === "list") return { code: 0, output: opts.listOutput ?? "" };
       return { code: opts.runCode ?? 0, output: "" };
     },
     async which(command) {
@@ -215,6 +216,62 @@ describe("fetching the local runtimes at setup", () => {
 
     await assert.rejects(readFile(orphan), "the fragment from the cancelled run is gone");
     assert.equal(last(events).components[0]!.state, "ready");
+  });
+
+  it("an offered model is never fetched unasked, and downloads when it is", async () => {
+    const appRoot = await root();
+    const events: DomainEvent[] = [];
+    const d = deps({ installed: true });
+    const offered: CatalogueEntry[] = [
+      {
+        id: "big-model",
+        displayName: "Gemma 4 · 12B",
+        purpose: "Reads images, holds a long context",
+        sizeMb: 7600,
+        optional: true,
+        spec: { kind: "pull", command: "ollama", args: ["pull", "gemma4:12b"] },
+      },
+    ];
+    const svc = new LocalSetupService(d, (e) => events.push(e), { appRoot, catalogue: offered, throttleMs: 0 });
+
+    await svc.run();
+    assert.equal(last(events).components[0]!.state, "available", "setup leaves it alone");
+    assert.ok(!d.calls.some((c) => c.includes("pull")), "nothing was pulled unasked");
+    assert.equal(catalogueTotalMb(offered), 0, "an offered model is nobody's cost until chosen");
+
+    // What the Download button does.
+    svc.retry("big-model");
+    await svc.run();
+    assert.equal(last(events).components[0]!.state, "ready");
+    assert.ok(d.calls.includes("run ollama pull gemma4:12b"));
+  });
+
+  it("tells one tag from another — gemma4:12b is not gemma4:e2b", async () => {
+    const appRoot = await root();
+    const events: DomainEvent[] = [];
+    const d = deps({
+      installed: true,
+      listOutput: ["NAME              ID    SIZE", "gemma4:e2b        abc   7.2 GB", ""].join("\n"),
+    });
+    const svc = new LocalSetupService(d, (e) => events.push(e), {
+      appRoot,
+      catalogue: [
+        {
+          id: "twelve",
+          displayName: "Gemma 4 · 12B",
+          purpose: "the twelve",
+          sizeMb: 7600,
+          spec: { kind: "pull", command: "ollama", args: ["pull", "gemma4:12b"] },
+        },
+      ],
+      throttleMs: 0,
+    });
+
+    await svc.run();
+
+    // The list holds a different gemma4; the one we want is still missing, so it was pulled.
+    assert.equal(last(events).components[0]!.state, "ready");
+    assert.ok(d.calls.includes("run ollama pull gemma4:12b"));
   });
 
   it("a skipped component is left alone, and retry puts it back", async () => {
