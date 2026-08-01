@@ -8,6 +8,9 @@ productName: Arke Studio
 # The workspace hoists electron to the repo root, so the builder cannot read an installed
 # version from this package's node_modules — pin it (keep in step with the root devDependency).
 electronVersion: 43.2.0
+# Native modules are built by scripts/rebuild-native.mjs (prebuild first, node-gyp 13 fallback);
+# the builder's own rebuild uses a node-gyp that fails against current Visual Studio.
+npmRebuild: false
 directories:
   output: release
 files:
