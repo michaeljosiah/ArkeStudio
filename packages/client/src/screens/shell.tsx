@@ -150,6 +150,18 @@ function mb(bytes: number): string {
   return m >= 1024 ? `${(m / 1024).toFixed(1)} GB` : `${Math.round(m)} MB`;
 }
 
+/**
+ * The setup reel. Kept in public/ rather than imported, so it stays a plain file the bundler
+ * copies as-is — and so the route tests, which render every screen through node's loader, do
+ * not have to know how to load an mp4. Relative, because the packaged app opens over file://.
+ */
+const SETUP_REEL = "./setup-reel.mp4";
+
+/** Has this machine asked for less movement? Server-rendered tests have no matchMedia. */
+function stillPreferred(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+}
+
 export function LaunchScreen() {
   const { connection, state } = useStore();
   const navigate = useNavigate();
@@ -209,7 +221,18 @@ export function LaunchScreen() {
       </div>
       <div className="fy-launch">
         <div className="fy-launch__reel">
-          <span className="fy-launch__mark">Arke Studio</span>
+          {/* The reel plays while the runtimes come down — the wait is the only time this
+              screen is ever seen. Muted and silent by design; a setup screen does not get to
+              make noise. Someone who has asked for less motion gets the still first frame. */}
+          <video
+            className="fy-launch__video"
+            src={SETUP_REEL}
+            autoPlay={!stillPreferred()}
+            loop
+            muted
+            playsInline
+            preload="auto"
+          />
         </div>
         <div className="fy-launch__panel">
           <div className="fy-launch__row">

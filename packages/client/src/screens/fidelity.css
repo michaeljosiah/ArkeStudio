@@ -36,6 +36,43 @@
 /* Desktop shell: native overlay window controls occupy the top-right ~140px of every bar. */
 .is-desktop .fy-titlebar { app-region: drag; }
 .is-desktop .fy-titlebar button, .is-desktop .fy-titlebar .fy-titlebar__mark { app-region: no-drag; }
+
+/*
+ * Moving the window. The native title bar is hidden (main.ts: titleBarStyle "hidden"), so the
+ * only way to drag is a CSS drag region — and a titlebar is not something every screen draws:
+ * the world picker, first run and settings have none, which left the app with nowhere to grab.
+ * This strip is the window's chrome, always present, matching the 44px the overlay buttons use.
+ *
+ * It never takes a click: `pointer-events: none` keeps hit-testing untouched, while the drag
+ * region is geometric and still counts. Nothing about the page changes visually.
+ */
+.fy-dragstrip { display: none; }
+.is-desktop .fy-dragstrip {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  pointer-events: none;
+  app-region: drag;
+}
+/*
+ * ...but a drag region is geometry, not hit-testing: a control that happens to sit in the top
+ * 44px would be *inside* the region and drag the window instead of responding. Everything the
+ * user can operate is cut back out.
+ */
+.is-desktop button,
+.is-desktop a,
+.is-desktop input,
+.is-desktop select,
+.is-desktop textarea,
+.is-desktop label,
+.is-desktop [role="button"],
+.is-desktop [role="tab"],
+.is-desktop [contenteditable="true"] {
+  app-region: no-drag;
+}
 .is-desktop .fy-titlebar__side--right { margin-right: 138px; }
 .is-desktop .fy-home-head { padding-right: 182px; }
 .fy-titlebar__side { width: 150px; display: flex; align-items: center; gap: 2px; }
@@ -1177,7 +1214,15 @@
   justify-content: center;
   animation: fy-fade-up 0.7s var(--ease-out) both;
 }
-.fy-launch__mark { font: 650 28px var(--font-sans); letter-spacing: -0.02em; color: var(--neutral-50); opacity: 0.9; }
+/* The reel fills its frame, and carries the screen on its own — no wordmark over it. */
+.fy-launch__video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 .fy-launch__panel { width: 640px; max-width: 100%; margin-top: 20px; flex: none; animation: fy-fade-up 0.8s var(--ease-out) 0.15s both; }
 .fy-launch__row { display: flex; align-items: baseline; width: 100%; gap: 10px; }
 .fy-launch__title { font: 600 13px var(--font-sans); letter-spacing: -0.01em; }
