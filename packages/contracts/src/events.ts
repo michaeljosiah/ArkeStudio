@@ -29,6 +29,30 @@ export type HealthStatus = z.infer<typeof HealthStatusSchema>;
 
 const base = { at: IsoDateTimeSchema };
 
+/**
+ * The genesis draft as the world-author agent maintains it in the sandbox's draft.json.
+ * Deliberately tolerant — every field optional, unknown keys stripped — because an agent's
+ * enthusiasm should degrade to a smaller draft, never to a parse failure.
+ */
+export const GenesisDraftSchema = z
+  .object({
+    name: z.string().min(1).max(120).optional(),
+    logline: z.string().min(1).max(500).optional(),
+    tone: z.string().min(1).max(120).optional(),
+    genre: z.string().min(1).max(120).optional(),
+    characters: z
+      .array(z.object({ name: z.string().min(1).max(120), line: z.string().min(1).max(300) }).strip())
+      .max(8)
+      .default([]),
+    locations: z
+      .array(z.object({ name: z.string().min(1).max(120), line: z.string().min(1).max(300) }).strip())
+      .max(8)
+      .default([]),
+    threads: z.array(z.string().min(1).max(300)).max(8).default([]),
+  })
+  .strip();
+export type GenesisDraft = z.infer<typeof GenesisDraftSchema>;
+
 export const DomainEventSchema = z.discriminatedUnion("type", [
   /** A world was opened into the coordinator; the follow-up snapshot carries its bundle. */
   z.object({ ...base, type: z.literal("world.opened"), worldId: UlidSchema }).strict(),
@@ -284,6 +308,39 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       proposalId: ProposalIdSchema,
       role: z.enum(["user", "gate"]),
       text: z.string().min(1),
+    })
+    .strict(),
+  /** Genesis conversation turns — before any world exists, in the sandbox (SPEC-005). */
+  z
+    .object({
+      ...base,
+      type: z.literal("genesis.turn"),
+      genesisId: z.string().min(1),
+      role: z.enum(["user", "gate"]),
+      text: z.string().min(1),
+    })
+    .strict(),
+  /** Genesis session lifecycle — endings always carry a reason. */
+  z
+    .object({
+      ...base,
+      type: z.literal("genesis.status"),
+      genesisId: z.string().min(1),
+      status: z.enum(["running", "completed", "cancelled", "timeout", "budget-exceeded", "failed"]),
+      detail: z.string().optional(),
+    })
+    .strict(),
+  /**
+   * The world-so-far, as the agent maintains it in the sandbox's draft.json after each turn.
+   * Everything here is proposed; nothing exists until "Begin in this world" walks it through
+   * the ordinary creation gates.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("genesis.draft"),
+      genesisId: z.string().min(1),
+      draft: GenesisDraftSchema,
     })
     .strict(),
 

@@ -29,5 +29,9 @@ export interface WorldProvider {
    * traversal-guarded, media extensions only. Null when the file is not servable.
    */
   serveMedia?(slug: string, relPath: string): Promise<{ path: string; contentType: string } | null>;
+  /** A sandbox directory for a genesis conversation — created on first use, world-less. */
+  genesisDir?(genesisId: string): Promise<string>;
+  /** Remove a genesis sandbox — the conversation began a world or was abandoned. */
+  discardGenesis?(genesisId: string): Promise<void>;
   close?(): Promise<void>;
 }

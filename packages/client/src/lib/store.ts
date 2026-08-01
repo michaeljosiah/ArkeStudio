@@ -70,6 +70,16 @@ interface StoreState {
   authoring: Record<string, AuthoringActivity>;
   /** Conversation over a proposal (SPEC-005): user instructions and gate replies, in order. */
   transcripts: Record<string, Array<{ role: "user" | "gate"; text: string; at: string }>>;
+  /** Genesis conversations: sandboxed world-shaping before any world exists. */
+  genesis: Record<
+    string,
+    {
+      turns: Array<{ role: "user" | "gate"; text: string; at: string }>;
+      draft: import("@arke-studio/contracts").GenesisDraft | null;
+      status: "running" | "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed" | null;
+      detail?: string;
+    }
+  >;
   permissions: Record<string, PendingPermission>;
   askResults: Record<string, AskResult>;
   canonSearches: Record<string, CanonSearchState>;
@@ -114,6 +124,7 @@ let current: StoreState = {
   gateNotices: {},
   authoring: {},
   transcripts: {},
+  genesis: {},
   permissions: {},
   askResults: {},
   canonSearches: {},
@@ -234,6 +245,7 @@ function handleFrame(json: string): void {
     let gateNotices = current.gateNotices;
     let authoring = current.authoring;
     let transcripts = current.transcripts;
+    let genesis = current.genesis;
     let permissions = current.permissions;
     const event = frame.event;
     if (event.type === "proposal.blocked") {
@@ -262,6 +274,21 @@ function handleFrame(json: string): void {
       transcripts = {
         ...transcripts,
         [event.proposalId]: [...(transcripts[event.proposalId] ?? []), { role: event.role, text: event.text, at: event.at }],
+      };
+    } else if (event.type === "genesis.turn") {
+      const g = genesis[event.genesisId] ?? { turns: [], draft: null, status: null };
+      genesis = {
+        ...genesis,
+        [event.genesisId]: { ...g, turns: [...g.turns, { role: event.role, text: event.text, at: event.at }] },
+      };
+    } else if (event.type === "genesis.draft") {
+      const g = genesis[event.genesisId] ?? { turns: [], draft: null, status: null };
+      genesis = { ...genesis, [event.genesisId]: { ...g, draft: event.draft } };
+    } else if (event.type === "genesis.status") {
+      const g = genesis[event.genesisId] ?? { turns: [], draft: null, status: null };
+      genesis = {
+        ...genesis,
+        [event.genesisId]: { ...g, status: event.status, ...(event.detail !== undefined ? { detail: event.detail } : {}) },
       };
     } else if (event.type === "authoring.status") {
       const existing = authoring[event.proposalId] ?? { status: event.status, lines: [] };
@@ -390,6 +417,7 @@ function handleFrame(json: string): void {
       gateNotices,
       authoring,
       transcripts,
+      genesis,
       permissions,
       askResults,
       canonSearches,
@@ -543,6 +571,18 @@ export function continueStudio(worldId: string, path: string, proposalId: string
 
 export function useTranscripts(): Record<string, Array<{ role: "user" | "gate"; text: string; at: string }>> {
   return useStore().transcripts;
+}
+
+export function genesisChat(genesisId: string, text: string): void {
+  send({ kind: "genesis-chat", genesisId, text });
+}
+
+export function genesisDiscard(genesisId: string): void {
+  send({ kind: "genesis-discard", genesisId });
+}
+
+export function useGenesis(): StoreState["genesis"] {
+  return useStore().genesis;
 }
 
 export function cancelAuthoring(worldId: string, proposalId: string): void {
@@ -1002,6 +1042,7 @@ export function __setStateForTest(state: ClientState): void {
     gateNotices: {},
     authoring: {},
   transcripts: {},
+  genesis: {},
     permissions: {},
     askResults: {},
     canonSearches: {},

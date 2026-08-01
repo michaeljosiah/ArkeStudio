@@ -13,10 +13,13 @@ import {
   clearCredential,
   createSheetFromSentence,
   createWorld,
+  genesisChat,
+  genesisDiscard,
   detectRuntimes,
   downloadUpdate,
   generateDiagnostics,
   openDataFolder,
+  openThread,
   openWorld,
   resolveHeldJob,
   resumeQueue,
@@ -26,6 +29,7 @@ import {
   useDiagnosticsBundle,
   useEnvCheck,
   useExports as useExportsState,
+  useGenesis,
   useReconcileReport,
   useStore,
   useUpdateStatus,
@@ -373,9 +377,38 @@ export function NewWorldScreen() {
   const [firstLocation, setFirstLocation] = useState("");
   const [submittedName, setSubmittedName] = useState<string | null>(null);
   const seededRef = useRef(false);
+  const [genMode, setGenMode] = useState<"form" | "chat">("form");
+  const modeTouchedRef = useRef(false);
+  const genesisIdRef = useRef(`gen-${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`);
+  const genesisId = genesisIdRef.current;
+  const [message, setMessage] = useState("");
+  const harnessReady = state?.app.health.harness.status === "healthy";
+  const g = useGenesis()[genesisId];
+  const turns = g?.turns ?? [];
+  const chatRunning = g?.status === "running";
+  const draft = g?.draft ?? null;
+
+  // With a healthy harness, talking is the front door (prototype 12a) — unless the author
+  // already picked the form themselves.
+  useEffect(() => {
+    if (harnessReady && !modeTouchedRef.current) setGenMode("chat");
+  }, [harnessReady]);
 
   const charSeed = parseSeed(firstCharacter);
   const locSeed = parseSeed(firstLocation);
+  const shownName = name.trim() || draft?.name?.trim() || "";
+  const shownLogline = logline.trim() || draft?.logline?.trim() || "";
+  const shownTone = tone.trim() || draft?.tone?.trim() || "";
+  const shownGenre = genre.trim() || draft?.genre?.trim() || "";
+  const draftCharacters = (draft?.characters ?? []).filter((c) => c.name !== charSeed?.name);
+  const draftLocations = (draft?.locations ?? []).filter((l) => l.name !== locSeed?.name);
+  const railCharacters = [...(charSeed ? [charSeed] : []), ...draftCharacters.map((c) => ({ name: c.name, sentence: c.line }))];
+  const railLocations = [...(locSeed ? [locSeed] : []), ...draftLocations.map((l) => ({ name: l.name, sentence: l.line }))];
+  const sendGenesis = () => {
+    if (!harnessReady || chatRunning || message.trim().length === 0) return;
+    genesisChat(genesisId, message.trim());
+    setMessage("");
+  };
 
   // The coordinator opens the new world and re-snapshots; when it lands, seed the optional
   // first sheets through the same gate everything else uses, then go there.
@@ -384,14 +417,18 @@ export function NewWorldScreen() {
     const worldId = state.world.meta.worldId;
     if (!seededRef.current) {
       seededRef.current = true;
-      if (charSeed) createSheetFromSentence(worldId, "character", charSeed.name, charSeed.sentence);
-      if (locSeed) createSheetFromSentence(worldId, "location", locSeed.name, locSeed.sentence);
+      for (const c of railCharacters.slice(0, 4)) createSheetFromSentence(worldId, "character", c.name, c.sentence);
+      for (const l of railLocations.slice(0, 4)) createSheetFromSentence(worldId, "location", l.name, l.sentence);
+      for (const t of (draft?.threads ?? []).slice(0, 4)) {
+        openThread(worldId, t.length > 80 ? `${t.slice(0, 77)}…` : t, t, []);
+      }
+      genesisDiscard(genesisId);
     }
     navigate(`/w/${worldId}`, { replace: true });
-  }, [submittedName, state?.world, navigate, charSeed, locSeed]);
+  }, [submittedName, state?.world, navigate, railCharacters, railLocations, draft, genesisId]);
 
-  const canCreate = connection === "open" && name.trim().length > 0 && submittedName === null;
-  const entries = 1 + (charSeed ? 1 : 0) + (locSeed ? 1 : 0);
+  const canCreate = connection === "open" && shownName.length > 0 && submittedName === null;
+  const entries = 1 + railCharacters.length + railLocations.length + (draft?.threads.length ?? 0);
 
   return (
     <div className="fy-app" data-screen="new-world">
@@ -401,22 +438,76 @@ export function NewWorldScreen() {
           <div className="fy-gate__head">
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-eyebrow-sm">NEW WORLD</div>
-              <h1 className="fy-story__h1">Write it down. It starts existing.</h1>
+              <h1 className="fy-story__h1">
+                {genMode === "chat" ? "Start talking. It starts existing." : "Write it down. It starts existing."}
+              </h1>
             </div>
             <span className="fy-seg" style={{ marginTop: 4 }}>
               <button
                 type="button"
-                className="fy-seg__item"
-                disabled
-                style={{ cursor: "not-allowed", opacity: 0.55 }}
-                title="Genesis chat arrives once the authoring gate speaks for worlds — the form drafts the same world"
+                className={cx("fy-seg__item", genMode === "chat" && "fy-seg__item--active")}
+                disabled={!harnessReady}
+                style={harnessReady ? undefined : { cursor: "not-allowed", opacity: 0.55 }}
+                title={harnessReady ? undefined : "Chat needs OpenCode running — the form drafts the same world"}
+                onClick={() => {
+                  modeTouchedRef.current = true;
+                  setGenMode("chat");
+                }}
               >
                 Chat
               </button>
-              <span className="fy-seg__item fy-seg__item--active">Form</span>
+              <button
+                type="button"
+                className={cx("fy-seg__item", genMode === "form" && "fy-seg__item--active")}
+                onClick={() => {
+                  modeTouchedRef.current = true;
+                  setGenMode("form");
+                }}
+              >
+                Form
+              </button>
             </span>
           </div>
           <div className="fy-gate__body" style={{ gap: 14 }}>
+            {genMode === "chat" ? (
+              <>
+                {turns.length === 0 && (
+                  <div className="fy-bubble--gate">
+                    Say what the world is — a place, a wrongness, a person standing in it. The studio shapes it with
+                    you and keeps "the world so far" on the right, all proposed, nothing locked.
+                    <div className="fy-bubble__note">everything is drafted from this thread · the world is the record, the chat is scaffolding</div>
+                  </div>
+                )}
+                {turns.map((turn, i) => (
+                  <div key={i} className={turn.role === "user" ? "fy-bubble--user" : "fy-bubble--gate"} style={{ whiteSpace: "pre-wrap" }}>
+                    {turn.text}
+                  </div>
+                ))}
+                {chatRunning && (
+                  <div className="fy-bubble--gate" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span className="fy-dot fy-dot--live" />
+                    <span className="fy-mono">shaping the draft…</span>
+                  </div>
+                )}
+                {g?.status === "failed" && g.detail && <div className="fy-mono">the last turn failed — {g.detail}</div>}
+                <div className="fy-composer" style={{ marginTop: "auto" }}>
+                  <input
+                    style={{ flex: 1, border: "none", outline: "none", background: "transparent", font: "400 13.5px var(--font-sans)", color: "inherit" }}
+                    placeholder="Keep going, or ask it to surprise you…"
+                    disabled={chatRunning}
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") sendGenesis();
+                    }}
+                  />
+                  <Button variant="primary" disabled={chatRunning || message.trim().length === 0} onClick={sendGenesis}>
+                    {chatRunning ? "Shaping…" : "Send"}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
             <div>
               <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>Name</div>
               <Input placeholder="The Undersong" value={name} onChange={(e) => setName(e.target.value)} />
@@ -489,6 +580,8 @@ export function NewWorldScreen() {
               a world is a folder under ArkeStudio\worlds — readable by hand, portable, never dependent on this app to
               exist
             </div>
+              </>
+            )}
           </div>
         </div>
         <div className="fy-gate__side">
@@ -523,33 +616,33 @@ export function NewWorldScreen() {
             <div style={{ padding: "12px 8px 0" }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
                 <div style={{ font: "650 20px var(--font-sans)", letterSpacing: "-0.02em" }}>
-                  {name.trim() || "Unnamed world"}
+                  {shownName || "Unnamed world"}
                 </div>
                 <span className="fy-mono" style={{ color: "var(--warning)", fontSize: 9.5 }}>
                   proposed
                 </span>
               </div>
               <div style={{ font: "400 12.5px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}>
-                {logline.trim() || "The logline lands here as you write it."}
+                {shownLogline || (genMode === "chat" ? "The logline lands here as you talk." : "The logline lands here as you write it.")}
               </div>
-              {(tone.trim() || genre.trim()) && (
+              {(shownTone || shownGenre) && (
                 <div style={{ display: "flex", gap: 7, marginTop: 10, flexWrap: "wrap" }}>
-                  {tone.trim() && <span className="fy-pill">tone · {tone.trim().toLowerCase()}</span>}
-                  {genre.trim() && <span className="fy-pill">{genre.trim().toLowerCase()}</span>}
+                  {shownTone && <span className="fy-pill">tone · {shownTone.toLowerCase()}</span>}
+                  {shownGenre && <span className="fy-pill">{shownGenre.toLowerCase()}</span>}
                 </div>
               )}
             </div>
           </div>
-          {(charSeed || locSeed) && (
-            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-              {charSeed && (
-                <div className="fy-draftcard" style={{ flex: 1, marginTop: 0, padding: "12px 14px" }}>
+          {(railCharacters.length > 0 || railLocations.length > 0) && (
+            <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+              {railCharacters.slice(0, 2).map((c) => (
+                <div key={c.name} className="fy-draftcard" style={{ flex: 1, minWidth: 150, marginTop: 0, padding: "12px 14px" }}>
                   <div className="fy-mono" style={{ fontSize: 10 }}>
                     CHARACTER
                   </div>
-                  <div style={{ font: "600 13.5px var(--font-sans)", marginTop: 6 }}>{charSeed.name}</div>
+                  <div style={{ font: "600 13.5px var(--font-sans)", marginTop: 6 }}>{c.name}</div>
                   <div style={{ font: "400 11.5px/1.5 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 2 }}>
-                    {charSeed.sentence}
+                    {c.sentence}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8 }}>
                     <span className="fy-dot fy-dot--sketch" style={{ width: 5, height: 5 }} />
@@ -558,15 +651,15 @@ export function NewWorldScreen() {
                     </span>
                   </div>
                 </div>
-              )}
-              {locSeed && (
-                <div className="fy-draftcard" style={{ flex: 1, marginTop: 0, padding: "12px 14px" }}>
+              ))}
+              {railLocations.slice(0, 2).map((l) => (
+                <div key={l.name} className="fy-draftcard" style={{ flex: 1, minWidth: 150, marginTop: 0, padding: "12px 14px" }}>
                   <div className="fy-mono" style={{ fontSize: 10 }}>
                     LOCATION
                   </div>
-                  <div style={{ font: "600 13.5px var(--font-sans)", marginTop: 6 }}>{locSeed.name}</div>
+                  <div style={{ font: "600 13.5px var(--font-sans)", marginTop: 6 }}>{l.name}</div>
                   <div style={{ font: "400 11.5px/1.5 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 2 }}>
-                    {locSeed.sentence}
+                    {l.sentence}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8 }}>
                     <span className="fy-dot fy-dot--sketch" style={{ width: 5, height: 5 }} />
@@ -575,7 +668,21 @@ export function NewWorldScreen() {
                     </span>
                   </div>
                 </div>
-              )}
+              ))}
+            </div>
+          )}
+          {(draft?.threads.length ?? 0) > 0 && (
+            <div className="fy-draftcard" style={{ padding: "12px 16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className="fy-dot fy-dot--warn" style={{ width: 6, height: 6 }} />
+                <span style={{ font: "600 12.5px var(--font-sans)" }}>Open threads</span>
+                <span className="fy-mono">pull one to keep going</span>
+              </div>
+              <div style={{ font: "400 12px/1.7 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 7 }}>
+                {draft!.threads.slice(0, 4).map((t, i) => (
+                  <div key={i}>{t}</div>
+                ))}
+              </div>
             </div>
           )}
           <div style={{ flex: 1, minHeight: 16 }} />
@@ -584,12 +691,12 @@ export function NewWorldScreen() {
               variant="primary"
               disabled={!canCreate}
               onClick={() => {
-                setSubmittedName(name.trim());
+                setSubmittedName(shownName);
                 createWorld({
-                  name: name.trim(),
-                  ...(logline.trim() ? { logline: logline.trim() } : {}),
-                  ...(tone.trim() ? { tone: tone.trim().toLowerCase() } : {}),
-                  ...(genre.trim() ? { genre: genre.trim().toLowerCase() } : {}),
+                  name: shownName,
+                  ...(shownLogline ? { logline: shownLogline } : {}),
+                  ...(shownTone ? { tone: shownTone.toLowerCase() } : {}),
+                  ...(shownGenre ? { genre: shownGenre.toLowerCase() } : {}),
                 });
               }}
             >

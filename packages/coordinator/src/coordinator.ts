@@ -72,6 +72,7 @@ import {
 } from "./canon/authoring.js";
 import { ChangeLog } from "./change-log.js";
 import { AuthoringService, settlePermission } from "./harness/authoring.js";
+import { GenesisService } from "./harness/genesis.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
@@ -155,6 +156,7 @@ export class Coordinator {
   private readonly worldQuery: WorldQueryServer;
   private readonly grants: GrantStore | null;
   private readonly authoring: AuthoringService | null;
+  private readonly genesis: GenesisService | null;
   /** actionClass per pending permission id, for remember-on-always (R-16). */
   private readonly pendingPermissions = new Map<string, string>();
   private started = false;
@@ -235,6 +237,12 @@ export class Coordinator {
         ? new AuthoringService(opts.adapter, (event) => this.emit(event), {
             buildConfig: opts.authoring.buildConfig,
             agentForPurpose: opts.authoring.agentForPurpose,
+          })
+        : null;
+    this.genesis =
+      opts.adapter && opts.authoring
+        ? new GenesisService(opts.adapter, (event) => this.emit(event), {
+            buildConfig: opts.authoring.buildConfig,
           })
         : null;
     this.askService = opts.authoring
@@ -734,6 +742,27 @@ export class Coordinator {
         } catch {
           this.transport.broadcastSnapshot();
         }
+        return;
+      }
+      case "genesis-chat": {
+        const failed = (detail: string) =>
+          this.emit({ at: new Date().toISOString(), type: "genesis.status", genesisId: msg.genesisId, status: "failed", detail });
+        if (!this.genesis || !this.opts.provider.genesisDir) {
+          failed("authoring is not configured");
+          return;
+        }
+        try {
+          const dir = await this.opts.provider.genesisDir(msg.genesisId);
+          // Fire and watch: turns, the draft and the final status arrive as events.
+          void this.genesis.run(dir, msg.genesisId, msg.text);
+        } catch (err) {
+          failed(err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+      case "genesis-discard": {
+        this.genesis?.release(msg.genesisId);
+        await this.opts.provider.discardGenesis?.(msg.genesisId)?.catch(() => {});
         return;
       }
       case "authoring-cancel": {
