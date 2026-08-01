@@ -32,8 +32,8 @@ export {
   tileRequest,
   type TileRequest,
 } from "./references/generate.js";
+export { attachmentFor, type AttachmentDecision } from "@arke-studio/contracts";
 export {
-  attachmentFor,
   chooseAnchor,
   compileGrid,
   designate,
@@ -44,7 +44,6 @@ export {
   readKit,
   setStyleOverride,
   supersedeTile,
-  type AttachmentDecision,
   type GridResult,
 } from "./references/kit.js";
 export { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "./references/png.js";
@@ -56,6 +55,19 @@ export {
   type SidecarLike,
   type VoiceServiceDeps,
 } from "./voice/service.js";
+export {
+  compileBoard,
+  composeDispatches,
+  createChapter,
+  createProduction,
+  draftSceneSkeleton,
+  exportBoard,
+  landBoard,
+  reorderChapters,
+  saveChapter,
+  setPromptOverride,
+  type SceneDraft,
+} from "./productions/ops.js";
 export { FrontmatterError, parseFrontmatter, splitSections, type BodySection } from "./frontmatter.js";
 export { ReadModel } from "./read-model.js";
 export {

@@ -262,35 +262,8 @@ export async function landGrid(store: WorldStore, sheet: Sheet, result: GridResu
   });
 }
 
-// ---------------------------------------------------------------------------
-// Attachment (R-14): what a dispatch citing this sheet actually carries
-// ---------------------------------------------------------------------------
-
-export interface AttachmentDecision {
-  sheetId: string;
-  /** World-relative file to attach, or null when nothing rides. */
-  file: string | null;
-  /** "sketch-citation" when no compilation exists (R-14). */
-  mode: "designated" | "sketch-citation";
-  /** Named gap when the designation predates the sheet (D10), e.g. "model sheet is v4; sheet is at v5". */
-  staleGap: string | null;
-}
-
-/** Resolve what rides along for one sheet — every dispatch path calls this one function (D8). */
-export function attachmentFor(kit: ReferenceKit | null, sheet: Sheet): AttachmentDecision {
-  const designated = kit ? designatedCompilation(kit) : null;
-  if (!kit || !designated) {
-    return { sheetId: sheet.id, file: null, mode: "sketch-citation", staleGap: null };
-  }
-  const stale = compilationIsStale(kit, designated, sheet.version);
-  return {
-    sheetId: sheet.id,
-    file: `references/${sheet.id}/${designated.file}`,
-    mode: "designated",
-    // Attached anyway, gap named, recompiling offered (D10) — never silently dropped.
-    staleGap: stale ? `model sheet is v${designated.sheetVersion}; ${sheet.name} is at v${sheet.version}` : null,
-  };
-}
+// The attachment resolver moved to @arke-studio/contracts (SPEC-012 planning shares it with
+// the renderer); `attachmentFor` re-exports from there via the barrel.
 
 /** The head-before-body report (R-7, D5) plus batch-missing summary (R-18), for the surface. */
 export function kitReport(kit: ReferenceKit | null): {

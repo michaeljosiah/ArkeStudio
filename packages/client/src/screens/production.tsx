@@ -1,14 +1,29 @@
 import { useMemo, useState } from "react";
 import { NavLink, Outlet, useNavigate, useParams } from "react-router";
+import {
+  assemblePrompt,
+  modelCapabilityCopy,
+  overrideStaleAgainst,
+  planScene,
+  promptFor,
+  type Shot,
+} from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, PageHeader, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, TabPanels, Textarea, cx } from "../components/ui.js";
 import { CanonEntryRow, ShotCard, TakeStrip } from "../domain/domain.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
+import {
+  compileSceneBoard,
+  dispatchScene,
+  draftScene,
+  exportSceneBoard,
+  recordReview,
+  setPromptOverride,
+  useStore,
+} from "../lib/store.js";
 
 /** Production screens (§2.9): dashboard, story, scenes, generate, cut, audio, exports, stills. */
-
-const DISPATCH_NOT_YET = "Dispatch arrives with SPEC-009 — providers, queue and cost live there.";
 
 export function ProductionLayout() {
   const { worldId, prodId } = useParams();
@@ -311,20 +326,47 @@ export function SceneDetailScreen() {
           {
             id: "board",
             label: scene.board ? `Board · v${scene.board.version}` : "Board",
-            content: scene.board ? (
+            content: (
               <div className="scr-board">
-                <div className="scr-board__image">{scene.board.image}</div>
-                <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>
-                  <span style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>
-                    compiled {scene.board.compiledAt} · in step with scene v{scene.version}
-                  </span>
-                  <Button disabled title="Board compilation arrives with SPEC-012">
-                    Recompile
+                {scene.board ? (
+                  <>
+                    <div className="scr-board__image">{scene.board.image}</div>
+                    <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>
+                      {scene.board.version < scene.version ? (
+                        <Badge tone="warning">
+                          stale — compiled from v{scene.board.version}, scene is at v{scene.version}
+                        </Badge>
+                      ) : (
+                        <span style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>
+                          compiled {scene.board.compiledAt} · in step with scene v{scene.version}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <EmptyState title="No board yet" hint="A board compiles from the scene at a point in time." />
+                )}
+                <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                  <Button
+                    onClick={() => {
+                      if (worldId && prodId)
+                        compileSceneBoard(worldId, prodId, `${String(scene.number).padStart(2, "0")}-${scene.slug}`);
+                    }}
+                  >
+                    Recompile · free, local
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={!scene.board}
+                    onClick={() => {
+                      if (worldId && prodId)
+                        exportSceneBoard(worldId, prodId, `${String(scene.number).padStart(2, "0")}-${scene.slug}`);
+                    }}
+                  >
+                    Export sheet · PNG → artifacts
                   </Button>
                 </div>
               </div>
-            ) : (
-              <EmptyState title="No board yet" hint="A board compiles from the scene at a point in time (SPEC-012)." />
             ),
           },
         ]}
@@ -334,6 +376,9 @@ export function SceneDetailScreen() {
 }
 
 export function NewSceneScreen() {
+  const { worldId, prodId } = useParams();
+  const navigate = useNavigate();
+  const [brief, setBrief] = useState("");
   return (
     <Screen id="new-scene">
       <PageHeader title="New scene" />
@@ -341,13 +386,27 @@ export function NewSceneScreen() {
       <div className="scr-form">
         <div className="scr-field">
           <label className="scr-field__label">What happens</label>
-          <Textarea placeholder="Maren takes the dusk watch alone; the verse rises a season early…" />
+          <Textarea
+            placeholder="Maren takes the dusk watch alone; the verse rises a season early…"
+            value={brief}
+            onChange={(e) => setBrief(e.target.value)}
+          />
           <span className="scr-field__hint">
             Mention cast with @name — shots compute their cast from live references, never guesses.
+            The draft arrives as a proposal; accepting it creates the shots and dispatches nothing.
           </span>
         </div>
         <div>
-          <Button variant="primary" disabled title="Scene drafting arrives with SPEC-012">
+          <Button
+            variant="primary"
+            disabled={brief.trim().length === 0}
+            onClick={() => {
+              if (worldId && prodId) {
+                draftScene(worldId, prodId, brief.trim());
+                navigate(`/w/${worldId}/p/${prodId}`);
+              }
+            }}
+          >
             Draft scene
           </Button>
         </div>
@@ -360,7 +419,7 @@ export function NewSceneScreen() {
 
 export function GenerateScreen() {
   const { worldId, prodId } = useParams();
-  const { production } = useProduction(worldId, prodId);
+  const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const shots = production?.scenes.flatMap((s) => s.shots) ?? [];
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
@@ -409,72 +468,221 @@ export function GenerateScreen() {
       <Section title="Takes" aside={<span>what came back, and what you decided</span>}>
         <TakeStrip takes={takes} decisions={decisions} selectedTakeId={selected} />
       </Section>
-      <Section title="Prompt" aside={<span>assembled from the world; edits stay on the shot</span>}>
-        <Textarea
-          defaultValue={takes[takes.length - 1]?.prompt ?? shot?.description ?? ""}
-          key={shotId}
-        />
-        <div style={{ display: "flex", gap: "var(--space-2)" }}>
-          <Button disabled title={DISPATCH_NOT_YET}>Reset to assembled</Button>
-        </div>
-      </Section>
+      {shot && production && world && (
+        <PromptPanel world={world} production={production} shot={shot} worldId={worldId!} prodId={prodId!} />
+      )}
     </Screen>
+  );
+}
+
+function PromptPanel({
+  world,
+  production,
+  shot,
+  worldId,
+  prodId,
+}: {
+  world: NonNullable<ReturnType<typeof useProduction>["world"]>;
+  production: NonNullable<ReturnType<typeof useProduction>["production"]>;
+  shot: Shot;
+  worldId: string;
+  prodId: string;
+}) {
+  const scene = production.scenes.find((s) => s.shots.some((x) => x.id === shot.id))!;
+  const sceneFile = `${String(scene.number).padStart(2, "0")}-${scene.slug}`;
+  const assembled = assemblePrompt(world.meta, world.sheets, scene, shot);
+  const current = promptFor(world.meta, world.sheets, scene, shot);
+  const stale = overrideStaleAgainst(shot, world.sheets);
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? current.text;
+  return (
+    <Section
+      title="Prompt"
+      aside={
+        current.overridden ? (
+          <Badge tone="warning">overridden — edits stay on this shot; the canon doesn't change</Badge>
+        ) : (
+          <span>assembled from the world; edits stay on the shot</span>
+        )
+      }
+    >
+      {stale.length > 0 && (
+        <Callout tone="warning" title="This override no longer reflects the world">
+          {stale.map((s) => `${s.sheetId} moved v${s.from} → v${s.to}`).join(" · ")} — the assembled prompt
+          would pick that up; this override will not.
+        </Callout>
+      )}
+      <Textarea key={shot.id} value={value} onChange={(e) => setDraft(e.target.value)} />
+      <div style={{ display: "flex", gap: "var(--space-2)" }}>
+        <Button
+          disabled={value.trim() === assembled || value.trim().length === 0}
+          onClick={() => {
+            setPromptOverride(worldId, prodId, sceneFile, shot.id, value.trim());
+            setDraft(null);
+          }}
+        >
+          Save as override
+        </Button>
+        <Button
+          variant="ghost"
+          disabled={!current.overridden && draft === null}
+          onClick={() => {
+            setPromptOverride(worldId, prodId, sceneFile, shot.id, null);
+            setDraft(null);
+          }}
+        >
+          Reset to assembled
+        </Button>
+      </div>
+    </Section>
   );
 }
 
 export function DispatchDialogScreen() {
   const { worldId, prodId } = useParams();
-  const { production } = useProduction(worldId, prodId);
+  const { world, production } = useProduction(worldId, prodId);
+  const { state } = useStore();
   const navigate = useNavigate();
-  const scene = production?.scenes[0];
-  const total = scene?.shots.reduce((s, x) => s + (x.durationSec ?? 0), 0) ?? 0;
-  const perShotEstimate = (scene?.shots.length ?? 0) * 130_000;
-  const CAP_SEC = 15;
-  const passes = Math.max(1, Math.ceil(total / CAP_SEC));
+  const manifest = state?.app.manifest ?? null;
+  const routing = state?.app.routing.defaults ?? {};
+  const capability = production?.meta.format === "stills" ? "image" : "video";
+  const models = (manifest?.models ?? []).filter((m) => m.capability === capability);
+  const [sceneIdx, setSceneIdx] = useState(0);
+  const [modelId, setModelId] = useState<string | null>(null);
+  const scene = production?.scenes[sceneIdx] ?? null;
+  const model = models.find((m) => m.id === (modelId ?? routing[capability])) ?? models[0] ?? null;
+
+  // The whole plan, computed live from the world — the same function the coordinator executes.
+  const plans = useMemo(() => {
+    if (!world || !production || !scene || !model) return null;
+    const input = {
+      world: world.meta,
+      sheets: world.sheets,
+      kits: world.referenceKits,
+      scene,
+      selections: production.selections,
+      model,
+    };
+    return { perShot: planScene(input, "per-shot"), wholeScene: planScene(input, "whole-scene") };
+  }, [world, production, scene, model]);
+
+  const sceneFile = scene ? `${String(scene.number).padStart(2, "0")}-${scene.slug}` : null;
+  const warnings = plans?.perShot.warnings ?? null;
+  const warningRows: Array<{ key: string; text: string }> = [];
+  if (warnings) {
+    for (const s of warnings.shotsWithoutFrame) warningRows.push({ key: `nf-${s.shotId}`, text: `shot ${s.number} has no accepted frame` });
+    for (const name of warnings.sketchCitations) warningRows.push({ key: `sk-${name}`, text: `${name} is a sketch — dispatch cites an unlocked sheet` });
+    for (const d of warnings.droppedReferences) warningRows.push({ key: `dr-${d.sheetId}`, text: `${d.sheetId}'s reference is dropped — over the model's cap` });
+    for (const g of warnings.staleModelSheets) warningRows.push({ key: `st-${g}`, text: g });
+    for (const name of warnings.retiredCitations) warningRows.push({ key: `re-${name}`, text: `${name} is retired and still cited here` });
+    for (const u of warnings.unknownMentions) warningRows.push({ key: `un-${u}`, text: `@${u} resolves to nothing — check the description` });
+    for (const o of warnings.overriddenStale)
+      warningRows.push({
+        key: `ov-${o.shotId}`,
+        text: `shot ${o.number}'s prompt is overridden and ${o.against.map((a) => `${a.sheetId} moved v${a.from}→v${a.to}`).join(", ")} — the override will not pick that up`,
+      });
+  }
+
   return (
     <Screen id="dispatch-dialog">
       <div className="scr-dialogcard">
         <PageHeader
           title="Dispatch"
-          meta={scene && <span>{scene.title} · {scene.shots.length} shots · {seconds(total)}</span>}
+          meta={
+            scene && (
+              <span>
+                {scene.title} · {scene.shots.length} shots · {seconds(scene.shots.reduce((s, x) => s + (x.durationSec ?? 4), 0))}
+              </span>
+            )
+          }
           actions={<Button variant="ghost" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>Close</Button>}
         />
-        <div className="scr-tradegrid">
-          <Card className="scr-worldcard">
-            <div className="scr-worldcard__name">Per shot</div>
-            <div className="scr-worldcard__logline">
-              One clip per shot, each seeded by its own frame. Any shot retries alone; cast stays
-              pinned per shot.
-            </div>
-            <div className="scr-worldcard__counts">
-              <span>est. {usd(perShotEstimate)}</span>
-            </div>
-          </Card>
-          <Card className="scr-worldcard">
-            <div className="scr-worldcard__name">Whole scene</div>
-            <div className="scr-worldcard__logline">
-              One pass from the compiled brief — best motion continuity, but a retry re-runs the
-              pass.
-            </div>
-            <div className="scr-worldcard__counts">
-              <span>
-                {seconds(total)} over the {CAP_SEC}s cap · packs into {passes} passes
-              </span>
-            </div>
-          </Card>
+        <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+          {(production?.scenes ?? []).map((s, i) => (
+            <Button key={s.id} variant={i === sceneIdx ? "primary" : "secondary"} onClick={() => setSceneIdx(i)}>
+              {s.title}
+            </Button>
+          ))}
+          <span style={{ marginLeft: "auto" }} />
+          {models.map((m) => (
+            <Button key={m.id} variant={m.id === model?.id ? "primary" : "ghost"} onClick={() => setModelId(m.id)}>
+              {m.displayName} · {modelCapabilityCopy(m)}
+            </Button>
+          ))}
         </div>
-        <Callout title="Estimates come from the manifest">
-          Pre-dispatch numbers never need a provider round-trip (R-PROV-4). Live dispatch, the
-          queue and reconciliation arrive with SPEC-009.
-        </Callout>
-        <div style={{ display: "flex", gap: "var(--space-2)" }}>
-          <Button variant="primary" disabled title={DISPATCH_NOT_YET}>
-            Dispatch
-          </Button>
-          <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
-            Cancel
-          </Button>
-        </div>
+        {warningRows.length > 0 ? (
+          <Callout tone="warning" title={`${warningRows.length} thing${warningRows.length === 1 ? "" : "s"} worth knowing — none blocks`}>
+            <ul style={{ margin: 0, paddingLeft: "1.2em" }}>
+              {warningRows.map((w) => (
+                <li key={w.key}>{w.text}</li>
+              ))}
+            </ul>
+          </Callout>
+        ) : (
+          plans && <Callout title="Clean dispatch">Every cited sheet is locked and current; every reference rides.</Callout>
+        )}
+        {plans && (
+          <div className="scr-tradegrid">
+            <Card className="scr-worldcard">
+              <div className="scr-worldcard__name">Per shot</div>
+              <div className="scr-worldcard__logline">
+                One clip per shot, each seeded by its own frame. Any shot retries alone; cast stays pinned per shot.
+              </div>
+              <div className="scr-worldcard__counts">
+                <span>est. {usd(plans.perShot.totalEstimatedMicroUsd)}</span>
+              </div>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  if (worldId && prodId && sceneFile && model) {
+                    dispatchScene(worldId, prodId, sceneFile, "per-shot", model.id);
+                    navigate(`/w/${worldId}/p/${prodId}/generate`);
+                  }
+                }}
+              >
+                Dispatch per shot · {usd(plans.perShot.totalEstimatedMicroUsd)}
+              </Button>
+            </Card>
+            <Card className="scr-worldcard">
+              <div className="scr-worldcard__name">Whole scene</div>
+              <div className="scr-worldcard__logline">
+                Best motion continuity — but a retry re-runs its whole pass.
+              </div>
+              {plans.wholeScene.pack.ok ? (
+                <>
+                  <div className="scr-worldcard__counts">
+                    <span>
+                      {plans.wholeScene.pack.passes.length} pass{plans.wholeScene.pack.passes.length === 1 ? "" : "es"} under the {model!.limits.maxDurationSec ?? "∞"}s cap
+                    </span>
+                  </div>
+                  {plans.wholeScene.pack.passes.map((p) => (
+                    <div key={p.index} className="scr-worldcard__counts">
+                      <span>
+                        pass {p.index} · {seconds(p.durationSec)} · shots {p.plan.map((e) => e.number).join(", ")}
+                      </span>
+                    </div>
+                  ))}
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      if (worldId && prodId && sceneFile && model) {
+                        dispatchScene(worldId, prodId, sceneFile, "whole-scene", model.id);
+                        navigate(`/w/${worldId}/p/${prodId}/generate`);
+                      }
+                    }}
+                  >
+                    Dispatch whole scene · {usd(plans.wholeScene.totalEstimatedMicroUsd)}
+                  </Button>
+                </>
+              ) : (
+                <Callout tone="warning" title="Whole-scene unavailable">
+                  shot {plans.wholeScene.pack.oversizeShot.number} runs {plans.wholeScene.pack.oversizeShot.durationSec}s —
+                  longer than the {plans.wholeScene.pack.oversizeShot.capSec}s cap, and half a shot cannot be reviewed.
+                </Callout>
+              )}
+            </Card>
+          </div>
+        )}
       </div>
     </Screen>
   );
@@ -620,11 +828,50 @@ export function StillsScreen() {
   const decisions = production ? takeDecisions(production) : {};
   return (
     <Screen id="stills-contact-sheet">
-      <PageHeader title="Stills" meta={<span>{stills.length} frames on the contact sheet</span>} />
+      <PageHeader
+        title="Stills"
+        meta={<span>{stills.length} frames on the contact sheet — judged as a set, accepted one at a time</span>}
+      />
       {stills.length === 0 ? (
         <EmptyState title="No stills yet" hint="Frames and stills land here as they are generated." />
       ) : (
-        <TakeStrip takes={stills} decisions={decisions} />
+        <div className="lay-cardgrid">
+          {stills.map((take) => {
+            const decision = decisions[take.id];
+            const shotId = take.coversShots[0];
+            return (
+              <Card key={take.id} className="scr-worldcard">
+                <span className="mono" style={{ fontSize: "var(--text-xs)" }}>
+                  {take.media ?? take.id}
+                </span>
+                <div className="scr-worldcard__counts">
+                  <span>{shotId ?? "unassigned"}</span>
+                  {decision && decision !== "pending" && (
+                    <Badge tone={decision === "accepted" ? "success" : "outline"}>{decision}</Badge>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                  <Button
+                    variant={decision === "accepted" ? "primary" : "ghost"}
+                    onClick={() => {
+                      if (worldId && prodId) recordReview(worldId, prodId, take.id, "accept", shotId);
+                    }}
+                  >
+                    Accept
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      if (worldId && prodId) recordReview(worldId, prodId, take.id, "reject", shotId);
+                    }}
+                  >
+                    Reject
+                  </Button>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
       )}
     </Screen>
   );

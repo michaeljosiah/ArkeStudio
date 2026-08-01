@@ -10,7 +10,9 @@ import {
   type HarnessAdapter,
   type HealthComponent,
   gateLocalRuntimes,
+  planScene,
   previewLineFor,
+  SceneSchema,
   type Job,
   type LedgerEntry,
   type ModelManifest,
@@ -23,6 +25,18 @@ import { AppSettingsFile, routingFaults } from "./app-settings.js";
 import { AskService } from "./canon/ask.js";
 import { CredentialStore, type Cipher } from "./credentials/store.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
+import {
+  compileBoard,
+  composeDispatches,
+  createChapter,
+  createProduction,
+  draftSceneSkeleton,
+  exportBoard,
+  landBoard,
+  reorderChapters,
+  saveChapter,
+  setPromptOverride,
+} from "./productions/ops.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "./queue/dispatcher.js";
 import { previewCacheFile, VoiceService, type CloudVoiceSource, type SidecarLike } from "./voice/service.js";
@@ -915,6 +929,205 @@ export class Coordinator {
           at: new Date().toISOString(),
           type: "spend.status",
           spend: evaluateSpend(entries, settings.spend, new Date()),
+        });
+        return;
+      }
+      case "create-production": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        try {
+          await createProduction(store, {
+            title: msg.title,
+            format: msg.format,
+            ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "draft-scene": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        try {
+          const draft = await draftSceneSkeleton(store, gate, { productionId: msg.productionId, brief: msg.brief });
+          this.emit({ at: new Date().toISOString(), type: "proposal.staged", worldId: msg.worldId, proposalId: draft.proposalId });
+          await this.refreshWorldSnapshot(msg.worldId);
+          if (this.authoring && this.opts.adapter?.readiness().ready) {
+            const worldQueryUrl = await this.worldQuery.start();
+            void this.authoring
+              .run(store, gate, {
+                worldId: msg.worldId,
+                proposalId: draft.proposalId,
+                purpose: "authoring",
+                instruction: draft.instruction,
+              }, worldQueryUrl)
+              .then(() => this.refreshWorldSnapshot(msg.worldId));
+          }
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "stage-scene-edit": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        try {
+          const scene = SceneSchema.parse(msg.scene);
+          await gate.stage({
+            kind: "scene-edit",
+            summary: msg.summary,
+            source: "form",
+            targets: [
+              {
+                path: `productions/${msg.productionId}/scenes/${msg.sceneFile}.json`,
+                content: JSON.stringify(scene, null, 2) + "\n",
+              },
+            ],
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "create-chapter": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await createChapter(store, msg.productionId, { title: msg.title, order: msg.order }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "save-chapter": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await saveChapter(store, msg.productionId, msg.chapterFile, msg.body).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "draft-chapter": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store || !this.authoring || !this.opts.adapter?.readiness().ready) return;
+        try {
+          const path = `productions/${msg.productionId}/chapters/${msg.chapterFile}.md`;
+          const staged = await gate.stage({ kind: "chapter-draft", summary: `Draft: ${msg.chapterFile}`, source: "chat:studio", targets: [{ path }] });
+          this.emit({ at: new Date().toISOString(), type: "proposal.staged", worldId: msg.worldId, proposalId: staged.id });
+          const worldQueryUrl = await this.worldQuery.start();
+          void this.authoring
+            .run(store, gate, {
+              worldId: msg.worldId,
+              proposalId: staged.id,
+              purpose: "drafting",
+              instruction: `Draft the chapter prose in ${path}. ${msg.instruction}. Anything the prose implies about the world — a new name, a rule, a place — must NOT be written into world files; list such facts at the end of the chapter under a "## Surfaced facts" heading for separate proposal.`,
+            }, worldQueryUrl)
+            .then(() => this.refreshWorldSnapshot(msg.worldId));
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "reorder-chapters": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await reorderChapters(store, msg.productionId, msg.orderedFiles).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "set-prompt-override": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await setPromptOverride(store, store.getBundle(), {
+          productionId: msg.productionId,
+          sceneFile: msg.sceneFile,
+          shotId: msg.shotId,
+          text: msg.text,
+        }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "compile-scene-board":
+      case "export-scene-board": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const bundle = store.getBundle();
+        const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
+        const scene = production?.scenes.find((s) => `${String(s.number).padStart(2, "0")}-${s.slug}` === msg.sceneFile);
+        if (!production || !scene) return;
+        try {
+          const png = await compileBoard(store, production, scene);
+          if (msg.kind === "compile-scene-board") {
+            await landBoard(store, msg.productionId, msg.sceneFile, png, () => new Date().toISOString());
+          } else {
+            await exportBoard(store, msg.productionId, scene, png, () => new Date().toISOString());
+          }
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch (err) {
+          void this.appLog?.append({
+            kind: "board.failed",
+            sceneFile: msg.sceneFile,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+      case "dispatch-scene": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.jobQueue || !this.opts.manifest) return;
+        const bundle = store.getBundle();
+        const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
+        const scene = production?.scenes.find((s) => `${String(s.number).padStart(2, "0")}-${s.slug}` === msg.sceneFile);
+        const model = this.opts.manifest.models.find((m) => m.id === msg.modelId);
+        if (!production || !scene || !model) return;
+        // Recompute the plan server-side — the request the dialog showed is the one executed.
+        const plan = planScene(
+          {
+            world: bundle.meta,
+            sheets: bundle.sheets,
+            kits: bundle.referenceKits,
+            scene,
+            selections: production.selections,
+            model,
+            ...(msg.resolution !== undefined ? { resolution: msg.resolution } : {}),
+          },
+          msg.mode,
+        );
+        if (msg.mode === "whole-scene" && !plan.pack.ok) {
+          void this.appLog?.append({ kind: "dispatch.refused", reason: "oversize shot", detail: plan.pack });
+          return;
+        }
+        for (const input of composeDispatches(msg.worldId, msg.productionId, scene, plan, model, bundle)) {
+          await this.jobQueue.enqueue(input).catch(() => {});
+        }
+        return;
+      }
+      case "record-review": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const review = {
+          ts: new Date().toISOString(),
+          takeId: msg.takeId,
+          ...(msg.shotId !== undefined ? { shotId: msg.shotId } : {}),
+          decision: msg.decision,
+          by: "user",
+          ...(msg.citation !== undefined ? { citation: msg.citation } : {}),
+        };
+        await store
+          .gateOp(async () => {
+            const path = join(store.dir, "productions", msg.productionId, "reviews.jsonl");
+            const { appendFile } = await import("node:fs/promises");
+            await appendFile(toExtendedLength(path), JSON.stringify(review) + "\n", "utf8");
+          })
+          .catch(() => {});
+        this.emit({
+          at: new Date().toISOString(),
+          type: "review.recorded",
+          worldId: msg.worldId,
+          productionId: msg.productionId,
+          review: review as never,
         });
         return;
       }
