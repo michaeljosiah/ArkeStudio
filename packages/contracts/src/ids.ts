@@ -14,7 +14,7 @@ const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 /** 26-char Crockford base32 ULID: 48-bit timestamp + 80-bit randomness. */
 export function ulid(now: number = Date.now()): string {
   let time = now;
-  const chars = new Array<string>(26);
+  const chars = Array.from<string>({ length: 26 });
   for (let i = 9; i >= 0; i--) {
     chars[i] = CROCKFORD[time % 32]!;
     time = Math.floor(time / 32);

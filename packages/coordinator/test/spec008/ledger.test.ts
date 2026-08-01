@@ -84,7 +84,7 @@ describe("the ledger file (R-16, R-17, §3.2)", () => {
   it("foreign lines are skipped by the tolerant reader, never fatal", async () => {
     const dir = await tempDir("arke-ledger-");
     const path = join(dir, "ledger.jsonl");
-    await writeFile(path, JSON.stringify(entry({})) + "\n" + '{"not":"a ledger entry"}' + "\n", "utf8");
+    await writeFile(path, `${JSON.stringify(entry({}))}\n{"not":"a ledger entry"}\n`, "utf8");
     await appendFile(path, JSON.stringify(entry({ outcome: "failed" })) + "\n", "utf8");
     assert.equal((await new LedgerFile(path).readAll()).length, 2);
   });

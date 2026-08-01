@@ -1,0 +1,73 @@
+# Cuts a version. Push a tag like v0.2.0 and this builds the installers, writes the update
+# metadata (latest.yml) that installed copies read, and stages a DRAFT GitHub Release holding
+# both. Nothing reaches an installed app until a human publishes that draft.
+#
+# The difference from package.yml: that one hands you an installer to test, on any branch, with
+# no update metadata and no release. This one is the published channel.
+#
+# Unsigned, for now. Signing needs WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD (electron-builder.yml
+# §2.7) on a machine trusted with the certificate. Until then every install and every update
+# shows a SmartScreen warning — auto-update still works, it just cannot prove who built it.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build (e.g. v0.2.0)"
+        required: true
+
+permissions:
+  contents: write # creating the draft release and uploading its assets
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      # A tag that disagrees with the version in package.json ships a build that lies about
+      # itself, and electron-updater compares versions — so stop here rather than release it.
+      - name: The tag and the version must agree
+        shell: bash
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          version=$(node -p "require('./apps/desktop/package.json').version")
+          if [ "$tag" != "v$version" ]; then
+            echo "::error::tag $tag does not match apps/desktop/package.json version $version"
+            exit 1
+          fi
+          echo "releasing $tag"
+
+      - run: npm ci
+
+      - name: Build the workspaces
+        run: npm run build
+
+      # --publish always: uploads the installers, the blockmaps and latest.yml to a draft
+      # release for this tag, creating it if it does not exist.
+      - name: Package and stage the draft release
+        run: npm run release --workspace @arke-studio/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # A copy that outlives the draft, so a botched release can still be inspected.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ArkeStudio-${{ inputs.tag || github.ref_name }}
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest*.yml
+          if-no-files-found: error
+          retention-days: 30

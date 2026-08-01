@@ -64,7 +64,7 @@ export function buildSheetContent(input: {
       id: input.id,
       type: input.type,
       name: input.name,
-      ...(input.extra ?? {}),
+      ...input.extra,
       version: 1, // the committer stamps the real version
       status: input.status,
       canonRules: [],

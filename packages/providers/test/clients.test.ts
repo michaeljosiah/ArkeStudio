@@ -109,7 +109,7 @@ describe("fal submit/poll round-trip carries the endpoint in the remote id", () 
     const seen: string[] = [];
     const fetchImpl: FetchLike = async (url) => {
       seen.push(url);
-      if (/\/status$/.test(url)) return new Response(JSON.stringify({ status: "IN_PROGRESS" }), { status: 200 });
+      if (url.endsWith("/status")) return new Response(JSON.stringify({ status: "IN_PROGRESS" }), { status: 200 });
       return new Response(JSON.stringify({ request_id: "req-9" }), { status: 200 });
     };
     const client = new FalClient(fetchImpl);

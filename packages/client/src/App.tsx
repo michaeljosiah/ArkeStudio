@@ -54,7 +54,12 @@ import { Navigate } from "react-router";
 
 export function App() {
   return (
-    <Routes>
+    <>
+      {/* The window has no native title bar to grab, so the top 44px is the app's own chrome
+          on every screen — not only the ones that happen to draw a titlebar. Invisible, takes
+          no clicks, contributes nothing but geometry. */}
+      <div className="fy-dragstrip" aria-hidden="true" />
+      <Routes>
       <Route path="/" element={<LaunchScreen />} />
 
       <Route element={<ShellChrome />}>
@@ -111,6 +116,7 @@ export function App() {
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </>
   );
 }

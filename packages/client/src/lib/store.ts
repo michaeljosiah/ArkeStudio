@@ -471,14 +471,14 @@ function devBridge(url: string): ArkeBridge {
         return;
       onStatus?.("connecting");
       socket = new WebSocket(url);
-      socket.onopen = () => onStatus?.("open");
-      socket.onclose = () => {
+      socket.addEventListener("open", () => onStatus?.("open"));
+      socket.addEventListener("close", () => {
         socket = null;
         onStatus?.("closed");
-      };
-      socket.onmessage = (e) => {
+      });
+      socket.addEventListener("message", (e) => {
         if (typeof e.data === "string") onFrame?.(e.data);
-      };
+      });
     },
     send(json) {
       if (socket?.readyState === WebSocket.OPEN) socket.send(json);

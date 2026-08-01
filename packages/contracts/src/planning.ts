@@ -1,6 +1,6 @@
 import { compilationIsStale, designatedCompilation, type ReferenceKit } from "./reference.js";
 import { referenceBudget, type BudgetCandidate, type BudgetResult } from "./reference-budget.js";
-import { estimateMicroUsd, passesForDuration, type ManifestModel } from "./manifest.js";
+import { estimateMicroUsd, type ManifestModel } from "./manifest.js";
 import type { Scene, Shot } from "./scene.js";
 import type { Selections } from "./scene.js";
 import type { Sheet, WorldMeta } from "./world.js";

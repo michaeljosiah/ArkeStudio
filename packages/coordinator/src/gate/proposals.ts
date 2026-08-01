@@ -9,7 +9,6 @@ import {
   type ProposalConflict,
   type RippleItem,
   type RipplePreview,
-  type WorldBundle,
 } from "@arke-studio/contracts";
 import { ripplesForCanonEntry, ripplesForSheet } from "../index-db/queries.js";
 import { atomicWriteFile } from "../world/atomic.js";

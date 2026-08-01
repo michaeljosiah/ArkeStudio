@@ -45,18 +45,18 @@ const bridge = {
     }
     notifyStatus("connecting");
     socket = new WebSocket(wsUrl);
-    socket.onopen = () => notifyStatus("open");
-    socket.onclose = () => {
+    socket.addEventListener("open", () => notifyStatus("open"));
+    socket.addEventListener("close", () => {
       socket = null;
       notifyStatus("closed");
-    };
-    socket.onerror = () => {
+    });
+    socket.addEventListener("error", () => {
       /* close follows */
-    };
-    socket.onmessage = (e) => {
+    });
+    socket.addEventListener("message", (e) => {
       const data = typeof e.data === "string" ? e.data : "";
       for (const l of frameListeners) l(data);
-    };
+    });
   },
 
   send(json: string): void {

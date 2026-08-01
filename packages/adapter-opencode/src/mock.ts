@@ -108,30 +108,29 @@ export class MockHarnessAdapter implements HarnessAdapter {
     // Eager registration — see OpenCodeAdapter.streamEvents for why.
     const sub: { queue: HarnessEvent[]; wake: (() => void) | null } = { queue: [], wake: null };
     this.subscribers.add(sub);
-    const adapter = this;
+    const { subscribers } = this;
+    const live = () => !this.disposed;
     return {
-      [Symbol.asyncIterator]() {
-        return (async function* () {
-          try {
-            while (!adapter.disposed && !signal?.aborted) {
-              const next = sub.queue.shift();
-              if (next) {
-                yield next;
-                continue;
-              }
-              await new Promise<void>((resolve) => {
-                const onAbort = () => resolve();
-                signal?.addEventListener("abort", onAbort, { once: true });
-                sub.wake = () => {
-                  signal?.removeEventListener("abort", onAbort);
-                  resolve();
-                };
-              });
+      async *[Symbol.asyncIterator]() {
+        try {
+          while (live() && !signal?.aborted) {
+            const next = sub.queue.shift();
+            if (next) {
+              yield next;
+              continue;
             }
-          } finally {
-            adapter.subscribers.delete(sub);
+            await new Promise<void>((resolve) => {
+              const onAbort = () => resolve();
+              signal?.addEventListener("abort", onAbort, { once: true });
+              sub.wake = () => {
+                signal?.removeEventListener("abort", onAbort);
+                resolve();
+              };
+            });
           }
-        })();
+        } finally {
+          subscribers.delete(sub);
+        }
       },
     };
   }

@@ -11,6 +11,16 @@ electronVersion: 43.2.0
 # Native modules are built by scripts/rebuild-native.mjs (prebuild first, node-gyp 13 fallback);
 # the builder's own rebuild uses a node-gyp that fails against current Visual Studio.
 npmRebuild: false
+# Where an installed copy looks for its next version (SPEC-016 R-12, R-13). This block is what
+# makes electron-builder emit `latest.yml` beside the installers and bake `app-update.yml` into
+# the app — without it, autoUpdater.checkForUpdates() has no feed to read and fails silently.
+# `releaseType: draft` means a tag build stages a release; a human publishes it, and only then
+# do installed copies see it.
+publish:
+  provider: github
+  owner: michaeljosiah
+  repo: ArkeStudio
+  releaseType: draft
 directories:
   output: release
 files:

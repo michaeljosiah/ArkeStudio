@@ -72,13 +72,16 @@ export function makeAdapterExtractor(
         }
       })();
       await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] });
+      // Refed, and cleared below: an unref'd deadline lets the loop drain while `collected`
+      // is parked, so it never fires and the extraction waits forever.
+      let deadline: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_, reject) => {
-        const t = setTimeout(() => reject(new Error("extraction took too long")), WALL_CLOCK_MS);
-        (t as { unref?: () => void }).unref?.();
+        deadline = setTimeout(() => reject(new Error("extraction took too long")), WALL_CLOCK_MS);
       });
       try {
         await Promise.race([collected, timeout]);
       } finally {
+        clearTimeout(deadline);
         abort.abort();
       }
       return finalText;

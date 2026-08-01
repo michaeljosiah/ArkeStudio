@@ -40,7 +40,11 @@ describe("screen inventory", () => {
 
   it("smoke-renders the root router", () => {
     const html = renderAt("/");
-    assert.ok(html.includes("Arke Studio"));
+    // The launch screen, by what it is rather than by a wordmark: the reel and the one line
+    // that says what is happening. It carried "Arke Studio" until the reel replaced it.
+    assert.ok(html.includes('data-screen="launch"'), "the root route mounts the launch screen");
+    assert.ok(html.includes("setup-reel.mp4"), "the reel plays while the runtimes come down");
+    assert.ok(html.includes("Setting up your studio."), "and it says what it is doing");
   });
 
   it("renders the degraded reasons when children are unavailable (R-6)", () => {

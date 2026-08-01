@@ -2,7 +2,7 @@
 // its obligations recorded in THIRD-PARTY-NOTICES.md BEFORE it may be bundled. A missing row
 // fails the package step — a licence question found here is a task, not a shipping delay.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));

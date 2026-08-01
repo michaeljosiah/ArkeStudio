@@ -94,7 +94,7 @@ export class VoxaClient {
     const res = await this.fetchImpl(`${this.baseUrl}/tts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ voice: input.voiceId, text: input.text, ...(input.params ?? {}) }),
+      body: JSON.stringify({ voice: input.voiceId, text: input.text, ...input.params }),
     });
     if (res.status >= 400) throw new Error(`voxa: synthesis failed (HTTP ${res.status})`);
     return new Uint8Array(await res.arrayBuffer());

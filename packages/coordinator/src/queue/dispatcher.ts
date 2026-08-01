@@ -1,5 +1,5 @@
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import {
   formatMicroUsd,
   PROVIDERS,
@@ -10,7 +10,6 @@ import {
   type Job,
   type JobTarget,
   type LedgerEntry,
-  type ProviderId,
   type QueueStatus,
   type ReconcileAction,
 } from "@arke-studio/contracts";

@@ -240,7 +240,8 @@ export class OpenCodeAdapter implements HarnessAdapter {
     if (parsed.type === "permission.requested") {
       this.permissionSessions.set(parsed.permissionId, parsed.sessionId);
     }
-    for (const listener of [...this.turnListeners]) listener(parsed);
+    // Snapshot: a listener may register or drop another while handling this event.
+    for (const listener of Array.from(this.turnListeners)) listener(parsed);
     for (const sub of this.subscribers) {
       sub.queue.push(parsed);
       sub.wake?.();
@@ -293,30 +294,29 @@ export class OpenCodeAdapter implements HarnessAdapter {
     // event arriving between dispatch and that pull must not be lost.
     const sub: { queue: HarnessEvent[]; wake: (() => void) | null } = { queue: [], wake: null };
     this.subscribers.add(sub);
-    const adapter = this;
+    const { subscribers } = this;
+    const live = () => !this.disposed;
     return {
-      [Symbol.asyncIterator]() {
-        return (async function* () {
-          try {
-            while (!adapter.disposed && !signal?.aborted) {
-              const next = sub.queue.shift();
-              if (next) {
-                yield next;
-                continue;
-              }
-              await new Promise<void>((resolve) => {
-                const onAbort = () => resolve();
-                signal?.addEventListener("abort", onAbort, { once: true });
-                sub.wake = () => {
-                  signal?.removeEventListener("abort", onAbort);
-                  resolve();
-                };
-              });
+      async *[Symbol.asyncIterator]() {
+        try {
+          while (live() && !signal?.aborted) {
+            const next = sub.queue.shift();
+            if (next) {
+              yield next;
+              continue;
             }
-          } finally {
-            adapter.subscribers.delete(sub);
+            await new Promise<void>((resolve) => {
+              const onAbort = () => resolve();
+              signal?.addEventListener("abort", onAbort, { once: true });
+              sub.wake = () => {
+                signal?.removeEventListener("abort", onAbort);
+                resolve();
+              };
+            });
           }
-        })();
+        } finally {
+          subscribers.delete(sub);
+        }
       },
     };
   }
