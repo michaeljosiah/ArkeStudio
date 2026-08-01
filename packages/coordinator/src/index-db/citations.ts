@@ -171,7 +171,10 @@ export function extract(bundle: WorldBundle): Extraction {
 
   for (const kit of bundle.referenceKits) {
     for (const tile of kit.tiles) {
-      if (tile.status === "empty" || tile.sheetVersion === undefined) continue;
+      // Superseded tiles are history, not references (SPEC-010 R-4, D11); queue states carry
+      // no image yet. Only tiles with a made-against version cite their sheet.
+      if (tile.status === "empty" || tile.status === "superseded" || tile.status === "pending" || tile.status === "rendering") continue;
+      if (tile.sheetVersion === undefined) continue;
       citations.push({
         sourceKind: "reference-tile",
         sourceId: `${kit.sheetId}/${tile.angle}`,

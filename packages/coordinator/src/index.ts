@@ -24,6 +24,30 @@ export {
 } from "./queue/dispatcher.js";
 export { JobJournal } from "./queue/journal.js";
 export { verifyArtifact, type VerifiableArtifact } from "./queue/verify.js";
+export {
+  establishRequests,
+  imageModelFor,
+  missingTileAngles,
+  styleLine,
+  tileRequest,
+  type TileRequest,
+} from "./references/generate.js";
+export {
+  attachmentFor,
+  chooseAnchor,
+  compileGrid,
+  designate,
+  emptyKit,
+  kitReport,
+  landGrid,
+  lockTile,
+  readKit,
+  setStyleOverride,
+  supersedeTile,
+  type AttachmentDecision,
+  type GridResult,
+} from "./references/kit.js";
+export { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "./references/png.js";
 export { FrontmatterError, parseFrontmatter, splitSections, type BodySection } from "./frontmatter.js";
 export { ReadModel } from "./read-model.js";
 export {

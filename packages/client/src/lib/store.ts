@@ -9,6 +9,7 @@ import {
   type DomainEvent,
   type ProviderId,
   type ReconcileAction,
+  type ReferenceAngle,
 } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../arke-bridge.js";
 
@@ -572,6 +573,40 @@ export function resumeQueue(provider: string): void {
 
 export function useReconcileReport(): ReconcileAction[] | null {
   return useStore().reconcileReport;
+}
+
+// ---- SPEC-010: reference kits ----------------------------------------------
+
+export function establishLook(worldId: string, sheetId: string, count: number): void {
+  send({ kind: "establish-look", worldId, sheetId, count });
+}
+
+export function chooseAnchor(worldId: string, sheetId: string, file: string): void {
+  send({ kind: "choose-anchor", worldId, sheetId, file });
+}
+
+export function lockTile(worldId: string, sheetId: string, angle: ReferenceAngle, name?: string): void {
+  send({ kind: "lock-tile", worldId, sheetId, angle, ...(name !== undefined ? { name } : {}) });
+}
+
+export function generateMissingTiles(worldId: string, sheetId: string, group: "head" | "body"): void {
+  send({ kind: "generate-missing-tiles", worldId, sheetId, group });
+}
+
+export function regenerateTile(worldId: string, sheetId: string, angle: ReferenceAngle): void {
+  send({ kind: "regenerate-tile", worldId, sheetId, angle });
+}
+
+export function compileGrid(worldId: string, sheetId: string): void {
+  send({ kind: "compile-grid", worldId, sheetId });
+}
+
+export function designateCompilation(worldId: string, sheetId: string, file: string): void {
+  send({ kind: "designate-compilation", worldId, sheetId, file });
+}
+
+export function setStyleOverride(worldId: string, sheetId: string, style: string | null): void {
+  send({ kind: "set-style-override", worldId, sheetId, style });
 }
 
 const getSnapshot = (): StoreState => current;

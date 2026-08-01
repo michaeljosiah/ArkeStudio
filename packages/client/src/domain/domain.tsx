@@ -321,7 +321,9 @@ export function ReferenceTile({ tile }: { tile: ReferenceTileModel }) {
       <div className="dom-reftile__foot">
         <span className="dom-reftile__angle">{tile.angle.replaceAll("-", " ")}</span>
         {tile.status === "locked" && <Badge tone="success">locked · v{tile.sheetVersion}</Badge>}
-        {tile.status === "draft" && <Badge tone="warning">draft · v{tile.sheetVersion}</Badge>}
+        {tile.status === "generated" && <Badge tone="warning">generated · v{tile.sheetVersion}</Badge>}
+        {(tile.status === "pending" || tile.status === "rendering") && <Badge tone="outline">{tile.status}</Badge>}
+        {tile.status === "superseded" && <Badge tone="outline">superseded</Badge>}
         {tile.status === "empty" && <Badge tone="outline">empty</Badge>}
       </div>
     </div>

@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { UlidSchema } from "./ids.js";
+import { SlugSchema, UlidSchema } from "./ids.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
+import { ReferenceAngleSchema } from "./reference.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then `event` frames, sequence
@@ -250,5 +251,66 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** SPEC-009 D7: resume a paused provider queue — the message IS the explicit confirmation. */
   z.object({ kind: z.literal("queue-resume"), provider: z.string().min(1) }).strict(),
+  /** SPEC-010 R-5: generate first-look candidates from the sheet text and the world's style. */
+  z
+    .object({
+      kind: z.literal("establish-look"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      count: z.number().int().min(1).max(8),
+    })
+    .strict(),
+  /** SPEC-010 D2: the chosen candidate becomes the anchor — the most consequential accept. */
+  z
+    .object({ kind: z.literal("choose-anchor"), worldId: UlidSchema, sheetId: SlugSchema, file: z.string().min(1) })
+    .strict(),
+  /** SPEC-010 R-3: admit a generated tile to the reference set. */
+  z
+    .object({
+      kind: z.literal("lock-tile"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      angle: ReferenceAngleSchema,
+      name: z.string().optional(),
+    })
+    .strict(),
+  /** SPEC-010 R-18: batch-generate missing tiles for a group; body is head-gated (R-7). */
+  z
+    .object({
+      kind: z.literal("generate-missing-tiles"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      group: z.enum(["head", "body"]),
+    })
+    .strict(),
+  /** SPEC-010 R-4: regenerate one tile; acceptance supersedes, never overwrites. */
+  z
+    .object({
+      kind: z.literal("regenerate-tile"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      angle: ReferenceAngleSchema,
+    })
+    .strict(),
+  /** SPEC-010 R-10: compile the classic grid — local, free, deterministic. */
+  z.object({ kind: z.literal("compile-grid"), worldId: UlidSchema, sheetId: SlugSchema }).strict(),
+  /** SPEC-010 R-13: pin the compilation that rides along with dispatches. */
+  z
+    .object({
+      kind: z.literal("designate-compilation"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      file: z.string().min(1),
+    })
+    .strict(),
+  /** SPEC-010 R-16: per-sheet rendering-style override; canon stays untouched. */
+  z
+    .object({
+      kind: z.literal("set-style-override"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      style: z.string().max(500).nullable(),
+    })
+    .strict(),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
