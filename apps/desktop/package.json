@@ -10,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "rebuild:native": "node scripts/rebuild-native.mjs",
     "start": "npm run build && npm run rebuild:native && electron dist/main.cjs",
-    "package": "npm run verify:licenses && npm run build && electron-builder --publish never",
+    "package": "npm run verify:licenses && npm run build && npm run rebuild:native && electron-builder --publish never",
     "verify:licenses": "node scripts/verify-licenses.mjs"
   },
   "dependencies": {
