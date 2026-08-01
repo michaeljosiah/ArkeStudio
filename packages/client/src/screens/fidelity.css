@@ -1195,16 +1195,6 @@
   background: var(--foreground);
   transition: width 0.45s var(--ease-out);
 }
-.fy-setuplist { margin-top: 14px; border-top: 1px solid var(--border); }
-.fy-setuprow {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 7px 2px;
-  border-bottom: 1px solid var(--border);
-}
-.fy-setuprow__label { font: 400 12.5px var(--font-sans); }
-.fy-setuprow__state { margin-left: auto; font: 400 10.5px var(--font-mono); color: var(--muted-foreground); text-align: right; }
 
 /* first run (5a) */
 .fy-firstrun__flank {
@@ -1447,15 +1437,3 @@
   }
 }
 
-/* Setup: the per-component action links on the local-runtime rows. */
-.fy-setuprow__act {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font: 400 11px var(--font-sans);
-  color: var(--muted-foreground);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  padding: 0;
-}
-.fy-setuprow__act:hover { color: var(--foreground); }
