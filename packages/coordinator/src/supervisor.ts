@@ -1,11 +1,19 @@
 import { EventEmitter } from "node:events";
 import net from "node:net";
-import { spawn, type ChildProcess } from "node:child_process";
+import { basename } from "node:path";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { ownerStamp, type ChildLedger } from "./child-ledger.js";
+import { leashChildToParent } from "./job-leash.js";
 
 /**
  * Generic child-process supervisor (SPEC-001 R-5, D3). OpenCode and Voxa differ in protocol
  * but not in lifecycle: spawn, allocate a loopback port, probe health, restart with backoff,
  * stop gracefully, never leave an orphan. One implementation, two configurations.
+ *
+ * "Never leave an orphan" has to hold when this process is force-killed and no code here
+ * runs at all, so every spawn is tethered twice: leashed to this process's lifetime with a
+ * kernel Job Object (job-leash.ts), and recorded in the pidfile ledger (child-ledger.ts)
+ * that the next startup sweeps.
  */
 
 export type SupervisorStatus =
@@ -59,20 +67,28 @@ export async function allocateLoopbackPort(): Promise<number> {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+export interface SupervisorDeps {
+  /** When present, spawns are recorded and exits released so a later sweep can reap. */
+  ledger?: ChildLedger;
+}
+
 export class ChildSupervisor extends EventEmitter {
   readonly id: string;
   private readonly spec: Required<Omit<SupervisedSpec, "command" | "args" | "env">> &
     Pick<SupervisedSpec, "command" | "args" | "env">;
+  private readonly deps: SupervisorDeps;
   private child: ChildProcess | null = null;
   private _port: number | null = null;
   private _status: SupervisorStatus = "stopped";
   private _reason: string | undefined;
   private stopping = false;
   private restarts = 0;
+  private leashWarned = false;
 
-  constructor(spec: SupervisedSpec) {
+  constructor(spec: SupervisedSpec, deps: SupervisorDeps = {}) {
     super();
     this.id = spec.id;
+    this.deps = deps;
     this.spec = {
       ...spec,
       healthPath: spec.healthPath ?? "/health",
@@ -125,11 +141,11 @@ export class ChildSupervisor extends EventEmitter {
     this._port = port;
     const args = (this.spec.args ?? []).map((a) => a.replaceAll("{port}", String(port)));
 
+    // Windows batch shims (.cmd/.bat) are only startable through the shell (Node ≥18
+    // refuses them otherwise). Args here are supervisor-authored, never user input.
+    const needsShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
     let child: ChildProcess;
     try {
-      // Windows batch shims (.cmd/.bat) are only startable through the shell (Node ≥18
-      // refuses them otherwise). Args here are supervisor-authored, never user input.
-      const needsShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
       child = spawn(command, args, {
         env: { ...process.env, ...this.spec.env, PORT: String(port) },
         stdio: ["ignore", "pipe", "pipe"],
@@ -153,7 +169,14 @@ export class ChildSupervisor extends EventEmitter {
       return;
     }
 
+    // With a shell shim the pid we hold is cmd.exe's; the ledger must record the image the
+    // OS will actually report for it, or the sweep's identity check would never match.
+    this.tether(child, needsShell ? "cmd.exe" : basename(command).toLowerCase());
+
     child.once("exit", (code, signal) => {
+      if (child.pid !== undefined) {
+        void this.deps.ledger?.release(child.pid).catch(() => {});
+      }
       if (this.child === child) this.child = null;
       if (this.stopping) return;
       void this.handleUnexpectedExit(code, signal);
@@ -172,6 +195,29 @@ export class ChildSupervisor extends EventEmitter {
       "failed",
       `${this.id} did not become healthy within ${Math.round(this.spec.readyTimeoutMs / 1000)}s`,
     );
+  }
+
+  /**
+   * Tie the child's lifetime to this process (R-5 under force-kill): kernel leash plus
+   * ledger record. Both are best-effort and neither delays startup — health probing races
+   * ahead while they attach.
+   */
+  private tether(child: ChildProcess, image: string): void {
+    const pid = child.pid;
+    if (pid === undefined) return;
+    void this.deps.ledger
+      ?.record({ pid, image, id: this.id, ...ownerStamp(), recordedAt: Date.now() })
+      .catch(() => {});
+    if (process.platform !== "win32") return;
+    void leashChildToParent(pid).then((leash) => {
+      // A child that already exited explains its own leash failure; anything else is worth
+      // one warning, because orphan cleanup now rests on the startup sweep alone.
+      if (leash.ok || this.leashWarned || child.exitCode !== null || child.signalCode !== null) return;
+      this.leashWarned = true;
+      console.warn(
+        `[supervisor] ${this.id}: could not leash pid ${pid} to this process (${leash.reason ?? "unknown"}); if this process is force-killed, cleanup falls to the next startup's sweep`,
+      );
+    });
   }
 
   private healthUrl(): string {
@@ -242,4 +288,27 @@ export class ChildSupervisor extends EventEmitter {
       }
     }
   }
+}
+
+/**
+ * Last-resort cleanup for exits that skip the graceful path — process.exit, an uncaught
+ * exception, a signal handler that raced. "exit" handlers must be synchronous, so this
+ * spawnSyncs taskkill; the kernel leash covers the deaths where not even this runs.
+ */
+export function registerExitBackstop(...supervisors: ChildSupervisor[]): void {
+  process.once("exit", () => {
+    for (const supervisor of supervisors) {
+      const pid = supervisor.pid;
+      if (pid === null) continue;
+      try {
+        if (process.platform === "win32") {
+          spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+        } else {
+          process.kill(pid, "SIGKILL");
+        }
+      } catch {
+        /* best effort by definition */
+      }
+    }
+  });
 }

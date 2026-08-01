@@ -7,8 +7,9 @@ import {
   discoverOpenCode,
   OpenCodeAdapter,
 } from "@arke-studio/adapter-opencode";
+import { ChildLedger } from "./child-ledger.js";
 import { Coordinator } from "./coordinator.js";
-import { ChildSupervisor } from "./supervisor.js";
+import { ChildSupervisor, registerExitBackstop } from "./supervisor.js";
 import { nodeSetupDeps } from "./setup/node-deps.js";
 import { FsWorldProvider } from "./world/provider.js";
 
@@ -47,15 +48,28 @@ if (provider.pathBudget.tight) {
   console.warn(`[arke-studio] path budget is tight at this root (${provider.pathBudget.worstCase} worst case)`);
 }
 
+// Children of a force-killed previous run (a dev-server restart runs no exit hooks) are
+// reaped before anything new spawns; this run's children are recorded in the same ledger.
+const ledger = new ChildLedger(join(devRoot, "run", "children.json"));
+const swept = await ledger.reapStale();
+if (swept.reaped.length > 0) {
+  const named = swept.reaped.map((r) => `${r.id} (pid ${r.pid})`).join(", ");
+  console.log(`[arke-studio] reaped ${swept.reaped.length} orphaned child process(es): ${named}`);
+}
+
 // Real authoring in dev when OpenCode is installed; honest degradation when it is not.
 const discovered = discoverOpenCode();
-const opencodeSupervisor = new ChildSupervisor({
-  id: "opencode",
-  command: discovered?.command ?? null,
-  args: ["serve", "--port", "{port}", "--hostname", "127.0.0.1"],
-  healthPath: "/api/health",
-  readyTimeoutMs: 30_000,
-});
+const opencodeSupervisor = new ChildSupervisor(
+  {
+    id: "opencode",
+    command: discovered?.command ?? null,
+    args: ["serve", "--port", "{port}", "--hostname", "127.0.0.1"],
+    healthPath: "/api/health",
+    readyTimeoutMs: 30_000,
+  },
+  { ledger },
+);
+registerExitBackstop(opencodeSupervisor);
 const adapter = discovered
   ? new OpenCodeAdapter({ baseUrl: () => `http://127.0.0.1:${opencodeSupervisor.port ?? 0}` })
   : null;

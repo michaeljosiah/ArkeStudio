@@ -5,11 +5,13 @@ import { join, resolve } from "node:path";
 import { app, BrowserWindow, safeStorage, shell } from "electron";
 import electronUpdater from "electron-updater";
 import {
+  ChildLedger,
   ChildSupervisor,
   Coordinator,
   defaultAppRoot,
   FsWorldProvider,
   nodeSetupDeps,
+  registerExitBackstop,
   type Cipher,
   type DatabaseCtor,
 } from "@arke-studio/coordinator";
@@ -89,20 +91,33 @@ async function start(): Promise<void> {
   const provider = new FsWorldProvider(appRoot, sqlite ? { sqlite } : {});
   await provider.ensureAppRoot();
 
+  // A force-killed previous run leaves its children behind (no exit hook fires under
+  // Stop-Process); the ledger sweep reaps them before this run spawns its own (R-5). One of
+  // those orphans once held a file lock that broke packaging — this is not hypothetical.
+  const childLedger = new ChildLedger(join(appRoot, "run", "children.json"));
+  const swept = await childLedger.reapStale();
+  if (swept.reaped.length > 0) {
+    const named = swept.reaped.map((r) => `${r.id} (pid ${r.pid})`).join(", ");
+    console.log(`[arke] reaped ${swept.reaped.length} orphaned child process(es): ${named}`);
+  }
+
   // OpenCode discovery (SPEC-005 R-1): configured path → PATH → bundled, reported with its
   // version. Absent → authoring degrades with the reason stated (R-4).
   const discovered = discoverOpenCode({
     ...(process.env["ARKE_OPENCODE_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE_CMD"] } : {}),
     ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode", "opencode.exe") } : {}),
   });
-  const opencodeSupervisor = new ChildSupervisor({
-    id: "opencode",
-    command: discovered?.command ?? null,
-    args: ["serve", "--port", "{port}", "--hostname", "127.0.0.1"],
-    env: credentialEnv({}), // SPEC-008 supplies real keys from safeStorage
-    healthPath: "/api/health",
-    readyTimeoutMs: 30_000,
-  });
+  const opencodeSupervisor = new ChildSupervisor(
+    {
+      id: "opencode",
+      command: discovered?.command ?? null,
+      args: ["serve", "--port", "{port}", "--hostname", "127.0.0.1"],
+      env: credentialEnv({}), // SPEC-008 supplies real keys from safeStorage
+      healthPath: "/api/health",
+      readyTimeoutMs: 30_000,
+    },
+    { ledger: childLedger },
+  );
   const adapter = discovered
     ? new OpenCodeAdapter({ baseUrl: () => `http://127.0.0.1:${opencodeSupervisor.port ?? 0}` })
     : null;
@@ -125,11 +140,15 @@ async function start(): Promise<void> {
 
   // The Voxa sidecar (SPEC-011): supervised like the harness; local inference only (D1).
   // The client resolves the supervisor's port lazily so restarts keep working.
-  const voxaSupervisor = new ChildSupervisor({
-    ...childSpec("voxa", "ARKE_VOXA_CMD", "ARKE_VOXA_ARGS", join("voxa", "voxa.exe")),
-    healthPath: "/health",
-    readyTimeoutMs: 30_000,
-  });
+  const voxaSupervisor = new ChildSupervisor(
+    {
+      ...childSpec("voxa", "ARKE_VOXA_CMD", "ARKE_VOXA_ARGS", join("voxa", "voxa.exe")),
+      healthPath: "/health",
+      readyTimeoutMs: 30_000,
+    },
+    { ledger: childLedger },
+  );
+  registerExitBackstop(opencodeSupervisor, voxaSupervisor);
   const voxaAt = () => new VoxaClient((url, init) => fetch(url, init), `http://127.0.0.1:${voxaSupervisor.port ?? 0}`);
   const voxaSidecar = {
     listVoices: () => voxaAt().listVoices(),
