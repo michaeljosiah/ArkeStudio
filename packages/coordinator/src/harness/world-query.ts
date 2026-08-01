@@ -210,7 +210,7 @@ export class WorldQueryServer {
       case "related": {
         if (!index) throw new Error("the index is unavailable");
         const id = String(args["id"] ?? "");
-        return /^CANON-/.test(id) ? refsForCanon(index.db, id) : refsForSheet(index.db, id);
+        return id.startsWith("CANON-") ? refsForCanon(index.db, id) : refsForSheet(index.db, id);
       }
       default:
         throw new Error(`unknown tool: ${name}`);

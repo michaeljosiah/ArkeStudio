@@ -641,9 +641,10 @@ export class Coordinator {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
         try {
-          const outcome = await gate.accept(msg.proposalId, {
-            ...(msg.confirmRipples !== undefined ? { confirmRipples: msg.confirmRipples } : {}),
-          });
+          const outcome = await gate.accept(
+            msg.proposalId,
+            msg.confirmRipples === undefined ? {} : { confirmRipples: msg.confirmRipples },
+          );
           const at = new Date().toISOString();
           if (outcome.status === "accepted") {
             this.authoring?.release(msg.proposalId);

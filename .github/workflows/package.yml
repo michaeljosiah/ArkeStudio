@@ -1,0 +1,47 @@
+# Builds the Windows installer and leaves it as a downloadable artifact, so testing a build
+# never depends on one particular machine. Runs on demand, and on every v* tag.
+#
+# What it does NOT do: sign. Signing needs WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD on a machine
+# trusted with the certificate (electron-builder.yml §2.7), so an unsigned artifact from here
+# will show a SmartScreen warning on first launch. That is expected, not a fault.
+name: Package (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The client's dist/ is staged into the installer as extraResources, so the whole
+      # workspace builds before the packager runs.
+      - name: Build the workspaces
+        run: npm run build
+
+      # verify:licenses → esbuild → rebuild:native → electron-builder, in that order.
+      - name: Package
+        run: npm run package --workspace @arke-studio/desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ArkeStudio-Windows-installer
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.blockmap
+          if-no-files-found: error
+          retention-days: 14

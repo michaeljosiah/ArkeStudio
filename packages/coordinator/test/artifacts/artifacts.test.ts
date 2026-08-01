@@ -232,7 +232,7 @@ describe("the batch review (R-15, R-16, D5, §3.2)", () => {
     assert.ok(artifact.links.includes(sella.id), "the accepted sheet links back to its source");
 
     // Reject the remaining twenty-eight: no world trace, all recorded decided.
-    for (const candidate of [...artifact.extraction!.pending]) {
+    for (const candidate of artifact.extraction!.pending) {
       await resolveCandidate(store, gate, store.getBundle().artifacts.find((a) => a.id === artifact.id)!, candidate.hash, "reject");
     }
     bundle = store.getBundle();

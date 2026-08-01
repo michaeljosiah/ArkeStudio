@@ -118,7 +118,7 @@ describe("delivery (R-15, D9, §3.2)", () => {
 describe("the sidecar client and its four states (R-4, §2.10)", () => {
   it("every request goes to loopback and nowhere else (R-17 instrumentation)", async () => {
     const urls: string[] = [];
-    const client = new VoxaClient(async (url, init) => {
+    const client = new VoxaClient(async (url) => {
       urls.push(url);
       if (url.endsWith("/stt")) return new Response(JSON.stringify({ text: "hello harbour" }), { status: 200 });
       if (url.endsWith("/tts")) return new Response(new Uint8Array([82, 73, 70, 70]), { status: 200 });

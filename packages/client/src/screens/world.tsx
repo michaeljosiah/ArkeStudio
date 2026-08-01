@@ -13,7 +13,7 @@ import {
 import { DegradedBanner, EmptyState, PageHeader, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
 import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
-import { ActivityIcon, ChevronLeft, ChevronRight, Mic, Play, Plus, Search, Sliders } from "../components/icons.js";
+import { ActivityIcon, ChevronRight, Play, Plus, Search, Sliders } from "../components/icons.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Wave } from "./production.js";

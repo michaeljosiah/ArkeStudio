@@ -593,7 +593,7 @@ export function SceneDetailScreen() {
       {tab === "shots" ? (
         <>
           <div className="fy-shotrow">
-            {scene.shots.map((shot, i) => {
+            {scene.shots.map((shot) => {
               const takes = takesForShot(production, shot.id);
               const accepted = acceptedTakeId(production, shot.id);
               const acceptedTake = accepted ? production.takes.find((t) => t.id === accepted) : null;
@@ -978,7 +978,6 @@ export function GenerateScreen() {
 
 function GeneratePromptEditor({
   world,
-  production,
   scene,
   shot,
   worldId,

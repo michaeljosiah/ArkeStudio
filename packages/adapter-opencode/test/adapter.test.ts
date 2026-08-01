@@ -3,7 +3,6 @@ import { after, before, describe, it } from "node:test";
 import type { HarnessEvent } from "@arke-studio/contracts";
 import { OpenCodeAdapter } from "../src/opencode-adapter.js";
 import { probeCapabilities } from "../src/capabilities.js";
-import { OpenCodeHttp } from "../src/http.js";
 import { createNormalizeState, normalizeOpenCode, toolSummary } from "../src/normalize.js";
 import { buildSessionConfig } from "../src/config.js";
 import { discoverOpenCode } from "../src/discovery.js";

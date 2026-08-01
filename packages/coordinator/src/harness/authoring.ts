@@ -114,7 +114,7 @@ export class AuthoringService {
       // registration — into the working directory (R-5). Never a credential (R-6).
       await atomicWriteFile(
         join(proposalDir, "opencode.json"),
-        JSON.stringify(this.opts.buildConfig({ ...(worldQueryUrl ? { worldQueryUrl } : {}) }), null, 2) + "\n",
+        JSON.stringify(this.opts.buildConfig(worldQueryUrl ? { worldQueryUrl } : {}), null, 2) + "\n",
       );
       try {
         const session = await this.adapter.createSession({

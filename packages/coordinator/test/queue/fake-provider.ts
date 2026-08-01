@@ -10,7 +10,7 @@ import type { DispatchArtifact, DispatchClient } from "../../src/queue/dispatche
 /** A valid tiny PNG: signature + IEND trailer. Truncation drops the trailer. */
 export function pngBytes(): Uint8Array {
   const head = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-  const body = new Array(64).fill(0x00);
+  const body = Array.from({ length: 64 }, () => 0x00);
   const iend = [0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82];
   return Uint8Array.from([...head, ...body, ...iend]);
 }

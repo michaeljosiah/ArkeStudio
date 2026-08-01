@@ -4,5 +4,8 @@
     "correctness": "error",
     "suspicious": "warn"
   },
+  "rules": {
+    "react/react-in-jsx-scope": "off"
+  },
   "ignorePatterns": ["**/dist/**", "**/node_modules/**", "design-system/**", "fixtures/**"]
 }

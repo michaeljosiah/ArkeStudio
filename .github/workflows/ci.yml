@@ -1,0 +1,54 @@
+# The gate every pull request must pass, on both the platform we ship (Windows) and the one
+# that catches path and case assumptions (Linux). Lint, types, build and tests — no formatting
+# check yet: 111 files predate the `format` script, and reformatting them is its own decision.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push supersedes the run it interrupted — nobody reads the results of stale code.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing should still tell us about the other.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      # The gate never launches Electron — it only reads the package's version and types, so the
+      # ~100 MB binary is dead weight here. The packaging workflow fetches its own.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      # better-sqlite3 is native: npm takes the published prebuild where one exists and compiles
+      # from source where it doesn't. Either way it must succeed — the derived index depends on it.
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test

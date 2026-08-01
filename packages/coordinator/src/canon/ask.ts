@@ -157,7 +157,7 @@ export class AskService {
     await mkdir(toExtendedLength(sandbox), { recursive: true });
     await atomicWriteFile(
       join(sandbox, "opencode.json"),
-      JSON.stringify(this.opts.buildConfig({ ...(worldQueryUrl ? { worldQueryUrl } : {}) }), null, 2) + "\n",
+      JSON.stringify(this.opts.buildConfig(worldQueryUrl ? { worldQueryUrl } : {}), null, 2) + "\n",
     );
 
     try {

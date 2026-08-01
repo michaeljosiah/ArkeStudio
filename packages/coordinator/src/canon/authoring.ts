@@ -112,7 +112,7 @@ export async function openThread(
           title: input.title,
           status: "open",
           statement: body,
-          links: input.candidates.filter((c) => /^CANON-/.test(c)),
+          links: input.candidates.filter((c) => c.startsWith("CANON-")),
         }),
       },
     ],

@@ -22,6 +22,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "oxlint packages apps",
     "format": "prettier --write \"packages/**/*.{ts,tsx,css,json}\" \"apps/**/*.{ts,tsx,json}\"",
+    "format:check": "prettier --check \"packages/**/*.{ts,tsx,css,json}\" \"apps/**/*.{ts,tsx,json}\"",
     "test": "npm run test --workspaces --if-present",
     "start": "npm run start --workspace @arke-studio/desktop"
   },

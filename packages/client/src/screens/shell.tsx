@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router";
-import { Badge, Button, Callout, Card, Input, StatusDot, Switch, Textarea, cx, type StatusDotTone } from "../components/ui.js";
-import { EmptyState, PageHeader, KeyValue, Screen, Section } from "../components/layout.js";
+import { Badge, Button, Callout, Input, StatusDot, Textarea, cx, type StatusDotTone } from "../components/ui.js";
+import { EmptyState, KeyValue, Section } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
 import { ChevronLeft, Plus, X } from "../components/icons.js";
 import { Portrait } from "../components/portrait.js";
-import { shortDateTime, usd } from "../lib/format.js";
+import { shortDateTime } from "../lib/format.js";
 import {
   cancelExport as cancelExportMsg,
   cancelJob,
