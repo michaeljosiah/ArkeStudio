@@ -37,6 +37,20 @@ export const ProposalTargetSchema = z
   .strict();
 export type ProposalTarget = z.infer<typeof ProposalTargetSchema>;
 
+/** A same-field rebase conflict awaiting a human choice (SPEC-004 R-6, D4). */
+export const ProposalConflictSchema = z
+  .object({
+    path: z.string().min(1),
+    /** Frontmatter key or section heading — the merge unit. */
+    field: z.string().min(1),
+    base: z.string().nullable(),
+    mine: z.string().nullable(),
+    theirs: z.string().nullable(),
+    resolution: z.enum(["mine", "theirs"]).optional(),
+  })
+  .strict();
+export type ProposalConflict = z.infer<typeof ProposalConflictSchema>;
+
 export const ProposalSchema = z
   .object({
     id: ProposalIdSchema,
@@ -50,6 +64,11 @@ export const ProposalSchema = z
     /** Where the draft came from, e.g. "chat:sess_9f2" | "form" | "import:ar_…". */
     source: z.string().min(1),
     created: IsoDateTimeSchema,
+    /** Set by a rebase: the merged result must be seen before accept (SPEC-004 R-7). */
+    pendingReview: z.boolean().optional(),
+    /** Same-field conflicts from the last rebase; all must carry a resolution before accept. */
+    conflicts: z.array(ProposalConflictSchema).optional(),
+    rebasedAt: IsoDateTimeSchema.optional(),
   })
   .strict();
 export type Proposal = z.infer<typeof ProposalSchema>;

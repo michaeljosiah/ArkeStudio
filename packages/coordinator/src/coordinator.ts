@@ -183,7 +183,115 @@ export class Coordinator {
         this.transport.broadcastSnapshot();
         return;
       }
+      case "stage-sheet-edit": {
+        const gate = this.opts.provider.gate?.();
+        if (!gate) return;
+        try {
+          const proposal = await gate.stageSheetEdit(msg.path, msg.summary, msg.sections, "form");
+          this.emit({ at: new Date().toISOString(), type: "proposal.staged", worldId: msg.worldId, proposalId: proposal.id });
+        } catch {
+          /* the snapshot below carries whatever state resulted */
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "proposal-accept": {
+        const gate = this.opts.provider.gate?.();
+        if (!gate) return;
+        try {
+          const outcome = await gate.accept(msg.proposalId, {
+            ...(msg.confirmRipples !== undefined ? { confirmRipples: msg.confirmRipples } : {}),
+          });
+          const at = new Date().toISOString();
+          if (outcome.status === "accepted") {
+            this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId: msg.proposalId, outcome: "accepted" });
+          } else {
+            this.emit({
+              at,
+              type: "proposal.blocked",
+              worldId: msg.worldId,
+              proposalId: msg.proposalId,
+              reason:
+                outcome.status === "needs-reconfirm"
+                  ? "needs-reconfirm"
+                  : outcome.status === "no-op"
+                    ? "no-op"
+                    : outcome.status === "stale"
+                      ? "stale"
+                      : outcome.status === "pending-review"
+                        ? "pending-review"
+                        : outcome.status === "unresolved-conflicts"
+                          ? "unresolved-conflicts"
+                          : "target-retired",
+              detail:
+                outcome.status === "stale"
+                  ? `moved since drafting: ${outcome.stalePaths.join(", ")}`
+                  : outcome.status === "no-op"
+                    ? "the proposal is identical to the live world — nothing to commit"
+                    : outcome.status === "unresolved-conflicts"
+                      ? `${outcome.count} conflicted field${outcome.count === 1 ? "" : "s"} await a choice`
+                      : outcome.status === "target-retired"
+                        ? `retired: ${outcome.paths.join(", ")}`
+                        : undefined,
+              ...(outcome.status === "needs-reconfirm" ? { authoritativeSignature: outcome.signature } : {}),
+            });
+          }
+        } catch {
+          /* surfaced only through the refreshed snapshot */
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "proposal-discard": {
+        const gate = this.opts.provider.gate?.();
+        if (!gate) return;
+        try {
+          await gate.discard(msg.proposalId);
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.resolved",
+            worldId: msg.worldId,
+            proposalId: msg.proposalId,
+            outcome: "discarded",
+          });
+        } catch {
+          /* snapshot below */
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "proposal-rebase": {
+        const gate = this.opts.provider.gate?.();
+        if (!gate) return;
+        await gate.rebase(msg.proposalId).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "proposal-resolve-conflict": {
+        const gate = this.opts.provider.gate?.();
+        if (!gate) return;
+        await gate.resolveConflict(msg.proposalId, msg.path, msg.field, msg.choice).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "proposal-mark-seen": {
+        const gate = this.opts.provider.gate?.();
+        if (!gate) return;
+        await gate.markSeen(msg.proposalId).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
     }
+  }
+
+  /** Gate operations mutate the world; every client re-syncs from a fresh snapshot. */
+  private async refreshWorldSnapshot(worldId: string): Promise<void> {
+    try {
+      this.readModel.setWorld(await this.opts.provider.loadWorld(worldId));
+    } catch {
+      /* the previous snapshot stands */
+    }
+    this.transport.broadcastSnapshot();
   }
 
   private async seed(): Promise<void> {

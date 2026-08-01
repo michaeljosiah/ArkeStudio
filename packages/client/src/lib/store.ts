@@ -15,12 +15,26 @@ import type { ArkeBridge } from "../arke-bridge.js";
 
 export type ConnectionStatus = "connecting" | "open" | "closed";
 
+/** The last blocked-accept notice per proposal (SPEC-004): why it did not land, and what to offer. */
+export interface GateNotice {
+  reason:
+    | "stale"
+    | "needs-reconfirm"
+    | "no-op"
+    | "pending-review"
+    | "unresolved-conflicts"
+    | "target-retired";
+  detail?: string;
+  authoritativeSignature?: string;
+}
+
 interface StoreState {
   connection: ConnectionStatus;
   state: ClientState | null;
+  gateNotices: Record<string, GateNotice>;
 }
 
-let current: StoreState = { connection: "connecting", state: null };
+let current: StoreState = { connection: "connecting", state: null, gateNotices: {} };
 const listeners = new Set<() => void>();
 let bridge: ArkeBridge | null = null;
 let lastSeq = 0;
@@ -97,9 +111,30 @@ function handleFrame(json: string): void {
   }
   lastSeq = frame.seq;
   if (frame.kind === "snapshot") {
-    emitChange({ ...current, state: frame.state });
+    // Prune notices for proposals the snapshot no longer carries.
+    const openIds = new Set((frame.state.world?.proposals ?? []).map((p) => p.proposal.id));
+    const gateNotices = Object.fromEntries(
+      Object.entries(current.gateNotices).filter(([id]) => openIds.has(id)),
+    );
+    emitChange({ ...current, state: frame.state, gateNotices });
   } else if (current.state) {
-    emitChange({ ...current, state: fold(current.state, frame.event) });
+    let gateNotices = current.gateNotices;
+    if (frame.event.type === "proposal.blocked") {
+      gateNotices = {
+        ...gateNotices,
+        [frame.event.proposalId]: {
+          reason: frame.event.reason,
+          ...(frame.event.detail !== undefined ? { detail: frame.event.detail } : {}),
+          ...(frame.event.authoritativeSignature !== undefined
+            ? { authoritativeSignature: frame.event.authoritativeSignature }
+            : {}),
+        },
+      };
+    } else if (frame.event.type === "proposal.resolved") {
+      gateNotices = { ...gateNotices };
+      delete gateNotices[frame.event.proposalId];
+    }
+    emitChange({ ...current, state: fold(current.state, frame.event), gateNotices });
   }
 }
 
@@ -177,6 +212,52 @@ export function reconcileExternalEdit(worldId: string, path: string): void {
   send({ kind: "reconcile-external-edit", worldId, path });
 }
 
+// ---- the accept gate (SPEC-004) -------------------------------------------
+
+export function stageSheetEdit(
+  worldId: string,
+  path: string,
+  summary: string,
+  sections: Array<{ heading: string; body: string }>,
+): void {
+  send({ kind: "stage-sheet-edit", worldId, path, summary, sections });
+}
+
+export function acceptProposal(worldId: string, proposalId: string, confirmRipples?: string): void {
+  send({
+    kind: "proposal-accept",
+    worldId,
+    proposalId,
+    ...(confirmRipples !== undefined ? { confirmRipples } : {}),
+  });
+}
+
+export function discardProposal(worldId: string, proposalId: string): void {
+  send({ kind: "proposal-discard", worldId, proposalId });
+}
+
+export function rebaseProposal(worldId: string, proposalId: string): void {
+  send({ kind: "proposal-rebase", worldId, proposalId });
+}
+
+export function resolveProposalConflict(
+  worldId: string,
+  proposalId: string,
+  path: string,
+  field: string,
+  choice: "mine" | "theirs",
+): void {
+  send({ kind: "proposal-resolve-conflict", worldId, proposalId, path, field, choice });
+}
+
+export function markProposalSeen(worldId: string, proposalId: string): void {
+  send({ kind: "proposal-mark-seen", worldId, proposalId });
+}
+
+export function useGateNotices(): Record<string, GateNotice> {
+  return useStore().gateNotices;
+}
+
 const getSnapshot = (): StoreState => current;
 const subscribe = (l: () => void): (() => void) => {
   listeners.add(l);
@@ -197,5 +278,5 @@ export function useWorld(): ClientState["world"] {
 
 /** Test hook: inject a full state and mark the connection open. */
 export function __setStateForTest(state: ClientState): void {
-  emitChange({ connection: "open", state });
+  emitChange({ connection: "open", state, gateNotices: {} });
 }
