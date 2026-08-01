@@ -251,6 +251,14 @@ export class FsWorldProvider implements WorldProvider {
 
   /** Registry rows follow the world's real counts whenever a bundle passes through. */
   private refreshRegistry(bundle: WorldBundle): void {
+    // Closed-world attention counts (SPEC-014 R-7, T-5/T-6): computed here, at the moment the
+    // bundle passes through, and labelled as-of now. A crash leaving them stale is honest by
+    // construction — the label always says when they were true.
+    let unreviewedTakes = 0;
+    for (const production of bundle.productions) {
+      const decided = new Set(production.reviews.map((r) => r.takeId));
+      unreviewedTakes += production.takes.filter((t) => !decided.has(t.id)).length;
+    }
     this.appIndex?.upsertWorld({
       worldId: bundle.meta.worldId,
       slug: bundle.meta.slug,
@@ -262,6 +270,11 @@ export class FsWorldProvider implements WorldProvider {
         factions: bundle.sheets.filter((s) => s.type === "faction").length,
         canonEntries: bundle.canon.length,
         productions: bundle.productions.length,
+      },
+      attention: {
+        unreviewedTakes,
+        openProposals: bundle.proposals.length,
+        asOf: new Date().toISOString(),
       },
       updated: bundle.meta.updated,
     });
