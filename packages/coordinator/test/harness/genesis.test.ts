@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildSessionConfig } from "@arke-studio/adapter-opencode";
 import type { DomainEvent, HarnessAdapter, HarnessEvent } from "@arke-studio/contracts";
+import { tempDir } from "../tmp.js";
 import { GenesisService } from "../../src/harness/genesis.js";
 
 /** An adapter that behaves like a world-author: writes draft.json into its cwd, then replies. */
@@ -83,7 +83,7 @@ function draftingAdapter(): HarnessAdapter & { created: string[] } {
 
 describe("genesis conversations in the sandbox (prototype 12a)", () => {
   it("runs the world-author in the sandbox, records both turns, and surfaces the draft", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-genesis-"));
+    const dir = await tempDir("arke-genesis-");
     const events: DomainEvent[] = [];
     const adapter = draftingAdapter();
     const genesis = new GenesisService(adapter, (e) => events.push(e), {

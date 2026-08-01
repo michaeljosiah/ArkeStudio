@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tempDir } from "../tmp.js";
 import { checkPathBudget } from "../../src/world/paths.js";
 import { fileArtifact } from "../../src/artifacts/filing.js";
 import { buildDiagnosticsBundle } from "../../src/diagnostics.js";
@@ -22,7 +22,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 describe("the no-credential path (R-3, D1, D2, §3.2) — the scenario that proves the claim", () => {
   it("no key, no adapter, no manifest: create, author by form, link, reopen, all intact", async () => {
     // A clean app root: no cipher, no validators, no dispatch clients, no manifest, no network.
-    const root = await mkdtemp(join(tmpdir(), "arke-firstrun-"));
+    const root = await tempDir("arke-firstrun-");
     const provider = new FsWorldProvider(root, {});
     await provider.ensureAppRoot();
 
@@ -102,7 +102,7 @@ describe("diagnostics are safe to paste publicly (R-15, D9, §3.2)", () => {
     const PROMPT_SENTINEL = "a-prompt-nobody-should-see";
     const registry = new SecretRegistry();
     registry.register(KEY_SENTINEL);
-    const dir = await mkdtemp(join(tmpdir(), "arke-diag16-"));
+    const dir = await tempDir("arke-diag16-");
     const log = new AppLog(join(dir, "app.jsonl"), registry);
     // A registered secret in free text, and a prompt in a prompt-named field — the two leak
     // shapes the boundary mechanically closes (call sites keep prompts out of message strings).
@@ -151,7 +151,7 @@ describe("the licence gate (R-9, D5, §3.2)", () => {
 
     // A staged-but-unrecorded component fails the gate: simulate by pointing the script at a
     // copy whose notices file lacks the row.
-    const fakeRepo = await mkdtemp(join(tmpdir(), "arke-lic-"));
+    const fakeRepo = await tempDir("arke-lic-");
     const { mkdir, cp } = await import("node:fs/promises");
     await mkdir(join(fakeRepo, "apps", "desktop", "scripts"), { recursive: true });
     await mkdir(join(fakeRepo, "apps", "desktop", "build-resources", "ffmpeg"), { recursive: true });

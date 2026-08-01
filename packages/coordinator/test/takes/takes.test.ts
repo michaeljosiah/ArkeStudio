@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   buildExportPlan,
@@ -10,6 +9,7 @@ import {
   type ExportPlan,
   type Job,
 } from "@arke-studio/contracts";
+import { tempDir } from "../tmp.js";
 import { readChanges } from "../../src/world/change-writer.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { exportWorld, runExport, type FfmpegRunner } from "../../src/takes/export.js";
@@ -259,7 +259,7 @@ describe("exports (R-19..R-22, D10..D12, §3.2)", () => {
   });
 
   it("a finished export appears whole; a cancelled one leaves no partial file (R-21)", async () => {
-    const worldDir = await mkdtemp(join(tmpdir(), "arke-export-"));
+    const worldDir = await tempDir("arke-export-");
     const plan: ExportPlan = { preset: "review-cut", items: [{ type: "slate", label: "SHOT 1 · 4.0s", durationSec: 4 }], totalSec: 4 };
     const okRunner: FfmpegRunner = {
       run: async (args) => {
@@ -301,7 +301,7 @@ describe("exports (R-19..R-22, D10..D12, §3.2)", () => {
     const sourceBundle = store.getBundle();
     await store.close(); // release the lock so the copy carries no live lock semantics
 
-    const target = join(await mkdtemp(join(tmpdir(), "arke-worldexp-")), "the-undersong");
+    const target = join(await tempDir("arke-worldexp-"), "the-undersong");
     await exportWorld(dir, target);
 
     const entries = await readdir(target);

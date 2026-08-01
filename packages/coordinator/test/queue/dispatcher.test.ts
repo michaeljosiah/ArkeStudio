@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, readdir, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, Job, LedgerEntry } from "@arke-studio/contracts";
+import { tempDir } from "../tmp.js";
 import { JobQueue, type EnqueueInput } from "../../src/queue/dispatcher.js";
 import { FakeProvider, pngBytes, truncatedPngBytes } from "./fake-provider.js";
 
@@ -31,8 +31,8 @@ async function makeHarness(
   clients: Record<string, FakeProvider>,
   opts: { getKey?: (p: string) => Promise<string | null>; baseConcurrency?: number } = {},
 ): Promise<Harness> {
-  const dir = await mkdtemp(join(tmpdir(), "arke-queue-"));
-  const worldDir = await mkdtemp(join(tmpdir(), "arke-qworld-"));
+  const dir = await tempDir("arke-queue-");
+  const worldDir = await tempDir("arke-qworld-");
   return build(join(dir, "jobs.jsonl"), worldDir, clients, opts);
 }
 

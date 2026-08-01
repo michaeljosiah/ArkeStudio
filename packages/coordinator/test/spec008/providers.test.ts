@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deriveCapabilityAvailability, type CapabilityProbe, type ModelManifest } from "@arke-studio/contracts";
+import { tempDir } from "../tmp.js";
 import { AppSettingsFile, routingFaults } from "../../src/app-settings.js";
 import { CredentialStore, type Cipher } from "../../src/credentials/store.js";
 import { ProviderService } from "../../src/providers/service.js";
@@ -16,7 +15,7 @@ const cipher: Cipher = {
 };
 
 async function makeService(probes: CapabilityProbe[] | Error) {
-  const dir = await mkdtemp(join(tmpdir(), "arke-prov-"));
+  const dir = await tempDir("arke-prov-");
   const credentials = new CredentialStore(join(dir, "credentials.dat"), cipher, new SecretRegistry(), async () => {});
   await credentials.set("fal", "sk-fal-testkey-000000000");
   const service = new ProviderService(
@@ -119,7 +118,7 @@ const manifest: ModelManifest = {
 
 describe("routing defaults resolve to concrete models (R-20, R-21 posture, D1)", () => {
   it("stores the model on change, refuses the unknown and the mismatched", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-settings-"));
+    const dir = await tempDir("arke-settings-");
     const settings = new AppSettingsFile(join(dir, "settings.json"));
 
     assert.deepEqual(await settings.setRoutingDefault("video", "seedance-2.0", manifest), { ok: true });
@@ -133,7 +132,7 @@ describe("routing defaults resolve to concrete models (R-20, R-21 posture, D1)",
   });
 
   it("a default whose model left the manifest surfaces as a named routing fault (§2.7)", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-settings-"));
+    const dir = await tempDir("arke-settings-");
     const settings = new AppSettingsFile(join(dir, "settings.json"));
     await settings.setRoutingDefault("video", "seedance-2.0", manifest);
     const shrunk: ModelManifest = { ...manifest, models: manifest.models.filter((m) => m.id !== "seedance-2.0") };

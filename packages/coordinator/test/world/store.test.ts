@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { cp, mkdtemp, readFile, rename, writeFile } from "node:fs/promises";
+import { cp, readFile, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { tempDir } from "../tmp.js";
 import { WorldLockedError } from "../../src/world/lock.js";
 import { WorldOpenError, readWorldMeta } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -113,7 +114,7 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     const store = await WorldStore.open(dir, { clock: CLOCK });
     await store.close();
 
-    const newParent = await mkdtemp(join(tmpdir(), "arke-moved-"));
+    const newParent = await tempDir("arke-moved-");
     const newDir = join(newParent, "the-undersong-moved");
     await rename(dir, newDir);
     const reopened = await WorldStore.open(newDir, { clock: CLOCK });
@@ -124,7 +125,7 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
   });
 
   it("refuses a newer schema version without modifying the world (R-25)", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-newer-"));
+    const dir = await tempDir("arke-newer-");
     const worldDir = join(dir, "future-world");
     await cp(FIXTURE_WORLD, worldDir, { recursive: true });
     const metaPath = join(worldDir, "world.json");

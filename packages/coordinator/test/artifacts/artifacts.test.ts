@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { computeNeedsYou, type ClientState } from "@arke-studio/contracts";
+import { tempDir } from "../tmp.js";
 import { candidateHash, resolveCandidate, storeBatch, verifyCandidates } from "../../src/artifacts/extraction.js";
 import { fileArtifact, importFolder, pickable } from "../../src/artifacts/filing.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
@@ -19,7 +19,7 @@ async function open() {
 }
 
 async function sourceFile(name: string, content: string | Buffer): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "arke-src-"));
+  const dir = await tempDir("arke-src-");
   const path = join(dir, name);
   await writeFile(path, content);
   return path;
@@ -96,7 +96,7 @@ describe("supersession (R-5, D10, §3.2)", () => {
 describe("import stage one (R-9..R-11, D1, D11, §3.2)", () => {
   it("files unknown types, excludes system files, and reports all of it", async () => {
     const { store } = await open();
-    const src = await mkdtemp(join(tmpdir(), "arke-import-"));
+    const src = await tempDir("arke-import-");
     await writeFile(join(src, "chapter-one.md"), "# The First Tide\nMaren counts the bells.");
     await writeFile(join(src, "notes.xyz"), "unknown extension, real notes");
     await writeFile(join(src, ".DS_Store"), "junk");

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { after, before, describe, it } from "node:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { after, before, describe, it, type TestContext } from "node:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { HarnessEvent } from "@arke-studio/contracts";
@@ -247,8 +247,9 @@ describe("session configuration (R-5, R-6, R-10)", () => {
  * A stub OpenCode the test can actually run: a batch file on Windows, a shell script elsewhere.
  * Discovery spawns what it finds, so a stub that only runs on one platform tests only that one.
  */
-function stubOpenCode(name: string, version: string): string {
+function stubOpenCode(t: TestContext, name: string, version: string): string {
   const dir = mkdtempSync(join(tmpdir(), "arke-oc-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 3 }));
   const windows = process.platform === "win32";
   const file = join(dir, windows ? `${name}.cmd` : name);
   writeFileSync(file, windows ? `@echo ${version}\r\n` : `#!/bin/sh\necho ${version}\n`, { mode: 0o755 });
@@ -256,16 +257,16 @@ function stubOpenCode(name: string, version: string): string {
 }
 
 describe("discovery (R-1)", () => {
-  it("prefers a configured path over PATH, and names the version", () => {
-    const found = discoverOpenCode({ configuredPath: stubOpenCode("fake-opencode", "7.7.7") });
+  it("prefers a configured path over PATH, and names the version", (t) => {
+    const found = discoverOpenCode({ configuredPath: stubOpenCode(t, "fake-opencode", "7.7.7") });
     assert.equal(found?.source, "configured");
     assert.equal(found?.version, "7.7.7");
   });
 
-  it("falls back to PATH when nothing is configured", () => {
+  it("falls back to PATH when nothing is configured", (t) => {
     // Put our own opencode first on PATH rather than trusting the machine to have one — a test
     // that passes because the developer happens to have it installed proves nothing on CI.
-    const onPath = stubOpenCode("opencode", "6.6.6");
+    const onPath = stubOpenCode(t, "opencode", "6.6.6");
     const original = process.env["PATH"];
     process.env["PATH"] = `${join(onPath, "..")}${delimiter}${original ?? ""}`;
     try {

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
+import { tempDir } from "../tmp.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { atomicWriteFile } from "../../src/world/atomic.js";
 import { toExtendedLength } from "../../src/world/paths.js";
@@ -14,7 +14,7 @@ const CLOCK = () => "2026-08-01T12:00:00.000Z";
 
 describe("FsWorldProvider (R-1, T-14)", () => {
   it("creates the app root skeleton on first run without prompting (R-1)", async () => {
-    const root = join(await mkdtemp(join(tmpdir(), "arke-approot-")), "deeper", "ArkeStudio");
+    const root = join(await tempDir("arke-approot-"), "deeper", "ArkeStudio");
     const provider = new FsWorldProvider(root, { clock: CLOCK });
     await provider.ensureAppRoot();
     assert.ok(JSON.parse(await readFile(join(root, "config.json"), "utf8")));
@@ -32,7 +32,7 @@ describe("FsWorldProvider (R-1, T-14)", () => {
   });
 
   it("creates a world end to end: slug, world.json, change line, then opens it", async () => {
-    const root = await mkdtemp(join(tmpdir(), "arke-create-"));
+    const root = await tempDir("arke-create-");
     const provider = new FsWorldProvider(root, { clock: CLOCK });
     const { worldId, slug } = await provider.createWorld({
       name: "The Undersong",
@@ -55,7 +55,7 @@ describe("FsWorldProvider (R-1, T-14)", () => {
 
   it("reads and writes the deepest path the layout allows via extended-length prefixes (R-10)", async () => {
     // Build a path beyond the classic 260-char limit and prove our own I/O handles it.
-    const base = await mkdtemp(join(tmpdir(), "arke-deep-"));
+    const base = await tempDir("arke-deep-");
     const segments = Array.from({ length: 12 }, () => "a".repeat(24));
     const deepDir = join(base, ...segments);
     const deepFile = join(deepDir, "clip-placeholder.txt");
@@ -67,7 +67,7 @@ describe("FsWorldProvider (R-1, T-14)", () => {
 
 describe("cold-scan budget (§2.13)", () => {
   it("scans a 50-sheet, 200-entry, 500-take world in under ten seconds", async () => {
-    const root = await mkdtemp(join(tmpdir(), "arke-bench-"));
+    const root = await tempDir("arke-bench-");
     const dir = join(root, "benchmark");
     await mkdir(join(dir, "characters"), { recursive: true });
     await mkdir(join(dir, "canon"), { recursive: true });
