@@ -84,6 +84,9 @@ interface StoreState {
   voiceSidecar: { state: "not-started" | "downloading" | "unavailable" | "ready"; detail: string } | null;
   /** SPEC-013: export lifecycle by exportId. */
   exportsState: Record<string, ExportState>;
+  /** SPEC-015: the last import report and filing notices — transient. */
+  importReport: ImportReportState | null;
+  artifactNotices: Array<{ sourcePath: string; outcome: string; reason: string; sizeBytes: number | null }>;
 }
 
 export interface VoiceCandidatesState {
@@ -109,6 +112,8 @@ let current: StoreState = {
   dictation: {},
   voiceSidecar: null,
   exportsState: {},
+  importReport: null,
+  artifactNotices: [],
 };
 const listeners = new Set<() => void>();
 let bridge: ArkeBridge | null = null;
@@ -287,6 +292,21 @@ function handleFrame(json: string): void {
     } else if (event.type === "voice.sidecar") {
       voiceSidecar = { state: event.state, detail: event.detail };
     }
+    let importReport = current.importReport;
+    let artifactNotices = current.artifactNotices;
+    if (event.type === "import.report") {
+      importReport = {
+        filed: event.filed,
+        deduplicated: event.deduplicated,
+        excluded: event.excluded,
+        needsConsent: event.needsConsent,
+      };
+    } else if (event.type === "artifact.notice") {
+      artifactNotices = [
+        ...artifactNotices.slice(-9),
+        { sourcePath: event.sourcePath, outcome: event.outcome, reason: event.reason, sizeBytes: event.sizeBytes },
+      ];
+    }
     let exportsState = current.exportsState;
     if (event.type === "export.progress") {
       exportsState = {
@@ -342,6 +362,8 @@ function handleFrame(json: string): void {
       dictation,
       voiceSidecar,
       exportsState,
+      importReport,
+      artifactNotices,
     });
   }
 }
@@ -798,6 +820,43 @@ export function useExports(): Record<string, ExportState> {
   return useStore().exportsState;
 }
 
+// ---- SPEC-015: artifacts ---------------------------------------------------
+
+export function fileArtifactMsg(
+  worldId: string,
+  sourcePath: string,
+  opts: { links?: string[]; allowLarge?: boolean; supersedes?: string } = {},
+): void {
+  send({ kind: "file-artifact", worldId, sourcePath, ...opts });
+}
+
+export function importFolder(worldId: string, sourcePath: string): void {
+  send({ kind: "import-folder", worldId, sourcePath });
+}
+
+export function extractArtifact(worldId: string, artifactId: string): void {
+  send({ kind: "extract-artifact", worldId, artifactId });
+}
+
+export function resolveExtraction(worldId: string, artifactId: string, candidateHash: string, decision: "accept" | "reject"): void {
+  send({ kind: "resolve-extraction", worldId, artifactId, candidateHash, decision });
+}
+
+export interface ImportReportState {
+  filed: Array<{ name: string; kind: string }>;
+  deduplicated: string[];
+  excluded: Array<{ name: string; reason: string }>;
+  needsConsent: Array<{ name: string; sizeBytes: number }>;
+}
+
+export function useImportReport(): ImportReportState | null {
+  return useStore().importReport;
+}
+
+export function useArtifactNotices(): Array<{ sourcePath: string; outcome: string; reason: string; sizeBytes: number | null }> {
+  return useStore().artifactNotices;
+}
+
 export function recordReview(
   worldId: string,
   productionId: string,
@@ -860,5 +919,7 @@ export function __setStateForTest(state: ClientState): void {
     dictation: {},
     voiceSidecar: null,
     exportsState: {},
+    importReport: null,
+    artifactNotices: [],
   });
 }

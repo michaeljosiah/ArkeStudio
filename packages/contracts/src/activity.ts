@@ -16,7 +16,14 @@ import { PROVIDERS } from "./provider.js";
 /** Urgency classes (§2.4): unresolved money, blocked work, read-only worlds, paid work, WIP. */
 export type NeedsYouClass = 1 | 2 | 3 | 4 | 5;
 
-export type NeedsYouAction = "resolve" | "settings" | "reconcile" | "review" | "open-proposal" | "open-world";
+export type NeedsYouAction =
+  | "resolve"
+  | "settings"
+  | "reconcile"
+  | "review"
+  | "open-proposal"
+  | "open-world"
+  | "review-extraction";
 
 export interface NeedsYouEntry {
   urgency: NeedsYouClass;
@@ -26,6 +33,7 @@ export interface NeedsYouEntry {
     | "external-edits"
     | "unreviewed-take"
     | "open-proposal"
+    | "extraction-batch"
     | "closed-world-attention";
   title: string;
   detail: string;
@@ -103,6 +111,24 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
           ref: take.id,
         });
       }
+    }
+    // Class 5 — an extraction batch: ONE entry per artifact, granularity inside (SPEC-015 R-15, D5).
+    for (const artifact of world.artifacts ?? []) {
+      const pending = artifact.extraction?.pending.length ?? 0;
+      if (pending === 0) continue;
+      entries.push({
+        urgency: 5,
+        kind: "extraction-batch",
+        title: `${pending} extracted fact${pending === 1 ? "" : "s"} from ${artifact.file}`,
+        detail:
+          artifact.extraction!.droppedCount > 0
+            ? `${artifact.extraction!.droppedCount} candidate${artifact.extraction!.droppedCount === 1 ? "" : "s"} dropped — quotes did not verify`
+            : "each accepts or rejects on its own",
+        at: artifact.created,
+        worldId: world.meta.worldId,
+        actions: ["review-extraction"],
+        ref: artifact.id,
+      });
     }
     // Class 5 — work in progress, waiting but costing nothing.
     for (const staged of world.proposals) {

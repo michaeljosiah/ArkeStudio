@@ -492,5 +492,31 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("cancel-export"), worldId: UlidSchema, exportId: z.string().min(1) }).strict(),
   /** SPEC-013 R-22: a folder that reopens identically elsewhere — history kept, caches dropped. */
   z.object({ kind: z.literal("export-world"), worldId: UlidSchema }).strict(),
+  /** SPEC-015 R-1/R-6: file one artifact; large files come back needing stated-size consent. */
+  z
+    .object({
+      kind: z.literal("file-artifact"),
+      worldId: UlidSchema,
+      sourcePath: z.string().min(1),
+      links: z.array(z.string()).optional(),
+      allowLarge: z.boolean().optional(),
+      /** Files a replacement recording what it supersedes (R-5). */
+      supersedes: z.string().optional(),
+    })
+    .strict(),
+  /** SPEC-015 R-9..R-11: stage one — file everything, exclude system files, report all of it. */
+  z.object({ kind: z.literal("import-folder"), worldId: UlidSchema, sourcePath: z.string().min(1) }).strict(),
+  /** SPEC-015 R-12..R-14: stage two — grounded extraction into a pending batch. */
+  z.object({ kind: z.literal("extract-artifact"), worldId: UlidSchema, artifactId: z.string().min(1) }).strict(),
+  /** SPEC-015 R-15: per-candidate resolution; accepts commit individually, rejects leave no trace. */
+  z
+    .object({
+      kind: z.literal("resolve-extraction"),
+      worldId: UlidSchema,
+      artifactId: z.string().min(1),
+      candidateHash: z.string().min(1),
+      decision: z.enum(["accept", "reject"]),
+    })
+    .strict(),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;

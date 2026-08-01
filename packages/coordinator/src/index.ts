@@ -55,6 +55,25 @@ export {
   type SidecarLike,
   type VoiceServiceDeps,
 } from "./voice/service.js";
+export {
+  candidateHash,
+  extractText,
+  resolveCandidate,
+  storeBatch,
+  verifyCandidates,
+  type RawCandidate,
+  type VerifiedBatch,
+} from "./artifacts/extraction.js";
+export {
+  addLinks,
+  fileArtifact,
+  importFolder,
+  kindForFile,
+  LARGE_FILE_BYTES,
+  pickable,
+  type FileOutcome,
+  type ImportReport,
+} from "./artifacts/filing.js";
 export { recordTakesFromJob } from "./takes/arrival.js";
 export { exportWorld, runExport, WORLD_EXPORT_EXCLUDED, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 export { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";

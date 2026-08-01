@@ -42,6 +42,8 @@ import {
 } from "./productions/ops.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "./queue/dispatcher.js";
+import { extractText, resolveCandidate, storeBatch, verifyCandidates, type RawCandidate } from "./artifacts/extraction.js";
+import { fileArtifact, importFolder } from "./artifacts/filing.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
@@ -117,6 +119,8 @@ export interface CoordinatorOptions {
   dispatchClients?: Record<string, DispatchClient>;
   /** SPEC-013 R-19: the local encoder for exports; absent → exports state the reason. */
   ffmpeg?: FfmpegRunner;
+  /** SPEC-015: the extraction model seam; every candidate is re-verified regardless (R-13). */
+  extractor?: (text: string, artifactFile: string) => Promise<RawCandidate[]>;
   /** SPEC-011: the Voxa sidecar and voice catalogue sources, injected from the desktop. */
   voice?: {
     sidecar: SidecarLike | null;
@@ -1246,6 +1250,88 @@ export class Coordinator {
           void this.appLog?.append({ kind: "world-export.failed", message: err instanceof Error ? err.message : String(err) });
         });
         void this.appLog?.append({ kind: "world-export.done", target });
+        return;
+      }
+      case "file-artifact": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const outcome = await fileArtifact(store, {
+          sourcePath: msg.sourcePath,
+          ...(msg.links !== undefined ? { links: msg.links } : {}),
+          ...(msg.allowLarge !== undefined ? { allowLarge: msg.allowLarge } : {}),
+          ...(msg.supersedes !== undefined ? { supersedes: msg.supersedes } : {}),
+        }).catch((err) => ({ outcome: "refused" as const, reason: err instanceof Error ? err.message : String(err) }));
+        if (outcome.outcome === "needs-consent" || outcome.outcome === "refused") {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "artifact.notice",
+            worldId: msg.worldId,
+            sourcePath: msg.sourcePath,
+            outcome: outcome.outcome,
+            reason: outcome.reason,
+            sizeBytes: outcome.outcome === "needs-consent" ? outcome.sizeBytes : null,
+          });
+          return;
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "import-folder": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const report = await importFolder(store, msg.sourcePath).catch(() => null);
+        if (report) {
+          this.emit({ at: new Date().toISOString(), type: "import.report", worldId: msg.worldId, ...report });
+          await this.refreshWorldSnapshot(msg.worldId);
+        }
+        return;
+      }
+      case "extract-artifact": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const artifact = store.getBundle().artifacts.find((a) => a.id === msg.artifactId);
+        if (!artifact) return;
+        try {
+          const text = await extractText(store, artifact);
+          if (text === null) {
+            void this.appLog?.append({ kind: "extraction.no-text", artifact: artifact.file });
+            return;
+          }
+          if (!this.opts.extractor) {
+            // Filing already succeeded and is untouched (D1); the model wiring is stated, not silent.
+            void this.appLog?.append({
+              kind: "extraction.unavailable",
+              artifact: artifact.file,
+              reason: "no extraction model is wired in this build",
+            });
+            return;
+          }
+          const raw = await this.opts.extractor(text, artifact.file);
+          const batch = verifyCandidates(raw, text, artifact.extraction?.decided ?? []);
+          await storeBatch(store, artifact, batch);
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch (err) {
+          void this.appLog?.append({
+            kind: "extraction.failed",
+            artifact: artifact.file,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+      case "resolve-extraction": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        const artifact = store.getBundle().artifacts.find((a) => a.id === msg.artifactId);
+        if (!artifact) return;
+        await resolveCandidate(store, gate, artifact, msg.candidateHash, msg.decision).catch((err) => {
+          void this.appLog?.append({
+            kind: "extraction.resolve-failed",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        });
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "record-review": {

@@ -190,6 +190,8 @@ export class ReadModel {
       case "dictation.result":
       case "voice.sidecar":
       case "export.progress":
+      case "import.report":
+      case "artifact.notice":
         // Signals only in SPEC-001: the bundle arrives via a fresh snapshot, and proposals
         // are static fixtures until the gate lands in SPEC-004.
         return;

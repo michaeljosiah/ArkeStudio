@@ -42,9 +42,15 @@ import {
   stageCanonAmendment as stageAmendmentMsg,
   stageCanonEntry as stageEntryMsg,
   stageSheetEdit,
+  extractArtifact,
+  fileArtifactMsg,
+  importFolder,
   requestVoiceCandidates,
   requestVoicePreview,
+  resolveExtraction,
   transcribeDictation,
+  useArtifactNotices,
+  useImportReport,
   useAskResults,
   useCanonRefs,
   useCanonSearches,
@@ -1733,22 +1739,135 @@ export function ArtifactsScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const artifacts = world?.artifacts ?? [];
+  const report = useImportReport();
+  const notices = useArtifactNotices();
+  const [importPath, setImportPath] = useState("");
+  const [kindFilter, setKindFilter] = useState<string | null>(null);
+  // Superseded artifacts drop out of the listing the way they drop out of pickers (R-5).
+  const superseded = new Set(artifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
+  const visible = artifacts.filter((a) => !superseded.has(a.id) && (kindFilter === null || a.kind === kindFilter));
+  const kinds = [...new Set(artifacts.map((a) => a.kind))];
+  const batches = artifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
   return (
     <Screen id="artifacts">
       <PageHeader
         title="Artifacts"
-        meta={<span>{artifacts.length} filed against the world</span>}
+        meta={
+          <span>
+            {visible.length} filed against the world
+            {superseded.size > 0 ? ` · ${superseded.size} superseded (history keeps them)` : ""}
+          </span>
+        }
         actions={
-          <Button variant="primary" disabled title="Filing and folder import arrive with SPEC-015">
-            Import a folder
-          </Button>
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
+            <Input
+              placeholder="C:\\path\\to\\your\\notes"
+              value={importPath}
+              onChange={(e) => setImportPath(e.target.value)}
+              style={{ minWidth: 280 }}
+            />
+            <Button
+              variant="primary"
+              disabled={importPath.trim().length === 0}
+              onClick={() => {
+                if (worldId) importFolder(worldId, importPath.trim());
+              }}
+            >
+              Import folder
+            </Button>
+          </div>
         }
       />
+      {notices.map((n, i) => (
+        <Callout key={`${n.sourcePath}-${i}`} tone="warning" title={n.outcome === "needs-consent" ? "Large file" : "Filing refused"}>
+          {n.reason}
+          {n.outcome === "needs-consent" && worldId && (
+            <>
+              {" "}
+              <Button onClick={() => fileArtifactMsg(worldId, n.sourcePath, { allowLarge: true })}>
+                Copy it anyway
+              </Button>
+            </>
+          )}
+        </Callout>
+      ))}
+      {report && (
+        <Callout title={`Imported: ${report.filed.length} filed · ${report.deduplicated.length} already held · ${report.excluded.length} excluded`}>
+          {report.excluded.length > 0 && (
+            <span>
+              excluded: {report.excluded.slice(0, 5).map((e) => `${e.name} (${e.reason})`).join(", ")}
+              {report.excluded.length > 5 ? "…" : ""} — reported, never silent.
+            </span>
+          )}
+          {report.needsConsent.length > 0 && (
+            <span> {report.needsConsent.length} large file{report.needsConsent.length === 1 ? "" : "s"} await consent above.</span>
+          )}
+        </Callout>
+      )}
+      {batches.map((artifact) => (
+        <Section
+          key={artifact.id}
+          title={`Extracted from ${artifact.file}`}
+          aside={
+            <span>
+              {artifact.extraction!.pending.length} candidate{artifact.extraction!.pending.length === 1 ? "" : "s"}
+              {artifact.extraction!.droppedCount > 0
+                ? ` · ${artifact.extraction!.droppedCount} dropped — quotes did not verify`
+                : ""}
+            </span>
+          }
+        >
+          <div className="scr-sectionlist">
+            {artifact.extraction!.pending.map((candidate) => (
+              <div key={candidate.hash} className="scr-sheetsection">
+                <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+                  <Badge tone="outline">{candidate.kind}</Badge>
+                  <strong style={{ font: "var(--type-ui)" }}>{candidate.name}</strong>
+                  {candidate.section && (
+                    <span style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>→ {candidate.section}</span>
+                  )}
+                </div>
+                <span>{candidate.body}</span>
+                <span className="scr-field__hint">
+                  “{candidate.quote}”{candidate.line !== undefined ? ` — line ${candidate.line}` : ""} · verified against the source
+                </span>
+                <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                  <Button
+                    onClick={() => {
+                      if (worldId) resolveExtraction(worldId, artifact.id, candidate.hash, "accept");
+                    }}
+                  >
+                    Accept — commits on its own
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      if (worldId) resolveExtraction(worldId, artifact.id, candidate.hash, "reject");
+                    }}
+                  >
+                    Reject — leaves no trace
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      ))}
+      <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+        <Button variant={kindFilter === null ? "primary" : "ghost"} onClick={() => setKindFilter(null)}>
+          all · {artifacts.filter((a) => !superseded.has(a.id)).length}
+        </Button>
+        {kinds.map((k) => (
+          <Button key={k} variant={kindFilter === k ? "primary" : "ghost"} onClick={() => setKindFilter(k)}>
+            {k} · {artifacts.filter((a) => a.kind === k && !superseded.has(a.id)).length}
+          </Button>
+        ))}
+      </div>
       {artifacts.length === 0 ? (
         <EmptyState title="Nothing filed yet" hint="Drop recordings, documents, boards or images to file them against the world." />
       ) : (
         <div className="lay-cardgrid">
-          {artifacts.map((a) => (
+          {visible.map((a) => (
             <Card key={a.id} className="scr-worldcard">
               <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
                 <Badge tone="outline">{a.kind}</Badge>
@@ -1756,8 +1875,22 @@ export function ArtifactsScreen() {
               </div>
               <div className="scr-worldcard__counts">
                 <span>{a.origin.by === "user" ? "filed by you" : `produced by ${a.origin.producedBy}`}</span>
+                {a.origin.by === "user" && a.origin.importedFrom !== undefined && <span>from {a.origin.importedFrom}</span>}
                 {a.links.length > 0 && <span>links {a.links.join(", ")}</span>}
+                {a.supersedes !== undefined && <span>supersedes {a.supersedes.slice(0, 10)}…</span>}
               </div>
+              {a.kind === "document" && (
+                <div>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      if (worldId) extractArtifact(worldId, a.id);
+                    }}
+                  >
+                    Lift facts — gated, grounded, optional
+                  </Button>
+                </div>
+              )}
             </Card>
           ))}
         </div>
