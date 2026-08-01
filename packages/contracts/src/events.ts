@@ -52,6 +52,20 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /** An accept did not land; the reason is stated and the client decides what to offer (SPEC-004). */
+  z
+    .object({
+      ...base,
+      type: z.literal("proposal.blocked"),
+      worldId: UlidSchema,
+      proposalId: ProposalIdSchema,
+      reason: z.enum(["stale", "needs-reconfirm", "no-op", "pending-review", "unresolved-conflicts", "target-retired"]),
+      detail: z.string().optional(),
+      /** On needs-reconfirm: the authoritative set and its signature to echo back (R-10). */
+      authoritativeSignature: z.string().optional(),
+    })
+    .strict(),
+
   /** Full row on every transition — jobs are small and the client never patches by hand. */
   z.object({ ...base, type: z.literal("job.updated"), job: JobSchema }).strict(),
 

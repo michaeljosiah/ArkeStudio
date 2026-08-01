@@ -182,24 +182,56 @@ export function RippleList({ ripple }: { ripple: RipplePreview | null }) {
   );
 }
 
+export interface ProposalGateNotice {
+  reason:
+    | "stale"
+    | "needs-reconfirm"
+    | "no-op"
+    | "pending-review"
+    | "unresolved-conflicts"
+    | "target-retired";
+  detail?: string;
+  authoritativeSignature?: string;
+}
+
+const NOTICE_TITLES: Record<ProposalGateNotice["reason"], string> = {
+  stale: "The world moved while this was open",
+  "needs-reconfirm": "The consequences changed",
+  "no-op": "Nothing to accept",
+  "pending-review": "Review the merged result",
+  "unresolved-conflicts": "Conflicted fields await a choice",
+  "target-retired": "The target was retired",
+};
+
 export function ProposalPanel({
   staged,
+  notice,
   onAccept,
   onDiscard,
+  onRebase,
+  onResolve,
+  onMarkSeen,
   disabledReason,
 }: {
   staged: StagedProposal;
-  onAccept?: () => void;
+  notice?: ProposalGateNotice;
+  onAccept?: (confirmSignature?: string) => void;
   onDiscard?: () => void;
+  onRebase?: () => void;
+  onResolve?: (path: string, field: string, choice: "mine" | "theirs") => void;
+  onMarkSeen?: () => void;
   disabledReason?: string;
 }) {
   const { proposal, ripple } = staged;
+  const conflicts = proposal.conflicts ?? [];
+  const unresolved = conflicts.filter((c) => c.resolution === undefined);
   return (
     <Card className="dom-proposal">
       <div className="dom-proposal__head">
         <Badge tone="warning">proposal</Badge>
         <span className="dom-proposal__kind mono">{proposal.kind}</span>
         <span className="dom-proposal__source">{proposal.source}</span>
+        {proposal.pendingReview && <Badge tone="danger">rebased — review</Badge>}
       </div>
       <div className="dom-proposal__summary">{proposal.summary}</div>
       <div className="dom-proposal__targets">
@@ -212,11 +244,63 @@ export function ProposalPanel({
           </div>
         ))}
       </div>
+      {notice && (
+        <div className="dom-proposal__notice" role="alert">
+          <strong>{NOTICE_TITLES[notice.reason]}.</strong> {notice.detail}
+          {notice.reason === "stale" && onRebase && (
+            <div className="dom-proposal__noticeactions">
+              <Button onClick={onRebase}>Rebase onto current</Button>
+            </div>
+          )}
+          {notice.reason === "needs-reconfirm" && onAccept && notice.authoritativeSignature && (
+            <div className="dom-proposal__noticeactions">
+              <Button variant="primary" onClick={() => onAccept(notice.authoritativeSignature)}>
+                Accept with these consequences
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+      {conflicts.length > 0 && (
+        <div className="dom-proposal__conflicts">
+          {conflicts.map((c) => (
+            <div key={`${c.path}#${c.field}`} className="dom-conflict">
+              <div className="dom-conflict__field mono">
+                {c.field}
+                {c.resolution && <Badge tone="success">kept {c.resolution === "mine" ? "the proposal" : "the world"}</Badge>}
+              </div>
+              {!c.resolution && (
+                <div className="dom-conflict__choices">
+                  <button type="button" className="dom-conflict__choice" onClick={() => onResolve?.(c.path, c.field, "mine")}>
+                    <span className="dom-conflict__label">This proposal</span>
+                    <span className="dom-conflict__value">{c.mine ?? "(removed)"}</span>
+                  </button>
+                  <button type="button" className="dom-conflict__choice" onClick={() => onResolve?.(c.path, c.field, "theirs")}>
+                    <span className="dom-conflict__label">The world now</span>
+                    <span className="dom-conflict__value">{c.theirs ?? "(removed)"}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       <RippleList ripple={ripple} />
       <div className="dom-proposal__actions">
-        <Button variant="primary" onClick={onAccept} disabled={!onAccept} title={disabledReason}>
-          Accept
-        </Button>
+        {proposal.pendingReview ? (
+          <Button variant="primary" onClick={onMarkSeen} disabled={!onMarkSeen}>
+            I've reviewed the merged result
+          </Button>
+        ) : (
+          <Button
+            variant="primary"
+            onClick={() => onAccept?.()}
+            disabled={!onAccept || unresolved.length > 0}
+            title={disabledReason}
+          >
+            Accept
+          </Button>
+        )}
         <Button variant="ghost" onClick={onDiscard} disabled={!onDiscard} title={disabledReason}>
           Discard
         </Button>

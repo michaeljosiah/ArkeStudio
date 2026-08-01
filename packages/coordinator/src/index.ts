@@ -31,6 +31,13 @@ export { readWorldMeta, scanWorld, SUPPORTED_SCHEMA_VERSION, WorldOpenError } fr
 export { fallbackSlug, slugify, uniqueSlug } from "./world/slug.js";
 export { deleteScanState, WorldStore } from "./world/store.js";
 export { JsonFile, MarkdownFile, sha256 } from "./world/text-files.js";
+export { applyResolution, mergeMarkdown, type MergeResult } from "./gate/merge.js";
+export {
+  ProposalManager,
+  rippleSignature,
+  type AcceptOutcome,
+  type StageInput,
+} from "./gate/proposals.js";
 export { AppIndex } from "./index-db/app-index.js";
 export { castRefs, canonStamp, extract } from "./index-db/citations.js";
 export {

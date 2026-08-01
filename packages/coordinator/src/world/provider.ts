@@ -1,6 +1,7 @@
 import { mkdir, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { ulid, type WorldBundle, type WorldSummary } from "@arke-studio/contracts";
+import { ProposalManager } from "../gate/proposals.js";
 import { AppIndex } from "../index-db/app-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import type { WorldProvider } from "../world-provider.js";
@@ -87,6 +88,11 @@ export class FsWorldProvider implements WorldProvider {
   /** The open world's derived index, when available. */
   getWorldIndex() {
     return this.store?.getIndex() ?? null;
+  }
+
+  /** The accept gate over the open world (SPEC-004). */
+  gate(): ProposalManager | null {
+    return this.store ? new ProposalManager(this.store) : null;
   }
 
   onWorldStale(cb: (worldId: string) => void): void {

@@ -3,15 +3,20 @@ import { NavLink, Outlet, useNavigate, useParams } from "react-router";
 import type { CanonEntry, Sheet } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, PageHeader, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
-import { CanonEntryRow, ProposalPanel, ReferenceTile, SheetCard } from "../domain/domain.js";
+import { CanonEntryRow, ReferenceTile, SheetCard } from "../domain/domain.js";
+import { ConnectedProposalPanel } from "../domain/connected.js";
 import { shortDateTime } from "../lib/format.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
-import { reconcileExternalEdit, reloadWorld, useStore, useWorld } from "../lib/store.js";
+import {
+  reconcileExternalEdit,
+  reloadWorld,
+  stageSheetEdit,
+  useStore,
+  useWorld,
+} from "../lib/store.js";
 import { HealthDot } from "./shell.js";
 
 /** World screens (§2.9): the world is the home, productions are lenses over it. */
-
-const GATE_NOT_YET = "The accept gate arrives with SPEC-004; until then the world is read-only here.";
 
 export function WorldLayout() {
   const { worldId } = useParams();
@@ -174,7 +179,7 @@ export function WorldOverviewScreen() {
       {proposals.length > 0 && (
         <Section title="Needs you" aside={<span>{proposals.length} awaiting a decision</span>}>
           {proposals.map((p) => (
-            <ProposalPanel key={p.proposal.id} staged={p} disabledReason={GATE_NOT_YET} />
+            <ConnectedProposalPanel key={p.proposal.id} staged={p} />
           ))}
         </Section>
       )}
@@ -336,7 +341,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         }
       />
       {staged.map((p) => (
-        <ProposalPanel key={p.proposal.id} staged={p} disabledReason={GATE_NOT_YET} />
+        <ConnectedProposalPanel key={p.proposal.id} staged={p} />
       ))}
       <div className="scr-sectionlist">
         {sheet.sections.map((s) => (
@@ -389,31 +394,56 @@ export const LocationDetailScreen = () => <SheetDetail screenId="location-detail
 export function CharacterEditScreen() {
   const { worldId, sheetId } = useParams();
   const sheet = useSheet(worldId, sheetId);
+  const navigate = useNavigate();
+  const [edited, setEdited] = useState<Record<string, string>>({});
+  const [stagedAt, setStagedAt] = useState<number | null>(null);
+
+  const sections = (sheet?.sections ?? []).map((s) => ({
+    heading: s.heading,
+    body: edited[s.heading] ?? s.body,
+  }));
+  const dirty = sections.some((s, i) => s.body !== sheet?.sections[i]?.body);
+
   return (
     <Screen id="character-edit">
       <PageHeader
         title={sheet ? `Edit — ${sheet.name}` : "Edit"}
         meta={sheet && <span>editing against v{sheet.version} · accepting cuts v{sheet.version + 1}</span>}
       />
-      <DegradedBanner component="harness" />
       <div className="scr-form">
-        {(sheet?.sections ?? []).map((s) => (
+        {sections.map((s) => (
           <div key={s.heading} className="scr-field">
             <label className="scr-field__label">{s.heading}</label>
-            <Textarea defaultValue={s.body} />
+            <Textarea
+              value={s.body}
+              onChange={(e) => setEdited((prev) => ({ ...prev, [s.heading]: e.target.value }))}
+            />
           </div>
         ))}
         <div style={{ display: "flex", gap: "var(--space-2)" }}>
-          <Button variant="primary" disabled title={GATE_NOT_YET}>
-            Stage proposal
+          <Button
+            variant="primary"
+            disabled={!sheet || !worldId || !dirty || stagedAt !== null}
+            title={dirty ? undefined : "Nothing changed yet"}
+            onClick={() => {
+              if (!sheet || !worldId) return;
+              const dir = sheet.type === "character" ? "characters" : `${sheet.type}s`;
+              stageSheetEdit(worldId, `${dir}/${sheet.id}.md`, `Edit ${sheet.name}`, sections);
+              setStagedAt(Date.now());
+              const base = sheet.type === "character" ? "cast" : `${sheet.type}s`;
+              navigate(`/w/${worldId}/${base}/${sheet.id}`);
+            }}
+          >
+            {stagedAt ? "Staging…" : "Stage proposal"}
           </Button>
-          <Button variant="ghost" disabled title={GATE_NOT_YET}>
-            Discard
+          <Button variant="ghost" onClick={() => setEdited({})} disabled={!dirty}>
+            Reset
           </Button>
         </div>
         <Callout title="Edits go through the gate">
-          A save stages a proposal with its ripples — reference tiles that age, productions that
-          pick the change up — and nothing lands until you accept (SPEC-004).
+          Staging opens a proposal with its computed ripples — reference tiles that age,
+          productions that pick the change up — and nothing lands until you accept it on the
+          sheet page.
         </Callout>
       </div>
     </Screen>

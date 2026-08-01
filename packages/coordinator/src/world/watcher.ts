@@ -24,8 +24,11 @@ export class WorldWatcher {
     try {
       this.watcher = watch(this.dir, { recursive: true }, (_event, filename) => {
         if (this.suppressed > 0) return;
-        const name = filename ?? "";
-        if (IGNORED.some((rx) => rx.test(name))) return;
+        // Windows delivers null filenames on rename bursts — overwhelmingly our own SQLite/
+        // journal traffic straggling past the suppression window. Closed-world reconciliation
+        // (R-28) still catches anything a dropped event would have flagged.
+        if (filename === null || filename === "") return;
+        if (IGNORED.some((rx) => rx.test(filename))) return;
         if (this.timer) clearTimeout(this.timer);
         this.timer = setTimeout(() => this.onExternalChange(), DEBOUNCE_MS);
       });

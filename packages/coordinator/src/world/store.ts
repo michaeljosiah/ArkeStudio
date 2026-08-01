@@ -38,6 +38,7 @@ export class WorldStore {
     private scan: ScanResult,
     private externalEdits: ExternalEdit[],
     private readonly events: WorldStoreEvents,
+    private readonly clockFn: () => string,
   ) {}
 
   private stale = false;
@@ -72,7 +73,15 @@ export class WorldStore {
       throw err;
     }
     const externalEdits = opts.readOnly ? [] : await detectExternalEdits(dir, scan);
-    const store = new WorldStore(dir, lock, committer, scan, externalEdits, opts.events ?? {});
+    const store = new WorldStore(
+      dir,
+      lock,
+      committer,
+      scan,
+      externalEdits,
+      opts.events ?? {},
+      opts.clock ?? (() => new Date().toISOString()),
+    );
     if (!opts.readOnly) {
       await store.saveScanState();
       store.startWatcher();
@@ -91,6 +100,28 @@ export class WorldStore {
     return this.index;
   }
 
+  /**
+   * Run a gate operation that writes inside the world (`.proposals/`): serialised with
+   * commits, watcher-suppressed so our own writes never read as external, rescanned after so
+   * the bundle stays honest (SPEC-004).
+   */
+  async gateOp<T>(fn: () => Promise<T>): Promise<T> {
+    return this.serialise(async () => {
+      this.watcher?.suppress();
+      try {
+        return await fn();
+      } finally {
+        await this.rescan().catch(() => {});
+        this.watcher?.unsuppress();
+      }
+    });
+  }
+
+  /** The committer's clock — gate records share the world's notion of now. */
+  now(): string {
+    return this.clockFn();
+  }
+
   getBundle(): WorldBundle {
     return { ...this.scan.bundle, externalEdits: this.externalEdits, stale: this.stale };
   }
@@ -104,13 +135,22 @@ export class WorldStore {
     return this.serialise(async () => {
       this.watcher?.suppress();
       try {
-        const result = await this.committer.commit(input, hooks);
-        await this.rescan([...input.files.map((f) => f.path), "world.json"]);
-        return result;
+        return await this.commitUnserialised(input, hooks);
       } finally {
         this.watcher?.unsuppress();
       }
     });
+  }
+
+  /**
+   * The commit body without the serialise/suppress envelope — for callers already inside
+   * `gateOp` (SPEC-004), where re-entering the chain would deadlock. Never call directly
+   * outside that envelope.
+   */
+  async commitUnserialised(input: CommitInput, hooks?: CommitHooks): Promise<CommitResult> {
+    const result = await this.committer.commit(input, hooks);
+    await this.rescan([...input.files.map((f) => f.path), "world.json"]);
+    return result;
   }
 
   /** Retire, never delete (R-26): the entity stays on disk, marked, still resolving. */
