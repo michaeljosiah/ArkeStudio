@@ -8,7 +8,7 @@ export { createNormalizeState, normalizeOpenCode, toolSummary, type NormalizeOut
 export { OpenCodeError, OpenCodeHttp } from "./http.js";
 export { parseSse } from "./sse.js";
 export type {
-  Capability,
+  HarnessCapability,
   CreateSessionInput,
   HarnessAdapter,
   HarnessEvent,

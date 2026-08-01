@@ -20,6 +20,7 @@
     "@arke-studio/adapter-opencode": "*",
     "@arke-studio/contracts": "*",
     "@arke-studio/coordinator": "*",
+    "@arke-studio/providers": "*",
     "@electron/rebuild": "^3.7.2",
     "@types/node": "^22.0.0",
     "electron": "^43.2.0",

@@ -26,10 +26,21 @@ export class ReadModel {
         },
         jobs: [],
         ledger: [],
+        providers: [],
+        manifest: null,
+        routing: { defaults: {}, faults: [] },
+        spend: null,
+        runtime: null,
+        drift: [],
       },
       worlds: [],
       world: null,
     };
+  }
+
+  /** Seed the app-config slice at start-up (SPEC-008): manifest, providers, routing, spend. */
+  seedAppConfig(config: Partial<Pick<ClientState["app"], "manifest" | "providers" | "routing" | "spend" | "runtime" | "drift">>): void {
+    this.state = { ...this.state, app: { ...this.state.app, ...config } };
   }
 
   getState(): ClientState {
@@ -82,6 +93,29 @@ export class ReadModel {
           ...this.state,
           app: { ...this.state.app, ledger: [...this.state.app.ledger, event.entry] },
         };
+        return;
+      }
+      case "provider.status": {
+        this.state = { ...this.state, app: { ...this.state.app, providers: event.providers } };
+        return;
+      }
+      case "routing.changed": {
+        this.state = {
+          ...this.state,
+          app: { ...this.state.app, routing: { defaults: event.routing, faults: event.faults } },
+        };
+        return;
+      }
+      case "spend.status": {
+        this.state = { ...this.state, app: { ...this.state.app, spend: event.spend } };
+        return;
+      }
+      case "runtime.status": {
+        this.state = { ...this.state, app: { ...this.state.app, runtime: event.runtime } };
+        return;
+      }
+      case "manifest.drift": {
+        this.state = { ...this.state, app: { ...this.state.app, drift: event.reports } };
         return;
       }
       case "entity.changed": {

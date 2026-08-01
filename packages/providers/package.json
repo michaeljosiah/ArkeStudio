@@ -2,12 +2,13 @@
   "name": "@arke-studio/providers",
   "version": "0.1.0",
   "private": true,
-  "description": "Typed skeleton for the provider layer — FAL, Higgsfield, ElevenLabs, OpenAI, Anthropic, Ollama. Implementations arrive with SPEC-008/SPEC-009; the workspace graph is settled here (SPEC-001 D9).",
+  "description": "Provider clients with capability declarations (FAL, Higgsfield, OpenAI, Anthropic, ElevenLabs, Ollama), the shipped model manifest, and local runtime detection (SPEC-008).",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"test/**/*.test.ts\""
   },
   "dependencies": {
     "@arke-studio/contracts": "*",
@@ -15,6 +16,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "tsx": "^4.19.2"
   }
 }

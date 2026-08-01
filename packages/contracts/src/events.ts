@@ -3,7 +3,15 @@ import { AskCandidateSchema, AskResultSchema } from "./ask.js";
 import { ChangeRecordSchema } from "./change.js";
 import { IsoDateTimeSchema, ProposalIdSchema, ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { JobSchema, LedgerEntrySchema } from "./job.js";
+import { ProviderStatusSchema } from "./provider.js";
 import { ShotSelectionSchema } from "./scene.js";
+import {
+  LocalRuntimeStatusSchema,
+  ManifestDriftSchema,
+  RoutingDefaultsSchema,
+  RoutingFaultSchema,
+  SpendStatusSchema,
+} from "./settings.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
 
 /**
@@ -100,6 +108,24 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
 
   z.object({ ...base, type: z.literal("ledger.appended"), entry: LedgerEntrySchema }).strict(),
+
+  /** Provider configuration or validation changed — the full set, never a patch (SPEC-008 R-2, R-3). */
+  z.object({ ...base, type: z.literal("provider.status"), providers: z.array(ProviderStatusSchema) }).strict(),
+  /** Routing defaults or their faults changed (SPEC-008 R-20, §2.7). */
+  z
+    .object({
+      ...base,
+      type: z.literal("routing.changed"),
+      routing: RoutingDefaultsSchema,
+      faults: z.array(RoutingFaultSchema),
+    })
+    .strict(),
+  /** Rolling spend re-evaluated on a ledger append or a settings change (SPEC-008 R-19, D10). */
+  z.object({ ...base, type: z.literal("spend.status"), spend: SpendStatusSchema }).strict(),
+  /** Local runtime detection completed (SPEC-008 R-22, D12). */
+  z.object({ ...base, type: z.literal("runtime.status"), runtime: LocalRuntimeStatusSchema }).strict(),
+  /** Estimate-versus-actual divergence crossed the drift threshold (SPEC-008 R-13, §2.11). */
+  z.object({ ...base, type: z.literal("manifest.drift"), reports: z.array(ManifestDriftSchema) }).strict(),
 
   /** Another program changed world files while open — reload required, never merged (SPEC-002 R-23). */
   z.object({ ...base, type: z.literal("world.stale"), worldId: UlidSchema }).strict(),

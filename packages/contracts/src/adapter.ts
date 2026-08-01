@@ -10,12 +10,12 @@ import { z } from "zod";
  */
 
 /** Capability flags an adapter advertises. Callers check before invoking gated methods. */
-export const Capability = z.enum([
+export const HarnessCapability = z.enum([
   "events", // streamEvents()
   "models", // listModels() — the backend exposes a model catalog
   "permissions", // respondToPermission()
 ]);
-export type Capability = z.infer<typeof Capability>;
+export type HarnessCapability = z.infer<typeof HarnessCapability>;
 
 export interface SessionRef {
   sessionId: string;
@@ -170,7 +170,7 @@ export interface HarnessAdapter {
   /** Stable identifier, e.g. "opencode" | "mock". */
   readonly id: string;
   /** What this adapter supports; determined by probing the live server at init, not hard-coded. */
-  capabilities(): ReadonlySet<Capability>;
+  capabilities(): ReadonlySet<HarnessCapability>;
 
   // ---- lifecycle ----
   /** Probe the server, derive capabilities, build initial state. Idempotent. */

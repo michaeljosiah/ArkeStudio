@@ -50,6 +50,49 @@ const state: ClientState = {
         actualSource: "provider-reported",
       },
     ],
+    providers: [
+      {
+        id: "fal",
+        configured: true,
+        validation: "valid",
+        probes: [
+          { capability: "image", available: true },
+          { capability: "video", available: true },
+        ],
+        lastValidated: AT,
+        fault: null,
+      },
+      {
+        id: "elevenlabs",
+        configured: false,
+        validation: "untested",
+        probes: [],
+        fault: null,
+      },
+    ],
+    manifest: {
+      manifestVersion: 7,
+      generated: "2026-07-28",
+      models: [
+        {
+          id: "seedance-2.0",
+          provider: "fal",
+          capability: "video",
+          displayName: "Seedance 2.0",
+          accepts: { referenceImages: 4, startFrame: true, endFrame: true },
+          limits: { maxDurationSec: 15, resolutions: ["720p", "1080p"], aspects: ["16:9"] },
+          pricing: { kind: "perSecond", microUsdPerSecond: 21667, byResolution: { "1080p": 43333 } },
+        },
+      ],
+    },
+    routing: { defaults: { video: "seedance-2.0" }, faults: [] },
+    spend: {
+      settings: { thresholdMicroUsd: 50_000_000, periodDays: 7 },
+      rollingMicroUsd: 128400,
+      alerted: false,
+    },
+    runtime: null,
+    drift: [],
   },
   worlds: [
     {

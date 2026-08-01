@@ -3,9 +3,11 @@ import {
   FrameSchema,
   type AskCandidate,
   type AskResult,
+  type Capability,
   type ClientMessage,
   type ClientState,
   type DomainEvent,
+  type ProviderId,
 } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../arke-bridge.js";
 
@@ -117,6 +119,16 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
     }
     case "ledger.appended":
       return { ...state, app: { ...state.app, ledger: [...state.app.ledger, event.entry] } };
+    case "provider.status":
+      return { ...state, app: { ...state.app, providers: event.providers } };
+    case "routing.changed":
+      return { ...state, app: { ...state.app, routing: { defaults: event.routing, faults: event.faults } } };
+    case "spend.status":
+      return { ...state, app: { ...state.app, spend: event.spend } };
+    case "runtime.status":
+      return { ...state, app: { ...state.app, runtime: event.runtime } };
+    case "manifest.drift":
+      return { ...state, app: { ...state.app, drift: event.reports } };
     case "entity.changed":
       if (!state.world || state.world.meta.worldId !== event.worldId) return state;
       return { ...state, world: { ...state.world, changes: [...state.world.changes, event.change] } };
@@ -497,6 +509,33 @@ export function requestSheetRefs(worldId: string, sheetId: string): void {
 
 export function useSheetRefs(): Record<string, SheetRefsState> {
   return useStore().sheetRefs;
+}
+
+// ---- SPEC-008: providers, routing, spend, runtimes -------------------------
+
+/** Write-only (R-5): the key goes up once; no frame ever carries it back. */
+export function setCredential(provider: ProviderId, key: string): void {
+  send({ kind: "set-credential", provider, key });
+}
+
+export function clearCredential(provider: ProviderId): void {
+  send({ kind: "clear-credential", provider });
+}
+
+export function validateProvider(provider: ProviderId): void {
+  send({ kind: "validate-provider", provider });
+}
+
+export function setRoutingDefault(capability: Capability, modelId: string): void {
+  send({ kind: "set-routing-default", capability, modelId });
+}
+
+export function setSpendThreshold(thresholdMicroUsd: number, periodDays: number): void {
+  send({ kind: "set-spend-threshold", thresholdMicroUsd, periodDays });
+}
+
+export function detectRuntimes(): void {
+  send({ kind: "detect-runtimes" });
 }
 
 const getSnapshot = (): StoreState => current;

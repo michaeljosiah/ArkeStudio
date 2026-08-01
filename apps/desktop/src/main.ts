@@ -1,11 +1,12 @@
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, safeStorage } from "electron";
 import {
   ChildSupervisor,
   Coordinator,
   defaultAppRoot,
   FsWorldProvider,
+  type Cipher,
   type DatabaseCtor,
 } from "@arke-studio/coordinator";
 import {
@@ -15,6 +16,7 @@ import {
   discoverOpenCode,
   OpenCodeAdapter,
 } from "@arke-studio/adapter-opencode";
+import { createProviderClients, probeRuntime, SHIPPED_MANIFEST } from "@arke-studio/providers";
 
 /**
  * The Electron-ABI SQLite binding (SPEC-003 R-7). Aliased so the Node-ABI copy used by tests
@@ -90,6 +92,14 @@ async function start(): Promise<void> {
     console.log("[arke] OpenCode: not found — authoring disabled");
   }
 
+  // Credentials encrypt against the OS user's key (SPEC-008 R-5); safeStorage is the cipher,
+  // the coordinator's store is the store.
+  const cipher: Cipher = {
+    isAvailable: () => safeStorage.isEncryptionAvailable(),
+    encryptString: (plain) => safeStorage.encryptString(plain),
+    decryptString: (buf) => safeStorage.decryptString(buf),
+  };
+
   coordinator = new Coordinator({
     provider,
     adapter,
@@ -99,6 +109,10 @@ async function start(): Promise<void> {
     ledgerSeedPath: join(appRoot, "ledger.jsonl"),
     appRoot,
     authoring: { buildConfig: buildSessionConfig, agentForPurpose },
+    cipher,
+    validators: createProviderClients((url, init) => fetch(url, init)),
+    manifest: SHIPPED_MANIFEST,
+    probeRuntime: () => probeRuntime(appRoot),
   });
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,

@@ -4,7 +4,16 @@ import { ChangeRecordSchema } from "./change.js";
 import { HealthStatusSchema } from "./events.js";
 import { IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { JobSchema, LedgerEntrySchema } from "./job.js";
+import { ModelManifestSchema } from "./manifest.js";
 import { ProposalSchema, RipplePreviewSchema } from "./proposal.js";
+import { ProviderStatusSchema } from "./provider.js";
+import {
+  LocalRuntimeStatusSchema,
+  ManifestDriftSchema,
+  RoutingDefaultsSchema,
+  RoutingFaultSchema,
+  SpendStatusSchema,
+} from "./settings.js";
 import { ReferenceKitSchema } from "./reference.js";
 import { SceneSchema, SelectionsSchema } from "./scene.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
@@ -133,6 +142,17 @@ export const ClientStateSchema = z
         health: AppHealthSchema,
         jobs: z.array(JobSchema),
         ledger: z.array(LedgerEntrySchema),
+        /** Provider configuration as Settings renders it — never key material (SPEC-008 R-6). */
+        providers: z.array(ProviderStatusSchema).default([]),
+        /** The shipped model manifest, whole: pickers and estimates read it locally (R-15). */
+        manifest: ModelManifestSchema.nullable().default(null),
+        routing: z
+          .object({ defaults: RoutingDefaultsSchema, faults: z.array(RoutingFaultSchema) })
+          .strict()
+          .default({ defaults: {}, faults: [] }),
+        spend: SpendStatusSchema.nullable().default(null),
+        runtime: LocalRuntimeStatusSchema.nullable().default(null),
+        drift: z.array(ManifestDriftSchema).default([]),
       })
       .strict(),
     worlds: z.array(WorldSummarySchema),

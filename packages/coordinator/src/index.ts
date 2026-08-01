@@ -1,5 +1,19 @@
+export { AppLog } from "./app-log.js";
+export { AppSettingsFile, routingFaults } from "./app-settings.js";
 export { ChangeLog, WriteQueue, type LogRecord } from "./change-log.js";
 export { Coordinator, type CoordinatorOptions } from "./coordinator.js";
+export { CredentialStore, type Cipher } from "./credentials/store.js";
+export { buildDiagnosticsBundle } from "./diagnostics.js";
+export { ProviderService, type KeyValidator } from "./providers/service.js";
+export { REDACTED, redactDeep, SecretRegistry } from "./redact.js";
+export {
+  detectDrift,
+  DRIFT_MIN_SAMPLES,
+  DRIFT_PER_MILLE,
+  evaluateSpend,
+  rollingSpend,
+} from "./spend/analytics.js";
+export { LedgerFile } from "./spend/ledger.js";
 export { FrontmatterError, parseFrontmatter, splitSections, type BodySection } from "./frontmatter.js";
 export { ReadModel } from "./read-model.js";
 export {

@@ -1,0 +1,117 @@
+import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
+import { jsonRequest, tryProbe } from "./http.js";
+import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
+
+/**
+ * ElevenLabs — direct voice provider. The subscription read is the probe: free, and it names
+ * plan limits, so "authenticates but out of characters" is distinguishable from "invalid key"
+ * (R-3). History listing exists → reconciliation can search recent generations (T-9). Costs
+ * come back as character counts, never dollars → manifest-derived (R-17).
+ */
+export class ElevenLabsClient implements ProviderClient {
+  readonly id = "elevenlabs" as const;
+  readonly declarations: ClientDeclarations = {
+    supportsIdempotencyKey: false,
+    supportsLookupByKey: false,
+    supportsListRecent: true,
+    reportsCost: false,
+  };
+
+  private readonly completed = new Map<string, { artifacts: FetchedArtifact[] }>();
+  private counter = 0;
+
+  constructor(
+    private readonly fetchImpl: FetchLike,
+    private readonly baseUrl = "https://api.elevenlabs.io",
+  ) {}
+
+  private headers(key: string): Record<string, string> {
+    return { "xi-api-key": key, "Content-Type": "application/json" };
+  }
+
+  async validateKey(key: string): Promise<CapabilityProbe[]> {
+    const probe = await tryProbe(() =>
+      jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/user/subscription`, { headers: this.headers(key) }),
+    );
+    if (!probe.ok) {
+      const reason = probe.auth ? "ElevenLabs rejected this key" : `ElevenLabs could not be reached: ${probe.message}`;
+      return [
+        { capability: "voice-tts", available: false, reason },
+        { capability: "voice-clone", available: false, reason },
+      ];
+    }
+    const sub = probe.value.body as {
+      character_count?: number;
+      character_limit?: number;
+      can_use_instant_voice_cloning?: boolean;
+    } | null;
+    const used = sub?.character_count ?? 0;
+    const limit = sub?.character_limit ?? 0;
+    const overQuota = limit > 0 && used >= limit;
+    const tts: CapabilityProbe = overQuota
+      ? {
+          capability: "voice-tts",
+          available: false,
+          reason: `the key authenticates but the character quota is exhausted (${used.toLocaleString("en-US")}/${limit.toLocaleString("en-US")} used)`,
+        }
+      : { capability: "voice-tts", available: true };
+    const clone: CapabilityProbe = sub?.can_use_instant_voice_cloning
+      ? { capability: "voice-clone", available: true }
+      : { capability: "voice-clone", available: false, reason: "this plan does not include voice cloning" };
+    return [tts, clone];
+  }
+
+  async submit(key: string, request: SubmitRequest): Promise<SubmitResult> {
+    const remoteId = `elevenlabs-${++this.counter}-${Date.now()}`;
+    const voiceId = String(request.params["voiceId"] ?? "");
+    if (!voiceId) throw new Error("elevenlabs: params.voiceId is required");
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/text-to-speech/${voiceId}`, {
+      method: "POST",
+      headers: this.headers(key),
+      body: JSON.stringify({
+        model_id: request.model,
+        text: String(request.params["text"] ?? ""),
+        ...(request.params["voiceSettings"] !== undefined ? { voice_settings: request.params["voiceSettings"] } : {}),
+      }),
+    });
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(`elevenlabs: the credential was rejected (HTTP ${res.status})`);
+    }
+    if (res.status >= 400) throw new Error(`elevenlabs: synthesis failed (HTTP ${res.status})`);
+    const data = new Uint8Array(await res.arrayBuffer());
+    this.completed.set(remoteId, { artifacts: [{ name: "speech.mp3", contentType: "audio/mpeg", data }] });
+    return { remoteId, acceptedAt: new Date().toISOString() };
+  }
+
+  async poll(_key: string, remoteId: string): Promise<PollResult> {
+    return this.completed.has(remoteId)
+      ? { state: "succeeded" }
+      : { state: "failed", error: "elevenlabs: unknown request id (synchronous API)" };
+  }
+
+  async fetchArtifacts(_key: string, remoteId: string): Promise<FetchedArtifact[]> {
+    const hit = this.completed.get(remoteId);
+    if (!hit) throw new Error("elevenlabs: no cached result for this id");
+    return hit.artifacts;
+  }
+
+  async cancel(): Promise<void> {
+    /* synchronous API */
+  }
+
+  /** Reconciliation strategy B (supportsListRecent): the recent-generation history. */
+  async listRecent(key: string): Promise<Array<{ id: string; text: string; createdAt: string }>> {
+    const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/history?page_size=25`, {
+      headers: this.headers(key),
+    });
+    if (status >= 400) return [];
+    const items = (body as { history?: Array<{ history_item_id?: string; text?: string; date_unix?: number }> } | null)?.history ?? [];
+    return items
+      .filter((h) => typeof h.history_item_id === "string")
+      .map((h) => ({
+        id: h.history_item_id!,
+        text: h.text ?? "",
+        createdAt: h.date_unix !== undefined ? new Date(h.date_unix * 1000).toISOString() : "",
+      }));
+  }
+}

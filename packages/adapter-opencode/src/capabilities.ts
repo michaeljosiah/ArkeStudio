@@ -1,4 +1,4 @@
-import type { Capability, Readiness } from "@arke-studio/contracts";
+import type { HarnessCapability, Readiness } from "@arke-studio/contracts";
 
 /**
  * Startup capability probe (SPEC-005 R-2, D6): capabilities come from the live server's
@@ -18,20 +18,20 @@ interface OpenApiDoc {
 }
 
 /** Endpoint patterns per capability — legacy and /api/* generations both accepted. */
-const CAPABILITY_ENDPOINTS: ReadonlyArray<{ cap: Capability; match: RegExp }> = [
+const CAPABILITY_ENDPOINTS: ReadonlyArray<{ cap: HarnessCapability; match: RegExp }> = [
   { cap: "events", match: /^\/(api\/event|global\/event|event)$/ },
   { cap: "permissions", match: /^\/(api\/session\/\*\/permission\/\*\/reply|permission\/\*\/reply)$/ },
   { cap: "models", match: /^\/(api\/model|api\/provider|config\/providers)$/ },
 ];
 
-const REQUIRED: ReadonlySet<Capability> = new Set<Capability>(["events"]);
+const REQUIRED: ReadonlySet<HarnessCapability> = new Set<HarnessCapability>(["events"]);
 
 function normalizePath(path: string): string {
   return path.replace(/\{[^}]+\}/g, "*");
 }
 
 export interface ProbeResult {
-  capabilities: Set<Capability>;
+  capabilities: Set<HarnessCapability>;
   readiness: Readiness;
   /** The server's self-reported version from the OpenAPI info block, when present. */
   serverVersion?: string;
@@ -68,7 +68,7 @@ export async function probeCapabilities(client: ProbeClient): Promise<ProbeResul
   }
   const paths = Object.keys(doc?.paths ?? {}).map(normalizePath);
 
-  const capabilities = new Set<Capability>();
+  const capabilities = new Set<HarnessCapability>();
   for (const { cap, match } of CAPABILITY_ENDPOINTS) {
     if (paths.some((p) => match.test(p))) capabilities.add(cap);
   }

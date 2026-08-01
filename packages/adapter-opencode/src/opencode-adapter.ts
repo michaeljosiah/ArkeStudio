@@ -1,6 +1,6 @@
 import {
   HarnessEventSchema,
-  type Capability,
+  type HarnessCapability,
   type CreateSessionInput,
   type HarnessAdapter,
   type HarnessEvent,
@@ -39,7 +39,7 @@ interface TrackedSession {
 export class OpenCodeAdapter implements HarnessAdapter {
   readonly id = "opencode";
   private readonly http: OpenCodeHttp;
-  private caps = new Set<Capability>();
+  private caps = new Set<HarnessCapability>();
   private ready: Readiness = { ready: false, reason: "not probed yet" };
   serverVersion: string | null = null;
   private readonly sessions = new Map<string, TrackedSession>();
@@ -58,7 +58,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
     this.http = new OpenCodeHttp({ baseUrl: opts.baseUrl });
   }
 
-  capabilities(): ReadonlySet<Capability> {
+  capabilities(): ReadonlySet<HarnessCapability> {
     return this.caps;
   }
 
