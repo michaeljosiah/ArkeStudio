@@ -9,6 +9,9 @@ import {
   type DomainEvent,
   type HarnessAdapter,
   type HealthComponent,
+  buildExportPlan,
+  CutFileSchema,
+  deriveCut,
   gateLocalRuntimes,
   planScene,
   previewLineFor,
@@ -39,6 +42,9 @@ import {
 } from "./productions/ops.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "./queue/dispatcher.js";
+import { recordTakesFromJob } from "./takes/arrival.js";
+import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
+import { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
 import { previewCacheFile, VoiceService, type CloudVoiceSource, type SidecarLike } from "./voice/service.js";
 import { fromPortable, toExtendedLength } from "./world/paths.js";
 import { establishRequests, imageModelFor, missingTileAngles, tileRequest } from "./references/generate.js";
@@ -109,6 +115,8 @@ export interface CoordinatorOptions {
   probeRuntime?: () => Promise<RuntimeProbes>;
   /** SPEC-009: dispatch clients (submit/poll/fetch/cancel + declarations), per provider. */
   dispatchClients?: Record<string, DispatchClient>;
+  /** SPEC-013 R-19: the local encoder for exports; absent → exports state the reason. */
+  ffmpeg?: FfmpegRunner;
   /** SPEC-011: the Voxa sidecar and voice catalogue sources, injected from the desktop. */
   voice?: {
     sidecar: SidecarLike | null;
@@ -150,6 +158,8 @@ export class Coordinator {
   private readonly jobQueue: JobQueue | null;
   /** SPEC-011: catalogue, matching, previews and dictation. Null without voice wiring. */
   private readonly voiceService: VoiceService | null;
+  /** SPEC-013: exports in flight, cancellable by id (R-21). */
+  private readonly exports = new Map<string, ExportHandle>();
 
   constructor(private readonly opts: CoordinatorOptions) {
     this.readModel = new ReadModel(opts.appVersion);
@@ -416,6 +426,24 @@ export class Coordinator {
       if (!sheet || !angle) return;
       const withinKit = job.landedFiles[0].replace(`references/${sheetId}/`, "");
       await supersedeTile(store, sheetId, angle, { file: withinKit, sheetVersion: sheet.version }).catch(() => {});
+    }
+    if (
+      (job.target.kind === "shot" || job.target.kind === "scene-pass" || job.target.kind === "voice-line") &&
+      job.landedFiles?.[0] !== undefined &&
+      job.productionId !== undefined
+    ) {
+      // SPEC-013: the landed media becomes an immutable take (plus segments for a pass).
+      const ledgerEntry = this.ledger ? (await this.ledger.readAll()).find((e) => e.jobId === job.id) : undefined;
+      const takes = await recordTakesFromJob(store, job, ledgerEntry?.actualMicroUsd ?? null).catch(() => []);
+      for (const take of takes) {
+        this.emit({
+          at: new Date().toISOString(),
+          type: "take.recorded",
+          worldId: job.worldId,
+          productionId: job.productionId,
+          take,
+        });
+      }
     }
     if (job.target.kind === "voice-preview" && job.landedFiles?.[0] !== undefined) {
       // The audition is ready; the landed file IS the cache entry (R-10).
@@ -1102,6 +1130,122 @@ export class Coordinator {
         for (const input of composeDispatches(msg.worldId, msg.productionId, scene, plan, model, bundle)) {
           await this.jobQueue.enqueue(input).catch(() => {});
         }
+        return;
+      }
+      case "accept-take": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+        if (!production) return;
+        try {
+          const decision = await acceptTake(store, production, { takeId: msg.takeId, shotId: msg.shotId, by: "user" });
+          this.emit({ at: new Date().toISOString(), type: "review.recorded", worldId: msg.worldId, productionId: msg.productionId, review: decision });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "selection.changed",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            shotId: msg.shotId,
+            selection: { acceptedTakeId: msg.takeId as never },
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "reject-take": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+        if (!production) return;
+        try {
+          const decision = await rejectTake(store, production, {
+            takeId: msg.takeId,
+            ...(msg.shotId !== undefined ? { shotId: msg.shotId } : {}),
+            by: "user",
+            citation: msg.citation,
+          });
+          this.emit({ at: new Date().toISOString(), type: "review.recorded", worldId: msg.worldId, productionId: msg.productionId, review: decision });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "save-audio-tracks": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        try {
+          const cut = CutFileSchema.parse(msg.cut);
+          await saveAudioTracks(store, msg.productionId, JSON.stringify(cut, null, 2) + "\n");
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "export-cut": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+        if (!production) return;
+        const runner = this.opts.ffmpeg;
+        const emitProgress = (
+          exportId: string,
+          status: "running" | "done" | "cancelled" | "failed",
+          percent: number,
+          output: string | null,
+          error: string | null,
+        ) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "export.progress",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            exportId,
+            status,
+            percent,
+            output,
+            error,
+          });
+        if (!runner) {
+          emitProgress("ex_none", "failed", 0, null, "export needs ffmpeg — bundled in packaged builds (SPEC-016); set ARKE_FFMPEG to use one now");
+          return;
+        }
+        const cut = deriveCut(production);
+        const plan = buildExportPlan(cut, msg.preset);
+        const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+        const handle = runExport(
+          store.dir,
+          plan,
+          `${msg.productionId}-${msg.preset}-${stamp}.mp4`,
+          runner,
+          (percent) => emitProgress(handle.id, "running", percent, null, null),
+        );
+        this.exports.set(handle.id, handle);
+        emitProgress(handle.id, "running", 0, null, null);
+        void handle.done.then((result) => {
+          this.exports.delete(handle.id);
+          if (result.status === "done") emitProgress(handle.id, "done", 100, result.output, null);
+          else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
+          else emitProgress(handle.id, "failed", 0, null, result.error);
+        });
+        return;
+      }
+      case "cancel-export": {
+        this.exports.get(msg.exportId)?.cancel();
+        return;
+      }
+      case "export-world": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.opts.appRoot) return;
+        const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+        const target = join(this.opts.appRoot, "exports", `${store.getBundle().meta.slug}-${stamp}`);
+        await exportWorld(store.dir, target).catch((err) => {
+          void this.appLog?.append({ kind: "world-export.failed", message: err instanceof Error ? err.message : String(err) });
+        });
+        void this.appLog?.append({ kind: "world-export.done", target });
         return;
       }
       case "record-review": {

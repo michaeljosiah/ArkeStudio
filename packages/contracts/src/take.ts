@@ -32,6 +32,11 @@ export const TakeCostSchema = z
     estimatedMicroUsd: z.number().int().min(0),
     actualMicroUsd: z.number().int().min(0).nullable(),
     actualSource: ActualCostSourceSchema.optional(),
+    /**
+     * A duration-pro-rata share of a pass's real charge, divided rather than measured
+     * (SPEC-013 R-5, D4). The ledger records the pass once; totals never double-count.
+     */
+    allocated: z.boolean().optional(),
   })
   .strict();
 export type TakeCost = z.infer<typeof TakeCostSchema>;
@@ -68,6 +73,19 @@ export const TakeSchema = z
     completedAt: IsoDateTimeSchema.optional(),
     /** Media filename within the take directory, e.g. "clip.mp4". */
     media: z.string().optional(),
+    /**
+     * A pass segment references the pass's media with an in/out range — a range, not a file
+     * (SPEC-013 R-3, D2). Boundaries come from the pre-dispatch shot plan, never from
+     * inspecting the returned clip (R-4, D3).
+     */
+    segment: z
+      .object({
+        passTakeId: TakeIdSchema,
+        inSec: z.number().min(0),
+        outSec: z.number().min(0),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type Take = z.infer<typeof TakeSchema>;

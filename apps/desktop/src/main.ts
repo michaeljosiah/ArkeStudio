@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { app, BrowserWindow, safeStorage } from "electron";
@@ -133,6 +134,25 @@ async function start(): Promise<void> {
     manifest: SHIPPED_MANIFEST,
     probeRuntime: () => probeRuntime(appRoot),
     dispatchClients: providerClients,
+    // Exports encode locally (SPEC-013 R-19). Bundled ffmpeg rides SPEC-016; until then an
+    // explicit path enables it and its absence is stated, never silent.
+    ...(process.env["ARKE_FFMPEG"]
+      ? {
+          ffmpeg: {
+            run: (args: string[], onProgress: (p: number) => void, signal: AbortSignal) =>
+              new Promise<void>((resolvePromise, reject) => {
+                const child = spawn(process.env["ARKE_FFMPEG"]!, args, { windowsHide: true });
+                signal.addEventListener("abort", () => child.kill("SIGKILL"));
+                child.stderr.on("data", (chunk: Buffer) => {
+                  const m = /time=(\d+):(\d+):(\d+)/.exec(chunk.toString());
+                  if (m) onProgress(Math.min(99, Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])));
+                });
+                child.on("error", reject);
+                child.on("exit", (code) => (code === 0 ? resolvePromise() : reject(new Error(`ffmpeg exited ${code}`))));
+              }),
+          },
+        }
+      : {}),
     voice: {
       sidecar: voxaSidecar,
       sidecarHealth: async () => sidecarState(await voxaAt().health()),
