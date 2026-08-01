@@ -12,3 +12,4 @@ export * from "./client-state.js";
 export * from "./frames.js";
 export * from "./adapter.js";
 export * from "./ask.js";
+export * from "./sheet-shapes.js";

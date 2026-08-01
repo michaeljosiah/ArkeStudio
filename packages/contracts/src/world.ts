@@ -78,6 +78,11 @@ export const SheetSchema = z
     status: SheetStatusSchema,
     /** Retired entities stay on disk and resolvable so citations keep meaning (SPEC-002 R-26). */
     retired: z.boolean().optional(),
+    /** Duplication origin — a record at copy time, never a live dependency (SPEC-007 R-12, D9). */
+    origin: z
+      .object({ sheet: SlugSchema, version: z.number().int().min(1) })
+      .strict()
+      .optional(),
     voice: VoiceAssignmentSchema.optional(),
     /** References only — the rules themselves are owned by canon, not the sheet (§2.3.2). */
     canonRules: z.array(CanonIdSchema),

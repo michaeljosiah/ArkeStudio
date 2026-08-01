@@ -20,7 +20,14 @@ import { ChangeLog } from "./change-log.js";
 import { AuthoringService, settlePermission } from "./harness/authoring.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
-import { refsForCanon, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
+import { refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
+import {
+  createSheetFromSentence,
+  duplicateSheet,
+  stageSheetRename,
+  stageSheetStatus,
+  stageVoiceAssignment,
+} from "./sheets/authoring.js";
 import { ReadModel } from "./read-model.js";
 import { ChildSupervisor, type SupervisorStatus } from "./supervisor.js";
 import { Transport } from "./transport.js";
@@ -527,6 +534,104 @@ export class Coordinator {
         if (!store) return;
         await store.retire(msg.path, "form").catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "create-sheet-from-sentence": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        try {
+          const draft = await createSheetFromSentence(store, gate, {
+            sheetType: msg.sheetType,
+            name: msg.name,
+            sentence: msg.sentence,
+          });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.staged",
+            worldId: msg.worldId,
+            proposalId: draft.proposal.id,
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+          // When the harness is up, the sheet-editor drafts the full sketch inside the
+          // proposal; without it, the skeleton with the author's sentence still stands.
+          if (this.authoring && this.opts.adapter?.readiness().ready) {
+            const worldQueryUrl = await this.worldQuery.start();
+            void this.authoring
+              .run(
+                store,
+                gate,
+                {
+                  worldId: msg.worldId,
+                  proposalId: draft.proposal.id,
+                  purpose: "authoring",
+                  instruction: `${draft.scope}\n\nDraft the full ${msg.sheetType} sheet in ${draft.path} from this seed: "${msg.sentence}". Fill every section the file already has headings for; keep the name "${msg.name}"; leave canonRules and links as they are.`,
+                },
+                worldQueryUrl,
+              )
+              .then(() => this.refreshWorldSnapshot(msg.worldId));
+          }
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "duplicate-sheet": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        await duplicateSheet(store, gate, { path: msg.path, newName: msg.newName }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "set-sheet-status": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        await stageSheetStatus(store, gate, { path: msg.path, status: msg.status }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "rename-sheet": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        await stageSheetRename(store, gate, { path: msg.path, name: msg.name }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "assign-voice": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        await stageVoiceAssignment(store, gate, { path: msg.path, voice: msg.voice }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "sheet-refs": {
+        const store = this.opts.provider.openStore?.();
+        const index = store?.getIndex();
+        if (!store || !index) return;
+        const refs = refsForSheet(index.db, msg.sheetId);
+        const incoming = index.db
+          .prepare(
+            "SELECT DISTINCT source_id AS id FROM citations WHERE target_id = ? AND relation = 'sheet-link' ORDER BY id",
+          )
+          .all(msg.sheetId) as Array<{ id: string }>;
+        this.emit({
+          at: new Date().toISOString(),
+          type: "sheet.refs",
+          worldId: msg.worldId,
+          sheetId: msg.sheetId,
+          tiles: refs.tiles,
+          productions: refs.productions,
+          artifacts: refs.artifacts,
+          scenes: refs.scenes,
+          takesByVersion: Object.fromEntries(
+            Object.entries(refs.takesByVersion).map(([v, n]) => [String(v), n]),
+          ),
+          incomingLinks: incoming.map((r) => r.id),
+        });
         return;
       }
       case "permission-reply": {

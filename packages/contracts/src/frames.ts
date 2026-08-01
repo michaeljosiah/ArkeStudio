@@ -155,5 +155,60 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** SPEC-006 R-19: retire an entity — stays resolvable, drops out of retrieval. */
   z.object({ kind: z.literal("retire-entity"), worldId: UlidSchema, path: z.string().min(1) }).strict(),
+  /** SPEC-007 R-10: create a sheet from a sentence — lands as a sketch through the gate. */
+  z
+    .object({
+      kind: z.literal("create-sheet-from-sentence"),
+      worldId: UlidSchema,
+      sheetType: z.enum(["character", "location", "faction"]),
+      name: z.string().min(1).max(200),
+      sentence: z.string().min(1).max(2000),
+    })
+    .strict(),
+  /** SPEC-007 R-12: duplicate a sheet — sketch, origin recorded at the source's version. */
+  z
+    .object({
+      kind: z.literal("duplicate-sheet"),
+      worldId: UlidSchema,
+      path: z.string().min(1),
+      newName: z.string().min(1).max(200),
+    })
+    .strict(),
+  /** SPEC-007 R-6/R-8: lock or unlock through the gate, with the ripple. */
+  z
+    .object({
+      kind: z.literal("set-sheet-status"),
+      worldId: UlidSchema,
+      path: z.string().min(1),
+      status: z.enum(["sketch", "locked"]),
+    })
+    .strict(),
+  /** SPEC-007 R-2/R-3: rename edits frontmatter only — the id and file never move. */
+  z
+    .object({
+      kind: z.literal("rename-sheet"),
+      worldId: UlidSchema,
+      path: z.string().min(1),
+      name: z.string().min(1).max(200),
+    })
+    .strict(),
+  /** SPEC-007 R-15: voice assignment is a gated sheet change. */
+  z
+    .object({
+      kind: z.literal("assign-voice"),
+      worldId: UlidSchema,
+      path: z.string().min(1),
+      voice: z
+        .object({
+          provider: z.string().min(1),
+          voiceId: z.string().min(1),
+          label: z.string().optional(),
+        })
+        .strict()
+        .nullable(),
+    })
+    .strict(),
+  /** SPEC-007 R-16: a sheet's computed detail — refs and incoming links from the index. */
+  z.object({ kind: z.literal("sheet-refs"), worldId: UlidSchema, sheetId: z.string().min(1) }).strict(),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;

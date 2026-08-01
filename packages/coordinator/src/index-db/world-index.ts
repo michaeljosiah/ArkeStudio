@@ -13,9 +13,10 @@ import { assertFts5, loadNodeSqlite, type Database, type DatabaseCtor } from "./
  * rebuild (R-1); corruption is discarded, never surfaced (R-4, D7).
  */
 
-// v2: canon_fts excludes open threads and retired entries (SPEC-006 R-16/R-19). The bump is
-// what forces existing indexes to rebuild — derivation changes are schema changes (R-3).
-const SCHEMA_VERSION = 2;
+// v2: canon_fts excludes open threads and retired entries (SPEC-006 R-16/R-19).
+// v3: sheet-link citations extracted for reverse relationship lookup (SPEC-007 R-4).
+// The bump is what forces existing indexes to rebuild — derivation changes are schema changes.
+const SCHEMA_VERSION = 3;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -314,7 +315,7 @@ export class WorldIndex {
 
   private refreshLiveTargetVersions(extraction: Extraction, changedIds: Set<string>): void {
     const upd = this.db.prepare(
-      "UPDATE citations SET target_version = ? WHERE target_id = ? AND relation IN ('canon-rule','entry-link','artifact-link','scene-location','shot-cast')",
+      "UPDATE citations SET target_version = ? WHERE target_id = ? AND relation IN ('canon-rule','entry-link','artifact-link','scene-location','shot-cast','sheet-link')",
     );
     for (const e of extraction.entities) {
       if (!changedIds.has(e.id)) continue;

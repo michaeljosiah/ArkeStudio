@@ -46,6 +46,17 @@ export {
   stageCanonEntry,
   stageThreadSettlement,
 } from "./canon/authoring.js";
+export {
+  buildSheetContent,
+  createSheetFromImage,
+  createSheetFromSentence,
+  duplicateSheet,
+  scopeImageExtraction,
+  stageSheetRename,
+  stageSheetStatus,
+  stageVoiceAssignment,
+  type ImageExtraction,
+} from "./sheets/authoring.js";
 export { AuthoringService, describeActionClass, settlePermission } from "./harness/authoring.js";
 export { GrantStore, type RememberedGrant } from "./harness/grants.js";
 export { WorldQueryServer } from "./harness/world-query.js";
