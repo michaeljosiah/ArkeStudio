@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { appendFile, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { LedgerEntry, ModelManifest } from "@arke-studio/contracts";
+import { tempDir } from "../tmp.js";
 import { detectDrift, evaluateSpend } from "../../src/spend/analytics.js";
 import { LedgerFile } from "../../src/spend/ledger.js";
 
@@ -26,7 +26,7 @@ function entry(overrides: Partial<LedgerEntry>): LedgerEntry {
 
 describe("the ledger file (R-16, R-17, §3.2)", () => {
   it("append-only under concurrent writes — every line lands whole", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-ledger-"));
+    const dir = await tempDir("arke-ledger-");
     const ledger = new LedgerFile(join(dir, "ledger.jsonl"));
     await Promise.all(
       Array.from({ length: 50 }, (_, i) =>
@@ -42,7 +42,7 @@ describe("the ledger file (R-16, R-17, §3.2)", () => {
   });
 
   it("a truncated final line is tolerated and repaired; complete records are never touched", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-ledger-"));
+    const dir = await tempDir("arke-ledger-");
     const path = join(dir, "ledger.jsonl");
     const good = JSON.stringify(entry({}));
     await writeFile(path, good + "\n" + good.slice(0, 40), "utf8"); // crash mid-write
@@ -60,7 +60,7 @@ describe("the ledger file (R-16, R-17, §3.2)", () => {
   });
 
   it("failures and cancellations produce entries with honest actualSource (D7, R-17)", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-ledger-"));
+    const dir = await tempDir("arke-ledger-");
     const ledger = new LedgerFile(join(dir, "ledger.jsonl"));
     // A provider that reports cost: the actual is measured, even for a failure.
     await ledger.append(entry({ outcome: "failed", actualMicroUsd: 40000, actualSource: "provider-reported" }));
@@ -82,7 +82,7 @@ describe("the ledger file (R-16, R-17, §3.2)", () => {
   });
 
   it("foreign lines are skipped by the tolerant reader, never fatal", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-ledger-"));
+    const dir = await tempDir("arke-ledger-");
     const path = join(dir, "ledger.jsonl");
     await writeFile(path, JSON.stringify(entry({})) + "\n" + '{"not":"a ledger entry"}' + "\n", "utf8");
     await appendFile(path, JSON.stringify(entry({ outcome: "failed" })) + "\n", "utf8");

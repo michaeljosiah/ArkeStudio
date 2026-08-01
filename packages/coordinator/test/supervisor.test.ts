@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tempDir } from "./tmp.js";
 import { ChildLedger, type ChildRecord } from "../src/child-ledger.js";
 import {
   ChildSupervisor,
@@ -135,7 +135,7 @@ describe("ChildSupervisor", () => {
   });
 
   it("records its child in the ledger while it runs and releases it on exit (R-5)", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-sup-ledger-"));
+    const dir = await tempDir("arke-sup-ledger-");
     const ledgerPath = join(dir, "children.json");
     const ledger = new ChildLedger(ledgerPath);
     const sup = new ChildSupervisor(

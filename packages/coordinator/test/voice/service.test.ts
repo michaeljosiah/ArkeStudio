@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, LedgerEntry, ManifestModel, Sheet, WorldBundle } from "@arke-studio/contracts";
+import { tempDir } from "../tmp.js";
 import { JobQueue } from "../../src/queue/dispatcher.js";
 import { previewCacheFile, VoiceService, voiceLineRequest } from "../../src/voice/service.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -87,8 +87,8 @@ describe("routing (R-2, D1, §3.2): local never touches the queue; cloud always 
 
   it("an ElevenLabs line goes through the queue, idempotency-protected, and writes one ledger entry", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
-    const queueDir = await mkdtemp(join(tmpdir(), "arke-voiceq-"));
-    const worldDir = await mkdtemp(join(tmpdir(), "arke-voicew-"));
+    const queueDir = await tempDir("arke-voiceq-");
+    const worldDir = await tempDir("arke-voicew-");
     const ledger: LedgerEntry[] = [];
     const queue = new JobQueue({
       journalPath: join(queueDir, "jobs.jsonl"),

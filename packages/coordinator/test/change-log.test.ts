@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tempDir } from "./tmp.js";
 import { ChangeLog } from "../src/change-log.js";
 
 describe("ChangeLog", () => {
   it("appends NDJSON lines with a file-level monotonic seq and reads them back", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-log-"));
+    const dir = await tempDir("arke-log-");
     const path = join(dir, "changes.jsonl");
     const log = new ChangeLog(path);
 
@@ -30,7 +30,7 @@ describe("ChangeLog", () => {
   });
 
   it("resumes the seq from the tail of an existing file on restart", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-log-"));
+    const dir = await tempDir("arke-log-");
     const path = join(dir, "changes.jsonl");
 
     const first = new ChangeLog(path);

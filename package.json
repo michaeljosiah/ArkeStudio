@@ -23,6 +23,7 @@
     "lint": "oxlint packages apps",
     "format": "prettier --write \"packages/**/*.{ts,tsx,css,json}\" \"apps/**/*.{ts,tsx,json}\"",
     "test": "npm run test --workspaces --if-present",
+    "clean:temp": "node scripts/clean-temp.mjs",
     "start": "npm run start --workspace @arke-studio/desktop"
   },
   "devDependencies": {

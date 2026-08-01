@@ -242,12 +242,13 @@ describe("session configuration (R-5, R-6, R-10)", () => {
 });
 
 describe("discovery (R-1)", () => {
-  it("prefers a configured path over PATH, and names the version", async () => {
+  it("prefers a configured path over PATH, and names the version", async (t) => {
     // The machine has a real opencode on PATH; a configured stub must still win.
-    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const { tmpdir } = await import("node:os");
     const dir = mkdtempSync(join(tmpdir(), "arke-oc-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 3 }));
     const fake = join(dir, "fake-opencode.cmd");
     writeFileSync(fake, "@echo 7.7.7\r\n", "utf8");
     const found = discoverOpenCode({ configuredPath: fake });

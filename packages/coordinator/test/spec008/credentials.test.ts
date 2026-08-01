@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tempDir } from "../tmp.js";
 import { CredentialStore, type Cipher } from "../../src/credentials/store.js";
 import { AppLog } from "../../src/app-log.js";
 import { REDACTED, redactDeep, SecretRegistry } from "../../src/redact.js";
@@ -19,7 +19,7 @@ const fakeCipher: Cipher = {
 const KEY = "sk-fal-SUPERSECRET-1234567890";
 
 async function makeStore() {
-  const dir = await mkdtemp(join(tmpdir(), "arke-cred-"));
+  const dir = await tempDir("arke-cred-");
   const registry = new SecretRegistry();
   const aclCalls: string[] = [];
   const store = new CredentialStore(join(dir, "credentials.dat"), fakeCipher, registry, async (p) => {
@@ -45,7 +45,7 @@ describe("credential storage (R-5, R-8, §3.2)", () => {
   });
 
   it("refuses to store when the cipher is unavailable rather than falling back to plaintext", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-cred-"));
+    const dir = await tempDir("arke-cred-");
     const store = new CredentialStore(
       join(dir, "credentials.dat"),
       { ...fakeCipher, isAvailable: () => false },
@@ -64,7 +64,7 @@ describe("credential storage (R-5, R-8, §3.2)", () => {
 
 describe("redaction at the logging boundary (R-7, §3.2)", () => {
   it("a NEW call site logging an object containing a key is redacted without changing that path", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-log-"));
+    const dir = await tempDir("arke-log-");
     const registry = new SecretRegistry();
     registry.register(KEY);
     const log = new AppLog(join(dir, "app.jsonl"), registry);
@@ -131,7 +131,7 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
     };
     const registry = new SecretRegistry();
     registry.register(KEY);
-    const dir = await mkdtemp(join(tmpdir(), "arke-diag-"));
+    const dir = await tempDir("arke-diag-");
     const log = new AppLog(join(dir, "app.jsonl"), registry);
     await log.append({ kind: "provider.fault", provider: "fal", message: `rejected ${KEY}` });
     await log.drain();
