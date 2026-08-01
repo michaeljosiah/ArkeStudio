@@ -10,6 +10,9 @@ import {
   type HealthComponent,
 } from "@arke-studio/contracts";
 import { ChangeLog } from "./change-log.js";
+import { AuthoringService, settlePermission } from "./harness/authoring.js";
+import { GrantStore } from "./harness/grants.js";
+import { WorldQueryServer } from "./harness/world-query.js";
 import { ReadModel } from "./read-model.js";
 import { ChildSupervisor, type SupervisorStatus } from "./supervisor.js";
 import { Transport } from "./transport.js";
@@ -29,6 +32,13 @@ export interface CoordinatorOptions {
   /** Optional NDJSON seeds so fixtures light the Activity screens (jobs.jsonl / ledger.jsonl). */
   jobsSeedPath?: string;
   ledgerSeedPath?: string;
+  /** App root for remembered grants (SPEC-005 R-16). Absent → grants are session-only. */
+  appRoot?: string;
+  /** Session-config builders from the adapter package, injected to keep dependencies one-way. */
+  authoring?: {
+    buildConfig: (input: { worldQueryUrl?: string }) => Record<string, unknown>;
+    agentForPurpose: (purpose: "authoring" | "drafting" | "extraction" | "ask") => string;
+  };
 }
 
 const SUPERVISOR_HEALTH: Record<SupervisorStatus, { status: "starting" | "healthy" | "unhealthy" | "unavailable" }> = {
@@ -45,6 +55,11 @@ export class Coordinator {
   private readonly transport: Transport;
   private readonly changeLog: ChangeLog;
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
+  private readonly worldQuery: WorldQueryServer;
+  private readonly grants: GrantStore | null;
+  private readonly authoring: AuthoringService | null;
+  /** actionClass per pending permission id, for remember-on-always (R-16). */
+  private readonly pendingPermissions = new Map<string, string>();
   private started = false;
 
   constructor(private readonly opts: CoordinatorOptions) {
@@ -54,6 +69,15 @@ export class Coordinator {
       getSnapshot: () => this.getState(),
       onMessage: (msg) => void this.handleClientMessage(msg),
     });
+    this.worldQuery = new WorldQueryServer(() => this.opts.provider.openStore?.() ?? null);
+    this.grants = opts.appRoot ? new GrantStore(opts.appRoot) : null;
+    this.authoring =
+      opts.adapter && opts.authoring
+        ? new AuthoringService(opts.adapter, (event) => this.emit(event), {
+            buildConfig: opts.authoring.buildConfig,
+            agentForPurpose: opts.authoring.agentForPurpose,
+          })
+        : null;
   }
 
   getState(): ClientState {
@@ -75,6 +99,35 @@ export class Coordinator {
   superviseAs(component: Exclude<HealthComponent, "coordinator">, supervisor: ChildSupervisor): void {
     this.supervisors.set(component, supervisor);
     supervisor.on("status", ({ status, reason }: { status: SupervisorStatus; reason?: string }) => {
+      // A healthy harness process is probed before it counts (SPEC-005 R-2): the adapter asks
+      // /doc what the server can do, and an under-capable one stays unavailable with a reason.
+      if (component === "harness" && status === "healthy" && this.opts.adapter?.init) {
+        const adapter = this.opts.adapter;
+        void adapter
+          .init!()
+          .then(() => {
+            const readiness = adapter.readiness();
+            this.emit({
+              at: new Date().toISOString(),
+              type: "health.changed",
+              component,
+              status: readiness.ready ? "healthy" : "unavailable",
+              ...(readiness.ready
+                ? {}
+                : { reason: readiness.reason ?? "the harness is missing a required capability" }),
+            });
+          })
+          .catch((err: unknown) => {
+            this.emit({
+              at: new Date().toISOString(),
+              type: "health.changed",
+              component,
+              status: "unavailable",
+              reason: `capability probe failed: ${err instanceof Error ? err.message : String(err)}`,
+            });
+          });
+        return;
+      }
       this.emit({
         at: new Date().toISOString(),
         type: "health.changed",
@@ -119,6 +172,28 @@ export class Coordinator {
 
     for (const supervisor of this.supervisors.values()) {
       void supervisor.start();
+    }
+
+    // The permission backstop pump (R-16, R-17): remembered grants answer silently; the rest
+    // surface in Studio's language and wait for the user.
+    const adapter = this.opts.adapter;
+    if (adapter && this.grants) {
+      const grants = this.grants;
+      void (async () => {
+        try {
+          for await (const event of adapter.streamEvents()) {
+            if (event.type === "permission.requested") {
+              this.pendingPermissions.set(event.permissionId, event.actionClass);
+              await settlePermission(adapter, grants, (e) => this.emit(e), {
+                permissionId: event.permissionId,
+                actionClass: event.actionClass,
+              });
+            }
+          }
+        } catch {
+          /* the pump dies with the adapter; readiness reporting covers it */
+        }
+      })();
     }
 
     return { port: boundPort };
@@ -281,6 +356,68 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "draft-with-studio": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store || !this.authoring) return;
+        try {
+          const proposal = await gate.stage({
+            kind: "sheet-edit",
+            summary: msg.summary,
+            source: "chat:studio",
+            targets: [{ path: msg.path }],
+          });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.staged",
+            worldId: msg.worldId,
+            proposalId: proposal.id,
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+          const worldQueryUrl = await this.worldQuery.start();
+          // Fire and watch: progress and the final status arrive as events (R-13).
+          void this.authoring
+            .run(
+              store,
+              gate,
+              {
+                worldId: msg.worldId,
+                proposalId: proposal.id,
+                purpose: "authoring",
+                instruction: msg.instruction,
+              },
+              worldQueryUrl,
+            )
+            .then(() => this.refreshWorldSnapshot(msg.worldId));
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "authoring-cancel": {
+        await this.authoring?.cancel(msg.proposalId);
+        return;
+      }
+      case "permission-reply": {
+        const adapter = this.opts.adapter;
+        if (!adapter) return;
+        const actionClass = this.pendingPermissions.get(msg.permissionId);
+        if (msg.decision === "always" && actionClass && this.grants) {
+          await this.grants.remember(actionClass, new Date().toISOString());
+        }
+        this.pendingPermissions.delete(msg.permissionId);
+        await adapter
+          .respondToPermission?.({ permissionId: msg.permissionId, decision: msg.decision })
+          .catch(() => {});
+        this.emit({
+          at: new Date().toISOString(),
+          type: "permission.settled",
+          permissionId: msg.permissionId,
+          decision: msg.decision,
+          remembered: false,
+        });
+        return;
+      }
     }
   }
 
@@ -307,6 +444,8 @@ export class Coordinator {
 
   async stop(): Promise<void> {
     await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
+    await this.opts.adapter?.dispose?.().catch(() => {});
+    await this.worldQuery.stop();
     await this.transport.stop();
     await this.opts.provider.close?.();
     await this.changeLog.drain();

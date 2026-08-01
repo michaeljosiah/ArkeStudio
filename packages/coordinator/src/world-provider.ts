@@ -1,5 +1,6 @@
 import type { WorldBundle, WorldSummary } from "@arke-studio/contracts";
 import type { ProposalManager } from "./gate/proposals.js";
+import type { WorldStore } from "./world/store.js";
 
 /**
  * Reads the world model (SPEC-001 §2.6). SPEC-002 replaced the SPEC-001 mock with the real
@@ -21,5 +22,7 @@ export interface WorldProvider {
   onWorldStale?(cb: (worldId: string) => void): void;
   /** The accept gate over the open world (SPEC-004). Null until a world is open. */
   gate?(): ProposalManager | null;
+  /** The open store itself (SPEC-005: the world-query tool reads through it). */
+  openStore?(): WorldStore | null;
   close?(): Promise<void>;
 }

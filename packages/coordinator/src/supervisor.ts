@@ -127,10 +127,14 @@ export class ChildSupervisor extends EventEmitter {
 
     let child: ChildProcess;
     try {
+      // Windows batch shims (.cmd/.bat) are only startable through the shell (Node ≥18
+      // refuses them otherwise). Args here are supervisor-authored, never user input.
+      const needsShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
       child = spawn(command, args, {
         env: { ...process.env, ...this.spec.env, PORT: String(port) },
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
+        shell: needsShell,
       });
     } catch (err) {
       this.setStatus("failed", `${this.id} failed to spawn: ${String(err)}`);

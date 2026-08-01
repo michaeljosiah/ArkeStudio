@@ -39,6 +39,9 @@ export {
   type StageInput,
 } from "./gate/proposals.js";
 export { AppIndex } from "./index-db/app-index.js";
+export { AuthoringService, describeActionClass, settlePermission } from "./harness/authoring.js";
+export { GrantStore, type RememberedGrant } from "./harness/grants.js";
+export { WorldQueryServer } from "./harness/world-query.js";
 export { castRefs, canonStamp, extract } from "./index-db/citations.js";
 export {
   contradictionCandidates,

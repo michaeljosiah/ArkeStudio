@@ -1,0 +1,40 @@
+/**
+ * Minimal Server-Sent Events parser over a fetch ReadableStream (adopted from Arke).
+ * OpenCode emits `data: <json>` frames; there is no Last-Event-ID replay, so callers
+ * re-resolve REST state on reconnect. Yields the parsed JSON of each data frame.
+ */
+export async function* parseSse(
+  body: ReadableStream<Uint8Array>,
+  signal?: AbortSignal,
+): AsyncGenerator<unknown> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      if (signal?.aborted) return;
+      const { done, value } = await reader.read();
+      if (done) return;
+      buffer += decoder.decode(value, { stream: true });
+
+      let sep: number;
+      while ((sep = buffer.indexOf("\n\n")) !== -1) {
+        const frame = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        const data = frame
+          .split("\n")
+          .filter((l) => l.startsWith("data:"))
+          .map((l) => l.slice(5).trim())
+          .join("\n");
+        if (!data) continue; // heartbeat / comment
+        try {
+          yield JSON.parse(data);
+        } catch {
+          /* malformed frame — dropped, callers count dead letters at the boundary */
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}

@@ -7,8 +7,19 @@ import { watch, type FSWatcher } from "node:fs";
  */
 
 const DEBOUNCE_MS = 400;
-/** Paths the app owns operationally — changes here are ours or derived, never "external". */
-const IGNORED = [/^\.commit([/\\]|$)/, /^\.index([/\\]|$)/, /^\.history([/\\]|$)/, /^world\.lock$/, /\.tmp-[0-9A-Z]+$/i];
+/**
+ * Paths the app owns operationally — changes here are ours or derived, never "external".
+ * `.proposals/` is staging: authoring agents legitimately write there mid-session (SPEC-005),
+ * the gate rescans after every operation, and base hashes protect the live world regardless.
+ */
+const IGNORED = [
+  /^\.commit([/\\]|$)/,
+  /^\.index([/\\]|$)/,
+  /^\.history([/\\]|$)/,
+  /^\.proposals([/\\]|$)/,
+  /^world\.lock$/,
+  /\.tmp-[0-9A-Z]+$/i,
+];
 
 export class WorldWatcher {
   private watcher: FSWatcher | null = null;

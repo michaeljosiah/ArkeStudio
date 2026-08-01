@@ -8,7 +8,13 @@ import {
   FsWorldProvider,
   type DatabaseCtor,
 } from "@arke-studio/coordinator";
-import { MockHarnessAdapter } from "@arke-studio/adapter-opencode";
+import {
+  agentForPurpose,
+  buildSessionConfig,
+  credentialEnv,
+  discoverOpenCode,
+  OpenCodeAdapter,
+} from "@arke-studio/adapter-opencode";
 
 /**
  * The Electron-ABI SQLite binding (SPEC-003 R-7). Aliased so the Node-ABI copy used by tests
@@ -61,18 +67,43 @@ async function start(): Promise<void> {
   const provider = new FsWorldProvider(appRoot, sqlite ? { sqlite } : {});
   await provider.ensureAppRoot();
 
+  // OpenCode discovery (SPEC-005 R-1): configured path → PATH → bundled, reported with its
+  // version. Absent → authoring degrades with the reason stated (R-4).
+  const discovered = discoverOpenCode({
+    ...(process.env["ARKE_OPENCODE_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE_CMD"] } : {}),
+    ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode", "opencode.exe") } : {}),
+  });
+  const opencodeSupervisor = new ChildSupervisor({
+    id: "opencode",
+    command: discovered?.command ?? null,
+    args: ["serve", "--port", "{port}", "--hostname", "127.0.0.1"],
+    env: credentialEnv({}), // SPEC-008 supplies real keys from safeStorage
+    healthPath: "/api/health",
+    readyTimeoutMs: 30_000,
+  });
+  const adapter = discovered
+    ? new OpenCodeAdapter({ baseUrl: () => `http://127.0.0.1:${opencodeSupervisor.port ?? 0}` })
+    : null;
+  if (discovered) {
+    console.log(`[arke] OpenCode: ${discovered.source} (${discovered.version ?? "unknown version"})`);
+  } else {
+    console.log("[arke] OpenCode: not found — authoring disabled");
+  }
+
   coordinator = new Coordinator({
     provider,
-    adapter: new MockHarnessAdapter(),
+    adapter,
     changeLogPath: join(appRoot, "logs", "coordinator.jsonl"),
     appVersion: __APP_VERSION__,
     jobsSeedPath: join(appRoot, "queue", "jobs.jsonl"),
     ledgerSeedPath: join(appRoot, "ledger.jsonl"),
+    appRoot,
+    authoring: { buildConfig: buildSessionConfig, agentForPurpose },
   });
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
   // and the affected features carry a stated reason (R-6).
-  coordinator.superviseAs("harness", new ChildSupervisor(childSpec("opencode", "ARKE_OPENCODE_CMD", "ARKE_OPENCODE_ARGS")));
+  coordinator.superviseAs("harness", opencodeSupervisor);
   coordinator.superviseAs("voice", new ChildSupervisor(childSpec("voxa", "ARKE_VOXA_CMD", "ARKE_VOXA_ARGS")));
 
   const { port } = await coordinator.start(0);
