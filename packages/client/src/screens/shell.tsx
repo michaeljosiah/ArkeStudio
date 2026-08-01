@@ -279,9 +279,6 @@ export function WorldPickerScreen() {
           <Button variant="ghost" onClick={() => navigate("/settings/providers")}>
             Settings
           </Button>
-          <Button variant="primary" onClick={() => navigate("/worlds/new")}>
-            New world
-          </Button>
         </div>
       </div>
       <div className="fy-content">
@@ -331,6 +328,18 @@ export function WorldPickerScreen() {
                 </div>
               </div>
             ))}
+            <button type="button" className="fy-newworldcard" onClick={() => navigate("/worlds/new")}>
+              <span className="fy-newprodcard__ring" style={{ width: 46, height: 46 }}>
+                <Plus size={20} />
+              </span>
+              <span style={{ font: "600 17px var(--font-sans)" }}>New world</span>
+              <span style={{ font: "400 13px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center", maxWidth: 190 }}>
+                Name it. We'll hold the rest.
+              </span>
+              <span style={{ marginTop: 6 }}>
+                <Button>Create a world</Button>
+              </span>
+            </button>
           </div>
         )}
       </div>
