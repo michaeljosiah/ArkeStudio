@@ -518,5 +518,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       decision: z.enum(["accept", "reject"]),
     })
     .strict(),
+  /** SPEC-016 R-12: check for an update; nothing installs without the user. */
+  z.object({ kind: z.literal("check-updates") }).strict(),
+  /** SPEC-016 R-13: download the update now; it installs at exit, interrupting nothing. */
+  z.object({ kind: z.literal("download-update") }).strict(),
+  /** SPEC-016 R-15: a diagnostics bundle safe to paste publicly. */
+  z.object({ kind: z.literal("generate-diagnostics") }).strict(),
+  /** SPEC-016 R-17: open the data location in the file manager. */
+  z.object({ kind: z.literal("open-data-folder") }).strict(),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;

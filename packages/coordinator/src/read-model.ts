@@ -192,6 +192,9 @@ export class ReadModel {
       case "export.progress":
       case "import.report":
       case "artifact.notice":
+      case "env.check":
+      case "update.status":
+      case "diagnostics.ready":
         // Signals only in SPEC-001: the bundle arrives via a fresh snapshot, and proposals
         // are static fixtures until the gate lands in SPEC-004.
         return;

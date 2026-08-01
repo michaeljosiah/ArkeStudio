@@ -9,7 +9,10 @@
  *     masked wholesale, catching secrets the registry has not seen.
  */
 
-const SUSPICIOUS_FIELD = /(key|token|secret|password|credential|authorization|cookie)/i;
+// Prompts join the masked set (SPEC-016 R-15): diagnostics carry the log tail, and a bundle
+// must be safe to paste publicly — no prompts, ever. Call sites keep prompt text out of free
+// message strings for the same reason; the field mask is the mechanical backstop.
+const SUSPICIOUS_FIELD = /(key|token|secret|password|credential|authorization|cookie|prompt)/i;
 /** Field names that merely *contain* a suspicious word but are not credentials. */
 const FIELD_ALLOWLIST = new Set(["idempotencyKey", "idempotency_key", "preReservedCanonIds", "keyHint"]);
 

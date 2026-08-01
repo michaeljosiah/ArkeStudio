@@ -87,6 +87,16 @@ interface StoreState {
   /** SPEC-015: the last import report and filing notices — transient. */
   importReport: ImportReportState | null;
   artifactNotices: Array<{ sourcePath: string; outcome: string; reason: string; sizeBytes: number | null }>;
+  /** SPEC-016: first-run environment verification, update lifecycle, diagnostics. */
+  envCheck: {
+    pathBudgetOk: boolean;
+    pathBudgetDetail: string | null;
+    diskFreeMb: number | null;
+    nativeIndexOk: boolean;
+    nativeIndexDetail: string | null;
+  } | null;
+  updateStatus: { status: "checking" | "available" | "none" | "downloading" | "downloaded" | "error"; version: string | null; detail: string | null } | null;
+  diagnosticsBundle: string | null;
 }
 
 export interface VoiceCandidatesState {
@@ -114,6 +124,9 @@ let current: StoreState = {
   exportsState: {},
   importReport: null,
   artifactNotices: [],
+  envCheck: null,
+  updateStatus: null,
+  diagnosticsBundle: null,
 };
 const listeners = new Set<() => void>();
 let bridge: ArkeBridge | null = null;
@@ -307,6 +320,22 @@ function handleFrame(json: string): void {
         { sourcePath: event.sourcePath, outcome: event.outcome, reason: event.reason, sizeBytes: event.sizeBytes },
       ];
     }
+    let envCheck = current.envCheck;
+    let updateStatus = current.updateStatus;
+    let diagnosticsBundle = current.diagnosticsBundle;
+    if (event.type === "env.check") {
+      envCheck = {
+        pathBudgetOk: event.pathBudgetOk,
+        pathBudgetDetail: event.pathBudgetDetail,
+        diskFreeMb: event.diskFreeMb,
+        nativeIndexOk: event.nativeIndexOk,
+        nativeIndexDetail: event.nativeIndexDetail,
+      };
+    } else if (event.type === "update.status") {
+      updateStatus = { status: event.status, version: event.version, detail: event.detail };
+    } else if (event.type === "diagnostics.ready") {
+      diagnosticsBundle = event.bundle;
+    }
     let exportsState = current.exportsState;
     if (event.type === "export.progress") {
       exportsState = {
@@ -364,6 +393,9 @@ function handleFrame(json: string): void {
       exportsState,
       importReport,
       artifactNotices,
+      envCheck,
+      updateStatus,
+      diagnosticsBundle,
     });
   }
 }
@@ -857,6 +889,48 @@ export function useArtifactNotices(): Array<{ sourcePath: string; outcome: strin
   return useStore().artifactNotices;
 }
 
+// ---- SPEC-016: first run, updates, diagnostics -----------------------------
+
+export function checkUpdates(): void {
+  send({ kind: "check-updates" });
+}
+
+export function downloadUpdate(): void {
+  send({ kind: "download-update" });
+}
+
+export function generateDiagnostics(): void {
+  send({ kind: "generate-diagnostics" });
+}
+
+export function openDataFolder(): void {
+  send({ kind: "open-data-folder" });
+}
+
+export function useEnvCheck(): StoreEnvCheck | null {
+  return useStore().envCheck;
+}
+
+export type StoreEnvCheck = {
+  pathBudgetOk: boolean;
+  pathBudgetDetail: string | null;
+  diskFreeMb: number | null;
+  nativeIndexOk: boolean;
+  nativeIndexDetail: string | null;
+};
+
+export function useUpdateStatus(): {
+  status: "checking" | "available" | "none" | "downloading" | "downloaded" | "error";
+  version: string | null;
+  detail: string | null;
+} | null {
+  return useStore().updateStatus;
+}
+
+export function useDiagnosticsBundle(): string | null {
+  return useStore().diagnosticsBundle;
+}
+
 export function recordReview(
   worldId: string,
   productionId: string,
@@ -921,5 +995,8 @@ export function __setStateForTest(state: ClientState): void {
     exportsState: {},
     importReport: null,
     artifactNotices: [],
+    envCheck: null,
+    updateStatus: null,
+    diagnosticsBundle: null,
   });
 }

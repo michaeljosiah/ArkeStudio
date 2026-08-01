@@ -1,24 +1,31 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router";
-import { Badge, Button, Callout, Card, Input, StatusDot, Switch, cx, type StatusDotTone } from "../components/ui.js";
+import { Badge, Button, Callout, Card, Input, StatusDot, Switch, Textarea, cx, type StatusDotTone } from "../components/ui.js";
 import { EmptyState, PageHeader, KeyValue, Screen, Section } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
 import { shortDateTime, usd } from "../lib/format.js";
 import {
   cancelExport as cancelExportMsg,
   cancelJob,
+  checkUpdates,
   clearCredential,
   createWorld,
   detectRuntimes,
+  downloadUpdate,
+  generateDiagnostics,
+  openDataFolder,
   openWorld,
   resolveHeldJob,
   resumeQueue,
   setCredential,
   setRoutingDefault,
   setSpendThreshold,
+  useDiagnosticsBundle,
+  useEnvCheck,
   useExports as useExportsState,
   useReconcileReport,
   useStore,
+  useUpdateStatus,
   useVoiceSidecar as useVoiceSidecarState,
   validateProvider,
 } from "../lib/store.js";
@@ -118,26 +125,69 @@ export function LaunchScreen() {
 
 export function FirstRunScreen() {
   const navigate = useNavigate();
+  const { state } = useStore();
+  const env = useEnvCheck();
+  const manifest = state?.app.manifest ?? null;
+  // The real figures, from the manifest (D3 — the prototype's "2.1 GB" overstated by ~10×).
+  const localModels = (manifest?.models ?? []).filter((m) => m.requires?.diskMb !== undefined && m.pricing.kind === "unmetered");
+  const totalMb = localModels.reduce((a, m) => a + (m.requires?.diskMb ?? 0), 0);
   return (
     <Screen id="first-run">
       <div className="scr-hero">
         <PageHeader title="Begin a world" />
         <p className="scr-hero__lede">
           A world is a folder on your disk — characters, canon, productions, all of it readable by
-          hand and yours to keep. Nothing here requires an account or a key to start.
+          hand and yours to keep. Nothing here requires an account, a key, a download or a network
+          to start.
         </p>
       </div>
+      {env && !env.pathBudgetOk && (
+        <Callout tone="warning" title="Your data folder sits too deep">
+          {env.pathBudgetDetail}
+        </Callout>
+      )}
+      {env && !env.nativeIndexOk && (
+        <Callout tone="warning" title="The search index could not load">
+          {env.nativeIndexDetail}
+        </Callout>
+      )}
       <div style={{ display: "flex", gap: "var(--space-3)" }}>
         <Button variant="primary" onClick={() => navigate("/worlds/new")}>
           Create your first world
         </Button>
-        <Button disabled title="Folder import arrives with the artifacts capability (SPEC-015)">
+        <Button
+          onClick={() => navigate("/worlds/new")}
+          title="Create the world first; then Artifacts → Import folder files everything and offers to lift facts — gated, grounded, optional."
+        >
           Already have a canon? Import a folder
         </Button>
       </div>
-      <Callout title="Bring your own keys, later">
-        Browsing, writing and canon never need a provider. Add FAL or other keys in Settings when
-        you want image, video or cloud-voice generation.
+      <Section title="Optional, later, skippable" aside={<span>each names what it unlocks — none is required</span>}>
+        <div className="scr-sectionlist">
+          <div className="scr-sheetsection">
+            <strong style={{ font: "var(--type-ui)" }}>Provider keys</strong>
+            <span className="scr-field__hint">
+              Unlock image and video generation (FAL, Higgsfield), cloud voice (ElevenLabs) and direct
+              LLM work. Settings · Providers, whenever you want them. Writing, canon and browsing
+              never need one.
+            </span>
+          </div>
+          <div className="scr-sheetsection">
+            <strong style={{ font: "var(--type-ui)" }}>Local voice models</strong>
+            <span className="scr-field__hint">
+              {localModels.length > 0
+                ? `${localModels.map((m) => `${m.displayName} · ${((m.requires?.diskMb ?? 0) / 1024).toFixed(1)} GB`).join(" · ")} — about ${(totalMb / 1024).toFixed(1)} GB total. `
+                : ""}
+              Nothing downloads now: anything you use later downloads at that point, in the
+              background, visible in Activity. A cloud-only session never waits for them.
+            </span>
+          </div>
+        </div>
+      </Section>
+      <Callout title="The no-key path is the real one">
+        Create the world, write canon by form, add characters and locations, link artifacts, browse
+        all of it — offline if you like. Agents and generation are named where they are unavailable,
+        never a locked door.
       </Callout>
     </Screen>
   );
@@ -595,17 +645,52 @@ export function SettingsWhoDoesWhatScreen() {
 
 export function SettingsAboutScreen() {
   const { state } = useStore();
+  const update = useUpdateStatus();
+  const diagnostics = useDiagnosticsBundle();
   return (
     <div data-screen="settings-about">
       <Section title="About">
         <KeyValue
           rows={[
             { k: "Version", v: state?.app.version ?? "—" },
-            { k: "Your worlds", v: "Folders on your disk. Delete the app, keep the worlds." },
-            { k: "Licences", v: "Third-party notices ship with packaging (SPEC-016)." },
+            { k: "Licence", v: "MIT — Arke Studio is yours to inspect and keep" },
+            {
+              k: "Third-party",
+              v: "OpenCode (MIT) · Voxa (MIT) · espeak-ng (GPL, separate process, never linked) · ffmpeg (LGPL build, subprocess) · better-sqlite3 (MIT) · Electron (MIT) · Geist (OFL) — full notices in THIRD-PARTY-NOTICES.md beside the app",
+            },
+            { k: "Your data", v: "%USERPROFILE%\\ArkeStudio — worlds, ledger, credentials. Uninstalling deletes none of it by default." },
           ]}
         />
+        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+          <Button variant="ghost" onClick={() => openDataFolder()}>
+            Open data folder
+          </Button>
+          <Button variant="ghost" onClick={() => generateDiagnostics()}>
+            Diagnostics — safe to paste publicly
+          </Button>
+        </div>
       </Section>
+      <Section
+        title="Updates"
+        aside={<span>checks are yours to run; nothing installs until you quit — running work is never interrupted</span>}
+      >
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+          <Button onClick={() => checkUpdates()}>Check for updates</Button>
+          {update && (
+            <span className="scr-field__hint">
+              {update.status}
+              {update.version ? ` · ${update.version}` : ""}
+              {update.detail ? ` — ${update.detail}` : ""}
+            </span>
+          )}
+          {update?.status === "available" && <Button variant="primary" onClick={() => downloadUpdate()}>Download</Button>}
+        </div>
+      </Section>
+      {diagnostics && (
+        <Section title="Diagnostics bundle" aside={<span>redacted at the boundary — no world content, no keys, no prompts</span>}>
+          <Textarea readOnly value={diagnostics} style={{ minHeight: 200, font: "var(--type-mono, monospace)" }} />
+        </Section>
+      )}
     </div>
   );
 }

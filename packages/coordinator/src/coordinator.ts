@@ -44,11 +44,12 @@ import { ProviderService, type KeyValidator } from "./providers/service.js";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "./queue/dispatcher.js";
 import { extractText, resolveCandidate, storeBatch, verifyCandidates, type RawCandidate } from "./artifacts/extraction.js";
 import { fileArtifact, importFolder } from "./artifacts/filing.js";
+import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
 import { previewCacheFile, VoiceService, type CloudVoiceSource, type SidecarLike } from "./voice/service.js";
-import { fromPortable, toExtendedLength } from "./world/paths.js";
+import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import { establishRequests, imageModelFor, missingTileAngles, tileRequest } from "./references/generate.js";
 import {
   chooseAnchor,
@@ -121,6 +122,12 @@ export interface CoordinatorOptions {
   ffmpeg?: FfmpegRunner;
   /** SPEC-015: the extraction model seam; every candidate is re-verified regardless (R-13). */
   extractor?: (text: string, artifactFile: string) => Promise<RawCandidate[]>;
+  /** SPEC-016: update seam — check and download only; installation happens at exit (R-13). */
+  updates?: { check: () => Promise<{ version: string } | null>; download: () => Promise<void> };
+  /** SPEC-016 R-17: open a path in the platform file manager, injected from the desktop. */
+  openPath?: (path: string) => void;
+  /** SPEC-016 R-2: whether the native index binding loaded, known only to the desktop shell. */
+  nativeIndex?: { ok: boolean; reason?: string };
   /** SPEC-011: the Voxa sidecar and voice catalogue sources, injected from the desktop. */
   voice?: {
     sidecar: SidecarLike | null;
@@ -329,6 +336,31 @@ export class Coordinator {
     }
     if (!this.supervisors.has("voice")) {
       this.readModel.setHealth("voice", { status: "unavailable", reason: "Voxa is not configured" });
+    }
+
+    // First-run environment verification (SPEC-016 R-2, D4): checked once, before any world
+    // could be created somewhere it would break, and stated plainly rather than discovered.
+    if (this.opts.appRoot) {
+      const budget = checkPathBudget(this.opts.appRoot);
+      let diskFreeMb: number | null = null;
+      try {
+        const { statfs } = await import("node:fs/promises");
+        const fs = await statfs(this.opts.appRoot);
+        diskFreeMb = Math.floor((fs.bavail * fs.bsize) / (1024 * 1024));
+      } catch {
+        diskFreeMb = null; // unknown, never presented as a failure
+      }
+      this.emit({
+        at: new Date().toISOString(),
+        type: "env.check",
+        pathBudgetOk: !budget.tight,
+        pathBudgetDetail: budget.tight
+          ? `the data folder sits ${budget.rootLength} characters deep — worst-case paths reach ${budget.worstCase}, past the classic Windows limit; move it shallower before creating worlds here`
+          : null,
+        diskFreeMb,
+        nativeIndexOk: this.opts.nativeIndex?.ok ?? true,
+        nativeIndexDetail: this.opts.nativeIndex?.ok === false ? (this.opts.nativeIndex.reason ?? "the native index binding failed to load — search and counts degrade; authoring is unaffected") : null,
+      });
     }
 
     // The sidecar's four degradation states (SPEC-011 §2.10), polled gently; the app is fully
@@ -1252,6 +1284,66 @@ export class Coordinator {
         void this.appLog?.append({ kind: "world-export.done", target });
         return;
       }
+      case "check-updates": {
+        if (!this.opts.updates) {
+          this.emit({ at: new Date().toISOString(), type: "update.status", status: "none", version: null, detail: "updates are managed outside this build" });
+          return;
+        }
+        this.emit({ at: new Date().toISOString(), type: "update.status", status: "checking", version: null, detail: null });
+        try {
+          const found = await this.opts.updates.check();
+          this.emit({
+            at: new Date().toISOString(),
+            type: "update.status",
+            status: found ? "available" : "none",
+            version: found?.version ?? null,
+            detail: found ? "downloading is your call; installing happens when you quit" : null,
+          });
+        } catch (err) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "update.status",
+            status: "error",
+            version: null,
+            detail: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+      case "download-update": {
+        if (!this.opts.updates) return;
+        this.emit({ at: new Date().toISOString(), type: "update.status", status: "downloading", version: null, detail: null });
+        try {
+          // Download only (R-13, D7): the world lock, the commit journal and running jobs are
+          // never interrupted — installation waits for application exit, by construction.
+          await this.opts.updates.download();
+          this.emit({
+            at: new Date().toISOString(),
+            type: "update.status",
+            status: "downloaded",
+            version: null,
+            detail: "installs when you quit — running work is never interrupted",
+          });
+        } catch (err) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "update.status",
+            status: "error",
+            version: null,
+            detail: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+      case "generate-diagnostics": {
+        const bundle = await this.diagnostics();
+        this.emit({ at: new Date().toISOString(), type: "diagnostics.ready", bundle: JSON.stringify(bundle, null, 2) });
+        return;
+      }
+      case "open-data-folder": {
+        if (this.opts.appRoot) this.opts.openPath?.(this.opts.appRoot);
+        return;
+      }
       case "file-artifact": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -1297,16 +1389,25 @@ export class Coordinator {
             void this.appLog?.append({ kind: "extraction.no-text", artifact: artifact.file });
             return;
           }
-          if (!this.opts.extractor) {
+          // The seam wins; else the built-in adapter runner when the harness is up (SPEC-016).
+          let extractor = this.opts.extractor ?? null;
+          if (!extractor && this.opts.adapter?.readiness().ready && this.opts.authoring) {
+            extractor = makeAdapterExtractor(
+              this.opts.adapter,
+              this.opts.authoring.buildConfig,
+              this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`,
+            );
+          }
+          if (!extractor) {
             // Filing already succeeded and is untouched (D1); the model wiring is stated, not silent.
             void this.appLog?.append({
               kind: "extraction.unavailable",
               artifact: artifact.file,
-              reason: "no extraction model is wired in this build",
+              reason: "extraction needs the authoring harness running — filing is complete either way",
             });
             return;
           }
-          const raw = await this.opts.extractor(text, artifact.file);
+          const raw = await extractor(text, artifact.file);
           const batch = verifyCandidates(raw, text, artifact.extraction?.decided ?? []);
           await storeBatch(store, artifact, batch);
           await this.refreshWorldSnapshot(msg.worldId);

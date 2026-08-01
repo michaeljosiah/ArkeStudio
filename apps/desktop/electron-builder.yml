@@ -1,5 +1,8 @@
-# Working electron-builder target (SPEC-001 scope note). Signing, publish channels and the
-# real update flow arrive with SPEC-016.
+# Packaging (SPEC-016 §2.5, R-7, R-8): the client, coordinator, harness binary, voice sidecar,
+# ffmpeg, espeak-ng and the native index binding — per architecture. Local inference models are
+# NOT installer contents; they download on first use (R-5, D3). The bundled-components set is
+# gated by scripts/verify-licenses.mjs (R-9, D5): a component with no recorded obligation fails
+# the package step, so a licence question is a task, never a shipping delay.
 appId: studio.arke.app
 productName: Arke Studio
 directories:
@@ -14,9 +17,37 @@ asarUnpack:
 extraResources:
   - from: ../../packages/client/dist
     to: client
+  # Bundled runtimes (R-8): staged into build-resources/ by CI or a local prep step; each entry
+  # is optional at build time so a source checkout still packages, but verify-licenses refuses
+  # to GATE-pass a bundle whose obligations file is missing a present component.
+  - from: build-resources/opencode
+    to: opencode
+    filter: ["**/*"]
+  - from: build-resources/voxa
+    to: voxa
+    filter: ["**/*"]
+  - from: build-resources/ffmpeg
+    to: ffmpeg
+    filter: ["**/*"]
+  # espeak-ng stays a SEPARATE EXECUTABLE, never linked (R-10, D6) — GPL, same arrangement Voxa makes.
+  - from: build-resources/espeak-ng
+    to: espeak-ng
+    filter: ["**/*"]
+  - from: ../../THIRD-PARTY-NOTICES.md
+    to: THIRD-PARTY-NOTICES.md
 win:
   target:
-    - nsis
+    - target: nsis
+      arch: [x64, arm64]
+  # Signing (§2.7): supplied via environment on the signing machine — never committed.
+  #   WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD, or signtoolOptions for an HSM token.
 nsis:
-  oneClick: true
+  oneClick: false
   perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ArkeStudio-Setup-${version}-${arch}.${ext}
+  # The app root — worlds, ledger, credentials — is NOT app data and is never deleted by the
+  # uninstaller by default (R-16, D10). The opt-ins live in installer.nsh, each labelled with
+  # what it actually destroys.
+  deleteAppDataOnUninstall: false
+  include: installer.nsh

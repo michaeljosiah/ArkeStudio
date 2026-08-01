@@ -129,6 +129,8 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
     created: store.now(),
   };
   await store.gateOp(async () => {
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(toExtendedLength(join(store.dir, "artifacts")), { recursive: true });
     await copyFile(toExtendedLength(input.sourcePath), toExtendedLength(join(store.dir, "artifacts", file)));
     await writeSidecar(store, sidecar, null);
   });

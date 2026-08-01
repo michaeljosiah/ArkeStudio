@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
-import { app, BrowserWindow, safeStorage } from "electron";
+import { app, BrowserWindow, safeStorage, shell } from "electron";
+import electronUpdater from "electron-updater";
 import {
   ChildSupervisor,
   Coordinator,
@@ -55,11 +57,22 @@ const clientIndex = isDev
 /** The real on-disk app root (SPEC-002 §2.2): %USERPROFILE%\ArkeStudio, env-overridable. */
 const appRoot = defaultAppRoot();
 
-/** Child commands come from the environment until SPEC-005/SPEC-011 manage them properly. */
-function childSpec(id: string, cmdVar: string, argsVar: string) {
-  const command = process.env[cmdVar] ?? null;
+/**
+ * Child commands: environment override first, then the bundled binary in a packaged build
+ * (SPEC-016 R-8). Absent both, the feature degrades with its stated reason.
+ */
+function childSpec(id: string, cmdVar: string, argsVar: string, bundled?: string) {
+  const bundledPath = app.isPackaged && bundled !== undefined ? join(process.resourcesPath, bundled) : null;
+  const command = process.env[cmdVar] ?? (bundledPath !== null && existsSync(bundledPath) ? bundledPath : null);
   const args = process.env[argsVar]?.split(" ").filter(Boolean) ?? [];
   return { id, command, args };
+}
+
+/** The bundled ffmpeg (SPEC-013 R-19 via SPEC-016 R-8), or an explicit path, or nothing. */
+function ffmpegPath(): string | null {
+  if (process.env["ARKE_FFMPEG"]) return process.env["ARKE_FFMPEG"];
+  const bundled = app.isPackaged ? join(process.resourcesPath, "ffmpeg", "ffmpeg.exe") : null;
+  return bundled !== null && existsSync(bundled) ? bundled : null;
 }
 
 let coordinator: Coordinator | null = null;
@@ -67,6 +80,10 @@ let window: BrowserWindow | null = null;
 let shuttingDown = false;
 
 async function start(): Promise<void> {
+  // Updater posture (SPEC-016 D7): never auto-download, always install at exit.
+  electronUpdater.autoUpdater.autoDownload = false;
+  electronUpdater.autoUpdater.autoInstallOnAppQuit = true;
+
   const sqlite = loadElectronSqlite();
   const provider = new FsWorldProvider(appRoot, sqlite ? { sqlite } : {});
   await provider.ensureAppRoot();
@@ -108,7 +125,7 @@ async function start(): Promise<void> {
   // The Voxa sidecar (SPEC-011): supervised like the harness; local inference only (D1).
   // The client resolves the supervisor's port lazily so restarts keep working.
   const voxaSupervisor = new ChildSupervisor({
-    ...childSpec("voxa", "ARKE_VOXA_CMD", "ARKE_VOXA_ARGS"),
+    ...childSpec("voxa", "ARKE_VOXA_CMD", "ARKE_VOXA_ARGS", join("voxa", "voxa.exe")),
     healthPath: "/health",
     readyTimeoutMs: 30_000,
   });
@@ -134,14 +151,15 @@ async function start(): Promise<void> {
     manifest: SHIPPED_MANIFEST,
     probeRuntime: () => probeRuntime(appRoot),
     dispatchClients: providerClients,
-    // Exports encode locally (SPEC-013 R-19). Bundled ffmpeg rides SPEC-016; until then an
-    // explicit path enables it and its absence is stated, never silent.
-    ...(process.env["ARKE_FFMPEG"]
+    // Exports encode locally (SPEC-013 R-19): the bundled ffmpeg in a packaged build
+    // (SPEC-016 R-8, invoked as a subprocess, never linked — D6), else ARKE_FFMPEG; its
+    // absence is stated, never silent.
+    ...(ffmpegPath() !== null
       ? {
           ffmpeg: {
             run: (args: string[], onProgress: (p: number) => void, signal: AbortSignal) =>
               new Promise<void>((resolvePromise, reject) => {
-                const child = spawn(process.env["ARKE_FFMPEG"]!, args, { windowsHide: true });
+                const child = spawn(ffmpegPath()!, args, { windowsHide: true });
                 signal.addEventListener("abort", () => child.kill("SIGKILL"));
                 child.stderr.on("data", (chunk: Buffer) => {
                   const m = /time=(\d+):(\d+):(\d+)/.exec(chunk.toString());
@@ -153,6 +171,23 @@ async function start(): Promise<void> {
           },
         }
       : {}),
+    // Updates (SPEC-016 R-12, R-13): check and download only. autoInstallOnAppQuit is the
+    // whole deferral mechanism — the world lock, the commit journal and running jobs are never
+    // interrupted, because nothing installs until the user quits.
+    updates: {
+      check: async () => {
+        if (!app.isPackaged) return null;
+        const result = await electronUpdater.autoUpdater.checkForUpdates();
+        return result && result.updateInfo.version !== app.getVersion() ? { version: result.updateInfo.version } : null;
+      },
+      download: async () => {
+        await electronUpdater.autoUpdater.downloadUpdate();
+      },
+    },
+    openPath: (p) => void shell.openPath(p),
+    nativeIndex: sqlite
+      ? { ok: true }
+      : { ok: false, reason: "the native index binding did not load — search and counts degrade; authoring still works" },
     voice: {
       sidecar: voxaSidecar,
       sidecarHealth: async () => sidecarState(await voxaAt().health()),

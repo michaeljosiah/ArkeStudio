@@ -338,3 +338,15 @@
   grid-template-columns: 1fr 1fr;
   gap: var(--space-4);
 }
+
+/* SPEC-016 R-1: the launch screen respects reduced motion (master N-8) — every transition and
+   animation collapses to an instant state change. */
+@media (prefers-reduced-motion: reduce) {
+  .scr-launch *,
+  .scr-launch *::before,
+  .scr-launch *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
