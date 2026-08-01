@@ -39,6 +39,13 @@ export {
   type StageInput,
 } from "./gate/proposals.js";
 export { AppIndex } from "./index-db/app-index.js";
+export { AskService, excerptAppears, extractJson, normalizeForVerify, verifyClaims } from "./canon/ask.js";
+export {
+  openThread,
+  stageCanonAmendment,
+  stageCanonEntry,
+  stageThreadSettlement,
+} from "./canon/authoring.js";
 export { AuthoringService, describeActionClass, settlePermission } from "./harness/authoring.js";
 export { GrantStore, type RememberedGrant } from "./harness/grants.js";
 export { WorldQueryServer } from "./harness/world-query.js";

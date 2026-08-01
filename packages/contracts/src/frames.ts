@@ -94,5 +94,66 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       decision: z.enum(["once", "always", "reject"]),
     })
     .strict(),
+  /** SPEC-006: ask canon. The answer (or refusal) arrives as a canon.answer event. */
+  z
+    .object({
+      kind: z.literal("canon-ask"),
+      worldId: UlidSchema,
+      askId: z.string().min(1).max(64),
+      question: z.string().min(1).max(2000),
+    })
+    .strict(),
+  /** SPEC-006 R-18: list search over the same retrieval path Q&A uses. */
+  z
+    .object({
+      kind: z.literal("canon-search"),
+      worldId: UlidSchema,
+      searchId: z.string().min(1).max(64),
+      query: z.string().min(1).max(500),
+    })
+    .strict(),
+  /** SPEC-006 §2.5: an entry's computed detail — cited-by and speculative ripples. */
+  z.object({ kind: z.literal("canon-refs"), worldId: UlidSchema, entryId: z.string().min(1) }).strict(),
+  /** SPEC-006: stage a new entry (settled on accept) through the gate. */
+  z
+    .object({
+      kind: z.literal("stage-canon-entry"),
+      worldId: UlidSchema,
+      entryType: z.enum(["rule", "lore", "location", "faction", "timeline", "tone"]),
+      title: z.string().min(1).max(200),
+      statement: z.string().min(1).max(5000),
+    })
+    .strict(),
+  /** SPEC-006: stage an amendment to an existing entry. */
+  z
+    .object({
+      kind: z.literal("stage-canon-amendment"),
+      worldId: UlidSchema,
+      entryId: z.string().min(1),
+      statement: z.string().min(1).max(5000),
+    })
+    .strict(),
+  /** SPEC-006 R-13/R-14: open a question as a thread — id allocated now, citable immediately. */
+  z
+    .object({
+      kind: z.literal("open-thread"),
+      worldId: UlidSchema,
+      title: z.string().min(1).max(200),
+      question: z.string().min(1).max(5000),
+      candidates: z.array(z.string()).max(10).default([]),
+    })
+    .strict(),
+  /** SPEC-006 R-15: stage the settlement of an open thread. */
+  z
+    .object({
+      kind: z.literal("settle-thread"),
+      worldId: UlidSchema,
+      entryId: z.string().min(1),
+      resolvedType: z.enum(["rule", "lore", "location", "faction", "timeline", "tone"]),
+      statement: z.string().min(1).max(5000),
+    })
+    .strict(),
+  /** SPEC-006 R-19: retire an entity — stays resolvable, drops out of retrieval. */
+  z.object({ kind: z.literal("retire-entity"), worldId: UlidSchema, path: z.string().min(1) }).strict(),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;

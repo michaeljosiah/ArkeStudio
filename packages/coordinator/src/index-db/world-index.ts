@@ -13,7 +13,9 @@ import { assertFts5, loadNodeSqlite, type Database, type DatabaseCtor } from "./
  * rebuild (R-1); corruption is discarded, never surfaced (R-4, D7).
  */
 
-const SCHEMA_VERSION = 1;
+// v2: canon_fts excludes open threads and retired entries (SPEC-006 R-16/R-19). The bump is
+// what forces existing indexes to rebuild — derivation changes are schema changes (R-3).
+const SCHEMA_VERSION = 2;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -295,6 +297,11 @@ export class WorldIndex {
   private insertFts(bundle: WorldBundle, include: (entryId: string) => boolean): void {
     const insFts = this.db.prepare("INSERT INTO canon_fts(entry_id, title, statement) VALUES (?,?,?)");
     for (const entry of bundle.canon) {
+      // Open threads assert nothing — retrieving one would answer a question with the same
+      // question (SPEC-006 R-16, D5). Retired entries resolve for old citations but must not
+      // answer new questions (R-19, D9). Neither enters the searchable set, so the refusal's
+      // "searched all N" stays honest.
+      if (entry.status === "open" || entry.retired === true) continue;
       if (include(entry.id)) insFts.run(entry.id, entry.title, entry.body);
     }
   }

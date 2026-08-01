@@ -70,7 +70,7 @@ describe("the read-only world-query tool (R-11, D2, D3)", () => {
       searched: number;
       candidates: Array<{ entryId: string; statement: string }>;
     };
-    assert.equal(parsed.searched, 6);
+    assert.equal(parsed.searched, 5);
     assert.equal(parsed.candidates[0]!.entryId, "CANON-002");
     assert.ok(parsed.candidates[0]!.statement.includes("stood in"), "full statement text (R-23)");
   });

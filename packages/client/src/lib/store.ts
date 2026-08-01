@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from "react";
 import {
   FrameSchema,
+  type AskCandidate,
+  type AskResult,
   type ClientMessage,
   type ClientState,
   type DomainEvent,
@@ -41,12 +43,30 @@ export interface PendingPermission {
   actionClass: string;
 }
 
+export interface CanonSearchState {
+  searched: number;
+  floorCleared: boolean;
+  candidates: AskCandidate[];
+}
+
+export interface CanonRefsState {
+  citedBy: {
+    sheets: Array<{ id: string; atVersion: number | null }>;
+    entries: string[];
+    productions: string[];
+  };
+  ripples: Array<{ kind: string; summary: string; targets: string[] }>;
+}
+
 interface StoreState {
   connection: ConnectionStatus;
   state: ClientState | null;
   gateNotices: Record<string, GateNotice>;
   authoring: Record<string, AuthoringActivity>;
   permissions: Record<string, PendingPermission>;
+  askResults: Record<string, AskResult>;
+  canonSearches: Record<string, CanonSearchState>;
+  canonRefs: Record<string, CanonRefsState>;
 }
 
 let current: StoreState = {
@@ -55,6 +75,9 @@ let current: StoreState = {
   gateNotices: {},
   authoring: {},
   permissions: {},
+  askResults: {},
+  canonSearches: {},
+  canonRefs: {},
 };
 const listeners = new Set<() => void>();
 let bridge: ArkeBridge | null = null;
@@ -184,7 +207,33 @@ function handleFrame(json: string): void {
       permissions = { ...permissions };
       delete permissions[event.permissionId];
     }
-    emitChange({ ...current, state: fold(current.state, event), gateNotices, authoring, permissions });
+    let askResults = current.askResults;
+    let canonSearches = current.canonSearches;
+    let canonRefs = current.canonRefs;
+    if (event.type === "canon.answer") {
+      askResults = { ...askResults, [event.askId]: event.result };
+    } else if (event.type === "canon.search") {
+      canonSearches = {
+        ...canonSearches,
+        [event.searchId]: {
+          searched: event.searched,
+          floorCleared: event.floorCleared,
+          candidates: event.candidates,
+        },
+      };
+    } else if (event.type === "canon.refs") {
+      canonRefs = { ...canonRefs, [event.entryId]: { citedBy: event.citedBy, ripples: event.ripples } };
+    }
+    emitChange({
+      ...current,
+      state: fold(current.state, event),
+      gateNotices,
+      authoring,
+      permissions,
+      askResults,
+      canonSearches,
+      canonRefs,
+    });
   }
 }
 
@@ -330,6 +379,62 @@ export function usePermissions(): Record<string, PendingPermission> {
   return useStore().permissions;
 }
 
+// ---- canon (SPEC-006) ------------------------------------------------------
+
+export function askCanon(worldId: string, askId: string, question: string): void {
+  send({ kind: "canon-ask", worldId, askId, question });
+}
+
+export function searchCanonList(worldId: string, searchId: string, query: string): void {
+  send({ kind: "canon-search", worldId, searchId, query });
+}
+
+export function requestCanonRefs(worldId: string, entryId: string): void {
+  send({ kind: "canon-refs", worldId, entryId });
+}
+
+export function stageCanonEntry(
+  worldId: string,
+  entryType: "rule" | "lore" | "location" | "faction" | "timeline" | "tone",
+  title: string,
+  statement: string,
+): void {
+  send({ kind: "stage-canon-entry", worldId, entryType, title, statement });
+}
+
+export function stageCanonAmendment(worldId: string, entryId: string, statement: string): void {
+  send({ kind: "stage-canon-amendment", worldId, entryId, statement });
+}
+
+export function openThread(worldId: string, title: string, question: string, candidates: string[]): void {
+  send({ kind: "open-thread", worldId, title, question, candidates });
+}
+
+export function settleThread(
+  worldId: string,
+  entryId: string,
+  resolvedType: "rule" | "lore" | "location" | "faction" | "timeline" | "tone",
+  statement: string,
+): void {
+  send({ kind: "settle-thread", worldId, entryId, resolvedType, statement });
+}
+
+export function retireEntity(worldId: string, path: string): void {
+  send({ kind: "retire-entity", worldId, path });
+}
+
+export function useAskResults(): Record<string, AskResult> {
+  return useStore().askResults;
+}
+
+export function useCanonSearches(): Record<string, CanonSearchState> {
+  return useStore().canonSearches;
+}
+
+export function useCanonRefs(): Record<string, CanonRefsState> {
+  return useStore().canonRefs;
+}
+
 const getSnapshot = (): StoreState => current;
 const subscribe = (l: () => void): (() => void) => {
   listeners.add(l);
@@ -350,5 +455,14 @@ export function useWorld(): ClientState["world"] {
 
 /** Test hook: inject a full state and mark the connection open. */
 export function __setStateForTest(state: ClientState): void {
-  emitChange({ connection: "open", state, gateNotices: {}, authoring: {}, permissions: {} });
+  emitChange({
+    connection: "open",
+    state,
+    gateNotices: {},
+    authoring: {},
+    permissions: {},
+    askResults: {},
+    canonSearches: {},
+    canonRefs: {},
+  });
 }
