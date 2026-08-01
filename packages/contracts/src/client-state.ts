@@ -64,6 +64,19 @@ export const WorldSummarySchema = z
         productions: z.number().int().min(0),
       })
       .strict(),
+    /**
+     * Needs-you counts for a CLOSED world (SPEC-014 R-7, D4): computed when the world last
+     * passed through, labelled as-of that time, never presented as current. The open world's
+     * items are precise and come from its bundle instead.
+     */
+    attention: z
+      .object({
+        unreviewedTakes: z.number().int().min(0),
+        openProposals: z.number().int().min(0),
+        asOf: IsoDateTimeSchema,
+      })
+      .strict()
+      .optional(),
     updated: IsoDateTimeSchema,
   })
   .strict();

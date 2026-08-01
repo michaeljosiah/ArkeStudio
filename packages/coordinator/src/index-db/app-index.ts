@@ -12,7 +12,8 @@ import { assertFts5, loadNodeSqlite, type Database, type DatabaseCtor } from "./
  * deleting it can never lose spend history, because the logs are the truth.
  */
 
-const SCHEMA_VERSION = 1;
+// v2: closed-world attention counts with their as-of stamp (SPEC-014 R-7, T-5/T-6).
+const SCHEMA_VERSION = 2;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -26,6 +27,9 @@ CREATE TABLE IF NOT EXISTS worlds(
   factions INTEGER NOT NULL,
   canon_entries INTEGER NOT NULL,
   productions INTEGER NOT NULL,
+  attention_unreviewed INTEGER,
+  attention_proposals INTEGER,
+  attention_as_of TEXT,
   updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS jobs(
@@ -121,11 +125,13 @@ export class AppIndex {
   upsertWorld(summary: WorldSummary): void {
     this.db
       .prepare(
-        `INSERT INTO worlds(world_id,slug,name,logline,characters,locations,factions,canon_entries,productions,updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?)
+        `INSERT INTO worlds(world_id,slug,name,logline,characters,locations,factions,canon_entries,productions,attention_unreviewed,attention_proposals,attention_as_of,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(world_id) DO UPDATE SET slug=excluded.slug,name=excluded.name,logline=excluded.logline,
            characters=excluded.characters,locations=excluded.locations,factions=excluded.factions,
-           canon_entries=excluded.canon_entries,productions=excluded.productions,updated_at=excluded.updated_at`,
+           canon_entries=excluded.canon_entries,productions=excluded.productions,
+           attention_unreviewed=excluded.attention_unreviewed,attention_proposals=excluded.attention_proposals,
+           attention_as_of=excluded.attention_as_of,updated_at=excluded.updated_at`,
       )
       .run(
         summary.worldId,
@@ -137,6 +143,9 @@ export class AppIndex {
         summary.counts.factions,
         summary.counts.canonEntries,
         summary.counts.productions,
+        summary.attention?.unreviewedTakes ?? null,
+        summary.attention?.openProposals ?? null,
+        summary.attention?.asOf ?? null,
         summary.updated,
       );
   }
@@ -157,6 +166,9 @@ export class AppIndex {
       factions: number;
       canon_entries: number;
       productions: number;
+      attention_unreviewed: number | null;
+      attention_proposals: number | null;
+      attention_as_of: string | null;
       updated_at: string;
     }>;
     const out: WorldSummary[] = [];
@@ -179,6 +191,15 @@ export class AppIndex {
           canonEntries: row.canon_entries,
           productions: row.productions,
         },
+        ...(row.attention_unreviewed !== null && row.attention_proposals !== null && row.attention_as_of !== null
+          ? {
+              attention: {
+                unreviewedTakes: row.attention_unreviewed,
+                openProposals: row.attention_proposals,
+                asOf: row.attention_as_of,
+              },
+            }
+          : {}),
         updated: row.updated_at,
       });
     }

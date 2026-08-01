@@ -3,26 +3,34 @@ import { NavLink, Outlet, useNavigate } from "react-router";
 import { Badge, Button, Callout, Card, Input, StatusDot, Switch, cx, type StatusDotTone } from "../components/ui.js";
 import { EmptyState, PageHeader, KeyValue, Screen, Section } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
-import { usd } from "../lib/format.js";
+import { shortDateTime, usd } from "../lib/format.js";
 import {
+  cancelExport as cancelExportMsg,
   cancelJob,
   clearCredential,
   createWorld,
   detectRuntimes,
+  openWorld,
   resolveHeldJob,
   resumeQueue,
   setCredential,
   setRoutingDefault,
   setSpendThreshold,
+  useExports as useExportsState,
   useReconcileReport,
   useStore,
+  useVoiceSidecar as useVoiceSidecarState,
   validateProvider,
 } from "../lib/store.js";
 import {
+  computeNeedsYou,
+  computeRunning,
   deriveCapabilityAvailability,
   formatMicroUsd,
+  jobActions,
   modelCapabilityCopy,
   PROVIDERS as PROVIDER_TABLE,
+  spendSummary,
   type Capability,
   type ComponentHealth,
   type ProviderId,
@@ -609,84 +617,212 @@ const TERMINAL_JOB = new Set(["succeeded", "failed", "cancelled"]);
 export function ActivityScreen() {
   const { state } = useStore();
   const reconcileReport = useReconcileReport();
+  const sidecar = useVoiceSidecarState();
+  const exportsState = useExportsState();
+  const navigate = useNavigate();
+  const [scope, setScope] = useState<"active" | "all">("active");
+  const activeWorldId = state?.world?.meta.worldId ?? null;
+
   const jobs = [...(state?.app.jobs ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const queues = state?.app.queues ?? [];
-  const ledger = state?.app.ledger ?? [];
-  const byProvider = new Map<string, number>();
-  for (const entry of ledger) {
-    byProvider.set(entry.provider, (byProvider.get(entry.provider) ?? 0) + (entry.actualMicroUsd ?? entry.estimatedMicroUsd));
-  }
-  // FIFO position per provider among queued jobs (SPEC-009 R-11): what waiting is waiting for.
-  const positions = new Map<string, number>();
-  for (const job of [...jobs].reverse()) {
-    if (job.status !== "queued") continue;
-    const n = positions.get(`#${job.provider}`) ?? 0;
-    positions.set(`#${job.provider}`, n + 1);
-    positions.set(job.id, n);
-  }
+  const scoped = <T extends { worldId?: string }>(items: T[]): T[] =>
+    scope === "all" || activeWorldId === null ? items : items.filter((i) => i.worldId === undefined || i.worldId === activeWorldId);
+
+  const running = state ? computeRunning(state, { sidecar, exports: exportsState }) : [];
+  const needsYou = state ? computeNeedsYou(state) : [];
+  const spend = state ? spendSummary(state.app.ledger, state.app.spend?.settings.periodDays ?? 7, new Date()) : null;
+  const drift = state?.app.drift ?? [];
+  const today = new Date().toISOString().slice(0, 10);
+  const recent = scoped(jobs.filter((j) => TERMINAL_JOB.has(j.status) && j.updatedAt.startsWith(today)));
+  const settled = running.length === 0 && needsYou.length === 0;
+
   return (
     <Screen id="activity">
-      <PageHeader title="Activity" meta={<span>Every job, every world, and what it cost.</span>} />
-      {queues
-        .filter((q) => q.paused)
-        .map((q) => (
-          <Callout key={q.provider} tone="warning" title={`${q.provider} is paused — ${q.reason ?? "unknown"}`}>
-            {q.held} job{q.held === 1 ? "" : "s"} held, not failed — they were never wrong. Fix the cause, then
-            resume; nothing is spent until you do.{" "}
-            <Button variant="ghost" onClick={() => resumeQueue(q.provider)}>
-              Resume {q.provider}
+      <PageHeader
+        title="Activity"
+        meta={<span>Everything running, everything waiting on you, and what it cost — every world.</span>}
+        actions={
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
+            <Button variant={scope === "active" ? "primary" : "ghost"} onClick={() => setScope("active")}>
+              This world
             </Button>
-          </Callout>
-        ))}
+            <Button variant={scope === "all" ? "primary" : "ghost"} onClick={() => setScope("all")}>
+              All worlds
+            </Button>
+          </div>
+        }
+      />
       {reconcileReport && reconcileReport.length > 0 && (
         <Callout title="What recovery did">
           {reconcileReport.map((r) => `${r.jobId.slice(0, 8)}… ${r.action}`).join(" · ")}
         </Callout>
       )}
-      <Section title="Spend" aside={<span>{ledger.length} ledger lines</span>}>
-        <div className="lay-stats">
-          {[...byProvider.entries()].map(([provider, micro]) => (
-            <div key={provider} className="lay-stats__item">
-              <div className="lay-stats__value">{usd(micro)}</div>
-              <div className="lay-stats__label">{provider}</div>
+      {settled ? (
+        <Section title="All quiet">
+          <EmptyState
+            title="Nothing running, nothing waiting on you"
+            hint="A settled state, not a blank — you can stop."
+          />
+        </Section>
+      ) : (
+        <>
+          <Section title="Running" aside={<span>work worth watching — pushed, never polled</span>}>
+            {scoped(running).length === 0 ? (
+              <EmptyState title="Nothing in flight" />
+            ) : (
+              <div className="scr-sectionlist">
+                {scoped(running).map((r) => (
+                  <div key={r.ref} className="scr-cutrow">
+                    <span className="mono">{r.kind}</span>
+                    <span>{r.title}</span>
+                    <span style={{ color: "var(--muted-foreground)" }}>
+                      {r.detail}
+                      {r.percent !== null ? ` · ${Math.round(r.percent)}%` : ""}
+                    </span>
+                    {r.cancellable && r.kind === "job" && (
+                      <Button variant="ghost" onClick={() => cancelJob(r.ref)}>
+                        Cancel
+                      </Button>
+                    )}
+                    {r.cancellable && r.kind === "export" && activeWorldId && (
+                      <Button variant="ghost" onClick={() => cancelExportMsg(activeWorldId, r.ref)}>
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
+          <Section
+            title={`Needs you · ${scoped(needsYou).length}`}
+            aside={<span>unresolved money first, then blocked work, then work already paid for</span>}
+          >
+            {scoped(needsYou).length === 0 ? (
+              <EmptyState title="Nothing waiting on you" />
+            ) : (
+              <div className="scr-sectionlist">
+                {scoped(needsYou).map((entry, i) => (
+                  <div key={`${entry.kind}-${entry.ref ?? entry.worldId ?? i}`} className="scr-sheetsection">
+                    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+                      <Badge tone={entry.urgency <= 2 ? "warning" : "outline"}>class {entry.urgency}</Badge>
+                      <strong style={{ font: "var(--type-ui)" }}>{entry.title}</strong>
+                      {entry.asOf && (
+                        <Badge tone="outline">as of {shortDateTime(entry.asOf)} — not current</Badge>
+                      )}
+                    </div>
+                    <span className="scr-field__hint">{entry.detail}</span>
+                    <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                      {entry.actions.includes("resolve") && entry.ref && (
+                        <>
+                          <Button onClick={() => resolveHeldJob(entry.ref!, "resubmit")}>Resubmit anyway</Button>
+                          <Button variant="ghost" onClick={() => resolveHeldJob(entry.ref!, "discard")}>
+                            Abandon
+                          </Button>
+                        </>
+                      )}
+                      {entry.actions.includes("settings") && entry.ref && (
+                        <>
+                          <Button onClick={() => resumeQueue(entry.ref!)}>Resume {entry.ref}</Button>
+                          <Button variant="ghost" onClick={() => navigate("/settings/providers")}>
+                            Settings
+                          </Button>
+                        </>
+                      )}
+                      {entry.actions.includes("reconcile") && entry.worldId && (
+                        <Button onClick={() => navigate(`/w/${entry.worldId}`)}>Open world</Button>
+                      )}
+                      {entry.actions.includes("review") && entry.worldId && (
+                        <Button onClick={() => navigate(`/w/${entry.worldId}/productions`)}>Review</Button>
+                      )}
+                      {entry.actions.includes("open-proposal") && entry.worldId && (
+                        <Button onClick={() => navigate(`/w/${entry.worldId}`)}>Open</Button>
+                      )}
+                      {entry.actions.includes("open-world") && entry.worldId && (
+                        <Button
+                          onClick={() => {
+                            // Opening makes the counts precise (R-7).
+                            openWorld(entry.worldId!);
+                            navigate(`/w/${entry.worldId}`);
+                          }}
+                        >
+                          Open — items become precise
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
+        </>
+      )}
+      <Section
+        title="Spend"
+        aside={
+          spend && (
+            <span>
+              last {spend.periodDays} days
+              {spend.mixed ? " · includes derived figures, not a measured total" : ""}
+            </span>
+          )
+        }
+      >
+        {spend && (
+          <>
+            <div className="lay-stats">
+              <div className="lay-stats__item">
+                <div className="lay-stats__value">{formatMicroUsd(spend.totalMicroUsd)}</div>
+                <div className="lay-stats__label">
+                  {spend.mixed
+                    ? `mixed · ${spend.reportedEntries} measured, ${spend.derivedEntries} derived`
+                    : spend.derivedEntries > 0
+                      ? "derived from the manifest"
+                      : "provider-reported"}
+                </div>
+              </div>
+              {spend.byProvider
+                .filter((p) => !p.unmetered)
+                .map((p) => (
+                  <div key={p.provider} className="lay-stats__item">
+                    <div className="lay-stats__value">{formatMicroUsd(p.microUsd)}</div>
+                    <div className="lay-stats__label">{p.provider}</div>
+                  </div>
+                ))}
+              {spend.unmeteredRuns > 0 && (
+                <div className="lay-stats__item">
+                  <div className="lay-stats__value">unmetered</div>
+                  <div className="lay-stats__label">
+                    {spend.unmeteredRuns} local run{spend.unmeteredRuns === 1 ? "" : "s"} — this machine's compute
+                  </div>
+                </div>
+              )}
             </div>
-          ))}
-          {byProvider.size === 0 && <EmptyState title="Nothing spent yet" />}
-        </div>
+            {state?.app.spend?.alerted && (
+              <Callout title="Over the spend threshold">
+                {formatMicroUsd(state.app.spend.rollingMicroUsd)} against{" "}
+                {formatMicroUsd(state.app.spend.settings.thresholdMicroUsd)}. Nothing is blocked — the threshold is
+                set in Settings · Providers.
+              </Callout>
+            )}
+            {drift.map((d) => (
+              <Callout key={d.modelId} tone="warning" title={`${d.modelId} estimates are drifting`}>
+                ~{(d.medianDivergencePerMille / 10).toFixed(0)}% off across {d.samples} provider-reported charges —
+                the shipped manifest needs an update.
+              </Callout>
+            ))}
+          </>
+        )}
       </Section>
-      <Section title="Jobs">
-        {jobs.length === 0 ? (
-          <EmptyState title="No jobs yet" hint="Dispatches from every world land here." />
+      <Section title="Recent" aside={<span>terminal today · the ledger holds everything</span>}>
+        {recent.length === 0 ? (
+          <EmptyState title="Nothing finished today" />
         ) : (
           <div className="scr-sectionlist">
-            {jobs.map((job) => (
+            {recent.slice(0, 20).map((job) => (
               <div key={job.id} className="scr-sheetsection">
                 <JobRow job={job} />
-                {job.status === "queued" && positions.has(job.id) && (
-                  <span className="scr-field__hint">
-                    {positions.get(job.id) === 0
-                      ? "next up"
-                      : `queued behind ${positions.get(job.id)} job${positions.get(job.id) === 1 ? "" : "s"}`}{" "}
-                    on {job.provider}
-                  </span>
-                )}
-                {job.status === "needs-reconciliation" && (
-                  <>
-                    <span className="scr-field__hint">{job.error}</span>
-                    <div style={{ display: "flex", gap: "var(--space-2)" }}>
-                      <Button onClick={() => resolveHeldJob(job.id, "resubmit")}>Resubmit anyway</Button>
-                      <Button variant="ghost" onClick={() => resolveHeldJob(job.id, "discard")}>
-                        Abandon
-                      </Button>
-                    </div>
-                  </>
-                )}
-                {!TERMINAL_JOB.has(job.status) && job.status !== "needs-reconciliation" && (
-                  <div>
-                    <Button variant="ghost" onClick={() => cancelJob(job.id)}>
-                      Cancel
-                    </Button>
-                  </div>
+                {jobActions(job).includes("retry") && (
+                  <span className="scr-field__hint">failed — retry from its production's dispatch dialog</span>
                 )}
               </div>
             ))}
