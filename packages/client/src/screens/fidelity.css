@@ -33,6 +33,11 @@
   flex: none;
 }
 .fy-titlebar--divided { border-bottom: 1px solid var(--border); }
+/* Desktop shell: native overlay window controls occupy the top-right ~140px of every bar. */
+.is-desktop .fy-titlebar { app-region: drag; }
+.is-desktop .fy-titlebar button, .is-desktop .fy-titlebar .fy-titlebar__mark { app-region: no-drag; }
+.is-desktop .fy-titlebar__side--right { margin-right: 138px; }
+.is-desktop .fy-home-head { padding-right: 182px; }
 .fy-titlebar__side { width: 150px; display: flex; align-items: center; gap: 2px; }
 .fy-titlebar__side--right { justify-content: flex-end; }
 .fy-titlebar__center {

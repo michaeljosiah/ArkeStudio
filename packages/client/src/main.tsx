@@ -24,6 +24,12 @@ import { initStore } from "./lib/store.js";
 
 initStore();
 
+// Under the desktop shell the native frame is hidden and white overlay window controls sit
+// in the top-right — in-app titlebars shift their own right-side content clear of them.
+if ((window as { arke?: unknown }).arke !== undefined) {
+  document.documentElement.classList.add("is-desktop");
+}
+
 // Hash routing so the same bundle works from Vite, file:// and the packaged app.
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

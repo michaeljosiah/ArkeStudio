@@ -20,13 +20,15 @@ function draftingAdapter(): HarnessAdapter & { created: string[] } {
   let sessions = 0;
   const cwdBySession = new Map<string, string>();
   const adapter: HarnessAdapter & { created: string[] } = {
-    created: [],
+    created: [] as string[],
+    id: "mock",
+    capabilities: () => new Set([]),
     readiness: () => ({ ready: true }),
     async createSession(input) {
       sessions += 1;
       const sessionId = `gen_s${sessions}`;
       adapter.created.push(sessionId);
-      cwdBySession.set(sessionId, input.cwd);
+      cwdBySession.set(sessionId, input.cwd ?? ".");
       return { sessionId };
     },
     async sendMessage(input) {
