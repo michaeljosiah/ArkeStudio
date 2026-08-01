@@ -364,9 +364,7 @@ export class Coordinator {
       } catch {
         diskFreeMb = null; // unknown, never presented as a failure
       }
-      this.emit({
-        at: new Date().toISOString(),
-        type: "env.check",
+      const envCheck = {
         pathBudgetOk: !budget.tight,
         pathBudgetDetail: budget.tight
           ? `the data folder sits ${budget.rootLength} characters deep — worst-case paths reach ${budget.worstCase}, past the classic Windows limit; move it shallower before creating worlds here`
@@ -374,7 +372,11 @@ export class Coordinator {
         diskFreeMb,
         nativeIndexOk: this.opts.nativeIndex?.ok ?? true,
         nativeIndexDetail: this.opts.nativeIndex?.ok === false ? (this.opts.nativeIndex.reason ?? "the native index binding failed to load — search and counts degrade; authoring is unaffected") : null,
-      });
+      };
+      // Both: the snapshot so late-joining clients see it at all (the window loads after
+      // start() in a packaged build), and the event so an open client updates live.
+      this.readModel.setEnv(envCheck);
+      this.emit({ at: new Date().toISOString(), type: "env.check", ...envCheck });
     }
 
     // The sidecar's four degradation states (SPEC-011 §2.10), polled gently; the app is fully

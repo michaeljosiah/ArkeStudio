@@ -33,6 +33,7 @@ export class ReadModel {
         runtime: null,
         drift: [],
         queues: [],
+        env: null,
       },
       worlds: [],
       world: null,
@@ -42,6 +43,11 @@ export class ReadModel {
   /** Seed the app-config slice at start-up (SPEC-008): manifest, providers, routing, spend. */
   seedAppConfig(config: Partial<Pick<ClientState["app"], "manifest" | "providers" | "routing" | "spend" | "runtime" | "drift">>): void {
     this.state = { ...this.state, app: { ...this.state.app, ...config } };
+  }
+
+  /** The one-shot environment verification, kept so late-joining clients still see it. */
+  setEnv(env: NonNullable<ClientState["app"]["env"]>): void {
+    this.state = { ...this.state, app: { ...this.state.app, env } };
   }
 
   getState(): ClientState {

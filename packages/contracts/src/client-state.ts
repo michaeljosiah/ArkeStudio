@@ -168,6 +168,22 @@ export const ClientStateSchema = z
         drift: z.array(ManifestDriftSchema).default([]),
         /** Per-provider queue state: pauses with reasons, held counts (SPEC-009 R-8, R-11). */
         queues: z.array(QueueStatusSchema).default([]),
+        /**
+         * First-run environment verification (SPEC-016 R-2). It lives in the snapshot, not only
+         * in its event: the check runs once at start-up — before the window exists in a packaged
+         * build — so a client that connects afterwards would otherwise never learn the outcome.
+         */
+        env: z
+          .object({
+            pathBudgetOk: z.boolean(),
+            pathBudgetDetail: z.string().nullable(),
+            diskFreeMb: z.number().nullable(),
+            nativeIndexOk: z.boolean(),
+            nativeIndexDetail: z.string().nullable(),
+          })
+          .strict()
+          .nullable()
+          .default(null),
       })
       .strict(),
     worlds: z.array(WorldSummarySchema),
