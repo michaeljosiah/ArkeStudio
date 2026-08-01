@@ -1,7 +1,30 @@
+import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { app, BrowserWindow } from "electron";
-import { ChildSupervisor, Coordinator, defaultAppRoot, FsWorldProvider } from "@arke-studio/coordinator";
+import {
+  ChildSupervisor,
+  Coordinator,
+  defaultAppRoot,
+  FsWorldProvider,
+  type DatabaseCtor,
+} from "@arke-studio/coordinator";
 import { MockHarnessAdapter } from "@arke-studio/adapter-opencode";
+
+/**
+ * The Electron-ABI SQLite binding (SPEC-003 R-7). Aliased so the Node-ABI copy used by tests
+ * never collides. Loaded defensively: a missing or mismatched binary degrades the derived
+ * index (a cache), never the app.
+ */
+function loadElectronSqlite(): DatabaseCtor | undefined {
+  try {
+    // The main bundle is CJS: import.meta.url is undefined there, __filename is real.
+    const req = createRequire(__filename);
+    return req("better-sqlite3-electron") as DatabaseCtor;
+  } catch (err) {
+    console.warn("[arke] better-sqlite3-electron unavailable — index disabled:", String(err));
+    return undefined;
+  }
+}
 
 declare const __APP_VERSION__: string;
 
@@ -34,7 +57,8 @@ let window: BrowserWindow | null = null;
 let shuttingDown = false;
 
 async function start(): Promise<void> {
-  const provider = new FsWorldProvider(appRoot);
+  const sqlite = loadElectronSqlite();
+  const provider = new FsWorldProvider(appRoot, sqlite ? { sqlite } : {});
   await provider.ensureAppRoot();
 
   coordinator = new Coordinator({

@@ -13,11 +13,13 @@
   },
   "dependencies": {
     "@arke-studio/contracts": "*",
+    "better-sqlite3": "^12.11.1",
     "ws": "^8.18.0",
     "yaml": "^2.6.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.12",
     "tsx": "^4.19.0",

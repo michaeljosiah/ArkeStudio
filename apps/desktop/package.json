@@ -8,16 +8,19 @@
   "scripts": {
     "build": "esbuild src/main.ts src/preload.ts --bundle --platform=node --format=cjs --target=node20 --main-fields=module,main --external:electron --external:electron-updater --define:__APP_VERSION__=\\\"0.1.0\\\" --outdir=dist --out-extension:.js=.cjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "start": "npm run build && electron dist/main.cjs",
+    "rebuild:native": "node scripts/rebuild-native.mjs",
+    "start": "npm run build && npm run rebuild:native && electron dist/main.cjs",
     "package": "npm run build && electron-builder --publish never"
   },
   "dependencies": {
+    "better-sqlite3-electron": "npm:better-sqlite3@^12.11.1",
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "@arke-studio/adapter-opencode": "*",
     "@arke-studio/contracts": "*",
     "@arke-studio/coordinator": "*",
+    "@electron/rebuild": "^3.7.2",
     "@types/node": "^22.0.0",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",

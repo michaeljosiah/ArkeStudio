@@ -15,7 +15,7 @@ const CLOCK = () => "2026-08-01T12:00:00.000Z";
 describe("FsWorldProvider (R-1, T-14)", () => {
   it("creates the app root skeleton on first run without prompting (R-1)", async () => {
     const root = join(await mkdtemp(join(tmpdir(), "arke-approot-")), "deeper", "ArkeStudio");
-    const provider = new FsWorldProvider(root, CLOCK);
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
     await provider.ensureAppRoot();
     assert.ok(JSON.parse(await readFile(join(root, "config.json"), "utf8")));
     assert.deepEqual(await provider.listWorlds(), []);
@@ -25,7 +25,7 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     const { root } = await makeTempRoot();
     await mkdir(join(root, "worlds", "just-notes"), { recursive: true });
     await writeFile(join(root, "worlds", "just-notes", "notes.txt"), "keep me", "utf8");
-    const provider = new FsWorldProvider(root, CLOCK);
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
     const worlds = await provider.listWorlds();
     assert.equal(worlds.length, 1);
     assert.equal(worlds[0]!.slug, "the-undersong");
@@ -33,7 +33,7 @@ describe("FsWorldProvider (R-1, T-14)", () => {
 
   it("creates a world end to end: slug, world.json, change line, then opens it", async () => {
     const root = await mkdtemp(join(tmpdir(), "arke-create-"));
-    const provider = new FsWorldProvider(root, CLOCK);
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
     const { worldId, slug } = await provider.createWorld({
       name: "The Undersong",
       logline: "A drowned god still sings.",

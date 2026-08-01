@@ -1,6 +1,8 @@
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExternalEdit, WorldBundle } from "@arke-studio/contracts";
+import { WorldIndex } from "../index-db/world-index.js";
+import type { DatabaseCtor } from "../index-db/sqlite.js";
 import { atomicWriteFile } from "./atomic.js";
 import { appendChanges } from "./change-writer.js";
 import { CommitPlanError, Committer, classify, type CommitHooks, type CommitInput, type CommitResult } from "./commit.js";
@@ -41,10 +43,16 @@ export class WorldStore {
   private stale = false;
   private watcher: WorldWatcher | null = null;
   private mutex: Promise<unknown> = Promise.resolve();
+  private index: WorldIndex | null = null;
 
   static async open(
     dir: string,
-    opts: { readOnly?: boolean; events?: WorldStoreEvents; clock?: () => string } = {},
+    opts: {
+      readOnly?: boolean;
+      events?: WorldStoreEvents;
+      clock?: () => string;
+      sqlite?: DatabaseCtor;
+    } = {},
   ): Promise<WorldStore> {
     const committer = new Committer(dir, opts.clock);
     // Recovery first — an interrupted commit must resolve before anything reads (R-15).
@@ -68,8 +76,19 @@ export class WorldStore {
     if (!opts.readOnly) {
       await store.saveScanState();
       store.startWatcher();
+      // The index is a cache: a failure to open it degrades queries, never the world (SPEC-003 R-4).
+      try {
+        store.index = WorldIndex.open(dir, scan.bundle, opts.sqlite);
+      } catch {
+        store.index = null;
+      }
     }
     return store;
+  }
+
+  /** The derived index, when it opened. Null in read-only mode or after an index failure. */
+  getIndex(): WorldIndex | null {
+    return this.index;
   }
 
   getBundle(): WorldBundle {
@@ -86,7 +105,7 @@ export class WorldStore {
       this.watcher?.suppress();
       try {
         const result = await this.committer.commit(input, hooks);
-        await this.rescan();
+        await this.rescan([...input.files.map((f) => f.path), "world.json"]);
         return result;
       } finally {
         this.watcher?.unsuppress();
@@ -208,6 +227,12 @@ export class WorldStore {
   async close(): Promise<void> {
     this.watcher?.stop();
     this.watcher = null;
+    try {
+      this.index?.close();
+    } catch {
+      /* a cache that cannot close is a cache that gets rebuilt */
+    }
+    this.index = null;
     if (this.lock) {
       await this.saveScanState();
       await this.lock.release();
@@ -222,9 +247,26 @@ export class WorldStore {
     return run;
   }
 
-  private async rescan(): Promise<void> {
+  /**
+   * Rescan after a mutation. With the changed-path set (a commit), the index applies an
+   * incremental delta (SPEC-003 R-20); without one (reload, reconcile), it syncs by
+   * fingerprint and rebuilds only if the world actually differs.
+   */
+  private async rescan(changedPaths?: string[]): Promise<void> {
     this.scan = await scanWorld(this.dir);
     await this.saveScanState();
+    try {
+      if (this.index && changedPaths) this.index.applyCommit(changedPaths, this.scan.bundle);
+      else this.index?.sync(this.scan.bundle);
+    } catch {
+      // A cache failure never surfaces: drop the index; the next open rebuilds it (R-4).
+      try {
+        this.index?.close();
+      } catch {
+        /* already broken */
+      }
+      this.index = null;
+    }
   }
 
   private async readEntity(portablePath: string): Promise<string | null> {
