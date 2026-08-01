@@ -113,15 +113,9 @@ export function LaunchScreen() {
   const { connection, state } = useStore();
   const navigate = useNavigate();
 
+  // Setup never walks off on its own — the user continues when they're ready (no worlds →
+  // first run; otherwise the picker, R-8).
   const ready = connection === "open" && state !== null;
-  useEffect(() => {
-    if (!ready) return;
-    // Hand off: no worlds → first run; otherwise the picker (R-8).
-    const timer = setTimeout(() => {
-      navigate(state!.worlds.length === 0 ? "/first-run" : "/worlds", { replace: true });
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [ready, navigate, state]);
 
   return (
     <div className="fy-app" data-screen="launch">
@@ -153,8 +147,18 @@ export function LaunchScreen() {
               `npm run dev:coordinator`.
             </Callout>
           )}
-          <div style={{ marginTop: 10, textAlign: "center", font: "400 11.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
-            Arke runs on your machine. Your worlds never leave it.
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14, justifyContent: "center" }}>
+            <span style={{ font: "400 11.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
+              Arke runs on your machine. Your worlds never leave it.
+            </span>
+            <Button
+              variant="primary"
+              disabled={!ready}
+              title={ready ? undefined : "Waiting for the studio to finish setting up"}
+              onClick={() => navigate(state!.worlds.length === 0 ? "/first-run" : "/worlds", { replace: true })}
+            >
+              {ready ? "Continue" : "Setting up…"}
+            </Button>
           </div>
         </div>
       </div>
@@ -166,15 +170,9 @@ export function LaunchScreen() {
 
 export function FirstRunScreen() {
   const navigate = useNavigate();
-  const { state } = useStore();
   const env = useEnvCheck();
-  const manifest = state?.app.manifest ?? null;
-  // The real figures, from the manifest (D3 — the prototype's "2.1 GB" overstated by ~10×).
-  const localModels = (manifest?.models ?? []).filter((m) => m.requires?.diskMb !== undefined && m.pricing.kind === "unmetered");
-  const totalMb = localModels.reduce((a, m) => a + (m.requires?.diskMb ?? 0), 0);
   return (
     <div className="fy-app" data-screen="first-run">
-      <ShellTitlebar label="Arke Studio" divided={false} />
       <div className="fy-home-head">
         <div className="fy-home-brand">
           <span className="fy-home-brand__arke">Arke</span>
@@ -239,15 +237,6 @@ export function FirstRunScreen() {
           <span style={{ font: "400 13px var(--font-sans)", color: "var(--muted-foreground)" }}>
             . It files into artifacts, ready to link.
           </span>
-        </div>
-        <div style={{ maxWidth: 640, margin: "34px auto 40px", textAlign: "center" }}>
-          <div className="fy-mono" style={{ lineHeight: 1.7 }}>
-            optional, later, skippable — provider keys unlock image, video and cloud voice; writing,
-            canon and browsing never need one
-            {localModels.length > 0
-              ? ` · local voice models (${localModels.map((m) => `${m.displayName} ${((m.requires?.diskMb ?? 0) / 1024).toFixed(1)} GB`).join(", ")}, ~${(totalMb / 1024).toFixed(1)} GB) download in the background only when first used`
-              : " · local models download in the background only when first used"}
-          </div>
         </div>
       </div>
     </div>

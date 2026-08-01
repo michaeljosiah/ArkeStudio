@@ -215,6 +215,10 @@ async function start(): Promise<void> {
     minHeight: 640,
     show: false,
     backgroundColor: "#FFFFFF",
+    // The native frame is hidden; white overlay controls sit inside the app's own 44px
+    // titlebars, so the chrome is white and no bar is spent on a window title.
+    titleBarStyle: "hidden",
+    titleBarOverlay: { color: "#FFFFFF", symbolColor: "#0A0A0A", height: 44 },
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
       contextIsolation: true,
