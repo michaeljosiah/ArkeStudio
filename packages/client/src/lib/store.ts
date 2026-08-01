@@ -66,6 +66,9 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
         ...state,
         world: { ...state.world, meta: { ...state.world.meta, canonRevision: event.revision } },
       };
+    case "world.stale":
+      if (!state.world || state.world.meta.worldId !== event.worldId) return state;
+      return { ...state, world: { ...state.world, stale: true } };
     case "take.recorded":
     case "review.recorded":
     case "selection.changed": {
@@ -160,6 +163,18 @@ export function send(msg: ClientMessage): void {
 
 export function openWorld(worldId: string): void {
   send({ kind: "open-world", worldId });
+}
+
+export function createWorld(input: { name: string; logline?: string; tone?: string; genre?: string }): void {
+  send({ kind: "create-world", ...input });
+}
+
+export function reloadWorld(worldId: string): void {
+  send({ kind: "reload-world", worldId });
+}
+
+export function reconcileExternalEdit(worldId: string, path: string): void {
+  send({ kind: "reconcile-external-edit", worldId, path });
 }
 
 const getSnapshot = (): StoreState => current;

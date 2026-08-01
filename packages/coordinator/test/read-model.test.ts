@@ -3,10 +3,10 @@ import { describe, it } from "node:test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReadModel } from "../src/read-model.js";
-import { MockWorldProvider } from "../src/world-provider.js";
+import { scanWorld } from "../src/world/scan.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const FIXTURES = resolve(here, "../../../fixtures");
+const FIXTURE_WORLD = resolve(here, "../../../fixtures/worlds/the-undersong");
 const WORLD_ID = "01J8F3K2QW9VZX4N7M0RTYB6HC";
 const AT = "2026-08-01T10:00:00Z";
 
@@ -49,9 +49,8 @@ describe("ReadModel", () => {
   });
 
   it("folds world-scoped events into the open world only", async () => {
-    const provider = new MockWorldProvider(FIXTURES);
     const model = new ReadModel("0.0.0-test");
-    model.setWorld(await provider.loadWorld(WORLD_ID));
+    model.setWorld((await scanWorld(FIXTURE_WORLD)).bundle);
 
     const before = model.getState().world!.changes.length;
     model.apply({

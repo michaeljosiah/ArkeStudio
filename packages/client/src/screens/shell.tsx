@@ -1,10 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router";
-import { Badge, Button, Callout, Card, Input, StatusDot, Switch, Textarea, cx, type StatusDotTone } from "../components/ui.js";
+import { Badge, Button, Callout, Card, Input, StatusDot, Switch, cx, type StatusDotTone } from "../components/ui.js";
 import { EmptyState, PageHeader, KeyValue, Screen, Section } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
 import { usd } from "../lib/format.js";
-import { useStore } from "../lib/store.js";
+import { createWorld, useStore } from "../lib/store.js";
 import type { ComponentHealth } from "@arke-studio/contracts";
 
 /** Shell screens: launch, first run, world picker, new world, settings, activity (§2.9). */
@@ -158,35 +158,69 @@ export function WorldPickerScreen() {
 // ---- New world -------------------------------------------------------------
 
 export function NewWorldScreen() {
+  const { state, connection } = useStore();
+  const navigate = useNavigate();
+  const [name, setName] = useState("");
+  const [logline, setLogline] = useState("");
+  const [tone, setTone] = useState("");
+  const [genre, setGenre] = useState("");
+  const [submittedName, setSubmittedName] = useState<string | null>(null);
+
+  // The coordinator opens the new world and re-snapshots; when it lands, go there.
+  useEffect(() => {
+    if (submittedName && state?.world && state.world.meta.name === submittedName) {
+      navigate(`/w/${state.world.meta.worldId}`, { replace: true });
+    }
+  }, [submittedName, state?.world, navigate]);
+
+  const canCreate = connection === "open" && name.trim().length > 0 && submittedName === null;
+
   return (
     <Screen id="new-world">
       <PageHeader title="New world" meta={<span>A folder is created under your ArkeStudio directory.</span>} />
       <div className="scr-form">
         <div className="scr-field">
           <label className="scr-field__label" htmlFor="nw-name">Name</label>
-          <Input id="nw-name" placeholder="The Undersong" />
+          <Input id="nw-name" placeholder="The Undersong" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <div className="scr-field">
           <label className="scr-field__label" htmlFor="nw-logline">Logline</label>
-          <Input id="nw-logline" placeholder="A drowned god still sings beneath the harbour." />
+          <Input
+            id="nw-logline"
+            placeholder="A drowned god still sings beneath the harbour."
+            value={logline}
+            onChange={(e) => setLogline(e.target.value)}
+          />
           <span className="scr-field__hint">One sentence. It anchors tone everywhere.</span>
         </div>
         <div className="scr-field">
           <label className="scr-field__label" htmlFor="nw-tone">Tone</label>
-          <Input id="nw-tone" placeholder="quiet dread" />
+          <Input id="nw-tone" placeholder="quiet dread" value={tone} onChange={(e) => setTone(e.target.value)} />
         </div>
         <div className="scr-field">
           <label className="scr-field__label" htmlFor="nw-genre">Genre</label>
-          <Input id="nw-genre" placeholder="coastal fantasy" />
+          <Input id="nw-genre" placeholder="coastal fantasy" value={genre} onChange={(e) => setGenre(e.target.value)} />
         </div>
         <div>
-          <Button variant="primary" disabled title="World creation lands with the world-on-disk capability (SPEC-002)">
-            Create world
+          <Button
+            variant="primary"
+            disabled={!canCreate}
+            onClick={() => {
+              setSubmittedName(name.trim());
+              createWorld({
+                name: name.trim(),
+                ...(logline.trim() ? { logline: logline.trim() } : {}),
+                ...(tone.trim() ? { tone: tone.trim() } : {}),
+                ...(genre.trim() ? { genre: genre.trim() } : {}),
+              });
+            }}
+          >
+            {submittedName ? "Creating…" : "Create world"}
           </Button>
         </div>
-        <Callout title="Not wired yet">
-          This build renders the approved design over fixtures. Creating real world folders arrives
-          with SPEC-002.
+        <Callout title="Yours, on disk">
+          The world is a folder under ArkeStudio\worlds — readable by hand, portable, and never
+          dependent on this app to exist.
         </Callout>
       </div>
     </Screen>

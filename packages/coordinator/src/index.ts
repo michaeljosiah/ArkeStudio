@@ -10,4 +10,24 @@ export {
   type SupervisorStatusEvent,
 } from "./supervisor.js";
 export { Transport, type TransportOptions } from "./transport.js";
-export { MockWorldProvider, type WorldProvider } from "./world-provider.js";
+export { type WorldProvider } from "./world-provider.js";
+export { atomicWriteFile, renameWithRetry } from "./world/atomic.js";
+export { appendChanges, readChanges } from "./world/change-writer.js";
+export {
+  classify,
+  CommitPlanError,
+  CommitStaleError,
+  Committer,
+  CrashSignal,
+  type CommitFileInput,
+  type CommitHooks,
+  type CommitInput,
+  type CommitResult,
+} from "./world/commit.js";
+export { WorldLock, WorldLockedError } from "./world/lock.js";
+export { checkPathBudget, defaultAppRoot, fsPath, toExtendedLength, toPortable } from "./world/paths.js";
+export { FsWorldProvider, type CreateWorldInput } from "./world/provider.js";
+export { readWorldMeta, scanWorld, SUPPORTED_SCHEMA_VERSION, WorldOpenError } from "./world/scan.js";
+export { fallbackSlug, slugify, uniqueSlug } from "./world/slug.js";
+export { deleteScanState, WorldStore } from "./world/store.js";
+export { JsonFile, MarkdownFile, sha256 } from "./world/text-files.js";

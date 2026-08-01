@@ -6,7 +6,7 @@ import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components
 import { CanonEntryRow, ProposalPanel, ReferenceTile, SheetCard } from "../domain/domain.js";
 import { shortDateTime } from "../lib/format.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
-import { useStore } from "../lib/store.js";
+import { reconcileExternalEdit, reloadWorld, useStore, useWorld } from "../lib/store.js";
 import { HealthDot } from "./shell.js";
 
 /** World screens (§2.9): the world is the home, productions are lenses over it. */
@@ -65,8 +65,61 @@ export function WorldLayout() {
         </div>
       </aside>
       <div className="scr-frame__content">
+        <WorldConditionBanners />
         <Outlet />
       </div>
+    </div>
+  );
+}
+
+/** Staleness, closed-world edits and per-file parse failures — stated, never silent (R-2, R-23, R-28). */
+function WorldConditionBanners() {
+  const { worldId } = useParams();
+  const world = useWorld();
+  if (!world || world.meta.worldId !== worldId) return null;
+  const hasConditions = world.stale || world.externalEdits.length > 0 || world.problems.length > 0;
+  if (!hasConditions) return null;
+  return (
+    <div style={{ display: "grid", gap: "var(--space-3)", padding: "var(--space-4) var(--gutter) 0" }}>
+      {world.stale && (
+        <Callout tone="warning" title="This world changed outside Arke Studio">
+          Another program wrote to the world folder while it was open. Reload to pick the changes
+          up — nothing is merged silently.
+          <div style={{ marginTop: "var(--space-2)" }}>
+            <Button variant="primary" onClick={() => reloadWorld(world.meta.worldId)}>
+              Reload world
+            </Button>
+          </div>
+        </Callout>
+      )}
+      {world.externalEdits.length > 0 && (
+        <Callout tone="warning" title={`${world.externalEdits.length} file(s) changed while the world was closed`}>
+          Adopting an edit snapshots the prior version, bumps the entity version and records the
+          change as external — so the history still explains itself.
+          <div style={{ display: "grid", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
+            {world.externalEdits.map((e) => (
+              <div key={e.path} style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>
+                <span className="mono" style={{ fontSize: "var(--text-xs)" }}>
+                  {e.path} · {e.kind}
+                </span>
+                <Button onClick={() => reconcileExternalEdit(world.meta.worldId, e.path)}>Adopt</Button>
+              </div>
+            ))}
+          </div>
+        </Callout>
+      )}
+      {world.problems.length > 0 && (
+        <Callout tone="danger" title={`${world.problems.length} file(s) could not be read`}>
+          The rest of the world is open and usable; these files are skipped until fixed:
+          <div style={{ display: "grid", gap: "var(--space-1)", marginTop: "var(--space-2)" }}>
+            {world.problems.map((p) => (
+              <span key={p.path} className="mono" style={{ fontSize: "var(--text-xs)" }}>
+                {p.path} — {p.message}
+              </span>
+            ))}
+          </div>
+        </Callout>
+      )}
     </div>
   );
 }
@@ -140,7 +193,11 @@ export function WorldOverviewScreen() {
             <div key={i} className="scr-change">
               <span className="scr-change__entity">{c.entity}</span>
               <span>
-                {c.fromVersion != null ? `v${c.fromVersion} → v${c.toVersion}` : `created v${c.toVersion}`}
+                {c.fromVersion != null
+                  ? `v${c.fromVersion} → v${c.toVersion}`
+                  : c.toVersion !== undefined
+                    ? `created v${c.toVersion}`
+                    : "created"}
                 {c.fieldsChanged ? ` · ${c.fieldsChanged.join(", ")}` : ""}
               </span>
               <span className="scr-change__when">{shortDateTime(c.ts)}</span>

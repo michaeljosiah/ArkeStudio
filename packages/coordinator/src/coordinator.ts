@@ -89,6 +89,11 @@ export class Coordinator {
     if (this.started) throw new Error("coordinator already started");
     this.started = true;
 
+    // Out-of-band writes to the open world mark it stale for every client (SPEC-002 R-23).
+    this.opts.provider.onWorldStale?.((worldId) => {
+      this.emit({ at: new Date().toISOString(), type: "world.stale", worldId });
+    });
+
     await this.seed();
     this.readModel.setWorlds(await this.opts.provider.listWorlds());
 
@@ -138,6 +143,46 @@ export class Coordinator {
           // An unknown world id is a stale client; the next snapshot corrects it.
         }
         return;
+      case "create-world": {
+        const create = this.opts.provider.createWorld?.bind(this.opts.provider);
+        if (!create) return;
+        try {
+          const { worldId } = await create({
+            name: msg.name,
+            ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
+            ...(msg.tone !== undefined ? { tone: msg.tone } : {}),
+            ...(msg.genre !== undefined ? { genre: msg.genre } : {}),
+          });
+          this.readModel.setWorlds(await this.opts.provider.listWorlds());
+          await this.openWorld(worldId);
+        } catch {
+          this.transport.broadcastSnapshot(); // surface whatever state we do have
+        }
+        return;
+      }
+      case "reload-world": {
+        const reload = this.opts.provider.reloadWorld?.bind(this.opts.provider);
+        if (!reload) return;
+        try {
+          this.readModel.setWorld(await reload(msg.worldId));
+          this.readModel.setWorlds(await this.opts.provider.listWorlds());
+        } catch {
+          /* the next snapshot carries the honest state */
+        }
+        this.transport.broadcastSnapshot();
+        return;
+      }
+      case "reconcile-external-edit": {
+        const reconcile = this.opts.provider.reconcileExternalEdit?.bind(this.opts.provider);
+        if (!reconcile) return;
+        try {
+          this.readModel.setWorld(await reconcile(msg.worldId, msg.path));
+        } catch {
+          /* refusal shows up as the edit still listed */
+        }
+        this.transport.broadcastSnapshot();
+        return;
+      }
     }
   }
 
@@ -155,6 +200,7 @@ export class Coordinator {
   async stop(): Promise<void> {
     await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
     await this.transport.stop();
+    await this.opts.provider.close?.();
     await this.changeLog.drain();
   }
 }

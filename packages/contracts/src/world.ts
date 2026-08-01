@@ -76,6 +76,8 @@ export const SheetSchema = z
     /** Own monotonic version, independent of canon and of every other sheet (§2.4). */
     version: z.number().int().min(1),
     status: SheetStatusSchema,
+    /** Retired entities stay on disk and resolvable so citations keep meaning (SPEC-002 R-26). */
+    retired: z.boolean().optional(),
     voice: VoiceAssignmentSchema.optional(),
     /** References only — the rules themselves are owned by canon, not the sheet (§2.3.2). */
     canonRules: z.array(CanonIdSchema),
@@ -107,6 +109,8 @@ export const CanonEntrySchema = z
     introducedAt: z.number().int().min(0),
     settledAt: z.number().int().min(0).optional(),
     amendedAt: z.number().int().min(0).optional(),
+    /** Retired entries keep their id and stay resolvable (SPEC-002 R-26, R-CANON-4). */
+    retired: z.boolean().optional(),
     /** Sheet slugs and CANON ids this entry links. */
     links: z.array(z.union([SlugSchema, CanonIdSchema])),
     /** The statement itself — the Markdown body below the frontmatter. */

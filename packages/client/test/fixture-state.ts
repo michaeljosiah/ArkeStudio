@@ -303,6 +303,9 @@ const state: ClientState = {
         canonRevisionAfter: 41,
       },
     ],
+    problems: [],
+    externalEdits: [],
+    stale: false,
   },
 };
 

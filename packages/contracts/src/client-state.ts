@@ -85,6 +85,24 @@ export const StagedProposalSchema = z
   .strict();
 export type StagedProposal = z.infer<typeof StagedProposalSchema>;
 
+/** A file that failed to parse — the world still opens; the failure is named (SPEC-002 R-2). */
+export const WorldProblemSchema = z
+  .object({
+    path: z.string().min(1),
+    message: z.string().min(1),
+  })
+  .strict();
+export type WorldProblem = z.infer<typeof WorldProblemSchema>;
+
+/** A file changed while the world was closed, awaiting explicit reconciliation (SPEC-002 R-28). */
+export const ExternalEditSchema = z
+  .object({
+    path: z.string().min(1),
+    kind: z.enum(["modified", "created", "deleted"]),
+  })
+  .strict();
+export type ExternalEdit = z.infer<typeof ExternalEditSchema>;
+
 /** The open world, in full — a world is small enough to send whole (SPEC-001 D4). */
 export const WorldBundleSchema = z
   .object({
@@ -97,6 +115,12 @@ export const WorldBundleSchema = z
     proposals: z.array(StagedProposalSchema),
     /** Recent tail of changes.jsonl, newest last. */
     changes: z.array(ChangeRecordSchema),
+    /** Files that failed to parse; the valid entities are still usable (SPEC-002 R-2). */
+    problems: z.array(WorldProblemSchema).default([]),
+    /** Closed-world edits awaiting reconciliation (SPEC-002 R-28). */
+    externalEdits: z.array(ExternalEditSchema).default([]),
+    /** Set when another program changed files while the world was open (SPEC-002 R-23). */
+    stale: z.boolean().default(false),
   })
   .strict();
 export type WorldBundle = z.infer<typeof WorldBundleSchema>;

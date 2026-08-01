@@ -1,0 +1,143 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { CrashSignal, Committer, type CommitInput } from "../../src/world/commit.js";
+import { readChanges } from "../../src/world/change-writer.js";
+import { scanWorld } from "../../src/world/scan.js";
+import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
+import { makeTempWorld } from "./helpers.js";
+
+/**
+ * The crash-safety suite (SPEC-002 §3.2): kill at every step of a multi-file commit, run
+ * recovery, and assert the world is in exactly one of the two valid states — wholly old or
+ * wholly new — with history, world.json and the change log in step (R-15).
+ */
+
+const CLOCK = () => "2026-08-01T12:00:00.000Z";
+
+const KILL_POINTS = [
+  "prepared-written",
+  "snapshots-written",
+  "staged-written",
+  "committing-marked",
+  "renamed:0",
+  "renamed:1",
+  "renamed:2",
+  "world-renamed",
+  "changes-appended",
+] as const;
+
+interface Prepared {
+  dir: string;
+  input: CommitInput;
+  oldSheet: string;
+  oldCanon: string;
+  newSheetBody: string;
+}
+
+async function prepare(): Promise<Prepared> {
+  const dir = await makeTempWorld();
+  const sheetPath = "characters/maren-kest.md";
+  const canonPath = "canon/CANON-002.md";
+  const oldSheet = await readFile(join(dir, sheetPath), "utf8");
+  const oldCanon = await readFile(join(dir, canonPath), "utf8");
+
+  const sheetDoc = MarkdownFile.parse(oldSheet);
+  const newSheetBody = sheetDoc.body.replace("Salt-crusted braids", "Salt-white braids");
+  sheetDoc.setBody(newSheetBody);
+  const canonDoc = MarkdownFile.parse(oldCanon);
+  canonDoc.setBody(canonDoc.body + "\nAmended under test.");
+  const canonNew =
+    "---\nid: CANON-045\ntype: rule\ntitle: The test rule\nstatus: settled\nintroducedAt: 0\nlinks: []\n---\n\nA rule created mid-crash.\n";
+
+  const input: CommitInput = {
+    kind: "mixed",
+    source: "crash-test",
+    files: [
+      { path: sheetPath, action: "replace", content: sheetDoc.serialize(), baseHash: sha256(oldSheet) },
+      { path: canonPath, action: "replace", content: canonDoc.serialize(), baseHash: sha256(oldCanon) },
+      { path: "canon/CANON-045.md", action: "create", content: canonNew, baseHash: null },
+    ],
+  };
+  return { dir, input, oldSheet, oldCanon, newSheetBody };
+}
+
+async function assertConsistent(p: Prepared): Promise<"old" | "new"> {
+  const world = JSON.parse(await readFile(join(p.dir, "world.json"), "utf8")) as { canonRevision: number };
+  const sheet = await readFile(join(p.dir, "characters/maren-kest.md"), "utf8");
+  const canon = await readFile(join(p.dir, "canon/CANON-002.md"), "utf8");
+  const created = await readFile(join(p.dir, "canon/CANON-045.md"), "utf8").catch(() => null);
+  const changes = await readChanges(join(p.dir, "changes.jsonl"));
+  const commitLines = changes.filter((c) => c["source"] === "crash-test");
+
+  if (world.canonRevision === 43) {
+    // The new state — every part of it, not some (R-15).
+    assert.ok(sheet.includes("Salt-white braids"), "sheet is new");
+    assert.ok(canon.includes("Amended under test."), "canon is new");
+    assert.ok(created !== null, "created entry exists");
+    assert.equal(commitLines.length, 3, "the change log records the commit exactly once");
+    assert.ok(await readFile(join(p.dir, ".history/characters/maren-kest/v4.md"), "utf8"), "outgoing snapshot exists");
+    return "new";
+  }
+  assert.equal(world.canonRevision, 42, "world.json is wholly old");
+  assert.equal(sheet, p.oldSheet, "sheet is byte-identical to before");
+  assert.equal(canon, p.oldCanon, "canon is byte-identical to before");
+  assert.equal(created, null, "no created entry");
+  assert.equal(commitLines.length, 0, "no change line from the failed commit");
+  return "old";
+}
+
+describe("kill-at-every-step recovery (R-15)", () => {
+  for (const point of KILL_POINTS) {
+    it(`killed at ${point} → recovery leaves exactly one valid state`, async () => {
+      const p = await prepare();
+      const committer = new Committer(p.dir, CLOCK);
+      await assert.rejects(
+        () =>
+          committer.commit(p.input, {
+            at: (where) => {
+              if (where === point) throw new CrashSignal(`killed at ${where}`);
+            },
+          }),
+        CrashSignal,
+      );
+
+      // Next open: recovery runs before anything reads.
+      const recovered = new Committer(p.dir, CLOCK);
+      const actions = await recovered.recover();
+
+      const state = await assertConsistent(p);
+      const beforePointOfNoReturn = point === "prepared-written" || point === "snapshots-written" || point === "staged-written";
+      if (beforePointOfNoReturn) {
+        assert.equal(state, "old", `${point} is before committing — roll back (R-15)`);
+        assert.ok(actions.some((a) => a.action === "rolled-back"));
+      } else {
+        assert.equal(state, "new", `${point} is at/after committing — roll forward`);
+        assert.ok(actions.some((a) => a.action === "rolled-forward"));
+      }
+
+      // Recovery is idempotent and the world scans clean afterwards.
+      assert.deepEqual(await recovered.recover(), []);
+      const { problems } = await scanWorld(p.dir);
+      assert.deepEqual(problems, []);
+    });
+  }
+
+  it("rolled-back worlds are byte-identical including history — no stray snapshots", async () => {
+    const p = await prepare();
+    const committer = new Committer(p.dir, CLOCK);
+    await assert.rejects(
+      () =>
+        committer.commit(p.input, {
+          at: (where) => {
+            if (where === "staged-written") throw new CrashSignal("kill");
+          },
+        }),
+      CrashSignal,
+    );
+    await new Committer(p.dir, CLOCK).recover();
+    const v5 = await readFile(join(p.dir, ".history/characters/maren-kest/v5.md"), "utf8").catch(() => null);
+    assert.equal(v5, null, "the incoming snapshot was rolled back with everything else");
+  });
+});
