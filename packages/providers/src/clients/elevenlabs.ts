@@ -99,18 +99,21 @@ export class ElevenLabsClient implements ProviderClient {
     /* synchronous API */
   }
 
-  /** Reconciliation strategy B (supportsListRecent): the recent-generation history. */
-  async listRecent(key: string): Promise<Array<{ id: string; text: string; createdAt: string }>> {
+  /**
+   * Reconciliation strategy B (supportsListRecent): the recent-generation history. ElevenLabs
+   * carries no caller metadata, so `idempotencyKey` is never present — the reconciler treats a
+   * keyless listing as inconclusive and escalates to asking the user rather than guessing.
+   */
+  async listRecent(key: string): Promise<Array<{ remoteId: string; idempotencyKey?: string; createdAt: string }>> {
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/history?page_size=25`, {
       headers: this.headers(key),
     });
     if (status >= 400) return [];
-    const items = (body as { history?: Array<{ history_item_id?: string; text?: string; date_unix?: number }> } | null)?.history ?? [];
+    const items = (body as { history?: Array<{ history_item_id?: string; date_unix?: number }> } | null)?.history ?? [];
     return items
       .filter((h) => typeof h.history_item_id === "string")
       .map((h) => ({
-        id: h.history_item_id!,
-        text: h.text ?? "",
+        remoteId: h.history_item_id!,
         createdAt: h.date_unix !== undefined ? new Date(h.date_unix * 1000).toISOString() : "",
       }));
   }

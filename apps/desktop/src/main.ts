@@ -100,6 +100,9 @@ async function start(): Promise<void> {
     decryptString: (buf) => safeStorage.decryptString(buf),
   };
 
+  // One client set serves validation (SPEC-008) and dispatch (SPEC-009).
+  const providerClients = createProviderClients((url, init) => fetch(url, init));
+
   coordinator = new Coordinator({
     provider,
     adapter,
@@ -110,9 +113,10 @@ async function start(): Promise<void> {
     appRoot,
     authoring: { buildConfig: buildSessionConfig, agentForPurpose },
     cipher,
-    validators: createProviderClients((url, init) => fetch(url, init)),
+    validators: providerClients,
     manifest: SHIPPED_MANIFEST,
     probeRuntime: () => probeRuntime(appRoot),
+    dispatchClients: providerClients,
   });
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,

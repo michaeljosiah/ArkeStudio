@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { IsoDateTimeSchema, JobIdSchema, ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
+import { CapabilitySchema } from "./provider.js";
 
 /**
  * The job queue (master spec §10.1). App-level, durable, append-only at
@@ -40,6 +41,7 @@ export const JobSchema = z
     worldId: UlidSchema,
     productionId: SlugSchema.optional(),
     target: JobTargetSchema,
+    capability: CapabilitySchema,
     provider: z.string().min(1),
     model: z.string().min(1),
     params: z.record(z.string(), z.unknown()).default({}),
@@ -48,12 +50,41 @@ export const JobSchema = z
     status: JobStatusSchema,
     /** The provider's own job id, recorded before the state moves to running. */
     providerJobId: z.string().nullable().default(null),
+    /** Submission attempts consumed (SPEC-009 R-9). Offline holds never burn one (R-17). */
+    attempt: z.number().int().min(0).default(0),
+    /** Where artifacts land, world-relative — the caller's meaning, not this spec's (§1.2). */
+    landing: z.object({ dir: z.string().min(1) }).strict().optional(),
+    /** Files landed on success, world-relative, in artifact order. */
+    landedFiles: z.array(z.string()).optional(),
     error: z.string().nullable().default(null),
     createdAt: IsoDateTimeSchema,
     updatedAt: IsoDateTimeSchema,
   })
   .strict();
 export type Job = z.infer<typeof JobSchema>;
+
+/** One provider's queue state (SPEC-009 R-8, R-11): paused-with-reason, and what is held. */
+export const QueueStatusSchema = z
+  .object({
+    provider: z.string().min(1),
+    paused: z.boolean(),
+    /** Why: "FAL rejected the key (HTTP 401)", "offline", "no credential stored" … */
+    reason: z.string().optional(),
+    /** Non-terminal jobs currently held behind the pause or awaiting the user. */
+    held: z.number().int().min(0),
+  })
+  .strict();
+export type QueueStatus = z.infer<typeof QueueStatusSchema>;
+
+/** What start-up reconciliation did to one job (SPEC-009 R-18). */
+export const ReconcileActionSchema = z
+  .object({
+    jobId: JobIdSchema,
+    action: z.enum(["adopted", "resubmitted", "held-for-user", "resumed-polling", "ledger-completed", "requeued"]),
+    detail: z.string().optional(),
+  })
+  .strict();
+export type ReconcileAction = z.infer<typeof ReconcileActionSchema>;
 
 /** ledger.jsonl — one line per completed job (§14.4). Estimate and actual recorded separately. */
 export const LedgerEntrySchema = z

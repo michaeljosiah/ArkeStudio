@@ -10,6 +10,7 @@ import {
   type HarnessAdapter,
   type HealthComponent,
   gateLocalRuntimes,
+  type Job,
   type LedgerEntry,
   type ModelManifest,
   type ProviderId,
@@ -21,6 +22,7 @@ import { AskService } from "./canon/ask.js";
 import { CredentialStore, type Cipher } from "./credentials/store.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
+import { JobQueue, type DispatchClient, type EnqueueInput } from "./queue/dispatcher.js";
 import { SecretRegistry } from "./redact.js";
 import { detectDrift, evaluateSpend } from "./spend/analytics.js";
 import { LedgerFile } from "./spend/ledger.js";
@@ -76,6 +78,8 @@ export interface CoordinatorOptions {
   manifest?: ModelManifest;
   /** SPEC-008: local runtime probing, injected so tests measure nothing. */
   probeRuntime?: () => Promise<RuntimeProbes>;
+  /** SPEC-009: dispatch clients (submit/poll/fetch/cancel + declarations), per provider. */
+  dispatchClients?: Record<string, DispatchClient>;
 }
 
 const SUPERVISOR_HEALTH: Record<SupervisorStatus, { status: "starting" | "healthy" | "unhealthy" | "unavailable" }> = {
@@ -105,6 +109,8 @@ export class Coordinator {
   private readonly providerService: ProviderService;
   private readonly ledger: LedgerFile | null;
   private readonly appSettings: AppSettingsFile | null;
+  /** SPEC-009: the dispatch engine. Null without an app root, clients and a ledger. */
+  private readonly jobQueue: JobQueue | null;
 
   constructor(private readonly opts: CoordinatorOptions) {
     this.readModel = new ReadModel(opts.appVersion);
@@ -117,6 +123,24 @@ export class Coordinator {
     this.providerService = new ProviderService(this.credentials, opts.validators ?? {}, this.appLog);
     this.ledger = opts.appRoot ? new LedgerFile(join(opts.appRoot, "ledger.jsonl")) : null;
     this.appSettings = opts.appRoot ? new AppSettingsFile(join(opts.appRoot, "settings.json")) : null;
+    this.jobQueue =
+      opts.appRoot && opts.dispatchClients && this.ledger
+        ? new JobQueue({
+            journalPath: join(opts.appRoot, "queue", "jobs.jsonl"),
+            clients: opts.dispatchClients,
+            getKey: async (provider) => (this.credentials ? this.credentials.get(provider as ProviderId) : null),
+            emit: (event) => this.emit(event),
+            ledger: {
+              has: async (jobId) => (await this.ledger!.readAll()).some((e) => e.jobId === jobId),
+              append: (entry) => this.recordLedger(entry),
+            },
+            worldDirFor: (worldId) => {
+              const store = this.opts.provider.openStore?.();
+              return store && store.worldId === worldId ? store.dir : null;
+            },
+            onProviderFault: (provider, message) => this.reportProviderFault(provider as ProviderId, message),
+          })
+        : null;
     this.transport = new Transport({
       getSnapshot: () => this.getState(),
       onMessage: (msg) => void this.handleClientMessage(msg),
@@ -209,6 +233,12 @@ export class Coordinator {
 
     await this.seed();
     await this.seedAppConfig();
+    // Reconcile every non-terminal job before accepting new work (SPEC-009 R-18). The report
+    // reaches clients as an event; the folded jobs seed the read model.
+    if (this.jobQueue) {
+      await this.jobQueue.start();
+      this.readModel.seedJobs(this.jobQueue.listJobs());
+    }
     this.readModel.setWorlds(await this.opts.provider.listWorlds());
 
     const boundPort = await this.transport.start(port);
@@ -297,6 +327,16 @@ export class Coordinator {
   reportProviderFault(provider: ProviderId, message: string): void {
     this.providerService.markFault(provider, message);
     this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
+  }
+
+  /**
+   * Enqueue a fully-formed dispatch (SPEC-009 §1.2): callers hand over model, params and
+   * estimate; the queue owns durability, reconciliation and the ledger. SPEC-012/013 compose
+   * the requests; nothing renderer-side may enqueue arbitrary spend.
+   */
+  async enqueueJob(input: EnqueueInput): Promise<Job> {
+    if (!this.jobQueue) throw new Error("dispatch is not configured (no app root or provider clients)");
+    return this.jobQueue.enqueue(input);
   }
 
   /**
@@ -783,6 +823,19 @@ export class Coordinator {
           type: "spend.status",
           spend: evaluateSpend(entries, settings.spend, new Date()),
         });
+        return;
+      }
+      case "cancel-job": {
+        await this.jobQueue?.cancel(msg.jobId);
+        return;
+      }
+      case "resolve-held-job": {
+        await this.jobQueue?.resolveHeld(msg.jobId, msg.decision);
+        return;
+      }
+      case "queue-resume": {
+        // The message IS the explicit confirmation resuming a paused provider (SPEC-009 D7).
+        this.jobQueue?.resume(msg.provider);
         return;
       }
       case "detect-runtimes": {

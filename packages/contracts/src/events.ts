@@ -2,7 +2,7 @@ import { z } from "zod";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
 import { ChangeRecordSchema } from "./change.js";
 import { IsoDateTimeSchema, ProposalIdSchema, ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
-import { JobSchema, LedgerEntrySchema } from "./job.js";
+import { JobSchema, LedgerEntrySchema, QueueStatusSchema, ReconcileActionSchema } from "./job.js";
 import { ProviderStatusSchema } from "./provider.js";
 import { ShotSelectionSchema } from "./scene.js";
 import {
@@ -77,6 +77,11 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
 
   /** Full row on every transition — jobs are small and the client never patches by hand. */
   z.object({ ...base, type: z.literal("job.updated"), job: JobSchema }).strict(),
+
+  /** A provider queue paused, resumed, or its held count moved (SPEC-009 R-8, R-11). */
+  z.object({ ...base, type: z.literal("queue.status"), queue: QueueStatusSchema }).strict(),
+  /** What start-up reconciliation resolved, reported once (SPEC-009 R-18). */
+  z.object({ ...base, type: z.literal("queue.reconciled"), report: z.array(ReconcileActionSchema) }).strict(),
 
   z
     .object({

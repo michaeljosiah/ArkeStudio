@@ -32,6 +32,7 @@ export class ReadModel {
         spend: null,
         runtime: null,
         drift: [],
+        queues: [],
       },
       worlds: [],
       world: null,
@@ -118,6 +119,17 @@ export class ReadModel {
         this.state = { ...this.state, app: { ...this.state.app, drift: event.reports } };
         return;
       }
+      case "queue.status": {
+        const queues = [...this.state.app.queues];
+        const i = queues.findIndex((q) => q.provider === event.queue.provider);
+        if (i === -1) queues.push(event.queue);
+        else queues[i] = event.queue;
+        this.state = { ...this.state, app: { ...this.state.app, queues } };
+        return;
+      }
+      case "queue.reconciled":
+        // A report, not state: the Activity screen shows it transiently; jobs carry the truth.
+        return;
       case "entity.changed": {
         const world = this.state.world;
         if (!world || world.meta.worldId !== event.worldId) return;

@@ -8,6 +8,7 @@ import {
   type ClientState,
   type DomainEvent,
   type ProviderId,
+  type ReconcileAction,
 } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../arke-bridge.js";
 
@@ -70,6 +71,8 @@ interface StoreState {
   canonSearches: Record<string, CanonSearchState>;
   canonRefs: Record<string, CanonRefsState>;
   sheetRefs: Record<string, SheetRefsState>;
+  /** The last start-up reconciliation report (SPEC-009 R-18) — transient, newest wins. */
+  reconcileReport: ReconcileAction[] | null;
 }
 
 let current: StoreState = {
@@ -82,6 +85,7 @@ let current: StoreState = {
   canonSearches: {},
   canonRefs: {},
   sheetRefs: {},
+  reconcileReport: null,
 };
 const listeners = new Set<() => void>();
 let bridge: ArkeBridge | null = null;
@@ -129,6 +133,13 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, runtime: event.runtime } };
     case "manifest.drift":
       return { ...state, app: { ...state.app, drift: event.reports } };
+    case "queue.status": {
+      const queues = [...state.app.queues];
+      const i = queues.findIndex((q) => q.provider === event.queue.provider);
+      if (i === -1) queues.push(event.queue);
+      else queues[i] = event.queue;
+      return { ...state, app: { ...state.app, queues } };
+    }
     case "entity.changed":
       if (!state.world || state.world.meta.worldId !== event.worldId) return state;
       return { ...state, world: { ...state.world, changes: [...state.world.changes, event.change] } };
@@ -225,6 +236,10 @@ function handleFrame(json: string): void {
     let canonSearches = current.canonSearches;
     let canonRefs = current.canonRefs;
     let sheetRefs = current.sheetRefs;
+    let reconcileReport = current.reconcileReport;
+    if (event.type === "queue.reconciled") {
+      reconcileReport = event.report;
+    }
     if (event.type === "canon.answer") {
       askResults = { ...askResults, [event.askId]: event.result };
     } else if (event.type === "canon.search") {
@@ -261,6 +276,7 @@ function handleFrame(json: string): void {
       canonSearches,
       canonRefs,
       sheetRefs,
+      reconcileReport,
     });
   }
 }
@@ -538,6 +554,26 @@ export function detectRuntimes(): void {
   send({ kind: "detect-runtimes" });
 }
 
+// ---- SPEC-009: the job queue -----------------------------------------------
+
+export function cancelJob(jobId: string): void {
+  send({ kind: "cancel-job", jobId });
+}
+
+/** Resolve a held (needs-reconciliation) job: accept the duplicate risk, or abandon. */
+export function resolveHeldJob(jobId: string, decision: "resubmit" | "discard"): void {
+  send({ kind: "resolve-held-job", jobId, decision });
+}
+
+/** Resume a paused provider queue — this message is the explicit confirmation (D7). */
+export function resumeQueue(provider: string): void {
+  send({ kind: "queue-resume", provider });
+}
+
+export function useReconcileReport(): ReconcileAction[] | null {
+  return useStore().reconcileReport;
+}
+
 const getSnapshot = (): StoreState => current;
 const subscribe = (l: () => void): (() => void) => {
   listeners.add(l);
@@ -568,5 +604,6 @@ export function __setStateForTest(state: ClientState): void {
     canonSearches: {},
     canonRefs: {},
     sheetRefs: {},
+    reconcileReport: null,
   });
 }

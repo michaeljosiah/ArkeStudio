@@ -235,5 +235,20 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** SPEC-008 R-22: re-run local runtime detection on demand. */
   z.object({ kind: z.literal("detect-runtimes") }).strict(),
+  /** SPEC-009 R-14: cancel a job in any non-terminal state; remote cancel attempted where supported. */
+  z.object({ kind: z.literal("cancel-job"), jobId: z.string().min(1) }).strict(),
+  /**
+   * SPEC-009 R-4/D4: resolve a job held as needs-reconciliation. "resubmit" accepts the stated
+   * duplicate risk; "discard" abandons the attempt (its ledger entry still lands, R-15).
+   */
+  z
+    .object({
+      kind: z.literal("resolve-held-job"),
+      jobId: z.string().min(1),
+      decision: z.enum(["resubmit", "discard"]),
+    })
+    .strict(),
+  /** SPEC-009 D7: resume a paused provider queue — the message IS the explicit confirmation. */
+  z.object({ kind: z.literal("queue-resume"), provider: z.string().min(1) }).strict(),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
