@@ -56,7 +56,7 @@ function Mentions({ text }: { text: string }) {
 }
 
 /** Deterministic decorative waveform — seeded by the label, no randomness. */
-function Wave({ seed, width = 290, height = 16 }: { seed: string; width?: number; height?: number }) {
+export function Wave({ seed, width = 290, height = 16 }: { seed: string; width?: number; height?: number }) {
   const bars: ReactNode[] = [];
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
