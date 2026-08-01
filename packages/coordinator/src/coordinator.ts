@@ -613,6 +613,7 @@ export class Coordinator {
           });
           const at = new Date().toISOString();
           if (outcome.status === "accepted") {
+            this.authoring?.release(msg.proposalId);
             this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId: msg.proposalId, outcome: "accepted" });
           } else {
             this.emit({
@@ -663,6 +664,7 @@ export class Coordinator {
             proposalId: msg.proposalId,
             outcome: "discarded",
           });
+          this.authoring?.release(msg.proposalId);
         } catch {
           /* snapshot below */
         }
@@ -695,19 +697,25 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!gate || !store || !this.authoring) return;
         try {
-          const proposal = await gate.stage({
-            kind: "sheet-edit",
-            summary: msg.summary,
-            source: "chat:studio",
-            targets: [{ path: msg.path }],
-          });
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.staged",
-            worldId: msg.worldId,
-            proposalId: proposal.id,
-          });
-          await this.refreshWorldSnapshot(msg.worldId);
+          // A proposalId continues that proposal's conversation — same session, same agent
+          // context; without one, a fresh proposal is staged and the conversation begins.
+          let proposalId = msg.proposalId ?? null;
+          if (proposalId === null) {
+            const proposal = await gate.stage({
+              kind: "sheet-edit",
+              summary: msg.summary,
+              source: "chat:studio",
+              targets: [{ path: msg.path }],
+            });
+            proposalId = proposal.id;
+            this.emit({
+              at: new Date().toISOString(),
+              type: "proposal.staged",
+              worldId: msg.worldId,
+              proposalId: proposal.id,
+            });
+            await this.refreshWorldSnapshot(msg.worldId);
+          }
           const worldQueryUrl = await this.worldQuery.start();
           // Fire and watch: progress and the final status arrive as events (R-13).
           void this.authoring
@@ -716,7 +724,7 @@ export class Coordinator {
               gate,
               {
                 worldId: msg.worldId,
-                proposalId: proposal.id,
+                proposalId,
                 purpose: "authoring",
                 instruction: msg.instruction,
               },

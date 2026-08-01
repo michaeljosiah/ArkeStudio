@@ -37,6 +37,12 @@ const DEFAULT_TOKEN_BUDGET = 200_000;
 
 export class AuthoringService {
   private readonly runs = new Map<string, ActiveRun>();
+  /**
+   * Proposal → live session. A session survives its turn so the next instruction continues
+   * the same conversation (the agent keeps its context); it is dropped when a turn ends
+   * badly, and released when the proposal settles.
+   */
+  private readonly sessions = new Map<string, string>();
 
   constructor(
     private readonly adapter: HarnessAdapter,
@@ -55,6 +61,11 @@ export class AuthoringService {
 
   isRunning(proposalId: string): boolean {
     return this.runs.has(proposalId);
+  }
+
+  /** The proposal settled (accepted or discarded) — its conversation is over. */
+  release(proposalId: string): void {
+    this.sessions.delete(proposalId);
   }
 
   /**
@@ -95,25 +106,39 @@ export class AuthoringService {
     }
 
     const proposalDir = join(store.dir, fromPortable(`.proposals/${input.proposalId}`));
-    // Studio writes the session's configuration — roster, tool denials, the world-query MCP
-    // registration — into the working directory (R-5). Never a credential (R-6).
-    await atomicWriteFile(
-      join(proposalDir, "opencode.json"),
-      JSON.stringify(this.opts.buildConfig({ ...(worldQueryUrl ? { worldQueryUrl } : {}) }), null, 2) + "\n",
-    );
 
-    let sessionId: string;
-    try {
-      const session = await this.adapter.createSession({
-        purpose: input.purpose,
-        cwd: proposalDir,
-        agent: this.opts.agentForPurpose(input.purpose),
-      });
-      sessionId = session.sessionId;
-    } catch (err) {
-      status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
-      return;
+    // Continue the proposal's conversation when a session already lives; otherwise start one.
+    let sessionId = this.sessions.get(input.proposalId);
+    if (sessionId === undefined) {
+      // Studio writes the session's configuration — roster, tool denials, the world-query MCP
+      // registration — into the working directory (R-5). Never a credential (R-6).
+      await atomicWriteFile(
+        join(proposalDir, "opencode.json"),
+        JSON.stringify(this.opts.buildConfig({ ...(worldQueryUrl ? { worldQueryUrl } : {}) }), null, 2) + "\n",
+      );
+      try {
+        const session = await this.adapter.createSession({
+          purpose: input.purpose,
+          cwd: proposalDir,
+          agent: this.opts.agentForPurpose(input.purpose),
+        });
+        sessionId = session.sessionId;
+        this.sessions.set(input.proposalId, sessionId);
+      } catch (err) {
+        status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
     }
+
+    // The instruction is the user's side of the conversation — on the record before dispatch.
+    this.emit({
+      at: at(),
+      type: "authoring.turn",
+      worldId: input.worldId,
+      proposalId: input.proposalId,
+      role: "user",
+      text: input.instruction,
+    });
 
     const run: ActiveRun = { sessionId, cancelled: false };
     this.runs.set(input.proposalId, run);
@@ -133,6 +158,7 @@ export class AuthoringService {
     timer.unref?.();
 
     const usage = (this.adapter as { usageTokens?: (id: string) => number }).usageTokens;
+    let replyText = "";
 
     try {
       // Subscribe BEFORE dispatching: registration is eager, so a turn that completes between
@@ -149,7 +175,9 @@ export class AuthoringService {
           progress(event.summary);
         } else if (event.type === "message.delta") {
           // Streaming text is progress enough at coarse grain; avoid flooding.
+          replyText = event.text;
         } else if (event.type === "message.completed") {
+          replyText = event.text;
           if (!ending) ending = { state: run.cancelled ? "cancelled" : "completed" };
           break;
         } else if (event.type === "session.error") {
@@ -184,6 +212,20 @@ export class AuthoringService {
     // preview from the files as they now stand.
     await gate.refreshPreviewFor(input.proposalId).catch(() => {});
     const final = ending ?? { state: "failed", detail: "the event stream ended unexpectedly" };
+
+    // A turn that ended cleanly keeps its session for the next instruction; any other ending
+    // drops it, so the following send starts a fresh conversation rather than a haunted one.
+    if (final.state !== "completed") this.sessions.delete(input.proposalId);
+    if (replyText.trim().length > 0 && final.state === "completed") {
+      this.emit({
+        at: at(),
+        type: "authoring.turn",
+        worldId: input.worldId,
+        proposalId: input.proposalId,
+        role: "gate",
+        text: replyText.trim(),
+      });
+    }
     status(final.state, final.detail);
   }
 }

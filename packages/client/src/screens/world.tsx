@@ -27,6 +27,7 @@ import {
   createProduction,
   createSheetFromSentence,
   designateCompilation,
+  continueStudio,
   draftWithStudio,
   duplicateSheet,
   establishLook,
@@ -57,12 +58,14 @@ import {
   useArtifactNotices,
   useImportReport,
   useAskResults,
+  useAuthoring,
   useCanonRefs,
   useCanonSearches,
   useDictation,
   usePermissions,
   useSheetRefs,
   useStore,
+  useTranscripts,
   useVoiceCandidates,
   useVoicePreviews,
   useVoiceSidecar,
@@ -920,7 +923,28 @@ export function CharacterEditScreen() {
   const dirty = sections.some((s, i) => s.body !== sheet?.sections[i]?.body);
   const changed = sections.filter((s, i) => s.body !== sheet?.sections[i]?.body);
   const [mode, setMode] = useState<"form" | "chat">("form");
-  const worldSlug = useOpenWorldGuard(worldId)?.meta.slug;
+  const world = useOpenWorldGuard(worldId);
+  const worldSlug = world?.meta.slug;
+
+  // The sheet's open studio conversation, if one is staged — sends continue it.
+  const sheetDir = sheet ? (sheet.type === "character" ? "characters" : `${sheet.type}s`) : "characters";
+  const chatPath = sheet ? `${sheetDir}/${sheet.id}.md` : null;
+  const chatProposal =
+    chatPath === null
+      ? null
+      : (world?.proposals.find((p) => p.proposal.targets.some((t) => t.path === chatPath)) ?? null);
+  const transcript = useTranscripts()[chatProposal?.proposal.id ?? ""] ?? [];
+  const chatActivity = useAuthoring()[chatProposal?.proposal.id ?? ""];
+  const chatRunning = chatActivity?.status === "running";
+  const sendToStudio = () => {
+    if (!sheet || !worldId || !chatPath || instruction.trim().length === 0) return;
+    if (chatProposal) {
+      continueStudio(worldId, chatPath, chatProposal.proposal.id, instruction.trim());
+    } else {
+      draftWithStudio(worldId, chatPath, instruction.trim(), `Studio draft: ${sheet.name}`);
+    }
+    setInstruction("");
+  };
 
   return (
     <div className="fy-gate" data-screen="character-edit">
@@ -967,34 +991,59 @@ export function CharacterEditScreen() {
             })
           ) : (
             <>
-              <div className="fy-bubble--gate">
-                Tell the studio what has changed. It drafts inside a proposal — its own copy of this sheet — and reads
-                the rest of the world through canon search, never the folder.
-                <div className="fy-bubble__note">you accept or discard the result · nothing lands until then</div>
-              </div>
+              {transcript.length === 0 && (
+                <div className="fy-bubble--gate">
+                  Tell the studio what has changed. It drafts inside a proposal — its own copy of this sheet — and
+                  reads the rest of the world through canon search, never the folder.
+                  <div className="fy-bubble__note">you accept or discard the result · nothing lands until then</div>
+                </div>
+              )}
+              {transcript.map((turn, i) => (
+                <div key={i} className={turn.role === "user" ? "fy-bubble--user" : "fy-bubble--gate"} style={{ whiteSpace: "pre-wrap" }}>
+                  {turn.text}
+                </div>
+              ))}
+              {chatRunning && (
+                <div className="fy-bubble--gate" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="fy-dot fy-dot--live" />
+                  <span className="fy-mono">
+                    {chatActivity?.lines[chatActivity.lines.length - 1] ?? "drafting inside the proposal…"}
+                  </span>
+                </div>
+              )}
               <div style={{ marginTop: "auto" }}>
                 <Textarea
-                  placeholder="Give her a scar from the night the verse rose early — appearance and relationships should both feel it."
+                  placeholder={
+                    chatProposal
+                      ? "Keep shaping her — the draft on this proposal follows the conversation."
+                      : "Give her a scar from the night the verse rose early — appearance and relationships should both feel it."
+                  }
                   value={instruction}
                   onChange={(e) => setInstruction(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey && harnessReady && !chatRunning) {
+                      e.preventDefault();
+                      sendToStudio();
+                    }
+                  }}
                   style={{ minHeight: 110 }}
                 />
                 <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
                   <DictationButton onText={(text) => setInstruction((prev) => (prev ? `${prev} ${text}` : text))} />
+                  {chatProposal && (
+                    <span className="fy-mono">
+                      conversation on proposal {chatProposal.proposal.id.slice(0, 10)}… · accept or discard it on the
+                      sheet page
+                    </span>
+                  )}
                   <span className="fy-h1row__push" />
                   <Button
                     variant="primary"
-                    disabled={!harnessReady || !sheet || !worldId || instruction.trim().length === 0}
+                    disabled={!harnessReady || !sheet || !worldId || instruction.trim().length === 0 || chatRunning}
                     title={harnessReady ? undefined : "Authoring needs OpenCode running"}
-                    onClick={() => {
-                      if (!sheet || !worldId) return;
-                      const dir = sheet.type === "character" ? "characters" : `${sheet.type}s`;
-                      draftWithStudio(worldId, `${dir}/${sheet.id}.md`, instruction.trim(), `Studio draft: ${sheet.name}`);
-                      const base = sheet.type === "character" ? "cast" : `${sheet.type}s`;
-                      navigate(`/w/${worldId}/${base}/${sheet.id}`);
-                    }}
+                    onClick={sendToStudio}
                   >
-                    Draft with the studio
+                    {chatRunning ? "Drafting…" : chatProposal ? "Send" : "Draft with the studio"}
                   </Button>
                 </div>
               </div>
@@ -2295,9 +2344,31 @@ const SETTLE_TYPES = ["rule", "lore", "location", "faction", "timeline", "tone"]
 
 export function CanonThreadScreen() {
   const { entry, worldId } = useCanonEntry();
+  const world = useWorld();
   const navigate = useNavigate();
+  const { state } = useStore();
   const [resolvedType, setResolvedType] = useState<(typeof SETTLE_TYPES)[number]>("lore");
   const [statement, setStatement] = useState("");
+  const [message, setMessage] = useState("");
+  const harnessReady = state?.app.health.harness.status === "healthy";
+
+  // Draft-in-context (18a): the thread's conversation runs on a proposal over the entry file.
+  const chatPath = entry ? `canon/${entry.id}.md` : null;
+  const chatProposal =
+    chatPath === null ? null : (world?.proposals.find((p) => p.proposal.targets.some((t) => t.path === chatPath)) ?? null);
+  const transcript = useTranscripts()[chatProposal?.proposal.id ?? ""] ?? [];
+  const chatActivity = useAuthoring()[chatProposal?.proposal.id ?? ""];
+  const chatRunning = chatActivity?.status === "running";
+  const sendToStudio = () => {
+    if (!entry || !worldId || !chatPath || message.trim().length === 0) return;
+    if (chatProposal) {
+      continueStudio(worldId, chatPath, chatProposal.proposal.id, message.trim());
+    } else {
+      draftWithStudio(worldId, chatPath, message.trim(), `Draft in context: ${entry.title}`);
+    }
+    setMessage("");
+  };
+
   return (
     <div className="fy-gate" data-screen="canon-thread">
       <div className="fy-gate__main">
@@ -2312,10 +2383,40 @@ export function CanonThreadScreen() {
         </div>
         <div className="fy-gate__body" style={{ gap: 14 }}>
           {entry && <div className="fy-bubble--gate">{entry.body}</div>}
-          <div className="fy-bubble--gate">
-            Settle it: pick what it turned out to be, write the settled statement, and stage it. The
-            answer becomes the entry; the number stays.
-            <div className="fy-bubble__note">settling is an ordinary accept — the staged proposal shows its ripples first</div>
+          {transcript.length === 0 && (
+            <div className="fy-bubble--gate">
+              Talk it through — the studio drafts the answer on a proposal over this entry, checked against the canon.
+              Or settle it directly below.
+              <div className="fy-bubble__note">settling is an ordinary accept — the staged proposal shows its ripples first</div>
+            </div>
+          )}
+          {transcript.map((turn, i) => (
+            <div key={i} className={turn.role === "user" ? "fy-bubble--user" : "fy-bubble--gate"} style={{ whiteSpace: "pre-wrap" }}>
+              {turn.text}
+            </div>
+          ))}
+          {chatRunning && (
+            <div className="fy-bubble--gate" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="fy-dot fy-dot--live" />
+              <span className="fy-mono">
+                {chatActivity?.lines[chatActivity.lines.length - 1] ?? "drafting against the canon…"}
+              </span>
+            </div>
+          )}
+          <div className="fy-composer" style={{ marginTop: 2 }}>
+            <input
+              style={{ flex: 1, border: "none", outline: "none", background: "transparent", font: "400 13.5px var(--font-sans)", color: "inherit" }}
+              placeholder={harnessReady ? "Keep shaping the entry…" : "Chat needs OpenCode running — the form below still settles it"}
+              disabled={!harnessReady || chatRunning}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") sendToStudio();
+              }}
+            />
+            <Button variant="primary" disabled={!harnessReady || chatRunning || message.trim().length === 0} onClick={sendToStudio}>
+              {chatRunning ? "Drafting…" : "Send"}
+            </Button>
           </div>
           <div style={{ marginTop: "auto" }}>
             <div className="fy-fieldlabel">What it turned out to be</div>

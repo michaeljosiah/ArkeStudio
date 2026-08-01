@@ -82,6 +82,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       path: z.string().min(1),
       instruction: z.string().min(1).max(4000),
       summary: z.string().min(1).max(300),
+      /**
+       * Continue the conversation on an existing proposal instead of staging a new one — the
+       * proposal's session persists between turns, so the agent keeps its context.
+       */
+      proposalId: z.string().min(1).optional(),
     })
     .strict(),
   /** SPEC-005 R-13: cancellation is immediate and leaves the proposal intact. */
