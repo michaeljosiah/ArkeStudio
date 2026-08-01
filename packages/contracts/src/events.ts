@@ -123,6 +123,31 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       error: z.string().nullable(),
     })
     .strict(),
+  /** Import stage one's report: filed, excluded and why — a silent import is a partial one (SPEC-015 R-11). */
+  z
+    .object({
+      ...base,
+      type: z.literal("import.report"),
+      worldId: UlidSchema,
+      filed: z.array(z.object({ name: z.string(), kind: z.string() }).strict()),
+      deduplicated: z.array(z.string()),
+      excluded: z.array(z.object({ name: z.string(), reason: z.string() }).strict()),
+      needsConsent: z.array(z.object({ name: z.string(), sizeBytes: z.number() }).strict()),
+    })
+    .strict(),
+  /** A large file awaiting stated-size consent, or a filing refusal (SPEC-015 R-6). */
+  z
+    .object({
+      ...base,
+      type: z.literal("artifact.notice"),
+      worldId: UlidSchema,
+      sourcePath: z.string(),
+      outcome: z.enum(["needs-consent", "refused"]),
+      reason: z.string(),
+      sizeBytes: z.number().nullable(),
+    })
+    .strict(),
+
   /** Export lifecycle (SPEC-013 R-21): progress, and a terminal status with the output path. */
   z
     .object({
