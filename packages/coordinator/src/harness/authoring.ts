@@ -155,7 +155,9 @@ export class AuthoringService {
       const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
       void interrupt?.call(this.adapter, sessionId).catch(() => {});
     }, wallClock);
-    timer.unref?.();
+    // NOT unref'd: a run parked on the event stream has nothing else pending, so an unref'd
+    // deadline lets the loop drain and never fires — the run then waits forever. `finally`
+    // clears it, so it holds the process open only while the run it guards is alive.
 
     const usage = (this.adapter as { usageTokens?: (id: string) => number }).usageTokens;
     let replyText = "";

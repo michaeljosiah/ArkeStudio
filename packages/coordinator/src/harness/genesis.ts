@@ -117,7 +117,8 @@ export class GenesisService {
       const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
       void interrupt?.call(this.adapter, sessionId).catch(() => {});
     }, wallClock);
-    timer.unref?.();
+    // Refed, and cleared in `finally` — see AuthoringService for why an unref'd deadline is
+    // no deadline at all.
     const usage = (this.adapter as { usageTokens?: (id: string) => number }).usageTokens;
     let replyText = "";
 

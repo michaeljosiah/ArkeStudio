@@ -178,16 +178,18 @@ export class AskService {
           }
         })();
         await this.adapter!.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] });
+        // Refed, and cleared below — see ArtifactModel for why an unref'd deadline never fires.
+        let deadline: ReturnType<typeof setTimeout> | undefined;
         const timeout = new Promise<never>((_, reject) => {
-          const t = setTimeout(
+          deadline = setTimeout(
             () => reject(new Error("the answer took too long")),
             this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS,
           );
-          (t as { unref?: () => void }).unref?.();
         });
         try {
           await Promise.race([collected, timeout]);
         } finally {
+          clearTimeout(deadline);
           abort.abort();
         }
         return finalText;
