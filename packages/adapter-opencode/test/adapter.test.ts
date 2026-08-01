@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import type { HarnessEvent } from "@arke-studio/contracts";
 import { OpenCodeAdapter } from "../src/opencode-adapter.js";
 import { probeCapabilities } from "../src/capabilities.js";
@@ -240,24 +243,37 @@ describe("session configuration (R-5, R-6, R-10)", () => {
   });
 });
 
+/**
+ * A stub OpenCode the test can actually run: a batch file on Windows, a shell script elsewhere.
+ * Discovery spawns what it finds, so a stub that only runs on one platform tests only that one.
+ */
+function stubOpenCode(name: string, version: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "arke-oc-"));
+  const windows = process.platform === "win32";
+  const file = join(dir, windows ? `${name}.cmd` : name);
+  writeFileSync(file, windows ? `@echo ${version}\r\n` : `#!/bin/sh\necho ${version}\n`, { mode: 0o755 });
+  return file;
+}
+
 describe("discovery (R-1)", () => {
-  it("prefers a configured path over PATH, and names the version", async () => {
-    // The machine has a real opencode on PATH; a configured stub must still win.
-    const { mkdtempSync, writeFileSync } = await import("node:fs");
-    const { join } = await import("node:path");
-    const { tmpdir } = await import("node:os");
-    const dir = mkdtempSync(join(tmpdir(), "arke-oc-"));
-    const fake = join(dir, "fake-opencode.cmd");
-    writeFileSync(fake, "@echo 7.7.7\r\n", "utf8");
-    const found = discoverOpenCode({ configuredPath: fake });
+  it("prefers a configured path over PATH, and names the version", () => {
+    const found = discoverOpenCode({ configuredPath: stubOpenCode("fake-opencode", "7.7.7") });
     assert.equal(found?.source, "configured");
     assert.equal(found?.version, "7.7.7");
   });
 
   it("falls back to PATH when nothing is configured", () => {
-    const found = discoverOpenCode();
-    // This machine has opencode installed; the assertion is source, not presence in general.
-    assert.equal(found?.source, "path");
-    assert.ok(found?.version);
+    // Put our own opencode first on PATH rather than trusting the machine to have one — a test
+    // that passes because the developer happens to have it installed proves nothing on CI.
+    const onPath = stubOpenCode("opencode", "6.6.6");
+    const original = process.env["PATH"];
+    process.env["PATH"] = `${join(onPath, "..")}${delimiter}${original ?? ""}`;
+    try {
+      const found = discoverOpenCode();
+      assert.equal(found?.source, "path");
+      assert.equal(found?.version, "6.6.6");
+    } finally {
+      process.env["PATH"] = original;
+    }
   });
 });
