@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useNavigate, useParams } from "react-router";
-import type { CanonEntry, Sheet } from "@arke-studio/contracts";
+import {
+  compilationIsStale,
+  designatedCompilation,
+  headGate,
+  tileIsStale,
+  type CanonEntry,
+  type Sheet,
+} from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, PageHeader, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
 import { CanonEntryRow, ReferenceTile, SheetCard } from "../domain/domain.js";
@@ -10,9 +17,15 @@ import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
   askCanon,
   assignVoice,
+  chooseAnchor as chooseAnchorMsg,
+  compileGrid as compileGridMsg,
   createSheetFromSentence,
+  designateCompilation,
   draftWithStudio,
   duplicateSheet,
+  establishLook,
+  generateMissingTiles,
+  lockTile as lockTileMsg,
   openThread as openThreadMsg,
   reconcileExternalEdit,
   reloadWorld,
@@ -23,6 +36,7 @@ import {
   retireEntity,
   searchCanonList,
   setSheetStatus,
+  setStyleOverride as setStyleOverrideMsg,
   settleThread,
   stageCanonAmendment as stageAmendmentMsg,
   stageCanonEntry as stageEntryMsg,
@@ -673,44 +687,165 @@ export function ReferenceKitScreen() {
   const { worldId, sheetId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);
+  const { state } = useStore();
   const navigate = useNavigate();
-  const kit = world?.referenceKits.find((k) => k.sheetId === sheetId);
+  const kit = world?.referenceKits.find((k) => k.sheetId === sheetId) ?? null;
+  const gate = headGate(kit ?? { sheetId: sheetId ?? "x", tiles: [], compilations: [] });
+  const hasAnchor = kit?.anchor !== undefined;
+  const staleTiles = sheet && kit ? kit.tiles.filter((t) => tileIsStale(t, sheet.version)) : [];
+  // Establish candidates land as job artifacts; list them off succeeded candidate jobs (R-5).
+  const candidates =
+    state?.app.jobs
+      .filter(
+        (j) =>
+          j.status === "succeeded" &&
+          j.target.kind === "establish-candidate" &&
+          j.target.id?.startsWith(`${sheetId}/`) === true,
+      )
+      .flatMap((j) => j.landedFiles ?? []) ?? [];
+  const [style, setStyle] = useState<string | null>(null);
+  const styleValue = style ?? kit?.styleOverride ?? "";
   return (
     <Screen id="reference-kit">
       <PageHeader
         title={sheet ? `Reference kit — ${sheet.name}` : "Reference kit"}
         meta={
-          kit?.modelSheet ? (
-            <span>
-              model sheet compiled from {kit.modelSheet.tiles.length} tiles · sheet v{kit.modelSheet.sheetVersion}
-            </span>
+          hasAnchor ? (
+            <span>anchor set — every generation carries it</span>
           ) : (
-            <span>no model sheet compiled yet</span>
+            <span>no anchor yet — establish a look first</span>
           )
         }
         actions={
           <Button variant="primary" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/model-sheet`)}>
-            Generate model sheet
+            Model sheet
           </Button>
         }
       />
-      {sheet && kit && sheet.version > (kit.modelSheet?.sheetVersion ?? sheet.version) && (
-        <Callout tone="warning" title="References predate the sheet">
-          Tiles were made against an older sheet version — regenerate looks to catch up.
+      {staleTiles.length > 0 && sheet && (
+        <Callout tone="warning" title={`${staleTiles.length} tile${staleTiles.length === 1 ? "" : "s"} predate v${sheet.version}`}>
+          Made against an older sheet — regenerate looks to catch up. They still reference; the gap is
+          named, not enforced.
         </Callout>
       )}
-      {kit ? (
+      {!hasAnchor && (
+        <Section title="Establish a look" aside={<span>Candidates from the sentence and the world's tone</span>}>
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+            <Button
+              variant="primary"
+              onClick={() => {
+                if (worldId && sheetId) establishLook(worldId, sheetId, 4);
+              }}
+            >
+              Generate first looks ×4
+            </Button>
+            <span className="scr-field__hint">Pick one and it becomes the face everything inherits.</span>
+          </div>
+          {candidates.length > 0 && (
+            <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+              {candidates.map((file) => (
+                <Button
+                  key={file}
+                  onClick={() => {
+                    if (worldId && sheetId)
+                      chooseAnchorMsg(worldId, sheetId, file.replace(`references/${sheetId}/`, ""));
+                  }}
+                >
+                  Choose {file.split("/").pop()}
+                </Button>
+              ))}
+            </div>
+          )}
+        </Section>
+      )}
+      <Section
+        title="Head turnaround"
+        aside={
+          gate.ready ? (
+            <Badge tone="success">complete — body unlocked</Badge>
+          ) : (
+            <span>
+              {4 - gate.outstanding.length} of 4 locked · outstanding: {gate.outstanding.join(", ")}
+            </span>
+          )
+        }
+      >
         <div className="lay-cardgrid">
-          {kit.tiles.map((tile) => (
-            <ReferenceTile key={tile.angle} tile={tile} />
+          {(kit?.tiles ?? []).filter((t) => t.angle.startsWith("head")).map((tile, i) => (
+            <div key={`${tile.angle}-${i}`}>
+              <ReferenceTile tile={tile} />
+              {tile.status === "generated" && (
+                <Button
+                  onClick={() => {
+                    if (worldId && sheetId) lockTileMsg(worldId, sheetId, tile.angle);
+                  }}
+                >
+                  Lock
+                </Button>
+              )}
+            </div>
           ))}
         </div>
-      ) : (
-        <EmptyState
-          title="No reference kit yet"
-          hint="Establish an anchor image, then fill the angles from it (SPEC-010)."
-        />
-      )}
+        <Button
+          variant="ghost"
+          disabled={!hasAnchor}
+          onClick={() => {
+            if (worldId && sheetId) generateMissingTiles(worldId, sheetId, "head");
+          }}
+        >
+          Generate missing head angles
+        </Button>
+      </Section>
+      <Section
+        title="Body turnaround"
+        aside={!gate.ready ? <span>blocked — a body without a locked face is a different person</span> : undefined}
+      >
+        <div className="lay-cardgrid">
+          {(kit?.tiles ?? []).filter((t) => t.angle.startsWith("body")).map((tile, i) => (
+            <div key={`${tile.angle}-${i}`}>
+              <ReferenceTile tile={tile} />
+              {tile.status === "generated" && (
+                <Button
+                  onClick={() => {
+                    if (worldId && sheetId) lockTileMsg(worldId, sheetId, tile.angle);
+                  }}
+                >
+                  Lock
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+        <Button
+          variant="ghost"
+          disabled={!gate.ready}
+          title={gate.ready ? undefined : `outstanding: ${gate.outstanding.join(", ")}`}
+          onClick={() => {
+            if (worldId && sheetId) generateMissingTiles(worldId, sheetId, "body");
+          }}
+        >
+          {gate.ready ? "Generate missing body angles" : `Body blocked · ${gate.outstanding.length} head angle${gate.outstanding.length === 1 ? "" : "s"} outstanding`}
+        </Button>
+      </Section>
+      <Section title="Rendering style" aside={<span>Override travels with this sheet only — canon doesn't change</span>}>
+        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+          <Input
+            placeholder="inherits the world's art direction"
+            value={styleValue}
+            onChange={(e) => setStyle(e.target.value)}
+          />
+          <Button
+            onClick={() => {
+              if (worldId && sheetId) {
+                setStyleOverrideMsg(worldId, sheetId, styleValue.trim() === "" ? null : styleValue.trim());
+                setStyle(null);
+              }
+            }}
+          >
+            Set
+          </Button>
+        </div>
+      </Section>
     </Screen>
   );
 }
@@ -718,27 +853,71 @@ export function ReferenceKitScreen() {
 export function ModelSheetScreen() {
   const { sheetId, worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
-  const kit = world?.referenceKits.find((k) => k.sheetId === sheetId);
+  const sheet = useSheet(worldId, sheetId);
+  const kit = world?.referenceKits.find((k) => k.sheetId === sheetId) ?? null;
   const locked = kit?.tiles.filter((t) => t.status === "locked") ?? [];
+  const designated = kit ? designatedCompilation(kit) : null;
   return (
     <Screen id="model-sheet-generate">
       <PageHeader
-        title="Generate model sheet"
+        title="Model sheet"
         meta={<span>{locked.length} locked tiles available to compile</span>}
+        actions={
+          <Button
+            variant="primary"
+            disabled={locked.length === 0}
+            onClick={() => {
+              if (worldId && sheetId) compileGridMsg(worldId, sheetId);
+            }}
+          >
+            Compile classic grid — free, local
+          </Button>
+        }
       />
-      <Callout title="Head before body">
-        Compilation insists on locked head angles before body work — identity first, wardrobe
-        second (SPEC-010).
+      {(kit?.compilations ?? []).length > 0 && sheet && (
+        <Section title="Compilations" aside={<span>exactly one rides along with dispatches</span>}>
+          <div className="scr-sectionlist">
+            {kit!.compilations.map((c) => {
+              const stale = compilationIsStale(kit!, c, sheet.version);
+              const isDesignated = designated?.file === c.file;
+              return (
+                <div key={c.file} className="scr-sheetsection">
+                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+                    <strong style={{ font: "var(--type-ui)" }}>{c.file}</strong>
+                    <span style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>
+                      {c.format} · sheet v{c.sheetVersion} · {c.tiles.length} tiles
+                    </span>
+                    <span style={{ marginLeft: "auto", display: "flex", gap: "var(--space-2)" }}>
+                      {stale && <Badge tone="warning">stale — sheet is at v{sheet.version}</Badge>}
+                      {isDesignated ? (
+                        <Badge tone="success">rides along</Badge>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          onClick={() => {
+                            if (worldId && sheetId) designateCompilation(worldId, sheetId, c.file);
+                          }}
+                        >
+                          Designate
+                        </Button>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      )}
+      <Callout title="The grid is deterministic">
+        Same tiles in, identical image out — a composite, not a generation. It costs nothing, cannot
+        hallucinate, and never touches a provider. Pitch and expression boards arrive as takes with
+        SPEC-013's review loop.
       </Callout>
       <div className="lay-cardgrid">
-        {locked.map((tile) => (
-          <ReferenceTile key={tile.angle} tile={tile} />
+        {locked.map((tile, i) => (
+          <ReferenceTile key={`${tile.angle}-${i}`} tile={tile} />
         ))}
-      </div>
-      <div>
-        <Button variant="primary" disabled title="Model-sheet generation arrives with SPEC-010">
-          Compile model sheet
-        </Button>
       </div>
     </Screen>
   );

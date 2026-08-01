@@ -15,8 +15,9 @@ import { assertFts5, loadNodeSqlite, type Database, type DatabaseCtor } from "./
 
 // v2: canon_fts excludes open threads and retired entries (SPEC-006 R-16/R-19).
 // v3: sheet-link citations extracted for reverse relationship lookup (SPEC-007 R-4).
+// v4: superseded/queue-state tiles excluded from tile-source citations (SPEC-010 R-4, D11).
 // The bump is what forces existing indexes to rebuild — derivation changes are schema changes.
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);

@@ -23,6 +23,17 @@ import { CredentialStore, type Cipher } from "./credentials/store.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "./queue/dispatcher.js";
+import { establishRequests, imageModelFor, missingTileAngles, tileRequest } from "./references/generate.js";
+import {
+  chooseAnchor,
+  compileGrid,
+  designate,
+  landGrid,
+  lockTile,
+  readKit,
+  setStyleOverride,
+  supersedeTile,
+} from "./references/kit.js";
 import { SecretRegistry } from "./redact.js";
 import { detectDrift, evaluateSpend } from "./spend/analytics.js";
 import { LedgerFile } from "./spend/ledger.js";
@@ -139,6 +150,7 @@ export class Coordinator {
               return store && store.worldId === worldId ? store.dir : null;
             },
             onProviderFault: (provider, message) => this.reportProviderFault(provider as ProviderId, message),
+            onTerminal: (job) => this.onJobTerminal(job),
           })
         : null;
     this.transport = new Transport({
@@ -327,6 +339,25 @@ export class Coordinator {
   reportProviderFault(provider: ProviderId, message: string): void {
     this.providerService.markFault(provider, message);
     this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
+  }
+
+  /**
+   * Terminal-job follow-ons (SPEC-010): a landed reference tile enters its kit as `generated`
+   * (unreviewed — locking is the user's act, R-3); the world snapshot refreshes so the kit
+   * surface sees it. Establish candidates just land; the client lists them off the job row.
+   */
+  private async onJobTerminal(job: Job): Promise<void> {
+    if (job.status !== "succeeded") return;
+    const store = this.opts.provider.openStore?.();
+    if (!store || store.worldId !== job.worldId) return;
+    if (job.target.kind === "reference-tile" && job.landedFiles?.[0] !== undefined) {
+      const [sheetId, angle] = (job.target.id ?? "").split("/") as [string, never];
+      const sheet = store.getBundle().sheets.find((s) => s.id === sheetId);
+      if (!sheet || !angle) return;
+      const withinKit = job.landedFiles[0].replace(`references/${sheetId}/`, "");
+      await supersedeTile(store, sheetId, angle, { file: withinKit, sheetVersion: sheet.version }).catch(() => {});
+    }
+    await this.refreshWorldSnapshot(job.worldId).catch(() => {});
   }
 
   /**
@@ -823,6 +854,95 @@ export class Coordinator {
           type: "spend.status",
           spend: evaluateSpend(entries, settings.spend, new Date()),
         });
+        return;
+      }
+      case "establish-look": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.jobQueue || !this.opts.manifest) return;
+        const sheet = store.getBundle().sheets.find((s) => s.id === msg.sheetId);
+        if (!sheet) return;
+        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
+        if (!model) return;
+        const kit = (await readKit(store, msg.sheetId))?.kit ?? null;
+        for (const request of establishRequests(store.getBundle().meta, sheet, kit, model, msg.count)) {
+          await this.jobQueue.enqueue(request.input).catch(() => {});
+        }
+        return;
+      }
+      case "choose-anchor": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const sheet = store.getBundle().sheets.find((s) => s.id === msg.sheetId);
+        if (!sheet) return;
+        await chooseAnchor(store, msg.sheetId, { file: msg.file, sheetVersion: sheet.version }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "lock-tile": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await lockTile(store, msg.sheetId, msg.angle, msg.name).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "generate-missing-tiles":
+      case "regenerate-tile": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.jobQueue || !this.opts.manifest) return;
+        const sheet = store.getBundle().sheets.find((s) => s.id === msg.sheetId);
+        if (!sheet) return;
+        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
+        if (!model) return;
+        const kit = (await readKit(store, msg.sheetId))?.kit ?? null;
+        let angles;
+        if (msg.kind === "regenerate-tile") {
+          angles = [msg.angle];
+        } else {
+          const missing = missingTileAngles(kit, msg.group);
+          if (!missing.ok) {
+            // The gate states what is outstanding (R-7, D5) — surfaced via the app log and a
+            // no-op; the client shows the same gate from the shared helper before sending.
+            void this.appLog?.append({ kind: "kit.gate-refused", sheetId: msg.sheetId, reason: missing.reason });
+            return;
+          }
+          angles = missing.angles;
+        }
+        for (const angle of angles) {
+          const request = tileRequest(store.getBundle().meta, sheet, kit, model, angle);
+          await this.jobQueue.enqueue(request.input).catch(() => {});
+        }
+        return;
+      }
+      case "compile-grid": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const sheet = store.getBundle().sheets.find((s) => s.id === msg.sheetId);
+        if (!sheet) return;
+        try {
+          const result = await compileGrid(store, sheet, () => new Date().toISOString());
+          await landGrid(store, sheet, result);
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch (err) {
+          void this.appLog?.append({
+            kind: "kit.compile-failed",
+            sheetId: msg.sheetId,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+      case "designate-compilation": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await designate(store, msg.sheetId, msg.file).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "set-style-override": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await setStyleOverride(store, msg.sheetId, msg.style).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "cancel-job": {

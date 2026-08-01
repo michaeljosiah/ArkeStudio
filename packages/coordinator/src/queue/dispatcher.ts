@@ -74,6 +74,8 @@ export interface JobQueueOptions {
   worldDirFor: (worldId: string) => string | null;
   /** A provider fault surfaced once, in provider terms (SPEC-008 R-4). */
   onProviderFault?: (provider: string, message: string) => void;
+  /** Fired after a job reaches terminal state and its ledger entry landed (SPEC-010 tile flows). */
+  onTerminal?: (job: Job) => void | Promise<void>;
   clock?: () => string;
   rng?: () => number;
   maxAttempts?: number;
@@ -501,6 +503,12 @@ export class JobQueue {
     await this.transition(terminal);
     if (this.disposed) return;
     await this.appendLedgerOnce(terminal, costMicroUsd);
+    if (this.disposed) return;
+    try {
+      await this.opts.onTerminal?.(terminal);
+    } catch {
+      /* a follow-on hook must never poison the pump */
+    }
   }
 
   private async appendLedgerOnce(job: Job, costMicroUsd?: number): Promise<void> {

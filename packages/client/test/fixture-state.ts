@@ -191,17 +191,24 @@ const state: ClientState = {
     referenceKits: [
       {
         sheetId: "maren-kest",
+        anchor: "head-front.png",
         tiles: [
           { angle: "head-front", status: "locked", file: "head-front.png", sheetVersion: 4 },
-          { angle: "body-full", status: "draft", file: "body-full.png", sheetVersion: 3 },
+          { angle: "body-full", status: "generated", file: "body-full.png", sheetVersion: 3 },
           { angle: "head-profile", status: "empty" },
         ],
-        modelSheet: {
-          file: "model-sheet-v4.png",
-          sheetVersion: 4,
-          compiledAt: "2026-07-14T09:00:00Z",
-          tiles: ["head-front", "body-full"],
-        },
+        compilations: [
+          {
+            file: "model-sheet-v4.png",
+            format: "classic-grid",
+            sheetVersion: 4,
+            tiles: ["head-front.png"],
+            compiledAt: "2026-07-14T09:00:00Z",
+            source: "local",
+            accepted: true,
+          },
+        ],
+        designatedCompilation: "model-sheet-v4.png",
       },
     ],
     artifacts: [
