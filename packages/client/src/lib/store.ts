@@ -67,6 +67,7 @@ interface StoreState {
   askResults: Record<string, AskResult>;
   canonSearches: Record<string, CanonSearchState>;
   canonRefs: Record<string, CanonRefsState>;
+  sheetRefs: Record<string, SheetRefsState>;
 }
 
 let current: StoreState = {
@@ -78,6 +79,7 @@ let current: StoreState = {
   askResults: {},
   canonSearches: {},
   canonRefs: {},
+  sheetRefs: {},
 };
 const listeners = new Set<() => void>();
 let bridge: ArkeBridge | null = null;
@@ -210,6 +212,7 @@ function handleFrame(json: string): void {
     let askResults = current.askResults;
     let canonSearches = current.canonSearches;
     let canonRefs = current.canonRefs;
+    let sheetRefs = current.sheetRefs;
     if (event.type === "canon.answer") {
       askResults = { ...askResults, [event.askId]: event.result };
     } else if (event.type === "canon.search") {
@@ -223,6 +226,18 @@ function handleFrame(json: string): void {
       };
     } else if (event.type === "canon.refs") {
       canonRefs = { ...canonRefs, [event.entryId]: { citedBy: event.citedBy, ripples: event.ripples } };
+    } else if (event.type === "sheet.refs") {
+      sheetRefs = {
+        ...sheetRefs,
+        [event.sheetId]: {
+          tiles: event.tiles,
+          productions: event.productions,
+          artifacts: event.artifacts,
+          scenes: event.scenes,
+          takesByVersion: event.takesByVersion,
+          incomingLinks: event.incomingLinks,
+        },
+      };
     }
     emitChange({
       ...current,
@@ -233,6 +248,7 @@ function handleFrame(json: string): void {
       askResults,
       canonSearches,
       canonRefs,
+      sheetRefs,
     });
   }
 }
@@ -435,6 +451,54 @@ export function useCanonRefs(): Record<string, CanonRefsState> {
   return useStore().canonRefs;
 }
 
+// ---- sheets (SPEC-007) -----------------------------------------------------
+
+export interface SheetRefsState {
+  tiles: number;
+  productions: string[];
+  artifacts: string[];
+  scenes: string[];
+  takesByVersion: Record<string, number>;
+  incomingLinks: string[];
+}
+
+export function createSheetFromSentence(
+  worldId: string,
+  sheetType: "character" | "location" | "faction",
+  name: string,
+  sentence: string,
+): void {
+  send({ kind: "create-sheet-from-sentence", worldId, sheetType, name, sentence });
+}
+
+export function duplicateSheet(worldId: string, path: string, newName: string): void {
+  send({ kind: "duplicate-sheet", worldId, path, newName });
+}
+
+export function setSheetStatus(worldId: string, path: string, status: "sketch" | "locked"): void {
+  send({ kind: "set-sheet-status", worldId, path, status });
+}
+
+export function renameSheet(worldId: string, path: string, name: string): void {
+  send({ kind: "rename-sheet", worldId, path, name });
+}
+
+export function assignVoice(
+  worldId: string,
+  path: string,
+  voice: { provider: string; voiceId: string; label?: string } | null,
+): void {
+  send({ kind: "assign-voice", worldId, path, voice });
+}
+
+export function requestSheetRefs(worldId: string, sheetId: string): void {
+  send({ kind: "sheet-refs", worldId, sheetId });
+}
+
+export function useSheetRefs(): Record<string, SheetRefsState> {
+  return useStore().sheetRefs;
+}
+
 const getSnapshot = (): StoreState => current;
 const subscribe = (l: () => void): (() => void) => {
   listeners.add(l);
@@ -464,5 +528,6 @@ export function __setStateForTest(state: ClientState): void {
     askResults: {},
     canonSearches: {},
     canonRefs: {},
+    sheetRefs: {},
   });
 }

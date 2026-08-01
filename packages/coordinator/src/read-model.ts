@@ -135,6 +135,10 @@ export class ReadModel {
       case "authoring.status":
       case "permission.pending":
       case "permission.settled":
+      case "canon.answer":
+      case "canon.search":
+      case "canon.refs":
+      case "sheet.refs":
         // Signals only in SPEC-001: the bundle arrives via a fresh snapshot, and proposals
         // are static fixtures until the gate lands in SPEC-004.
         return;

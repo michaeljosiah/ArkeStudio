@@ -164,6 +164,23 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /** A sheet's computed detail: refs, versions cited, incoming links (SPEC-007 R-4, R-16). */
+  z
+    .object({
+      ...base,
+      type: z.literal("sheet.refs"),
+      worldId: UlidSchema,
+      sheetId: z.string().min(1),
+      tiles: z.number().int().min(0),
+      productions: z.array(z.string()),
+      artifacts: z.array(z.string()),
+      scenes: z.array(z.string()),
+      takesByVersion: z.record(z.string(), z.number().int()),
+      /** Sheets that link here — reverse lookup from the index, never a second stored edge. */
+      incomingLinks: z.array(z.string()),
+    })
+    .strict(),
+
   /** A harness permission backstop prompt, in Studio's language (SPEC-005 R-16, R-17). */
   z
     .object({

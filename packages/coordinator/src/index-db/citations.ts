@@ -23,7 +23,8 @@ export interface CitationRow {
     | "artifact-link"
     | "tile-source"
     | "scene-location"
-    | "voice-assignment";
+    | "voice-assignment"
+    | "sheet-link";
   productionId: string | null;
 }
 
@@ -122,6 +123,21 @@ export function extract(bundle: WorldBundle): Extraction {
         targetId: `${sheet.voice.provider}/${sheet.voice.voiceId}`,
         targetVersion: null,
         relation: "voice-assignment",
+        productionId: null,
+      });
+    }
+    // Directed relationship links, stored one-sided; the reverse lookup is this row queried
+    // from the target's side (SPEC-007 R-4, D10).
+    for (const link of sheet.links) {
+      const target = targetOf(link);
+      citations.push({
+        sourceKind: sheet.type,
+        sourceId: sheet.id,
+        sourceVersion: sheet.version,
+        targetKind: target.kind,
+        targetId: link,
+        targetVersion: target.version,
+        relation: "sheet-link",
         productionId: null,
       });
     }

@@ -9,14 +9,20 @@ import { shortDateTime } from "../lib/format.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
   askCanon,
+  assignVoice,
+  createSheetFromSentence,
   draftWithStudio,
+  duplicateSheet,
   openThread as openThreadMsg,
   reconcileExternalEdit,
   reloadWorld,
+  renameSheet,
   replyToPermission,
   requestCanonRefs,
+  requestSheetRefs,
   retireEntity,
   searchCanonList,
+  setSheetStatus,
   settleThread,
   stageCanonAmendment as stageAmendmentMsg,
   stageCanonEntry as stageEntryMsg,
@@ -25,6 +31,7 @@ import {
   useCanonRefs,
   useCanonSearches,
   usePermissions,
+  useSheetRefs,
   useStore,
   useWorld,
 } from "../lib/store.js";
@@ -260,11 +267,20 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const sheets = world?.sheets.filter((s) => s.type === kind) ?? [];
+  const locked = sheets.filter((s) => s.status === "locked" && s.retired !== true).length;
+  const sketches = sheets.filter((s) => s.status === "sketch" && s.retired !== true).length;
+  const retired = sheets.filter((s) => s.retired === true).length;
   return (
     <Screen id={screenId}>
       <PageHeader
         title={title}
-        meta={<span>{sheets.length} {kind === "character" ? "in the cast" : "on the map"}</span>}
+        meta={
+          <>
+            <span>{locked} locked</span>
+            <span>{sketches} sketch{sketches === 1 ? "" : "es"}</span>
+            {retired > 0 && <span>{retired} retired</span>}
+          </>
+        }
         actions={
           <Button variant="primary" onClick={() => navigate(newPath)}>
             New {kind}
@@ -333,6 +349,14 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);
   const navigate = useNavigate();
+  const sheetRefsMap = useSheetRefs();
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [duplicating, setDuplicating] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (worldId && sheetId) requestSheetRefs(worldId, sheetId);
+  }, [worldId, sheetId]);
+
   if (!world || !sheet) {
     return (
       <Screen id={screenId}>
@@ -345,6 +369,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
     p.proposal.targets.some((t) => t.path.endsWith(`/${sheet.id}.md`)),
   );
   const kit = world.referenceKits.find((k) => k.sheetId === sheet.id);
+  const sheetPath = `${sheet.type === "character" ? "characters" : `${sheet.type}s`}/${sheet.id}.md`;
+  const refs = sheetRefsMap[sheet.id];
   return (
     <Screen id={screenId}>
       <PageHeader
@@ -353,9 +379,15 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           <>
             {sheet.role && <span>{sheet.role}</span>}
             <Badge tone={sheet.status === "sketch" ? "outline" : "neutral"}>
-              {sheet.status === "sketch" ? "sketch" : `v${sheet.version} · locked`}
+              {sheet.status === "sketch" ? `sketch · v${sheet.version}` : `v${sheet.version} · locked`}
             </Badge>
+            {sheet.retired && <Badge tone="danger">retired</Badge>}
             {sheet.voice && <Badge tone="outline">voice · {sheet.voice.label ?? sheet.voice.provider}</Badge>}
+            {sheet.origin && (
+              <Badge tone="outline">
+                from {sheet.origin.sheet} v{sheet.origin.version}
+              </Badge>
+            )}
           </>
         }
         actions={
@@ -366,12 +398,89 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
                 <Button onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}>Voice</Button>
               </>
             )}
+            <Button
+              onClick={() => {
+                if (!worldId) return;
+                setSheetStatus(worldId, sheetPath, sheet.status === "locked" ? "sketch" : "locked");
+              }}
+              title={
+                sheet.status === "locked"
+                  ? "Unlocking ripples: everything citing this did so as settled"
+                  : "Locking makes the identity settled — no image required first"
+              }
+            >
+              {sheet.status === "locked" ? "Unlock" : "Lock to canon"}
+            </Button>
             <Button variant="primary" onClick={() => navigate(`/w/${worldId}/${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${sheet.id}/edit`)}>
               Edit
             </Button>
           </>
         }
       />
+      <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+        <Button variant="ghost" onClick={() => setRenaming(renaming === null ? sheet.name : null)}>
+          Rename
+        </Button>
+        <Button variant="ghost" onClick={() => setDuplicating(duplicating === null ? `${sheet.name} (copy)` : null)}>
+          Duplicate
+        </Button>
+        <Button
+          variant="ghost"
+          disabled={sheet.retired === true}
+          onClick={() => worldId && retireEntity(worldId, sheetPath)}
+          title="Stays resolvable for existing citations; leaves pickers for new work"
+        >
+          Retire
+        </Button>
+      </div>
+      {renaming !== null && (
+        <Card className="scr-form">
+          <div className="scr-field">
+            <label className="scr-field__label">New name — the id and every citation stay</label>
+            <Input value={renaming} onChange={(e) => setRenaming(e.target.value)} />
+          </div>
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
+            <Button
+              variant="primary"
+              disabled={renaming.trim().length === 0 || renaming.trim() === sheet.name}
+              onClick={() => {
+                if (worldId) renameSheet(worldId, sheetPath, renaming.trim());
+                setRenaming(null);
+              }}
+            >
+              Stage rename
+            </Button>
+            <Button variant="ghost" onClick={() => setRenaming(null)}>
+              Cancel
+            </Button>
+          </div>
+        </Card>
+      )}
+      {duplicating !== null && (
+        <Card className="scr-form">
+          <div className="scr-field">
+            <label className="scr-field__label">
+              Duplicate as — a sketch recording its origin at v{sheet.version}; {sheet.name} is untouched
+            </label>
+            <Input value={duplicating} onChange={(e) => setDuplicating(e.target.value)} />
+          </div>
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
+            <Button
+              variant="primary"
+              disabled={duplicating.trim().length === 0}
+              onClick={() => {
+                if (worldId) duplicateSheet(worldId, sheetPath, duplicating.trim());
+                setDuplicating(null);
+              }}
+            >
+              Stage duplicate
+            </Button>
+            <Button variant="ghost" onClick={() => setDuplicating(null)}>
+              Cancel
+            </Button>
+          </div>
+        </Card>
+      )}
       {staged.map((p) => (
         <ConnectedProposalPanel key={p.proposal.id} staged={p} />
       ))}
@@ -398,8 +507,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           ))}
         </Section>
       )}
-      {sheet.links.length > 0 && (
-        <Section title="Linked">
+      {(sheet.links.length > 0 || (refs?.incomingLinks.length ?? 0) > 0) && (
+        <Section title="Linked" aside={<span>outgoing authored here; incoming from the index</span>}>
           <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
             {sheet.links.map((link) => {
               const other = world.sheets.find((s) => s.id === link);
@@ -407,10 +516,50 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
               const base = other.type === "character" ? "cast" : `${other.type}s`;
               return (
                 <Button key={link} variant="secondary" onClick={() => navigate(`/w/${worldId}/${base}/${link}`)}>
-                  {other.name}
+                  {other.name} →
                 </Button>
               );
             })}
+            {(refs?.incomingLinks ?? [])
+              .filter((id) => !sheet.links.includes(id))
+              .map((id) => {
+                const other = world.sheets.find((s) => s.id === id);
+                const base = other ? (other.type === "character" ? "cast" : `${other.type}s`) : "cast";
+                return (
+                  <Button key={id} variant="ghost" onClick={() => navigate(`/w/${worldId}/${base}/${id}`)}>
+                    ← {other?.name ?? id}
+                  </Button>
+                );
+              })}
+          </div>
+        </Section>
+      )}
+      {refs && (
+        <Section title="From this sheet" aside={<span>computed from the index, never stored</span>}>
+          <div className="lay-stats">
+            <div className="lay-stats__item">
+              <div className="lay-stats__value">{refs.tiles}</div>
+              <div className="lay-stats__label">reference tiles</div>
+            </div>
+            <div className="lay-stats__item">
+              <div className="lay-stats__value">{refs.productions.length}</div>
+              <div className="lay-stats__label">productions</div>
+            </div>
+            <div className="lay-stats__item">
+              <div className="lay-stats__value">{refs.artifacts.length}</div>
+              <div className="lay-stats__label">artifacts</div>
+            </div>
+            <div className="lay-stats__item">
+              <div className="lay-stats__value">
+                {Object.values(refs.takesByVersion).reduce((a, b) => a + b, 0)}
+              </div>
+              <div className="lay-stats__label">
+                takes
+                {Object.keys(refs.takesByVersion).length > 1
+                  ? ` across v${Object.keys(refs.takesByVersion).sort().join(", v")}`
+                  : ""}
+              </div>
+            </div>
           </div>
         </Section>
       )}
@@ -598,6 +747,10 @@ export function ModelSheetScreen() {
 export function VoicePickerScreen() {
   const { worldId, sheetId } = useParams();
   const sheet = useSheet(worldId, sheetId);
+  const [provider, setProvider] = useState("elevenlabs");
+  const [voiceId, setVoiceId] = useState("");
+  const [label, setLabel] = useState("");
+  const sheetPath = sheet ? `characters/${sheet.id}.md` : null;
   return (
     <Screen id="voice-picker">
       <PageHeader
@@ -612,7 +765,57 @@ export function VoicePickerScreen() {
             <span>no voice assigned</span>
           )
         }
+        actions={
+          sheet?.voice && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                if (worldId && sheetPath) assignVoice(worldId, sheetPath, null);
+              }}
+            >
+              Clear voice
+            </Button>
+          )
+        }
       />
+      <Section title="Assign directly" aside={<span>a gated sheet change — it versions and ripples</span>}>
+        <div className="scr-form">
+          <div className="scr-field">
+            <label className="scr-field__label">Provider</label>
+            <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+              {["elevenlabs", "openai", "voxa"].map((p) => (
+                <Button key={p} variant={p === provider ? "primary" : "secondary"} onClick={() => setProvider(p)}>
+                  {p}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div className="scr-field">
+            <label className="scr-field__label">Voice id</label>
+            <Input placeholder="v_8Kq2" value={voiceId} onChange={(e) => setVoiceId(e.target.value)} />
+          </div>
+          <div className="scr-field">
+            <label className="scr-field__label">Label</label>
+            <Input placeholder="Low tide" value={label} onChange={(e) => setLabel(e.target.value)} />
+          </div>
+          <div>
+            <Button
+              variant="primary"
+              disabled={!worldId || !sheetPath || voiceId.trim().length === 0}
+              onClick={() => {
+                if (!worldId || !sheetPath) return;
+                assignVoice(worldId, sheetPath, {
+                  provider,
+                  voiceId: voiceId.trim(),
+                  ...(label.trim() ? { label: label.trim() } : {}),
+                });
+              }}
+            >
+              Stage assignment
+            </Button>
+          </div>
+        </div>
+      </Section>
       <DegradedBanner component="voice" />
       <Section title="Local voices" aside={<span>Voxa · Kokoro — free, on this machine</span>}>
         <EmptyState
@@ -629,44 +832,82 @@ export function VoicePickerScreen() {
 
 // ---- New sheet screens -----------------------------------------------------
 
-function NewSheetScreen({ screenId, title, fields }: { screenId: string; title: string; fields: string[] }) {
+function NewSheetScreen({
+  screenId,
+  title,
+  sheetType,
+}: {
+  screenId: string;
+  title: string;
+  sheetType: "character" | "location" | "faction";
+}) {
+  const { worldId } = useParams();
+  const world = useOpenWorldGuard(worldId);
+  const navigate = useNavigate();
+  const { state } = useStore();
+  const [name, setName] = useState("");
+  const [sentence, setSentence] = useState("");
+  const harnessReady = state?.app.health.harness.status === "healthy";
+  const characters = world?.sheets.filter((s) => s.type === "character").length ?? 0;
+  const listPath = sheetType === "character" ? "cast" : `${sheetType}s`;
+
   return (
     <Screen id={screenId}>
       <PageHeader title={title} />
-      <DegradedBanner component="harness" />
+      {world && (
+        <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+          <Badge tone="outline">{world.meta.name}</Badge>
+          <Badge tone="outline">canon v{world.meta.canonRevision}</Badge>
+          {world.meta.tone && <Badge tone="outline">tone · {world.meta.tone}</Badge>}
+          <Badge tone="outline">{characters} existing characters</Badge>
+        </div>
+      )}
       <div className="scr-form">
         <div className="scr-field">
           <label className="scr-field__label">Name</label>
-          <Input placeholder="Name" />
+          <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
-        {fields.map((f) => (
-          <div key={f} className="scr-field">
-            <label className="scr-field__label">{f}</label>
-            <Textarea placeholder={`${f}…`} />
-          </div>
-        ))}
+        <div className="scr-field">
+          <label className="scr-field__label">One sentence to draft from</label>
+          <Textarea
+            placeholder="A rope-seller who remembers every knot she has ever sold, and who bought it."
+            value={sentence}
+            onChange={(e) => setSentence(e.target.value)}
+          />
+          <span className="scr-field__hint">
+            {harnessReady
+              ? "The studio drafts the full sheet from this, against canon, tone and the existing cast; it lands as a sketch you accept."
+              : "Without OpenCode running, the sentence seeds the sheet as-is — still a sketch through the gate."}
+          </span>
+        </div>
         <div style={{ display: "flex", gap: "var(--space-2)" }}>
-          <Button variant="primary" disabled title="Sheet creation arrives with SPEC-007">
-            Create as sketch
-          </Button>
-          <Button variant="ghost" disabled title="Chat-first drafting arrives with SPEC-005/SPEC-007">
-            Draft with the studio
+          <Button
+            variant="primary"
+            disabled={!worldId || name.trim().length === 0 || sentence.trim().length === 0}
+            onClick={() => {
+              if (!worldId) return;
+              createSheetFromSentence(worldId, sheetType, name.trim(), sentence.trim());
+              navigate(`/w/${worldId}/${listPath}`);
+            }}
+          >
+            {harnessReady ? "Draft as sketch" : "Create as sketch"}
           </Button>
         </div>
         <Callout title="Sketch first, lock later">
-          A new sheet starts as a sketch — enough to be cast in a scene. Locking it makes it citable
-          by dispatches (SPEC-007).
+          A new sheet starts as a sketch — citable, visibly provisional. Locking it is its own
+          gated change, and needs no image to exist first.
         </Callout>
       </div>
+      <DegradedBanner component="harness" />
     </Screen>
   );
 }
 
 export const NewCharacterScreen = () => (
-  <NewSheetScreen screenId="new-character" title="New character" fields={["Essence", "Appearance"]} />
+  <NewSheetScreen screenId="new-character" title="New character" sheetType="character" />
 );
 export const NewLocationScreen = () => (
-  <NewSheetScreen screenId="new-location" title="New location" fields={["Look", "Sound", "Customs"]} />
+  <NewSheetScreen screenId="new-location" title="New location" sheetType="location" />
 );
 
 // ---- Canon -----------------------------------------------------------------
