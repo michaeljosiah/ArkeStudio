@@ -120,6 +120,12 @@ export class ReadModel {
         }));
         return;
       }
+      case "world.stale": {
+        const world = this.state.world;
+        if (!world || world.meta.worldId !== event.worldId) return;
+        this.state = { ...this.state, world: { ...world, stale: true } };
+        return;
+      }
       case "world.opened":
       case "world.closed":
       case "proposal.staged":

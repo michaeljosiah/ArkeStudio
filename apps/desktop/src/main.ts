@@ -1,6 +1,6 @@
 import { join, resolve } from "node:path";
 import { app, BrowserWindow } from "electron";
-import { ChildSupervisor, Coordinator, MockWorldProvider } from "@arke-studio/coordinator";
+import { ChildSupervisor, Coordinator, defaultAppRoot, FsWorldProvider } from "@arke-studio/coordinator";
 import { MockHarnessAdapter } from "@arke-studio/adapter-opencode";
 
 declare const __APP_VERSION__: string;
@@ -15,10 +15,12 @@ const isDev = !app.isPackaged;
 
 /** Repo root in dev (dist/ is two levels below apps/desktop). */
 const repoRoot = resolve(__dirname, "../../..");
-const fixturesRoot = isDev ? join(repoRoot, "fixtures") : join(process.resourcesPath, "fixtures");
 const clientIndex = isDev
   ? join(repoRoot, "packages/client/dist/index.html")
   : join(process.resourcesPath, "client/index.html");
+
+/** The real on-disk app root (SPEC-002 §2.2): %USERPROFILE%\ArkeStudio, env-overridable. */
+const appRoot = defaultAppRoot();
 
 /** Child commands come from the environment until SPEC-005/SPEC-011 manage them properly. */
 function childSpec(id: string, cmdVar: string, argsVar: string) {
@@ -32,13 +34,16 @@ let window: BrowserWindow | null = null;
 let shuttingDown = false;
 
 async function start(): Promise<void> {
+  const provider = new FsWorldProvider(appRoot);
+  await provider.ensureAppRoot();
+
   coordinator = new Coordinator({
-    provider: new MockWorldProvider(fixturesRoot),
+    provider,
     adapter: new MockHarnessAdapter(),
-    changeLogPath: join(app.getPath("userData"), "changes.jsonl"),
+    changeLogPath: join(appRoot, "logs", "coordinator.jsonl"),
     appVersion: __APP_VERSION__,
-    jobsSeedPath: join(fixturesRoot, "queue/jobs.jsonl"),
-    ledgerSeedPath: join(fixturesRoot, "ledger.jsonl"),
+    jobsSeedPath: join(appRoot, "queue", "jobs.jsonl"),
+    ledgerSeedPath: join(appRoot, "ledger.jsonl"),
   });
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,

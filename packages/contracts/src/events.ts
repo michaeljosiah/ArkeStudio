@@ -86,6 +86,9 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
 
   z.object({ ...base, type: z.literal("ledger.appended"), entry: LedgerEntrySchema }).strict(),
 
+  /** Another program changed world files while open — reload required, never merged (SPEC-002 R-23). */
+  z.object({ ...base, type: z.literal("world.stale"), worldId: UlidSchema }).strict(),
+
   /** Supervised-child and harness health — what powers degraded mode (SPEC-001 R-6). */
   z
     .object({

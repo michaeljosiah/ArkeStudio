@@ -10,8 +10,6 @@ files:
 extraResources:
   - from: ../../packages/client/dist
     to: client
-  - from: ../../fixtures
-    to: fixtures
 win:
   target:
     - nsis
