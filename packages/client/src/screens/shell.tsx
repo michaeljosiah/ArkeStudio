@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { Badge, Button, Callout, Card, Input, StatusDot, Switch, Textarea, cx, type StatusDotTone } from "../components/ui.js";
 import { EmptyState, PageHeader, KeyValue, Screen, Section } from "../components/layout.js";
@@ -11,6 +11,7 @@ import {
   cancelJob,
   checkUpdates,
   clearCredential,
+  createSheetFromSentence,
   createWorld,
   detectRuntimes,
   downloadUpdate,
@@ -349,6 +350,18 @@ export function WorldPickerScreen() {
 
 // ---- New world -------------------------------------------------------------
 
+const GENESIS_TONES = ["Quiet dread", "Wonder", "Grim", "Playful"] as const;
+
+/** "Name · one line" → the two halves createSheetFromSentence needs; null until both exist. */
+function parseSeed(raw: string): { name: string; sentence: string } | null {
+  const m = /^(.*?)(?:·|—|-{2}|,)\s*(.+)$/.exec(raw.trim());
+  if (!m) return null;
+  const name = m[1]!.trim();
+  const sentence = m[2]!.trim();
+  return name.length > 0 && sentence.length > 0 ? { name, sentence } : null;
+}
+
+/** World genesis (prototype 12a): the whole window is the surface — form beside the world-so-far rail. */
 export function NewWorldScreen() {
   const { state, connection } = useStore();
   const navigate = useNavigate();
@@ -356,69 +369,235 @@ export function NewWorldScreen() {
   const [logline, setLogline] = useState("");
   const [tone, setTone] = useState("");
   const [genre, setGenre] = useState("");
+  const [firstCharacter, setFirstCharacter] = useState("");
+  const [firstLocation, setFirstLocation] = useState("");
   const [submittedName, setSubmittedName] = useState<string | null>(null);
+  const seededRef = useRef(false);
 
-  // The coordinator opens the new world and re-snapshots; when it lands, go there.
+  const charSeed = parseSeed(firstCharacter);
+  const locSeed = parseSeed(firstLocation);
+
+  // The coordinator opens the new world and re-snapshots; when it lands, seed the optional
+  // first sheets through the same gate everything else uses, then go there.
   useEffect(() => {
-    if (submittedName && state?.world && state.world.meta.name === submittedName) {
-      navigate(`/w/${state.world.meta.worldId}`, { replace: true });
+    if (!submittedName || !state?.world || state.world.meta.name !== submittedName) return;
+    const worldId = state.world.meta.worldId;
+    if (!seededRef.current) {
+      seededRef.current = true;
+      if (charSeed) createSheetFromSentence(worldId, "character", charSeed.name, charSeed.sentence);
+      if (locSeed) createSheetFromSentence(worldId, "location", locSeed.name, locSeed.sentence);
     }
-  }, [submittedName, state?.world, navigate]);
+    navigate(`/w/${worldId}`, { replace: true });
+  }, [submittedName, state?.world, navigate, charSeed, locSeed]);
 
   const canCreate = connection === "open" && name.trim().length > 0 && submittedName === null;
+  const entries = 1 + (charSeed ? 1 : 0) + (locSeed ? 1 : 0);
 
   return (
     <div className="fy-app" data-screen="new-world">
       <ShellTitlebar back={{ label: "Back", to: "/worlds" }} label="Arke Studio · new world" />
-      <div className="fy-dialogwrap">
-        <div className="fy-dialog" style={{ maxWidth: 640 }}>
-          <div>
-            <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>New world</div>
-            <div className="fy-mono" style={{ marginTop: 5 }}>
-              a folder is created under your ArkeStudio directory · readable by hand, portable, never
-              dependent on this app to exist
+      <div className="fy-gate" style={{ flex: 1, minHeight: 0 }}>
+        <div className="fy-gate__main">
+          <div className="fy-gate__head">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="fy-eyebrow-sm">NEW WORLD</div>
+              <h1 className="fy-story__h1">Write it down. It starts existing.</h1>
+            </div>
+            <span className="fy-seg" style={{ marginTop: 4 }}>
+              <button
+                type="button"
+                className="fy-seg__item"
+                disabled
+                style={{ cursor: "not-allowed", opacity: 0.55 }}
+                title="Genesis chat arrives once the authoring gate speaks for worlds — the form drafts the same world"
+              >
+                Chat
+              </button>
+              <span className="fy-seg__item fy-seg__item--active">Form</span>
+            </span>
+          </div>
+          <div className="fy-gate__body" style={{ gap: 14 }}>
+            <div>
+              <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>Name</div>
+              <Input placeholder="The Undersong" value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div>
+              <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>Logline</div>
+              <Textarea
+                placeholder="A coastal city where a drowned god still sings, and some people can hear it."
+                value={logline}
+                onChange={(e) => setLogline(e.target.value)}
+                style={{ minHeight: 52 }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 14 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>Tone</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {GENESIS_TONES.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      className={cx("fy-filterchip", tone === t && "fy-filterchip--active")}
+                      style={{ border: tone === t ? "none" : "1px solid var(--border)" }}
+                      onClick={() => setTone(tone === t ? "" : t)}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+                <Input
+                  placeholder="or your own words"
+                  value={GENESIS_TONES.includes(tone as (typeof GENESIS_TONES)[number]) ? "" : tone}
+                  onChange={(e) => setTone(e.target.value)}
+                  style={{ marginTop: 6 }}
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>Genre</div>
+                <Input placeholder="Coastal fantasy" value={genre} onChange={(e) => setGenre(e.target.value)} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 14 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>
+                  First character <span className="fy-mono">optional</span>
+                </div>
+                <Input
+                  placeholder="Maren Kest · tide-caller, the last one"
+                  value={firstCharacter}
+                  onChange={(e) => setFirstCharacter(e.target.value)}
+                />
+                {firstCharacter.trim().length > 0 && !charSeed && (
+                  <span className="fy-mono" style={{ display: "block", marginTop: 4 }}>
+                    name · one line — the separator splits who they are from what they are
+                  </span>
+                )}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>
+                  First location <span className="fy-mono">optional</span>
+                </div>
+                <Input
+                  placeholder="The Vigil · the lighthouse that listens back"
+                  value={firstLocation}
+                  onChange={(e) => setFirstLocation(e.target.value)}
+                />
+              </div>
+            </div>
+            <div style={{ marginTop: "auto" }} className="fy-mono">
+              a world is a folder under ArkeStudio\worlds — readable by hand, portable, never dependent on this app to
+              exist
             </div>
           </div>
-          <div className="scr-form">
-        <div className="scr-field">
-          <label className="scr-field__label" htmlFor="nw-name">Name</label>
-          <Input id="nw-name" placeholder="The Undersong" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
-        <div className="scr-field">
-          <label className="scr-field__label" htmlFor="nw-logline">Logline</label>
-          <Input
-            id="nw-logline"
-            placeholder="A drowned god still sings beneath the harbour."
-            value={logline}
-            onChange={(e) => setLogline(e.target.value)}
-          />
-          <span className="scr-field__hint">One sentence. It anchors tone everywhere.</span>
-        </div>
-        <div className="scr-field">
-          <label className="scr-field__label" htmlFor="nw-tone">Tone</label>
-          <Input id="nw-tone" placeholder="quiet dread" value={tone} onChange={(e) => setTone(e.target.value)} />
-        </div>
-        <div className="scr-field">
-          <label className="scr-field__label" htmlFor="nw-genre">Genre</label>
-          <Input id="nw-genre" placeholder="coastal fantasy" value={genre} onChange={(e) => setGenre(e.target.value)} />
-        </div>
-        <div>
-          <Button
-            variant="primary"
-            disabled={!canCreate}
-            onClick={() => {
-              setSubmittedName(name.trim());
-              createWorld({
-                name: name.trim(),
-                ...(logline.trim() ? { logline: logline.trim() } : {}),
-                ...(tone.trim() ? { tone: tone.trim() } : {}),
-                ...(genre.trim() ? { genre: genre.trim() } : {}),
-              });
-            }}
-          >
-            {submittedName ? "Creating…" : "Create world"}
-          </Button>
-        </div>
+        <div className="fy-gate__side">
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+            <div style={{ font: "600 15px var(--font-sans)" }}>The world so far</div>
+            <span className="fy-mono" style={{ color: "var(--warning)" }}>
+              {entries} entr{entries === 1 ? "y" : "ies"} · all proposed
+            </span>
+          </div>
+          <div className="fy-draftcard" style={{ padding: "10px 10px 16px" }}>
+            <div
+              style={{
+                height: 118,
+                borderRadius: 8,
+                border: "1.5px dashed var(--neutral-300)",
+                background: "var(--neutral-50)",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 7,
+              }}
+            >
+              <span style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)" }}>No world image yet</span>
+              <Button disabled title="Image jobs need the world folder — generate from the hub once it exists">
+                Generate from the logline
+              </Button>
+              <span className="fy-mono" style={{ fontSize: 9 }}>
+                title · logline · tone ride along · comes back as a take
+              </span>
+            </div>
+            <div style={{ padding: "12px 8px 0" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
+                <div style={{ font: "650 20px var(--font-sans)", letterSpacing: "-0.02em" }}>
+                  {name.trim() || "Unnamed world"}
+                </div>
+                <span className="fy-mono" style={{ color: "var(--warning)", fontSize: 9.5 }}>
+                  proposed
+                </span>
+              </div>
+              <div style={{ font: "400 12.5px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}>
+                {logline.trim() || "The logline lands here as you write it."}
+              </div>
+              {(tone.trim() || genre.trim()) && (
+                <div style={{ display: "flex", gap: 7, marginTop: 10, flexWrap: "wrap" }}>
+                  {tone.trim() && <span className="fy-pill">tone · {tone.trim().toLowerCase()}</span>}
+                  {genre.trim() && <span className="fy-pill">{genre.trim().toLowerCase()}</span>}
+                </div>
+              )}
+            </div>
+          </div>
+          {(charSeed || locSeed) && (
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              {charSeed && (
+                <div className="fy-draftcard" style={{ flex: 1, marginTop: 0, padding: "12px 14px" }}>
+                  <div className="fy-mono" style={{ fontSize: 10 }}>
+                    CHARACTER
+                  </div>
+                  <div style={{ font: "600 13.5px var(--font-sans)", marginTop: 6 }}>{charSeed.name}</div>
+                  <div style={{ font: "400 11.5px/1.5 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 2 }}>
+                    {charSeed.sentence}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8 }}>
+                    <span className="fy-dot fy-dot--sketch" style={{ width: 5, height: 5 }} />
+                    <span className="fy-mono" style={{ fontSize: 9.5 }}>
+                      sketch · no face yet
+                    </span>
+                  </div>
+                </div>
+              )}
+              {locSeed && (
+                <div className="fy-draftcard" style={{ flex: 1, marginTop: 0, padding: "12px 14px" }}>
+                  <div className="fy-mono" style={{ fontSize: 10 }}>
+                    LOCATION
+                  </div>
+                  <div style={{ font: "600 13.5px var(--font-sans)", marginTop: 6 }}>{locSeed.name}</div>
+                  <div style={{ font: "400 11.5px/1.5 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 2 }}>
+                    {locSeed.sentence}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8 }}>
+                    <span className="fy-dot fy-dot--sketch" style={{ width: 5, height: 5 }} />
+                    <span className="fy-mono" style={{ fontSize: 9.5 }}>
+                      sketch
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <div style={{ flex: 1, minHeight: 16 }} />
+          <div style={{ display: "grid", gap: 8 }}>
+            <Button
+              variant="primary"
+              disabled={!canCreate}
+              onClick={() => {
+                setSubmittedName(name.trim());
+                createWorld({
+                  name: name.trim(),
+                  ...(logline.trim() ? { logline: logline.trim() } : {}),
+                  ...(tone.trim() ? { tone: tone.trim().toLowerCase() } : {}),
+                  ...(genre.trim() ? { genre: genre.trim().toLowerCase() } : {}),
+                });
+              }}
+            >
+              {submittedName ? "Creating…" : "Begin in this world"}
+            </Button>
+            <div style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center" }}>
+              Opens the hub. Everything arrives as sketches — lock what holds, discard what doesn't.
+            </div>
           </div>
         </div>
       </div>
