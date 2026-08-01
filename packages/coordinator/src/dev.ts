@@ -1,7 +1,14 @@
 import { cp, mkdir, readdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  agentForPurpose,
+  buildSessionConfig,
+  discoverOpenCode,
+  OpenCodeAdapter,
+} from "@arke-studio/adapter-opencode";
 import { Coordinator } from "./coordinator.js";
+import { ChildSupervisor } from "./supervisor.js";
 import { FsWorldProvider } from "./world/provider.js";
 
 /**
@@ -39,14 +46,35 @@ if (provider.pathBudget.tight) {
   console.warn(`[arke-studio] path budget is tight at this root (${provider.pathBudget.worstCase} worst case)`);
 }
 
+// Real authoring in dev when OpenCode is installed; honest degradation when it is not.
+const discovered = discoverOpenCode();
+const opencodeSupervisor = new ChildSupervisor({
+  id: "opencode",
+  command: discovered?.command ?? null,
+  args: ["serve", "--port", "{port}", "--hostname", "127.0.0.1"],
+  healthPath: "/api/health",
+  readyTimeoutMs: 30_000,
+});
+const adapter = discovered
+  ? new OpenCodeAdapter({ baseUrl: () => `http://127.0.0.1:${opencodeSupervisor.port ?? 0}` })
+  : null;
+console.log(
+  discovered
+    ? `[arke-studio] OpenCode: ${discovered.source} (${discovered.version ?? "unknown version"})`
+    : "[arke-studio] OpenCode: not found — authoring disabled",
+);
+
 const coordinator = new Coordinator({
   provider,
-  adapter: null,
+  adapter,
   changeLogPath: join(devRoot, "logs", "coordinator.jsonl"),
   appVersion: "0.1.0-dev",
   jobsSeedPath: join(devRoot, "queue", "jobs.jsonl"),
   ledgerSeedPath: join(devRoot, "ledger.jsonl"),
+  appRoot: devRoot,
+  authoring: { buildConfig: buildSessionConfig, agentForPurpose },
 });
+coordinator.superviseAs("harness", opencodeSupervisor);
 
 const { port } = await coordinator.start(DEV_PORT);
 console.log(`[arke-studio] dev coordinator on ws://127.0.0.1:${port} (root: ${devRoot})`);

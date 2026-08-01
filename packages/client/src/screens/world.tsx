@@ -8,9 +8,12 @@ import { ConnectedProposalPanel } from "../domain/connected.js";
 import { shortDateTime } from "../lib/format.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
+  draftWithStudio,
   reconcileExternalEdit,
   reloadWorld,
+  replyToPermission,
   stageSheetEdit,
+  usePermissions,
   useStore,
   useWorld,
 } from "../lib/store.js";
@@ -77,15 +80,33 @@ export function WorldLayout() {
   );
 }
 
-/** Staleness, closed-world edits and per-file parse failures — stated, never silent (R-2, R-23, R-28). */
+/** Staleness, closed-world edits, parse failures and permission backstops — stated, never silent. */
 function WorldConditionBanners() {
   const { worldId } = useParams();
   const world = useWorld();
+  const permissions = usePermissions();
   if (!world || world.meta.worldId !== worldId) return null;
-  const hasConditions = world.stale || world.externalEdits.length > 0 || world.problems.length > 0;
+  const permissionEntries = Object.entries(permissions);
+  const hasConditions =
+    world.stale || world.externalEdits.length > 0 || world.problems.length > 0 || permissionEntries.length > 0;
   if (!hasConditions) return null;
   return (
     <div style={{ display: "grid", gap: "var(--space-3)", padding: "var(--space-4) var(--gutter) 0" }}>
+      {permissionEntries.map(([id, p]) => (
+        <Callout key={id} tone="warning" title="The drafting agent is asking permission">
+          {p.description}. This is the backstop, not the gate — nothing lands in the world without
+          your accept either way.
+          <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
+            <Button variant="primary" onClick={() => replyToPermission(id, "once")}>
+              Allow once
+            </Button>
+            <Button onClick={() => replyToPermission(id, "always")}>Always allow</Button>
+            <Button variant="ghost" onClick={() => replyToPermission(id, "reject")}>
+              Reject
+            </Button>
+          </div>
+        </Callout>
+      ))}
       {world.stale && (
         <Callout tone="warning" title="This world changed outside Arke Studio">
           Another program wrote to the world folder while it was open. Reload to pick the changes
@@ -397,6 +418,9 @@ export function CharacterEditScreen() {
   const navigate = useNavigate();
   const [edited, setEdited] = useState<Record<string, string>>({});
   const [stagedAt, setStagedAt] = useState<number | null>(null);
+  const [instruction, setInstruction] = useState("");
+  const { state } = useStore();
+  const harnessReady = state?.app.health.harness.status === "healthy";
 
   const sections = (sheet?.sections ?? []).map((s) => ({
     heading: s.heading,
@@ -445,6 +469,39 @@ export function CharacterEditScreen() {
           productions that pick the change up — and nothing lands until you accept it on the
           sheet page.
         </Callout>
+        <div className="scr-field">
+          <label className="scr-field__label">Or tell the studio what to change</label>
+          <Textarea
+            placeholder="Give her a scar from the night the verse rose early — appearance and relationships should both feel it."
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+          />
+          <span className="scr-field__hint">
+            The agent drafts inside a proposal — its own copy of this sheet — and reads the rest
+            of the world through canon search, never the folder. You accept or discard the result.
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+          <Button
+            disabled={!harnessReady || !sheet || !worldId || instruction.trim().length === 0}
+            title={harnessReady ? undefined : "Authoring needs OpenCode running — see the sidebar"}
+            onClick={() => {
+              if (!sheet || !worldId) return;
+              const dir = sheet.type === "character" ? "characters" : `${sheet.type}s`;
+              draftWithStudio(
+                worldId,
+                `${dir}/${sheet.id}.md`,
+                instruction.trim(),
+                `Studio draft: ${sheet.name}`,
+              );
+              const base = sheet.type === "character" ? "cast" : `${sheet.type}s`;
+              navigate(`/w/${worldId}/${base}/${sheet.id}`);
+            }}
+          >
+            Draft with the studio
+          </Button>
+        </div>
+        <DegradedBanner component="harness" />
       </div>
     </Screen>
   );

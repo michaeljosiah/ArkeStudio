@@ -28,13 +28,34 @@ export interface GateNotice {
   authoritativeSignature?: string;
 }
 
+/** Live authoring activity per proposal (SPEC-005 R-13, R-15). */
+export interface AuthoringActivity {
+  status: "running" | "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed";
+  detail?: string;
+  lines: string[];
+}
+
+/** A harness backstop prompt awaiting the user (SPEC-005 R-16). */
+export interface PendingPermission {
+  description: string;
+  actionClass: string;
+}
+
 interface StoreState {
   connection: ConnectionStatus;
   state: ClientState | null;
   gateNotices: Record<string, GateNotice>;
+  authoring: Record<string, AuthoringActivity>;
+  permissions: Record<string, PendingPermission>;
 }
 
-let current: StoreState = { connection: "connecting", state: null, gateNotices: {} };
+let current: StoreState = {
+  connection: "connecting",
+  state: null,
+  gateNotices: {},
+  authoring: {},
+  permissions: {},
+};
 const listeners = new Set<() => void>();
 let bridge: ArkeBridge | null = null;
 let lastSeq = 0;
@@ -119,22 +140,51 @@ function handleFrame(json: string): void {
     emitChange({ ...current, state: frame.state, gateNotices });
   } else if (current.state) {
     let gateNotices = current.gateNotices;
-    if (frame.event.type === "proposal.blocked") {
+    let authoring = current.authoring;
+    let permissions = current.permissions;
+    const event = frame.event;
+    if (event.type === "proposal.blocked") {
       gateNotices = {
         ...gateNotices,
-        [frame.event.proposalId]: {
-          reason: frame.event.reason,
-          ...(frame.event.detail !== undefined ? { detail: frame.event.detail } : {}),
-          ...(frame.event.authoritativeSignature !== undefined
-            ? { authoritativeSignature: frame.event.authoritativeSignature }
+        [event.proposalId]: {
+          reason: event.reason,
+          ...(event.detail !== undefined ? { detail: event.detail } : {}),
+          ...(event.authoritativeSignature !== undefined
+            ? { authoritativeSignature: event.authoritativeSignature }
             : {}),
         },
       };
-    } else if (frame.event.type === "proposal.resolved") {
+    } else if (event.type === "proposal.resolved") {
       gateNotices = { ...gateNotices };
-      delete gateNotices[frame.event.proposalId];
+      delete gateNotices[event.proposalId];
+      authoring = { ...authoring };
+      delete authoring[event.proposalId];
+    } else if (event.type === "authoring.progress") {
+      const existing = authoring[event.proposalId] ?? { status: "running" as const, lines: [] };
+      authoring = {
+        ...authoring,
+        [event.proposalId]: { ...existing, lines: [...existing.lines.slice(-19), event.line] },
+      };
+    } else if (event.type === "authoring.status") {
+      const existing = authoring[event.proposalId] ?? { status: event.status, lines: [] };
+      authoring = {
+        ...authoring,
+        [event.proposalId]: {
+          ...existing,
+          status: event.status,
+          ...(event.detail !== undefined ? { detail: event.detail } : {}),
+        },
+      };
+    } else if (event.type === "permission.pending") {
+      permissions = {
+        ...permissions,
+        [event.permissionId]: { description: event.description, actionClass: event.actionClass },
+      };
+    } else if (event.type === "permission.settled") {
+      permissions = { ...permissions };
+      delete permissions[event.permissionId];
     }
-    emitChange({ ...current, state: fold(current.state, frame.event), gateNotices });
+    emitChange({ ...current, state: fold(current.state, event), gateNotices, authoring, permissions });
   }
 }
 
@@ -258,6 +308,28 @@ export function useGateNotices(): Record<string, GateNotice> {
   return useStore().gateNotices;
 }
 
+// ---- authoring sessions (SPEC-005) ----------------------------------------
+
+export function draftWithStudio(worldId: string, path: string, instruction: string, summary: string): void {
+  send({ kind: "draft-with-studio", worldId, path, instruction, summary });
+}
+
+export function cancelAuthoring(worldId: string, proposalId: string): void {
+  send({ kind: "authoring-cancel", worldId, proposalId });
+}
+
+export function replyToPermission(permissionId: string, decision: "once" | "always" | "reject"): void {
+  send({ kind: "permission-reply", permissionId, decision });
+}
+
+export function useAuthoring(): Record<string, AuthoringActivity> {
+  return useStore().authoring;
+}
+
+export function usePermissions(): Record<string, PendingPermission> {
+  return useStore().permissions;
+}
+
 const getSnapshot = (): StoreState => current;
 const subscribe = (l: () => void): (() => void) => {
   listeners.add(l);
@@ -278,5 +350,5 @@ export function useWorld(): ClientState["world"] {
 
 /** Test hook: inject a full state and mark the connection open. */
 export function __setStateForTest(state: ClientState): void {
-  emitChange({ connection: "open", state, gateNotices: {} });
+  emitChange({ connection: "open", state, gateNotices: {}, authoring: {}, permissions: {} });
 }

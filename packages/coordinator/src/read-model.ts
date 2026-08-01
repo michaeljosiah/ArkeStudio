@@ -130,6 +130,11 @@ export class ReadModel {
       case "world.closed":
       case "proposal.staged":
       case "proposal.resolved":
+      case "proposal.blocked":
+      case "authoring.progress":
+      case "authoring.status":
+      case "permission.pending":
+      case "permission.settled":
         // Signals only in SPEC-001: the bundle arrives via a fresh snapshot, and proposals
         // are static fixtures until the gate lands in SPEC-004.
         return;

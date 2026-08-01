@@ -103,6 +103,50 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   /** Another program changed world files while open — reload required, never merged (SPEC-002 R-23). */
   z.object({ ...base, type: z.literal("world.stale"), worldId: UlidSchema }).strict(),
 
+  /** Agent progress in product language: canon checks, drafting steps (SPEC-005 R-15). */
+  z
+    .object({
+      ...base,
+      type: z.literal("authoring.progress"),
+      worldId: UlidSchema,
+      proposalId: ProposalIdSchema,
+      line: z.string().min(1),
+    })
+    .strict(),
+  /** Authoring session lifecycle over a proposal — endings always carry a reason (SPEC-005 R-13). */
+  z
+    .object({
+      ...base,
+      type: z.literal("authoring.status"),
+      worldId: UlidSchema,
+      proposalId: ProposalIdSchema,
+      status: z.enum(["running", "completed", "cancelled", "timeout", "budget-exceeded", "failed"]),
+      detail: z.string().optional(),
+    })
+    .strict(),
+
+  /** A harness permission backstop prompt, in Studio's language (SPEC-005 R-16, R-17). */
+  z
+    .object({
+      ...base,
+      type: z.literal("permission.pending"),
+      permissionId: z.string().min(1),
+      /** What the agent is asking to do, already translated for the user. */
+      description: z.string().min(1),
+      actionClass: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("permission.settled"),
+      permissionId: z.string().min(1),
+      decision: z.enum(["once", "always", "reject"]),
+      /** True when a remembered grant answered without prompting; recorded, revocable. */
+      remembered: z.boolean(),
+    })
+    .strict(),
+
   /** Supervised-child and harness health — what powers degraded mode (SPEC-001 R-6). */
   z
     .object({

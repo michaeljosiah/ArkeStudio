@@ -373,6 +373,14 @@ export class ProposalManager {
     return { computedAt: this.store.now(), governing: false, items };
   }
 
+  /** Re-derive the advisory preview from the proposal files as they now stand (SPEC-005). */
+  async refreshPreviewFor(proposalId: string): Promise<void> {
+    await this.store.gateOp(async () => {
+      const proposal = await this.readManifest(proposalId);
+      await this.refreshPreview(proposal);
+    });
+  }
+
   private async refreshPreview(proposal: Proposal): Promise<void> {
     const files: CommitFileInput[] = [];
     for (const target of proposal.targets) {

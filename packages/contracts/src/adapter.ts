@@ -32,6 +32,8 @@ export interface CreateSessionInput {
    * the world root (SPEC-005). Absolute path; the adapter scopes every request to it.
    */
   cwd?: string;
+  /** Named agent from the application-owned roster, e.g. "sheet-editor" (SPEC-005 R-8). */
+  agent?: string;
   /** Parent session id, when a session is a follow-up of another. */
   parent?: string;
   title?: string;
@@ -136,6 +138,25 @@ export const HarnessEventSchema = z.discriminatedUnion("type", [
       type: z.literal("session.error"),
       sessionId: z.string().optional(),
       message: z.string(),
+    })
+    .strict(),
+  /** Tool activity in the product's own language — what makes grounding visible (SPEC-005 R-15). */
+  z
+    .object({
+      type: z.literal("tool.activity"),
+      sessionId: z.string(),
+      tool: z.string(),
+      /** Human line, e.g. "checked canon: CANON-002, CANON-007". */
+      summary: z.string(),
+    })
+    .strict(),
+  /** A session ended — always with a stated reason, never silently (SPEC-005 R-13). */
+  z
+    .object({
+      type: z.literal("session.ended"),
+      sessionId: z.string(),
+      reason: z.enum(["completed", "cancelled", "timeout", "budget-exceeded", "error"]),
+      detail: z.string().optional(),
     })
     .strict(),
 ]);

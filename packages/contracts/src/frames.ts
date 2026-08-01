@@ -71,5 +71,28 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("proposal-mark-seen"), worldId: UlidSchema, proposalId: z.string().min(1) })
     .strict(),
+  /** SPEC-005: stage a proposal and run an authoring agent inside it. */
+  z
+    .object({
+      kind: z.literal("draft-with-studio"),
+      worldId: UlidSchema,
+      /** World-relative target path the draft revises, e.g. "characters/maren-kest.md". */
+      path: z.string().min(1),
+      instruction: z.string().min(1).max(4000),
+      summary: z.string().min(1).max(300),
+    })
+    .strict(),
+  /** SPEC-005 R-13: cancellation is immediate and leaves the proposal intact. */
+  z
+    .object({ kind: z.literal("authoring-cancel"), worldId: UlidSchema, proposalId: z.string().min(1) })
+    .strict(),
+  /** SPEC-005 R-16: a human's decision on a harness backstop prompt. */
+  z
+    .object({
+      kind: z.literal("permission-reply"),
+      permissionId: z.string().min(1),
+      decision: z.enum(["once", "always", "reject"]),
+    })
+    .strict(),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;

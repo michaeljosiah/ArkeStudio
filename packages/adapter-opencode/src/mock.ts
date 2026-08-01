@@ -23,8 +23,7 @@ export class MockHarnessAdapter implements HarnessAdapter {
   private readonly caps = new Set<Capability>(["events", "models", "permissions"]);
   private sessions = 0;
   private correlations = 0;
-  private queue: HarnessEvent[] = [];
-  private waiters: Array<() => void> = [];
+  private readonly subscribers = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null }>();
   private disposed = false;
 
   capabilities(): ReadonlySet<Capability> {
@@ -41,7 +40,10 @@ export class MockHarnessAdapter implements HarnessAdapter {
 
   async dispose(): Promise<void> {
     this.disposed = true;
-    for (const w of this.waiters.splice(0)) w();
+    for (const sub of this.subscribers) {
+      sub.wake?.();
+      sub.wake = null;
+    }
   }
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
@@ -94,25 +96,43 @@ export class MockHarnessAdapter implements HarnessAdapter {
   }
 
   private push(event: HarnessEvent): void {
-    this.queue.push(HarnessEventSchema.parse(event));
-    for (const w of this.waiters.splice(0)) w();
+    const parsed = HarnessEventSchema.parse(event);
+    for (const sub of this.subscribers) {
+      sub.queue.push(parsed);
+      sub.wake?.();
+      sub.wake = null;
+    }
   }
 
-  async *streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {
-    while (!this.disposed && !signal?.aborted) {
-      const next = this.queue.shift();
-      if (next) {
-        yield next;
-        continue;
-      }
-      await new Promise<void>((resolve) => {
-        const onAbort = () => resolve();
-        signal?.addEventListener("abort", onAbort, { once: true });
-        this.waiters.push(() => {
-          signal?.removeEventListener("abort", onAbort);
-          resolve();
-        });
-      });
-    }
+  streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {
+    // Eager registration — see OpenCodeAdapter.streamEvents for why.
+    const sub: { queue: HarnessEvent[]; wake: (() => void) | null } = { queue: [], wake: null };
+    this.subscribers.add(sub);
+    const adapter = this;
+    return {
+      [Symbol.asyncIterator]() {
+        return (async function* () {
+          try {
+            while (!adapter.disposed && !signal?.aborted) {
+              const next = sub.queue.shift();
+              if (next) {
+                yield next;
+                continue;
+              }
+              await new Promise<void>((resolve) => {
+                const onAbort = () => resolve();
+                signal?.addEventListener("abort", onAbort, { once: true });
+                sub.wake = () => {
+                  signal?.removeEventListener("abort", onAbort);
+                  resolve();
+                };
+              });
+            }
+          } finally {
+            adapter.subscribers.delete(sub);
+          }
+        })();
+      },
+    };
   }
 }
