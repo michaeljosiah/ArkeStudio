@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tempDir } from "../tmp.js";
 import { AppIndex } from "../../src/index-db/app-index.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot } from "../world/helpers.js";
@@ -47,7 +47,7 @@ describe("the app index (R-5, R-6, R-15, D2, D3)", () => {
   });
 
   it("rebuilds jobs and ledger from the append-only logs, and deleting it loses nothing (R-5)", async () => {
-    const root = await mkdtemp(join(tmpdir(), "arke-appidx-"));
+    const root = await tempDir("arke-appidx-");
     const { cp, mkdir } = await import("node:fs/promises");
     await mkdir(join(root, "queue"), { recursive: true });
     await cp(join(FIXTURES, "queue", "jobs.jsonl"), join(root, "queue", "jobs.jsonl"));
@@ -73,7 +73,7 @@ describe("the app index (R-5, R-6, R-15, D2, D3)", () => {
   });
 
   it("discards a corrupt app database silently (R-4)", async () => {
-    const root = await mkdtemp(join(tmpdir(), "arke-appidx-"));
+    const root = await tempDir("arke-appidx-");
     const { mkdir } = await import("node:fs/promises");
     await mkdir(join(root, ".index"), { recursive: true });
     await writeFile(join(root, ".index", "app.db"), "not sqlite", "utf8");

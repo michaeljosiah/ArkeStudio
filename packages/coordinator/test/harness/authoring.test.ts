@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MockHarnessAdapter, agentForPurpose, buildSessionConfig } from "@arke-studio/adapter-opencode";
 import type { DomainEvent, HarnessAdapter, HarnessEvent } from "@arke-studio/contracts";
+import { tempDir } from "../tmp.js";
 import { AuthoringService } from "../../src/harness/authoring.js";
 import { GrantStore } from "../../src/harness/grants.js";
 import { settlePermission } from "../../src/harness/authoring.js";
@@ -239,9 +240,7 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
 
 describe("permission backstop and remembered grants (R-16, R-17)", () => {
   it("remembers an always grant across store instances and answers without prompting", async () => {
-    const { mkdtemp } = await import("node:fs/promises");
-    const { tmpdir } = await import("node:os");
-    const root = await mkdtemp(join(tmpdir(), "arke-grants-"));
+    const root = await tempDir("arke-grants-");
 
     const first = new GrantStore(root);
     assert.equal(await first.covers("bash"), false);
@@ -256,9 +255,7 @@ describe("permission backstop and remembered grants (R-16, R-17)", () => {
   });
 
   it("settles covered requests silently and surfaces the rest in Studio language", async () => {
-    const { mkdtemp } = await import("node:fs/promises");
-    const { tmpdir } = await import("node:os");
-    const root = await mkdtemp(join(tmpdir(), "arke-grants-"));
+    const root = await tempDir("arke-grants-");
     const grants = new GrantStore(root);
     await grants.remember("webfetch", CLOCK());
     const adapter = new MockHarnessAdapter();

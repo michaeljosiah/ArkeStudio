@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, readFile, readdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { rename } from "node:fs/promises";
+import { tempDir } from "../tmp.js";
 import { atomicWriteFile, renameWithRetry } from "../../src/world/atomic.js";
 import { appendChanges, readChanges } from "../../src/world/change-writer.js";
 import { writeFile } from "node:fs/promises";
 
 describe("atomic writes (R-13, R-14)", () => {
   it("stages and renames — no partial file ever visible at the target", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-atomic-"));
+    const dir = await tempDir("arke-atomic-");
     const target = join(dir, "sheet.md");
     await atomicWriteFile(target, "content one");
     assert.equal(await readFile(target, "utf8"), "content one");
@@ -21,7 +21,7 @@ describe("atomic writes (R-13, R-14)", () => {
   });
 
   it("retries a transiently failing rename with backoff (R-14, D7)", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-atomic-"));
+    const dir = await tempDir("arke-atomic-");
     let failures = 2;
     const flaky = async (from: string, to: string) => {
       if (failures-- > 0) {
@@ -48,7 +48,7 @@ describe("atomic writes (R-13, R-14)", () => {
 
 describe("changes.jsonl tolerance (R-21, R-22)", () => {
   it("discards a truncated final line on read and repairs it on append", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-changes-"));
+    const dir = await tempDir("arke-changes-");
     const path = join(dir, "changes.jsonl");
     await writeFile(
       path,

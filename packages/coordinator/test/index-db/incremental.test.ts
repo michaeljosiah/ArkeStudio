@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tempDir } from "../tmp.js";
 import { WorldIndex } from "../../src/index-db/world-index.js";
 import { WorldStore } from "../../src/world/store.js";
 import { MarkdownFile, JsonFile, sha256 } from "../../src/world/text-files.js";
@@ -22,7 +22,7 @@ async function assertMatchesColdRebuild(store: WorldStore, label: string): Promi
   assert.ok(live, "index available");
   const liveDump = dumpIndex(live.db);
 
-  const coldDir = await mkdtemp(join(tmpdir(), "arke-cold-"));
+  const coldDir = await tempDir("arke-cold-");
   const cold = WorldIndex.open(coldDir, store.getBundle());
   const coldDump = dumpIndex(cold.db);
   cold.close();

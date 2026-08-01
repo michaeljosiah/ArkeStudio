@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { buildSessionConfig } from "@arke-studio/adapter-opencode";
 import type { HarnessAdapter, HarnessEvent } from "@arke-studio/contracts";
+import { tempDir } from "../tmp.js";
 import { AskService, excerptAppears, extractJson, verifyClaims } from "../../src/canon/ask.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -74,7 +72,7 @@ async function askWith(replies: string[], question: string) {
   const adapter = scriptedAdapter(replies);
   const service = new AskService(adapter, {
     buildConfig: buildSessionConfig,
-    scratchRoot: await mkdtemp(join(tmpdir(), "arke-ask-")),
+    scratchRoot: await tempDir("arke-ask-"),
     wallClockMs: 10_000,
   });
   const result = await service.ask(store, question);
@@ -203,7 +201,7 @@ describe("the grounded pipeline, adversarially (§3.2)", () => {
     const store = await WorldStore.open(await makeTempWorld(), { clock: CLOCK });
     const service = new AskService(null, {
       buildConfig: buildSessionConfig,
-      scratchRoot: await mkdtemp(join(tmpdir(), "arke-ask-")),
+      scratchRoot: await tempDir("arke-ask-"),
     });
     const result = await service.ask(store, "what does tide calling cost?");
     assert.equal(result.outcome, "unavailable");

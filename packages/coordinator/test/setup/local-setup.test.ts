@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, readFile, writeFile, mkdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, SetupStatus } from "@arke-studio/contracts";
+import { tempDir } from "../tmp.js";
 import { LocalSetupService, type SetupDeps } from "../../src/setup/local-setup.js";
 import type { CatalogueEntry } from "../../src/setup/catalogue.js";
 
@@ -98,7 +98,7 @@ function deps(opts: FakeOpts = {}): SetupDeps & { calls: string[] } {
 }
 
 async function root(): Promise<string> {
-  return mkdtemp(join(tmpdir(), "arke-setup-"));
+  return tempDir("arke-setup-");
 }
 
 function last(events: DomainEvent[]): SetupStatus {

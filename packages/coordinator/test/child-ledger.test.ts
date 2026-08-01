@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { tempDir } from "./tmp.js";
 import {
   ChildLedger,
   ownerStamp,
@@ -49,7 +49,7 @@ async function eventually(check: () => boolean, timeoutMs = 5_000): Promise<void
 const nodeImage = basename(process.execPath).toLowerCase();
 
 async function tempLedgerPath(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "arke-ledger-"));
+  const dir = await tempDir("arke-ledger-");
   return join(dir, "run", "children.json");
 }
 
@@ -214,7 +214,7 @@ describe("ChildLedger", () => {
   });
 
   it("survives a corrupt ledger file", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "arke-ledger-"));
+    const dir = await tempDir("arke-ledger-");
     const path = join(dir, "children.json");
     const { atomicWriteFile } = await import("../src/world/atomic.js");
     await atomicWriteFile(path, "{ not json");
