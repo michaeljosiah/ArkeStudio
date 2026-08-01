@@ -95,10 +95,20 @@ export { ReadModel } from "./read-model.js";
 export {
   allocateLoopbackPort,
   ChildSupervisor,
+  registerExitBackstop,
   type SupervisedSpec,
+  type SupervisorDeps,
   type SupervisorStatus,
   type SupervisorStatusEvent,
 } from "./supervisor.js";
+export {
+  ChildLedger,
+  ownerStamp,
+  type ChildRecord,
+  type ProcessProbe,
+  type ReapReport,
+} from "./child-ledger.js";
+export { leashChildToParent, type LeashResult } from "./job-leash.js";
 export { Transport, type TransportOptions } from "./transport.js";
 export { type WorldProvider } from "./world-provider.js";
 export { atomicWriteFile, renameWithRetry } from "./world/atomic.js";

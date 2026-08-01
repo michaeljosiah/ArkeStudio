@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { dirname, join } from "node:path";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ChildLedger, type ChildRecord } from "../src/child-ledger.js";
 import {
   ChildSupervisor,
   allocateLoopbackPort,
@@ -49,6 +52,15 @@ async function eventually(check: () => boolean, timeoutMs = 5_000): Promise<void
     await new Promise((r) => setTimeout(r, 100));
   }
   assert.ok(check(), "condition not met in time");
+}
+
+async function eventuallyAsync(check: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await check()) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.ok(await check(), "condition not met in time");
 }
 
 describe("ChildSupervisor", () => {
@@ -120,6 +132,42 @@ describe("ChildSupervisor", () => {
     );
     assert.match(sup.reason ?? "", /restart budget/);
     await sup.stop();
+  });
+
+  it("records its child in the ledger while it runs and releases it on exit (R-5)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "arke-sup-ledger-"));
+    const ledgerPath = join(dir, "children.json");
+    const ledger = new ChildLedger(ledgerPath);
+    const sup = new ChildSupervisor(
+      {
+        id: "voxa",
+        command: process.execPath,
+        args: [CHILD],
+        env: { MODE: "healthy" },
+        readyTimeoutMs: 10_000,
+      },
+      { ledger },
+    );
+    const readRecords = async (): Promise<ChildRecord[]> => {
+      try {
+        const parsed = JSON.parse(await readFile(ledgerPath, "utf8")) as { children: ChildRecord[] };
+        return parsed.children;
+      } catch {
+        return [];
+      }
+    };
+    await sup.start();
+    await waitForStatus(sup, "healthy");
+    const pid = sup.pid;
+    assert.ok(pid !== null);
+    // Recording is fire-and-forget off the spawn path, so it lands shortly after healthy.
+    await eventuallyAsync(async () => (await readRecords()).some((c) => c.pid === pid));
+    const rec = (await readRecords()).find((c) => c.pid === pid)!;
+    assert.equal(rec.id, "voxa");
+    assert.equal(rec.image, basename(process.execPath).toLowerCase());
+    assert.equal(rec.ownerPid, process.pid);
+    await sup.stop();
+    await eventuallyAsync(async () => (await readRecords()).length === 0);
   });
 
   it("stops a child that ignores the polite signal, leaving no orphan", async () => {
