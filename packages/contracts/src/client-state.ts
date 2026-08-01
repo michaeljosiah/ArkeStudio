@@ -14,6 +14,7 @@ import {
   RoutingFaultSchema,
   SpendStatusSchema,
 } from "./settings.js";
+import { SetupStatusSchema } from "./setup.js";
 import { ReferenceKitSchema } from "./reference.js";
 import { SceneSchema, SelectionsSchema } from "./scene.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
@@ -168,6 +169,8 @@ export const ClientStateSchema = z
         drift: z.array(ManifestDriftSchema).default([]),
         /** Per-provider queue state: pauses with reasons, held counts (SPEC-009 R-8, R-11). */
         queues: z.array(QueueStatusSchema).default([]),
+        /** Local-runtime setup: what is being fetched onto this machine, and how far along. */
+        setup: SetupStatusSchema.nullable().default(null),
         /**
          * First-run environment verification (SPEC-016 R-2). It lives in the snapshot, not only
          * in its event: the check runs once at start-up — before the window exists in a packaged

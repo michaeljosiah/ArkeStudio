@@ -55,6 +55,7 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
       runtime: null,
       drift: [],
       queues: [],
+      setup: null,
       env: null,
       ...overrides,
     },

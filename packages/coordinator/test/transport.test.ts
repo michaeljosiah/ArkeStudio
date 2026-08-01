@@ -21,6 +21,7 @@ const STATE: ClientState = {
     runtime: null,
     drift: [],
     queues: [],
+    setup: null,
     env: null,
   },
   worlds: [],

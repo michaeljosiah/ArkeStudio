@@ -114,6 +114,7 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
         runtime: null,
         drift: [],
         queues: [],
+        setup: null,
         env: null,
       },
       worlds: [
