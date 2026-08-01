@@ -1,6 +1,8 @@
 import { mkdir, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { ulid, type WorldBundle, type WorldSummary } from "@arke-studio/contracts";
+import { AppIndex } from "../index-db/app-index.js";
+import type { DatabaseCtor } from "../index-db/sqlite.js";
 import type { WorldProvider } from "../world-provider.js";
 import { atomicWriteFile } from "./atomic.js";
 import { appendChanges } from "./change-writer.js";
@@ -11,7 +13,8 @@ import { WorldStore } from "./store.js";
 
 /**
  * The real filesystem WorldProvider (SPEC-002 T-14), replacing SPEC-001's mock. Owns the app
- * root, world discovery and creation, and the lifecycle of the one open WorldStore.
+ * root, world discovery and creation, the app-level index (SPEC-003 R-5, R-6), and the
+ * lifecycle of the one open WorldStore.
  */
 
 export interface CreateWorldInput {
@@ -21,16 +24,28 @@ export interface CreateWorldInput {
   genre?: string;
 }
 
+export interface FsWorldProviderOptions {
+  clock?: () => string;
+  /** Injected SQLite constructor (Electron-ABI in the desktop shell; Node's by default). */
+  sqlite?: DatabaseCtor;
+}
+
 export class FsWorldProvider implements WorldProvider {
   private store: WorldStore | null = null;
   private onStaleCb: ((worldId: string) => void) | null = null;
+  private appIndex: AppIndex | null = null;
+  private appIndexReady = false;
   readonly pathBudget: PathBudget;
+  private readonly clock: () => string;
+  private readonly sqlite: DatabaseCtor | undefined;
 
   constructor(
     readonly appRoot: string,
-    private readonly clock: () => string = () => new Date().toISOString(),
+    opts: FsWorldProviderOptions = {},
   ) {
     this.pathBudget = checkPathBudget(appRoot);
+    this.clock = opts.clock ?? (() => new Date().toISOString());
+    this.sqlite = opts.sqlite;
   }
 
   private worldsDir(): string {
@@ -48,14 +63,54 @@ export class FsWorldProvider implements WorldProvider {
     } catch {
       await atomicWriteFile(configPath, JSON.stringify({ schemaVersion: 1 }, null, 2) + "\n");
     }
+    if (!this.appIndexReady) {
+      this.appIndexReady = true;
+      // The app index is a cache over the logs and the worlds present; failure degrades to
+      // direct scans, never to an error (SPEC-003 R-4).
+      try {
+        this.appIndex = AppIndex.open(this.appRoot, this.sqlite);
+        await this.appIndex.rebuildFromLogs(
+          join(this.appRoot, "queue", "jobs.jsonl"),
+          join(this.appRoot, "ledger.jsonl"),
+        );
+      } catch {
+        this.appIndex = null;
+      }
+    }
+  }
+
+  /** The app-level index (registry, jobs, ledger) when it opened. */
+  getAppIndex(): AppIndex | null {
+    return this.appIndex;
+  }
+
+  /** The open world's derived index, when available. */
+  getWorldIndex() {
+    return this.store?.getIndex() ?? null;
   }
 
   onWorldStale(cb: (worldId: string) => void): void {
     this.onStaleCb = cb;
   }
 
+  /**
+   * List worlds. Once the registry is seeded, the picker renders from it without opening or
+   * scanning any world (SPEC-003 R-6, D3); the first call seeds it with one folder pass.
+   */
   async listWorlds(): Promise<WorldSummary[]> {
     await this.ensureAppRoot();
+    if (this.appIndex?.seeded) {
+      return this.appIndex.listWorlds(this.worldsDir());
+    }
+    const summaries = await this.scanAllSummaries();
+    if (this.appIndex) {
+      for (const s of summaries) this.appIndex.upsertWorld(s);
+      this.appIndex.markSeeded();
+    }
+    return summaries;
+  }
+
+  private async scanAllSummaries(): Promise<WorldSummary[]> {
     const out: WorldSummary[] = [];
     let entries: string[];
     try {
@@ -147,6 +202,14 @@ export class FsWorldProvider implements WorldProvider {
     await appendChanges(join(dir, "changes.jsonl"), [
       { ts: at, entity: "world", created: true, source: "form", canonRevisionAfter: 0 },
     ]);
+    this.appIndex?.upsertWorld({
+      worldId,
+      slug,
+      name: input.name,
+      ...(input.logline ? { logline: input.logline } : {}),
+      counts: { characters: 0, locations: 0, factions: 0, canonEntries: 0, productions: 0 },
+      updated: at,
+    });
     return { worldId, slug };
   }
 
@@ -163,19 +226,46 @@ export class FsWorldProvider implements WorldProvider {
     throw new Error(`no world with id ${worldId}`);
   }
 
-  /** Open for read-write: recovery, lock, scan, watcher. Closes any previously open world. */
+  /** Open for read-write: recovery, lock, scan, index, watcher. Closes any previous world. */
   async loadWorld(worldId: string): Promise<WorldBundle> {
     const dir = await this.findWorldDir(worldId);
     if (this.store) {
       if (this.store.worldId === worldId) return this.store.getBundle();
-      await this.store.close();
-      this.store = null;
+      await this.closeStore();
     }
     this.store = await WorldStore.open(dir, {
       clock: this.clock,
+      ...(this.sqlite ? { sqlite: this.sqlite } : {}),
       events: { onStale: () => this.onStaleCb?.(worldId) },
     });
-    return this.store.getBundle();
+    const bundle = this.store.getBundle();
+    this.refreshRegistry(bundle);
+    return bundle;
+  }
+
+  /** Registry rows follow the world's real counts whenever a bundle passes through. */
+  private refreshRegistry(bundle: WorldBundle): void {
+    this.appIndex?.upsertWorld({
+      worldId: bundle.meta.worldId,
+      slug: bundle.meta.slug,
+      name: bundle.meta.name,
+      ...(bundle.meta.logline !== undefined ? { logline: bundle.meta.logline } : {}),
+      counts: {
+        characters: bundle.sheets.filter((s) => s.type === "character").length,
+        locations: bundle.sheets.filter((s) => s.type === "location").length,
+        factions: bundle.sheets.filter((s) => s.type === "faction").length,
+        canonEntries: bundle.canon.length,
+        productions: bundle.productions.length,
+      },
+      updated: bundle.meta.updated,
+    });
+  }
+
+  private async closeStore(): Promise<void> {
+    if (!this.store) return;
+    this.refreshRegistry(this.store.getBundle());
+    await this.store.close();
+    this.store = null;
   }
 
   /** The open store, for mutations. Null until a world is loaded. */
@@ -195,8 +285,14 @@ export class FsWorldProvider implements WorldProvider {
   }
 
   async close(): Promise<void> {
-    await this.store?.close();
-    this.store = null;
+    await this.closeStore();
+    try {
+      this.appIndex?.close();
+    } catch {
+      /* cache */
+    }
+    this.appIndex = null;
+    this.appIndexReady = false;
   }
 
   /** Read-only scan of an arbitrary world directory — the corpus/tests entry point. */

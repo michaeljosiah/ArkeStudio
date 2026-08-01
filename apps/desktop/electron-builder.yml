@@ -7,6 +7,10 @@ directories:
 files:
   - dist/**
   - package.json
+# Native modules cannot load from inside the asar archive (SPEC-003 §2.9).
+asarUnpack:
+  - "**/*.node"
+  - "node_modules/better-sqlite3-electron/**"
 extraResources:
   - from: ../../packages/client/dist
     to: client

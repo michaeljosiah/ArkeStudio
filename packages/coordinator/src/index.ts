@@ -31,3 +31,22 @@ export { readWorldMeta, scanWorld, SUPPORTED_SCHEMA_VERSION, WorldOpenError } fr
 export { fallbackSlug, slugify, uniqueSlug } from "./world/slug.js";
 export { deleteScanState, WorldStore } from "./world/store.js";
 export { JsonFile, MarkdownFile, sha256 } from "./world/text-files.js";
+export { AppIndex } from "./index-db/app-index.js";
+export { castRefs, canonStamp, extract } from "./index-db/citations.js";
+export {
+  contradictionCandidates,
+  DEFAULT_RELEVANCE_FLOOR,
+  ftsQuery,
+  needsYou,
+  refsForCanon,
+  refsForSheet,
+  ripplesForCanonEntry,
+  ripplesForSheet,
+  searchCanon,
+  type CanonCandidate,
+  type CanonSearchResult,
+  type NeedsYouItem,
+  type SheetRefs,
+} from "./index-db/queries.js";
+export { assertFts5, loadNodeSqlite, type Database, type DatabaseCtor } from "./index-db/sqlite.js";
+export { bundleFingerprint, WorldIndex } from "./index-db/world-index.js";
