@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useNavigate, useParams } from "react-router";
 import {
   compilationIsStale,
+  deriveCut,
   designatedCompilation,
   formatMicroUsd,
   headGate,
@@ -11,7 +12,9 @@ import {
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, PageHeader, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
-import { CanonEntryRow, ReferenceTile, SheetCard } from "../domain/domain.js";
+import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
+import { ActivityIcon, ChevronRight, Plus, Sliders } from "../components/icons.js";
+import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { shortDateTime } from "../lib/format.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
@@ -63,17 +66,19 @@ import {
   useVoiceSidecar,
   useWorld,
 } from "../lib/store.js";
-import { HealthDot } from "./shell.js";
 
 /** World screens (§2.9): the world is the home, productions are lenses over it. */
 
 export function WorldLayout() {
   const { worldId } = useParams();
-  const world = useOpenWorldGuard(worldId);
+  useOpenWorldGuard(worldId);
   const { state } = useStore();
+  const navigate = useNavigate();
+  const attention = (state?.app.jobs.some((j) => j.status === "needs-reconciliation") ?? false) ||
+    (state?.app.queues.some((q) => q.paused) ?? false);
   const nav = [
     ["", "Overview"],
-    ["cast", "Cast"],
+    ["cast", "Characters"],
     ["locations", "Locations"],
     ["factions", "Factions"],
     ["canon", "Canon"],
@@ -81,44 +86,37 @@ export function WorldLayout() {
     ["productions", "Productions"],
   ] as const;
   return (
-    <div className="scr-frame">
-      <aside className="scr-sidebar">
-        <div className="scr-sidebar__world">
-          <span className="scr-sidebar__worldname">{world?.meta.name ?? "…"}</span>
-          <span className="scr-sidebar__worldmeta">
-            {world ? `canon v${world.meta.canonRevision} · ${world.meta.tone ?? ""}` : "opening world"}
+    <div className="fy-app">
+      <div className="fy-titlebar">
+        <div className="fy-titlebar__side">
+          <button className="fy-iconbtn" title="Settings" onClick={() => navigate("/settings/providers")}>
+            <Sliders size={13} />
+          </button>
+          <button className="fy-iconbtn" title="Activity" onClick={() => navigate("/activity")}>
+            <ActivityIcon size={13} />
+            {attention && <span className="fy-iconbtn__dot" />}
+          </button>
+        </div>
+        <div className="fy-titlebar__center">Arke Studio</div>
+        <div className="fy-titlebar__side fy-titlebar__side--right">
+          <span className="fy-titlebar__mark" onClick={() => navigate("/worlds")}>
+            Arke
           </span>
         </div>
-        <nav className="scr-sidebar__group">
+      </div>
+      <div className="fy-content">
+        <nav className="fy-pillnav">
           {nav.map(([slug, label]) => (
             <NavLink
               key={slug}
               to={`/w/${worldId}${slug ? `/${slug}` : ""}`}
               end={slug === ""}
-              className={({ isActive }) => cx("scr-navlink", isActive && "scr-navlink--active")}
+              className={({ isActive }) => cx("fy-pillnav__item", isActive && "fy-pillnav__item--active")}
             >
               {label}
             </NavLink>
           ))}
         </nav>
-        <div className="scr-sidebar__group">
-          <span className="scr-sidebar__grouplabel">Studio</span>
-          <NavLink to="/activity" className={({ isActive }) => cx("scr-navlink", isActive && "scr-navlink--active")}>
-            Activity
-          </NavLink>
-          <NavLink to="/settings" className={({ isActive }) => cx("scr-navlink", isActive && "scr-navlink--active")}>
-            Settings
-          </NavLink>
-          <NavLink to="/worlds" className={({ isActive }) => cx("scr-navlink", isActive && "scr-navlink--active")}>
-            Switch world
-          </NavLink>
-        </div>
-        <div className="scr-sidebar__foot">
-          <HealthDot label="Authoring" health={state?.app.health.harness} />
-          <HealthDot label="Voice" health={state?.app.health.voice} />
-        </div>
-      </aside>
-      <div className="scr-frame__content">
         <WorldConditionBanners />
         <Outlet />
       </div>
@@ -198,6 +196,7 @@ function WorldConditionBanners() {
 
 // ---- Overview --------------------------------------------------------------
 
+/** The world hub (prototype 1c): hero, the cast fanned like held cards, and two ways in. */
 export function WorldOverviewScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
@@ -209,80 +208,145 @@ export function WorldOverviewScreen() {
       </Screen>
     );
   }
-  const characters = world.sheets.filter((s) => s.type === "character");
+  const slug = world.meta.slug;
+  const characters = world.sheets.filter((s) => s.type === "character" && s.retired !== true).slice(0, 5);
   const threads = world.canon.filter((c) => c.status === "open");
   const proposals = world.proposals;
+  const production = world.productions[0];
+  const cut = production ? deriveCut(production) : null;
+  // The prototype's fan: per-slot offset, rotation and drift, centre card forward.
+  const FAN = [
+    { left: -410, top: 30, rotate: -9, z: 1, dur: 7.4, delay: 0 },
+    { left: -255, top: 8, rotate: -4, z: 2, dur: 8.1, delay: 0.5 },
+    { left: -85, top: 0, rotate: 0, z: 3, dur: 7.8, delay: 1 },
+    { left: 85, top: 8, rotate: 4, z: 2, dur: 8.6, delay: 1.4 },
+    { left: 240, top: 30, rotate: 9, z: 1, dur: 7.1, delay: 1.8 },
+  ];
   return (
-    <Screen id="world-overview">
-      <PageHeader
-        title={world.meta.name}
-        meta={
-          <>
-            <span>{world.meta.logline}</span>
-            <Badge tone="outline">canon v{world.meta.canonRevision}</Badge>
-          </>
-        }
-      />
-      <div className="lay-stats">
-        {[
-          [characters.length, "characters", "cast"],
-          [world.sheets.filter((s) => s.type === "location").length, "locations", "locations"],
-          [world.canon.length, "canon entries", "canon"],
-          [world.artifacts.length, "artifacts", "artifacts"],
-          [world.productions.length, "productions", "productions"],
-        ].map(([value, label, slug]) => (
-          <button
-            key={String(label)}
-            type="button"
-            className="lay-stats__item"
-            style={{ cursor: "pointer", textAlign: "left" }}
-            onClick={() => navigate(`/w/${worldId}/${slug}`)}
-          >
-            <div className="lay-stats__value">{value}</div>
-            <div className="lay-stats__label">{label}</div>
-          </button>
-        ))}
+    <div data-screen="world-overview">
+      <div className="fy-hero">
+        <div className="fy-hero__eyebrow">
+          A world of yours · canon v{world.meta.canonRevision}
+          {proposals.length > 0 ? ` · ${proposals.length} awaiting you` : ""}
+        </div>
+        <h1 className="fy-hero__title">{world.meta.name}</h1>
+        {world.meta.logline && <p className="fy-hero__lede">{world.meta.logline}</p>}
+      </div>
+      <div className="fy-fan">
+        {characters.map((sheet, i) => {
+          const slot = FAN[i] ?? FAN[2]!;
+          return (
+            <div key={sheet.id} className="fy-fan__slot" style={{ marginLeft: slot.left, top: slot.top, zIndex: slot.z }}>
+              <div
+                className="fy-fan__drift"
+                style={{ animationDuration: `${slot.dur}s`, animationDelay: `${slot.delay}s` }}
+              >
+                <div
+                  className="fy-polaroid"
+                  style={{ transform: `rotate(${slot.rotate}deg)` }}
+                  onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}`)}
+                >
+                  <div className="fy-polaroid__frame">
+                    <Portrait worldSlug={slug} path={sheetPortraitPath(sheet.id)} label={sheet.name} />
+                  </div>
+                  <div className="fy-polaroid__name">{sheet.name}</div>
+                  <div className="fy-polaroid__role">
+                    {sheet.role ?? sheet.sections[0]?.body.split(/[.!?]/)[0] ?? ""}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {characters.length === 0 && (
+          <div style={{ textAlign: "center", paddingTop: 120 }}>
+            <EmptyState title="No one lives here yet" hint="Start with a sentence — a character grows from it." />
+          </div>
+        )}
+      </div>
+      <div className="fy-ctas">
+        {production && cut && (
+          <div className="fy-cta" onClick={() => navigate(`/w/${worldId}/p/${production.meta.id}`)}>
+            <div className="fy-cta__frame">
+              <Portrait
+                worldSlug={slug}
+                path={`productions/${production.meta.id}/${production.scenes[0]?.board?.image ?? "board-v2.png"}`}
+                label={production.meta.title}
+                radius={8}
+              />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="fy-cta__title">Continue {production.meta.title}</div>
+              <div className="fy-cta__sub">
+                {cut.covered} of {cut.entries.length} shots covered
+                {cut.gaps > 0 ? ` · ${cut.gaps} gap${cut.gaps === 1 ? "" : "s"} to close.` : " · the boards are ready."}
+              </div>
+            </div>
+            <Button>Open</Button>
+          </div>
+        )}
+        <div className="fy-cta" onClick={() => navigate(`/w/${worldId}/canon`)}>
+          <div className="fy-cta__frame">
+            <Portrait worldSlug={slug} path={sheetPortraitPath("the-saltmarket")} label="Canon" radius={8} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="fy-cta__title">Grow the canon</div>
+            <div className="fy-cta__sub">
+              {threads.length > 0
+                ? `${threads.length} open thread${threads.length === 1 ? "" : "s"}, waiting to be pulled.`
+                : `${world.canon.length} entries hold; nothing is unsettled.`}
+            </div>
+          </div>
+          <Button variant="secondary">Write</Button>
+        </div>
       </div>
       {proposals.length > 0 && (
-        <Section title="Needs you" aside={<span>{proposals.length} awaiting a decision</span>}>
-          {proposals.map((p) => (
-            <ConnectedProposalPanel key={p.proposal.id} staged={p} />
-          ))}
-        </Section>
+        <div style={{ padding: "0 96px" }}>
+          <Section title="Needs you" aside={<span>{proposals.length} awaiting a decision</span>}>
+            {proposals.map((p) => (
+              <ConnectedProposalPanel key={p.proposal.id} staged={p} />
+            ))}
+          </Section>
+        </div>
       )}
       {threads.length > 0 && (
-        <Section title="Open threads" aside={<span>unsettled canon, waiting to be pulled</span>}>
-          <div className="scr-sectionlist">
-            {threads.map((t) => (
-              <CanonEntryRow key={t.id} entry={t} onOpen={() => navigate(`/w/${worldId}/canon/${t.id}/thread`)} />
+        <div style={{ padding: "0 96px" }}>
+          <Section title="Open threads" aside={<span>unsettled canon, waiting to be pulled</span>}>
+            <div className="scr-sectionlist">
+              {threads.map((t) => (
+                <CanonEntryRow key={t.id} entry={t} onOpen={() => navigate(`/w/${worldId}/canon/${t.id}/thread`)} />
+              ))}
+            </div>
+          </Section>
+        </div>
+      )}
+      <div style={{ padding: "0 96px 40px" }}>
+        <Section title="Recent changes">
+          <div className="scr-sectionlist scr-changelist">
+            {[...world.changes].reverse().slice(0, 8).map((c, i) => (
+              <div key={i} className="scr-change">
+                <span className="scr-change__entity">{c.entity}</span>
+                <span>
+                  {c.fromVersion != null
+                    ? `v${c.fromVersion} → v${c.toVersion}`
+                    : c.toVersion !== undefined
+                      ? `created v${c.toVersion}`
+                      : "created"}
+                  {c.fieldsChanged ? ` · ${c.fieldsChanged.join(", ")}` : ""}
+                </span>
+                <span className="scr-change__when">{shortDateTime(c.ts)}</span>
+              </div>
             ))}
           </div>
         </Section>
-      )}
-      <Section title="Recent changes">
-        <div className="scr-sectionlist scr-changelist">
-          {[...world.changes].reverse().slice(0, 8).map((c, i) => (
-            <div key={i} className="scr-change">
-              <span className="scr-change__entity">{c.entity}</span>
-              <span>
-                {c.fromVersion != null
-                  ? `v${c.fromVersion} → v${c.toVersion}`
-                  : c.toVersion !== undefined
-                    ? `created v${c.toVersion}`
-                    : "created"}
-                {c.fieldsChanged ? ` · ${c.fieldsChanged.join(", ")}` : ""}
-              </span>
-              <span className="scr-change__when">{shortDateTime(c.ts)}</span>
-            </div>
-          ))}
-        </div>
-      </Section>
-    </Screen>
+      </div>
+    </div>
   );
 }
 
 // ---- Sheet list screens ----------------------------------------------------
 
+/** The ledger layout (prototype 1d): one featured portrait, the rest as quiet rows. */
 function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
   kind: Sheet["type"];
   screenId: string;
@@ -294,37 +358,102 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
-  const sheets = world?.sheets.filter((s) => s.type === kind) ?? [];
-  const locked = sheets.filter((s) => s.status === "locked" && s.retired !== true).length;
-  const sketches = sheets.filter((s) => s.status === "sketch" && s.retired !== true).length;
-  const retired = sheets.filter((s) => s.retired === true).length;
+  const [featuredId, setFeaturedId] = useState<string | null>(null);
+  const sheets = world?.sheets.filter((s) => s.type === kind && s.retired !== true) ?? [];
+  const retired = world?.sheets.filter((s) => s.type === kind && s.retired === true).length ?? 0;
+  const locked = sheets.filter((s) => s.status === "locked").length;
+  const sketches = sheets.filter((s) => s.status === "sketch").length;
+  const featured = sheets.find((s) => s.id === featuredId) ?? sheets[0] ?? null;
+  const slug = world?.meta.slug;
+  const roleOf = (sheet: Sheet): string =>
+    [sheet.role, sheet.billing].filter(Boolean).join(" · ") ||
+    (sheet.sections[0]?.body.split(/[.!?]/)[0] ?? "").slice(0, 60);
   return (
-    <Screen id={screenId}>
-      <PageHeader
-        title={title}
-        meta={
-          <>
-            <span>{locked} locked</span>
-            <span>{sketches} sketch{sketches === 1 ? "" : "es"}</span>
-            {retired > 0 && <span>{retired} retired</span>}
-          </>
-        }
-        actions={
-          <Button variant="primary" onClick={() => navigate(newPath)}>
-            New {kind}
-          </Button>
-        }
-      />
+    <div data-screen={screenId}>
+      <div className="fy-corner">
+        <Button variant="primary" onClick={() => navigate(newPath)}>
+          New {kind}
+        </Button>
+      </div>
       {sheets.length === 0 ? (
-        <EmptyState title={`No ${kind}s yet`} hint={hint} />
+        <div style={{ paddingTop: 140 }}>
+          <EmptyState title={`No ${kind}s yet`} hint={hint} />
+        </div>
       ) : (
-        <div className="lay-cardgrid">
-          {sheets.map((sheet) => (
-            <SheetCard key={sheet.id} sheet={sheet} onOpen={() => navigate(detailPath(sheet.id))} />
-          ))}
+        <div className="fy-split">
+          {featured && (
+            <div className="fy-split__side">
+              <div className="fy-feature">
+                <div className="fy-feature__frame">
+                  <Portrait worldSlug={slug} path={sheetPortraitPath(featured.id)} label={featured.name} radius={9} />
+                </div>
+                <div className="fy-feature__title">
+                  {featured.name}
+                  <span className={cx("fy-dot", featured.status === "locked" ? "fy-dot--ok" : "fy-dot--sketch")} />
+                  <span className="fy-feature__note">{featured.status === "locked" ? "canon locked" : "sketch"}</span>
+                </div>
+                <div className="fy-feature__sub">{roleOf(featured)}</div>
+                <div className="fy-feature__actions">
+                  <Button onClick={() => navigate(detailPath(featured.id))}>Open sheet</Button>
+                  {kind === "character" && (
+                    <Button variant="secondary" onClick={() => navigate(`/w/${worldId}/cast/${featured.id}/kit`)}>
+                      Generate looks
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="fy-split__main">
+            <div className="fy-ledgerhead">
+              <span className="fy-ledgerhead__label">
+                {title} · {sheets.length}
+              </span>
+              <span className="fy-ledgerhead__meta">
+                {locked} canon-locked · {sketches} sketch{sketches === 1 ? "" : "es"}
+                {retired > 0 ? ` · ${retired} retired` : ""}
+              </span>
+            </div>
+            <div className="fy-ledger">
+              {sheets.map((sheet) => (
+                <button
+                  key={sheet.id}
+                  type="button"
+                  className={cx("fy-row", featured?.id === sheet.id && "fy-row--selected")}
+                  onClick={() =>
+                    featured?.id === sheet.id ? navigate(detailPath(sheet.id)) : setFeaturedId(sheet.id)
+                  }
+                >
+                  <div className="fy-row__thumb">
+                    <Portrait worldSlug={slug} path={sheetPortraitPath(sheet.id)} label={sheet.name} radius={6} />
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="fy-row__name">
+                      {sheet.name}
+                      <span
+                        className={cx("fy-dot", sheet.status === "locked" ? "fy-dot--ok" : "fy-dot--sketch")}
+                        style={{ width: 6, height: 6 }}
+                      />
+                    </div>
+                    <div className="fy-row__sub">{roleOf(sheet)}</div>
+                  </div>
+                  <span className="fy-row__meta">
+                    {sheet.status === "locked" ? `v${sheet.version}` : `sketch · v${sheet.version}`}
+                    {sheet.voice ? " · voiced" : ""}
+                  </span>
+                  <span className="fy-row__chev">
+                    <ChevronRight />
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="fy-footnote">
+              Everything you produce pulls from these sheets: change one here and it changes everywhere.
+            </p>
+          </div>
         </div>
       )}
-    </Screen>
+    </div>
   );
 }
 
@@ -399,68 +528,116 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const kit = world.referenceKits.find((k) => k.sheetId === sheet.id);
   const sheetPath = `${sheet.type === "character" ? "characters" : `${sheet.type}s`}/${sheet.id}.md`;
   const refs = sheetRefsMap[sheet.id];
+  const isCharacter = sheet.type === "character";
+  const kitTiles = (kit?.tiles ?? []).filter((t) => t.status !== "empty" && t.file !== undefined);
+  const nextAngle = (kit?.tiles ?? []).find((t) => t.status === "empty")?.angle;
+  const slug = world.meta.slug;
   return (
-    <Screen id={screenId}>
-      <PageHeader
-        title={sheet.name}
-        meta={
-          <>
-            {sheet.role && <span>{sheet.role}</span>}
+    <div className="fy-sheet" data-screen={screenId}>
+      {isCharacter && (
+        <div className="fy-sheet__side">
+          <div className="fy-fan__drift">
+            <div className="fy-designcard">
+              <div className="fy-designcard__frame">
+                <Portrait worldSlug={slug} path={sheetPortraitPath(sheet.id)} label={`${sheet.name}: portrait`} radius={8} />
+              </div>
+              <div className="fy-designcard__caption">
+                <span className="fy-designcard__title">Design sheet v{sheet.version}</span>
+                <span className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`} />
+                <span className="fy-designcard__note">{sheet.status === "locked" ? "canon locked" : "sketch"}</span>
+              </div>
+            </div>
+          </div>
+          <div className="fy-turnstrip">
+            {kitTiles.slice(0, 2).map((t) => (
+              <div
+                key={t.angle}
+                className="fy-turnstrip__tile"
+                onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}
+              >
+                <Portrait worldSlug={slug} path={`references/${sheet.id}/${t.file!}`} label={t.angle.replace(/-/g, " ")} radius={8} />
+              </div>
+            ))}
+            <button type="button" className="fy-turnstrip__add" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}>
+              <Plus size={16} />
+              <span>{nextAngle ? nextAngle.replace(/-/g, " ") : "Kit"}</span>
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="fy-sheet__main">
+        <div>
+          <div className="fy-sheet__eyebrow">
+            {sheet.type}
+            {sheet.role ? ` · ${sheet.role}` : ""}
+          </div>
+          <h1 className="fy-sheet__name">{sheet.name}</h1>
+          <div className="fy-sheet__badges">
             <Badge tone={sheet.status === "sketch" ? "outline" : "neutral"}>
               {sheet.status === "sketch" ? `sketch · v${sheet.version}` : `v${sheet.version} · locked`}
             </Badge>
             {sheet.retired && <Badge tone="danger">retired</Badge>}
-            {sheet.voice && <Badge tone="outline">voice · {sheet.voice.label ?? sheet.voice.provider}</Badge>}
             {sheet.origin && (
               <Badge tone="outline">
                 from {sheet.origin.sheet} v{sheet.origin.version}
               </Badge>
             )}
-          </>
-        }
-        actions={
-          <>
-            {sheet.type === "character" && (
-              <>
-                <Button onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}>Reference kit{kit ? ` · ${kit.tiles.filter((t) => t.status !== "empty").length}` : ""}</Button>
-                <Button onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}>Voice</Button>
-              </>
-            )}
-            <Button
-              onClick={() => {
-                if (!worldId) return;
-                setSheetStatus(worldId, sheetPath, sheet.status === "locked" ? "sketch" : "locked");
-              }}
-              title={
-                sheet.status === "locked"
-                  ? "Unlocking ripples: everything citing this did so as settled"
-                  : "Locking makes the identity settled — no image required first"
-              }
-            >
-              {sheet.status === "locked" ? "Unlock" : "Lock to canon"}
+          </div>
+        </div>
+        <div className="fy-sheet__actions">
+          {isCharacter && (
+            <Button variant="primary" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}>
+              Generate looks{kit ? ` · ${kit.tiles.filter((t) => t.status !== "empty").length}` : ""}
             </Button>
-            <Button variant="primary" onClick={() => navigate(`/w/${worldId}/${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${sheet.id}/edit`)}>
-              Edit
-            </Button>
-          </>
-        }
-      />
-      <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
-        <Button variant="ghost" onClick={() => setRenaming(renaming === null ? sheet.name : null)}>
-          Rename
-        </Button>
-        <Button variant="ghost" onClick={() => setDuplicating(duplicating === null ? `${sheet.name} (copy)` : null)}>
-          Duplicate
-        </Button>
-        <Button
-          variant="ghost"
-          disabled={sheet.retired === true}
-          onClick={() => worldId && retireEntity(worldId, sheetPath)}
-          title="Stays resolvable for existing citations; leaves pickers for new work"
-        >
-          Retire
-        </Button>
-      </div>
+          )}
+          <Button onClick={() => navigate(`/w/${worldId}/${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${sheet.id}/edit`)}>
+            Edit the sheet
+          </Button>
+          <Button
+            onClick={() => {
+              if (!worldId) return;
+              setSheetStatus(worldId, sheetPath, sheet.status === "locked" ? "sketch" : "locked");
+            }}
+            title={
+              sheet.status === "locked"
+                ? "Unlocking ripples: everything citing this did so as settled"
+                : "Locking makes the identity settled — no image required first"
+            }
+          >
+            {sheet.status === "locked" ? "Unlock" : "Lock to canon"}
+          </Button>
+        </div>
+        {isCharacter && (
+          <div className="fy-voicecard">
+            <div>
+              <div className="fy-voicecard__label">{sheet.voice ? (sheet.voice.label ?? sheet.voice.provider) : "No voice assigned"}</div>
+              <div className="fy-voicecard__meta">
+                {sheet.voice ? `${sheet.voice.provider} · rides with every dialogue render` : "dialogue renders stay silent until one is chosen"}
+              </div>
+            </div>
+            <div className="fy-voicecard__side">
+              <Button onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}>
+                {sheet.voice ? "Change voice" : "Choose voice"}
+              </Button>
+            </div>
+          </div>
+        )}
+        <div className="fy-sheet__quiet">
+          <Button variant="ghost" onClick={() => setRenaming(renaming === null ? sheet.name : null)}>
+            Rename
+          </Button>
+          <Button variant="ghost" onClick={() => setDuplicating(duplicating === null ? `${sheet.name} (copy)` : null)}>
+            Duplicate
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={sheet.retired === true}
+            onClick={() => worldId && retireEntity(worldId, sheetPath)}
+            title="Stays resolvable for existing citations; leaves pickers for new work"
+          >
+            Retire
+          </Button>
+        </div>
       {renaming !== null && (
         <Card className="scr-form">
           <div className="scr-field">
@@ -512,11 +689,11 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
       {staged.map((p) => (
         <ConnectedProposalPanel key={p.proposal.id} staged={p} />
       ))}
-      <div className="scr-sectionlist">
+      <div className="fy-sheet__grid">
         {sheet.sections.map((s) => (
-          <div key={s.heading} className="scr-sheetsection">
-            <div className="scr-sheetsection__head">{s.heading}</div>
-            <div className="scr-prose">{s.body}</div>
+          <div key={s.heading}>
+            <div className="fy-sheet__sechead">{s.heading}</div>
+            <div className="fy-sheet__secbody">{s.body}</div>
           </div>
         ))}
       </div>
@@ -591,7 +768,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           </div>
         </Section>
       )}
-    </Screen>
+      </div>
+    </div>
   );
 }
 
@@ -855,7 +1033,7 @@ export function ReferenceKitScreen() {
         <div className="lay-cardgrid">
           {(kit?.tiles ?? []).filter((t) => t.angle.startsWith("head")).map((tile, i) => (
             <div key={`${tile.angle}-${i}`}>
-              <ReferenceTile tile={tile} />
+              <ReferenceTile tile={tile} worldSlug={world?.meta.slug} sheetId={sheetId} />
               {tile.status === "generated" && (
                 <Button
                   onClick={() => {
@@ -885,7 +1063,7 @@ export function ReferenceKitScreen() {
         <div className="lay-cardgrid">
           {(kit?.tiles ?? []).filter((t) => t.angle.startsWith("body")).map((tile, i) => (
             <div key={`${tile.angle}-${i}`}>
-              <ReferenceTile tile={tile} />
+              <ReferenceTile tile={tile} worldSlug={world?.meta.slug} sheetId={sheetId} />
               {tile.status === "generated" && (
                 <Button
                   onClick={() => {
@@ -998,7 +1176,7 @@ export function ModelSheetScreen() {
       </Callout>
       <div className="lay-cardgrid">
         {locked.map((tile, i) => (
-          <ReferenceTile key={`${tile.angle}-${i}`} tile={tile} />
+          <ReferenceTile key={`${tile.angle}-${i}`} tile={tile} worldSlug={world?.meta.slug} sheetId={sheetId} />
         ))}
       </div>
     </Screen>

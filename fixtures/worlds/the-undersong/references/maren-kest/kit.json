@@ -2,25 +2,56 @@
   "sheetId": "maren-kest",
   "anchor": "head-front.png",
   "tiles": [
-    { "angle": "head-front", "status": "locked", "file": "head-front.png", "sheetVersion": 4 },
+    {
+      "angle": "head-front",
+      "status": "locked",
+      "file": "head-front.png",
+      "sheetVersion": 4
+    },
     {
       "angle": "head-left-three-quarter",
       "status": "locked",
       "file": "head-left-three-quarter.png",
       "sheetVersion": 4
     },
-    { "angle": "body-full", "status": "generated", "file": "body-full.png", "sheetVersion": 3 },
-    { "angle": "head-profile", "status": "empty" },
-    { "angle": "expression", "status": "empty" }
+    {
+      "angle": "body-full",
+      "status": "generated",
+      "file": "body-full.png",
+      "sheetVersion": 3
+    },
+    {
+      "angle": "head-profile",
+      "status": "empty"
+    },
+    {
+      "angle": "expression",
+      "status": "empty"
+    }
   ],
   "compilations": [
     {
       "file": "model-sheet-v4.png",
       "format": "classic-grid",
       "sheetVersion": 4,
-      "tiles": ["head-front.png", "head-left-three-quarter.png"],
+      "tiles": [
+        "head-front.png",
+        "head-left-three-quarter.png"
+      ],
       "compiledAt": "2026-07-14T09:00:00Z",
       "source": "local",
+      "accepted": true
+    },
+    {
+      "file": "model-sheet-v4-pitch.png",
+      "format": "pitch-board",
+      "sheetVersion": 4,
+      "tiles": [
+        "head-front.png",
+        "head-left-three-quarter.png"
+      ],
+      "compiledAt": "2026-07-20T10:30:00Z",
+      "source": "tk_01J8F0000000000000000000B2",
       "accepted": true
     }
   ],

@@ -10,6 +10,7 @@ import type {
 } from "@arke-studio/contracts";
 import { humanNumber, seconds, shortDateTime, usd } from "../lib/format.js";
 import { Avatar, Badge, Button, Card, StatusDot, cx, type StatusDotTone } from "../components/ui.js";
+import { Portrait } from "../components/portrait.js";
 
 /**
  * Arke Studio's domain primitives (SPEC-001 §2.10) — the vocabulary the rest of the specs
@@ -312,11 +313,27 @@ export function ProposalPanel({
 
 // ---- ReferenceTile — reference kits ---------------------------------------
 
-export function ReferenceTile({ tile }: { tile: ReferenceTileModel }) {
+export function ReferenceTile({
+  tile,
+  worldSlug,
+  sheetId,
+}: {
+  tile: ReferenceTileModel;
+  /** With both, the tile renders its actual image; without, the quiet placeholder. */
+  worldSlug?: string;
+  sheetId?: string;
+}) {
+  const renderable = worldSlug !== undefined && sheetId !== undefined && tile.file !== undefined && tile.status !== "empty";
   return (
     <div className={cx("dom-reftile", tile.status === "empty" && "dom-reftile--empty")}>
       <div className="dom-reftile__image" aria-hidden>
-        {tile.status === "empty" ? "empty slot" : tile.angle}
+        {renderable ? (
+          <Portrait worldSlug={worldSlug} path={`references/${sheetId}/${tile.file!}`} label={tile.angle} radius={6} />
+        ) : tile.status === "empty" ? (
+          "empty slot"
+        ) : (
+          tile.angle
+        )}
       </div>
       <div className="dom-reftile__foot">
         <span className="dom-reftile__angle">{tile.angle.replaceAll("-", " ")}</span>

@@ -24,5 +24,10 @@ export interface WorldProvider {
   gate?(): ProposalManager | null;
   /** The open store itself (SPEC-005: the world-query tool reads through it). */
   openStore?(): WorldStore | null;
+  /**
+   * Resolve a world-relative media file for the renderer (design-fidelity pass): read-only,
+   * traversal-guarded, media extensions only. Null when the file is not servable.
+   */
+  serveMedia?(slug: string, relPath: string): Promise<{ path: string; contentType: string } | null>;
   close?(): Promise<void>;
 }

@@ -15,6 +15,8 @@ function argValue(name: string): string | null {
 const port = argValue("arke-ws-port");
 const appVersion = argValue("arke-app-version") ?? "0.0.0";
 const wsUrl = port ? `ws://127.0.0.1:${port}` : null;
+/** Read-only media base (design-fidelity pass): same server, plain GET. */
+const httpBase = port ? `http://127.0.0.1:${port}` : null;
 
 type FrameListener = (frameJson: string) => void;
 type StatusListener = (status: "connecting" | "open" | "closed") => void;
@@ -30,6 +32,7 @@ function notifyStatus(status: "connecting" | "open" | "closed"): void {
 const bridge = {
   appVersion,
   platform: process.platform as string,
+  httpBase,
 
   /** (Re)establish the socket to the embedded coordinator. Loopback only. */
   connect(): void {

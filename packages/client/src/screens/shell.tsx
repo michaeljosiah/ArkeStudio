@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { Badge, Button, Callout, Card, Input, StatusDot, Switch, Textarea, cx, type StatusDotTone } from "../components/ui.js";
 import { EmptyState, PageHeader, KeyValue, Screen, Section } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
+import { Portrait } from "../components/portrait.js";
 import { shortDateTime, usd } from "../lib/format.js";
 import {
   cancelExport as cancelExportMsg,
@@ -64,8 +65,11 @@ export function HealthDot({ label, health }: { label: string; health: ComponentH
 }
 
 export function ShellChrome() {
+  // The home screen carries its own head (prototype 1a); the bar would double the nav there.
+  const bare = useLocation().pathname === "/worlds";
   return (
     <div className="scr-frame__content" style={{ height: "100%" }}>
+      {bare ? null : (
       <div className="scr-shellbar">
         <span className="scr-shellbar__brand">Arke Studio</span>
         <nav className="scr-shellbar__nav">
@@ -80,6 +84,7 @@ export function ShellChrome() {
           </NavLink>
         </nav>
       </div>
+      )}
       <Outlet />
     </div>
   );
@@ -195,43 +200,90 @@ export function FirstRunScreen() {
 
 // ---- World picker ----------------------------------------------------------
 
+/** Home (prototype 1a): the greeting, and every world as a held card with its key art. */
 export function WorldPickerScreen() {
   const { state } = useStore();
   const navigate = useNavigate();
   const worlds = state?.worlds ?? [];
+  const hour = new Date().getHours();
+  const greeting = hour < 5 ? "Working late" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const lede =
+    worlds.length === 0
+      ? "Nothing here yet — a first world is a folder and a sentence."
+      : worlds.length === 1
+        ? "One world, breathing, or start another."
+        : `${["", "", "Two", "Three", "Four", "Five"][worlds.length] ?? worlds.length} worlds, all of them breathing, or start another.`;
+  const ROT = [-2.5, 1.8, -1.2, 2.4, -2];
   return (
-    <Screen id="world-picker">
-      <PageHeader
-        title="Your worlds"
-        actions={
+    <div className="fy-app" data-screen="world-picker">
+      <div className="fy-home-head">
+        <div className="fy-home-brand">
+          <span className="fy-home-brand__arke">Arke</span>
+          <span className="fy-home-brand__studio">Studio</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <Button variant="ghost" onClick={() => navigate("/activity")}>
+            Activity
+          </Button>
+          <Button variant="ghost" onClick={() => navigate("/settings/providers")}>
+            Settings
+          </Button>
           <Button variant="primary" onClick={() => navigate("/worlds/new")}>
             New world
           </Button>
-        }
-      />
-      {worlds.length === 0 ? (
-        <EmptyState
-          title="No worlds yet"
-          hint="Create one, or drop an existing world folder into your ArkeStudio directory."
-          action={<Button onClick={() => navigate("/first-run")}>Start</Button>}
-        />
-      ) : (
-        <div className="lay-cardgrid">
-          {worlds.map((w) => (
-            <Card key={w.worldId} className="scr-worldcard" onClick={() => navigate(`/w/${w.worldId}`)}>
-              <div className="scr-worldcard__name">{w.name}</div>
-              {w.logline && <div className="scr-worldcard__logline">{w.logline}</div>}
-              <div className="scr-worldcard__counts">
-                <span>{w.counts.characters} characters</span>
-                <span>{w.counts.locations} locations</span>
-                <span>{w.counts.canonEntries} canon entries</span>
-                <span>{w.counts.productions} productions</span>
-              </div>
-            </Card>
-          ))}
         </div>
-      )}
-    </Screen>
+      </div>
+      <div className="fy-content">
+        <div className="fy-home-hero">
+          <div className="fy-hero__eyebrow">{greeting}</div>
+          <h1 className="fy-hero__title fy-hero__title--home" style={{ textAlign: "left" }}>
+            Pick up where you left off.
+          </h1>
+          <p className="fy-hero__lede" style={{ margin: "10px 0 0", maxWidth: 540 }}>
+            {lede}
+          </p>
+        </div>
+        {worlds.length === 0 ? (
+          <div style={{ padding: "54px 88px" }}>
+            <EmptyState
+              title="No worlds yet"
+              hint="Create one, or drop an existing world folder into your ArkeStudio directory."
+              action={<Button onClick={() => navigate("/first-run")}>Start</Button>}
+            />
+          </div>
+        ) : (
+          <div className="fy-home-cards">
+            {worlds.map((w, i) => (
+              <div
+                key={w.worldId}
+                className="fy-fan__drift"
+                style={{ animationDuration: `${7 + (i % 3) * 0.7}s`, animationDelay: `${i * 0.6}s` }}
+              >
+                <div
+                  className="fy-worldcard"
+                  style={{ transform: `rotate(${ROT[i % ROT.length]}deg)` }}
+                  onClick={() => navigate(`/w/${w.worldId}`)}
+                >
+                  <div className="fy-worldcard__frame">
+                    <Portrait worldSlug={w.slug} path="world-art.png" label={`${w.name}: key art`} radius={10} />
+                  </div>
+                  <div className="fy-worldcard__name">{w.name}</div>
+                  {w.logline && <div className="fy-worldcard__logline">{w.logline}</div>}
+                  <div className="fy-worldcard__meta">
+                    <span
+                      className={cx("fy-dot", (w.attention?.unreviewedTakes ?? 0) > 0 ? "fy-dot--warn" : "fy-dot--ok")}
+                    />
+                    {w.counts.characters} character{w.counts.characters === 1 ? "" : "s"} · {w.counts.productions}{" "}
+                    production{w.counts.productions === 1 ? "" : "s"}
+                    <span className="mono">{shortDateTime(w.updated)}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

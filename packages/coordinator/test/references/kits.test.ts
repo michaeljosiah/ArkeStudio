@@ -196,9 +196,13 @@ describe("the classic grid (R-10, D6, D7, §3.2)", () => {
   it("decodes the fixture's real RGB tiles", async () => {
     const { dir, store } = await open();
     const bytes = await readFile(join(dir, "references", "maren-kest", "head-front.png"));
+    // The fixture ships real artwork; the decoder must agree with the PNG's own header.
+    const headerWidth = new DataView(bytes.buffer, bytes.byteOffset).getUint32(16);
+    const headerHeight = new DataView(bytes.buffer, bytes.byteOffset).getUint32(20);
     const image = decodePng(Uint8Array.from(bytes));
-    assert.equal(image.width, 320);
-    assert.equal(image.height, 320);
+    assert.equal(image.width, headerWidth);
+    assert.equal(image.height, headerHeight);
+    assert.ok(image.width >= 320 && image.height >= 320);
     await store.close();
   });
 });

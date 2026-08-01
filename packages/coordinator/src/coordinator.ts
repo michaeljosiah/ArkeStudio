@@ -221,6 +221,12 @@ export class Coordinator {
     this.transport = new Transport({
       getSnapshot: () => this.getState(),
       onMessage: (msg) => void this.handleClientMessage(msg),
+      // GET /media/<world-slug>/<world-relative-file> — read-only renderer media.
+      serveFile: async (urlPath) => {
+        const match = /^\/media\/([^/]+)\/(.+)$/.exec(urlPath);
+        if (!match || !this.opts.provider.serveMedia) return null;
+        return this.opts.provider.serveMedia(match[1]!, match[2]!);
+      },
     });
     this.worldQuery = new WorldQueryServer(() => this.opts.provider.openStore?.() ?? null);
     this.grants = opts.appRoot ? new GrantStore(opts.appRoot) : null;

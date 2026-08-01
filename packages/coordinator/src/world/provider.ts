@@ -7,7 +7,7 @@ import type { DatabaseCtor } from "../index-db/sqlite.js";
 import type { WorldProvider } from "../world-provider.js";
 import { atomicWriteFile } from "./atomic.js";
 import { appendChanges } from "./change-writer.js";
-import { checkPathBudget, toExtendedLength, type PathBudget } from "./paths.js";
+import { checkPathBudget, fromPortable, toExtendedLength, type PathBudget } from "./paths.js";
 import { readWorldMeta, scanWorld, WorldOpenError, SUPPORTED_SCHEMA_VERSION } from "./scan.js";
 import { uniqueSlug } from "./slug.js";
 import { WorldStore } from "./store.js";
@@ -290,6 +290,41 @@ export class FsWorldProvider implements WorldProvider {
   /** The open store, for mutations. Null until a world is loaded. */
   openStore(): WorldStore | null {
     return this.store;
+  }
+
+  /** Media file types the renderer may fetch — nothing else is servable. */
+  private static readonly MEDIA_TYPES: Record<string, string> = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".pdf": "application/pdf",
+  };
+
+  /**
+   * Read-only media for the renderer (design-fidelity pass): any registered world's media
+   * files, resolved under the worlds directory with the traversal cases refused outright.
+   */
+  async serveMedia(slug: string, relPath: string): Promise<{ path: string; contentType: string } | null> {
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return null;
+    const portable = relPath.replace(/\\/g, "/");
+    if (portable.split("/").some((seg) => seg === "" || seg === "." || seg === "..")) return null;
+    const ext = portable.slice(portable.lastIndexOf(".")).toLowerCase();
+    const contentType = FsWorldProvider.MEDIA_TYPES[ext];
+    if (contentType === undefined) return null;
+    const abs = join(this.worldsDir(), slug, fromPortable(portable));
+    try {
+      const info = await stat(toExtendedLength(abs));
+      if (!info.isFile()) return null;
+    } catch {
+      return null;
+    }
+    return { path: toExtendedLength(abs), contentType };
   }
 
   async reloadWorld(worldId: string): Promise<WorldBundle> {
