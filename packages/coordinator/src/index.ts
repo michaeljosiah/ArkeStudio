@@ -14,6 +14,16 @@ export {
   rollingSpend,
 } from "./spend/analytics.js";
 export { LedgerFile } from "./spend/ledger.js";
+export { backoffMs, classifyError, isRateLimit, type FailureClass } from "./queue/classify.js";
+export {
+  JobQueue,
+  type DispatchArtifact,
+  type DispatchClient,
+  type EnqueueInput,
+  type JobQueueOptions,
+} from "./queue/dispatcher.js";
+export { JobJournal } from "./queue/journal.js";
+export { verifyArtifact, type VerifiableArtifact } from "./queue/verify.js";
 export { FrontmatterError, parseFrontmatter, splitSections, type BodySection } from "./frontmatter.js";
 export { ReadModel } from "./read-model.js";
 export {

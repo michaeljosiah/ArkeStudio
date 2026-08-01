@@ -25,12 +25,14 @@ const state: ClientState = {
         worldId: FIXTURE_WORLD_ID,
         productionId: "saltlight",
         target: { kind: "shot", id: "sh_14", coversShots: ["sh_14"] },
+        capability: "video",
         provider: "fal",
         model: "seedance-2.0",
         params: {},
         estimatedMicroUsd: 110000,
         status: "running",
         providerJobId: "fal_q5e",
+        attempt: 1,
         error: null,
         createdAt: AT,
         updatedAt: AT,
@@ -93,6 +95,7 @@ const state: ClientState = {
     },
     runtime: null,
     drift: [],
+    queues: [{ provider: "fal", paused: false, held: 0 }],
   },
   worlds: [
     {

@@ -3,7 +3,7 @@ import { ArtifactSidecarSchema } from "./artifact.js";
 import { ChangeRecordSchema } from "./change.js";
 import { HealthStatusSchema } from "./events.js";
 import { IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
-import { JobSchema, LedgerEntrySchema } from "./job.js";
+import { JobSchema, LedgerEntrySchema, QueueStatusSchema } from "./job.js";
 import { ModelManifestSchema } from "./manifest.js";
 import { ProposalSchema, RipplePreviewSchema } from "./proposal.js";
 import { ProviderStatusSchema } from "./provider.js";
@@ -153,6 +153,8 @@ export const ClientStateSchema = z
         spend: SpendStatusSchema.nullable().default(null),
         runtime: LocalRuntimeStatusSchema.nullable().default(null),
         drift: z.array(ManifestDriftSchema).default([]),
+        /** Per-provider queue state: pauses with reasons, held counts (SPEC-009 R-8, R-11). */
+        queues: z.array(QueueStatusSchema).default([]),
       })
       .strict(),
     worlds: z.array(WorldSummarySchema),

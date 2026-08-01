@@ -5,12 +5,16 @@ import { EmptyState, PageHeader, KeyValue, Screen, Section } from "../components
 import { JobRow } from "../domain/domain.js";
 import { usd } from "../lib/format.js";
 import {
+  cancelJob,
   clearCredential,
   createWorld,
   detectRuntimes,
+  resolveHeldJob,
+  resumeQueue,
   setCredential,
   setRoutingDefault,
   setSpendThreshold,
+  useReconcileReport,
   useStore,
   validateProvider,
 } from "../lib/store.js";
@@ -600,17 +604,45 @@ export function SettingsAboutScreen() {
 
 // ---- Activity --------------------------------------------------------------
 
+const TERMINAL_JOB = new Set(["succeeded", "failed", "cancelled"]);
+
 export function ActivityScreen() {
   const { state } = useStore();
+  const reconcileReport = useReconcileReport();
   const jobs = [...(state?.app.jobs ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const queues = state?.app.queues ?? [];
   const ledger = state?.app.ledger ?? [];
   const byProvider = new Map<string, number>();
   for (const entry of ledger) {
     byProvider.set(entry.provider, (byProvider.get(entry.provider) ?? 0) + (entry.actualMicroUsd ?? entry.estimatedMicroUsd));
   }
+  // FIFO position per provider among queued jobs (SPEC-009 R-11): what waiting is waiting for.
+  const positions = new Map<string, number>();
+  for (const job of [...jobs].reverse()) {
+    if (job.status !== "queued") continue;
+    const n = positions.get(`#${job.provider}`) ?? 0;
+    positions.set(`#${job.provider}`, n + 1);
+    positions.set(job.id, n);
+  }
   return (
     <Screen id="activity">
       <PageHeader title="Activity" meta={<span>Every job, every world, and what it cost.</span>} />
+      {queues
+        .filter((q) => q.paused)
+        .map((q) => (
+          <Callout key={q.provider} tone="warning" title={`${q.provider} is paused — ${q.reason ?? "unknown"}`}>
+            {q.held} job{q.held === 1 ? "" : "s"} held, not failed — they were never wrong. Fix the cause, then
+            resume; nothing is spent until you do.{" "}
+            <Button variant="ghost" onClick={() => resumeQueue(q.provider)}>
+              Resume {q.provider}
+            </Button>
+          </Callout>
+        ))}
+      {reconcileReport && reconcileReport.length > 0 && (
+        <Callout title="What recovery did">
+          {reconcileReport.map((r) => `${r.jobId.slice(0, 8)}… ${r.action}`).join(" · ")}
+        </Callout>
+      )}
       <Section title="Spend" aside={<span>{ledger.length} ledger lines</span>}>
         <div className="lay-stats">
           {[...byProvider.entries()].map(([provider, micro]) => (
@@ -628,7 +660,35 @@ export function ActivityScreen() {
         ) : (
           <div className="scr-sectionlist">
             {jobs.map((job) => (
-              <JobRow key={job.id} job={job} />
+              <div key={job.id} className="scr-sheetsection">
+                <JobRow job={job} />
+                {job.status === "queued" && positions.has(job.id) && (
+                  <span className="scr-field__hint">
+                    {positions.get(job.id) === 0
+                      ? "next up"
+                      : `queued behind ${positions.get(job.id)} job${positions.get(job.id) === 1 ? "" : "s"}`}{" "}
+                    on {job.provider}
+                  </span>
+                )}
+                {job.status === "needs-reconciliation" && (
+                  <>
+                    <span className="scr-field__hint">{job.error}</span>
+                    <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                      <Button onClick={() => resolveHeldJob(job.id, "resubmit")}>Resubmit anyway</Button>
+                      <Button variant="ghost" onClick={() => resolveHeldJob(job.id, "discard")}>
+                        Abandon
+                      </Button>
+                    </div>
+                  </>
+                )}
+                {!TERMINAL_JOB.has(job.status) && job.status !== "needs-reconciliation" && (
+                  <div>
+                    <Button variant="ghost" onClick={() => cancelJob(job.id)}>
+                      Cancel
+                    </Button>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         )}
