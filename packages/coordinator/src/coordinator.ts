@@ -73,6 +73,7 @@ import {
 import { ChangeLog } from "./change-log.js";
 import { AuthoringService, settlePermission } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
+import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
@@ -117,6 +118,11 @@ export interface CoordinatorOptions {
   manifest?: ModelManifest;
   /** SPEC-008: local runtime probing, injected so tests measure nothing. */
   probeRuntime?: () => Promise<RuntimeProbes>;
+  /**
+   * Fetching the local runtimes at setup: Ollama and its default model, the voice models.
+   * Absent → nothing is fetched and the app behaves exactly as before.
+   */
+  setup?: SetupDeps;
   /** SPEC-009: dispatch clients (submit/poll/fetch/cancel + declarations), per provider. */
   dispatchClients?: Record<string, DispatchClient>;
   /** SPEC-013 R-19: the local encoder for exports; absent → exports state the reason. */
@@ -157,6 +163,7 @@ export class Coordinator {
   private readonly grants: GrantStore | null;
   private readonly authoring: AuthoringService | null;
   private readonly genesis: GenesisService | null;
+  private readonly setup: LocalSetupService | null;
   /** actionClass per pending permission id, for remember-on-always (R-16). */
   private readonly pendingPermissions = new Map<string, string>();
   private started = false;
@@ -244,6 +251,18 @@ export class Coordinator {
         ? new GenesisService(opts.adapter, (event) => this.emit(event), {
             buildConfig: opts.authoring.buildConfig,
           })
+        : null;
+    this.setup =
+      opts.setup && opts.appRoot
+        ? new LocalSetupService(
+            opts.setup,
+            (event) => {
+              // The snapshot carries it too: a window that opens mid-download still sees it.
+              if (event.type === "setup.status") this.readModel.setSetup(event.setup);
+              this.emit(event);
+            },
+            { appRoot: opts.appRoot },
+          )
         : null;
     this.askService = opts.authoring
       ? new AskService(opts.adapter, {
@@ -378,6 +397,10 @@ export class Coordinator {
       this.readModel.setEnv(envCheck);
       this.emit({ at: new Date().toISOString(), type: "env.check", ...envCheck });
     }
+
+    // Local runtimes arrive in the background (R-5 revised): the app is usable throughout, and
+    // every component can be skipped. Detection runs first, so a second launch fetches nothing.
+    void this.setup?.run();
 
     // The sidecar's four degradation states (SPEC-011 §2.10), polled gently; the app is fully
     // usable in every one of them (R-4).
@@ -760,6 +783,18 @@ export class Coordinator {
         } catch (err) {
           failed(err instanceof Error ? err.message : String(err));
         }
+        return;
+      }
+      case "setup-skip": {
+        this.setup?.skip(msg.componentId);
+        return;
+      }
+      case "setup-retry": {
+        this.setup?.retry(msg.componentId);
+        return;
+      }
+      case "setup-cancel": {
+        this.setup?.cancel();
         return;
       }
       case "genesis-discard": {
@@ -1750,6 +1785,7 @@ export class Coordinator {
   }
 
   async stop(): Promise<void> {
+    this.setup?.dispose();
     await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
     await this.opts.adapter?.dispose?.().catch(() => {});
     await this.worldQuery.stop();

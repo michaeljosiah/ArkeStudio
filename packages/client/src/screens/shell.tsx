@@ -30,6 +30,10 @@ import {
   useEnvCheck,
   useExports as useExportsState,
   useGenesis,
+  useSetup,
+  setupCancel,
+  setupRetry,
+  setupSkip,
   useReconcileReport,
   useStore,
   useUpdateStatus,
@@ -141,10 +145,94 @@ function setupSteps(
   ];
 }
 
+function mb(bytes: number): string {
+  const m = bytes / (1024 * 1024);
+  return m >= 1024 ? `${(m / 1024).toFixed(1)} GB` : `${Math.round(m)} MB`;
+}
+
+/**
+ * The local runtimes arriving in the background: what each one is for, how far along, and the
+ * way out of every one of them. Nothing here blocks Continue.
+ */
+function SetupDownloads() {
+  const setup = useSetup();
+  if (!setup || setup.components.length === 0) return null;
+  const done = setup.components.filter((c) => c.state === "ready" || c.state === "present").length;
+  const totalBytes = setup.components.reduce((s, c) => s + c.bytesTotal, 0);
+  const doneBytes = setup.components.reduce((s, c) => s + (c.state === "present" ? c.bytesTotal : c.bytesDone), 0);
+  const speed = setup.components.find((c) => c.state === "downloading")?.bytesPerSecond ?? null;
+
+  return (
+    <div style={{ marginTop: 18 }}>
+      <div className="fy-launch__row">
+        <span className="fy-launch__title">On this machine</span>
+        <span style={{ flex: 1 }} />
+        <span className="fy-mono">
+          {done} of {setup.components.length} ready · {mb(doneBytes)} of {mb(totalBytes)}
+          {speed !== null && speed > 0 ? ` · ${mb(speed)}/s` : ""}
+        </span>
+      </div>
+      <div className="fy-setuplist">
+        {setup.components.map((c) => {
+          const pct = c.bytesTotal > 0 ? Math.min(100, Math.round((c.bytesDone / c.bytesTotal) * 100)) : 0;
+          const settled = c.state === "ready" || c.state === "present";
+          return (
+            <div key={c.id} className="fy-setuprow" style={{ display: "block", padding: "9px 2px" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+                <span className="fy-setuprow__label">{c.displayName}</span>
+                <span className="fy-mono" style={{ fontSize: 10 }}>
+                  {c.state === "downloading" ? `${mb(c.bytesDone)} of ${mb(c.bytesTotal)}` : `${c.sizeMb >= 1024 ? `${(c.sizeMb / 1024).toFixed(1)} GB` : `${c.sizeMb} MB`}`}
+                </span>
+                <span className="fy-setuprow__state">
+                  {c.state === "present" ? "already here" : c.state === "downloading" ? `${pct}%` : c.state}
+                </span>
+                {!settled && c.state !== "skipped" && (
+                  <button type="button" className="fy-setuprow__act" onClick={() => setupSkip(c.id)}>
+                    Skip
+                  </button>
+                )}
+                {(c.state === "skipped" || c.state === "failed" || c.state === "blocked") && (
+                  <button type="button" className="fy-setuprow__act" onClick={() => setupRetry(c.id)}>
+                    Retry
+                  </button>
+                )}
+              </div>
+              <div style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)", marginTop: 2 }}>
+                {c.purpose}
+              </div>
+              {c.state === "downloading" && (
+                <div className="fy-setupbar" style={{ height: 3, marginTop: 6 }}>
+                  <div className="fy-setupbar__fill" style={{ width: `${pct}%` }} />
+                </div>
+              )}
+              {c.detail !== undefined && c.state !== "downloading" && (
+                <div className="fy-mono" style={{ marginTop: 3 }}>
+                  {c.detail}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {setup.running && (
+        <div style={{ display: "flex", marginTop: 8 }}>
+          <span className="fy-mono">these arrive in the background — you can carry on without them</span>
+          <span style={{ flex: 1 }} />
+          <button type="button" className="fy-setuprow__act" onClick={() => setupCancel()}>
+            Stop all
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function LaunchScreen() {
   const { connection, state } = useStore();
   const navigate = useNavigate();
   const env = useEnvCheck();
+  const setup = useSetup();
+  const downloading = setup?.running === true;
 
   // Setup never walks off on its own — the user continues when they're ready (no worlds →
   // first run; otherwise the picker, R-8).
@@ -181,7 +269,7 @@ export function LaunchScreen() {
               {settled} of {steps.length} checks settled
             </span>
             <span style={{ flex: 1 }} />
-            <span className="fy-mono">nothing is downloaded here</span>
+            <span className="fy-mono">these are checks — the downloads are below</span>
           </div>
           <div className="fy-setuplist">
             {steps.map((s) => (
@@ -191,6 +279,7 @@ export function LaunchScreen() {
               </div>
             ))}
           </div>
+          <SetupDownloads />
           {connection === "closed" && (
             <Callout tone="warning" title="Waiting for the coordinator">
               The app keeps retrying on its own. If this is a dev browser session, start it with
@@ -207,7 +296,7 @@ export function LaunchScreen() {
               title={ready ? undefined : "Waiting for the studio to finish setting up"}
               onClick={() => navigate(state!.worlds.length === 0 ? "/first-run" : "/worlds", { replace: true })}
             >
-              {ready ? "Continue" : "Setting up…"}
+              {ready ? (downloading ? "Continue in the background →" : "Continue") : "Setting up…"}
             </Button>
           </div>
         </div>

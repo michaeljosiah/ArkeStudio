@@ -70,6 +70,8 @@ interface StoreState {
   authoring: Record<string, AuthoringActivity>;
   /** Conversation over a proposal (SPEC-005): user instructions and gate replies, in order. */
   transcripts: Record<string, Array<{ role: "user" | "gate"; text: string; at: string }>>;
+  /** Local-runtime setup progress — the whole picture, newest wins. */
+  setupStatus: import("@arke-studio/contracts").SetupStatus | null;
   /** Genesis conversations: sandboxed world-shaping before any world exists. */
   genesis: Record<
     string,
@@ -125,6 +127,7 @@ let current: StoreState = {
   authoring: {},
   transcripts: {},
   genesis: {},
+  setupStatus: null,
   permissions: {},
   askResults: {},
   canonSearches: {},
@@ -246,6 +249,7 @@ function handleFrame(json: string): void {
     let authoring = current.authoring;
     let transcripts = current.transcripts;
     let genesis = current.genesis;
+    let setupStatus = current.setupStatus;
     let permissions = current.permissions;
     const event = frame.event;
     if (event.type === "proposal.blocked") {
@@ -275,6 +279,8 @@ function handleFrame(json: string): void {
         ...transcripts,
         [event.proposalId]: [...(transcripts[event.proposalId] ?? []), { role: event.role, text: event.text, at: event.at }],
       };
+    } else if (event.type === "setup.status") {
+      setupStatus = event.setup;
     } else if (event.type === "genesis.turn") {
       const g = genesis[event.genesisId] ?? { turns: [], draft: null, status: null };
       genesis = {
@@ -418,6 +424,7 @@ function handleFrame(json: string): void {
       authoring,
       transcripts,
       genesis,
+      setupStatus,
       permissions,
       askResults,
       canonSearches,
@@ -571,6 +578,24 @@ export function continueStudio(worldId: string, path: string, proposalId: string
 
 export function useTranscripts(): Record<string, Array<{ role: "user" | "gate"; text: string; at: string }>> {
   return useStore().transcripts;
+}
+
+export function setupSkip(componentId: string): void {
+  send({ kind: "setup-skip", componentId });
+}
+
+export function setupRetry(componentId: string): void {
+  send({ kind: "setup-retry", componentId });
+}
+
+export function setupCancel(): void {
+  send({ kind: "setup-cancel" });
+}
+
+/** Live progress wins; the snapshot covers a window that opened mid-download. */
+export function useSetup(): import("@arke-studio/contracts").SetupStatus | null {
+  const { setupStatus, state } = useStore();
+  return setupStatus ?? state?.app.setup ?? null;
 }
 
 export function genesisChat(genesisId: string, text: string): void {
@@ -1046,6 +1071,7 @@ export function __setStateForTest(state: ClientState): void {
     authoring: {},
   transcripts: {},
   genesis: {},
+  setupStatus: null,
     permissions: {},
     askResults: {},
     canonSearches: {},

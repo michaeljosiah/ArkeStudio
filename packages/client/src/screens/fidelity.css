@@ -1446,3 +1446,16 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Setup: the per-component action links on the local-runtime rows. */
+.fy-setuprow__act {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font: 400 11px var(--font-sans);
+  color: var(--muted-foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 0;
+}
+.fy-setuprow__act:hover { color: var(--foreground); }

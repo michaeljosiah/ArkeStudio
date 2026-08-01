@@ -96,6 +96,7 @@ const state: ClientState = {
     runtime: null,
     drift: [],
     queues: [{ provider: "fal", paused: false, held: 0 }],
+    setup: null,
     env: null,
   },
   worlds: [

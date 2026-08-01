@@ -10,6 +10,7 @@ import {
 import { ChildLedger } from "./child-ledger.js";
 import { Coordinator } from "./coordinator.js";
 import { ChildSupervisor, registerExitBackstop } from "./supervisor.js";
+import { nodeSetupDeps } from "./setup/node-deps.js";
 import { FsWorldProvider } from "./world/provider.js";
 
 /**
@@ -86,6 +87,7 @@ const coordinator = new Coordinator({
   jobsSeedPath: join(devRoot, "queue", "jobs.jsonl"),
   ledgerSeedPath: join(devRoot, "ledger.jsonl"),
   appRoot: devRoot,
+  setup: nodeSetupDeps(),
   authoring: { buildConfig: buildSessionConfig, agentForPurpose },
 });
 coordinator.superviseAs("harness", opencodeSupervisor);

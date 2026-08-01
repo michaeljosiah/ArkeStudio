@@ -10,6 +10,7 @@ import {
   Coordinator,
   defaultAppRoot,
   FsWorldProvider,
+  nodeSetupDeps,
   registerExitBackstop,
   type Cipher,
   type DatabaseCtor,
@@ -203,6 +204,8 @@ async function start(): Promise<void> {
         await electronUpdater.autoUpdater.downloadUpdate();
       },
     },
+    // Fetching the local runtimes at setup: the shared Node seams (streamed HTTP, subprocesses).
+    setup: nodeSetupDeps(),
     openPath: (p) => void shell.openPath(p),
     nativeIndex: sqlite
       ? { ok: true }

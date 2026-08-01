@@ -158,6 +158,9 @@ export {
   type ImageExtraction,
 } from "./sheets/authoring.js";
 export { AuthoringService, describeActionClass, settlePermission } from "./harness/authoring.js";
+export { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
+export { SETUP_CATALOGUE, catalogueTotalMb, type CatalogueEntry } from "./setup/catalogue.js";
+export { nodeSetupDeps } from "./setup/node-deps.js";
 export { GrantStore, type RememberedGrant } from "./harness/grants.js";
 export { WorldQueryServer } from "./harness/world-query.js";
 export { castRefs, canonStamp, extract } from "./index-db/citations.js";

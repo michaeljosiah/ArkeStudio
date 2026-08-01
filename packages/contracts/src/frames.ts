@@ -93,6 +93,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("authoring-cancel"), worldId: UlidSchema, proposalId: z.string().min(1) })
     .strict(),
+  /** Local-runtime setup: leave one out, try one again, or stop the lot. */
+  z.object({ kind: z.literal("setup-skip"), componentId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("setup-retry"), componentId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("setup-cancel") }).strict(),
   /** Genesis conversation: shape a world that does not exist yet, in a sandbox session. */
   z
     .object({

@@ -12,6 +12,7 @@ import {
   RoutingFaultSchema,
   SpendStatusSchema,
 } from "./settings.js";
+import { SetupStatusSchema } from "./setup.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
 import { RankedVoiceSchema } from "./voice.js";
 
@@ -310,6 +311,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       text: z.string().min(1),
     })
     .strict(),
+  /** Local-runtime setup progress: one event per change, the whole picture each time. */
+  z.object({ ...base, type: z.literal("setup.status"), setup: SetupStatusSchema }).strict(),
   /** Genesis conversation turns — before any world exists, in the sandbox (SPEC-005). */
   z
     .object({
