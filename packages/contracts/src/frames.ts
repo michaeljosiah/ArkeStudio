@@ -312,5 +312,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       style: z.string().max(500).nullable(),
     })
     .strict(),
+  /** SPEC-011 R-7: rank the voice catalogue against the sheet's written voice. */
+  z.object({ kind: z.literal("voice-candidates"), worldId: UlidSchema, sheetId: SlugSchema }).strict(),
+  /**
+   * SPEC-011 R-9/R-10: audition one candidate with the character's line. Cloud previews cost;
+   * the client shows the stated figure before this message is sent.
+   */
+  z
+    .object({
+      kind: z.literal("voice-preview"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      provider: z.string().min(1),
+      voiceId: z.string().min(1),
+    })
+    .strict(),
+  /** SPEC-011 R-17: local push-to-talk transcription. Audio goes to loopback, nowhere else. */
+  z
+    .object({
+      kind: z.literal("transcribe-dictation"),
+      requestId: z.string().min(1),
+      audioBase64: z.string().min(1).max(8_000_000),
+      contentType: z.string().min(1),
+    })
+    .strict(),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;

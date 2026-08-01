@@ -48,6 +48,14 @@ export {
   type GridResult,
 } from "./references/kit.js";
 export { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "./references/png.js";
+export {
+  previewCacheFile,
+  VoiceService,
+  voiceLineRequest,
+  type CloudVoiceSource,
+  type SidecarLike,
+  type VoiceServiceDeps,
+} from "./voice/service.js";
 export { FrontmatterError, parseFrontmatter, splitSections, type BodySection } from "./frontmatter.js";
 export { ReadModel } from "./read-model.js";
 export {

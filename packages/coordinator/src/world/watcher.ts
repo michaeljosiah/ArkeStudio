@@ -17,6 +17,8 @@ const IGNORED = [
   /^\.index([/\\]|$)/,
   /^\.history([/\\]|$)/,
   /^\.proposals([/\\]|$)/,
+  /^\.cache([/\\]|$)/, // derived previews and staging (SPEC-011) — regenerable, never canon
+  /^\.staging([/\\]|$)/, // the queue's artifact staging area (SPEC-009 R-12)
   /^world\.lock$/,
   /\.tmp-[0-9A-Z]+$/i,
 ];

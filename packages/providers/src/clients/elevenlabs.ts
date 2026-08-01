@@ -99,6 +99,29 @@ export class ElevenLabsClient implements ProviderClient {
     /* synchronous API */
   }
 
+  /** The cloud voice catalogue (SPEC-011 R-6): labels plus descriptive attributes for matching. */
+  async listVoicesCatalog(key: string): Promise<
+    Array<{ provider: string; voiceId: string; label: string; attributes: string[]; local: boolean; canClone: boolean }>
+  > {
+    const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/voices`, {
+      headers: this.headers(key),
+    });
+    if (status >= 400) return [];
+    const voices =
+      (body as { voices?: Array<{ voice_id?: string; name?: string; labels?: Record<string, string> }> } | null)
+        ?.voices ?? [];
+    return voices
+      .filter((v) => typeof v.voice_id === "string" && typeof v.name === "string")
+      .map((v) => ({
+        provider: "elevenlabs",
+        voiceId: v.voice_id!,
+        label: v.name!,
+        attributes: Object.values(v.labels ?? {}).map((s) => s.toLowerCase()),
+        local: false,
+        canClone: true, // cloning is cloud-only (SPEC-011 R-12); the plan probe gates the button
+      }));
+  }
+
   /**
    * Reconciliation strategy B (supportsListRecent): the recent-generation history. ElevenLabs
    * carries no caller metadata, so `idempotencyKey` is never present — the reconciler treats a

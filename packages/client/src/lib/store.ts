@@ -8,6 +8,7 @@ import {
   type ClientState,
   type DomainEvent,
   type ProviderId,
+  type RankedVoice,
   type ReconcileAction,
   type ReferenceAngle,
 } from "@arke-studio/contracts";
@@ -74,6 +75,20 @@ interface StoreState {
   sheetRefs: Record<string, SheetRefsState>;
   /** The last start-up reconciliation report (SPEC-009 R-18) — transient, newest wins. */
   reconcileReport: ReconcileAction[] | null;
+  /** SPEC-011: ranked voice candidates per sheet, with the honest overlap framing. */
+  voiceCandidates: Record<string, VoiceCandidatesState>;
+  /** SPEC-011: audition results keyed provider/voiceId — cached files replay free. */
+  voicePreviews: Record<string, { file: string | null; error: string | null }>;
+  /** SPEC-011: dictation results by requestId — inserted as editable text, never submitted. */
+  dictation: Record<string, { text: string | null; error: string | null }>;
+  voiceSidecar: { state: "not-started" | "downloading" | "unavailable" | "ready"; detail: string } | null;
+}
+
+export interface VoiceCandidatesState {
+  extracted: string[];
+  ranked: RankedVoice[];
+  previewLine: { text: string; source: "own-line" | "drafted" | "stock" };
+  cloudPreviewMicroUsd: number | null;
 }
 
 let current: StoreState = {
@@ -87,6 +102,10 @@ let current: StoreState = {
   canonRefs: {},
   sheetRefs: {},
   reconcileReport: null,
+  voiceCandidates: {},
+  voicePreviews: {},
+  dictation: {},
+  voiceSidecar: null,
 };
 const listeners = new Set<() => void>();
 let bridge: ArkeBridge | null = null;
@@ -241,6 +260,30 @@ function handleFrame(json: string): void {
     if (event.type === "queue.reconciled") {
       reconcileReport = event.report;
     }
+    let voiceCandidates = current.voiceCandidates;
+    let voicePreviews = current.voicePreviews;
+    let dictation = current.dictation;
+    let voiceSidecar = current.voiceSidecar;
+    if (event.type === "voice.candidates") {
+      voiceCandidates = {
+        ...voiceCandidates,
+        [event.sheetId]: {
+          extracted: event.extracted,
+          ranked: event.ranked,
+          previewLine: event.previewLine,
+          cloudPreviewMicroUsd: event.cloudPreviewMicroUsd,
+        },
+      };
+    } else if (event.type === "voice.preview") {
+      voicePreviews = {
+        ...voicePreviews,
+        [`${event.provider}/${event.voiceId}`]: { file: event.file, error: event.error },
+      };
+    } else if (event.type === "dictation.result") {
+      dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
+    } else if (event.type === "voice.sidecar") {
+      voiceSidecar = { state: event.state, detail: event.detail };
+    }
     if (event.type === "canon.answer") {
       askResults = { ...askResults, [event.askId]: event.result };
     } else if (event.type === "canon.search") {
@@ -278,6 +321,10 @@ function handleFrame(json: string): void {
       canonRefs,
       sheetRefs,
       reconcileReport,
+      voiceCandidates,
+      voicePreviews,
+      dictation,
+      voiceSidecar,
     });
   }
 }
@@ -609,6 +656,40 @@ export function setStyleOverride(worldId: string, sheetId: string, style: string
   send({ kind: "set-style-override", worldId, sheetId, style });
 }
 
+// ---- SPEC-011: voice -------------------------------------------------------
+
+export function requestVoiceCandidates(worldId: string, sheetId: string): void {
+  send({ kind: "voice-candidates", worldId, sheetId });
+}
+
+/** The client shows the stated cloud cost before this is sent (R-10). */
+export function requestVoicePreview(worldId: string, sheetId: string, provider: string, voiceId: string): void {
+  send({ kind: "voice-preview", worldId, sheetId, provider, voiceId });
+}
+
+export function transcribeDictation(requestId: string, audioBase64: string, contentType: string): void {
+  send({ kind: "transcribe-dictation", requestId, audioBase64, contentType });
+}
+
+export function useVoiceCandidates(): Record<string, VoiceCandidatesState> {
+  return useStore().voiceCandidates;
+}
+
+export function useVoicePreviews(): Record<string, { file: string | null; error: string | null }> {
+  return useStore().voicePreviews;
+}
+
+export function useDictation(): Record<string, { text: string | null; error: string | null }> {
+  return useStore().dictation;
+}
+
+export function useVoiceSidecar(): {
+  state: "not-started" | "downloading" | "unavailable" | "ready";
+  detail: string;
+} | null {
+  return useStore().voiceSidecar;
+}
+
 const getSnapshot = (): StoreState => current;
 const subscribe = (l: () => void): (() => void) => {
   listeners.add(l);
@@ -640,5 +721,9 @@ export function __setStateForTest(state: ClientState): void {
     canonRefs: {},
     sheetRefs: {},
     reconcileReport: null,
+    voiceCandidates: {},
+    voicePreviews: {},
+    dictation: {},
+    voiceSidecar: null,
   });
 }
