@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  attachmentFor,
   compilationIsStale,
   designatedCompilation,
   headGate,
@@ -14,7 +15,6 @@ import {
 } from "@arke-studio/contracts";
 import { establishRequests, missingTileAngles, styleLine, tileRequest } from "../../src/references/generate.js";
 import {
-  attachmentFor,
   chooseAnchor,
   compileGrid,
   designate,

@@ -40,6 +40,12 @@ export interface CommitFileInput {
   content?: string;
   /** sha256 of the base content this change was drafted against; null for create (R-27). */
   baseHash: string | null;
+  /**
+   * Save without cutting a version (SPEC-012 R-5): direct chapter authoring and shot prompt
+   * overrides are production output, not gated change. The history snapshot for the current
+   * version is refreshed rather than a new one cut.
+   */
+  preserveVersion?: boolean;
 }
 
 export interface CommitInput {
@@ -213,7 +219,8 @@ export class Committer {
         fromVersion = baseDoc ? ((baseDoc.data["version"] as number) ?? 1) : null;
         if (f.action !== "delete") {
           const doc = MarkdownFile.parse(newContent!);
-          toVersion = f.action === "create" ? 1 : (fromVersion ?? 0) + 1; // R-17
+          toVersion =
+            f.action === "create" ? 1 : f.preserveVersion === true ? (fromVersion ?? 1) : (fromVersion ?? 0) + 1; // R-17; SPEC-012 R-5
           doc.setData({ version: toVersion, updated: at.slice(0, 10) });
           newContent = doc.serialize();
           historyNew = `${dirPath}/v${toVersion}.md`;
@@ -248,7 +255,8 @@ export class Committer {
         fromVersion = baseDoc ? ((baseDoc.value["version"] as number) ?? 1) : null;
         if (f.action !== "delete") {
           const doc = JsonFile.parse(newContent!);
-          toVersion = f.action === "create" ? 1 : (fromVersion ?? 0) + 1;
+          toVersion =
+            f.action === "create" ? 1 : f.preserveVersion === true ? (fromVersion ?? 1) : (fromVersion ?? 0) + 1;
           doc.set({ version: toVersion });
           newContent = doc.serialize();
           historyNew = `${dirPath}/v${toVersion}.json`;

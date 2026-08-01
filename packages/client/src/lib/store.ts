@@ -683,6 +683,78 @@ export function useDictation(): Record<string, { text: string | null; error: str
   return useStore().dictation;
 }
 
+// ---- SPEC-012: productions, scenes, boards, dispatch -----------------------
+
+export function createProduction(worldId: string, title: string, format: "story" | "video" | "stills", logline?: string): void {
+  send({ kind: "create-production", worldId, title, format, ...(logline !== undefined ? { logline } : {}) });
+}
+
+export function draftScene(worldId: string, productionId: string, brief: string): void {
+  send({ kind: "draft-scene", worldId, productionId, brief });
+}
+
+export function stageSceneEdit(worldId: string, productionId: string, sceneFile: string, summary: string, scene: unknown): void {
+  send({ kind: "stage-scene-edit", worldId, productionId, sceneFile, summary, scene });
+}
+
+export function createChapter(worldId: string, productionId: string, title: string, order: number): void {
+  send({ kind: "create-chapter", worldId, productionId, title, order });
+}
+
+export function saveChapter(worldId: string, productionId: string, chapterFile: string, body: string): void {
+  send({ kind: "save-chapter", worldId, productionId, chapterFile, body });
+}
+
+export function draftChapter(worldId: string, productionId: string, chapterFile: string, instruction: string): void {
+  send({ kind: "draft-chapter", worldId, productionId, chapterFile, instruction });
+}
+
+export function reorderChapters(worldId: string, productionId: string, orderedFiles: string[]): void {
+  send({ kind: "reorder-chapters", worldId, productionId, orderedFiles });
+}
+
+export function setPromptOverride(worldId: string, productionId: string, sceneFile: string, shotId: string, text: string | null): void {
+  send({ kind: "set-prompt-override", worldId, productionId, sceneFile, shotId, text });
+}
+
+export function compileSceneBoard(worldId: string, productionId: string, sceneFile: string): void {
+  send({ kind: "compile-scene-board", worldId, productionId, sceneFile });
+}
+
+export function exportSceneBoard(worldId: string, productionId: string, sceneFile: string): void {
+  send({ kind: "export-scene-board", worldId, productionId, sceneFile });
+}
+
+export function dispatchScene(
+  worldId: string,
+  productionId: string,
+  sceneFile: string,
+  mode: "per-shot" | "whole-scene",
+  modelId: string,
+  resolution?: string,
+): void {
+  send({ kind: "dispatch-scene", worldId, productionId, sceneFile, mode, modelId, ...(resolution !== undefined ? { resolution } : {}) });
+}
+
+export function recordReview(
+  worldId: string,
+  productionId: string,
+  takeId: string,
+  decision: "accept" | "reject",
+  shotId?: string,
+  citation?: { sheet: string; field?: string; note?: string },
+): void {
+  send({
+    kind: "record-review",
+    worldId,
+    productionId,
+    takeId,
+    decision,
+    ...(shotId !== undefined ? { shotId } : {}),
+    ...(citation !== undefined ? { citation } : {}),
+  });
+}
+
 export function useVoiceSidecar(): {
   state: "not-started" | "downloading" | "unavailable" | "ready";
   detail: string;

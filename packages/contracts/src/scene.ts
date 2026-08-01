@@ -30,6 +30,19 @@ export const ShotSchema = z
     camera: z.string().optional(),
     audio: ShotAudioSchema.optional(),
     durationSec: z.number().positive().optional(),
+    /**
+     * An edited prompt, stored as an override, never a replacement (SPEC-012 R-15, D6): the
+     * assembled form stays derivable, Reset stays possible, and the recorded sheet versions
+     * are what make override staleness computable (R-16, D7).
+     */
+    promptOverride: z
+      .object({
+        text: z.string().min(1),
+        /** Cited sheet versions at the moment of the edit. */
+        sheetVersions: z.record(SlugSchema, z.number().int().min(1)),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type Shot = z.infer<typeof ShotSchema>;

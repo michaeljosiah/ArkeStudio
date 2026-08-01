@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { SlugSchema, UlidSchema } from "./ids.js";
+import { ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
 
@@ -334,6 +334,120 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: z.string().min(1),
       audioBase64: z.string().min(1).max(8_000_000),
       contentType: z.string().min(1),
+    })
+    .strict(),
+  /** SPEC-012 R-1/R-2: a production is a lens over the world — nothing is copied. */
+  z
+    .object({
+      kind: z.literal("create-production"),
+      worldId: UlidSchema,
+      title: z.string().min(1).max(200),
+      format: z.enum(["story", "video", "stills"]),
+      logline: z.string().max(500).optional(),
+    })
+    .strict(),
+  /** SPEC-012 R-7: draft a scene in conversation; accepting creates shots, dispatches nothing. */
+  z
+    .object({
+      kind: z.literal("draft-scene"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      brief: z.string().min(1).max(2000),
+    })
+    .strict(),
+  /** SPEC-012 R-10: shot edits, reordering and insertion go through the gate and version. */
+  z
+    .object({
+      kind: z.literal("stage-scene-edit"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneFile: z.string().min(1),
+      summary: z.string().min(1).max(300),
+      scene: z.unknown(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("create-chapter"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      title: z.string().min(1).max(200),
+      order: z.number().int().min(1),
+    })
+    .strict(),
+  /** SPEC-012 R-5: direct authoring saves in place — no proposal, no version cut. */
+  z
+    .object({
+      kind: z.literal("save-chapter"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      body: z.string(),
+    })
+    .strict(),
+  /** SPEC-012 R-5: agent drafts arrive as proposals and cut a version on acceptance. */
+  z
+    .object({
+      kind: z.literal("draft-chapter"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      instruction: z.string().min(1).max(2000),
+    })
+    .strict(),
+  /** SPEC-012 R-4: reorder via frontmatter — no file renamed, no history path moved. */
+  z
+    .object({
+      kind: z.literal("reorder-chapters"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      orderedFiles: z.array(z.string().min(1)).min(1),
+    })
+    .strict(),
+  /** SPEC-012 R-15/R-16: an edited prompt is an override on the shot; null resets. */
+  z
+    .object({
+      kind: z.literal("set-prompt-override"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneFile: z.string().min(1),
+      shotId: ShotIdSchema,
+      text: z.string().max(4000).nullable(),
+    })
+    .strict(),
+  /** SPEC-012 R-11/R-12: compile the board — local, free, scene-version stamped. */
+  z
+    .object({ kind: z.literal("compile-scene-board"), worldId: UlidSchema, productionId: SlugSchema, sceneFile: z.string().min(1) })
+    .strict(),
+  /** SPEC-012 R-13: export files exactly one artifact; recompiling files none. */
+  z
+    .object({ kind: z.literal("export-scene-board"), worldId: UlidSchema, productionId: SlugSchema, sceneFile: z.string().min(1) })
+    .strict(),
+  /** SPEC-012 R-17..R-20: dispatch what the dialog planned — per shot or whole scene. */
+  z
+    .object({
+      kind: z.literal("dispatch-scene"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneFile: z.string().min(1),
+      mode: z.enum(["per-shot", "whole-scene"]),
+      modelId: z.string().min(1),
+      resolution: z.string().optional(),
+    })
+    .strict(),
+  /** SPEC-012 R-22: accept/reject from the contact sheet; the full loop is SPEC-013's. */
+  z
+    .object({
+      kind: z.literal("record-review"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      takeId: z.string().min(1),
+      shotId: ShotIdSchema.optional(),
+      decision: z.enum(["accept", "reject"]),
+      citation: z
+        .object({ sheet: SlugSchema, field: z.string().optional(), note: z.string().optional() })
+        .strict()
+        .optional(),
     })
     .strict(),
 ]);
