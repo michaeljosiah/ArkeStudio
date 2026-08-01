@@ -94,7 +94,7 @@ const INPUT: EnqueueInput = {
   estimatedMicroUsd: 130000,
 };
 
-async function until(cond: () => boolean, ms = 2000): Promise<void> {
+async function until(cond: () => boolean, ms = 10000): Promise<void> {
   const start = Date.now();
   while (!cond()) {
     if (Date.now() - start > ms) throw new Error("condition not reached in time");

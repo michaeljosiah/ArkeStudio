@@ -1,0 +1,432 @@
+/* ============================================================
+   Design-fidelity pattern language, transcribed from
+   design-system/Arke Studio Prototype.dc.html. Every value is a
+   token reference; compositions match the prototype's frames.
+   ============================================================ */
+
+@keyframes fy-fade-up {
+  from { opacity: 0; transform: translateY(26px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes fy-drift {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-7px); }
+}
+
+/* ---- app frame: 44px titlebar, content column ---------------------------- */
+
+.fy-app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.fy-titlebar {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 16px;
+  flex: none;
+}
+.fy-titlebar--divided { border-bottom: 1px solid var(--border); }
+.fy-titlebar__side { width: 150px; display: flex; align-items: center; gap: 2px; }
+.fy-titlebar__side--right { justify-content: flex-end; }
+.fy-titlebar__center {
+  flex: 1;
+  text-align: center;
+  font: 400 12px var(--font-mono);
+  color: var(--muted-foreground);
+}
+.fy-titlebar__mark {
+  font: 650 14px var(--font-sans);
+  letter-spacing: -0.02em;
+  color: var(--neutral-400);
+  cursor: pointer;
+}
+.fy-iconbtn {
+  width: 26px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--neutral-400);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  padding: 0;
+  position: relative;
+  transition: var(--transition-control);
+}
+.fy-iconbtn:hover { background: var(--accent); color: var(--foreground); }
+.fy-iconbtn__dot {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 99px;
+  background: var(--warning);
+}
+
+.fy-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  position: relative;
+}
+
+/* ---- the floating pill nav ------------------------------------------------ */
+
+.fy-pillnav {
+  position: sticky;
+  top: 12px;
+  margin: 12px auto 0;
+  width: fit-content;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px;
+  box-shadow: var(--shadow-md);
+  animation: fy-fade-up 0.6s var(--ease-out) both;
+}
+.fy-pillnav__item {
+  padding: 7px 16px;
+  border-radius: 999px;
+  font: 400 13px var(--font-sans);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  text-decoration: none;
+  transition: var(--transition-control);
+  white-space: nowrap;
+}
+.fy-pillnav__item:hover { background: var(--accent); color: var(--foreground); }
+.fy-pillnav__item--active {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 500;
+}
+
+/* ---- hero ----------------------------------------------------------------- */
+
+.fy-hero { text-align: center; padding-top: 56px; animation: fy-fade-up 0.7s var(--ease-out) 0.1s both; }
+.fy-hero--left { text-align: left; }
+.fy-hero__eyebrow {
+  font: 500 11px var(--font-sans);
+  letter-spacing: 0.16em;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+}
+.fy-hero__title {
+  margin: 16px 0 0;
+  font: 650 64px/1.02 var(--font-sans);
+  letter-spacing: -0.035em;
+}
+.fy-hero__title--home { font-size: 54px; letter-spacing: -0.028em; margin-top: 14px; }
+.fy-hero__lede {
+  margin: 16px auto 0;
+  font: 400 17px/1.6 var(--font-sans);
+  color: var(--muted-foreground);
+  max-width: 540px;
+}
+.fy-hero--left .fy-hero__lede { margin-left: 0; }
+
+/* ---- portraits and polaroid cards ---------------------------------------- */
+
+.fy-portrait {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 7px;
+  display: block;
+  background: var(--muted);
+}
+.fy-portrait--fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 7px;
+  background: var(--muted);
+  color: var(--neutral-400);
+  font: 500 12px var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 8px;
+}
+
+.fy-fan {
+  position: relative;
+  height: 340px;
+  margin-top: 36px;
+  animation: fy-fade-up 0.8s var(--ease-out) 0.25s both;
+}
+.fy-fan__slot { position: absolute; left: 50%; }
+.fy-fan__drift { animation: fy-drift 7.4s ease-in-out infinite alternate; }
+
+.fy-polaroid {
+  width: 170px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  padding: 8px 8px 12px;
+  cursor: pointer;
+  transition: transform 0.35s var(--ease-out), box-shadow 0.35s var(--ease-out);
+}
+.fy-polaroid:hover { transform: rotate(0deg) translateY(-14px) !important; box-shadow: var(--shadow-xl); }
+.fy-polaroid__frame { width: 154px; height: 180px; }
+.fy-polaroid__name { font: 600 13px var(--font-sans); margin: 9px 3px 0; }
+.fy-polaroid__role { font: 400 11px var(--font-sans); color: var(--muted-foreground); margin: 1px 3px 0; }
+
+.fy-worldcard {
+  width: 280px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-sm);
+  padding: 12px 12px 16px;
+  cursor: pointer;
+  transition: transform 0.35s var(--ease-out), box-shadow 0.35s var(--ease-out);
+}
+.fy-worldcard:hover { transform: rotate(0deg) translateY(-10px) !important; box-shadow: var(--shadow-xl); }
+.fy-worldcard__frame { width: 256px; height: 286px; }
+.fy-worldcard__name { margin: 14px 4px 0; font: 600 20px/1.2 var(--font-sans); letter-spacing: -0.015em; }
+.fy-worldcard__logline { margin: 5px 4px 0; font: 400 13px/1.5 var(--font-sans); color: var(--muted-foreground); }
+.fy-worldcard__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 4px 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.fy-worldcard__meta .mono { margin-left: auto; font: 400 11px var(--font-mono); color: var(--neutral-400); }
+
+/* ---- CTA rows ------------------------------------------------------------- */
+
+.fy-ctas {
+  display: flex;
+  justify-content: center;
+  gap: 28px;
+  padding: 10px 0 40px;
+  flex-wrap: wrap;
+  animation: fy-fade-up 0.8s var(--ease-out) 0.4s both;
+}
+.fy-cta {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: 420px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 14px;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  background: var(--card);
+  transition: transform 0.3s var(--ease-out), box-shadow 0.3s var(--ease-out);
+}
+.fy-cta:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
+.fy-cta__frame { width: 110px; height: 82px; flex: none; }
+.fy-cta__title { font: 600 15px var(--font-sans); }
+.fy-cta__sub { font: 400 12px/1.45 var(--font-sans); color: var(--muted-foreground); margin-top: 3px; }
+
+/* ---- featured card + ledger ----------------------------------------------- */
+
+.fy-split { display: flex; gap: 60px; padding: 28px 96px 40px; align-items: flex-start; }
+.fy-split__side { flex: none; width: 400px; animation: fy-fade-up 0.7s var(--ease-out) 0.1s both; }
+.fy-split__main { flex: 1; min-width: 0; animation: fy-fade-up 0.7s var(--ease-out) 0.2s both; }
+
+.fy-feature {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-md);
+  padding: 10px 10px 16px;
+}
+.fy-feature__frame { width: 100%; height: 440px; }
+.fy-feature__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 13px 6px 0;
+  font: 600 18px var(--font-sans);
+  letter-spacing: -0.015em;
+}
+.fy-feature__note { margin-left: auto; font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
+.fy-feature__sub { margin: 3px 6px 0; font: 400 13px/1.5 var(--font-sans); color: var(--muted-foreground); }
+.fy-feature__actions { display: flex; gap: 8px; margin: 14px 6px 2px; }
+
+.fy-ledgerhead {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 2px 14px 12px;
+}
+.fy-ledgerhead__label {
+  font: 500 11px var(--font-sans);
+  letter-spacing: 0.16em;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+}
+.fy-ledgerhead__meta { margin-left: auto; font: 400 11px var(--font-mono); color: var(--neutral-400); }
+
+.fy-ledger { display: flex; flex-direction: column; gap: 2px; }
+.fy-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-radius: 11px;
+  cursor: pointer;
+  transition: var(--transition-control);
+  border: none;
+  background: transparent;
+  text-align: left;
+  width: 100%;
+  color: inherit;
+  font: inherit;
+}
+.fy-row:hover { background: var(--accent); }
+.fy-row--selected { background: var(--secondary); }
+.fy-row__thumb { width: 44px; height: 52px; flex: none; }
+.fy-row__name { display: flex; align-items: center; gap: 7px; font: 600 14px var(--font-sans); }
+.fy-row__sub { font: 400 12px var(--font-sans); color: var(--muted-foreground); margin-top: 1px; }
+.fy-row__meta { margin-left: auto; font: 400 11px var(--font-mono); color: var(--muted-foreground); white-space: nowrap; }
+.fy-row__chev { color: var(--neutral-400); display: inline-flex; }
+
+.fy-dot { width: 7px; height: 7px; border-radius: 99px; flex: none; }
+.fy-dot--ok { background: var(--success); }
+.fy-dot--sketch { background: var(--neutral-300); }
+.fy-dot--warn { background: var(--warning); }
+
+.fy-footnote {
+  margin: 16px 14px 0;
+  font: 400 12.5px/1.6 var(--font-sans);
+  color: var(--muted-foreground);
+}
+
+/* ---- sheet detail (3a): design card, turnaround strip, identity column ---- */
+
+.fy-sheet { display: flex; gap: 64px; padding: 34px 100px 48px; align-items: flex-start; }
+.fy-sheet__side { flex: none; animation: fy-fade-up 0.7s var(--ease-out) 0.1s both; }
+.fy-sheet__main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: var(--stack-loose);
+  align-content: start;
+  animation: fy-fade-up 0.7s var(--ease-out) 0.18s both;
+}
+
+.fy-designcard {
+  width: 320px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-md);
+  padding: 10px 10px 14px;
+  transform: rotate(-2.5deg);
+  transition: transform 0.35s var(--ease-out), box-shadow 0.35s var(--ease-out);
+}
+.fy-designcard:hover { transform: rotate(0deg) translateY(-8px); box-shadow: var(--shadow-xl); }
+.fy-designcard__frame { width: 300px; height: 360px; }
+.fy-designcard__caption { display: flex; align-items: center; gap: 8px; margin: 11px 4px 0; }
+.fy-designcard__title { font: 600 16px var(--font-sans); }
+.fy-designcard__note { margin-left: auto; font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
+
+.fy-turnstrip { display: flex; gap: 12px; margin-top: 24px; animation: fy-fade-up 0.7s var(--ease-out) 0.3s both; }
+.fy-turnstrip__tile { width: 96px; height: 112px; cursor: pointer; }
+.fy-turnstrip__add {
+  width: 96px;
+  height: 112px;
+  border: 1.5px dashed var(--neutral-300);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font: 400 11px var(--font-sans);
+  background: transparent;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-turnstrip__add:hover { border-color: var(--neutral-500); background: var(--neutral-50); }
+
+.fy-sheet__eyebrow {
+  font: 500 11px var(--font-sans);
+  letter-spacing: 0.14em;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+}
+.fy-sheet__name { margin: 10px 0 0; font: 650 48px/1.02 var(--font-sans); letter-spacing: -0.03em; }
+.fy-sheet__badges { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.fy-sheet__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 36px;
+  max-width: 620px;
+}
+.fy-sheet__sechead { font: 600 13px var(--font-sans); margin-bottom: 5px; }
+.fy-sheet__secbody { font: 400 12.5px/1.55 var(--font-sans); color: var(--muted-foreground); white-space: pre-wrap; }
+
+.fy-voicecard {
+  max-width: 620px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: var(--shadow-xs);
+  background: var(--neutral-50);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.fy-voicecard__label { font: 600 14px var(--font-sans); }
+.fy-voicecard__meta { font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
+.fy-voicecard__side { margin-left: auto; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+
+.fy-sheet__actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.fy-sheet__quiet { display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* ---- page-corner action -------------------------------------------------- */
+.fy-corner {
+  position: absolute;
+  top: 14px;
+  right: 44px;
+  z-index: 20;
+  animation: fy-fade-up 0.6s var(--ease-out) both;
+}
+
+/* ---- home hero spacing ---------------------------------------------------- */
+.fy-home-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 44px;
+  flex: none;
+}
+.fy-home-brand { display: flex; align-items: baseline; gap: 7px; }
+.fy-home-brand__arke { font: 650 17px var(--font-sans); letter-spacing: -0.02em; }
+.fy-home-brand__studio { font: 400 13px var(--font-sans); color: var(--muted-foreground); }
+.fy-home-hero { padding: 58px 88px 0; animation: fy-fade-up 0.7s var(--ease-out) both; }
+.fy-home-cards { display: flex; gap: 32px; padding: 54px 64px; align-items: flex-start; flex-wrap: wrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fy-app *, .fy-app *::before, .fy-app *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

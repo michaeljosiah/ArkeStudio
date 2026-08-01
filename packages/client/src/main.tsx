@@ -18,6 +18,7 @@ import "./components/ui.css";
 import "./components/layout.css";
 import "./domain/domain.css";
 import "./screens/screens.css";
+import "./screens/fidelity.css";
 import { App } from "./App.js";
 import { initStore } from "./lib/store.js";
 
