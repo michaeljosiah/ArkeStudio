@@ -67,7 +67,7 @@ export class LocalSetupService {
         displayName: entry.displayName,
         purpose: entry.purpose,
         sizeMb: entry.sizeMb,
-        state: "queued",
+        state: entry.optional === true ? "available" : "queued",
         bytesDone: 0,
         bytesTotal: entry.sizeMb * 1024 * 1024,
         bytesPerSecond: null,
@@ -107,7 +107,7 @@ export class LocalSetupService {
       if (present) {
         this.set(id, { state: "present", bytesDone: c.bytesTotal, bytesPerSecond: null });
       } else if (c.state === "present") {
-        this.set(id, { state: "queued", bytesDone: 0 });
+        this.set(id, { state: c.entry.optional === true ? "available" : "queued", bytesDone: 0 });
       }
     }
     this.diskFreeMb = await this.deps.diskFreeMb(this.opts.appRoot).catch(() => null);
@@ -139,7 +139,8 @@ export class LocalSetupService {
       const listed = await this.deps.run(spec.command, ["list"], this.abort.signal).catch(() => null);
       if (!listed || listed.code !== 0) return false;
       const wanted = spec.args[spec.args.length - 1] ?? "";
-      return listed.output.includes(wanted.split(":")[0] ?? wanted);
+      // The exact tag: gemma4:12b and gemma4:e2b are different models on the same shelf.
+      return listed.output.split(/\r?\n/).some((line) => line.trim().split(/\s+/)[0] === wanted);
     }
     for (const f of spec.files) {
       const path = join(this.modelsDir(), spec.dir, f.file);
@@ -348,7 +349,10 @@ export class LocalSetupService {
     this.publish();
   }
 
-  /** Put a skipped or failed component back in the queue, and start again if idle. */
+  /**
+   * Start one component: an offered model someone asked for, or a skipped/failed one going
+   * round again. Either way it joins the queue and the run picks it up.
+   */
   retry(componentId: string): void {
     const c = this.components.get(componentId);
     if (!c || c.state === "ready" || c.state === "present") return;

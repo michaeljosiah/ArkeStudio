@@ -42,6 +42,11 @@ export interface CatalogueEntry {
   requires?: readonly string[];
   /** Shown on the row when the thing that would *use* this is not in the build yet. */
   caveat?: string;
+  /**
+   * Offered, not fetched: setup leaves it alone and it waits in Settings · Local runtime until
+   * someone asks for it. Big models belong here — the disk is the user's to spend.
+   */
+  optional?: boolean;
 }
 
 const KOKORO = "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main";
@@ -98,9 +103,39 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
       files: [{ url: `${WHISPER}/ggml-base.en.bin`, file: "ggml-base.en.bin", sizeMb: 141, magic: GGML_MAGIC }],
     },
   },
+  // ---- offered, never fetched on their own -------------------------------------------
+  // Gemma 4 through Ollama. Sizes are Ollama's published download sizes; the VRAM figures
+  // follow the manifest's convention of the weights plus a couple of gigabytes to work in.
+  {
+    id: "ollama-gemma4-e2b-it-qat",
+    displayName: "Gemma 4 · E2B (quantised)",
+    purpose: "The small Gemma 4 — the one to try first on a modest graphics card",
+    sizeMb: 4300,
+    optional: true,
+    requires: ["ollama-runtime"],
+    spec: { kind: "pull", command: "ollama", args: ["pull", "gemma4:e2b-it-qat"] },
+  },
+  {
+    id: "ollama-gemma4-12b",
+    displayName: "Gemma 4 · 12B",
+    purpose: "Reads images and holds a 256K context — the one worth having if it fits",
+    sizeMb: 7600,
+    optional: true,
+    requires: ["ollama-runtime"],
+    spec: { kind: "pull", command: "ollama", args: ["pull", "gemma4:12b"] },
+  },
+  {
+    id: "ollama-gemma4-26b",
+    displayName: "Gemma 4 · 26B",
+    purpose: "The large one, for a machine with the memory to hold it",
+    sizeMb: 18000,
+    optional: true,
+    requires: ["ollama-runtime"],
+    spec: { kind: "pull", command: "ollama", args: ["pull", "gemma4:26b"] },
+  },
 ] as const;
 
-/** Everything setup would fetch on a bare machine, in megabytes. */
+/** What setup fetches unasked — the optional entries are nobody's cost until they are chosen. */
 export function catalogueTotalMb(entries: readonly CatalogueEntry[] = SETUP_CATALOGUE): number {
-  return entries.reduce((sum, e) => sum + e.sizeMb, 0);
+  return entries.filter((e) => e.optional !== true).reduce((sum, e) => sum + e.sizeMb, 0);
 }

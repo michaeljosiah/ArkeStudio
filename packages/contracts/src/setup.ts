@@ -12,6 +12,8 @@ import { z } from "zod";
 export const SetupComponentStateSchema = z.enum([
   /** Already on this machine — nothing to do. */
   "present",
+  /** Offered but never fetched on its own: yours to start, from Settings. */
+  "available",
   /** Waiting its turn. */
   "queued",
   "downloading",

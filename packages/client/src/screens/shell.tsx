@@ -1027,7 +1027,7 @@ function SetupComponents() {
   const size = (mbytes: number) => (mbytes >= 1024 ? `${(mbytes / 1024).toFixed(1)} GB` : `${mbytes} MB`);
   return (
     <Section
-      title="Runtimes on this machine"
+      title="On this machine"
       aside={
         setup.running ? (
           <Button variant="ghost" onClick={() => setupCancel()}>
@@ -1041,6 +1041,7 @@ function SetupComponents() {
       <div className="scr-sectionlist">
         {setup.components.map((c) => {
           const settled = c.state === "ready" || c.state === "present";
+          const offered = c.state === "available";
           const pct = c.bytesTotal > 0 ? Math.min(100, Math.round((c.bytesDone / c.bytesTotal) * 100)) : 0;
           return (
             <div key={c.id} className="scr-sheetsection">
@@ -1051,7 +1052,10 @@ function SetupComponents() {
                   <Badge tone={settled ? "success" : "outline"}>
                     {c.state === "present" ? "already here" : c.state === "downloading" ? `${pct}%` : c.state}
                   </Badge>
-                  {!settled && c.state !== "skipped" && (
+                  {offered && (
+                    <Button onClick={() => setupRetry(c.id)}>Download · {size(c.sizeMb)}</Button>
+                  )}
+                  {!settled && !offered && c.state !== "skipped" && (
                     <Button variant="ghost" onClick={() => setupSkip(c.id)}>
                       Skip
                     </Button>
