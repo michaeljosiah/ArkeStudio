@@ -93,6 +93,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("authoring-cancel"), worldId: UlidSchema, proposalId: z.string().min(1) })
     .strict(),
+  /** Genesis conversation: shape a world that does not exist yet, in a sandbox session. */
+  z
+    .object({
+      kind: z.literal("genesis-chat"),
+      genesisId: z.string().regex(/^[a-z0-9][a-z0-9-]{2,40}$/),
+      text: z.string().min(1).max(4000),
+    })
+    .strict(),
+  /** The genesis conversation is over (begun or abandoned) — the sandbox is removed. */
+  z
+    .object({ kind: z.literal("genesis-discard"), genesisId: z.string().regex(/^[a-z0-9][a-z0-9-]{2,40}$/) })
+    .strict(),
   /** SPEC-005 R-16: a human's decision on a harness backstop prompt. */
   z
     .object({

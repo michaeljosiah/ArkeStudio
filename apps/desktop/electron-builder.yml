@@ -5,6 +5,9 @@
 # the package step, so a licence question is a task, never a shipping delay.
 appId: studio.arke.app
 productName: Arke Studio
+# The workspace hoists electron to the repo root, so the builder cannot read an installed
+# version from this package's node_modules — pin it (keep in step with the root devDependency).
+electronVersion: 43.2.0
 directories:
   output: release
 files:

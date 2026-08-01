@@ -1,4 +1,4 @@
-import { mkdir, readdir, stat } from "node:fs/promises";
+import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { ulid, type WorldBundle, type WorldSummary } from "@arke-studio/contracts";
 import { ProposalManager } from "../gate/proposals.js";
@@ -310,6 +310,19 @@ export class FsWorldProvider implements WorldProvider {
    * Read-only media for the renderer (design-fidelity pass): any registered world's media
    * files, resolved under the worlds directory with the traversal cases refused outright.
    */
+  /** Genesis sandboxes live beside worlds, never inside one — world-less by construction. */
+  async genesisDir(genesisId: string): Promise<string> {
+    if (!/^[a-z0-9][a-z0-9-]{2,40}$/.test(genesisId)) throw new Error("invalid genesis id");
+    const dir = join(this.appRoot, ".genesis", genesisId);
+    await mkdir(toExtendedLength(dir), { recursive: true });
+    return dir;
+  }
+
+  async discardGenesis(genesisId: string): Promise<void> {
+    if (!/^[a-z0-9][a-z0-9-]{2,40}$/.test(genesisId)) return;
+    await rm(toExtendedLength(join(this.appRoot, ".genesis", genesisId)), { recursive: true, force: true });
+  }
+
   async serveMedia(slug: string, relPath: string): Promise<{ path: string; contentType: string } | null> {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return null;
     const portable = relPath.replace(/\\/g, "/");
