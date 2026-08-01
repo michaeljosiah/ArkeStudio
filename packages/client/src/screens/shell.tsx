@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
+import { NavLink, Outlet, useNavigate } from "react-router";
 import { Badge, Button, Callout, Card, Input, StatusDot, Switch, Textarea, cx, type StatusDotTone } from "../components/ui.js";
 import { EmptyState, PageHeader, KeyValue, Screen, Section } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
+import { ChevronLeft, Plus, X } from "../components/icons.js";
 import { Portrait } from "../components/portrait.js";
 import { shortDateTime, usd } from "../lib/format.js";
 import {
@@ -65,27 +66,38 @@ export function HealthDot({ label, health }: { label: string; health: ComponentH
 }
 
 export function ShellChrome() {
-  // The home screen carries its own head (prototype 1a); the bar would double the nav there.
-  const bare = useLocation().pathname === "/worlds";
+  // Every shell screen carries its own chrome (prototype 1a/5a/22a/26a) — no shared bar.
   return (
     <div className="scr-frame__content" style={{ height: "100%" }}>
-      {bare ? null : (
-      <div className="scr-shellbar">
-        <span className="scr-shellbar__brand">Arke Studio</span>
-        <nav className="scr-shellbar__nav">
-          <NavLink to="/worlds" className={({ isActive }) => cx("scr-navlink", isActive && "scr-navlink--active")}>
-            Worlds
-          </NavLink>
-          <NavLink to="/activity" className={({ isActive }) => cx("scr-navlink", isActive && "scr-navlink--active")}>
-            Activity
-          </NavLink>
-          <NavLink to="/settings" className={({ isActive }) => cx("scr-navlink", isActive && "scr-navlink--active")}>
-            Settings
-          </NavLink>
-        </nav>
-      </div>
-      )}
       <Outlet />
+    </div>
+  );
+}
+
+/** The prototype's shared 44px titlebar for shell screens: back slot, mono label, Arke mark. */
+function ShellTitlebar({ back, label, divided = true }: { back?: { label: string; to: string }; label: string; divided?: boolean }) {
+  const navigate = useNavigate();
+  return (
+    <div className={cx("fy-titlebar", divided && "fy-titlebar--divided")}>
+      <div className="fy-titlebar__side">
+        {back && (
+          <button
+            type="button"
+            className="fy-iconbtn"
+            style={{ width: "auto", gap: 7, padding: "0 6px", font: "400 12px var(--font-sans)" }}
+            onClick={() => navigate(back.to)}
+          >
+            <ChevronLeft size={13} />
+            {back.label}
+          </button>
+        )}
+      </div>
+      <div className="fy-titlebar__center">{label}</div>
+      <div className="fy-titlebar__side fy-titlebar__side--right">
+        <span className="fy-titlebar__mark" onClick={() => navigate("/worlds")}>
+          Arke
+        </span>
+      </div>
     </div>
   );
 }
@@ -107,22 +119,41 @@ export function LaunchScreen() {
   }, [ready, navigate, state]);
 
   return (
-    <Screen id="launch">
-      <div className="scr-launch">
-        <div className="scr-launch__mark">Arke Studio</div>
-        <div className="scr-launch__probes">
-          <HealthDot label="Coordinator" health={connection === "open" ? state?.app.health.coordinator : { status: "starting" }} />
-          <HealthDot label="Authoring (OpenCode)" health={state?.app.health.harness} />
-          <HealthDot label="Local voice (Voxa)" health={state?.app.health.voice} />
+    <div className="fy-app" data-screen="launch">
+      <div className="fy-titlebar">
+        <div className="fy-titlebar__side" />
+        <div className="fy-titlebar__center" />
+        <div className="fy-titlebar__side fy-titlebar__side--right">
+          <span className="fy-titlebar__mark">Arke</span>
         </div>
-        {connection === "closed" && (
-          <Callout tone="warning" title="Waiting for the coordinator">
-            The app keeps retrying on its own. If this is a dev browser session, start it with
-            `npm run dev:coordinator`.
-          </Callout>
-        )}
       </div>
-    </Screen>
+      <div className="fy-launch">
+        <div className="fy-launch__reel">
+          <span className="fy-launch__mark">Arke Studio</span>
+        </div>
+        <div className="fy-launch__panel">
+          <div className="fy-launch__row">
+            <span className="fy-launch__title">Setting up your studio.</span>
+            <span style={{ flex: 1 }} />
+            <span className="fy-mono">{ready ? "ready" : "probing…"}</span>
+          </div>
+          <div className="scr-launch__probes" style={{ marginTop: 10 }}>
+            <HealthDot label="Coordinator" health={connection === "open" ? state?.app.health.coordinator : { status: "starting" }} />
+            <HealthDot label="Authoring (OpenCode)" health={state?.app.health.harness} />
+            <HealthDot label="Local voice (Voxa)" health={state?.app.health.voice} />
+          </div>
+          {connection === "closed" && (
+            <Callout tone="warning" title="Waiting for the coordinator">
+              The app keeps retrying on its own. If this is a dev browser session, start it with
+              `npm run dev:coordinator`.
+            </Callout>
+          )}
+          <div style={{ marginTop: 10, textAlign: "center", font: "400 11.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
+            Arke runs on your machine. Your worlds never leave it.
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -137,64 +168,84 @@ export function FirstRunScreen() {
   const localModels = (manifest?.models ?? []).filter((m) => m.requires?.diskMb !== undefined && m.pricing.kind === "unmetered");
   const totalMb = localModels.reduce((a, m) => a + (m.requires?.diskMb ?? 0), 0);
   return (
-    <Screen id="first-run">
-      <div className="scr-hero">
-        <PageHeader title="Begin a world" />
-        <p className="scr-hero__lede">
-          A world is a folder on your disk — characters, canon, productions, all of it readable by
-          hand and yours to keep. Nothing here requires an account, a key, a download or a network
-          to start.
-        </p>
+    <div className="fy-app" data-screen="first-run">
+      <ShellTitlebar label="Arke Studio" divided={false} />
+      <div className="fy-home-head">
+        <div className="fy-home-brand">
+          <span className="fy-home-brand__arke">Arke</span>
+          <span className="fy-home-brand__studio">Studio</span>
+        </div>
       </div>
-      {env && !env.pathBudgetOk && (
-        <Callout tone="warning" title="Your data folder sits too deep">
-          {env.pathBudgetDetail}
-        </Callout>
-      )}
-      {env && !env.nativeIndexOk && (
-        <Callout tone="warning" title="The search index could not load">
-          {env.nativeIndexDetail}
-        </Callout>
-      )}
-      <div style={{ display: "flex", gap: "var(--space-3)" }}>
-        <Button variant="primary" onClick={() => navigate("/worlds/new")}>
-          Create your first world
-        </Button>
-        <Button
-          onClick={() => navigate("/worlds/new")}
-          title="Create the world first; then Artifacts → Import folder files everything and offers to lift facts — gated, grounded, optional."
-        >
-          Already have a canon? Import a folder
-        </Button>
-      </div>
-      <Section title="Optional, later, skippable" aside={<span>each names what it unlocks — none is required</span>}>
-        <div className="scr-sectionlist">
-          <div className="scr-sheetsection">
-            <strong style={{ font: "var(--type-ui)" }}>Provider keys</strong>
-            <span className="scr-field__hint">
-              Unlock image and video generation (FAL, Higgsfield), cloud voice (ElevenLabs) and direct
-              LLM work. Settings · Providers, whenever you want them. Writing, canon and browsing
-              never need one.
-            </span>
+      <div className="fy-content">
+        <div className="fy-hero" style={{ paddingTop: 40 }}>
+          <div className="fy-hero__eyebrow">Welcome</div>
+          <h1 className="fy-hero__title" style={{ fontSize: 56 }}>
+            Every world starts as a name.
+          </h1>
+          <p className="fy-hero__lede" style={{ maxWidth: 460 }}>
+            Give yours one. Characters, canon and productions grow from there, and stay consistent
+            because they share it. Nothing here requires an account, a key, a download or a network
+            to start.
+          </p>
+        </div>
+        {env && (!env.pathBudgetOk || !env.nativeIndexOk) && (
+          <div style={{ maxWidth: 560, margin: "18px auto 0", display: "grid", gap: 10 }}>
+            {!env.pathBudgetOk && (
+              <Callout tone="warning" title="Your data folder sits too deep">
+                {env.pathBudgetDetail}
+              </Callout>
+            )}
+            {!env.nativeIndexOk && (
+              <Callout tone="warning" title="The search index could not load">
+                {env.nativeIndexDetail}
+              </Callout>
+            )}
           </div>
-          <div className="scr-sheetsection">
-            <strong style={{ font: "var(--type-ui)" }}>Local voice models</strong>
-            <span className="scr-field__hint">
-              {localModels.length > 0
-                ? `${localModels.map((m) => `${m.displayName} · ${((m.requires?.diskMb ?? 0) / 1024).toFixed(1)} GB`).join(" · ")} — about ${(totalMb / 1024).toFixed(1)} GB total. `
-                : ""}
-              Nothing downloads now: anything you use later downloads at that point, in the
-              background, visible in Activity. A cloud-only session never waits for them.
-            </span>
+        )}
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", gap: 40, paddingTop: 46 }}>
+          <div className="fy-firstrun__flank" style={{ transform: "rotate(-4deg)" }} />
+          <div className="fy-fan__drift">
+            <div className="fy-createcard" onClick={() => navigate("/worlds/new")}>
+              <div className="fy-createcard__ring">
+                <Plus size={22} />
+              </div>
+              <div className="fy-createcard__title">Your first world</div>
+              <div className="fy-createcard__sub">
+                A name and a sentence are enough. We'll hold everything it becomes.
+              </div>
+              <div style={{ marginTop: 4 }}>
+                <Button variant="primary">Create a world</Button>
+              </div>
+            </div>
+          </div>
+          <div className="fy-firstrun__flank" style={{ transform: "rotate(4deg)" }} />
+        </div>
+        <div style={{ textAlign: "center", paddingTop: 30 }}>
+          <span style={{ font: "400 13px var(--font-sans)", color: "var(--muted-foreground)" }}>
+            Already have a canon in documents?{" "}
+          </span>
+          <span
+            style={{ font: "500 13px var(--font-sans)", textDecoration: "underline", textUnderlineOffset: 3, cursor: "pointer" }}
+            title="Create the world first; then Artifacts → Import folder files everything and offers to lift facts — gated, grounded, optional."
+            onClick={() => navigate("/worlds/new")}
+          >
+            Import a folder
+          </span>
+          <span style={{ font: "400 13px var(--font-sans)", color: "var(--muted-foreground)" }}>
+            . It files into artifacts, ready to link.
+          </span>
+        </div>
+        <div style={{ maxWidth: 640, margin: "34px auto 40px", textAlign: "center" }}>
+          <div className="fy-mono" style={{ lineHeight: 1.7 }}>
+            optional, later, skippable — provider keys unlock image, video and cloud voice; writing,
+            canon and browsing never need one
+            {localModels.length > 0
+              ? ` · local voice models (${localModels.map((m) => `${m.displayName} ${((m.requires?.diskMb ?? 0) / 1024).toFixed(1)} GB`).join(", ")}, ~${(totalMb / 1024).toFixed(1)} GB) download in the background only when first used`
+              : " · local models download in the background only when first used"}
           </div>
         </div>
-      </Section>
-      <Callout title="The no-key path is the real one">
-        Create the world, write canon by form, add characters and locations, link artifacts, browse
-        all of it — offline if you like. Agents and generation are named where they are unavailable,
-        never a locked door.
-      </Callout>
-    </Screen>
+      </div>
+    </div>
   );
 }
 
@@ -308,9 +359,18 @@ export function NewWorldScreen() {
   const canCreate = connection === "open" && name.trim().length > 0 && submittedName === null;
 
   return (
-    <Screen id="new-world">
-      <PageHeader title="New world" meta={<span>A folder is created under your ArkeStudio directory.</span>} />
-      <div className="scr-form">
+    <div className="fy-app" data-screen="new-world">
+      <ShellTitlebar back={{ label: "Back", to: "/worlds" }} label="Arke Studio · new world" />
+      <div className="fy-dialogwrap">
+        <div className="fy-dialog" style={{ maxWidth: 640 }}>
+          <div>
+            <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>New world</div>
+            <div className="fy-mono" style={{ marginTop: 5 }}>
+              a folder is created under your ArkeStudio directory · readable by hand, portable, never
+              dependent on this app to exist
+            </div>
+          </div>
+          <div className="scr-form">
         <div className="scr-field">
           <label className="scr-field__label" htmlFor="nw-name">Name</label>
           <Input id="nw-name" placeholder="The Undersong" value={name} onChange={(e) => setName(e.target.value)} />
@@ -350,41 +410,70 @@ export function NewWorldScreen() {
             {submittedName ? "Creating…" : "Create world"}
           </Button>
         </div>
-        <Callout title="Yours, on disk">
-          The world is a folder under ArkeStudio\worlds — readable by hand, portable, and never
-          dependent on this app to exist.
-        </Callout>
+          </div>
+        </div>
       </div>
-    </Screen>
+    </div>
   );
 }
 
 // ---- Settings --------------------------------------------------------------
 
 export function SettingsLayout() {
+  const { state } = useStore();
+  const navigate = useNavigate();
+  const firstWorld = state?.worlds[0] ?? null;
   return (
-    <Screen id="settings">
-      <PageHeader title="Settings" />
-      <nav className="scr-settingsnav">
-        {(
-          [
-            ["providers", "Providers"],
-            ["local-runtime", "Local runtime"],
-            ["who-does-what", "Who does what"],
-            ["about", "About"],
-          ] as const
-        ).map(([slug, label]) => (
-          <NavLink
-            key={slug}
-            to={`/settings/${slug}`}
-            className={({ isActive }) => cx("scr-navlink", isActive && "scr-navlink--active")}
-          >
-            {label}
-          </NavLink>
-        ))}
-      </nav>
-      <Outlet />
-    </Screen>
+    <div className="fy-app" data-screen="settings">
+      <div className="fy-scrim">
+        {firstWorld && (
+          <div className="fy-scrim__art">
+            <Portrait worldSlug={firstWorld.slug} path="world-art.png" label="" radius={0} />
+          </div>
+        )}
+        <div className="fy-scrim__wash" />
+        <div className="fy-scrim__center">
+          <div className="fy-settings">
+            <div className="fy-settings__head">
+              <div style={{ flex: 1 }}>
+                <div className="fy-settings__title">Settings</div>
+                <div className="fy-settings__sub">
+                  providers &amp; runtime · one key per provider, however many jobs it does
+                </div>
+              </div>
+              <button type="button" className="fy-settings__close" onClick={() => navigate("/worlds")}>
+                <X size={14} />
+              </button>
+            </div>
+            <div className="fy-settings__body">
+              <div className="fy-settings__rail">
+                {(
+                  [
+                    ["providers", "Providers"],
+                    ["local-runtime", "Local runtime"],
+                    ["who-does-what", "Who does what"],
+                    ["about", "About"],
+                  ] as const
+                ).map(([slug, label]) => (
+                  <NavLink
+                    key={slug}
+                    to={`/settings/${slug}`}
+                    className={({ isActive }) => cx("fy-settings__tab", isActive && "fy-settings__tab--active")}
+                  >
+                    {label}
+                  </NavLink>
+                ))}
+                <div style={{ flex: 1 }} />
+                <div className="fy-settings__version">v{state?.app.version ?? "0.1.0"}</div>
+              </div>
+              <div className="fy-settings__pane">
+                <Outlet />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -773,82 +862,89 @@ export function ActivityScreen() {
   const settled = running.length === 0 && needsYou.length === 0;
 
   return (
-    <Screen id="activity">
-      <PageHeader
-        title="Activity"
-        meta={<span>Everything running, everything waiting on you, and what it cost — every world.</span>}
-        actions={
-          <div style={{ display: "flex", gap: "var(--space-2)" }}>
-            <Button variant={scope === "active" ? "primary" : "ghost"} onClick={() => setScope("active")}>
-              This world
-            </Button>
-            <Button variant={scope === "all" ? "primary" : "ghost"} onClick={() => setScope("all")}>
-              All worlds
-            </Button>
+    <div className="fy-app" data-screen="activity">
+      <ShellTitlebar back={{ label: "Home", to: "/worlds" }} label="Arke · activity" />
+      <div className="fy-activity">
+        <div className="fy-activity__main">
+          <div className="fy-h1row">
+            <h1 className="fy-h1">Activity</h1>
+            <span className="fy-h1row__meta">
+              {scoped(running).length} running · {scoped(needsYou).length} need{scoped(needsYou).length === 1 ? "s" : ""} you ·
+              everything Arke is doing, and what it costs
+            </span>
+            <span className="fy-h1row__push" />
+            <span className="fy-seg">
+              <button
+                type="button"
+                className={cx("fy-seg__item", scope === "active" && "fy-seg__item--active")}
+                onClick={() => setScope("active")}
+              >
+                This world
+              </button>
+              <button
+                type="button"
+                className={cx("fy-seg__item", scope === "all" && "fy-seg__item--active")}
+                onClick={() => setScope("all")}
+              >
+                All worlds
+              </button>
+            </span>
           </div>
-        }
-      />
-      {reconcileReport && reconcileReport.length > 0 && (
-        <Callout title="What recovery did">
-          {reconcileReport.map((r) => `${r.jobId.slice(0, 8)}… ${r.action}`).join(" · ")}
-        </Callout>
-      )}
-      {settled ? (
-        <Section title="All quiet">
-          <EmptyState
-            title="Nothing running, nothing waiting on you"
-            hint="A settled state, not a blank — you can stop."
-          />
-        </Section>
-      ) : (
-        <>
-          <Section title="Running" aside={<span>work worth watching — pushed, never polled</span>}>
-            {scoped(running).length === 0 ? (
-              <EmptyState title="Nothing in flight" />
-            ) : (
-              <div className="scr-sectionlist">
-                {scoped(running).map((r) => (
-                  <div key={r.ref} className="scr-cutrow">
-                    <span className="mono">{r.kind}</span>
-                    <span>{r.title}</span>
-                    <span style={{ color: "var(--muted-foreground)" }}>
-                      {r.detail}
-                      {r.percent !== null ? ` · ${Math.round(r.percent)}%` : ""}
-                    </span>
-                    {r.cancellable && r.kind === "job" && (
-                      <Button variant="ghost" onClick={() => cancelJob(r.ref)}>
-                        Cancel
-                      </Button>
-                    )}
-                    {r.cancellable && r.kind === "export" && activeWorldId && (
-                      <Button variant="ghost" onClick={() => cancelExportMsg(activeWorldId, r.ref)}>
-                        Cancel
-                      </Button>
-                    )}
-                  </div>
-                ))}
+          {reconcileReport && reconcileReport.length > 0 && (
+            <Callout title="What recovery did">
+              {reconcileReport.map((r) => `${r.jobId.slice(0, 8)}… ${r.action}`).join(" · ")}
+            </Callout>
+          )}
+          {settled ? (
+            <div style={{ padding: "40px 0" }}>
+              <EmptyState
+                title="Nothing running, nothing waiting on you"
+                hint="A settled state, not a blank — you can stop."
+              />
+            </div>
+          ) : (
+            <>
+              <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
+                RUNNING
               </div>
-            )}
-          </Section>
-          <Section
-            title={`Needs you · ${scoped(needsYou).length}`}
-            aside={<span>unresolved money first, then blocked work, then work already paid for</span>}
-          >
-            {scoped(needsYou).length === 0 ? (
-              <EmptyState title="Nothing waiting on you" />
-            ) : (
-              <div className="scr-sectionlist">
-                {scoped(needsYou).map((entry, i) => (
-                  <div key={`${entry.kind}-${entry.ref ?? entry.worldId ?? i}`} className="scr-sheetsection">
-                    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-                      <Badge tone={entry.urgency <= 2 ? "warning" : "outline"}>class {entry.urgency}</Badge>
-                      <strong style={{ font: "var(--type-ui)" }}>{entry.title}</strong>
-                      {entry.asOf && (
-                        <Badge tone="outline">as of {shortDateTime(entry.asOf)} — not current</Badge>
-                      )}
+              {scoped(running).length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>nothing in flight</div>}
+              {scoped(running).map((r) => (
+                <div key={r.ref} className="fy-activityrow">
+                  <span className="fy-dot fy-dot--live" />
+                  <div className="fy-activityrow__main">
+                    <div className="fy-activityrow__title">{r.title}</div>
+                    <div className="fy-activityrow__sub">
+                      {r.kind} · {r.detail}
                     </div>
-                    <span className="scr-field__hint">{entry.detail}</span>
-                    <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                  </div>
+                  <span className="fy-activityrow__meta">{r.percent !== null ? `${Math.round(r.percent)}%` : "running"}</span>
+                  {r.cancellable && r.kind === "job" && (
+                    <Button variant="ghost" onClick={() => cancelJob(r.ref)}>
+                      Cancel
+                    </Button>
+                  )}
+                  {r.cancellable && r.kind === "export" && activeWorldId && (
+                    <Button variant="ghost" onClick={() => cancelExportMsg(activeWorldId, r.ref)}>
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
+                NEEDS YOU · {scoped(needsYou).length}
+              </div>
+              {scoped(needsYou).length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>nothing waiting on you</div>}
+              {scoped(needsYou).map((entry, i) => (
+                <div key={`${entry.kind}-${entry.ref ?? entry.worldId ?? i}`} className="fy-activityrow" style={{ alignItems: "flex-start" }}>
+                  <span className="fy-dot fy-dot--warn" style={{ marginTop: 5 }} />
+                  <div className="fy-activityrow__main">
+                    <div className="fy-activityrow__title" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      {entry.title}
+                      <Badge tone={entry.urgency <= 2 ? "warning" : "outline"}>class {entry.urgency}</Badge>
+                      {entry.asOf && <Badge tone="outline">as of {shortDateTime(entry.asOf)} — not current</Badge>}
+                    </div>
+                    <div className="fy-activityrow__sub">{entry.detail}</div>
+                    <div style={{ display: "flex", gap: "var(--space-2)", marginTop: 8, flexWrap: "wrap" }}>
                       {entry.actions.includes("resolve") && entry.ref && (
                         <>
                           <Button onClick={() => resolveHeldJob(entry.ref!, "resubmit")}>Resubmit anyway</Button>
@@ -887,85 +983,88 @@ export function ActivityScreen() {
                       )}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </Section>
-        </>
-      )}
-      <Section
-        title="Spend"
-        aside={
-          spend && (
-            <span>
-              last {spend.periodDays} days
-              {spend.mixed ? " · includes derived figures, not a measured total" : ""}
-            </span>
-          )
-        }
-      >
-        {spend && (
-          <>
-            <div className="lay-stats">
-              <div className="lay-stats__item">
-                <div className="lay-stats__value">{formatMicroUsd(spend.totalMicroUsd)}</div>
-                <div className="lay-stats__label">
+                </div>
+              ))}
+            </>
+          )}
+          <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
+            EARLIER TODAY
+          </div>
+          {recent.length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>nothing finished today · the ledger holds everything</div>}
+          {recent.slice(0, 20).map((job) => (
+            <div key={job.id} className="fy-activityrow" style={{ display: "block" }}>
+              <JobRow job={job} />
+              {jobActions(job).includes("retry") && (
+                <span className="scr-field__hint">failed — retry from its production's dispatch dialog</span>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="fy-activity__side">
+          <div style={{ font: "600 13px var(--font-sans)" }}>
+            {spend ? `Last ${spend.periodDays} days` : "Spend"}
+          </div>
+          {spend && (
+            <>
+              <div className="fy-spendtotal">
+                {formatMicroUsd(spend.totalMicroUsd)}{" "}
+                <span className="fy-mono">
                   {spend.mixed
                     ? `mixed · ${spend.reportedEntries} measured, ${spend.derivedEntries} derived`
                     : spend.derivedEntries > 0
                       ? "derived from the manifest"
                       : "provider-reported"}
-                </div>
+                </span>
               </div>
               {spend.byProvider
                 .filter((p) => !p.unmetered)
                 .map((p) => (
-                  <div key={p.provider} className="lay-stats__item">
-                    <div className="lay-stats__value">{formatMicroUsd(p.microUsd)}</div>
-                    <div className="lay-stats__label">{p.provider}</div>
+                  <div key={p.provider} className="fy-spendbar">
+                    <span className="fy-spendbar__label">{p.provider}</span>
+                    <div className="fy-spendbar__track">
+                      <div
+                        className="fy-spendbar__fill"
+                        style={{
+                          width: `${spend.totalMicroUsd > 0 ? Math.max(Math.round((p.microUsd / spend.totalMicroUsd) * 100), 2) : 0}%`,
+                        }}
+                      />
+                    </div>
+                    <span className="fy-spendbar__value">{formatMicroUsd(p.microUsd)}</span>
                   </div>
                 ))}
               {spend.unmeteredRuns > 0 && (
-                <div className="lay-stats__item">
-                  <div className="lay-stats__value">unmetered</div>
-                  <div className="lay-stats__label">
-                    {spend.unmeteredRuns} local run{spend.unmeteredRuns === 1 ? "" : "s"} — this machine's compute
-                  </div>
+                <div className="fy-mono" style={{ marginTop: 12 }}>
+                  {spend.unmeteredRuns} local run{spend.unmeteredRuns === 1 ? "" : "s"} — unmetered, this machine's
+                  compute
                 </div>
               )}
-            </div>
-            {state?.app.spend?.alerted && (
-              <Callout title="Over the spend threshold">
-                {formatMicroUsd(state.app.spend.rollingMicroUsd)} against{" "}
-                {formatMicroUsd(state.app.spend.settings.thresholdMicroUsd)}. Nothing is blocked — the threshold is
-                set in Settings · Providers.
-              </Callout>
-            )}
-            {drift.map((d) => (
-              <Callout key={d.modelId} tone="warning" title={`${d.modelId} estimates are drifting`}>
-                ~{(d.medianDivergencePerMille / 10).toFixed(0)}% off across {d.samples} provider-reported charges —
-                the shipped manifest needs an update.
-              </Callout>
-            ))}
-          </>
-        )}
-      </Section>
-      <Section title="Recent" aside={<span>terminal today · the ledger holds everything</span>}>
-        {recent.length === 0 ? (
-          <EmptyState title="Nothing finished today" />
-        ) : (
-          <div className="scr-sectionlist">
-            {recent.slice(0, 20).map((job) => (
-              <div key={job.id} className="scr-sheetsection">
-                <JobRow job={job} />
-                {jobActions(job).includes("retry") && (
-                  <span className="scr-field__hint">failed — retry from its production's dispatch dialog</span>
-                )}
+              <div className="fy-notecard" style={{ background: "var(--background)" }}>
+                <span className={`fy-dot fy-dot--${state?.app.spend?.alerted ? "warn" : "sketch"}`} />
+                {state?.app.spend?.alerted && state.app.spend
+                  ? `Over the threshold: ${formatMicroUsd(state.app.spend.rollingMicroUsd)} against ${formatMicroUsd(state.app.spend.settings.thresholdMicroUsd)}. Nothing is blocked.`
+                  : `Alert at ${formatMicroUsd(state?.app.spend?.settings.thresholdMicroUsd ?? 0)} / ${spend.periodDays}d${(state?.app.spend?.settings.thresholdMicroUsd ?? 0) === 0 ? " · off" : ""}`}
+                <span
+                  style={{ marginLeft: "auto", cursor: "pointer", font: "400 11px var(--font-sans)" }}
+                  onClick={() => navigate("/settings/providers")}
+                >
+                  Set
+                </span>
               </div>
-            ))}
+              {drift.map((d) => (
+                <Callout key={d.modelId} tone="warning" title={`${d.modelId} estimates are drifting`}>
+                  ~{(d.medianDivergencePerMille / 10).toFixed(0)}% off across {d.samples} provider-reported charges —
+                  the shipped manifest needs an update.
+                </Callout>
+              ))}
+            </>
+          )}
+          <div className="fy-mono" style={{ marginTop: 12 }}>
+            local runs are free · the local runtimes don't meter
           </div>
-        )}
-      </Section>
-    </Screen>
+          <div style={{ flex: 1 }} />
+          <Button onClick={() => navigate("/settings/providers")}>Providers &amp; keys</Button>
+        </div>
+      </div>
+    </div>
   );
 }
