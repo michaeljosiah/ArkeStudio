@@ -2,9 +2,11 @@ import { useMemo, useState } from "react";
 import { NavLink, Outlet, useNavigate, useParams } from "react-router";
 import {
   assemblePrompt,
+  deriveCut,
   modelCapabilityCopy,
   overrideStaleAgainst,
   planScene,
+  PRESETS,
   promptFor,
   type Shot,
 } from "@arke-studio/contracts";
@@ -14,12 +16,17 @@ import { CanonEntryRow, ShotCard, TakeStrip } from "../domain/domain.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
 import {
+  acceptTake,
+  cancelExport,
   compileSceneBoard,
   dispatchScene,
   draftScene,
+  exportCut,
   exportSceneBoard,
-  recordReview,
+  exportWorld,
+  rejectTake,
   setPromptOverride,
+  useExports,
   useStore,
 } from "../lib/store.js";
 
@@ -807,13 +814,88 @@ export function AudioScreen() {
 }
 
 export function ExportsScreen() {
+  const { worldId, prodId } = useParams();
+  const { production } = useProduction(worldId, prodId);
+  const exportsState = useExports();
+  const cut = production ? deriveCut(production) : null;
+  const mine = Object.entries(exportsState).filter(([, e]) => e.productionId === prodId);
   return (
     <Screen id="exports">
-      <PageHeader title="Exports" />
-      <EmptyState
-        title="Nothing exported yet"
-        hint="Master renders, contact sheets and world snapshots — every export is reproducible from the folder (SPEC-013/016)."
+      <PageHeader
+        title="Exports"
+        meta={
+          cut && (
+            <span>
+              {cut.covered}/{cut.entries.length} shots covered · {cut.gaps} gap{cut.gaps === 1 ? "" : "s"} export as
+              labelled slates
+            </span>
+          )
+        }
       />
+      <Section title="Render the cut" aside={<span>local, one encode, no provider call</span>}>
+        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+          {(["review-cut", "master", "social-excerpt"] as const).map((preset) => (
+            <Button
+              key={preset}
+              onClick={() => {
+                if (worldId && prodId) exportCut(worldId, prodId, preset);
+              }}
+            >
+              {preset} · {PRESETS[preset].width}×{PRESETS[preset].height}
+            </Button>
+          ))}
+        </div>
+        {cut && cut.gaps > 0 && (
+          <Callout title="An unfinished film still reviews">
+            {cut.gaps} shot{cut.gaps === 1 ? "" : "s"} without a selection export as black slates carrying their
+            labels and durations — {seconds(cut.uncoveredSec)} of them.
+          </Callout>
+        )}
+      </Section>
+      {mine.length > 0 && (
+        <Section title="In flight and finished">
+          <div className="scr-sectionlist">
+            {mine.map(([id, e]) => (
+              <div key={id} className="scr-cutrow">
+                <span className="mono">{id.slice(0, 10)}…</span>
+                <span>
+                  {e.status}
+                  {e.status === "running" ? ` · ${Math.round(e.percent)}%` : ""}
+                </span>
+                <span className="mono" style={{ fontSize: "var(--text-xs)" }}>
+                  {e.output ?? e.error ?? ""}
+                </span>
+                {e.status === "running" && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      if (worldId) cancelExport(worldId, id);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+      <Section title="World export" aside={<span>a folder that reopens identically elsewhere</span>}>
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              if (worldId) exportWorld(worldId);
+            }}
+          >
+            Export world folder
+          </Button>
+          <span className="scr-field__hint">
+            history kept — the version record travels; caches and locks stay behind. Lands under
+            ArkeStudio\exports.
+          </span>
+        </div>
+      </Section>
     </Screen>
   );
 }
@@ -853,16 +935,22 @@ export function StillsScreen() {
                 <div style={{ display: "flex", gap: "var(--space-2)" }}>
                   <Button
                     variant={decision === "accepted" ? "primary" : "ghost"}
+                    disabled={!shotId}
                     onClick={() => {
-                      if (worldId && prodId) recordReview(worldId, prodId, take.id, "accept", shotId);
+                      // Accept = decision + selection in one commit (SPEC-013 R-9).
+                      if (worldId && prodId && shotId) acceptTake(worldId, prodId, take.id, shotId);
                     }}
                   >
                     Accept
                   </Button>
                   <Button
                     variant="ghost"
+                    disabled={Object.keys(take.provenance.sheets).length === 0}
+                    title="A rejection cites the sheet the take drifted from (R-10)"
                     onClick={() => {
-                      if (worldId && prodId) recordReview(worldId, prodId, take.id, "reject", shotId);
+                      const sheet = Object.keys(take.provenance.sheets)[0];
+                      if (worldId && prodId && sheet)
+                        rejectTake(worldId, prodId, take.id, { sheet, field: "appearance", note: "rejected from the contact sheet" }, shotId);
                     }}
                   >
                     Reject

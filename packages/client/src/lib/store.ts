@@ -82,6 +82,8 @@ interface StoreState {
   /** SPEC-011: dictation results by requestId — inserted as editable text, never submitted. */
   dictation: Record<string, { text: string | null; error: string | null }>;
   voiceSidecar: { state: "not-started" | "downloading" | "unavailable" | "ready"; detail: string } | null;
+  /** SPEC-013: export lifecycle by exportId. */
+  exportsState: Record<string, ExportState>;
 }
 
 export interface VoiceCandidatesState {
@@ -106,6 +108,7 @@ let current: StoreState = {
   voicePreviews: {},
   dictation: {},
   voiceSidecar: null,
+  exportsState: {},
 };
 const listeners = new Set<() => void>();
 let bridge: ArkeBridge | null = null;
@@ -284,6 +287,19 @@ function handleFrame(json: string): void {
     } else if (event.type === "voice.sidecar") {
       voiceSidecar = { state: event.state, detail: event.detail };
     }
+    let exportsState = current.exportsState;
+    if (event.type === "export.progress") {
+      exportsState = {
+        ...exportsState,
+        [event.exportId]: {
+          productionId: event.productionId,
+          status: event.status,
+          percent: event.percent,
+          output: event.output,
+          error: event.error,
+        },
+      };
+    }
     if (event.type === "canon.answer") {
       askResults = { ...askResults, [event.askId]: event.result };
     } else if (event.type === "canon.search") {
@@ -325,6 +341,7 @@ function handleFrame(json: string): void {
       voicePreviews,
       dictation,
       voiceSidecar,
+      exportsState,
     });
   }
 }
@@ -736,6 +753,51 @@ export function dispatchScene(
   send({ kind: "dispatch-scene", worldId, productionId, sceneFile, mode, modelId, ...(resolution !== undefined ? { resolution } : {}) });
 }
 
+// ---- SPEC-013: takes, the cut, exports -------------------------------------
+
+export function acceptTake(worldId: string, productionId: string, takeId: string, shotId: string): void {
+  send({ kind: "accept-take", worldId, productionId, takeId, shotId });
+}
+
+/** A rejection requires the cited sheet and field (R-10). */
+export function rejectTake(
+  worldId: string,
+  productionId: string,
+  takeId: string,
+  citation: { sheet: string; field: string; note?: string },
+  shotId?: string,
+): void {
+  send({ kind: "reject-take", worldId, productionId, takeId, citation, ...(shotId !== undefined ? { shotId } : {}) });
+}
+
+export function saveAudioTracks(worldId: string, productionId: string, cut: unknown): void {
+  send({ kind: "save-audio-tracks", worldId, productionId, cut });
+}
+
+export function exportCut(worldId: string, productionId: string, preset: "review-cut" | "master" | "social-excerpt"): void {
+  send({ kind: "export-cut", worldId, productionId, preset });
+}
+
+export function cancelExport(worldId: string, exportId: string): void {
+  send({ kind: "cancel-export", worldId, exportId });
+}
+
+export function exportWorld(worldId: string): void {
+  send({ kind: "export-world", worldId });
+}
+
+export interface ExportState {
+  productionId: string;
+  status: "running" | "done" | "cancelled" | "failed";
+  percent: number;
+  output: string | null;
+  error: string | null;
+}
+
+export function useExports(): Record<string, ExportState> {
+  return useStore().exportsState;
+}
+
 export function recordReview(
   worldId: string,
   productionId: string,
@@ -797,5 +859,6 @@ export function __setStateForTest(state: ClientState): void {
     voicePreviews: {},
     dictation: {},
     voiceSidecar: null,
+    exportsState: {},
   });
 }

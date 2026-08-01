@@ -123,6 +123,21 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       error: z.string().nullable(),
     })
     .strict(),
+  /** Export lifecycle (SPEC-013 R-21): progress, and a terminal status with the output path. */
+  z
+    .object({
+      ...base,
+      type: z.literal("export.progress"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      exportId: z.string().min(1),
+      status: z.enum(["running", "done", "cancelled", "failed"]),
+      percent: z.number().min(0).max(100),
+      output: z.string().nullable(),
+      error: z.string().nullable(),
+    })
+    .strict(),
+
   /** The sidecar's four degradation states, each with its copy (SPEC-011 §2.10). */
   z
     .object({

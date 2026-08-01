@@ -55,6 +55,9 @@ export {
   type SidecarLike,
   type VoiceServiceDeps,
 } from "./voice/service.js";
+export { recordTakesFromJob } from "./takes/arrival.js";
+export { exportWorld, runExport, WORLD_EXPORT_EXCLUDED, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
+export { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
 export {
   compileBoard,
   composeDispatches,

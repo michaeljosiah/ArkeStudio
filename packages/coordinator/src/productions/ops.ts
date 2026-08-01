@@ -327,6 +327,16 @@ export function composeDispatches(
   model: ManifestModel,
   world: WorldBundle,
 ): EnqueueInput[] {
+  // Provenance frozen at dispatch (SPEC-013 R-2): canon revision and every cited sheet version.
+  const provenanceFor = (sheetIds: string[]): { canonRevision: number; sheets: Record<string, number> } => ({
+    canonRevision: world.meta.canonRevision,
+    sheets: Object.fromEntries(
+      sheetIds
+        .map((id) => world.sheets.find((s) => s.id === id))
+        .filter((s): s is NonNullable<typeof s> => s !== undefined)
+        .map((s) => [s.id, s.version]),
+    ),
+  });
   if (plan.mode === "per-shot") {
     return plan.shots.map((entry) => ({
       worldId,
@@ -339,6 +349,7 @@ export function composeDispatches(
         prompt: entry.prompt.text,
         references: entry.references.filter((r) => r.file !== null).map((r) => r.file),
         ...(entry.shot.durationSec !== undefined ? { durationSec: entry.shot.durationSec } : {}),
+        provenance: provenanceFor(entry.budget.carried.map((c) => c.sheetId)),
       },
       estimatedMicroUsd: entry.estimatedMicroUsd,
       landing: { dir: `productions/${productionId}/incoming/${entry.shot.id}` },
@@ -363,6 +374,7 @@ export function composeDispatches(
         durationSec: pass.durationSec,
         // The explicit plan (R-19, D11): SPEC-013 segments from these, never guesses.
         shotPlan: pass.plan,
+        provenance: provenanceFor(shotsInPass.flatMap((s) => s.budget.carried.map((c) => c.sheetId))),
       },
       estimatedMicroUsd: estimateMicroUsd(model, { durationSec: pass.durationSec }),
       landing: { dir: `productions/${productionId}/incoming/${scene.id}-pass-${pass.index}` },

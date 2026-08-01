@@ -450,5 +450,47 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         .optional(),
     })
     .strict(),
+  /** SPEC-013 R-9: accept = decision + selection in one commit; continuity chains (R-12). */
+  z
+    .object({
+      kind: z.literal("accept-take"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      takeId: z.string().min(1),
+      shotId: ShotIdSchema,
+    })
+    .strict(),
+  /** SPEC-013 R-10: rejection requires the cited sheet and field; selection untouched. */
+  z
+    .object({
+      kind: z.literal("reject-take"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      takeId: z.string().min(1),
+      shotId: ShotIdSchema.optional(),
+      citation: z.object({ sheet: SlugSchema, field: z.string().min(1), note: z.string().optional() }).strict(),
+    })
+    .strict(),
+  /** SPEC-013 R-16/R-17: cut.json holds audio tracks and placement only. */
+  z
+    .object({
+      kind: z.literal("save-audio-tracks"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      cut: z.unknown(),
+    })
+    .strict(),
+  /** SPEC-013 R-19..R-21: local render of the derived cut; gaps become labelled slates. */
+  z
+    .object({
+      kind: z.literal("export-cut"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      preset: z.enum(["review-cut", "master", "social-excerpt"]),
+    })
+    .strict(),
+  z.object({ kind: z.literal("cancel-export"), worldId: UlidSchema, exportId: z.string().min(1) }).strict(),
+  /** SPEC-013 R-22: a folder that reopens identically elsewhere — history kept, caches dropped. */
+  z.object({ kind: z.literal("export-world"), worldId: UlidSchema }).strict(),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
