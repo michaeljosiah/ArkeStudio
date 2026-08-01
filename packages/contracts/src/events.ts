@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AskCandidateSchema, AskResultSchema } from "./ask.js";
 import { ChangeRecordSchema } from "./change.js";
 import { IsoDateTimeSchema, ProposalIdSchema, ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { JobSchema, LedgerEntrySchema } from "./job.js";
@@ -122,6 +123,44 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       proposalId: ProposalIdSchema,
       status: z.enum(["running", "completed", "cancelled", "timeout", "budget-exceeded", "failed"]),
       detail: z.string().optional(),
+    })
+    .strict(),
+
+  /** A grounded answer, a refusal with receipts, or honest unavailability (SPEC-006). */
+  z
+    .object({
+      ...base,
+      type: z.literal("canon.answer"),
+      worldId: UlidSchema,
+      askId: z.string().min(1),
+      result: AskResultSchema,
+    })
+    .strict(),
+  /** List-search results over the same retrieval path (SPEC-006 R-18). */
+  z
+    .object({
+      ...base,
+      type: z.literal("canon.search"),
+      worldId: UlidSchema,
+      searchId: z.string().min(1),
+      searched: z.number().int().min(0),
+      floorCleared: z.boolean(),
+      candidates: z.array(AskCandidateSchema),
+    })
+    .strict(),
+  /** An entry's computed detail: cited-by and speculative ripples (SPEC-006 §2.5). */
+  z
+    .object({
+      ...base,
+      type: z.literal("canon.refs"),
+      worldId: UlidSchema,
+      entryId: z.string().min(1),
+      citedBy: z.object({
+        sheets: z.array(z.object({ id: z.string(), atVersion: z.number().nullable() }).strict()),
+        entries: z.array(z.string()),
+        productions: z.array(z.string()),
+      }).strict(),
+      ripples: z.array(z.object({ kind: z.string(), summary: z.string(), targets: z.array(z.string()) }).strict()),
     })
     .strict(),
 

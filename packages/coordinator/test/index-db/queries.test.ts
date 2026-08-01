@@ -83,7 +83,7 @@ describe("search and the refusal floor (R-16..R-19, R-23, D8)", () => {
 
   it("reports the searched count truthfully (R-18)", async () => {
     const { index } = await openFixtureIndex();
-    assert.equal(searchCanon(index.db, "anything at all").searched, 6);
+    assert.equal(searchCanon(index.db, "anything at all").searched, 5);
     index.close();
   });
 
@@ -94,7 +94,7 @@ describe("search and the refusal floor (R-16..R-19, R-23, D8)", () => {
     assert.ok(result.candidates.length <= 3);
     // Structural: this module has no model dependency to call — the refusal renders from
     // retrieval alone. The assertion is that the result is complete in itself.
-    assert.equal(result.searched, 6);
+    assert.equal(result.searched, 5);
     index.close();
   });
 

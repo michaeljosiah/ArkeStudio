@@ -233,6 +233,48 @@
   white-space: nowrap;
 }
 
+/* ---- Canon ask --------------------------------------------- */
+.scr-answer {
+  display: grid;
+  gap: var(--space-3);
+}
+.scr-answer--refusal {
+  border-color: var(--warning);
+}
+.scr-answer__claim {
+  display: grid;
+  gap: var(--space-2);
+}
+.scr-answer__cite {
+  display: grid;
+  gap: var(--space-1);
+  justify-items: start;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-left: var(--border-accent) solid var(--border);
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font: var(--type-label);
+  color: var(--muted-foreground);
+  transition: var(--transition-control);
+}
+.scr-answer__cite:hover {
+  border-left-color: var(--foreground);
+  color: var(--foreground);
+}
+.scr-answer__excerpt {
+  font: var(--type-ui);
+  font-weight: var(--weight-regular);
+  font-style: italic;
+  color: var(--text-secondary);
+}
+.scr-answer__foot {
+  font: var(--type-label);
+  color: var(--faint);
+}
+
 /* ---- Production -------------------------------------------- */
 .scr-prodbar {
   display: flex;

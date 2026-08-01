@@ -9,10 +9,18 @@ import {
   type HarnessAdapter,
   type HealthComponent,
 } from "@arke-studio/contracts";
+import { AskService } from "./canon/ask.js";
+import {
+  openThread,
+  stageCanonAmendment,
+  stageCanonEntry,
+  stageThreadSettlement,
+} from "./canon/authoring.js";
 import { ChangeLog } from "./change-log.js";
 import { AuthoringService, settlePermission } from "./harness/authoring.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
+import { refsForCanon, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
 import { ReadModel } from "./read-model.js";
 import { ChildSupervisor, type SupervisorStatus } from "./supervisor.js";
 import { Transport } from "./transport.js";
@@ -78,7 +86,15 @@ export class Coordinator {
             agentForPurpose: opts.authoring.agentForPurpose,
           })
         : null;
+    this.askService = opts.authoring
+      ? new AskService(opts.adapter, {
+          buildConfig: opts.authoring.buildConfig,
+          scratchRoot: opts.appRoot ? `${opts.appRoot}/.ask` : `${opts.changeLogPath}.ask`,
+        })
+      : null;
   }
+
+  private readonly askService: AskService | null;
 
   getState(): ClientState {
     return this.readModel.getState();
@@ -396,6 +412,121 @@ export class Coordinator {
       }
       case "authoring-cancel": {
         await this.authoring?.cancel(msg.proposalId);
+        return;
+      }
+      case "canon-ask": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        // Fire and watch: the result arrives as one canon.answer event, refusals included.
+        void (async () => {
+          const worldQueryUrl = this.askService && this.opts.adapter ? await this.worldQuery.start() : undefined;
+          const fallback: import("@arke-studio/contracts").AskResult = {
+            outcome: "unavailable",
+            reason: "authoring is not configured",
+            searched: 0,
+            closest: [],
+          };
+          const result = this.askService
+            ? await this.askService.ask(store, msg.question, worldQueryUrl)
+            : fallback;
+          this.emit({
+            at: new Date().toISOString(),
+            type: "canon.answer",
+            worldId: msg.worldId,
+            askId: msg.askId,
+            result,
+          });
+        })();
+        return;
+      }
+      case "canon-search": {
+        const index = this.opts.provider.openStore?.()?.getIndex();
+        if (!index) return;
+        const result = searchCanon(index.db, msg.query, { limit: 12 });
+        this.emit({
+          at: new Date().toISOString(),
+          type: "canon.search",
+          worldId: msg.worldId,
+          searchId: msg.searchId,
+          searched: result.searched,
+          floorCleared: result.floorCleared,
+          candidates: result.candidates.map((c) => ({ entryId: c.entryId, title: c.title, score: c.score })),
+        });
+        return;
+      }
+      case "canon-refs": {
+        const store = this.opts.provider.openStore?.();
+        const index = store?.getIndex();
+        if (!store || !index) return;
+        const entry = store.getBundle().canon.find((c) => c.id === msg.entryId);
+        const refs = refsForCanon(index.db, msg.entryId);
+        const ripples = entry
+          ? ripplesForCanonEntry(index.db, { entryId: entry.id, title: entry.title, statement: entry.body })
+          : [];
+        this.emit({
+          at: new Date().toISOString(),
+          type: "canon.refs",
+          worldId: msg.worldId,
+          entryId: msg.entryId,
+          citedBy: { sheets: refs.sheets, entries: refs.entries, productions: refs.productions },
+          ripples: ripples.map((r) => ({ kind: r.kind, summary: r.summary, targets: r.targets })),
+        });
+        return;
+      }
+      case "stage-canon-entry": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        try {
+          const proposal = await stageCanonEntry(store, gate, {
+            entryType: msg.entryType,
+            title: msg.title,
+            statement: msg.statement,
+          });
+          this.emit({ at: new Date().toISOString(), type: "proposal.staged", worldId: msg.worldId, proposalId: proposal.id });
+        } catch {
+          /* the refreshed snapshot carries whatever resulted */
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "stage-canon-amendment": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        await stageCanonAmendment(store, gate, { entryId: msg.entryId, statement: msg.statement }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "open-thread": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        await openThread(store, gate, {
+          title: msg.title,
+          question: msg.question,
+          candidates: msg.candidates,
+        }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "settle-thread": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        await stageThreadSettlement(store, gate, {
+          entryId: msg.entryId,
+          resolvedType: msg.resolvedType,
+          statement: msg.statement,
+        }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "retire-entity": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await store.retire(msg.path, "form").catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "permission-reply": {

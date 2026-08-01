@@ -11,3 +11,4 @@ export * from "./events.js";
 export * from "./client-state.js";
 export * from "./frames.js";
 export * from "./adapter.js";
+export * from "./ask.js";

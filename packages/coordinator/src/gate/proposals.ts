@@ -43,6 +43,8 @@ export interface StageInput {
   targets: Array<{ path: string; content?: string }>;
   /** How many canon ids to reserve at creation (R-13). */
   reserveCanonIds?: number;
+  /** Ids already reserved by the caller (store.allocateCanonIds) — recorded, not re-allocated. */
+  preReservedCanonIds?: string[];
 }
 
 const PROPOSALS_DIR = ".proposals";
@@ -90,16 +92,19 @@ export class ProposalManager {
       const id = newId("pr");
       const at = this.store.now();
 
-      let reservedCanonIds: string[] = [];
+      let reservedCanonIds: string[] = input.preReservedCanonIds ?? [];
       if (input.reserveCanonIds && input.reserveCanonIds > 0) {
-        reservedCanonIds = (
-          await this.store.commitUnserialised({
-            kind: "canon-id-allocation",
-            source: input.source,
-            files: [],
-            allocateCanonIds: input.reserveCanonIds,
-          })
-        ).allocatedCanonIds;
+        reservedCanonIds = [
+          ...reservedCanonIds,
+          ...(
+            await this.store.commitUnserialised({
+              kind: "canon-id-allocation",
+              source: input.source,
+              files: [],
+              allocateCanonIds: input.reserveCanonIds,
+            })
+          ).allocatedCanonIds,
+        ];
       }
 
       const targets: Proposal["targets"] = [];

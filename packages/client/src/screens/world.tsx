@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useNavigate, useParams } from "react-router";
 import type { CanonEntry, Sheet } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, PageHeader, Screen, Section } from "../components/layout.js";
@@ -8,11 +8,22 @@ import { ConnectedProposalPanel } from "../domain/connected.js";
 import { shortDateTime } from "../lib/format.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
+  askCanon,
   draftWithStudio,
+  openThread as openThreadMsg,
   reconcileExternalEdit,
   reloadWorld,
   replyToPermission,
+  requestCanonRefs,
+  retireEntity,
+  searchCanonList,
+  settleThread,
+  stageCanonAmendment as stageAmendmentMsg,
+  stageCanonEntry as stageEntryMsg,
   stageSheetEdit,
+  useAskResults,
+  useCanonRefs,
+  useCanonSearches,
   usePermissions,
   useStore,
   useWorld,
@@ -660,19 +671,144 @@ export const NewLocationScreen = () => (
 
 // ---- Canon -----------------------------------------------------------------
 
+/** A grounded answer or a refusal with receipts (SPEC-006 §2.6–§2.7). */
+function AskOutcome({ worldId, question, result }: { worldId: string; question: string; result: import("@arke-studio/contracts").AskResult }) {
+  const navigate = useNavigate();
+  const world = useWorld();
+  const openAsThread = () => {
+    const title = question.length > 80 ? `${question.slice(0, 77)}…` : question;
+    openThreadMsg(worldId, title, question, result.outcome !== "answer" ? result.closest.map((c) => c.entryId) : []);
+    navigate(`/w/${worldId}/canon`);
+  };
+  if (result.outcome === "answer") {
+    return (
+      <Card className="scr-answer">
+        <Badge tone="success">answered from canon</Badge>
+        {result.claims.map((claim, i) => (
+          <div key={i} className="scr-answer__claim">
+            <div className="scr-prose">{claim.text}</div>
+            <button
+              type="button"
+              className="scr-answer__cite"
+              onClick={() => navigate(`/w/${worldId}/canon/${claim.entryId}`)}
+            >
+              <span className="mono">{claim.entryId}</span>
+              <span className="scr-answer__excerpt">“{claim.excerpt}”</span>
+            </button>
+          </div>
+        ))}
+        <div className="scr-answer__foot">
+          Every quoted span was verified against its entry. Searched {result.searched} entries.
+        </div>
+      </Card>
+    );
+  }
+  if (result.outcome === "unavailable") {
+    return (
+      <Callout tone="warning" title="Canon cannot be asked right now">
+        {result.reason}. {result.closest.length > 0 && "The closest entries by search:"}
+        <ClosestList worldId={worldId} closest={result.closest} />
+      </Callout>
+    );
+  }
+  const isNothing = result.cause === "nothing-retrieved";
+  return (
+    <Card className="scr-answer scr-answer--refusal">
+      <Badge tone="warning">{isNothing ? "canon has not touched this" : "canon has not decided this"}</Badge>
+      <div className="scr-prose">
+        {isNothing
+          ? `Searched all ${result.searched} entries — nothing comes close to this question.`
+          : `Searched all ${result.searched} entries. The closest describe the area without deciding the fact${result.detail ? ` — ${result.detail}` : ""}.`}
+      </div>
+      {result.closest.length > 0 && (
+        <div>
+          <div className="scr-field__label">Closest, by rank</div>
+          <ClosestList worldId={worldId} closest={result.closest} />
+        </div>
+      )}
+      <div style={{ display: "flex", gap: "var(--space-2)" }}>
+        <Button variant="primary" onClick={openAsThread}>
+          Open as a thread
+        </Button>
+        <Button
+          onClick={() => {
+            navigate(`/w/${worldId}/canon/new`, { state: { seed: question } });
+          }}
+        >
+          Draft an answer in context
+        </Button>
+      </div>
+      {world && world.meta.nextCanonId > 0 && (
+        <span className="scr-field__hint">
+          A thread takes CANON-{String(world.meta.nextCanonId).padStart(3, "0")} now and is citable
+          before it settles.
+        </span>
+      )}
+    </Card>
+  );
+}
+
+function ClosestList({ worldId, closest }: { worldId: string; closest: Array<{ entryId: string; title: string }> }) {
+  const navigate = useNavigate();
+  return (
+    <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", marginTop: "var(--space-2)" }}>
+      {closest.map((c) => (
+        <Button key={c.entryId} variant="secondary" onClick={() => navigate(`/w/${worldId}/canon/${c.entryId}`)}>
+          <span className="mono">{c.entryId}</span>&nbsp;{c.title}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
 export function CanonScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
+  const { state } = useStore();
+  const askResults = useAskResults();
+  const searches = useCanonSearches();
   const [query, setQuery] = useState("");
+  const [askId, setAskId] = useState<string | null>(null);
+  const [askedQuestion, setAskedQuestion] = useState("");
+  const [searchId, setSearchId] = useState<string | null>(null);
+  const harnessReady = state?.app.health.harness.status === "healthy";
+
+  const serverSearch = searchId ? searches[searchId] : undefined;
   const entries = useMemo(() => {
     const all = world?.canon ?? [];
-    const q = query.trim().toLowerCase();
-    const hit = q
-      ? all.filter((c) => c.title.toLowerCase().includes(q) || c.body.toLowerCase().includes(q))
-      : all;
-    return [...hit].sort((a, b) => (a.status === "open" ? -1 : 0) - (b.status === "open" ? -1 : 0) || a.id.localeCompare(b.id));
-  }, [world, query]);
+    if (serverSearch) {
+      const ranked = new Map(serverSearch.candidates.map((c, i) => [c.entryId, i]));
+      return all
+        .filter((c) => ranked.has(c.id))
+        .sort((a, b) => (ranked.get(a.id) ?? 99) - (ranked.get(b.id) ?? 99));
+    }
+    return [...all].sort(
+      (a, b) => (a.status === "open" ? -1 : 0) - (b.status === "open" ? -1 : 0) || a.id.localeCompare(b.id),
+    );
+  }, [world, serverSearch]);
+
+  const ask = () => {
+    if (!worldId || query.trim().length === 0) return;
+    const id = `ask_${Date.now().toString(36)}`;
+    setAskId(id);
+    setAskedQuestion(query.trim());
+    askCanon(worldId, id, query.trim());
+  };
+  const runSearch = (value: string) => {
+    setQuery(value);
+    if (!worldId) return;
+    if (value.trim().length === 0) {
+      setSearchId(null);
+      return;
+    }
+    const id = `search_${Date.now().toString(36)}`;
+    setSearchId(id);
+    searchCanonList(worldId, id, value.trim());
+  };
+
+  const result = askId ? askResults[askId] : undefined;
+
   return (
     <Screen id="canon">
       <PageHeader
@@ -685,21 +821,43 @@ export function CanonScreen() {
         }
       />
       <div className="scr-form">
-        <Input
-          placeholder="Ask the canon, or search it — “can Maren call a tide she has not stood in?”"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+          <Input
+            placeholder="Ask the canon — “can Maren call a tide she has not stood in?”"
+            value={query}
+            onChange={(e) => runSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") ask();
+            }}
+          />
+          <Button
+            variant="primary"
+            onClick={ask}
+            disabled={!harnessReady || query.trim().length === 0}
+            title={harnessReady ? undefined : "Asking needs OpenCode running; search still works"}
+          >
+            Ask
+          </Button>
+        </div>
         <span className="scr-field__hint">
-          Search is lexical here; grounded ask-with-citations (and its honest refusals) arrives with
-          SPEC-006.
+          Answers come only from entries, with verified quotes. When canon has not decided, it says
+          so and shows what it searched.
         </span>
       </div>
+      {askId && !result && <Callout title="Asking canon…">Retrieval first, then a grounded read of the candidates.</Callout>}
+      {result && worldId && <AskOutcome worldId={worldId} question={askedQuestion} result={result} />}
+      {serverSearch && (
+        <span className="scr-field__hint">
+          {serverSearch.candidates.length} match{serverSearch.candidates.length === 1 ? "" : "es"} across{" "}
+          {serverSearch.searched} searchable entries (open threads and retired entries are not
+          searched).
+        </span>
+      )}
       <div className="scr-sectionlist">
         {entries.map((entry) => (
           <CanonEntryRow key={entry.id} entry={entry} onOpen={() => navigate(`/w/${worldId}/canon/${entry.id}`)} />
         ))}
-        {entries.length === 0 && <EmptyState title="No matches" hint="Closest-match suggestions arrive with the index (SPEC-003)." />}
+        {entries.length === 0 && <EmptyState title="No matches" hint="The closest entries appear in the ask refusal above." />}
       </div>
     </Screen>
   );
@@ -714,6 +872,15 @@ function useCanonEntry(): { entry: CanonEntry | null; worldId: string | undefine
 export function CanonEntryScreen() {
   const { entry, worldId } = useCanonEntry();
   const navigate = useNavigate();
+  const world = useWorld();
+  const refs = useCanonRefs();
+  const [amending, setAmending] = useState(false);
+  const [statement, setStatement] = useState("");
+
+  useEffect(() => {
+    if (worldId && entry) requestCanonRefs(worldId, entry.id);
+  }, [worldId, entry?.id]);
+
   if (!entry) {
     return (
       <Screen id="canon-entry">
@@ -721,6 +888,8 @@ export function CanonEntryScreen() {
       </Screen>
     );
   }
+  const detail = refs[entry.id];
+  const history = (world?.changes ?? []).filter((c) => c.entity === `canon/${entry.id}`);
   return (
     <Screen id="canon-entry">
       <PageHeader
@@ -729,6 +898,7 @@ export function CanonEntryScreen() {
           <>
             <span className="mono">{entry.id}</span>
             <Badge tone="outline">{entry.type}</Badge>
+            {entry.retired && <Badge tone="danger">retired</Badge>}
             <span>
               written v{entry.introducedAt}
               {entry.settledAt !== undefined && ` · settled v${entry.settledAt}`}
@@ -742,24 +912,113 @@ export function CanonEntryScreen() {
               Open thread
             </Button>
           ) : (
-            <Button disabled title="Amendments go through the gate (SPEC-006)">
-              Propose amendment
-            </Button>
+            <>
+              <Button
+                variant="ghost"
+                disabled={entry.retired === true}
+                onClick={() => {
+                  if (worldId) retireEntity(worldId, `canon/${entry.id}.md`);
+                }}
+                title="Stays resolvable for existing citations; drops out of retrieval"
+              >
+                Retire
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setStatement(entry.body);
+                  setAmending(true);
+                }}
+              >
+                Propose amendment
+              </Button>
+            </>
           )
         }
       />
       <Card>
         <div className="scr-prose">{entry.body}</div>
       </Card>
-      <Section title="History" aside={<span>full snapshots per revision, from .history/ (SPEC-002)</span>}>
-        <EmptyState title="Version history renders once the world is on disk" />
+      {amending && worldId && (
+        <Card className="scr-form">
+          <div className="scr-field">
+            <label className="scr-field__label">Amended statement</label>
+            <Textarea value={statement} onChange={(e) => setStatement(e.target.value)} />
+          </div>
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
+            <Button
+              variant="primary"
+              disabled={statement.trim().length === 0 || statement.trim() === entry.body.trim()}
+              onClick={() => {
+                stageAmendmentMsg(worldId, entry.id, statement.trim());
+                setAmending(false);
+              }}
+            >
+              Stage amendment
+            </Button>
+            <Button variant="ghost" onClick={() => setAmending(false)}>
+              Cancel
+            </Button>
+          </div>
+        </Card>
+      )}
+      {detail && (detail.citedBy.sheets.length > 0 || detail.citedBy.entries.length > 0) && (
+        <Section title="Cited by" aside={<span>from the index, at the versions cited</span>}>
+          <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+            {detail.citedBy.sheets.map((s) => (
+              <Badge key={s.id} tone="outline">
+                {s.id}
+                {s.atVersion !== null ? ` @ v${s.atVersion}` : ""}
+              </Badge>
+            ))}
+            {detail.citedBy.entries.map((id) => (
+              <Button key={id} variant="secondary" onClick={() => navigate(`/w/${worldId}/canon/${id}`)}>
+                {id}
+              </Button>
+            ))}
+          </div>
+        </Section>
+      )}
+      {detail && detail.ripples.length > 0 && (
+        <Section title="Changing this ripples" aside={<span>computed speculatively for display</span>}>
+          <ul className="dom-ripples">
+            {detail.ripples.map((r, i) => (
+              <li key={i} className="dom-ripples__item">
+                <Badge tone="outline">{r.kind}</Badge>
+                <span>{r.summary}</span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+      <Section title="History" aside={<span>keyed by canon revision</span>}>
+        {history.length === 0 ? (
+          <EmptyState title="No recorded changes yet" />
+        ) : (
+          <div className="scr-sectionlist scr-changelist">
+            {[...history].reverse().map((c, i) => (
+              <div key={i} className="scr-change">
+                <span className="scr-change__entity mono">v{String(c.canonRevisionAfter ?? c.toVersion ?? "?")}</span>
+                <span>
+                  {c.fieldsChanged ? c.fieldsChanged.join(", ") : "changed"} · {c.source}
+                </span>
+                <span className="scr-change__when">{shortDateTime(c.ts)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </Section>
     </Screen>
   );
 }
 
+const SETTLE_TYPES = ["rule", "lore", "location", "faction", "timeline", "tone"] as const;
+
 export function CanonThreadScreen() {
-  const { entry } = useCanonEntry();
+  const { entry, worldId } = useCanonEntry();
+  const navigate = useNavigate();
+  const [resolvedType, setResolvedType] = useState<(typeof SETTLE_TYPES)[number]>("lore");
+  const [statement, setStatement] = useState("");
   return (
     <Screen id="canon-thread">
       <PageHeader
@@ -771,56 +1030,105 @@ export function CanonThreadScreen() {
           </>
         )}
       />
-      <DegradedBanner component="harness" />
       {entry && (
         <Card>
           <div className="scr-prose">{entry.body}</div>
         </Card>
       )}
-      <Section title="Conversation">
-        <EmptyState
-          title="Pull the thread"
-          hint="Talking a thread toward settlement — and settling it into canon — arrives with SPEC-006."
-        />
+      <Section title="Settle it" aside={<span>the answer becomes the entry; the number stays</span>}>
+        <div className="scr-form">
+          <div className="scr-field">
+            <label className="scr-field__label">What it turned out to be</label>
+            <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+              {SETTLE_TYPES.map((t) => (
+                <Button key={t} variant={t === resolvedType ? "primary" : "secondary"} onClick={() => setResolvedType(t)}>
+                  {t}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div className="scr-field">
+            <label className="scr-field__label">The settled statement</label>
+            <Textarea
+              placeholder="The Chorister was taught by the god itself, in the winter it walked in…"
+              value={statement}
+              onChange={(e) => setStatement(e.target.value)}
+            />
+          </div>
+          <div>
+            <Button
+              variant="primary"
+              disabled={!entry || !worldId || statement.trim().length === 0}
+              onClick={() => {
+                if (!entry || !worldId) return;
+                settleThread(worldId, entry.id, resolvedType, statement.trim());
+                navigate(`/w/${worldId}/canon/${entry.id}`);
+              }}
+            >
+              Stage settlement
+            </Button>
+          </div>
+          <Callout title="Settling is an ordinary accept">
+            The staged proposal shows its ripples; accepting settles the entry, closes the thread
+            and moves the canon revision once.
+          </Callout>
+        </div>
       </Section>
-      <div>
-        <Button variant="primary" disabled title="Settling arrives with SPEC-006">
-          Settle into canon
-        </Button>
-      </div>
     </Screen>
   );
 }
 
 export function NewCanonScreen() {
+  const { worldId } = useParams();
+  const world = useOpenWorldGuard(worldId);
+  const navigate = useNavigate();
+  const [entryType, setEntryType] = useState<(typeof SETTLE_TYPES)[number]>("rule");
+  const [title, setTitle] = useState("");
+  const [statement, setStatement] = useState("");
+  const nextId = world ? `CANON-${String(world.meta.nextCanonId).padStart(3, "0")}` : "CANON-…";
   return (
     <Screen id="new-canon">
-      <PageHeader title="New canon entry" />
+      <PageHeader title="New canon entry" meta={<span>takes {nextId} at staging, and keeps it</span>} />
       <div className="scr-form">
         <div className="scr-field">
           <label className="scr-field__label">Type</label>
           <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
-            {["rule", "lore", "location", "faction", "timeline", "tone", "thread"].map((t) => (
-              <Badge key={t} tone="outline">{t}</Badge>
+            {SETTLE_TYPES.map((t) => (
+              <Button key={t} variant={t === entryType ? "primary" : "secondary"} onClick={() => setEntryType(t)}>
+                {t}
+              </Button>
             ))}
           </div>
         </div>
         <div className="scr-field">
           <label className="scr-field__label">Title</label>
-          <Input placeholder="Tide-calling" />
+          <Input placeholder="Tide-calling" value={title} onChange={(e) => setTitle(e.target.value)} />
         </div>
         <div className="scr-field">
           <label className="scr-field__label">Statement</label>
-          <Textarea placeholder="A caller cannot move a tide she has not stood in…" />
+          <Textarea
+            placeholder="A caller cannot move a tide she has not stood in…"
+            value={statement}
+            onChange={(e) => setStatement(e.target.value)}
+          />
         </div>
         <div>
-          <Button variant="primary" disabled title="Canon writes go through the gate (SPEC-006)">
-            Propose entry
+          <Button
+            variant="primary"
+            disabled={!worldId || title.trim().length === 0 || statement.trim().length === 0}
+            onClick={() => {
+              if (!worldId) return;
+              stageEntryMsg(worldId, entryType, title.trim(), statement.trim());
+              navigate(`/w/${worldId}/canon`);
+            }}
+          >
+            Stage entry
           </Button>
         </div>
         <Callout title="Ids are permanent">
-          The entry reserves the next CANON number at proposal time and keeps it forever — retired
-          ids are never reused, so citations never drift (R-CANON-4).
+          The entry reserves the next CANON number at staging and keeps it forever — retired ids
+          are never reused, so citations never drift. Contradiction candidates appear on the
+          proposal as an aid; nothing blocks.
         </Callout>
       </div>
     </Screen>
