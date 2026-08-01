@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   DomainEventSchema,
   JobSchema,
@@ -8,8 +9,21 @@ import {
   type DomainEvent,
   type HarnessAdapter,
   type HealthComponent,
+  gateLocalRuntimes,
+  type LedgerEntry,
+  type ModelManifest,
+  type ProviderId,
+  type RuntimeProbes,
 } from "@arke-studio/contracts";
+import { AppLog } from "./app-log.js";
+import { AppSettingsFile, routingFaults } from "./app-settings.js";
 import { AskService } from "./canon/ask.js";
+import { CredentialStore, type Cipher } from "./credentials/store.js";
+import { buildDiagnosticsBundle } from "./diagnostics.js";
+import { ProviderService, type KeyValidator } from "./providers/service.js";
+import { SecretRegistry } from "./redact.js";
+import { detectDrift, evaluateSpend } from "./spend/analytics.js";
+import { LedgerFile } from "./spend/ledger.js";
 import {
   openThread,
   stageCanonAmendment,
@@ -54,6 +68,14 @@ export interface CoordinatorOptions {
     buildConfig: (input: { worldQueryUrl?: string }) => Record<string, unknown>;
     agentForPurpose: (purpose: "authoring" | "drafting" | "extraction" | "ask") => string;
   };
+  /** SPEC-008: credential cipher (Electron safeStorage in the desktop; a fake in tests). */
+  cipher?: Cipher;
+  /** SPEC-008: per-provider key validators, injected from @arke-studio/providers. */
+  validators?: Partial<Record<ProviderId, KeyValidator>>;
+  /** SPEC-008: the shipped model manifest. */
+  manifest?: ModelManifest;
+  /** SPEC-008: local runtime probing, injected so tests measure nothing. */
+  probeRuntime?: () => Promise<RuntimeProbes>;
 }
 
 const SUPERVISOR_HEALTH: Record<SupervisorStatus, { status: "starting" | "healthy" | "unhealthy" | "unavailable" }> = {
@@ -76,10 +98,25 @@ export class Coordinator {
   /** actionClass per pending permission id, for remember-on-always (R-16). */
   private readonly pendingPermissions = new Map<string, string>();
   private started = false;
+  /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
+  private readonly secrets = new SecretRegistry();
+  private readonly appLog: AppLog | null;
+  private readonly credentials: CredentialStore | null;
+  private readonly providerService: ProviderService;
+  private readonly ledger: LedgerFile | null;
+  private readonly appSettings: AppSettingsFile | null;
 
   constructor(private readonly opts: CoordinatorOptions) {
     this.readModel = new ReadModel(opts.appVersion);
     this.changeLog = new ChangeLog(opts.changeLogPath);
+    this.appLog = opts.appRoot ? new AppLog(join(opts.appRoot, "logs", "app.jsonl"), this.secrets) : null;
+    this.credentials =
+      opts.appRoot && opts.cipher
+        ? new CredentialStore(join(opts.appRoot, "credentials.dat"), opts.cipher, this.secrets)
+        : null;
+    this.providerService = new ProviderService(this.credentials, opts.validators ?? {}, this.appLog);
+    this.ledger = opts.appRoot ? new LedgerFile(join(opts.appRoot, "ledger.jsonl")) : null;
+    this.appSettings = opts.appRoot ? new AppSettingsFile(join(opts.appRoot, "settings.json")) : null;
     this.transport = new Transport({
       getSnapshot: () => this.getState(),
       onMessage: (msg) => void this.handleClientMessage(msg),
@@ -171,6 +208,7 @@ export class Coordinator {
     });
 
     await this.seed();
+    await this.seedAppConfig();
     this.readModel.setWorlds(await this.opts.provider.listWorlds());
 
     const boundPort = await this.transport.start(port);
@@ -228,6 +266,62 @@ export class Coordinator {
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();
+  }
+
+  /** Seed the SPEC-008 app-config slice: manifest, provider statuses, routing, spend, drift. */
+  private async seedAppConfig(): Promise<void> {
+    await this.providerService.init();
+    const manifest = this.opts.manifest ?? null;
+    const settings = this.appSettings ? await this.appSettings.load() : null;
+    const entries = this.ledger ? await this.ledger.readAll() : [];
+    this.readModel.seedAppConfig({
+      manifest,
+      providers: this.providerService.list(),
+      ...(settings && manifest
+        ? { routing: { defaults: settings.routing, faults: routingFaults(settings, manifest) } }
+        : {}),
+      ...(settings ? { spend: evaluateSpend(entries, settings.spend, new Date()) } : {}),
+      ...(manifest ? { drift: detectDrift(entries, manifest) } : {}),
+    });
+  }
+
+  /**
+   * The diagnostics bundle (SPEC-008 R-6): app state through the redaction boundary — no key
+   * material, no world content. Exposed for the About screen and support flows.
+   */
+  async diagnostics(): Promise<Record<string, unknown>> {
+    return buildDiagnosticsBundle(this.getState(), this.appLog, this.secrets);
+  }
+
+  /** A credential failed mid-session: a provider fault naming the provider, never a work failure (R-4). */
+  reportProviderFault(provider: ProviderId, message: string): void {
+    this.providerService.markFault(provider, message);
+    this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
+  }
+
+  /**
+   * Record a terminal job outcome (SPEC-008 R-16): append to the ledger, mirror to the app
+   * index via the event fold, re-evaluate the rolling threshold (R-19) and drift (R-13).
+   * SPEC-009's dispatcher calls this; fixtures and tests call it directly.
+   */
+  async recordLedger(entry: LedgerEntry): Promise<void> {
+    if (this.ledger) await this.ledger.append(entry);
+    this.emit({ at: new Date().toISOString(), type: "ledger.appended", entry });
+    const settings = this.appSettings ? await this.appSettings.load() : null;
+    if (!settings) return;
+    const entries = this.ledger ? await this.ledger.readAll() : this.getState().app.ledger;
+    const spend = evaluateSpend(entries, settings.spend, new Date());
+    const wasAlerted = this.getState().app.spend?.alerted ?? false;
+    this.emit({ at: new Date().toISOString(), type: "spend.status", spend });
+    if (spend.alerted && !wasAlerted) {
+      void this.appLog?.append({ kind: "spend.alert", rollingMicroUsd: spend.rollingMicroUsd, settings: settings.spend });
+    }
+    if (this.opts.manifest) {
+      const drift = detectDrift(entries, this.opts.manifest);
+      if (JSON.stringify(drift) !== JSON.stringify(this.getState().app.drift)) {
+        this.emit({ at: new Date().toISOString(), type: "manifest.drift", reports: drift });
+      }
+    }
   }
 
   private async handleClientMessage(msg: ClientMessage): Promise<void> {
@@ -632,6 +726,78 @@ export class Coordinator {
           ),
           incomingLinks: incoming.map((r) => r.id),
         });
+        return;
+      }
+      case "set-credential": {
+        // Write-only (R-5, R-8): the plaintext is registered with the redaction boundary,
+        // encrypted, stored under a user-only ACL, and never travels back in any frame.
+        if (!this.credentials) return;
+        try {
+          await this.credentials.set(msg.provider, msg.key);
+          this.providerService.setConfigured(msg.provider, true);
+          this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
+        } catch (err) {
+          void this.appLog?.append({
+            kind: "credential.store-failed",
+            provider: msg.provider,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+      case "clear-credential": {
+        if (!this.credentials) return;
+        await this.credentials.clear(msg.provider).catch(() => {});
+        this.providerService.setConfigured(msg.provider, false);
+        this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
+        return;
+      }
+      case "validate-provider": {
+        // Probes per capability (R-3): the emitted statuses carry what the key unlocks.
+        this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
+        await this.providerService.validate(msg.provider);
+        this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
+        return;
+      }
+      case "set-routing-default": {
+        if (!this.appSettings || !this.opts.manifest) return;
+        const result = await this.appSettings.setRoutingDefault(msg.capability, msg.modelId, this.opts.manifest);
+        if (!result.ok) {
+          void this.appLog?.append({ kind: "routing.refused", capability: msg.capability, reason: result.reason });
+        }
+        const settings = await this.appSettings.load();
+        this.emit({
+          at: new Date().toISOString(),
+          type: "routing.changed",
+          routing: settings.routing,
+          faults: routingFaults(settings, this.opts.manifest),
+        });
+        return;
+      }
+      case "set-spend-threshold": {
+        if (!this.appSettings) return;
+        const settings = await this.appSettings.setSpend(msg.thresholdMicroUsd, msg.periodDays);
+        const entries = this.ledger ? await this.ledger.readAll() : this.getState().app.ledger;
+        this.emit({
+          at: new Date().toISOString(),
+          type: "spend.status",
+          spend: evaluateSpend(entries, settings.spend, new Date()),
+        });
+        return;
+      }
+      case "detect-runtimes": {
+        if (!this.opts.manifest || !this.opts.probeRuntime) return;
+        try {
+          const probes = await this.opts.probeRuntime();
+          this.emit({
+            at: new Date().toISOString(),
+            type: "runtime.status",
+            runtime: gateLocalRuntimes(this.opts.manifest, probes, new Date().toISOString()),
+          });
+        } catch {
+          // Detection failure means unknown, not unavailable (D12) — nothing is emitted over
+          // the last known figures, and nothing gets disabled by a broken probe.
+        }
         return;
       }
       case "permission-reply": {

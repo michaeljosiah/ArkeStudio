@@ -4,8 +4,26 @@ import { Badge, Button, Callout, Card, Input, StatusDot, Switch, cx, type Status
 import { EmptyState, PageHeader, KeyValue, Screen, Section } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
 import { usd } from "../lib/format.js";
-import { createWorld, useStore } from "../lib/store.js";
-import type { ComponentHealth } from "@arke-studio/contracts";
+import {
+  clearCredential,
+  createWorld,
+  detectRuntimes,
+  setCredential,
+  setRoutingDefault,
+  setSpendThreshold,
+  useStore,
+  validateProvider,
+} from "../lib/store.js";
+import {
+  deriveCapabilityAvailability,
+  formatMicroUsd,
+  modelCapabilityCopy,
+  PROVIDERS as PROVIDER_TABLE,
+  type Capability,
+  type ComponentHealth,
+  type ProviderId,
+  type ProviderStatus,
+} from "@arke-studio/contracts";
 
 /** Shell screens: launch, first run, world picker, new world, settings, activity (§2.9). */
 
@@ -256,74 +274,224 @@ export function SettingsLayout() {
   );
 }
 
-const PROVIDERS = [
-  { id: "fal", label: "FAL", note: "images and video — most models route here" },
-  { id: "higgsfield", label: "Higgsfield", note: "video" },
-  { id: "elevenlabs", label: "ElevenLabs", note: "cloud voice and voice clones" },
-  { id: "openai", label: "OpenAI", note: "authoring and voice" },
-  { id: "anthropic", label: "Anthropic", note: "authoring" },
-] as const;
+const KEYED_PROVIDERS: Array<{ id: ProviderId; note: string }> = [
+  { id: "fal", note: "images and video — one key, both route here" },
+  { id: "higgsfield", note: "images and video" },
+  { id: "elevenlabs", note: "cloud voice and voice clones" },
+  { id: "openai", note: "LLM and images" },
+  { id: "anthropic", note: "LLM" },
+];
+
+function ProbeChips({ status }: { status: ProviderStatus | undefined }) {
+  if (!status || status.probes.length === 0) return null;
+  return (
+    <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+      {status.probes.map((p) => (
+        <Badge key={p.capability} tone={p.available ? "success" : "outline"}>
+          {p.capability} {p.available ? "✓" : `— ${p.reason ?? "unavailable"}`}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+function ProviderKeyRow({ id, note }: { id: ProviderId; note: string }) {
+  const { state } = useStore();
+  const [draft, setDraft] = useState("");
+  const status = state?.app.providers.find((p) => p.id === id);
+  const info = PROVIDER_TABLE[id];
+  return (
+    <div className="scr-sheetsection">
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+        <strong style={{ font: "var(--type-ui)" }}>{info.displayName}</strong>
+        <span style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>{note}</span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+          {status?.validation === "testing" && <Badge tone="outline">testing…</Badge>}
+          {status?.validation === "valid" && <Badge>key valid</Badge>}
+          {status?.validation === "invalid" && <Badge tone="outline">key rejected</Badge>}
+          <Badge tone={status?.configured ? "success" : "outline"}>
+            {status?.configured ? "key stored" : "no key stored"}
+          </Badge>
+        </span>
+      </div>
+      {status?.fault && (
+        <Callout title={`${info.displayName} fault`}>
+          {status.fault} — the work was not the problem; the credential was.
+        </Callout>
+      )}
+      <div style={{ display: "flex", gap: "var(--space-2)" }}>
+        <Input
+          type="password"
+          placeholder={info.keyHint ?? "API key"}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <Button
+          disabled={draft.trim().length === 0}
+          onClick={() => {
+            setCredential(id, draft.trim());
+            setDraft("");
+          }}
+        >
+          Save key
+        </Button>
+        <Button variant="ghost" disabled={!status?.configured} onClick={() => validateProvider(id)}>
+          Test
+        </Button>
+        <Button variant="ghost" disabled={!status?.configured} onClick={() => clearCredential(id)}>
+          Remove
+        </Button>
+      </div>
+      <ProbeChips status={status} />
+    </div>
+  );
+}
 
 export function SettingsProvidersScreen() {
+  const { state } = useStore();
+  const availability = deriveCapabilityAvailability(state?.app.providers ?? []);
+  const spend = state?.app.spend ?? null;
+  const [threshold, setThreshold] = useState<string | null>(null);
+  const [period, setPeriod] = useState<string | null>(null);
+  const thresholdValue = threshold ?? (spend ? String(spend.settings.thresholdMicroUsd / 1_000_000) : "0");
+  const periodValue = period ?? String(spend?.settings.periodDays ?? 7);
   return (
     <div data-screen="settings-providers">
-      <Section
-        title="Provider keys"
-        aside={<span>Stored encrypted at OS level, never inside a world (R-PROV-2)</span>}
-      >
+      <Section title="Provider keys" aside={<span>Encrypted at OS level, outside every world — no export can carry one</span>}>
         <div className="scr-sectionlist">
-          {PROVIDERS.map((p) => (
-            <div key={p.id} className="scr-sheetsection">
-              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-                <strong style={{ font: "var(--type-ui)" }}>{p.label}</strong>
-                <span style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>{p.note}</span>
-                <span style={{ marginLeft: "auto" }}>
-                  <Badge tone="outline">no key stored</Badge>
-                </span>
-              </div>
-              <Input disabled placeholder="Key entry arrives with SPEC-008" />
-            </div>
+          {KEYED_PROVIDERS.map((p) => (
+            <ProviderKeyRow key={p.id} id={p.id} note={p.note} />
           ))}
         </div>
-        <Callout title="One key per provider">
-          A key entered once satisfies everything that provider declares — image, video or voice
-          (R-PROV-1). Key storage and validation land with SPEC-008.
+        <Callout title="Validation tells the truth">
+          Testing a key probes each capability separately: a key that authenticates but cannot do
+          video says so here, not at the end of composing a scene.
         </Callout>
+      </Section>
+      <Section title="What this machine can do" aside={<span>Derived from configured, validated providers</span>}>
+        <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+          {availability.map((a) => (
+            <Badge key={a.capability} tone={a.available ? "success" : "outline"}>
+              {a.capability}
+              {a.available
+                ? ` · ${a.via.map((v) => PROVIDER_TABLE[v].displayName).join(", ")}`
+                : ` — ${a.reason ?? "unavailable"}`}
+            </Badge>
+          ))}
+        </div>
+      </Section>
+      <Section title="Spend" aside={<span>Alerts on a rolling window, across all worlds. Never blocks.</span>}>
+        {spend && (
+          <KeyValue
+            rows={[
+              {
+                k: `Last ${spend.settings.periodDays} day${spend.settings.periodDays === 1 ? "" : "s"}`,
+                v: formatMicroUsd(spend.rollingMicroUsd),
+              },
+              {
+                k: "Threshold",
+                v:
+                  spend.settings.thresholdMicroUsd > 0
+                    ? `${formatMicroUsd(spend.settings.thresholdMicroUsd)}${spend.alerted ? " — over" : ""}`
+                    : "off",
+              },
+            ]}
+          />
+        )}
+        {spend?.alerted && (
+          <Callout title="Over the spend threshold">
+            {formatMicroUsd(spend.rollingMicroUsd)} in the last {spend.settings.periodDays} days, against a threshold
+            of {formatMicroUsd(spend.settings.thresholdMicroUsd)}. Dispatch still works — the money is yours; this is
+            a warning, not a stop.
+          </Callout>
+        )}
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+          <span className="scr-field__label">Alert at $</span>
+          <Input style={{ maxWidth: 120 }} value={thresholdValue} onChange={(e) => setThreshold(e.target.value)} />
+          <span className="scr-field__label">over</span>
+          <Input style={{ maxWidth: 80 }} value={periodValue} onChange={(e) => setPeriod(e.target.value)} />
+          <span className="scr-field__label">days</span>
+          <Button
+            onClick={() => {
+              const usdValue = Number.parseFloat(thresholdValue);
+              const days = Number.parseInt(periodValue, 10);
+              if (Number.isFinite(usdValue) && usdValue >= 0 && Number.isFinite(days) && days >= 1) {
+                setSpendThreshold(Math.round(usdValue * 1_000_000), Math.min(days, 365));
+                setThreshold(null);
+                setPeriod(null);
+              }
+            }}
+          >
+            Set
+          </Button>
+        </div>
       </Section>
     </div>
   );
 }
+
+const RUNTIME_TONE: Record<"ready" | "disabled" | "unknown", StatusDotTone> = {
+  ready: "ok",
+  disabled: "muted",
+  unknown: "busy",
+};
 
 export function SettingsLocalRuntimeScreen() {
   const { state } = useStore();
+  const runtime = state?.app.runtime ?? null;
+  useEffect(() => {
+    if (!runtime) detectRuntimes();
+    // Detection runs once per mount when nothing is known yet; Re-detect is the manual path.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const gbOrUnknown = (mb: number | null) => (mb === null ? "could not measure" : `${Math.round(mb / 1024)} GB`);
   return (
     <div data-screen="settings-local-runtime">
-      <Section title="Local runtime">
+      <Section
+        title="This machine"
+        aside={
+          <Button variant="ghost" onClick={() => detectRuntimes()}>
+            Re-detect
+          </Button>
+        }
+      >
+        {runtime ? (
+          <KeyValue
+            rows={[
+              { k: "Dedicated VRAM", v: gbOrUnknown(runtime.probes.vramMb) },
+              { k: "System memory", v: gbOrUnknown(runtime.probes.memMb) },
+              { k: "Free disk", v: gbOrUnknown(runtime.probes.diskFreeMb) },
+            ]}
+          />
+        ) : (
+          <EmptyState title="Not yet measured" hint="Detection runs on demand and at start-up." />
+        )}
+      </Section>
+      <Section title="Local models" aside={<span>Shown even when they cannot run — with the measured reason</span>}>
+        <div className="scr-sectionlist">
+          {(runtime?.models ?? []).map((m) => (
+            <div key={m.modelId} className="scr-sheetsection">
+              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+                <StatusDot tone={RUNTIME_TONE[m.state]} label={m.displayName} />
+                <span style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>
+                  {PROVIDER_TABLE[m.provider].displayName} · {m.capability}
+                </span>
+                <span style={{ marginLeft: "auto" }}>
+                  <Badge tone={m.state === "ready" ? "success" : "outline"}>{m.state}</Badge>
+                </span>
+              </div>
+              {m.reason && <span className="scr-field__hint">{m.reason}</span>}
+            </div>
+          ))}
+        </div>
+      </Section>
+      <Section title="Supervised runtimes">
         <div className="scr-sectionlist">
           <div className="scr-sheetsection">
             <HealthDot label="OpenCode (authoring harness)" health={state?.app.health.harness} />
-            <span className="scr-field__hint">
-              Bundled with the app; an existing install is used when found. Managed start-up lands
-              with SPEC-005.
-            </span>
           </div>
           <div className="scr-sheetsection">
             <HealthDot label="Voxa (local voice)" health={state?.app.health.voice} />
-            <span className="scr-field__hint">
-              Local TTS/STT — Kokoro and whisper.cpp under a supervised sidecar. Lands with SPEC-011.
-            </span>
-          </div>
-          <div className="scr-sheetsection">
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-              <span style={{ font: "var(--type-ui)" }}>Ollama</span>
-              <span style={{ marginLeft: "auto" }}>
-                <Switch checked={false} disabled label="Use Ollama for cheap non-authoring work" />
-              </span>
-            </div>
-            <span className="scr-field__hint">
-              Called directly for cheap non-authoring work; offered for authoring when no cloud LLM
-              is configured (R-PROV-7).
-            </span>
           </div>
         </div>
       </Section>
@@ -331,21 +499,84 @@ export function SettingsLocalRuntimeScreen() {
   );
 }
 
+/** The capability rows the routing surface offers, in product language. */
+const ROUTED_CAPABILITIES: Array<{ capability: Capability; label: string }> = [
+  { capability: "video", label: "Clips" },
+  { capability: "image", label: "Frames & stills" },
+  { capability: "voice-tts", label: "Voice" },
+  { capability: "llm", label: "Direct LLM work" },
+];
+
 export function SettingsWhoDoesWhatScreen() {
+  const { state } = useStore();
+  const manifest = state?.app.manifest ?? null;
+  const routing = state?.app.routing ?? { defaults: {}, faults: [] };
+  const drift = state?.app.drift ?? [];
   return (
     <div data-screen="settings-who-does-what">
-      <Section title="Who does what" aside={<span>Routing defaults — editable once SPEC-008 lands</span>}>
-        <KeyValue
-          rows={[
-            { k: "Clips", v: "FAL · seedance-2.0" },
-            { k: "Frames & stills", v: "FAL · flux-pro-1.1" },
-            { k: "Cloud voice", v: "ElevenLabs · eleven-v3" },
-            { k: "Local voice", v: "Voxa · Kokoro" },
-            { k: "Authoring", v: "OpenCode → your configured LLM" },
-            { k: "Cheap non-authoring", v: "Ollama (when running)" },
-          ]}
-        />
+      <Section
+        title="Who does what"
+        aside={<span>A default is a concrete model — what a dispatch will use is never ambiguous</span>}
+      >
+        {routing.faults.map((f) => (
+          <Callout key={f.capability} title={`Routing fault — ${f.capability}`}>
+            {f.reason}
+          </Callout>
+        ))}
+        <div className="scr-sectionlist">
+          {ROUTED_CAPABILITIES.map(({ capability, label }) => {
+            const options = (manifest?.models ?? []).filter((m) => m.capability === capability);
+            const selected = routing.defaults[capability];
+            const selectedModel = options.find((m) => m.id === selected);
+            return (
+              <div key={capability} className="scr-sheetsection">
+                <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+                  <strong style={{ font: "var(--type-ui)" }}>{label}</strong>
+                  <span style={{ marginLeft: "auto", font: "var(--type-label)", color: "var(--muted-foreground)" }}>
+                    {selectedModel
+                      ? `${PROVIDER_TABLE[selectedModel.provider].displayName} · ${selectedModel.displayName}`
+                      : "no default set"}
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+                  {options.map((m) => (
+                    <Button
+                      key={m.id}
+                      variant={m.id === selected ? "primary" : "ghost"}
+                      onClick={() => setRoutingDefault(capability, m.id)}
+                    >
+                      {PROVIDER_TABLE[m.provider].displayName} · {m.displayName}
+                    </Button>
+                  ))}
+                  {options.length === 0 && <span className="scr-field__hint">no models in the manifest for this</span>}
+                </div>
+                {/* The capability copy is the manifest speaking (R-10): refs, frames, caps. */}
+                {options.length > 0 && (
+                  <span className="scr-field__hint">
+                    {options.map((m) => `${m.displayName} · ${modelCapabilityCopy(m)}`).join("  —  ")}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {manifest && (
+          <span className="scr-field__hint">
+            Manifest v{manifest.manifestVersion} · {manifest.generated}. Any production can override the routed model
+            per dispatch; the override travels with that dispatch alone.
+          </span>
+        )}
       </Section>
+      {drift.length > 0 && (
+        <Section title="Manifest drift" aside={<span>Estimates keep missing what providers actually charge</span>}>
+          {drift.map((d) => (
+            <Callout key={d.modelId} title={`${d.modelId} — estimates off by ~${(d.medianDivergencePerMille / 10).toFixed(0)}%`}>
+              Across {d.samples} provider-reported charges, the manifest price for {d.modelId} diverges from what{" "}
+              {PROVIDER_TABLE[d.provider].displayName} actually billed. The shipped manifest needs an update.
+            </Callout>
+          ))}
+        </Section>
+      )}
     </div>
   );
 }

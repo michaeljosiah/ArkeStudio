@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
 import { UlidSchema } from "./ids.js";
+import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then `event` frames, sequence
@@ -210,5 +211,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** SPEC-007 R-16: a sheet's computed detail — refs and incoming links from the index. */
   z.object({ kind: z.literal("sheet-refs"), worldId: UlidSchema, sheetId: z.string().min(1) }).strict(),
+  /**
+   * SPEC-008 R-5: store a credential. Write-only — no message or event ever carries one back,
+   * and the plaintext exists in the main process for the write alone (R-8).
+   */
+  z
+    .object({ kind: z.literal("set-credential"), provider: ProviderIdSchema, key: z.string().min(1).max(4096) })
+    .strict(),
+  z.object({ kind: z.literal("clear-credential"), provider: ProviderIdSchema }).strict(),
+  /** SPEC-008 R-3: probe per capability; the answer is what the key unlocks, not that it authenticates. */
+  z.object({ kind: z.literal("validate-provider"), provider: ProviderIdSchema }).strict(),
+  /** SPEC-008 R-20: a routing default is a concrete model, displayed as its provider (D1). */
+  z
+    .object({ kind: z.literal("set-routing-default"), capability: CapabilitySchema, modelId: z.string().min(1) })
+    .strict(),
+  /** SPEC-008 R-19: the rolling spend threshold — alerts, never blocks (D10). */
+  z
+    .object({
+      kind: z.literal("set-spend-threshold"),
+      thresholdMicroUsd: z.number().int().min(0),
+      periodDays: z.number().int().min(1).max(365),
+    })
+    .strict(),
+  /** SPEC-008 R-22: re-run local runtime detection on demand. */
+  z.object({ kind: z.literal("detect-runtimes") }).strict(),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;

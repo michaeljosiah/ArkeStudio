@@ -54,8 +54,11 @@ describe("design tokens", () => {
     assert.deepEqual(offenders, [], `hard-coded colours found in: ${offenders.join(", ")}`);
   });
 
-  it("keeps credentials out of the client entirely (R-10)", () => {
-    const suspicious = /(apiKey|api_key|secretKey|credential|safeStorage|Authorization: Bearer)/i;
+  it("keeps credential material out of the client (R-10; SPEC-008 R-5, R-6)", () => {
+    // Key ENTRY is legitimate since SPEC-008 (write-only: the value goes up once, no frame
+    // carries one back). What must never appear client-side: decryption, persistence, or
+    // direct provider auth — a key the client could read back would break R-6.
+    const suspicious = /(safeStorage|decryptString|localStorage|sessionStorage|api_key|secretKey|Authorization: Bearer|xi-api-key|x-api-key)/i;
     const offenders: string[] = [];
     for (const path of walk(SRC)) {
       if (!/\.(tsx?)$/.test(path)) continue;

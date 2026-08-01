@@ -1,6 +1,6 @@
 import {
   HarnessEventSchema,
-  type Capability,
+  type HarnessCapability,
   type CreateSessionInput,
   type HarnessAdapter,
   type HarnessEvent,
@@ -20,13 +20,13 @@ import {
  */
 export class MockHarnessAdapter implements HarnessAdapter {
   readonly id = "mock";
-  private readonly caps = new Set<Capability>(["events", "models", "permissions"]);
+  private readonly caps = new Set<HarnessCapability>(["events", "models", "permissions"]);
   private sessions = 0;
   private correlations = 0;
   private readonly subscribers = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null }>();
   private disposed = false;
 
-  capabilities(): ReadonlySet<Capability> {
+  capabilities(): ReadonlySet<HarnessCapability> {
     return this.caps;
   }
 
