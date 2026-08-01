@@ -109,13 +109,50 @@ function ShellTitlebar({ back, label, divided = true }: { back?: { label: string
 
 // ---- Launch ----------------------------------------------------------------
 
+/**
+ * What setup actually does, in the order it happens. A step is "settled" once its outcome is
+ * known — and "not configured" is a settled outcome, not a failure: the app is usable in every
+ * one of them (R-6). Progress counts settled steps, so the bar never stalls on an absent
+ * optional runtime.
+ */
+function setupSteps(
+  connection: string,
+  state: ReturnType<typeof useStore>["state"],
+  envChecked: boolean,
+): Array<{ label: string; state: string; settled: boolean }> {
+  const outcome = (health: ComponentHealth | undefined): { state: string; settled: boolean } => {
+    if (!health || health.status === "starting") return { state: "starting…", settled: false };
+    if (health.status === "healthy") return { state: "ready", settled: true };
+    return { state: health.reason ?? health.status, settled: true };
+  };
+  return [
+    {
+      label: "Studio core",
+      ...(connection === "open" && state !== null
+        ? { state: "ready", settled: true }
+        : { state: connection === "closed" ? "retrying…" : "starting…", settled: false }),
+    },
+    {
+      label: "Your data folder",
+      ...(envChecked ? { state: "checked", settled: true } : { state: "checking…", settled: false }),
+    },
+    { label: "Authoring (OpenCode)", ...outcome(state?.app.health.harness) },
+    { label: "Local voice (Voxa)", ...outcome(state?.app.health.voice) },
+  ];
+}
+
 export function LaunchScreen() {
   const { connection, state } = useStore();
   const navigate = useNavigate();
+  const env = useEnvCheck();
 
   // Setup never walks off on its own — the user continues when they're ready (no worlds →
   // first run; otherwise the picker, R-8).
   const ready = connection === "open" && state !== null;
+  const steps = setupSteps(connection, state, env !== null);
+  const settled = steps.filter((s) => s.settled).length;
+  const percent = Math.round((settled / steps.length) * 100);
+  const current = steps.find((s) => !s.settled);
 
   return (
     <div className="fy-app" data-screen="launch">
@@ -134,12 +171,25 @@ export function LaunchScreen() {
           <div className="fy-launch__row">
             <span className="fy-launch__title">Setting up your studio.</span>
             <span style={{ flex: 1 }} />
-            <span className="fy-mono">{ready ? "ready" : "probing…"}</span>
+            <span className="fy-mono">{current ? current.label.toLowerCase() : "everything settled"}</span>
           </div>
-          <div className="scr-launch__probes" style={{ marginTop: 10 }}>
-            <HealthDot label="Coordinator" health={connection === "open" ? state?.app.health.coordinator : { status: "starting" }} />
-            <HealthDot label="Authoring (OpenCode)" health={state?.app.health.harness} />
-            <HealthDot label="Local voice (Voxa)" health={state?.app.health.voice} />
+          <div className="fy-setupbar">
+            <div className="fy-setupbar__fill" style={{ width: `${percent}%` }} />
+          </div>
+          <div className="fy-launch__row" style={{ marginTop: 8 }}>
+            <span className="fy-mono">
+              {settled} of {steps.length} checks settled
+            </span>
+            <span style={{ flex: 1 }} />
+            <span className="fy-mono">nothing is downloaded here</span>
+          </div>
+          <div className="fy-setuplist">
+            {steps.map((s) => (
+              <div key={s.label} className="fy-setuprow">
+                <span className="fy-setuprow__label">{s.label}</span>
+                <span className="fy-setuprow__state">{s.state}</span>
+              </div>
+            ))}
           </div>
           {connection === "closed" && (
             <Callout tone="warning" title="Waiting for the coordinator">

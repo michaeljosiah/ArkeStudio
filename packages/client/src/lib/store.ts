@@ -967,7 +967,10 @@ export function openDataFolder(): void {
 }
 
 export function useEnvCheck(): StoreEnvCheck | null {
-  return useStore().envCheck;
+  // The event only reaches clients already connected when start-up ran; the snapshot carries
+  // it for everyone else — including the packaged app's window, which loads afterwards.
+  const { envCheck, state } = useStore();
+  return envCheck ?? state?.app.env ?? null;
 }
 
 export type StoreEnvCheck = {

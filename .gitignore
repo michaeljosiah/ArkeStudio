@@ -12,3 +12,6 @@ release/
 
 # Local dev scratch (dev coordinator change log, etc.)
 .dev/
+
+# Local system documentation — generated for this machine, not shipped.
+docs/system/
