@@ -122,6 +122,53 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
     await store.close();
   });
 
+  it("the conversation persists: a second turn reuses the session and both sides land as turns", async () => {
+    const { store, gate, proposal } = await setup();
+    const events: DomainEvent[] = [];
+    const adapter = new MockHarnessAdapter();
+    let created = 0;
+    const originalCreate = adapter.createSession.bind(adapter);
+    adapter.createSession = async (input) => {
+      created += 1;
+      return originalCreate(input);
+    };
+    const authoring = service(adapter, events);
+
+    await authoring.run(
+      store,
+      gate,
+      { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "give her a scar" },
+      "http://127.0.0.1:1/mcp",
+    );
+    await authoring.run(
+      store,
+      gate,
+      { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "and fray the collar thread" },
+      "http://127.0.0.1:1/mcp",
+    );
+
+    assert.equal(created, 1, "the second instruction continues the same session — same agent, same context");
+
+    const turns = events.filter((e) => e.type === "authoring.turn");
+    assert.deepEqual(
+      turns.map((t) => (t.type === "authoring.turn" ? t.role : "")),
+      ["user", "gate", "user", "gate"],
+      "each turn records the instruction going in and the reply coming back",
+    );
+    assert.equal(turns[0]!.type === "authoring.turn" ? turns[0]!.text : "", "give her a scar");
+
+    // Settling the proposal ends the conversation; the next run starts fresh.
+    authoring.release(proposal.id);
+    await authoring.run(
+      store,
+      gate,
+      { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "one more" },
+      "http://127.0.0.1:1/mcp",
+    );
+    assert.equal(created, 2, "a released conversation does not haunt the next one");
+    await store.close();
+  });
+
   it("cancellation is immediate, stated, and costs nothing (R-13, D8)", async () => {
     const { store, gate, proposal } = await setup();
     const events: DomainEvent[] = [];

@@ -68,6 +68,8 @@ interface StoreState {
   state: ClientState | null;
   gateNotices: Record<string, GateNotice>;
   authoring: Record<string, AuthoringActivity>;
+  /** Conversation over a proposal (SPEC-005): user instructions and gate replies, in order. */
+  transcripts: Record<string, Array<{ role: "user" | "gate"; text: string; at: string }>>;
   permissions: Record<string, PendingPermission>;
   askResults: Record<string, AskResult>;
   canonSearches: Record<string, CanonSearchState>;
@@ -111,6 +113,7 @@ let current: StoreState = {
   state: null,
   gateNotices: {},
   authoring: {},
+  transcripts: {},
   permissions: {},
   askResults: {},
   canonSearches: {},
@@ -230,6 +233,7 @@ function handleFrame(json: string): void {
   } else if (current.state) {
     let gateNotices = current.gateNotices;
     let authoring = current.authoring;
+    let transcripts = current.transcripts;
     let permissions = current.permissions;
     const event = frame.event;
     if (event.type === "proposal.blocked") {
@@ -253,6 +257,11 @@ function handleFrame(json: string): void {
       authoring = {
         ...authoring,
         [event.proposalId]: { ...existing, lines: [...existing.lines.slice(-19), event.line] },
+      };
+    } else if (event.type === "authoring.turn") {
+      transcripts = {
+        ...transcripts,
+        [event.proposalId]: [...(transcripts[event.proposalId] ?? []), { role: event.role, text: event.text, at: event.at }],
       };
     } else if (event.type === "authoring.status") {
       const existing = authoring[event.proposalId] ?? { status: event.status, lines: [] };
@@ -380,6 +389,7 @@ function handleFrame(json: string): void {
       state: fold(current.state, event),
       gateNotices,
       authoring,
+      transcripts,
       permissions,
       askResults,
       canonSearches,
@@ -524,6 +534,15 @@ export function useGateNotices(): Record<string, GateNotice> {
 
 export function draftWithStudio(worldId: string, path: string, instruction: string, summary: string): void {
   send({ kind: "draft-with-studio", worldId, path, instruction, summary });
+}
+
+/** Continue a proposal's conversation — same session, same agent context (SPEC-005). */
+export function continueStudio(worldId: string, path: string, proposalId: string, instruction: string): void {
+  send({ kind: "draft-with-studio", worldId, path, instruction, summary: "Continue the conversation", proposalId });
+}
+
+export function useTranscripts(): Record<string, Array<{ role: "user" | "gate"; text: string; at: string }>> {
+  return useStore().transcripts;
 }
 
 export function cancelAuthoring(worldId: string, proposalId: string): void {
@@ -982,6 +1001,7 @@ export function __setStateForTest(state: ClientState): void {
     state,
     gateNotices: {},
     authoring: {},
+  transcripts: {},
     permissions: {},
     askResults: {},
     canonSearches: {},

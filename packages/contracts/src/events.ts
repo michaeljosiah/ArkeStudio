@@ -271,6 +271,21 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       detail: z.string().optional(),
     })
     .strict(),
+  /**
+   * One turn of the conversation over a proposal: the user's instruction going in, the gate's
+   * reply coming back. The proposal's session persists between turns, so chat surfaces are a
+   * running conversation with the same agent, not a series of strangers.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("authoring.turn"),
+      worldId: UlidSchema,
+      proposalId: ProposalIdSchema,
+      role: z.enum(["user", "gate"]),
+      text: z.string().min(1),
+    })
+    .strict(),
 
   /** A grounded answer, a refusal with receipts, or honest unavailability (SPEC-006). */
   z
