@@ -1169,7 +1169,12 @@ export class Coordinator {
         if (!list) return;
         const models = await list.call(this.opts.adapter).catch(() => []);
         this.readModel.setHarnessModels(
-          models.map((m) => ({ id: m.id, provider: m.provider, ...(m.displayName ? { displayName: m.displayName } : {}) })),
+          models.map((m) => ({
+            id: m.id,
+            provider: m.provider,
+            ...(m.displayName ? { displayName: m.displayName } : {}),
+            ...(m.isDefault ? { isDefault: true } : {}),
+          })),
         );
         this.transport.broadcastSnapshot();
         return;
