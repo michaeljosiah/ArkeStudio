@@ -54,6 +54,31 @@ export class AppSettingsFile {
     return { ok: true };
   }
 
+  /**
+   * Set or clear one agent's overrides. A null clears that half back to the shipped default;
+   * an agent left with nothing is dropped from settings entirely, so "as shipped" is the
+   * absence of a record rather than a record that happens to be empty.
+   */
+  async setAgent(agent: string, patch: { model?: string | null; brief?: string | null }): Promise<AppSettings> {
+    const current = await this.load();
+    const existing = current.agents[agent] ?? {};
+    const next: { model?: string; brief?: string } = { ...existing };
+    if (patch.model !== undefined) {
+      if (patch.model === null) delete next.model;
+      else next.model = patch.model;
+    }
+    if (patch.brief !== undefined) {
+      if (patch.brief === null) delete next.brief;
+      else next.brief = patch.brief;
+    }
+    const agents = { ...current.agents };
+    if (next.model === undefined && next.brief === undefined) delete agents[agent];
+    else agents[agent] = next;
+    const settings: AppSettings = { ...current, agents };
+    await this.persist(settings);
+    return settings;
+  }
+
   async setSpend(thresholdMicroUsd: number, periodDays: number): Promise<AppSettings> {
     const current = await this.load();
     const next: AppSettings = { ...current, spend: { thresholdMicroUsd, periodDays } };

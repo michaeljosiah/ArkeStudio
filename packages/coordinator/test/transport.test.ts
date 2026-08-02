@@ -20,6 +20,8 @@ const STATE: ClientState = {
     spend: null,
     runtime: null,
     drift: [],
+    agents: [],
+    harnessModels: [],
     queues: [],
     setup: null,
     env: null,

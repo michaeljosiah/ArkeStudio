@@ -916,6 +916,7 @@ export function SettingsLayout() {
                   [
                     ["providers", "Providers"],
                     ["local-runtime", "Local runtime"],
+                    ["agents", "Agents"],
                     ["who-does-what", "Who does what"],
                     ["about", "About"],
                   ] as const

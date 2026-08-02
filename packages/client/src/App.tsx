@@ -12,6 +12,7 @@ import {
   ShellChrome,
   WorldPickerScreen,
 } from "./screens/shell.js";
+import { SettingsAgentsScreen } from "./screens/agents.js";
 import {
   ArtifactsScreen,
   CanonEntryScreen,
@@ -70,6 +71,7 @@ export function App() {
           <Route index element={<Navigate to="providers" replace />} />
           <Route path="providers" element={<SettingsProvidersScreen />} />
           <Route path="local-runtime" element={<SettingsLocalRuntimeScreen />} />
+          <Route path="agents" element={<SettingsAgentsScreen />} />
           <Route path="who-does-what" element={<SettingsWhoDoesWhatScreen />} />
           <Route path="about" element={<SettingsAboutScreen />} />
         </Route>

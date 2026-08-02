@@ -54,6 +54,8 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
       spend: null,
       runtime: null,
       drift: [],
+      agents: [],
+      harnessModels: [],
       queues: [],
       setup: null,
       env: null,

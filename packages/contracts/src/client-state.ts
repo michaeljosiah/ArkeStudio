@@ -164,6 +164,30 @@ export const ClientStateSchema = z
           .object({ defaults: RoutingDefaultsSchema, faults: z.array(RoutingFaultSchema) })
           .strict()
           .default({ defaults: {}, faults: [] }),
+        /**
+         * The agent roster as it will actually run: the shipped brief, the user's override if
+         * there is one, and the model each will use. The screen never has to guess which of the
+         * two is in force, because both are here.
+         */
+        agents: z
+          .array(
+            z
+              .object({
+                name: z.string().min(1),
+                description: z.string().min(1),
+                shippedBrief: z.string().min(1),
+                brief: z.string().min(1),
+                /** Absent → whatever the harness is configured with. */
+                model: z.string().min(1).optional(),
+                edited: z.boolean(),
+              })
+              .strict(),
+          )
+          .default([]),
+        /** What the harness says it can run, when it has been asked. Empty until then. */
+        harnessModels: z
+          .array(z.object({ id: z.string(), provider: z.string(), displayName: z.string().optional() }).strict())
+          .default([]),
         spend: SpendStatusSchema.nullable().default(null),
         runtime: LocalRuntimeStatusSchema.nullable().default(null),
         drift: z.array(ManifestDriftSchema).default([]),

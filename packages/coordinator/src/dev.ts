@@ -6,6 +6,7 @@ import {
   buildSessionConfig,
   discoverOpenCode,
   OpenCodeAdapter,
+  ROSTER,
 } from "@arke-studio/adapter-opencode";
 import { ChildLedger } from "./child-ledger.js";
 import { Coordinator } from "./coordinator.js";
@@ -94,7 +95,7 @@ const coordinator = new Coordinator({
   ledgerSeedPath: join(devRoot, "ledger.jsonl"),
   appRoot: devRoot,
   setup: nodeSetupDeps(),
-  authoring: { buildConfig: buildSessionConfig, agentForPurpose },
+  authoring: { buildConfig: buildSessionConfig, agentForPurpose, roster: ROSTER },
 });
 coordinator.superviseAs("harness", opencodeSupervisor);
 

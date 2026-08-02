@@ -30,10 +30,29 @@ export const SpendSettingsSchema = z
   .strict();
 export type SpendSettings = z.infer<typeof SpendSettingsSchema>;
 
+/**
+ * What the user has changed about an agent. Absent fields mean "as shipped": no model pins the
+ * agent to whatever the harness is configured with, and no brief leaves the shipped one alone.
+ *
+ * The brief is only what the agent is FOR. The confinement rules — stay in your folder, do not
+ * restate canon, do not stamp versions — are not here and cannot be edited, because the accept
+ * gate assumes them and an agent talked out of them fails in ways that look like our bugs.
+ */
+export const AgentSettingsSchema = z
+  .object({
+    /** "provider/model" as the harness names it, e.g. "github-copilot/claude-sonnet-4.6". */
+    model: z.string().min(1).optional(),
+    brief: z.string().min(1).max(8000).optional(),
+  })
+  .strict();
+export type AgentSettings = z.infer<typeof AgentSettingsSchema>;
+
 export const AppSettingsSchema = z
   .object({
     routing: RoutingDefaultsSchema.default({}),
     spend: SpendSettingsSchema.default({ thresholdMicroUsd: 0, periodDays: 7 }),
+    /** Per-agent overrides, keyed by roster name. */
+    agents: z.record(z.string().min(1), AgentSettingsSchema).default({}),
   })
   .strict();
 export type AppSettings = z.infer<typeof AppSettingsSchema>;

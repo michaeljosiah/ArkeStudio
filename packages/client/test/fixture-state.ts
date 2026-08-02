@@ -95,6 +95,8 @@ const state: ClientState = {
     },
     runtime: null,
     drift: [],
+    agents: [],
+    harnessModels: [],
     queues: [{ provider: "fal", paused: false, held: 0 }],
     setup: null,
     env: null,
