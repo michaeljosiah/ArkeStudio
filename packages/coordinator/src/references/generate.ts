@@ -82,7 +82,10 @@ export function tileRequest(
         references,
       },
       estimatedMicroUsd: estimated,
-      landing: { dir: `references/${sheet.id}/incoming` },
+      // Named by angle. Without a name every job lands the provider's own "image-1.png" into
+      // the same directory, so a turnaround of six angles arrives as one file that each job
+      // overwrote in turn.
+      landing: { dir: `references/${sheet.id}/incoming`, name: `${angle}.png` },
     },
   };
 }
@@ -110,7 +113,10 @@ export function establishRequests(
         references: [],
       },
       estimatedMicroUsd: estimated,
-      landing: { dir: `references/${sheet.id}/candidates` },
+      // Named by candidate. Four candidates asked for, four jobs dispatched, four charges on
+      // the account — and one file, because they all landed as "image-1.png" on top of each
+      // other. That is what "generate looks does not work" looked like.
+      landing: { dir: `references/${sheet.id}/candidates`, name: `candidate-${i + 1}.png` },
     },
   }));
 }

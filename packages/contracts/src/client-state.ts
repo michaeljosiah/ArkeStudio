@@ -140,6 +140,12 @@ export const WorldBundleSchema = z
     changes: z.array(ChangeRecordSchema),
     /** Files that failed to parse; the valid entities are still usable (SPEC-002 R-2). */
     problems: z.array(WorldProblemSchema).default([]),
+    /**
+     * A generated key image waiting for a yes, world-relative. Read from the disk, because the
+     * disk is the truth: deriving it from the job record made the offer come back on every
+     * visit, over a file that had already been used or thrown away.
+     */
+    keyArtCandidate: z.string().nullable().default(null),
     /** Closed-world edits awaiting reconciliation (SPEC-002 R-28). */
     externalEdits: z.array(ExternalEditSchema).default([]),
     /** Set when another program changed files while the world was open (SPEC-002 R-23). */
