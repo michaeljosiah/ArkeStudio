@@ -12,6 +12,7 @@ import { Coordinator } from "./coordinator.js";
 import { ChildSupervisor, registerExitBackstop } from "./supervisor.js";
 import { nodeSetupDeps } from "./setup/node-deps.js";
 import { FsWorldProvider } from "./world/provider.js";
+import { harnessTrace } from "./harness/trace.js";
 
 /**
  * Dev entry: run the coordinator standalone over a real on-disk app root (SPEC-002) so the
@@ -71,7 +72,12 @@ const opencodeSupervisor = new ChildSupervisor(
 );
 registerExitBackstop(opencodeSupervisor);
 const adapter = discovered
-  ? new OpenCodeAdapter({ baseUrl: () => `http://127.0.0.1:${opencodeSupervisor.port ?? 0}` })
+  ? new OpenCodeAdapter({
+        baseUrl: () => `http://127.0.0.1:${opencodeSupervisor.port ?? 0}`,
+        // The adapter's own account of itself — connects, stalls, resyncs, dispatches. When a
+        // chat sticks, this file answers "what did the app hear, and when" without a debugger.
+        onTrace: harnessTrace(devRoot),
+      })
   : null;
 console.log(
   discovered
