@@ -1373,6 +1373,113 @@
 .fy-settings__version { font: 400 9.5px var(--font-mono); color: var(--neutral-400); padding: 0 12px 4px; }
 .fy-settings__pane { flex: 1; min-width: 0; overflow-y: auto; display: grid; gap: var(--space-4); align-content: start; }
 
+/*
+ * Inside the panes. The prototype settles every setting into the same compact row — a name, a
+ * quiet line saying what it does, a control, and a state — rather than a card per item. The
+ * difference matters at this size: cards turn eight providers into a scroll, rows fit them.
+ */
+.fy-set { display: grid; gap: 0; align-content: start; }
+.fy-set__eyebrow {
+  font: 500 10.5px var(--font-sans);
+  letter-spacing: 0.14em;
+  color: var(--muted-foreground);
+  margin-bottom: 2px;
+}
+.fy-set__eyebrow + .fy-set__eyebrow, .fy-set__row + .fy-set__eyebrow { margin-top: 20px; }
+.fy-set__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.fy-set__row--stack { display: block; }
+.fy-set__row--off { opacity: 0.45; }
+.fy-set__name { width: 118px; flex: none; }
+.fy-set__name--wide { width: auto; flex: 1; min-width: 0; }
+.fy-set__title { font: 600 12.5px var(--font-sans); }
+/*
+ * The line under a name: what this one is for. Uppercase is reserved for the --tokens variant,
+ * where the content really is a short tag ("IMAGE · VIDEO"); a whole sentence set in capitals
+ * reads as shouting, which is not what the template does with it.
+ */
+.fy-set__caps {
+  font: 400 9.5px var(--font-mono);
+  color: var(--neutral-400);
+  margin-top: 2px;
+  letter-spacing: 0.05em;
+}
+.fy-set__caps--tokens { text-transform: uppercase; font-size: 9px; }
+.fy-set__field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 7px 11px;
+  font: 400 11px var(--font-mono);
+  color: var(--muted-foreground);
+}
+/* Nothing stored yet: dashed, so an empty slot reads as an invitation rather than a fault. */
+.fy-set__field--empty {
+  border: 1.5px dashed var(--neutral-300);
+  color: var(--neutral-400);
+  cursor: text;
+  transition: var(--transition-control);
+}
+.fy-set__field--empty:hover { border-color: var(--neutral-500); }
+.fy-set__input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: 400 11px var(--font-mono);
+  color: var(--foreground);
+}
+.fy-set__link {
+  font: 400 10.5px var(--font-sans);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  background: none;
+  border: 0;
+  padding: 0;
+  transition: var(--transition-control);
+}
+.fy-set__link:hover { color: var(--foreground); }
+.fy-set__link:disabled { opacity: 0.4; cursor: default; }
+.fy-set__dot { width: 6px; height: 6px; border-radius: 999px; background: var(--neutral-300); flex: none; }
+.fy-set__dot--ok { background: var(--success); }
+.fy-set__dot--warn { background: var(--warning); }
+.fy-set__state { font: 400 10px var(--font-mono); color: var(--muted-foreground); }
+.fy-set__note { font: 400 10px/1.6 var(--font-mono); color: var(--neutral-400); margin-top: 10px; }
+.fy-set__why { display: flex; align-items: center; gap: 7px; margin-top: 7px; }
+.fy-set__why span:last-child { font: 400 10.5px/1.5 var(--font-sans); color: var(--muted-foreground); }
+.fy-set__bar { height: 4px; border-radius: 999px; background: var(--neutral-100); margin-top: 8px; overflow: hidden; }
+.fy-set__barfill { height: 4px; border-radius: 999px; background: var(--foreground); }
+/* Routing: the capability on the left, the model that answers for it in a pill on the right. */
+.fy-set__routelabel { font: 400 11px var(--font-mono); color: var(--muted-foreground); width: 118px; flex: none; }
+.fy-set__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font: 500 11.5px var(--font-sans);
+  color: var(--foreground);
+  background: var(--background);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-set__pill:hover { background: var(--accent); }
+.fy-set__pill:disabled { opacity: 0.5; cursor: default; }
+.fy-set__aboutname { font: 650 26px var(--font-sans); letter-spacing: -0.02em; }
+.fy-set__aboutmeta { font: 400 11px var(--font-mono); color: var(--neutral-400); }
+.fy-set__aboutline { font: 400 12.5px var(--font-sans); color: var(--muted-foreground); margin-top: 5px; }
+
 /* activity (26a) */
 .fy-activity { display: flex; flex: 1; min-height: 0; }
 .fy-activity__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 28px 40px 24px; overflow-y: auto; }
