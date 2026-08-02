@@ -146,6 +146,46 @@ function talkingAdapter(json = DRAFT_JSON): HarnessAdapter & { prompts: string[]
   return adapter;
 }
 
+/**
+ * An adapter that takes the prompt, says nothing, and answers an interrupt with silence too —
+ * exactly what a session that accepted a message without starting a turn does.
+ */
+function muteAdapter(): HarnessAdapter {
+  return {
+    id: "mute",
+    capabilities: () => new Set([]),
+    readiness: () => ({ ready: true }),
+    async createSession() {
+      return { sessionId: "gen_mute" };
+    },
+    async sendMessage(input) {
+      return { sessionId: input.sessionId, correlationId: "c" };
+    },
+    async dispatchAsync(input) {
+      return { sessionId: input.sessionId, correlationId: "c" };
+    },
+    async interrupt() {
+      /* nothing to interrupt, so nothing is emitted — the silence is the point */
+    },
+    streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {
+      return {
+        // Hand-rolled rather than a generator: this stream yields nothing, ever, and ends only
+        // when the caller gives up on it.
+        [Symbol.asyncIterator]() {
+          return {
+            async next(): Promise<IteratorResult<HarnessEvent>> {
+              if (!signal?.aborted) {
+                await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+              }
+              return { done: true, value: undefined };
+            },
+          };
+        },
+      };
+    },
+  } as HarnessAdapter;
+}
+
 const DRAFT_JSON = JSON.stringify({
   name: "The Pallid Beacon",
   logline: "A drowned lighthouse that only appears in fog.",
@@ -212,6 +252,25 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     assert.equal(adapter.prompts.length, 2, "one conversation turn, then one narrow ask");
     const statuses = events.filter((e) => e.type === "genesis.status").map((e) => (e.type === "genesis.status" ? e.status : ""));
     assert.deepEqual(statuses, ["running", "completed"]);
+  });
+
+  it("the wall clock ends the turn even when the harness never answers", async () => {
+    // The case seen in the packaged app: a session that accepted the prompt but started no
+    // turn. Interrupting it produces nothing, so a deadline that waits to be told is not a
+    // deadline — the screen sat on "shaping the draft…" for as long as anyone watched.
+    const dir = await tempDir("arke-genesis-mute-");
+    const events: DomainEvent[] = [];
+    const genesis = new GenesisService(muteAdapter(), (e) => events.push(e), {
+      buildConfig: () => buildSessionConfig({}),
+      wallClockMs: 120,
+    });
+
+    await genesis.run(dir, "gen-mute", "say something");
+
+    const last = events.findLast((e) => e.type === "genesis.status");
+    assert.ok(last && last.type === "genesis.status");
+    assert.equal(last.status, "timeout", "it ends itself");
+    assert.match(last.detail ?? "", /wall-clock/);
   });
 
   it("a turn that settles nothing is not an error, and does not flicker the rail", async () => {

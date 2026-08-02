@@ -154,6 +154,9 @@ export class AuthoringService {
       ending = { state: "timeout", detail: `hit the ${Math.round(wallClock / 1000)}s wall-clock limit` };
       const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
       void interrupt?.call(this.adapter, sessionId).catch(() => {});
+      // And end the wait ourselves — see GenesisService: a session with nothing running
+      // answers an interrupt with silence, and a deadline that waits for a reply is not one.
+      abort.abort();
     }, wallClock);
     // NOT unref'd: a run parked on the event stream has nothing else pending, so an unref'd
     // deadline lets the loop drain and never fires — the run then waits forever. `finally`

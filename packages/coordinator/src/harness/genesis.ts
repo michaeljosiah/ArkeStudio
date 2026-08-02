@@ -137,6 +137,10 @@ export class GenesisService {
       ending = { state: "timeout", detail: `hit the ${Math.round(wallClock / 1000)}s wall-clock limit` };
       const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
       void interrupt?.call(this.adapter, sessionId).catch(() => {});
+      // And end the wait ourselves. Asking the harness to stop and then waiting for it to say
+      // so is not a deadline — it is a hope. A session with nothing running answers an
+      // interrupt with silence, and the turn sat on "shaping the draft…" indefinitely.
+      abort.abort();
     }, wallClock);
     // Refed, and cleared in `finally` — see AuthoringService for why an unref'd deadline is
     // no deadline at all.

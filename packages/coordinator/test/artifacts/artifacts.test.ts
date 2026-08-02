@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { computeNeedsYou, type ClientState } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { candidateHash, resolveCandidate, storeBatch, verifyCandidates } from "../../src/artifacts/extraction.js";
-import { fileArtifact, importFolder, pickable } from "../../src/artifacts/filing.js";
+import { ATTACHABLE_EXTENSIONS, fileArtifact, importFolder, kindForFile, pickable } from "../../src/artifacts/filing.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -26,6 +26,19 @@ async function sourceFile(name: string, content: string | Buffer): Promise<strin
 }
 
 describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
+  it("offers in the picker exactly what it can file", async () => {
+    // The attach dialog's filter is derived from the kind map, not written a second time — so
+    // it cannot come to offer something that files as "other", or hide something it can hold.
+    assert.ok(ATTACHABLE_EXTENSIONS.length > 0);
+    for (const ext of ATTACHABLE_EXTENSIONS) {
+      assert.ok(!ext.startsWith("."), `${ext} is bare, as a dialog filter wants`);
+      assert.notEqual(kindForFile(`whatever.${ext}`), "other", `.${ext} files as a real kind`);
+    }
+    // The three kinds this app was asked to take are all in there.
+    const kinds = new Set(ATTACHABLE_EXTENSIONS.map((e) => kindForFile(`x.${e}`)));
+    for (const kind of ["image", "document", "audio"]) assert.ok(kinds.has(kind as never), `${kind} can be attached`);
+  });
+
   it("copies in — the artifact survives its source being deleted", async () => {
     const { dir, store } = await open();
     const source = await sourceFile("tide-tables.txt", "the tides, tabulated");

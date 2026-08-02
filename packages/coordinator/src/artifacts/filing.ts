@@ -24,6 +24,13 @@ export function kindForFile(name: string): ArtifactKind {
   return KIND_BY_EXT[extname(name).toLowerCase()] ?? "other";
 }
 
+/**
+ * What the attach dialog offers — derived from the kinds above rather than written twice, so
+ * the picker and the sidecar can never disagree about what this app can hold. Dropping a file
+ * the dialog does not list still files it; the filter is a courtesy, not the gate.
+ */
+export const ATTACHABLE_EXTENSIONS: readonly string[] = Object.keys(KIND_BY_EXT).map((e) => e.slice(1));
+
 /** Anything over this states its size and needs explicit consent before copying (R-6). */
 export const LARGE_FILE_BYTES = 100 * 1024 * 1024;
 

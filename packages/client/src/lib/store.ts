@@ -101,6 +101,13 @@ interface StoreState {
   /** SPEC-015: the last import report and filing notices — transient. */
   importReport: ImportReportState | null;
   artifactNotices: Array<{ sourcePath: string; outcome: string; reason: string; sizeBytes: number | null }>;
+  /** Filed by attaching to a chat, newest last — what the composer shows as chips. */
+  attached: Array<{
+    worldId: string;
+    artifactId: string;
+    file: string;
+    kind: import("@arke-studio/contracts").ArtifactKind;
+  }>;
   /** SPEC-016: first-run environment verification, update lifecycle, diagnostics. */
   envCheck: {
     pathBudgetOk: boolean;
@@ -141,6 +148,7 @@ let current: StoreState = {
   exportsState: {},
   importReport: null,
   artifactNotices: [],
+  attached: [],
   envCheck: null,
   updateStatus: null,
   diagnosticsBundle: null,
@@ -349,6 +357,7 @@ function handleFrame(json: string): void {
     }
     let importReport = current.importReport;
     let artifactNotices = current.artifactNotices;
+    let attached = current.attached;
     if (event.type === "import.report") {
       importReport = {
         filed: event.filed,
@@ -356,6 +365,12 @@ function handleFrame(json: string): void {
         excluded: event.excluded,
         needsConsent: event.needsConsent,
       };
+    } else if (event.type === "artifact.attached") {
+      // Filing the same bytes twice is one artifact — so is its chip.
+      attached = [
+        ...attached.filter((a) => a.artifactId !== event.artifactId),
+        { worldId: event.worldId, artifactId: event.artifactId, file: event.file, kind: event.kind },
+      ];
     } else if (event.type === "artifact.notice") {
       artifactNotices = [
         ...artifactNotices.slice(-9),
@@ -438,6 +453,7 @@ function handleFrame(json: string): void {
       exportsState,
       importReport,
       artifactNotices,
+      attached,
       envCheck,
       updateStatus,
       diagnosticsBundle,
@@ -509,6 +525,11 @@ export function openWorld(worldId: string): void {
 
 export function createWorld(input: { name: string; logline?: string; tone?: string; genre?: string }): void {
   send({ kind: "create-world", ...input });
+}
+
+/** Ask the host to open its picker and file whatever is chosen. No path passes through here. */
+export function attachFiles(worldId: string, links?: string[]): void {
+  send({ kind: "attach-files", worldId, ...(links !== undefined ? { links } : {}) });
 }
 
 export function reloadWorld(worldId: string): void {
@@ -1085,6 +1106,7 @@ export function __setStateForTest(state: ClientState): void {
     exportsState: {},
     importReport: null,
     artifactNotices: [],
+    attached: [],
     envCheck: null,
     updateStatus: null,
     diagnosticsBundle: null,

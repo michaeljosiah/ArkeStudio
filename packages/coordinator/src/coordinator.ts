@@ -43,7 +43,7 @@ import {
 import { ProviderService, type KeyValidator } from "./providers/service.js";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "./queue/dispatcher.js";
 import { extractText, resolveCandidate, storeBatch, verifyCandidates, type RawCandidate } from "./artifacts/extraction.js";
-import { fileArtifact, importFolder } from "./artifacts/filing.js";
+import { ATTACHABLE_EXTENSIONS, fileArtifact, importFolder } from "./artifacts/filing.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
@@ -123,6 +123,13 @@ export interface CoordinatorOptions {
    * Absent → nothing is fetched and the app behaves exactly as before.
    */
   setup?: SetupDeps;
+  /**
+   * Choosing files to attach. The dialog belongs to the host, and so does the path it returns:
+   * the renderer asks for an attachment and learns only that artifacts now exist, never where
+   * they came from — the preload's promise of "no paths" survives (SPEC-001 R-9).
+   * Absent → attaching says so instead of doing nothing.
+   */
+  pickFiles?: (input: { accept: readonly string[] }) => Promise<readonly string[]>;
   /** SPEC-009: dispatch clients (submit/poll/fetch/cancel + declarations), per provider. */
   dispatchClients?: Record<string, DispatchClient>;
   /** SPEC-013 R-19: the local encoder for exports; absent → exports state the reason. */
@@ -1426,27 +1433,34 @@ export class Coordinator {
         return;
       }
       case "file-artifact": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const outcome = await fileArtifact(store, {
-          sourcePath: msg.sourcePath,
+        await this.fileOne(msg.worldId, msg.sourcePath, {
           ...(msg.links !== undefined ? { links: msg.links } : {}),
           ...(msg.allowLarge !== undefined ? { allowLarge: msg.allowLarge } : {}),
           ...(msg.supersedes !== undefined ? { supersedes: msg.supersedes } : {}),
-        }).catch((err) => ({ outcome: "refused" as const, reason: err instanceof Error ? err.message : String(err) }));
-        if (outcome.outcome === "needs-consent" || outcome.outcome === "refused") {
+        });
+        return;
+      }
+      case "attach-files": {
+        // The dialog is the host's, and so is the path it returns. The renderer asked to attach
+        // something; what it gets back is artifacts in the snapshot, never a path.
+        const pick = this.opts.pickFiles;
+        if (!pick) {
           this.emit({
             at: new Date().toISOString(),
             type: "artifact.notice",
             worldId: msg.worldId,
-            sourcePath: msg.sourcePath,
-            outcome: outcome.outcome,
-            reason: outcome.reason,
-            sizeBytes: outcome.outcome === "needs-consent" ? outcome.sizeBytes : null,
+            sourcePath: "",
+            outcome: "refused",
+            reason: "attaching needs the desktop app — a browser session cannot open the file picker",
+            sizeBytes: null,
           });
           return;
         }
-        await this.refreshWorldSnapshot(msg.worldId);
+        const paths = await pick({ accept: ATTACHABLE_EXTENSIONS }).catch(() => [] as readonly string[]);
+        // Cancelling the dialog is an answer, not an error: nothing is said and nothing happens.
+        for (const sourcePath of paths) {
+          await this.fileOne(msg.worldId, sourcePath, msg.links !== undefined ? { links: msg.links } : {});
+        }
         return;
       }
       case "import-folder": {
@@ -1765,6 +1779,45 @@ export class Coordinator {
   }
 
   /** Gate operations mutate the world; every client re-syncs from a fresh snapshot. */
+  /**
+   * File one source into the world, and say so when it will not go. Shared by the explicit
+   * file-artifact frame and by attaching from a chat, so both refuse in the same words.
+   */
+  private async fileOne(
+    worldId: string,
+    sourcePath: string,
+    opts: { links?: string[]; allowLarge?: boolean; supersedes?: string },
+  ): Promise<void> {
+    const store = this.opts.provider.openStore?.();
+    if (!store) return;
+    const outcome = await fileArtifact(store, { sourcePath, ...opts }).catch((err) => ({
+      outcome: "refused" as const,
+      reason: err instanceof Error ? err.message : String(err),
+    }));
+    if (outcome.outcome === "needs-consent" || outcome.outcome === "refused") {
+      this.emit({
+        at: new Date().toISOString(),
+        type: "artifact.notice",
+        worldId,
+        sourcePath,
+        outcome: outcome.outcome,
+        reason: outcome.reason,
+        sizeBytes: outcome.outcome === "needs-consent" ? outcome.sizeBytes : null,
+      });
+      return;
+    }
+    this.emit({
+      at: new Date().toISOString(),
+      type: "artifact.attached",
+      worldId,
+      artifactId: outcome.artifact.id,
+      file: outcome.artifact.file,
+      kind: outcome.artifact.kind,
+      deduplicated: outcome.outcome === "deduplicated",
+    });
+    await this.refreshWorldSnapshot(worldId);
+  }
+
   private async refreshWorldSnapshot(worldId: string): Promise<void> {
     try {
       this.readModel.setWorld(await this.opts.provider.loadWorld(worldId));
