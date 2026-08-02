@@ -18,11 +18,14 @@ npmRebuild: false
 # `releaseType: release` publishes the moment the tag builds, so a v* tag IS the upgrade — that
 # is the whole point, and it is why the tag must never be pushed casually.
 #
-# This setting and the workflow must move together. electron-builder refuses to upload into a
-# release whose type does not match ("existing type not compatible with publishing type"), and
-# it fails by SKIPPING the upload — leaving a release with no installer and no latest.yml, which
-# looks fine on GitHub and silently breaks every client's update check. So: nothing pre-creates
-# the release here; electron-builder creates it, published, and uploads into its own.
+# This setting and the workflow must move together, and the workflow OPENS the release before
+# this runs. Both halves are load-bearing:
+#   - type must match: electron-builder refuses to upload into a release of a different type, and
+#     it refuses by SKIPPING the upload — a release with no installer and no latest.yml, which
+#     looks healthy on GitHub and silently breaks every client's update check.
+#   - the release must already exist: left to create its own, electron-builder publishes each
+#     artifact concurrently and two of them raced, producing TWO releases for one tag. Clients
+#     resolved the wrong one and got `Cannot find latest.yml … 404`.
 publish:
   provider: github
   owner: michaeljosiah
