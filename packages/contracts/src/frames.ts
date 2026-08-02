@@ -549,6 +549,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("import-folder"), worldId: UlidSchema, sourcePath: z.string().min(1) }).strict(),
   /** SPEC-015 R-12..R-14: stage two — grounded extraction into a pending batch. */
   z.object({ kind: z.literal("extract-artifact"), worldId: UlidSchema, artifactId: z.string().min(1) }).strict(),
+  /** Stop reading it. The turn is interrupted and the file stays filed, unread. */
+  z.object({ kind: z.literal("stop-extraction"), worldId: UlidSchema, artifactId: z.string().min(1) }).strict(),
   /** SPEC-015 R-15: per-candidate resolution; accepts commit individually, rejects leave no trace. */
   z
     .object({

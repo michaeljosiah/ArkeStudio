@@ -136,7 +136,7 @@ export interface CoordinatorOptions {
   /** SPEC-013 R-19: the local encoder for exports; absent → exports state the reason. */
   ffmpeg?: FfmpegRunner;
   /** SPEC-015: the extraction model seam; every candidate is re-verified regardless (R-13). */
-  extractor?: (text: string, artifactFile: string) => Promise<RawCandidate[]>;
+  extractor?: (text: string, artifactFile: string, signal?: AbortSignal) => Promise<RawCandidate[]>;
   /** SPEC-016: update seam — check and download only; installation happens at exit (R-13). */
   updates?: { check: () => Promise<{ version: string } | null>; download: () => Promise<void> };
   /** SPEC-016 R-17: open a path in the platform file manager, injected from the desktop. */
@@ -176,6 +176,8 @@ export class Coordinator {
   private readonly pendingPermissions = new Map<string, string>();
   /** Genesis sandboxes whose attachments are still being carried into a new world. */
   private readonly carrying = new Map<string, Promise<void>>();
+  /** Documents being read for facts right now, so the reading can be stopped (SPEC-015 §2). */
+  private readonly reading = new Map<string, AbortController>();
   private started = false;
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
   private readonly secrets = new SecretRegistry();
@@ -1512,15 +1514,48 @@ export class Coordinator {
         }
         return;
       }
+      case "stop-extraction": {
+        this.reading.get(msg.artifactId)?.abort();
+        return;
+      }
       case "extract-artifact": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         const artifact = store.getBundle().artifacts.find((a) => a.id === msg.artifactId);
         if (!artifact) return;
+        // Asking twice while it is already reading is a double-click, not a second reading.
+        if (this.reading.has(msg.artifactId)) return;
+        const control = new AbortController();
+        this.reading.set(msg.artifactId, control);
+        const finished = (
+          outcome: "found" | "nothing" | "no-text" | "stopped" | "unavailable" | "failed",
+          found: number,
+          dropped: number,
+          reason?: string,
+        ) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "extraction.finished",
+            worldId: msg.worldId,
+            artifactId: msg.artifactId,
+            file: artifact.file,
+            outcome,
+            found,
+            dropped,
+            ...(reason !== undefined ? { reason } : {}),
+          });
+        this.emit({
+          at: new Date().toISOString(),
+          type: "extraction.started",
+          worldId: msg.worldId,
+          artifactId: msg.artifactId,
+          file: artifact.file,
+        });
         try {
           const text = await extractText(store, artifact);
           if (text === null) {
             void this.appLog?.append({ kind: "extraction.no-text", artifact: artifact.file });
+            finished("no-text", 0, 0, "there is no text in this one we can read");
             return;
           }
           // The seam wins; else the built-in adapter runner when the harness is up (SPEC-016).
@@ -1539,18 +1574,33 @@ export class Coordinator {
               artifact: artifact.file,
               reason: "extraction needs the authoring harness running — filing is complete either way",
             });
+            finished("unavailable", 0, 0, "reading needs the writing service running — the file is filed either way");
             return;
           }
-          const raw = await extractor(text, artifact.file);
+          const raw = await extractor(text, artifact.file, control.signal);
           const batch = verifyCandidates(raw, text, artifact.extraction?.decided ?? []);
           await storeBatch(store, artifact, batch);
           await this.refreshWorldSnapshot(msg.worldId);
+          // Nothing found is an answer, not a failure — and it is the answer whenever the
+          // document only repeats what the canon already says (R-17: decided is never re-offered).
+          finished(
+            batch.verified.length > 0 ? "found" : "nothing",
+            batch.verified.length,
+            batch.droppedCount,
+          );
         } catch (err) {
+          if (control.signal.aborted) {
+            finished("stopped", 0, 0);
+            return;
+          }
           void this.appLog?.append({
             kind: "extraction.failed",
             artifact: artifact.file,
             message: err instanceof Error ? err.message : String(err),
           });
+          finished("failed", 0, 0, err instanceof Error ? err.message.slice(0, 200) : String(err));
+        } finally {
+          this.reading.delete(msg.artifactId);
         }
         return;
       }

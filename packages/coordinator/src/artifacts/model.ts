@@ -50,8 +50,10 @@ export function makeAdapterExtractor(
   adapter: HarnessAdapter,
   buildConfig: (input: { worldQueryUrl?: string }) => Record<string, unknown>,
   scratchRoot: string,
-): (text: string, artifactFile: string) => Promise<RawCandidate[]> {
-  return async (text, artifactFile) => {
+): (text: string, artifactFile: string, signal?: AbortSignal) => Promise<RawCandidate[]> {
+  return async (text, artifactFile, signal) => {
+    const stopped = () => new Error("stopped");
+    if (signal?.aborted) throw stopped();
     const sandbox = join(scratchRoot, `extract-${Date.now().toString(36)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
     await atomicWriteFile(join(sandbox, "opencode.json"), JSON.stringify(buildConfig({}), null, 2) + "\n");
@@ -60,6 +62,16 @@ export function makeAdapterExtractor(
     const turn = async (prompt: string): Promise<string> => {
       let finalText = "";
       const abort = new AbortController();
+      // Stopping has to end the wait, not just ask the harness to stop: a session that
+      // accepted a prompt without starting a turn answers an interrupt with silence, and the
+      // strip would sit on "Reading…" for as long as anyone watched. Same lesson as genesis.
+      const onStop = () => {
+        void (adapter as { interrupt?: (id: string) => Promise<void> }).interrupt
+          ?.call(adapter, session.sessionId)
+          .catch(() => {});
+        abort.abort();
+      };
+      signal?.addEventListener("abort", onStop, { once: true });
       const events = adapter.streamEvents(abort.signal);
       const collected = (async () => {
         for await (const event of events) {
@@ -82,8 +94,13 @@ export function makeAdapterExtractor(
         await Promise.race([collected, timeout]);
       } finally {
         clearTimeout(deadline);
+        signal?.removeEventListener("abort", onStop);
         abort.abort();
       }
+      // The stream ends on a stop as well as on an answer, so an empty reply after an abort is
+      // a stop, not an extraction that found nothing. Saying which is the difference between
+      // "you stopped it" and "there is nothing in this document".
+      if (signal?.aborted) throw stopped();
       return finalText;
     };
 
