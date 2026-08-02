@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   DomainEventSchema,
   JobSchema,
@@ -44,6 +44,7 @@ import { ProviderService, type KeyValidator } from "./providers/service.js";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "./queue/dispatcher.js";
 import { extractText, resolveCandidate, storeBatch, verifyCandidates, type RawCandidate } from "./artifacts/extraction.js";
 import { ATTACHABLE_EXTENSIONS, fileArtifact, importFolder } from "./artifacts/filing.js";
+import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
@@ -173,6 +174,8 @@ export class Coordinator {
   private readonly setup: LocalSetupService | null;
   /** actionClass per pending permission id, for remember-on-always (R-16). */
   private readonly pendingPermissions = new Map<string, string>();
+  /** Genesis sandboxes whose attachments are still being carried into a new world. */
+  private readonly carrying = new Map<string, Promise<void>>();
   private started = false;
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
   private readonly secrets = new SecretRegistry();
@@ -604,6 +607,16 @@ export class Coordinator {
           });
           this.readModel.setWorlds(await this.opts.provider.listWorlds());
           await this.openWorld(worldId);
+          // After the world is open, so filing has a store to commit into. Whatever was handed
+          // to the conversation is now an artifact like any other.
+          const genesisId = msg.genesisId;
+          if (genesisId !== undefined) {
+            // Held so a discard cannot delete the sandbox out from under the copy. The screen
+            // discards as soon as the world opens, which is while this is still running.
+            const carry = this.carryGenesisAttachments(genesisId, worldId);
+            this.carrying.set(genesisId, carry);
+            await carry.finally(() => this.carrying.delete(genesisId));
+          }
         } catch {
           this.transport.broadcastSnapshot(); // surface whatever state we do have
         }
@@ -807,6 +820,9 @@ export class Coordinator {
       }
       case "genesis-discard": {
         this.genesis?.release(msg.genesisId);
+        // Anything still being carried into the new world finishes first — otherwise Begin
+        // races the sweep and the files handed over are the ones that vanish.
+        await this.carrying.get(msg.genesisId)?.catch(() => {});
         await this.opts.provider.discardGenesis?.(msg.genesisId)?.catch(() => {});
         return;
       }
@@ -1463,6 +1479,29 @@ export class Coordinator {
         }
         return;
       }
+      case "genesis-attach-files": {
+        const pick = this.opts.pickFiles;
+        if (!pick) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "genesis.attachment",
+            genesisId: msg.genesisId,
+            // No file was ever chosen, so there is no name to carry — the chip names the act.
+            name: "attaching",
+            kind: "other",
+            outcome: "refused",
+            reason: "this needs the desktop app — a browser session cannot open the file picker",
+          });
+          return;
+        }
+        const paths = await pick({ accept: ATTACHABLE_EXTENSIONS }).catch(() => [] as readonly string[]);
+        for (const sourcePath of paths) await this.attachToGenesis(msg.genesisId, sourcePath);
+        return;
+      }
+      case "genesis-attach": {
+        await this.attachToGenesis(msg.genesisId, msg.sourcePath);
+        return;
+      }
       case "import-folder": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -1783,6 +1822,60 @@ export class Coordinator {
    * File one source into the world, and say so when it will not go. Shared by the explicit
    * file-artifact frame and by attaching from a chat, so both refuse in the same words.
    */
+  /**
+   * Hold a file for a conversation that has no world yet. It lands in the sandbox the agent
+   * works in, so it can be read during the conversation, and is filed properly at Begin.
+   */
+  private async attachToGenesis(genesisId: string, sourcePath: string): Promise<void> {
+    const at = new Date().toISOString();
+    const dir = await this.opts.provider.genesisDir?.(genesisId).catch(() => null);
+    if (!dir) {
+      this.emit({
+        at,
+        type: "genesis.attachment",
+        genesisId,
+        name: basename(sourcePath),
+        kind: "other",
+        outcome: "refused",
+        reason: "this conversation has no sandbox to hold it",
+      });
+      return;
+    }
+    const outcome = await attachToSandbox(dir, sourcePath);
+    if ("reason" in outcome) {
+      this.emit({
+        at,
+        type: "genesis.attachment",
+        genesisId,
+        name: basename(sourcePath),
+        kind: "other",
+        outcome: "refused",
+        reason: outcome.reason,
+      });
+      return;
+    }
+    this.emit({
+      at,
+      type: "genesis.attachment",
+      genesisId,
+      name: outcome.name,
+      kind: outcome.kind,
+      outcome: "waiting",
+    });
+  }
+
+  /**
+   * Begin: everything the conversation was handed follows it into the world. Filed one by one
+   * through the ordinary path, so each gets its sidecar, its hash and its place in the journal.
+   */
+  private async carryGenesisAttachments(genesisId: string, worldId: string): Promise<void> {
+    const dir = await this.opts.provider.genesisDir?.(genesisId).catch(() => null);
+    if (!dir) return;
+    for (const sourcePath of await sandboxAttachments(dir)) {
+      await this.fileOne(worldId, sourcePath, {});
+    }
+  }
+
   private async fileOne(
     worldId: string,
     sourcePath: string,

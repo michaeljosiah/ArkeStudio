@@ -12,7 +12,12 @@ import {
   type ReconcileAction,
   type ReferenceAngle,
 } from "@arke-studio/contracts";
-import type { ArkeBridge } from "../arke-bridge.js";
+import type { ArkeBridge, AttachTarget } from "../arke-bridge.js";
+
+/** A conversation nobody has said anything in yet. */
+function emptyGenesis(): StoreState["genesis"][string] {
+  return { turns: [], draft: null, status: null, attachments: [], refusals: [] };
+}
 
 /**
  * The client store: one external store holding connection status and the coordinator's
@@ -80,6 +85,10 @@ interface StoreState {
       draft: import("@arke-studio/contracts").GenesisDraft | null;
       status: "running" | "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed" | null;
       detail?: string;
+      /** Waiting in the sandbox: filed into the world the moment it exists. */
+      attachments: Array<{ name: string; kind: import("@arke-studio/contracts").ArtifactKind }>;
+      /** What would not go in, and why — said on a chip rather than swallowed. */
+      refusals: Array<{ name: string; reason: string }>;
     }
   >;
   permissions: Record<string, PendingPermission>;
@@ -290,19 +299,32 @@ function handleFrame(json: string): void {
     } else if (event.type === "setup.status") {
       setupStatus = event.setup;
     } else if (event.type === "genesis.turn") {
-      const g = genesis[event.genesisId] ?? { turns: [], draft: null, status: null };
+      const g = genesis[event.genesisId] ?? emptyGenesis();
       genesis = {
         ...genesis,
         [event.genesisId]: { ...g, turns: [...g.turns, { role: event.role, text: event.text, at: event.at }] },
       };
     } else if (event.type === "genesis.draft") {
-      const g = genesis[event.genesisId] ?? { turns: [], draft: null, status: null };
+      const g = genesis[event.genesisId] ?? emptyGenesis();
       genesis = { ...genesis, [event.genesisId]: { ...g, draft: event.draft } };
     } else if (event.type === "genesis.status") {
-      const g = genesis[event.genesisId] ?? { turns: [], draft: null, status: null };
+      const g = genesis[event.genesisId] ?? emptyGenesis();
       genesis = {
         ...genesis,
         [event.genesisId]: { ...g, status: event.status, ...(event.detail !== undefined ? { detail: event.detail } : {}) },
+      };
+    } else if (event.type === "genesis.attachment") {
+      const g = genesis[event.genesisId] ?? emptyGenesis();
+      genesis = {
+        ...genesis,
+        [event.genesisId]:
+          event.outcome === "waiting"
+            ? {
+                ...g,
+                // The sandbox de-collides names, so a name is an identity here.
+                attachments: [...g.attachments.filter((a) => a.name !== event.name), { name: event.name, kind: event.kind }],
+              }
+            : { ...g, refusals: [...g.refusals.slice(-2), { name: event.name, reason: event.reason ?? "it would not go in" }] },
       };
     } else if (event.type === "authoring.status") {
       const existing = authoring[event.proposalId] ?? { status: event.status, lines: [] };
@@ -523,7 +545,14 @@ export function openWorld(worldId: string): void {
   send({ kind: "open-world", worldId });
 }
 
-export function createWorld(input: { name: string; logline?: string; tone?: string; genre?: string }): void {
+export function createWorld(input: {
+  name: string;
+  logline?: string;
+  tone?: string;
+  genre?: string;
+  /** Begun from a conversation: its attachments are filed into the world as it opens. */
+  genesisId?: string;
+}): void {
   send({ kind: "create-world", ...input });
 }
 
@@ -564,7 +593,7 @@ function nameFor(file: File): string {
  * than swallowing it.
  */
 export async function attachHostFiles(
-  worldId: string,
+  target: AttachTarget,
   files: readonly File[],
 ): Promise<ReadonlyArray<{ name: string; reason: string }>> {
   const host = bridge;
@@ -574,7 +603,7 @@ export async function attachHostFiles(
   const trouble: Array<{ name: string; reason: string }> = [];
   let unresolved: number[] = [];
   try {
-    unresolved = host.attachDropped(worldId, files).unresolved;
+    unresolved = host.attachDropped(target, files).unresolved;
   } catch {
     unresolved = files.map((_, i) => i);
   }
@@ -582,7 +611,7 @@ export async function attachHostFiles(
     const file = files[index];
     if (!file) continue;
     try {
-      const outcome = await host.attachBytes(worldId, nameFor(file), new Uint8Array(await file.arrayBuffer()));
+      const outcome = await host.attachBytes(target, nameFor(file), new Uint8Array(await file.arrayBuffer()));
       if (!outcome.ok) trouble.push({ name: nameFor(file), reason: outcome.reason });
     } catch {
       trouble.push({ name: nameFor(file), reason: "it could not be read" });
@@ -593,18 +622,23 @@ export async function attachHostFiles(
 
 /** A paste too long to be a message becomes a note in the world instead of filling the box. */
 export async function attachHostText(
-  worldId: string,
+  target: AttachTarget,
   text: string,
   name: string,
 ): Promise<ReadonlyArray<{ name: string; reason: string }>> {
   const host = bridge;
   if (!host?.attachBytes) return [{ name, reason: "attaching needs the desktop app" }];
   try {
-    const outcome = await host.attachBytes(worldId, name, new TextEncoder().encode(text));
+    const outcome = await host.attachBytes(target, name, new TextEncoder().encode(text));
     return outcome.ok ? [] : [{ name, reason: outcome.reason }];
   } catch {
     return [{ name, reason: "it could not be written" }];
   }
+}
+
+/** Ask the host's picker for files to hand to a conversation that has no world yet. */
+export function genesisAttachFiles(genesisId: string): void {
+  send({ kind: "genesis-attach-files", genesisId });
 }
 
 export function reloadWorld(worldId: string): void {

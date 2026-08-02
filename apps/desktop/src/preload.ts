@@ -18,6 +18,12 @@ const wsUrl = port ? `ws://127.0.0.1:${port}` : null;
 /** Read-only media base (design-fidelity pass): same server, plain GET. */
 const httpBase = port ? `http://127.0.0.1:${port}` : null;
 
+/**
+ * Where an attachment is going. The renderer names the destination, the host names the path —
+ * neither knows the other's half, and the two only meet in the frame that leaves here.
+ */
+type AttachTarget = { kind: "file-artifact"; worldId: string } | { kind: "genesis-attach"; genesisId: string };
+
 type FrameListener = (frameJson: string) => void;
 type StatusListener = (status: "connecting" | "open" | "closed") => void;
 
@@ -77,7 +83,7 @@ const bridge = {
    * with no file behind it (a clipboard screenshot, a drag out of a web page) comes back by
    * index, for the caller to offer again as bytes.
    */
-  attachDropped(worldId: string, files: readonly unknown[]): { filed: number; unresolved: number[] } {
+  attachDropped(target: AttachTarget, files: readonly unknown[]): { filed: number; unresolved: number[] } {
     const unresolved: number[] = [];
     let filed = 0;
     files.forEach((file, index) => {
@@ -91,7 +97,7 @@ const bridge = {
         unresolved.push(index);
         return;
       }
-      bridge.send(JSON.stringify({ kind: "file-artifact", worldId, sourcePath }));
+      bridge.send(JSON.stringify({ ...target, sourcePath }));
       filed += 1;
     });
     return { filed, unresolved };
@@ -99,7 +105,7 @@ const bridge = {
 
   /** Bytes with no file behind them: the host spools them, then they file like anything else. */
   async attachBytes(
-    worldId: string,
+    target: AttachTarget,
     name: string,
     bytes: Uint8Array,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
@@ -119,7 +125,7 @@ const bridge = {
       .invoke("arke:spool", { name, bytes: view })
       .catch((err: unknown) => ({ reason: String(err) }))) as { path?: string; reason?: string };
     if (!result?.path) return { ok: false, reason: result?.reason ?? "the app could not hold on to it" };
-    bridge.send(JSON.stringify({ kind: "file-artifact", worldId, sourcePath: result.path }));
+    bridge.send(JSON.stringify({ ...target, sourcePath: result.path }));
     return { ok: true };
   },
 };

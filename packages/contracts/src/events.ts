@@ -192,6 +192,23 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /**
+   * One file handed to a genesis conversation. Outcome rather than two event types: there is
+   * no world yet, so there is no artifact to name and nothing to look up — a chip and, when it
+   * would not go, the reason, is the whole of what the screen can say.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("genesis.attachment"),
+      genesisId: z.string().min(1),
+      name: z.string().min(1),
+      kind: ArtifactKindSchema,
+      outcome: z.enum(["waiting", "refused"]),
+      reason: z.string().optional(),
+    })
+    .strict(),
+
   /** Export lifecycle (SPEC-013 R-21): progress, and a terminal status with the output path. */
   z
     .object({

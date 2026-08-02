@@ -12,13 +12,18 @@ export interface ArkeBridge {
    * Desktop only, and optional for that reason: a browser session has no host to resolve a
    * dropped file's path, so the composer simply does not offer the affordance there.
    */
-  attachDropped?(worldId: string, files: readonly File[]): { filed: number; unresolved: number[] };
+  attachDropped?(target: AttachTarget, files: readonly File[]): { filed: number; unresolved: number[] };
   attachBytes?(
-    worldId: string,
+    target: AttachTarget,
     name: string,
     bytes: Uint8Array,
   ): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
+
+/** A world to file into, or a genesis conversation that does not have one yet. */
+export type AttachTarget =
+  | { kind: "file-artifact"; worldId: string }
+  | { kind: "genesis-attach"; genesisId: string };
 
 declare global {
   interface Window {

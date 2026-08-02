@@ -12,10 +12,14 @@ import {
   cancelJob,
   checkUpdates,
   clearCredential,
+  attachHostFiles,
+  attachHostText,
   createSheetFromSentence,
   createWorld,
+  genesisAttachFiles,
   genesisChat,
   genesisDiscard,
+  hostCanAttach,
   detectRuntimes,
   downloadUpdate,
   generateDiagnostics,
@@ -517,6 +521,11 @@ export function NewWorldScreen() {
     setMessage("");
   };
 
+  // Attachments here have no artifact id — there is no world to hold one yet. The sandbox
+  // de-collides the names, so the name is the identity until Begin turns them into artifacts.
+  const attachTarget = { kind: "genesis-attach", genesisId } as const;
+  const handed = (g?.attachments ?? []).map((a) => ({ artifactId: a.name, file: a.name, kind: a.kind }));
+
   // The coordinator opens the new world and re-snapshots; when it lands, seed the optional
   // first sheets through the same gate everything else uses, then go there.
   useEffect(() => {
@@ -606,6 +615,15 @@ export function NewWorldScreen() {
                     agentLabel="world author"
                     busy={chatRunning}
                     busyLabel="shaping the draft…"
+                    onAttach={() => genesisAttachFiles(genesisId)}
+                    {...(hostCanAttach()
+                      ? {
+                          onAttachFiles: (files: readonly File[]) => attachHostFiles(attachTarget, files),
+                          onAttachText: (text: string) => attachHostText(attachTarget, text, "pasted-note.txt"),
+                        }
+                      : {})}
+                    attachments={handed}
+                    refusals={g?.refusals ?? []}
                   />
                 </div>
               </>
@@ -800,6 +818,10 @@ export function NewWorldScreen() {
                   ...(shownLogline ? { logline: shownLogline } : {}),
                   ...(shownTone ? { tone: shownTone.toLowerCase() } : {}),
                   ...(shownGenre ? { genre: shownGenre.toLowerCase() } : {}),
+                  // Whatever was handed to the conversation follows it in. Sent always, not
+                  // only when something is attached: the sandbox is the source of truth for
+                  // what is waiting, and the screen's idea of it can lag an event behind.
+                  genesisId,
                 });
               }}
             >

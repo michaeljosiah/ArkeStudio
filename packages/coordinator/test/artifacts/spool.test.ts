@@ -51,15 +51,19 @@ describe("the paste spool", () => {
     // file that was picked, so nothing downstream needs a second idea of what an artifact is.
     const root = await tempDir("spool");
     const store = await WorldStore.open(await makeTempWorld(), { clock: () => "2026-08-02T09:00:00.000Z" });
-    const spooled = await spoolBytes(root, "Screenshot 2026-08-02.png", bytes("PNG-ish bytes"));
-    assert.ok("path" in spooled);
+    try {
+      const spooled = await spoolBytes(root, "Screenshot 2026-08-02.png", bytes("PNG-ish bytes"));
+      assert.ok("path" in spooled);
 
-    const filed = await fileArtifact(store, { sourcePath: spooled.path });
-    assert.equal(filed.outcome, "filed");
-    assert.ok(filed.outcome === "filed");
-    assert.equal(filed.artifact.kind, "image", "the extension survived the paste, so the kind is right");
-    assert.match(filed.artifact.file, /screenshot-2026-08-02/, "and so did the name");
-    store.close?.();
+      const filed = await fileArtifact(store, { sourcePath: spooled.path });
+      assert.equal(filed.outcome, "filed");
+      assert.ok(filed.outcome === "filed");
+      assert.equal(filed.artifact.kind, "image", "the extension survived the paste, so the kind is right");
+      assert.match(filed.artifact.file, /screenshot-2026-08-02/, "and so did the name");
+    } finally {
+      // Closed even when an assertion fails: an open world holds the runner open for good.
+      await store.close();
+    }
   });
 
   it("sweeps itself, because nothing in there outlives the run that wrote it", async () => {
