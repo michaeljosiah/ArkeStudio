@@ -15,6 +15,7 @@ import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components
 import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
 import { ActivityIcon, ChevronRight, Play, Plus, Search, Sliders } from "../components/icons.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
+import { Composer } from "../components/composer.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Wave } from "./production.js";
 import { shortDateTime } from "../lib/format.js";
@@ -2403,20 +2404,19 @@ export function CanonThreadScreen() {
               </span>
             </div>
           )}
-          <div className="fy-composer" style={{ marginTop: 2 }}>
-            <input
-              style={{ flex: 1, border: "none", outline: "none", background: "transparent", font: "400 13.5px var(--font-sans)", color: "inherit" }}
-              placeholder={harnessReady ? "Keep shaping the entry…" : "Chat needs OpenCode running — the form below still settles it"}
-              disabled={!harnessReady || chatRunning}
+          <div style={{ marginTop: 2 }}>
+            <Composer
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") sendToStudio();
-              }}
+              onChange={setMessage}
+              onSubmit={sendToStudio}
+              placeholder="Keep shaping the entry…"
+              agentLabel="canon author"
+              busy={chatRunning}
+              busyLabel="drafting against the canon…"
+              {...(harnessReady
+                ? {}
+                : { disabledReason: "Chat needs OpenCode running — the form below still settles it." })}
             />
-            <Button variant="primary" disabled={!harnessReady || chatRunning || message.trim().length === 0} onClick={sendToStudio}>
-              {chatRunning ? "Drafting…" : "Send"}
-            </Button>
           </div>
           <div style={{ marginTop: "auto" }}>
             <div className="fy-fieldlabel">What it turned out to be</div>

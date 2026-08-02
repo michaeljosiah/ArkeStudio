@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Composer — Arke Studio design system</title>
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/colors.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/typography.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/effects.css">
+<style>
+/* ==========================================================================
+   PAGE CHROME — review scaffolding only. Nothing below the "COMPOSER" rule
+   belongs to the page; that part is the proposed component.
+   ========================================================================== */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans, "Geist", system-ui, sans-serif);
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 56px 40px 120px; }
+.kicker { font: 500 11px/1 var(--font-mono, ui-monospace, monospace); letter-spacing: .14em; text-transform: uppercase; color: var(--muted-foreground); }
+h1 { font: 650 34px/1.15 inherit; letter-spacing: -0.025em; margin: 14px 0 12px; }
+.lede { font: 400 15px/1.65 inherit; color: var(--muted-foreground); max-width: 60ch; margin: 0 0 40px; }
+h2 { font: 600 19px/1.3 inherit; letter-spacing: -0.015em; margin: 60px 0 6px; padding-top: 26px; border-top: 1px solid var(--border); }
+h2 .n { font: 500 11px var(--font-mono, monospace); color: var(--muted-foreground); margin-right: 10px; }
+h3 { font: 600 13px/1.4 inherit; margin: 30px 0 10px; }
+p { font: 400 13.5px/1.7 inherit; color: var(--muted-foreground); max-width: 68ch; margin: 0 0 14px; }
+p strong, li strong { color: var(--foreground); font-weight: 600; }
+code { font: 400 12px var(--font-mono, monospace); background: var(--muted); padding: 1px 5px; border-radius: 4px; color: var(--foreground); }
+.stage { background: var(--muted); border: 1px solid var(--border); border-radius: 14px; padding: 34px; margin: 18px 0 10px; }
+.stage--tight { padding: 22px; }
+.caption { font: 400 11.5px/1.5 var(--font-mono, monospace); color: var(--muted-foreground); margin: 0 0 14px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+table { width: 100%; border-collapse: collapse; margin: 14px 0 22px; font-size: 13px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { font: 600 11px var(--font-mono, monospace); letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); }
+td { color: var(--muted-foreground); }
+td:first-child { color: var(--foreground); font-family: var(--font-mono, monospace); font-size: 12px; white-space: nowrap; }
+.flag { border-left: 2px solid var(--foreground); padding: 2px 0 2px 16px; margin: 20px 0; }
+.flag--warn { border-left-color: #b45309; }
+.flag__t { font: 600 12px inherit; color: var(--foreground); margin-bottom: 3px; }
+.flag p { margin: 0; font-size: 13px; }
+
+/* ==========================================================================
+   COMPOSER — the proposed component. Everything here is token-only.
+   Anatomy follows opencode's prompt-input v2; the skin is ours.
+   ========================================================================== */
+.cx {
+  position: relative;
+  width: 100%;
+  min-height: 96px;                    /* oc: min-h-[96px] */
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  overflow: clip;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgb(0 0 0 / 5%));
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.cx:focus-within { border-color: var(--ring, var(--foreground)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring, var(--foreground)) 12%, transparent); }
+
+/* --- attachment strip (above the editor, only when something is attached) - */
+.cx__films { position: relative; }
+.cx__filmstrip {
+  display: flex; flex-wrap: nowrap; gap: 8px;
+  overflow-x: auto; scrollbar-width: none;
+  padding: 8px 8px 4px;                /* oc: px-2 pt-2 pb-1 */
+}
+.cx__filmstrip::-webkit-scrollbar { display: none; }
+.cx__chip { position: relative; flex: none; }
+.cx__thumb {
+  width: 58px; height: 46px;           /* oc: w-[58px] h-[46px] */
+  border-radius: 6px; object-fit: cover; display: block;
+  background: var(--muted);
+  box-shadow: inset 0 0 0 .5px var(--border);
+}
+.cx__file {
+  height: 46px; min-width: 132px; max-width: 200px;
+  border-radius: 6px; background: var(--muted);
+  box-shadow: inset 0 0 0 .5px var(--border);
+  display: flex; align-items: center; gap: 9px; padding: 0 11px;
+}
+.cx__fileicon { width: 18px; height: 18px; flex: none; color: var(--muted-foreground); }
+.cx__filetext { min-width: 0; }
+.cx__filename { font: 500 11.5px/1.35 inherit; color: var(--foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cx__filemeta { font: 400 10px/1.35 var(--font-mono, monospace); color: var(--muted-foreground); text-transform: uppercase; letter-spacing: .04em; }
+.cx__x {
+  position: absolute; top: -4px; right: -4px;  /* oc: -top-1 -right-1 */
+  width: 16px; height: 16px; border-radius: 999px;
+  background: var(--muted-foreground); color: var(--background);
+  border: 1px solid var(--background);
+  display: grid; place-items: center; cursor: pointer;
+  opacity: 0; transition: opacity .12s ease;   /* oc: reveal on hover */
+}
+.cx__chip:hover .cx__x, .cx__x:focus-visible { opacity: 1; }
+/* edge fades, shown only when the strip actually scrolls */
+.cx__fade { position: absolute; inset-block: 0; width: 24px; pointer-events: none; }
+.cx__fade--l { left: 0; background: linear-gradient(to right, var(--background), transparent); }
+.cx__fade--r { right: 0; background: linear-gradient(to left, var(--background), transparent); }
+
+/* --- the editor ---------------------------------------------------------- */
+.cx__editorwrap { position: relative; min-height: 60px; }
+.cx__editor {
+  position: relative; z-index: 1; display: block;
+  min-height: 60px; max-height: 180px;  /* oc: min-h-[60px] max-h-[180px] */
+  overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+  background: transparent; border: 0; outline: none;
+  padding: 16px 16px 8px;               /* oc: px-4 pt-4 pb-2 */
+  font: 440 13px/20px inherit;          /* oc: text-[13px] font-[440] leading-5 */
+  color: var(--foreground);
+}
+.cx__placeholder {
+  position: absolute; inset-inline: 0; top: 0; pointer-events: none;
+  padding: 16px 16px 0;
+  font: 440 13px/20px inherit;
+  color: var(--muted-foreground);
+}
+/* @mentions, coloured by what they point at */
+.cx__m { border-radius: 3px; padding: 0 1px; }
+.cx__m--sheet { color: #1d4ed8; }
+.cx__m--canon { color: #7c3aed; }
+.cx__m--file  { color: #047857; }
+
+/* --- the control row ----------------------------------------------------- */
+.cx__bar { display: flex; align-items: center; height: 44px; padding: 0 8px; gap: 4px; }
+.cx__left { display: flex; align-items: center; gap: 4px; min-width: 0; flex: 1; }
+.cx__btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px;
+  border: 0; background: transparent; border-radius: var(--radius-sm, 6px);
+  font: 500 12px inherit; color: var(--muted-foreground); cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.cx__btn:hover { background: var(--accent); color: var(--foreground); }
+.cx__btn--icon { width: 28px; padding: 0; justify-content: center; }
+.cx__btn .chev { opacity: .55; }
+.cx__send {
+  width: 28px; height: 28px; flex: none;      /* oc: size-7 */
+  border: 0; border-radius: var(--radius-sm, 6px);
+  background: var(--primary); color: var(--primary-foreground);
+  display: grid; place-items: center; cursor: pointer;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgb(0 0 0 / 8%));
+}
+.cx__send:disabled { opacity: .5; cursor: default; }
+.cx__send--stop { background: var(--foreground); }
+
+/* --- states -------------------------------------------------------------- */
+.cx--drag { border-style: dashed; border-color: var(--ring, var(--foreground)); }
+.cx__drop {
+  position: absolute; inset: 0; z-index: 2; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--background) 90%, transparent);
+  color: var(--foreground); font: 500 13px inherit; gap: 8px; pointer-events: none;
+}
+.cx__drop svg { width: 26px; height: 26px; opacity: .5; }
+.cx--off { opacity: .55; }
+.cx--off .cx__editor { cursor: not-allowed; }
+.cx__reason {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 14px; border-top: 1px solid var(--border);
+  background: var(--muted);
+  font: 400 11.5px/1.4 inherit; color: var(--muted-foreground);
+}
+.cx__reason a { color: var(--foreground); text-underline-offset: 2px; }
+
+/* --- what it replaces (today's .fy-composer, reproduced) ----------------- */
+.old {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px 16px; background: var(--background);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
+}
+.old__hint { flex: 1; font: 400 13.5px inherit; color: var(--muted-foreground); }
+.old__send {
+  height: 30px; padding: 0 13px; border-radius: var(--radius-sm, 6px);
+  background: var(--primary); color: var(--primary-foreground);
+  font: 500 12.5px inherit; display: inline-flex; align-items: center;
+}
+
+/* ==========================================================================
+   SCREEN MOCK — the new-world screen at true proportions.
+   ========================================================================== */
+.scr {
+  background: var(--background); border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden; box-shadow: 0 8px 30px rgb(0 0 0 / 8%);
+}
+.scr__bar {
+  height: 44px; display: flex; align-items: center; padding: 0 16px;
+  border-bottom: 1px solid var(--border); gap: 12px;
+}
+.scr__back { font: 400 12.5px inherit; color: var(--muted-foreground); }
+.scr__title { flex: 1; text-align: center; font: 400 11.5px var(--font-mono, monospace); color: var(--muted-foreground); }
+.scr__dots { display: flex; gap: 16px; }
+.scr__dots i { width: 11px; height: 1.5px; background: var(--muted-foreground); opacity: .55; }
+.scr__body { display: flex; min-height: 470px; }
+.scr__main { flex: 1; min-width: 0; padding: 22px 26px; display: flex; flex-direction: column; }
+.scr__kicker { font: 500 10px var(--font-mono, monospace); letter-spacing: .16em; color: var(--muted-foreground); }
+.scr__h1 { font: 650 23px/1.15 inherit; letter-spacing: -0.025em; margin: 8px 0 0; }
+.scr__seg {
+  align-self: flex-end; margin-top: -22px; display: inline-flex; gap: 2px; padding: 2px;
+  background: var(--muted); border-radius: 8px; font: 500 12px inherit; color: var(--muted-foreground);
+}
+.scr__seg span { padding: 4px 14px; border-radius: 6px; }
+.scr__seg-on { background: var(--background); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / 6%); }
+.scr__log { flex: 1; display: flex; flex-direction: column; gap: 12px; margin-top: 22px; }
+.bub { max-width: 78%; font: 400 12.5px/1.55 inherit; padding: 10px 14px; }
+.bub--gate { align-self: flex-start; background: var(--secondary); border-radius: 13px 13px 13px 4px; }
+.bub--user { align-self: flex-end; background: var(--primary); color: var(--primary-foreground); border-radius: 13px 13px 4px 13px; }
+.bub__note { font: 400 10px/1.5 var(--font-mono, monospace); color: var(--muted-foreground); margin-top: 7px; }
+.scr__rail {
+  width: 300px; flex: none; border-left: 1px solid var(--border);
+  background: var(--muted); padding: 20px 18px; display: flex; flex-direction: column; gap: 10px;
+}
+.scr__railhead { font: 600 12.5px inherit; }
+.scr__railhead span { display: block; font: 400 10px var(--font-mono, monospace); color: var(--muted-foreground); margin-top: 4px; }
+.scr__card { background: var(--background); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+.scr__cardart { height: 62px; border-radius: 7px; background: linear-gradient(135deg,#8d99a6,#3b444c); margin-bottom: 10px; }
+.scr__cardname { font: 650 14px inherit; }
+.scr__cardname span { font: 400 9.5px var(--font-mono, monospace); color: var(--muted-foreground); margin-left: 6px; text-transform: uppercase; }
+.scr__cardline { font: 400 11px/1.5 inherit; color: var(--muted-foreground); margin-top: 5px; }
+.scr__ent {
+  background: var(--background); border: 1px solid var(--border); border-radius: 8px;
+  padding: 9px 11px; font: 500 12px inherit;
+}
+.scr__ent span { display: block; font: 500 8.5px var(--font-mono, monospace); letter-spacing: .1em; color: var(--muted-foreground); margin-bottom: 3px; }
+.scr__file {
+  border: 1px dashed var(--border); border-radius: 8px; padding: 9px 11px;
+  font: 500 11.5px inherit; color: var(--foreground); background: transparent;
+}
+.scr__file span { display: block; font: 400 9.5px var(--font-mono, monospace); color: var(--muted-foreground); margin-top: 3px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="kicker">Arke Studio · design system · proposal</div>
+<h1>The composer</h1>
+<p class="lede">
+  One input, used by every conversation in the studio — new world, character, canon, scene. The
+  anatomy is taken from opencode's <code>prompt-input v2</code> so the behaviour is familiar and
+  proven; the skin, the words and the accepted file kinds are ours. This page is for review: nothing
+  here is implemented yet.
+</p>
+
+<h2><span class="n">01</span>Anatomy</h2>
+<p>
+  Three stacked regions inside one rounded container. The attachment strip only exists when
+  something is attached, so an empty composer is exactly the shape it is today.
+</p>
+
+<div class="stage">
+  <div class="cx">
+    <div class="cx__editorwrap">
+      <div class="cx__editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message"></div>
+      <div class="cx__placeholder">Say what the world is — <span style="opacity:.75">/ for commands, @ for what already exists</span></div>
+    </div>
+    <div class="cx__bar">
+      <div class="cx__left">
+        <button class="cx__btn cx__btn--icon" title="Add images, documents and audio  ⌘U" aria-label="Add files">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button class="cx__btn">World author <svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+        <button class="cx__btn">Claude Sonnet 4.6 <svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+      </div>
+      <button class="cx__send" aria-label="Send" disabled>
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+<p class="caption">Empty · the send button is disabled until there is text or an attachment.</p>
+
+<table>
+  <tr><th>Region</th><th>Size</th><th>Why</th></tr>
+  <tr><td>container</td><td>min-height 96px, radius 12px</td><td>Never collapses below two comfortable lines plus the bar.</td></tr>
+  <tr><td>strip</td><td>46px tall chips, 8px gap</td><td>Only rendered when attachments exist. Scrolls sideways, never wraps.</td></tr>
+  <tr><td>editor</td><td>min 60px, max 180px</td><td>Grows with the text, then scrolls. The bar never leaves the screen.</td></tr>
+  <tr><td>bar</td><td>44px</td><td>Matches the window chrome height already used across the app.</td></tr>
+  <tr><td>send</td><td>28px square</td><td>Same as the icon buttons beside it.</td></tr>
+</table>
+
+<h2><span class="n">02</span>With attachments</h2>
+<p>
+  Images show their own thumbnail. Everything else shows a name and a kind. The remove button
+  appears on hover — it is present for keyboard users at all times, it is only <em>visually</em>
+  hidden until the chip is hovered or focused.
+</p>
+
+<div class="stage">
+  <div class="cx">
+    <div class="cx__films">
+      <div class="cx__filmstrip">
+        <div class="cx__chip">
+          <div class="cx__thumb" style="background:linear-gradient(135deg,#5b6b7a,#2b333a)"></div>
+          <button class="cx__x" aria-label="Remove reference-harbour.png">
+            <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+        <div class="cx__chip">
+          <div class="cx__file">
+            <svg class="cx__fileicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 3v5h5M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+            <div class="cx__filetext">
+              <div class="cx__filename">tide-notes.md</div>
+              <div class="cx__filemeta">document · 12 KB</div>
+            </div>
+          </div>
+          <button class="cx__x" aria-label="Remove tide-notes.md">
+            <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+        <div class="cx__chip">
+          <div class="cx__file">
+            <svg class="cx__fileicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3v11.5a2.5 2.5 0 1 1-2-2.45"/><path d="M12 3l6 2v3l-6-2"/></svg>
+            <div class="cx__filetext">
+              <div class="cx__filename">sable-voice-take.wav</div>
+              <div class="cx__filemeta">audio · 1:12</div>
+            </div>
+          </div>
+          <button class="cx__x" aria-label="Remove sable-voice-take.wav">
+            <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="cx__fade cx__fade--r"></div>
+    </div>
+    <div class="cx__editorwrap">
+      <div class="cx__editor" contenteditable="true" role="textbox" aria-multiline="true">Use these as the reference for <span class="cx__m cx__m--sheet">@Sable</span> — the notes settle what the tide takes.</div>
+    </div>
+    <div class="cx__bar">
+      <div class="cx__left">
+        <button class="cx__btn cx__btn--icon" aria-label="Add files"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button class="cx__btn">World author <svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+        <button class="cx__btn">Claude Sonnet 4.6 <svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+      </div>
+      <button class="cx__send" aria-label="Send">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+<p class="caption">Three attachments · an image, a document and an audio file. The right-hand fade means the strip has more to scroll.</p>
+
+<h2><span class="n">03</span>Dropping files</h2>
+<p>
+  The whole composer is the drop target, not a small zone. While a drag is over it the border goes
+  dashed and a single line covers the surface. Dropping something we cannot take does not fail
+  silently — the chip appears greyed with the reason on it.
+</p>
+
+<div class="grid2">
+  <div>
+    <div class="stage stage--tight">
+      <div class="cx cx--drag">
+        <div class="cx__drop">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 16V4m0 0L7 9m5-5l5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          <span>Drop to attach</span>
+        </div>
+        <div class="cx__editorwrap"><div class="cx__editor"></div></div>
+        <div class="cx__bar"><div class="cx__left"></div></div>
+      </div>
+    </div>
+    <p class="caption">Drag over.</p>
+  </div>
+  <div>
+    <div class="stage stage--tight">
+      <div class="cx cx--off">
+        <div class="cx__editorwrap">
+          <div class="cx__editor"></div>
+          <div class="cx__placeholder">Chat needs a writing service</div>
+        </div>
+        <div class="cx__bar">
+          <div class="cx__left">
+            <button class="cx__btn cx__btn--icon" disabled aria-label="Add files"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+          </div>
+          <button class="cx__send" disabled aria-label="Send"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+        </div>
+        <div class="cx__reason">
+          <span>No writing service is configured, so the chat is off. The form beside it still works.</span>
+        </div>
+      </div>
+    </div>
+    <p class="caption">Unavailable · the reason is stated, never a dead box.</p>
+  </div>
+</div>
+
+<h2><span class="n">04</span>Behaviour we are copying</h2>
+<p>
+  These are opencode's rules, read from <code>packages/app/src/components/prompt-input/</code> on
+  the <code>dev</code> branch. They are worth copying because each one solves a problem we would
+  otherwise hit.
+</p>
+
+<table>
+  <tr><th>Rule</th><th>What it does</th></tr>
+  <tr><td>Enter sends</td><td>Shift+Enter makes a new line. Ignored while an IME is composing, and while the key is repeating.</td></tr>
+  <tr><td>contenteditable</td><td>Not a <code>&lt;textarea&gt;</code> — so @mentions can be coloured inline and treated as single objects.</td></tr>
+  <tr><td>Large paste</td><td>Over 8,000 characters or 120 line breaks becomes an attachment instead of filling the box.</td></tr>
+  <tr><td>Paste an image</td><td>Straight from the clipboard to a chip; no save-then-attach detour.</td></tr>
+  <tr><td>Sniff, don't trust</td><td>A file's type is decided by its bytes when the declared type is missing or generic.</td></tr>
+  <tr><td>⌘U</td><td>Opens the file picker from the keyboard.</td></tr>
+  <tr><td>Growth cap</td><td>The editor stops growing at 180px and scrolls, so the send button never scrolls away.</td></tr>
+</table>
+
+<h3>Where we deliberately differ</h3>
+<table>
+  <tr><th>opencode</th><th>Arke Studio</th></tr>
+  <tr><td>images, PDF, text and code</td><td>plus <strong>audio and video</strong> — a voice take and a reference clip are ordinary source material here</td></tr>
+  <tr><td>@ mentions files and agents</td><td>@ mentions <strong>what exists in the world</strong>: sheets, canon entries, artifacts</td></tr>
+  <tr><td>“Ask anything…”</td><td>the placeholder says what <em>this</em> conversation is for; each screen sets its own</td></tr>
+  <tr><td>attachments are context for one turn</td><td>an attachment is <strong>filed as an artifact</strong> and stays in the world after the turn</td></tr>
+</table>
+
+<div class="flag flag--warn">
+  <div class="flag__t">The last row is the important one</div>
+  <p>
+    In opencode an attachment is scaffolding for a question. In a studio it is source material — the
+    photograph a character is drawn from, the notes a world came out of. So attaching a file files it
+    in <code>artifacts/</code> and it is citable afterwards. That is a product decision, not a copy,
+    and it is the one I would most like your view on.
+  </p>
+</div>
+
+<h2><span class="n">05</span>What it replaces</h2>
+<p>
+  Today every chat surface uses <code>.fy-composer</code>: one flex row, a borrowed
+  <code>&lt;input&gt;</code>, and a Send button. It cannot hold an attachment, cannot show which
+  model is answering, and grows to exactly one line no matter what you type.
+</p>
+
+<div class="grid2">
+  <div>
+    <div class="stage stage--tight">
+      <div class="old">
+        <span class="old__hint">Keep going, or ask it to surprise you…</span>
+        <span class="old__send">Send</span>
+      </div>
+    </div>
+    <p class="caption">Now · 44px, one line, no attachments.</p>
+  </div>
+  <div>
+    <div class="stage stage--tight">
+      <div class="cx" style="min-height:auto">
+        <div class="cx__editorwrap" style="min-height:44px">
+          <div class="cx__editor" style="min-height:44px;padding:12px 16px 4px"></div>
+          <div class="cx__placeholder" style="padding:12px 16px 0">Keep going, or ask it to surprise you…</div>
+        </div>
+        <div class="cx__bar">
+          <div class="cx__left">
+            <button class="cx__btn cx__btn--icon" aria-label="Add files"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+            <button class="cx__btn">World author <svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+          </div>
+          <button class="cx__send" disabled aria-label="Send"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+        </div>
+      </div>
+    </div>
+    <p class="caption">Proposed · 88px at rest. The extra 44px is the control bar.</p>
+  </div>
+</div>
+
+<div class="flag">
+  <div class="flag__t">It costs vertical space, and that is the trade</div>
+  <p>
+    Three screens carry a composer — new world, story, and the world chat. Each loses about 44px of
+    transcript to gain attachments and a visible model. On the new-world screen, where the composer
+    sits at the bottom of a tall column, that is comfortable. On the story screen it is tighter,
+    which is why the bar collapses to just <code>+</code> and send when the panel is narrow.
+  </p>
+</div>
+
+<h2><span class="n">06</span>In place — the new-world screen</h2>
+<p>
+  The target, drawn at true proportions: the window chrome, the Chat/Form tabs, the transcript, the
+  new composer, and the world-so-far rail. This is the screen you will get.
+</p>
+
+<div class="stage">
+  <div class="scr">
+    <div class="scr__bar">
+      <span class="scr__back">‹ Back</span>
+      <span class="scr__title">Arke Studio · new world</span>
+      <span class="scr__dots"><i></i><i></i><i></i></span>
+    </div>
+    <div class="scr__body">
+      <div class="scr__main">
+        <div class="scr__kicker">NEW WORLD</div>
+        <div class="scr__h1">Start talking. It starts existing.</div>
+        <div class="scr__seg"><span class="scr__seg-on">Chat</span><span>Form</span></div>
+
+        <div class="scr__log">
+          <div class="bub bub--gate">
+            Say what the world is — a place, a wrongness, a person standing in it.
+            <div class="bub__note">everything is drafted from this thread · the world is the record</div>
+          </div>
+          <div class="bub bub--user">A drowned cathedral city where the tide only goes out once a year.</div>
+          <div class="bub bub--gate">Vael Maris. The bell towers never touch the ground — who was the first to go down?</div>
+        </div>
+
+        <div class="cx" style="margin-top:14px">
+          <div class="cx__films">
+            <div class="cx__filmstrip">
+              <div class="cx__chip">
+                <div class="cx__thumb" style="background:linear-gradient(135deg,#6b7a86,#2f3941)"></div>
+                <button class="cx__x" aria-label="Remove"><svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+              </div>
+              <div class="cx__chip">
+                <div class="cx__file">
+                  <svg class="cx__fileicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 3v5h5M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+                  <div class="cx__filetext">
+                    <div class="cx__filename">series-bible.pdf</div>
+                    <div class="cx__filemeta">document · 2.4 MB</div>
+                  </div>
+                </div>
+                <button class="cx__x" aria-label="Remove"><svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+              </div>
+            </div>
+          </div>
+          <div class="cx__editorwrap">
+            <div class="cx__editor">The bible has the tide calendar in it — use that rather than inventing one.</div>
+          </div>
+          <div class="cx__bar">
+            <div class="cx__left">
+              <button class="cx__btn cx__btn--icon" aria-label="Add files"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+              <button class="cx__btn">World author <svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+              <button class="cx__btn">Claude Sonnet 4.6 <svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+            </div>
+            <button class="cx__send" aria-label="Send"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="scr__rail">
+        <div class="scr__railhead">The world so far <span>4 entries · all proposed</span></div>
+        <div class="scr__card">
+          <div class="scr__cardart"></div>
+          <div class="scr__cardname">Vael Maris <span>proposed</span></div>
+          <div class="scr__cardline">In a city that drowns and exhales once a year…</div>
+        </div>
+        <div class="scr__ent"><span>CHARACTER</span>Sable</div>
+        <div class="scr__ent"><span>LOCATION</span>The Bell Towers</div>
+        <div class="scr__file">series-bible.pdf <span>filed as an artifact</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+<p class="caption">The attached PDF appears twice on purpose: as a chip while it is part of what you are saying, and in the rail because it has been filed and will outlast the turn.</p>
+
+<h2><span class="n">07</span>What is not in this page</h2>
+<p>
+  The <code>/</code> command palette and the <code>@</code> picker both open above the composer as
+  floating lists. They are drawn in the prototype already and unchanged by this proposal, so I have
+  left them out rather than redraw them slightly differently.
+</p>
+
+</div>
+</body>
+</html>

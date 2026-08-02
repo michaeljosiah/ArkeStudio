@@ -5,6 +5,7 @@ import { EmptyState, KeyValue, Section } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
 import { ChevronLeft, Plus, X } from "../components/icons.js";
 import { Portrait } from "../components/portrait.js";
+import { Composer } from "../components/composer.js";
 import { shortDateTime } from "../lib/format.js";
 import {
   cancelExport as cancelExportMsg,
@@ -596,20 +597,16 @@ export function NewWorldScreen() {
                   </div>
                 )}
                 {g?.status === "failed" && g.detail && <div className="fy-mono">the last turn failed — {g.detail}</div>}
-                <div className="fy-composer" style={{ marginTop: "auto" }}>
-                  <input
-                    style={{ flex: 1, border: "none", outline: "none", background: "transparent", font: "400 13.5px var(--font-sans)", color: "inherit" }}
-                    placeholder="Keep going, or ask it to surprise you…"
-                    disabled={chatRunning}
+                <div style={{ marginTop: "auto" }}>
+                  <Composer
                     value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") sendGenesis();
-                    }}
+                    onChange={setMessage}
+                    onSubmit={sendGenesis}
+                    placeholder="Keep going, or ask it to surprise you…"
+                    agentLabel="world author"
+                    busy={chatRunning}
+                    busyLabel="shaping the draft…"
                   />
-                  <Button variant="primary" disabled={chatRunning || message.trim().length === 0} onClick={sendGenesis}>
-                    {chatRunning ? "Shaping…" : "Send"}
-                  </Button>
                 </div>
               </>
             ) : (

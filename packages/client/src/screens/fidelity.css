@@ -1007,6 +1007,74 @@
 }
 .fy-composer:hover { border-color: var(--neutral-400); }
 .fy-composer__hint { flex: 1; font: 400 13.5px var(--font-sans); color: var(--muted-foreground); }
+
+/*
+ * The composer (design-system/composer.html). A contenteditable surface that grows to a cap and
+ * then scrolls, over a control bar of fixed height — so the send button never scrolls away, and
+ * there is a home for attachments above the text when they arrive.
+ */
+.fy-cx {
+  position: relative;
+  width: 100%;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  overflow: clip;
+  box-shadow: var(--shadow-xs);
+  transition: var(--transition-control);
+}
+.fy-cx:focus-within { border-color: var(--neutral-400); }
+.fy-cx__editorwrap { position: relative; min-height: 44px; }
+.fy-cx__editor {
+  position: relative;
+  z-index: 1;
+  display: block;
+  min-height: 44px;
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 13px 15px 5px;
+  font: 400 13.5px/20px var(--font-sans);
+  color: var(--foreground);
+  outline: none;
+}
+.fy-cx__placeholder {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  pointer-events: none;
+  padding: 13px 15px 0;
+  font: 400 13.5px/20px var(--font-sans);
+  color: var(--muted-foreground);
+}
+.fy-cx__bar { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 15px; }
+.fy-cx__left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.fy-cx__agent { font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+.fy-cx__busy { font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+.fy-cx__send {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border: none;
+  border-radius: var(--radius-control);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-cx__send:disabled { opacity: 0.45; cursor: default; }
+.fy-cx--off { opacity: 0.6; }
+.fy-cx--off .fy-cx__editor { cursor: not-allowed; }
+.fy-cx__reason {
+  border-top: 1px solid var(--border);
+  background: var(--neutral-50);
+  padding: 8px 15px;
+  font: 400 11px/1.5 var(--font-sans);
+  color: var(--muted-foreground);
+}
 .fy-story__side {
   width: 470px;
   flex: none;
