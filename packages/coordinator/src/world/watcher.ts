@@ -23,6 +23,11 @@ const IGNORED = [
   /\.tmp-[0-9A-Z]+$/i,
 ];
 
+export interface WatcherDeps {
+  /** Injectable for the error-path unit tests; defaults to fs.watch. */
+  watch?: typeof watch;
+}
+
 export class WorldWatcher {
   private watcher: FSWatcher | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -31,11 +36,13 @@ export class WorldWatcher {
   constructor(
     private readonly dir: string,
     private readonly onExternalChange: () => void,
+    private readonly deps: WatcherDeps = {},
   ) {}
 
   start(): void {
+    const open = this.deps.watch ?? watch;
     try {
-      this.watcher = watch(this.dir, { recursive: true }, (_event, filename) => {
+      const watcher = open(this.dir, { recursive: true }, (_event, filename) => {
         if (this.suppressed > 0) return;
         // Windows delivers null filenames on rename bursts — overwhelmingly our own SQLite/
         // journal traffic straggling past the suppression window. Closed-world reconciliation
@@ -45,12 +52,34 @@ export class WorldWatcher {
         if (this.timer) clearTimeout(this.timer);
         this.timer = setTimeout(() => this.onExternalChange(), DEBOUNCE_MS);
       });
+      watcher.on("error", (err: NodeJS.ErrnoException) => this.onWatchError(err));
+      this.watcher = watcher;
       // Detection must never hold the process open — a leaked watcher is a hang, not a feature.
       this.watcher.unref?.();
     } catch {
       // A filesystem that cannot watch degrades detection, not the product.
       this.watcher = null;
     }
+  }
+
+  /**
+   * Watcher errors are reports, never crashes.
+   *
+   * Only Windows and macOS watch a tree natively. Everywhere else Node emulates `recursive`
+   * in JavaScript: it walks the world, keeps one watcher per directory, and re-reads a
+   * directory whenever that directory changes. Accepting or discarding a proposal deletes
+   * `.proposals/<id>/` out from under that re-read, so the walk lands on a directory that no
+   * longer exists and the ENOENT arrives here. An `FSWatcher` is an EventEmitter, and an
+   * emitter that emits `error` with nobody listening rethrows into the process — which is how
+   * an ordinary deletion became an uncaught exception that killed whatever was running.
+   */
+  private onWatchError(err: NodeJS.ErrnoException): void {
+    // A directory we deleted ourselves, mid-walk. Nothing external happened; nothing to report.
+    if (err.code === "ENOENT") return;
+    // Anything else — inotify exhausted, permission lost — means the watch no longer sees the
+    // world. Let it go rather than trust it: same degraded detection as a filesystem that
+    // cannot watch at all, and reconciliation at open (R-28) still catches the edits.
+    this.stop();
   }
 
   /** Suppress while the app itself writes; unsuppress lingers past the debounce window. */
