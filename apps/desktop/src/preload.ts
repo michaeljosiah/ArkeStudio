@@ -1,4 +1,4 @@
-import { contextBridge } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 /**
  * The typed preload bridge (SPEC-001 R-9): one object on `window.arke` exposing connect,
@@ -66,6 +66,61 @@ const bridge = {
   subscribe(onFrame: FrameListener, onStatus: StatusListener): void {
     frameListeners.add(onFrame);
     statusListeners.add(onStatus);
+  },
+
+  /**
+   * Files dropped on, or pasted into, the composer.
+   *
+   * The window legitimately holds the File objects — the drop event handed them over — but not
+   * where they live. Resolving that happens here and the path goes straight out on the socket
+   * as a file-artifact frame, so the renderer still never sees one (SPEC-001 R-9). Anything
+   * with no file behind it (a clipboard screenshot, a drag out of a web page) comes back by
+   * index, for the caller to offer again as bytes.
+   */
+  attachDropped(worldId: string, files: readonly unknown[]): { filed: number; unresolved: number[] } {
+    const unresolved: number[] = [];
+    let filed = 0;
+    files.forEach((file, index) => {
+      let sourcePath = "";
+      try {
+        sourcePath = webUtils.getPathForFile(file as File);
+      } catch {
+        sourcePath = "";
+      }
+      if (!sourcePath) {
+        unresolved.push(index);
+        return;
+      }
+      bridge.send(JSON.stringify({ kind: "file-artifact", worldId, sourcePath }));
+      filed += 1;
+    });
+    return { filed, unresolved };
+  },
+
+  /** Bytes with no file behind them: the host spools them, then they file like anything else. */
+  async attachBytes(
+    worldId: string,
+    name: string,
+    bytes: Uint8Array,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    // Crossing the context bridge can hand this over as a view, a buffer or a plain array
+    // depending on the shape it went in as. Normalise rather than trust — a wrong guess here
+    // writes a zero-byte file and the attachment fails silently, which is the worst outcome.
+    const raw: unknown = bytes;
+    const view = ArrayBuffer.isView(raw)
+      ? new Uint8Array((raw as ArrayBufferView).buffer, (raw as ArrayBufferView).byteOffset, (raw as ArrayBufferView).byteLength)
+      : raw instanceof ArrayBuffer
+        ? new Uint8Array(raw)
+        : Array.isArray(raw)
+          ? Uint8Array.from(raw as number[])
+          : null;
+    if (!view) return { ok: false, reason: "the app could not read what was pasted" };
+    const result = (await ipcRenderer
+      .invoke("arke:spool", { name, bytes: view })
+      .catch((err: unknown) => ({ reason: String(err) }))) as { path?: string; reason?: string };
+    if (!result?.path) return { ok: false, reason: result?.reason ?? "the app could not hold on to it" };
+    bridge.send(JSON.stringify({ kind: "file-artifact", worldId, sourcePath: result.path }));
+    return { ok: true };
   },
 };
 

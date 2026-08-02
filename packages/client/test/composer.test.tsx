@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
-import { Composer } from "../src/components/composer.js";
+import { Composer, isLongPaste } from "../src/components/composer.js";
 
 const noop = () => {};
 
@@ -58,5 +58,27 @@ describe("the composer", () => {
     assert.ok(html.includes("world author"));
     assert.ok(html.includes("shaping the draft…"));
     assert.match(html, /contenteditable="false"/i, "a turn in flight is read-only");
+  });
+
+  it("treats a pasted document as an attachment, and an ordinary paste as typing", () => {
+    assert.equal(isLongPaste("a drowned city that still sings"), false);
+    assert.equal(isLongPaste("line\n".repeat(60)), false, "sixty lines is still a message");
+    assert.equal(isLongPaste("x".repeat(8_001)), true);
+    assert.equal(isLongPaste("line\n".repeat(121)), true, "a hundred and twenty-one is a document");
+  });
+
+  it("says what would not go in, rather than swallowing it", () => {
+    const html = renderToString(
+      <Composer
+        value=""
+        onChange={noop}
+        onSubmit={noop}
+        placeholder="…"
+        refusals={[{ name: "the-tapes.zip", reason: "the studio has no use for a .zip yet" }]}
+      />,
+    );
+    assert.ok(html.includes("fy-cx__chip--bad"), "the chip is there, greyed");
+    assert.ok(html.includes("the-tapes.zip"));
+    assert.ok(html.includes("the studio has no use for a .zip yet"), "with the reason on it");
   });
 });

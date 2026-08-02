@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
-import { app, BrowserWindow, dialog, safeStorage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 import electronUpdater from "electron-updater";
 import {
   ChildLedger,
@@ -12,6 +12,8 @@ import {
   FsWorldProvider,
   nodeSetupDeps,
   harnessTrace,
+  spoolBytes,
+  sweepSpool,
   registerExitBackstop,
   type Cipher,
   type DatabaseCtor,
@@ -251,6 +253,21 @@ async function start(): Promise<void> {
   coordinator.superviseAs("voice", voxaSupervisor);
 
   const { port } = await coordinator.start(0);
+
+  // Pasting. A screenshot off the clipboard has no file behind it, so the bytes come here, land
+  // in the spool and go into the world by the ordinary filing path. The window sends bytes and
+  // gets back a path it never sees — the preload holds it just long enough to name it in a
+  // file-artifact frame (SPEC-001 R-9). Last run's couriers are swept first; nothing in there
+  // outlives the process that wrote it.
+  await sweepSpool(appRoot);
+  ipcMain.handle("arke:spool", async (event, input: { name?: unknown; bytes?: unknown }) => {
+    if (!window || event.sender !== window.webContents) return { reason: "that window cannot attach" };
+    const raw = input?.bytes;
+    const bytes = raw instanceof Uint8Array ? raw : raw instanceof ArrayBuffer ? new Uint8Array(raw) : null;
+    if (!bytes) return { reason: "the clipboard gave us nothing we could write" };
+    const name = typeof input?.name === "string" ? input.name : "pasted";
+    return await spoolBytes(appRoot, name, bytes).catch((err: unknown) => ({ reason: String(err) }));
+  });
 
   window = new BrowserWindow({
     width: 1440,

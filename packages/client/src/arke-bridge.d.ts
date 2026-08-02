@@ -8,6 +8,16 @@ export interface ArkeBridge {
     onFrame: (frameJson: string) => void,
     onStatus: (status: "connecting" | "open" | "closed") => void,
   ): void;
+  /**
+   * Desktop only, and optional for that reason: a browser session has no host to resolve a
+   * dropped file's path, so the composer simply does not offer the affordance there.
+   */
+  attachDropped?(worldId: string, files: readonly File[]): { filed: number; unresolved: number[] };
+  attachBytes?(
+    worldId: string,
+    name: string,
+    bytes: Uint8Array,
+  ): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
 declare global {

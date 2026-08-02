@@ -532,6 +532,81 @@ export function attachFiles(worldId: string, links?: string[]): void {
   send({ kind: "attach-files", worldId, ...(links !== undefined ? { links } : {}) });
 }
 
+/**
+ * Can this session take a dropped or pasted file? Only the desktop host can — it is the one
+ * that can turn a File into somewhere on disk. A browser session says nothing and offers
+ * nothing, rather than showing a drop target that would quietly do nothing.
+ */
+export function hostCanAttach(): boolean {
+  return typeof bridge?.attachDropped === "function" && typeof bridge?.attachBytes === "function";
+}
+
+/** An extension for bytes that arrived with none — from what the clipboard said they are. */
+const EXT_BY_TYPE: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "text/plain": "txt",
+  "text/markdown": "md",
+  "application/pdf": "pdf",
+};
+
+function nameFor(file: File): string {
+  if (file.name) return file.name;
+  return `pasted.${EXT_BY_TYPE[file.type] ?? "bin"}`;
+}
+
+/**
+ * File what was dropped or pasted. Those with a path behind them go by path; the rest — a
+ * clipboard screenshot, a drag out of a web page — are handed over as bytes. Resolves with a
+ * reason when something could not be taken, so the composer can say so on the chip rather
+ * than swallowing it.
+ */
+export async function attachHostFiles(
+  worldId: string,
+  files: readonly File[],
+): Promise<ReadonlyArray<{ name: string; reason: string }>> {
+  const host = bridge;
+  if (!host?.attachDropped || !host.attachBytes) {
+    return files.map((f) => ({ name: nameFor(f), reason: "attaching needs the desktop app" }));
+  }
+  const trouble: Array<{ name: string; reason: string }> = [];
+  let unresolved: number[] = [];
+  try {
+    unresolved = host.attachDropped(worldId, files).unresolved;
+  } catch {
+    unresolved = files.map((_, i) => i);
+  }
+  for (const index of unresolved) {
+    const file = files[index];
+    if (!file) continue;
+    try {
+      const outcome = await host.attachBytes(worldId, nameFor(file), new Uint8Array(await file.arrayBuffer()));
+      if (!outcome.ok) trouble.push({ name: nameFor(file), reason: outcome.reason });
+    } catch {
+      trouble.push({ name: nameFor(file), reason: "it could not be read" });
+    }
+  }
+  return trouble;
+}
+
+/** A paste too long to be a message becomes a note in the world instead of filling the box. */
+export async function attachHostText(
+  worldId: string,
+  text: string,
+  name: string,
+): Promise<ReadonlyArray<{ name: string; reason: string }>> {
+  const host = bridge;
+  if (!host?.attachBytes) return [{ name, reason: "attaching needs the desktop app" }];
+  try {
+    const outcome = await host.attachBytes(worldId, name, new TextEncoder().encode(text));
+    return outcome.ok ? [] : [{ name, reason: outcome.reason }];
+  } catch {
+    return [{ name, reason: "it could not be written" }];
+  }
+}
+
 export function reloadWorld(worldId: string): void {
   send({ kind: "reload-world", worldId });
 }

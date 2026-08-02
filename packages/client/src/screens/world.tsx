@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import {
   compilationIsStale,
@@ -28,6 +28,9 @@ import {
   createProduction,
   createSheetFromSentence,
   attachFiles,
+  attachHostFiles,
+  attachHostText,
+  hostCanAttach,
   designateCompilation,
   continueStudio,
   draftWithStudio,
@@ -2359,6 +2362,14 @@ export function CanonThreadScreen() {
   const attached = useStore()
     .attached.filter((a) => a.worldId === worldId && !dismissed.includes(a.artifactId))
     .map(({ artifactId, file, kind }) => ({ artifactId, file, kind }));
+  // Refusals are news, not a list: only what the world turned away since this screen opened
+  // shows on a chip here. The Artifacts screen keeps the fuller account.
+  const notices = useArtifactNotices();
+  const noticesAtOpen = useRef(notices.length);
+  const refusals = notices.slice(noticesAtOpen.current).map((n) => ({
+    name: n.sourcePath.split(/[\\/]/).pop() || "that file",
+    reason: n.reason,
+  }));
 
   // Draft-in-context (18a): the thread's conversation runs on a proposal over the entry file.
   const chatPath = entry ? `canon/${entry.id}.md` : null;
@@ -2421,7 +2432,14 @@ export function CanonThreadScreen() {
               busy={chatRunning}
               busyLabel="drafting against the canon…"
               {...(worldId === undefined ? {} : { onAttach: () => attachFiles(worldId) })}
+              {...(worldId !== undefined && hostCanAttach()
+                ? {
+                    onAttachFiles: (files: readonly File[]) => attachHostFiles(worldId, files),
+                    onAttachText: (text: string) => attachHostText(worldId, text, "pasted-note.txt"),
+                  }
+                : {})}
               attachments={attached}
+              refusals={refusals}
               onRemoveAttachment={(id) => setDismissed((prev) => [...prev, id])}
               {...(harnessReady
                 ? {}
