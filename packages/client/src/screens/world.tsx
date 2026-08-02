@@ -27,6 +27,7 @@ import {
   compileGrid as compileGridMsg,
   createProduction,
   createSheetFromSentence,
+  attachFiles,
   designateCompilation,
   continueStudio,
   draftWithStudio,
@@ -2352,6 +2353,12 @@ export function CanonThreadScreen() {
   const [statement, setStatement] = useState("");
   const [message, setMessage] = useState("");
   const harnessReady = state?.app.health.harness.status === "healthy";
+  // What has been attached here this session. Dismissing a chip stops the conversation
+  // referring to it; the artifact stays filed in the world, because filing is the point.
+  const [dismissed, setDismissed] = useState<readonly string[]>([]);
+  const attached = useStore()
+    .attached.filter((a) => a.worldId === worldId && !dismissed.includes(a.artifactId))
+    .map(({ artifactId, file, kind }) => ({ artifactId, file, kind }));
 
   // Draft-in-context (18a): the thread's conversation runs on a proposal over the entry file.
   const chatPath = entry ? `canon/${entry.id}.md` : null;
@@ -2413,6 +2420,9 @@ export function CanonThreadScreen() {
               agentLabel="canon author"
               busy={chatRunning}
               busyLabel="drafting against the canon…"
+              {...(worldId === undefined ? {} : { onAttach: () => attachFiles(worldId) })}
+              attachments={attached}
+              onRemoveAttachment={(id) => setDismissed((prev) => [...prev, id])}
               {...(harnessReady
                 ? {}
                 : { disabledReason: "Chat needs OpenCode running — the form below still settles it." })}

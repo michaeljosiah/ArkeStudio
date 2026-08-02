@@ -525,6 +525,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       supersedes: z.string().optional(),
     })
     .strict(),
+  /**
+   * Attach from a chat: the host opens the picker and files what comes back. No path crosses
+   * into the renderer in either direction — it asks, and learns only that artifacts now exist.
+   */
+  z
+    .object({ kind: z.literal("attach-files"), worldId: UlidSchema, links: z.array(z.string()).optional() })
+    .strict(),
   /** SPEC-015 R-9..R-11: stage one — file everything, exclude system files, report all of it. */
   z.object({ kind: z.literal("import-folder"), worldId: UlidSchema, sourcePath: z.string().min(1) }).strict(),
   /** SPEC-015 R-12..R-14: stage two — grounded extraction into a pending batch. */

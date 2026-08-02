@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ArtifactKindSchema } from "./artifact.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
 import { ChangeRecordSchema } from "./change.js";
 import { IsoDateTimeSchema, ProposalIdSchema, ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
@@ -170,6 +171,24 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       outcome: z.enum(["needs-consent", "refused"]),
       reason: z.string(),
       sizeBytes: z.number().nullable(),
+    })
+    .strict(),
+
+  /**
+   * One file landed in the world by attaching it to a conversation. The chat shows a chip for
+   * it; the snapshot carries the artifact itself. Carries no path — the name it was given in
+   * the world is the only name the renderer needs.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("artifact.attached"),
+      worldId: UlidSchema,
+      artifactId: z.string().min(1),
+      file: z.string().min(1),
+      kind: ArtifactKindSchema,
+      /** Filed already under this content: the same material, not a second copy. */
+      deduplicated: z.boolean(),
     })
     .strict(),
 
