@@ -105,6 +105,8 @@ interface StoreState {
       reason?: string;
     }
   >;
+  /** The last word on archiving a world — said once, then dismissed. */
+  archiveNote: { worldId: string; text: string; refused: boolean } | null;
   permissions: Record<string, PendingPermission>;
   askResults: Record<string, AskResult>;
   canonSearches: Record<string, CanonSearchState>;
@@ -159,6 +161,7 @@ let current: StoreState = {
   genesis: {},
   setupStatus: null,
   reading: {},
+  archiveNote: null,
   permissions: {},
   askResults: {},
   canonSearches: {},
@@ -282,6 +285,7 @@ function handleFrame(json: string): void {
     let transcripts = current.transcripts;
     let genesis = current.genesis;
     let reading = current.reading;
+    let archiveNote = current.archiveNote;
     let setupStatus = current.setupStatus;
     let permissions = current.permissions;
     const event = frame.event;
@@ -342,6 +346,14 @@ function handleFrame(json: string): void {
               }
             : { ...g, refusals: [...g.refusals.slice(-2), { name: event.name, reason: event.reason ?? "it would not go in" }] },
       };
+    } else if (event.type === "world.archived") {
+      archiveNote = {
+        worldId: event.worldId,
+        text: `${event.name} is in the archive folder, under ${event.folder}. Nothing was deleted.`,
+        refused: false,
+      };
+    } else if (event.type === "world.archive-refused") {
+      archiveNote = { worldId: event.worldId, text: event.reason, refused: true };
     } else if (event.type === "extraction.started") {
       reading = { ...reading, [event.artifactId]: { file: event.file, state: "reading", found: 0, dropped: 0 } };
     } else if (event.type === "extraction.finished") {
@@ -492,6 +504,7 @@ function handleFrame(json: string): void {
       genesis,
       setupStatus,
       reading,
+      archiveNote,
       permissions,
       askResults,
       canonSearches,
@@ -669,6 +682,15 @@ export async function attachHostText(
 /** Ask the host's picker for files to hand to a conversation that has no world yet. */
 export function genesisAttachFiles(genesisId: string): void {
   send({ kind: "genesis-attach-files", genesisId });
+}
+
+/** Move a world out of the library. The folder survives in archive/ — this is not a delete. */
+export function archiveWorld(worldId: string): void {
+  send({ kind: "archive-world", worldId });
+}
+
+export function useArchiveNote(): StoreState["archiveNote"] {
+  return useStore().archiveNote;
 }
 
 export function reloadWorld(worldId: string): void {
@@ -1242,6 +1264,7 @@ export function __setStateForTest(state: ClientState): void {
   genesis: {},
   setupStatus: null,
     reading: {},
+    archiveNote: null,
     permissions: {},
     askResults: {},
     canonSearches: {},

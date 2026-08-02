@@ -193,6 +193,24 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
 
   /**
+   * A world left the library. Carries where it went by folder name rather than by path — enough
+   * to find it beside the others, without handing the renderer a location on disk.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("world.archived"),
+      worldId: UlidSchema,
+      name: z.string().min(1),
+      folder: z.string().min(1),
+    })
+    .strict(),
+  /** Archiving refused, and why — a world with work still running is not tidied away. */
+  z
+    .object({ ...base, type: z.literal("world.archive-refused"), worldId: UlidSchema, reason: z.string().min(1) })
+    .strict(),
+
+  /**
    * Reading a document for facts (SPEC-015 stage two), as the chat sees it. Extraction was
    * silent before: it ran, wrote a batch into the artifact and said nothing, so a screen could
    * only find out by noticing the snapshot had changed. These two events are what let the offer

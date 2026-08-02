@@ -1,5 +1,5 @@
-import { mkdir, readdir, rm, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { ulid, type WorldBundle, type WorldSummary } from "@arke-studio/contracts";
 import { ProposalManager } from "../gate/proposals.js";
 import { AppIndex } from "../index-db/app-index.js";
@@ -290,6 +290,38 @@ export class FsWorldProvider implements WorldProvider {
   /** The open store, for mutations. Null until a world is loaded. */
   openStore(): WorldStore | null {
     return this.store;
+  }
+
+  /**
+   * Archive a world: it leaves the library without leaving the disk.
+   *
+   * The folder moves to `archive/<slug>`, whole and unchanged — commit journal, artifacts,
+   * lock file and all — so recovery is a move back rather than a restore from anything. That
+   * is the point of a world being plain files (SPEC-002): the safe version of delete is a
+   * rename, and it costs nothing on the same volume.
+   *
+   * The store is closed first. Windows will not move a directory holding an open SQLite index,
+   * and the failure it gives for that reads as a permissions problem, which it is not.
+   */
+  async archiveWorld(worldId: string): Promise<{ folder: string }> {
+    const dir = await this.findWorldDir(worldId);
+    if (this.store?.worldId === worldId) await this.closeStore();
+    const archiveRoot = join(this.appRoot, "archive");
+    await mkdir(toExtendedLength(archiveRoot), { recursive: true });
+
+    // Archiving the same slug twice must not overwrite the first one — the second gets a
+    // stamped name rather than silently replacing what is already in there.
+    const slug = basename(dir);
+    let target = join(archiveRoot, slug);
+    try {
+      await stat(toExtendedLength(target));
+      target = join(archiveRoot, `${slug}-${this.clock().replace(/[:.]/g, "-")}`);
+    } catch {
+      /* nothing there under that name — the plain one will do */
+    }
+    await rename(toExtendedLength(dir), toExtendedLength(target));
+    this.appIndex?.removeWorld(worldId);
+    return { folder: target };
   }
 
   /** Media file types the renderer may fetch — nothing else is servable. */
