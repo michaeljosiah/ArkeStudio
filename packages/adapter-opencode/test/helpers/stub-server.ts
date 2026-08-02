@@ -55,7 +55,12 @@ export class StubOpenCode {
             .end(JSON.stringify({ info: { version: "9.9.9-stub" }, paths }));
           return;
         }
+        if (url.pathname === "/global/event" && this.globalEventStatus !== null) {
+          res.writeHead(this.globalEventStatus).end();
+          return;
+        }
         if (url.pathname === "/api/event" || url.pathname === "/global/event" || url.pathname === "/event") {
+          this.streamPaths.push(url.pathname);
           res.writeHead(200, {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
@@ -136,6 +141,11 @@ export class StubOpenCode {
 
   /** What GET /session/:id/message replays — how a reconnecting adapter learns what it missed. */
   replayMessages: unknown[] = [];
+
+  /** Force /global/event to answer this status instead of streaming (null = stream normally). */
+  globalEventStatus: number | null = null;
+  /** Which stream endpoints were actually attached, in order. */
+  readonly streamPaths: string[] = [];
 
   private turnCounter = 0;
 

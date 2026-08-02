@@ -348,17 +348,18 @@ export class OpenCodeAdapter implements HarnessAdapter {
           (watchdog as { unref?: () => void }).unref?.();
         };
         try {
-          const opened = this.opts.baseUrl();
           const stream = await this.http.openEventStream(attempt.signal);
           backoff = 500;
-          this.trace("stream.connected", { baseUrl: opened });
+          // The channel matters as much as the port: attached to /api/event, the app is
+          // "connected" and starving. One trace line here would have named today's fault.
+          this.trace("stream.connected", { baseUrl: this.opts.baseUrl(), channel: stream.path });
           heard();
           // OpenCode cannot replay what we missed (no Last-Event-ID), so ask REST what happened
           // while we were not listening. Without this a turn that finished during the gap is
           // lost for good and the caller waits out its whole deadline for news that already
           // came and went. Arke's adapter resyncs on every reconnect for the same reason.
           await this.resyncCompletedTurns();
-          for await (const raw of parseSse(stream, attempt.signal, heard)) {
+          for await (const raw of parseSse(stream.body, attempt.signal, heard)) {
             const outcome = normalizeOpenCode(raw, this.normalizeState);
             if (outcome.kind === "events") {
               for (const event of outcome.events) {

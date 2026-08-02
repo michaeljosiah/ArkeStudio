@@ -332,3 +332,57 @@ describe("the event stream survives a harness that goes quiet (R-2, R-14)", () =
     assert.ok(recovered > stall, "and the recovery follows it");
   });
 });
+
+describe("the stream channel is never downgraded by a bad moment (R-2)", () => {
+  it("waits for a real port instead of dialling :0 and sliding to a starving channel", async () => {
+    // The boot-race regression, made deterministic: baseUrl reads :0 exactly once — the value
+    // the pump sees while the supervisor has no child — and the real port from then on. The
+    // old code spent its one :0 on dialling /global/event, failed, and its very next URL landed
+    // on /api/event at the real port: connected, heartbeating, starving. The fix spends the :0
+    // on a wait instead, so the first dial is the preferred channel at the real port.
+    const stub = new StubOpenCode();
+    await stub.start();
+    // Armed only after init, so the probe's own requests do not consume the ":0" read — the
+    // pump's first look at baseUrl must be the one that sees the port-less supervisor.
+    let armed = false;
+    let reads = 0;
+    const adapter = new OpenCodeAdapter({
+      baseUrl: () => (armed && reads++ === 0 ? "http://127.0.0.1:0" : `http://127.0.0.1:${stub.port}`),
+    });
+    await adapter.init().catch(() => {});
+    armed = true;
+
+    const abort = new AbortController();
+    const events = adapter.streamEvents(abort.signal);
+    const pump = (async () => {
+      for await (const e of events) if (e.type === "session.created") break;
+    })();
+
+    await new Promise((r) => setTimeout(r, 900));
+    abort.abort();
+    await Promise.race([pump, new Promise((r) => setTimeout(r, 500))]);
+    await adapter.dispose();
+    await stub.stop();
+
+    assert.ok(stub.streamPaths.length > 0, "the stream attached once the port existed");
+    assert.equal(stub.streamPaths[0], "/global/event", "and to the full channel, not a fallback");
+  });
+
+  it("falls back only when the server says the endpoint is absent, not when a connection fails", async () => {
+    const stub = new StubOpenCode();
+    await stub.start();
+    stub.globalEventStatus = 404; // an old server generation: genuinely no /global/event
+    const adapter = new OpenCodeAdapter({ baseUrl: () => stub.baseUrl() });
+    await adapter.init().catch(() => {});
+    const abort = new AbortController();
+    const events = adapter.streamEvents(abort.signal);
+    void (async () => {
+      for await (const _ of events) void _;
+    })();
+    await new Promise((r) => setTimeout(r, 400));
+    abort.abort();
+    await adapter.dispose();
+    await stub.stop();
+    assert.equal(stub.streamPaths[0], "/api/event", "404 means absent — the fallback is correct there");
+  });
+});
