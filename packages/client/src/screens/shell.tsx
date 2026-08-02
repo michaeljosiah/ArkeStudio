@@ -600,8 +600,11 @@ export function NewWorldScreen() {
     const worldId = state.world.meta.worldId;
     if (!seededRef.current) {
       seededRef.current = true;
-      for (const c of railCharacters.slice(0, 4)) createSheetFromSentence(worldId, "character", c.name, c.sentence);
-      for (const l of railLocations.slice(0, 4)) createSheetFromSentence(worldId, "location", l.name, l.sentence);
+      // Settled, not proposed. Pressing Begin was the yes; being asked again once per
+      // character and once per place is a toll on a decision already made, and a sheet is a
+      // sketch that changes by typing in it.
+      for (const c of railCharacters.slice(0, 4)) createSheetFromSentence(worldId, "character", c.name, c.sentence, true);
+      for (const l of railLocations.slice(0, 4)) createSheetFromSentence(worldId, "location", l.name, l.sentence, true);
       for (const t of (draft?.threads ?? []).slice(0, 4)) {
         openThread(worldId, t.length > 80 ? `${t.slice(0, 77)}…` : t, t, []);
       }

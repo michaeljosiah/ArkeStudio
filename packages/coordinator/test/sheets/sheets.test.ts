@@ -136,6 +136,30 @@ describe("creation paths (R-10..R-12, D7, D9)", () => {
     await store.close();
   });
 
+  it("settling one leaves a sheet and nothing waiting to be decided", async () => {
+    // What beginning a world now does per character and per place. The gate still ran — this is
+    // an accept, not a bypass — but nobody was asked, because pressing Begin was the yes.
+    const { store, gate } = await open();
+    const draft = await createSheetFromSentence(store, gate, {
+      sheetType: "location",
+      name: "The Bell Towers",
+      sentence: "Salt-eaten stone that rings itself when the tide turns.",
+    });
+    const before = store.getBundle().proposals.length;
+    assert.ok(before > 0, "it is staged first, like everything else");
+
+    assert.equal((await gate.accept(draft.proposal.id)).status, "accepted");
+
+    const sheet = store.getBundle().sheets.find((s) => s.id === "the-bell-towers");
+    assert.equal(sheet?.status, "sketch", "a sketch, changeable by typing in it");
+    assert.equal(
+      store.getBundle().proposals.some((p) => p.proposal.id === draft.proposal.id),
+      false,
+      "and nothing left in Needs you",
+    );
+    await store.close();
+  });
+
   it("duplication: source byte-identical, origin recorded at copy-time version (R-12, D9)", async () => {
     const { dir, store, gate } = await open();
     const sourceBefore = await readFile(join(dir, "characters", "bray-half-hitch.md"), "utf8");

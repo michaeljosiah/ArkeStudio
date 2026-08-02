@@ -896,8 +896,10 @@ export function createSheetFromSentence(
   sheetType: "character" | "location" | "faction",
   name: string,
   sentence: string,
+  /** Settle it as drafted, without asking — see the frame. Beginning a world sets this. */
+  settle = false,
 ): void {
-  send({ kind: "create-sheet-from-sentence", worldId, sheetType, name, sentence });
+  send({ kind: "create-sheet-from-sentence", worldId, sheetType, name, sentence, ...(settle ? { settle } : {}) });
 }
 
 export function duplicateSheet(worldId: string, path: string, newName: string): void {
