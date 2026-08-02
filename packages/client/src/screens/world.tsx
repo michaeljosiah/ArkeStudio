@@ -14,7 +14,9 @@ import {
 import { DegradedBanner, EmptyState, PageHeader, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
 import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
-import { ActivityIcon, ChevronRight, Play, Plus, Search, Sliders } from "../components/icons.js";
+import { ChevronRight, Play, Plus, Search } from "../components/icons.js";
+import { AppChrome } from "../components/chrome.js";
+import { Loading } from "../components/loading.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
 import { ExtractionOffer } from "../components/extraction-offer.js";
@@ -90,9 +92,7 @@ export function WorldLayout() {
   const { worldId } = useParams();
   useOpenWorldGuard(worldId);
   const { state } = useStore();
-  const navigate = useNavigate();
-  const attention = (state?.app.jobs.some((j) => j.status === "needs-reconciliation") ?? false) ||
-    (state?.app.queues.some((q) => q.paused) ?? false);
+  const world = state?.world;
   const nav = [
     ["", "Overview"],
     ["cast", "Characters"],
@@ -104,23 +104,11 @@ export function WorldLayout() {
   ] as const;
   return (
     <div className="fy-app">
-      <div className="fy-titlebar">
-        <div className="fy-titlebar__side">
-          <button className="fy-iconbtn" title="Settings" onClick={() => navigate("/settings/providers")}>
-            <Sliders size={13} />
-          </button>
-          <button className="fy-iconbtn" title="Activity" onClick={() => navigate("/activity")}>
-            <ActivityIcon size={13} />
-            {attention && <span className="fy-iconbtn__dot" />}
-          </button>
-        </div>
-        <div className="fy-titlebar__center">Arke Studio</div>
-        <div className="fy-titlebar__side fy-titlebar__side--right">
-          <span className="fy-titlebar__mark" onClick={() => navigate("/worlds")}>
-            Arke
-          </span>
-        </div>
-      </div>
+      <AppChrome
+        back={{ label: "Worlds", to: "/worlds" }}
+        context={world ? { label: world.meta.name } : undefined}
+        divided={false}
+      />
       <div className="fy-content">
         <nav className="fy-pillnav">
           {nav.map(([slug, label]) => (
@@ -340,7 +328,7 @@ export function WorldOverviewScreen() {
   if (!world) {
     return (
       <Screen id="world-overview">
-        <EmptyState title="Opening world…" />
+        <Loading label="opening the world" />
       </Screen>
     );
   }
@@ -1136,11 +1124,8 @@ export function CharacterEditScreen() {
                 </div>
               ))}
               {chatRunning && (
-                <div className="fy-bubble--gate" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span className="fy-dot fy-dot--live" />
-                  <span className="fy-mono">
-                    {chatActivity?.lines[chatActivity.lines.length - 1] ?? "drafting inside the proposal…"}
-                  </span>
+                <div className="fy-bubble--gate">
+                  <Loading inline label={chatActivity?.lines[chatActivity.lines.length - 1] ?? "drafting inside the proposal…"} />
                 </div>
               )}
               <div style={{ marginTop: "auto" }}>
@@ -1321,7 +1306,7 @@ export function DictationButton({ onText }: { onText: (text: string) => void }) 
       >
         {recorder ? "Stop · transcribe" : "🎤 Dictate"}
       </Button>
-      {requestId && !result && <span className="scr-field__hint">transcribing locally…</span>}
+      {requestId && !result && <Loading inline label="transcribing locally…" />}
       {result?.error && <span className="scr-field__hint">{result.error}</span>}
     </span>
   );
@@ -2561,11 +2546,8 @@ export function CanonThreadScreen() {
             </div>
           ))}
           {chatRunning && (
-            <div className="fy-bubble--gate" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span className="fy-dot fy-dot--live" />
-              <span className="fy-mono">
-                {chatActivity?.lines[chatActivity.lines.length - 1] ?? "drafting against the canon…"}
-              </span>
+            <div className="fy-bubble--gate">
+              <Loading inline label={chatActivity?.lines[chatActivity.lines.length - 1] ?? "drafting against the canon…"} />
             </div>
           )}
           <div style={{ marginTop: 2 }}>

@@ -3,7 +3,9 @@ import { NavLink, Outlet, useNavigate } from "react-router";
 import { Badge, Button, Callout, Input, StatusDot, Textarea, cx, type StatusDotTone } from "../components/ui.js";
 import { EmptyState } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
-import { Archive, ChevronLeft, Plus, X } from "../components/icons.js";
+import { Archive, Plus, X } from "../components/icons.js";
+import { AppChrome } from "../components/chrome.js";
+import { Loading } from "../components/loading.js";
 import { Portrait } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
 import { shortDateTime } from "../lib/format.js";
@@ -86,34 +88,6 @@ export function ShellChrome() {
   return (
     <div className="scr-frame__content" style={{ height: "100%" }}>
       <Outlet />
-    </div>
-  );
-}
-
-/** The prototype's shared 44px titlebar for shell screens: back slot, mono label, Arke mark. */
-function ShellTitlebar({ back, label, divided = true }: { back?: { label: string; to: string }; label: string; divided?: boolean }) {
-  const navigate = useNavigate();
-  return (
-    <div className={cx("fy-titlebar", divided && "fy-titlebar--divided")}>
-      <div className="fy-titlebar__side">
-        {back && (
-          <button
-            type="button"
-            className="fy-iconbtn"
-            style={{ width: "auto", gap: 7, padding: "0 6px", font: "400 12px var(--font-sans)" }}
-            onClick={() => navigate(back.to)}
-          >
-            <ChevronLeft size={13} />
-            {back.label}
-          </button>
-        )}
-      </div>
-      <div className="fy-titlebar__center">{label}</div>
-      <div className="fy-titlebar__side fy-titlebar__side--right">
-        <span className="fy-titlebar__mark" onClick={() => navigate("/worlds")}>
-          Arke
-        </span>
-      </div>
     </div>
   );
 }
@@ -222,13 +196,9 @@ export function LaunchScreen() {
 
   return (
     <div className="fy-app" data-screen="launch">
-      <div className="fy-titlebar">
-        <div className="fy-titlebar__side" />
-        <div className="fy-titlebar__center" />
-        <div className="fy-titlebar__side fy-titlebar__side--right">
-          <span className="fy-titlebar__mark">Arke</span>
-        </div>
-      </div>
+      {/* The one screen without the two controls: nothing is configured yet, and the only thing
+          that has happened is the download this screen is already showing. */}
+      <AppChrome controls={false} divided={false} />
       <div className="fy-launch">
         <div className="fy-launch__reel">
           {/* The reel plays while the runtimes come down — the wait is the only time this
@@ -319,12 +289,7 @@ export function FirstRunScreen() {
   const env = useEnvCheck();
   return (
     <div className="fy-app" data-screen="first-run">
-      <div className="fy-home-head">
-        <div className="fy-home-brand">
-          <span className="fy-home-brand__arke">Arke</span>
-          <span className="fy-home-brand__studio">Studio</span>
-        </div>
-      </div>
+      <AppChrome divided={false} />
       <div className="fy-content">
         <div className="fy-hero" style={{ paddingTop: 40 }}>
           <div className="fy-hero__eyebrow">Welcome</div>
@@ -409,20 +374,8 @@ export function WorldPickerScreen() {
   const ROT = [-2.5, 1.8, -1.2, 2.4, -2];
   return (
     <div className="fy-app" data-screen="world-picker">
-      <div className="fy-home-head">
-        <div className="fy-home-brand">
-          <span className="fy-home-brand__arke">Arke</span>
-          <span className="fy-home-brand__studio">Studio</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <Button variant="ghost" onClick={() => navigate("/activity")}>
-            Activity
-          </Button>
-          <Button variant="ghost" onClick={() => navigate("/settings/providers")}>
-            Settings
-          </Button>
-        </div>
-      </div>
+      {/* No back and no context: this is the top, and the wordmark already says where you are. */}
+      <AppChrome divided={false} />
       <div className="fy-content">
         <div className="fy-home-hero">
           <div className="fy-hero__eyebrow">{greeting}</div>
@@ -618,7 +571,7 @@ export function NewWorldScreen() {
 
   return (
     <div className="fy-app" data-screen="new-world">
-      <ShellTitlebar back={{ label: "Back", to: "/worlds" }} label="Arke Studio · new world" />
+      <AppChrome back={{ label: "Back", to: "/worlds" }} context={{ label: "new world" }} />
       <div className="fy-gate" style={{ flex: 1, minHeight: 0 }}>
         <div className="fy-gate__main">
           <div className="fy-gate__head">
@@ -670,9 +623,8 @@ export function NewWorldScreen() {
                   </div>
                 ))}
                 {chatRunning && (
-                  <div className="fy-bubble--gate" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span className="fy-dot fy-dot--live" />
-                    <span className="fy-mono">shaping the draft…</span>
+                  <div className="fy-bubble--gate">
+                    <Loading inline label="shaping the draft…" />
                   </div>
                 )}
                 {g?.status === "failed" && g.detail && <div className="fy-mono">the last turn failed — {g.detail}</div>}
@@ -921,6 +873,12 @@ export function SettingsLayout() {
   const firstWorld = state?.worlds[0] ?? null;
   return (
     <div className="fy-app" data-screen="settings">
+      {/* The scrim used to start at the top of the window and swallow the bar with it. It now
+          sits under the chrome: the blurred world art is atmosphere, not a reason to lose the
+          only fixed thing on screen. The panel keeps its own close — that is an exit, not a
+          destination, and the two read differently. */}
+      <AppChrome current="settings" divided={false} />
+      <div className="fy-content">
       <div className="fy-scrim">
         {firstWorld && (
           <div className="fy-scrim__art">
@@ -969,6 +927,7 @@ export function SettingsLayout() {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );
@@ -1517,7 +1476,7 @@ export function ActivityScreen() {
 
   return (
     <div className="fy-app" data-screen="activity">
-      <ShellTitlebar back={{ label: "Home", to: "/worlds" }} label="Arke · activity" />
+      <AppChrome back={{ label: "Home", to: "/worlds" }} context={{ label: "activity" }} current="activity" />
       <div className="fy-activity">
         <div className="fy-activity__main">
           <div className="fy-h1row">

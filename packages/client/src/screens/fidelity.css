@@ -31,11 +31,12 @@
   height: 44px;
   padding: 0 16px;
   flex: none;
+  position: relative;
 }
 .fy-titlebar--divided { border-bottom: 1px solid var(--border); }
 /* Desktop shell: native overlay window controls occupy the top-right ~140px of every bar. */
 .is-desktop .fy-titlebar { app-region: drag; }
-.is-desktop .fy-titlebar button, .is-desktop .fy-titlebar .fy-titlebar__mark { app-region: no-drag; }
+.is-desktop .fy-titlebar button { app-region: no-drag; }
 
 /*
  * Moving the window. The native title bar is hidden (main.ts: titleBarStyle "hidden"), so the
@@ -74,21 +75,44 @@
   app-region: no-drag;
 }
 .is-desktop .fy-titlebar__side--right { margin-right: 138px; }
-.is-desktop .fy-home-head { padding-right: 182px; }
-.fy-titlebar__side { width: 150px; display: flex; align-items: center; gap: 2px; }
+.fy-titlebar__side { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; }
 .fy-titlebar__side--right { justify-content: flex-end; }
-.fy-titlebar__center {
-  flex: 1;
-  text-align: center;
+/*
+ * Where you are, on the left: ellipsised rather than allowed to run under the wordmark, which
+ * is centred on the window and cannot move out of its way.
+ */
+.fy-titlebar__context {
   font: 400 12px var(--font-mono);
   color: var(--muted-foreground);
+  border: none;
+  background: transparent;
+  padding: 0 6px;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
-.fy-titlebar__mark {
-  font: 650 14px var(--font-sans);
-  letter-spacing: -0.02em;
-  color: var(--neutral-400);
+button.fy-titlebar__context { cursor: pointer; }
+button.fy-titlebar__context:hover { color: var(--foreground); }
+/*
+ * The wordmark. Absolutely placed, so it sits at the centre of the *window* on every screen —
+ * flex centring would put it 69px left of centre on desktop, where the right side carries an
+ * extra 138px of margin to clear the native window controls.
+ */
+.fy-titlebar__brand {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  border: none;
+  background: transparent;
+  padding: 0 6px;
   cursor: pointer;
 }
+.fy-brand__arke { font: 650 15px var(--font-sans); letter-spacing: -0.02em; color: var(--foreground); }
+.fy-brand__studio { font: 400 12px var(--font-sans); color: var(--muted-foreground); }
 .fy-iconbtn {
   width: 26px;
   height: 22px;
@@ -105,6 +129,10 @@
   transition: var(--transition-control);
 }
 .fy-iconbtn:hover { background: var(--accent); color: var(--foreground); }
+/* An icon button that carries a word too — the back affordance. */
+.fy-iconbtn--wide { width: auto; gap: 7px; padding: 0 6px; font: 400 12px var(--font-sans); }
+/* You are already here: lit, not hidden. A control that disappears where it applies is worse. */
+.fy-iconbtn--current { background: var(--accent); color: var(--foreground); }
 .fy-iconbtn__dot {
   position: absolute;
   top: 2px;
@@ -113,6 +141,60 @@
   height: 5px;
   border-radius: 99px;
   background: var(--warning);
+}
+
+/*
+ * Loading — the sweep, chosen from the ten in design-system/loading.html.
+ *
+ * The band of light travels; the letter does not. That is the whole reason this one is the house
+ * loader: it can sit mid-sentence without displacing a pixel, and under prefers-reduced-motion
+ * (flattened globally in globals.css) it falls back to its base style, which is a solid A —
+ * a resting state inherited rather than hand-written.
+ */
+@keyframes fy-sweep {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+.fy-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 44px 0;
+}
+.fy-loading--inline { flex-direction: row; align-items: baseline; gap: 8px; padding: 0; }
+.fy-loading__mark {
+  font: 650 40px/1 var(--font-sans);
+  letter-spacing: -0.04em;
+  background: linear-gradient(
+    100deg,
+    var(--neutral-300) 20%,
+    var(--foreground) 42%,
+    var(--foreground) 50%,
+    var(--neutral-300) 72%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: fy-sweep 1.9s var(--ease-out) infinite;
+}
+.fy-loading--inline .fy-loading__mark { font-size: 15px; }
+.fy-loading__label { font: 400 12px var(--font-mono); color: var(--muted-foreground); }
+/*
+ * The resting state, declared rather than left to fall out.
+ *
+ * The global reduced-motion rule only shortens the animation; the letter's base style is still a
+ * gradient offset behind clipped text, which stops somewhere arbitrary along the ramp and leaves
+ * one side of the A pale. A loader that half-fades for the person who asked for less motion is
+ * worse than no loader, so the stopped state is written: a solid letter, no gradient at all.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .fy-loading__mark {
+    background: none;
+    color: var(--foreground);
+    -webkit-text-fill-color: currentColor;
+  }
 }
 
 .fy-content {
@@ -471,17 +553,9 @@
 .fy-newworldcard:hover { border-color: var(--neutral-500); background: var(--neutral-50); }
 
 /* ---- home hero spacing ---------------------------------------------------- */
-.fy-home-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 44px;
-  flex: none;
-}
-.fy-home-brand { display: flex; align-items: baseline; gap: 7px; }
-.fy-home-brand__arke { font: 650 17px var(--font-sans); letter-spacing: -0.02em; }
-.fy-home-brand__studio { font: 400 13px var(--font-sans); color: var(--muted-foreground); }
-.fy-home-hero { padding: 58px 88px 0; animation: fy-fade-up 0.7s var(--ease-out) both; }
+/* Home's own head is gone: the lockup and the two destinations it held now live in the one
+   chrome every screen draws (.fy-titlebar), which is the whole point of there being one. */
+.fy-home-hero { padding: 34px 88px 0; animation: fy-fade-up 0.7s var(--ease-out) both; }
 .fy-home-cards { display: flex; gap: 32px; padding: 54px 64px; align-items: flex-start; flex-wrap: wrap; }
 
 /* ============================================================

@@ -14,6 +14,7 @@ import {
 import { DegradedBanner, EmptyState, Screen } from "../components/layout.js";
 import { Badge, Button, Callout, Textarea, cx } from "../components/ui.js";
 import { ChevronLeft, ChevronRight, Play, Plus } from "../components/icons.js";
+import { AppChrome } from "../components/chrome.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { CanonEntryRow } from "../domain/domain.js";
 import { seconds, usd } from "../lib/format.js";
@@ -123,22 +124,13 @@ export function ProductionLayout() {
   );
   return (
     <div className="fy-app">
-      <div className="fy-titlebar fy-titlebar--divided">
-        <div className="fy-titlebar__side" />
-        <button
-          type="button"
-          className="fy-titlebar__center"
-          style={{ border: "none", background: "transparent", cursor: "pointer" }}
-          onClick={() => navigate(`/w/${worldId}/productions`)}
-        >
-          {production ? `${production.meta.title} · ${production.meta.format}` : "…"}
-        </button>
-        <div className="fy-titlebar__side fy-titlebar__side--right">
-          <span className="fy-titlebar__mark" onClick={() => navigate("/worlds")}>
-            Arke
-          </span>
-        </div>
-      </div>
+      <AppChrome
+        back={{ label: "World", to: `/w/${worldId}` }}
+        context={{
+          label: production ? `${production.meta.title} · ${production.meta.format}` : "…",
+          to: `/w/${worldId}/productions`,
+        }}
+      />
       <div className="fy-prod">
         <div className="fy-prodrail">
           <button type="button" className="fy-prodrail__switch" onClick={() => navigate(`/w/${worldId}/productions`)}>

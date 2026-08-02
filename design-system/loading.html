@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loading — ten variations — Arke Studio design system</title>
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/colors.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/typography.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/effects.css">
+<style>
+/* ==========================================================================
+   PAGE CHROME — review scaffolding. Everything under "MARKS" and "MOTION"
+   is the proposal itself and is written to be lifted straight into
+   packages/client/src/screens/fidelity.css.
+   ========================================================================== */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans, "Geist", system-ui, sans-serif);
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 56px 40px 120px; }
+.kicker { font: 500 11px/1 var(--font-mono, ui-monospace, monospace); letter-spacing: .14em; text-transform: uppercase; color: var(--muted-foreground); }
+h1 { font: 650 34px/1.15 inherit; letter-spacing: -0.025em; margin: 14px 0 12px; }
+.lede { font: 400 15px/1.65 inherit; color: var(--muted-foreground); max-width: 62ch; margin: 0 0 34px; }
+h2 { font: 600 19px/1.3 inherit; letter-spacing: -0.015em; margin: 58px 0 6px; padding-top: 26px; border-top: 1px solid var(--border); }
+h2 .n { font: 500 11px var(--font-mono, monospace); color: var(--muted-foreground); margin-right: 10px; }
+p { font: 400 13.5px/1.7 inherit; color: var(--muted-foreground); max-width: 68ch; margin: 0 0 14px; }
+p strong, li strong, td strong { color: var(--foreground); font-weight: 600; }
+code { font: 400 12px var(--font-mono, monospace); background: var(--muted); padding: 1px 5px; border-radius: 4px; color: var(--foreground); }
+table { width: 100%; border-collapse: collapse; margin: 14px 0 22px; font-size: 13px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { font: 600 11px var(--font-mono, monospace); letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); }
+td { color: var(--muted-foreground); }
+td:first-child { color: var(--foreground); font-family: var(--font-mono, monospace); font-size: 12px; white-space: nowrap; }
+.flag { border-left: 2px solid var(--foreground); padding: 2px 0 2px 16px; margin: 22px 0; }
+.flag--warn { border-left-color: var(--warning, #b45309); }
+.flag__t { font: 600 12px inherit; color: var(--foreground); margin-bottom: 3px; }
+.flag p { margin: 0; font-size: 13px; }
+a { color: var(--foreground); }
+
+/* The bench: ten stages, two up. */
+.bench { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 22px 0 10px; }
+.cell { border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--background); }
+.cell__stage { height: 168px; display: grid; place-items: center; background: var(--muted); border-bottom: 1px solid var(--border); }
+.cell__foot { padding: 13px 16px 15px; }
+.cell__no { font: 500 10px var(--font-mono, monospace); letter-spacing: .12em; color: var(--neutral-400, #a3a3a3); }
+.cell__name { font: 600 13px inherit; color: var(--foreground); margin: 3px 0 5px; }
+.cell__note { font: 400 12px/1.6 inherit; color: var(--muted-foreground); margin: 0; }
+.tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
+.tag { font: 500 9.5px var(--font-mono, monospace); letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; }
+.tag--pick { border-color: var(--foreground); color: var(--foreground); }
+
+.toggles { display: flex; gap: 10px; align-items: center; margin: 0 0 26px; flex-wrap: wrap; }
+.tbtn { font: 500 11.5px inherit; color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+.tbtn[aria-pressed="true"] { background: var(--foreground); color: var(--background); border-color: transparent; }
+.tnote { font: 400 11.5px inherit; color: var(--muted-foreground); }
+
+/* ==========================================================================
+   MARKS — the three forms of the mark these animations are built on. One
+   typeface, one weight pair, no logotype file: the wordmark in the app is
+   live text (.fy-titlebar__brand) and everything here stays that way.
+   ========================================================================== */
+.mk { display: inline-flex; align-items: baseline; gap: 8px; line-height: 1; }
+.mk__a { font: 650 34px var(--font-sans, inherit); letter-spacing: -0.025em; color: var(--foreground); }
+.mk__s { font: 400 26px var(--font-sans, inherit); color: var(--muted-foreground); }
+.glyph { font: 650 54px/1 var(--font-sans, inherit); letter-spacing: -0.04em; color: var(--foreground); }
+.glyph--pair { letter-spacing: -0.05em; }
+
+/* ==========================================================================
+   MOTION — ten loops. Rules that hold across all of them:
+     · every one is legible stopped, because prefers-reduced-motion in this
+       app flattens animation to 0.01ms globally (globals.css) — a loop whose
+       meaning lives in the movement becomes a dot or a half-drawn letter.
+     · none of them spin. A spinner says "software is busy"; these say
+       "Arke is starting", which is the only wait long enough to need art.
+     · all timings are whole beats at 1.4s–2.4s. Faster reads as anxious.
+   ========================================================================== */
+
+/* 01 — sweep: a band of light crosses the glyph. */
+@keyframes ld-sweep { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.ld-sweep {
+  background: linear-gradient(100deg,
+    var(--neutral-300, #d4d4d4) 20%,
+    var(--foreground) 42%,
+    var(--foreground) 50%,
+    var(--neutral-300, #d4d4d4) 72%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: ld-sweep 1.9s var(--ease-out, cubic-bezier(.2,.8,.2,1)) infinite;
+}
+/* Sweep's base style is a gradient offset behind clipped text, not a colour, so stopping it
+   leaves one side of the letter pale. Its resting state is declared. This rule ships. */
+.still .ld-sweep { background: none; color: var(--foreground); -webkit-text-fill-color: currentColor; }
+@media (prefers-reduced-motion: reduce) {
+  .ld-sweep { background: none; color: var(--foreground); -webkit-text-fill-color: currentColor; }
+}
+
+/* 02 — draw: the letter written, held, and written again. */
+@keyframes ld-draw {
+  0%   { stroke-dashoffset: 120; }
+  55%  { stroke-dashoffset: 0; }
+  85%  { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -120; }
+}
+.ld-draw path { stroke-dasharray: 120; animation: ld-draw 2.4s var(--ease-out, cubic-bezier(.2,.8,.2,1)) infinite; }
+.ld-draw path:nth-child(2) { animation-delay: .18s; }
+
+/* 03 — fill: a level rising through the glyph. The only one that can carry a
+   real number: the inset is the percentage, so it doubles as a progress bar. */
+@keyframes ld-fill { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0 0 0 0); } }
+.ld-fillwrap { position: relative; }
+.ld-fillwrap .ghost { color: var(--neutral-300, #d4d4d4); }
+.ld-fillwrap .lit { position: absolute; inset: 0; color: var(--foreground); animation: ld-fill 2.2s var(--ease-in-out, cubic-bezier(.4,0,.2,1)) infinite; }
+
+/* 04 — arc: the glyph inside a ring one arc travels. The conventional one. */
+@keyframes ld-spin { to { transform: rotate(360deg); } }
+.ld-ring { position: relative; width: 92px; height: 92px; display: grid; place-items: center; }
+.ld-ring::before, .ld-ring::after { content: ""; position: absolute; inset: 0; border-radius: 999px; }
+.ld-ring::before { border: 2px solid var(--border); }
+.ld-ring::after { border: 2px solid transparent; border-top-color: var(--foreground); animation: ld-spin 1.4s linear infinite; }
+.ld-ring .glyph { font-size: 34px; }
+
+/* 05 — breathe: two letters trading the light between them. */
+@keyframes ld-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .22; } }
+.ld-breathe span { animation: ld-breathe 2s var(--ease-in-out, cubic-bezier(.4,0,.2,1)) infinite; }
+.ld-breathe span:last-child { animation-delay: 1s; }
+
+/* 06 — shuttle: A leaves, S arrives, and back. Reads as change, not as wait. */
+@keyframes ld-out { 0%, 40% { transform: none; opacity: 1; } 55%, 95% { transform: translateX(-16px); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@keyframes ld-in  { 0%, 40% { transform: translateX(16px); opacity: 0; } 55%, 95% { transform: none; opacity: 1; } 100% { transform: translateX(16px); opacity: 0; } }
+.ld-shuttle { position: relative; width: 78px; height: 62px; }
+.ld-shuttle span { position: absolute; inset: 0; display: grid; place-items: center; }
+.ld-shuttle span:first-child { animation: ld-out 2.2s var(--ease-in-out, cubic-bezier(.4,0,.2,1)) infinite; }
+.ld-shuttle span:last-child  { animation: ld-in  2.2s var(--ease-in-out, cubic-bezier(.4,0,.2,1)) infinite; }
+
+/* 07 — stagger: the full lockup arriving a letter at a time. One-shot.
+   The delays are the animation — without them all ten letters arrive together, which is a
+   fade, not a stagger. 55ms a letter through "Arke", then a beat, then 45ms through the
+   lighter word so the two halves read as one gesture rather than two lists. */
+@keyframes ld-up { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+.ld-stagger > span > span { display: inline-block; animation: ld-up .46s var(--ease-out, cubic-bezier(.2,.8,.2,1)) both; }
+.ld-stagger .mk__a span:nth-child(1) { animation-delay: 0s; }
+.ld-stagger .mk__a span:nth-child(2) { animation-delay: .055s; }
+.ld-stagger .mk__a span:nth-child(3) { animation-delay: .11s; }
+.ld-stagger .mk__a span:nth-child(4) { animation-delay: .165s; }
+.ld-stagger .mk__s span:nth-child(1) { animation-delay: .30s; }
+.ld-stagger .mk__s span:nth-child(2) { animation-delay: .345s; }
+.ld-stagger .mk__s span:nth-child(3) { animation-delay: .39s; }
+.ld-stagger .mk__s span:nth-child(4) { animation-delay: .435s; }
+.ld-stagger .mk__s span:nth-child(5) { animation-delay: .48s; }
+.ld-stagger .mk__s span:nth-child(6) { animation-delay: .525s; }
+/* A one-shot plays once, on load, and a reviewer who scrolls to it has already missed it. */
+.replay { position: absolute; bottom: 10px; right: 12px; font: 500 10px var(--font-mono, monospace); letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); background: var(--background); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+.cell__stage { position: relative; }
+
+/* 08 — set: the lockup opening loose and closing to its set width. */
+@keyframes ld-set { 0% { letter-spacing: .34em; opacity: .3; } 60% { letter-spacing: -0.025em; opacity: 1; } 100% { letter-spacing: -0.025em; opacity: 1; } }
+.ld-set .mk__a, .ld-set .mk__s { animation: ld-set 2.1s var(--ease-out, cubic-bezier(.2,.8,.2,1)) infinite; }
+.ld-set .mk__s { animation-delay: .12s; }
+
+/* 09 — rule: the lockup still, one hairline running under it. Determinate if
+   the width is bound to a number instead of the keyframe. */
+@keyframes ld-rule { 0% { transform: scaleX(0); transform-origin: left; } 60% { transform: scaleX(1); transform-origin: left; } 61% { transform: scaleX(1); transform-origin: right; } 100% { transform: scaleX(0); transform-origin: right; } }
+.ld-rule { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.ld-rule i { display: block; height: 2px; width: 148px; border-radius: 999px; background: var(--foreground); animation: ld-rule 2.2s var(--ease-in-out, cubic-bezier(.4,0,.2,1)) infinite; }
+
+/* 10 — shimmer: the lockup as the same skeleton the content areas use. */
+@keyframes ld-shimmer { from { background-position: 180% 0; } to { background-position: -80% 0; } }
+.ld-shimmer { display: flex; flex-direction: column; gap: 9px; align-items: center; }
+.ld-shimmer i {
+  display: block; height: 15px; border-radius: 5px;
+  background: linear-gradient(90deg, var(--muted) 0%, var(--neutral-200, #e5e5e5) 42%, var(--muted) 74%);
+  background-size: 220% 100%;
+  animation: ld-shimmer 1.7s linear infinite;
+}
+.ld-shimmer i:first-child { width: 104px; }
+.ld-shimmer i:last-child { width: 68px; height: 11px; }
+
+/* The stilled state, applied on demand — this is exactly the rule the app
+   ships in globals.css, so what you see under it is what a reduced-motion
+   user sees, not an approximation of it. */
+.still *, .still *::before, .still *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+.dark-on { background: var(--background); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="kicker">Arke Studio · design system</div>
+  <h1>Loading: ten variations</h1>
+  <p class="lede">
+    Ten ways for the mark to say <em>wait</em>. Each uses a different form of it — the single
+    letter, the monogram, the full lockup — because the form is most of the decision: a glyph can
+    take a two-second loop without becoming furniture, and a wordmark cannot.
+  </p>
+
+  <div class="toggles">
+    <button class="tbtn" id="stillbtn" aria-pressed="false" type="button">Still them</button>
+    <button class="tbtn" id="darkbtn" aria-pressed="false" type="button">Dark</button>
+    <span class="tnote">Stilling applies the app's own reduced-motion rule. Anything unreadable under it is unfinished.</span>
+  </div>
+
+  <h2><span class="n">00</span>What is actually being waited on</h2>
+  <p>
+    Worth saying before the bench, because it narrows it: Arke has exactly one wait long enough to
+    deserve art, and it already has one. First launch downloads the local runtimes and plays a
+    video reel while it does — 30 seconds to several minutes, with a real percentage available.
+    Everything else is short: a screen change is instant, a harness turn already streams its own
+    lines, and a generation job is tracked in Activity with a cost attached.
+  </p>
+  <p>
+    So these are not competing to replace the reel. They compete for two other jobs — the second
+    or two while the window opens and the coordinator connects, and the in-app pause where
+    something is coming back and there is currently nothing at all. Both are on the short side,
+    which is an argument against the elaborate ones rather than for them.
+  </p>
+
+  <h2><span class="n">01</span>The bench</h2>
+
+  <div class="bench" id="bench">
+
+    <div class="cell">
+      <div class="cell__stage">
+        <span class="glyph ld-sweep">A</span>
+      </div>
+      <div class="cell__foot">
+        <div class="cell__no">01 · A</div>
+        <div class="cell__name">Sweep</div>
+        <p class="cell__note">A band of light crossing the letter, 1.9s. Nothing moves, so it never
+          pulls the eye off what it is sitting next to.</p>
+        <div class="tags"><span class="tag tag--pick">adopted</span><span class="tag">loop</span><span class="tag">indeterminate</span><span class="tag">stills to a plain A</span></div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <div class="cell__stage">
+        <svg class="ld-draw" width="64" height="64" viewBox="0 0 48 48" fill="none"
+             stroke="var(--foreground)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M6 42 24 7 42 42"/>
+          <path d="M14 30h20"/>
+        </svg>
+      </div>
+      <div class="cell__foot">
+        <div class="cell__no">02 · A</div>
+        <div class="cell__name">Draw</div>
+        <p class="cell__note">The letter written, held, then unwritten. The most characterful of the
+          ten and the most expensive: 2.4s is a long cycle to catch the whole of.</p>
+        <div class="tags"><span class="tag">loop</span><span class="tag">indeterminate</span><span class="tag tag--pick">stills fully drawn</span></div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <div class="cell__stage">
+        <span class="ld-fillwrap glyph">
+          <span class="ghost">A</span>
+          <span class="lit">A</span>
+        </span>
+      </div>
+      <div class="cell__foot">
+        <div class="cell__no">03 · A</div>
+        <div class="cell__name">Fill</div>
+        <p class="cell__note">A level rising through the glyph. The only one here that can carry a
+          real number — bind the inset to the percentage and it is a progress bar shaped like the
+          mark.</p>
+        <div class="tags"><span class="tag">loop</span><span class="tag tag--pick">determinate</span><span class="tag">stills full</span></div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <div class="cell__stage">
+        <span class="ld-ring"><span class="glyph">A</span></span>
+      </div>
+      <div class="cell__foot">
+        <div class="cell__no">04 · A</div>
+        <div class="cell__name">Arc</div>
+        <p class="cell__note">The conventional spinner with the mark parked inside it. Instantly
+          understood, and it makes the mark decoration around a spinner rather than the thing
+          doing the work.</p>
+        <div class="tags"><span class="tag">loop</span><span class="tag">indeterminate</span><span class="tag">stills to a stalled spinner</span></div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <div class="cell__stage">
+        <span class="glyph glyph--pair ld-breathe"><span>A</span><span>S</span></span>
+      </div>
+      <div class="cell__foot">
+        <div class="cell__no">05 · AS</div>
+        <div class="cell__name">Breathe</div>
+        <p class="cell__note">The two letters trading the light, out of phase, 2s. Quiet enough to
+          leave running for a minute without irritation.</p>
+        <div class="tags"><span class="tag">loop</span><span class="tag">indeterminate</span><span class="tag">stills lit</span></div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <div class="cell__stage">
+        <span class="ld-shuttle"><span class="glyph">A</span><span class="glyph">S</span></span>
+      </div>
+      <div class="cell__foot">
+        <div class="cell__no">06 · AS</div>
+        <div class="cell__name">Shuttle</div>
+        <p class="cell__note">A leaves left, S arrives right, and back. It reads as
+          <em>something is changing</em> rather than <em>something is loading</em> — which is wrong
+          here, and is why it is on the bench and not in the recommendation.</p>
+        <div class="tags"><span class="tag">loop</span><span class="tag">indeterminate</span><span class="tag">stills mid-swap</span></div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <div class="cell__stage">
+        <span class="mk ld-stagger">
+          <span class="mk__a"><span>A</span><span>r</span><span>k</span><span>e</span></span>
+          <span class="mk__s"><span>S</span><span>t</span><span>u</span><span>d</span><span>i</span><span>o</span></span>
+        </span>
+        <button class="replay" type="button" data-replay=".ld-stagger">Replay</button>
+      </div>
+      <div class="cell__foot">
+        <div class="cell__no">07 · Arke Studio</div>
+        <div class="cell__name">Stagger</div>
+        <p class="cell__note">The full lockup arriving a letter at a time, then holding. A one-shot,
+          not a loop: it is the app opening, and looping it would be a nervous tic.</p>
+        <div class="tags"><span class="tag tag--pick">one-shot</span><span class="tag">no state</span><span class="tag">stills assembled</span></div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <div class="cell__stage">
+        <span class="mk ld-set"><span class="mk__a">Arke</span><span class="mk__s">Studio</span></span>
+      </div>
+      <div class="cell__foot">
+        <div class="cell__no">08 · Arke Studio</div>
+        <div class="cell__name">Set</div>
+        <p class="cell__note">Letter-spacing opening loose and closing to its set width — typesetting
+          as the metaphor. Beautiful once; as a loop the reflow is restless.</p>
+        <div class="tags"><span class="tag">loop</span><span class="tag">indeterminate</span><span class="tag">stills set</span></div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <div class="cell__stage">
+        <span class="ld-rule">
+          <span class="mk"><span class="mk__a">Arke</span><span class="mk__s">Studio</span></span>
+          <i></i>
+        </span>
+      </div>
+      <div class="cell__foot">
+        <div class="cell__no">09 · Arke Studio</div>
+        <div class="cell__name">Rule</div>
+        <p class="cell__note">The lockup still, one hairline running beneath it. The mark stays
+          legible the whole time because nothing happens to it — and the rule takes a real width
+          if there is a percentage to give it.</p>
+        <div class="tags"><span class="tag">loop</span><span class="tag tag--pick">determinate</span><span class="tag">stills to a full rule</span></div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <div class="cell__stage">
+        <span class="ld-shimmer"><i></i><i></i></span>
+      </div>
+      <div class="cell__foot">
+        <div class="cell__no">10 · Arke Studio</div>
+        <div class="cell__name">Shimmer</div>
+        <p class="cell__note">The lockup drawn as the same skeleton a loading list would use.
+          Honest about what it is, and says nothing about whose app it is — the one variation with
+          no brand in it at all.</p>
+        <div class="tags"><span class="tag">loop</span><span class="tag">indeterminate</span><span class="tag">stills to grey bars</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <h2><span class="n">02</span>What each one is for</h2>
+  <table>
+    <thead><tr><th>Variation</th><th>Form</th><th>Shape</th><th>Fits</th></tr></thead>
+    <tbody>
+      <tr><td>01 Sweep</td><td>A</td><td>Loop, indeterminate</td><td>An in-app pause of 1–10s. Small, quiet, no layout of its own.</td></tr>
+      <tr><td>02 Draw</td><td>A</td><td>Loop, indeterminate</td><td>A full-screen wait you expect someone to look at. Wasted at 20px.</td></tr>
+      <tr><td>03 Fill</td><td>A</td><td>Determinate</td><td>First-run setup, where a real percentage exists.</td></tr>
+      <tr><td>04 Arc</td><td>A</td><td>Loop, indeterminate</td><td>Anywhere a plain spinner would do — which is an argument for a plain spinner.</td></tr>
+      <tr><td>05 Breathe</td><td>AS</td><td>Loop, indeterminate</td><td>Long indefinite waits. The least tiring of the ten.</td></tr>
+      <tr><td>06 Shuttle</td><td>AS</td><td>Loop, indeterminate</td><td>Nothing here. Kept because it shows what the wrong verb looks like.</td></tr>
+      <tr><td>07 Stagger</td><td>Arke Studio</td><td>One-shot</td><td>The window opening — the second before the first screen.</td></tr>
+      <tr><td>08 Set</td><td>Arke Studio</td><td>Loop, indeterminate</td><td>A splash you show once. Not a loop, whatever the CSS says.</td></tr>
+      <tr><td>09 Rule</td><td>Arke Studio</td><td>Determinate</td><td>A named wait with a number: setup, a long export.</td></tr>
+      <tr><td>10 Shimmer</td><td>—</td><td>Loop, indeterminate</td><td>Content that will arrive in place. Not a brand moment.</td></tr>
+    </tbody>
+  </table>
+
+  <h2><span class="n">03</span>The decision: 01 Sweep, everywhere</h2>
+  <p>
+    <strong>One of the ten, for every wait in the app.</strong> The bench was built expecting to
+    hand three different waits to three different loaders; the argument against that is simpler
+    than the argument for it. A house loader is recognised, and a mark that arrives in three
+    costumes is recognised more slowly than a mark that arrives in one. Where a real number
+    exists — first-run setup — the app shows the number, and a number beats an animation.
+  </p>
+  <p>
+    <strong>01 won on properties, not on looks.</strong> Nothing about it moves: only the light
+    crosses it, which is what lets it sit inside a line of text without displacing anything. It
+    is a glyph and a gradient, so the same rule reads at 15px beside a sentence and at 40px alone
+    on a screen. Its stopped state is the whole of it — a solid letter — so the reduced-motion
+    path costs one rule rather than a second design. And it is the mark, rather than a spinner
+    with the mark parked inside it.
+  </p>
+  <table>
+    <thead><tr><th>Wait</th><th>Shows</th></tr></thead>
+    <tbody>
+      <tr><td>First-run setup</td><td>The reel, and the percentage. Unchanged — there is a real number here and it is better than any of these.</td></tr>
+      <tr><td>Opening a world</td><td>01, at 40px, over <code>opening the world</code>.</td></tr>
+      <tr><td>The studio drafting</td><td>01 inline, at 15px, in front of whatever line the harness last streamed.</td></tr>
+      <tr><td>Transcribing a dictation</td><td>01 inline, beside the field.</td></tr>
+      <tr><td>A running job in Activity</td><td>The live dot, unchanged. That is a status marker in a list of rows, not a wait — twenty sweeping letters in a table is noise.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="flag">
+    <div class="flag__t">The other nine</div>
+    <p>Kept on this page rather than deleted. They are the argument for the one that was chosen,
+      and the record of what was considered — 07 in particular is the one worth revisiting if the
+      app ever grows a real splash moment.</p>
+  </div>
+
+  <div class="flag">
+    <div class="flag__t">Built</div>
+    <p>01 ships as <code>&lt;Loading&gt;</code> / <code>.fy-loading</code>. The other nine are on
+      this page only. See also <a href="since-the-prototype.html">Since the prototype</a> §07 for
+      the mark at rest: one chrome, the wordmark centred, on every screen.</p>
+  </div>
+
+  <h2><span class="n">04</span>Constraints any of them must meet</h2>
+  <p>
+    <strong>Legible stopped.</strong> The app flattens every animation to 0.01ms under
+    <code>prefers-reduced-motion</code>, globally, in <code>globals.css</code>. None of these
+    declare <code>forwards</code>, so what a reduced-motion user actually sees is not the last
+    keyframe — it is the <em>base</em> style each element would have had with no animation on it
+    at all. Press <em>Still them</em>: 02 rests as a fully drawn letter, 03 filled, 09 as a
+    completed rule, 07 assembled. Four of the ten need nothing written for them.
+  </p>
+  <p>
+    <strong>01 and 04 do.</strong> The sweep's base style is a gradient offset behind clipped
+    text, not a colour, so stopping it mid-ramp leaves one side of the A pale; its resting state
+    is declared — <code>background: none</code>, solid foreground — and that is what the app
+    ships. The arc's base style is an unrotated arc, so it stills into a spinner that has stopped,
+    the one image that says <em>this has hung</em>; nothing short of a different mark fixes that,
+    which is the strongest argument on this page against using it.
+  </p>
+  <p>
+    <strong>Live text, not an asset.</strong> The mark in the chrome is two spans and a font
+    (<code>.fy-titlebar__brand</code>). Everything on this bench keeps that, so the loader inherits
+    the theme, the type and the colour tokens for free, and dark mode needs no second file.
+  </p>
+  <p>
+    <strong>No spinner without a subject.</strong> A loader that cannot say what it is waiting for
+    is a confession. Where Arke knows — a provider, a download, a model — the words go next to the
+    mark and the animation is the smaller half of the message.
+  </p>
+
+</div>
+
+<script>
+  var stillbtn = document.getElementById('stillbtn');
+  var bench = document.getElementById('bench');
+  stillbtn.addEventListener('click', function () {
+    var on = stillbtn.getAttribute('aria-pressed') === 'true';
+    stillbtn.setAttribute('aria-pressed', String(!on));
+    bench.classList.toggle('still', !on);
+  });
+  // Restarting a CSS animation means replacing the node — there is no "play again" on a
+  // one-shot that has already finished.
+  document.querySelectorAll('[data-replay]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var el = document.querySelector(b.dataset.replay);
+      if (el) el.replaceWith(el.cloneNode(true));
+    });
+  });
+  var darkbtn = document.getElementById('darkbtn');
+  darkbtn.addEventListener('click', function () {
+    var on = darkbtn.getAttribute('aria-pressed') === 'true';
+    darkbtn.setAttribute('aria-pressed', String(!on));
+    document.documentElement.classList.toggle('dark', !on);
+    document.body.classList.toggle('dark', !on);
+  });
+</script>
+</body>
+</html>

@@ -77,6 +77,23 @@ td:first-child { color: var(--foreground); font-family: var(--font-mono, monospa
 .card__name { margin: 12px 4px 0; font: 600 17px inherit; letter-spacing: -0.015em; color: var(--foreground); }
 .card__x { position: absolute; top: 10px; right: 10px; width: 24px; height: 24px; border-radius: 999px; border: 0; background: color-mix(in srgb, var(--background) 82%, transparent); color: var(--muted-foreground); }
 .card__ask { position: absolute; inset: 0; border-radius: 14px; background: color-mix(in srgb, var(--background) 94%, transparent); display: flex; flex-direction: column; justify-content: center; gap: 12px; padding: 18px; text-align: center; font: 400 12px/1.5 inherit; color: var(--foreground); }
+/* The chrome, at its real 44px. Drawn against a window edge because the whole argument is
+   about where things sit relative to the window rather than to the row. */
+.win { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--background); }
+.bar { position: relative; display: flex; align-items: center; height: 44px; padding: 0 16px; border-bottom: 1px solid var(--border); }
+.bar__side { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
+.bar__side--r { justify-content: flex-end; gap: 2px; }
+.bar__back { font: 400 12px inherit; color: var(--muted-foreground); }
+.bar__ctx { font: 400 12px var(--font-mono, monospace); color: var(--muted-foreground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.bar__brand { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: baseline; gap: 7px; }
+.bar__brand b { font: 650 15px inherit; letter-spacing: -0.02em; color: var(--foreground); }
+.bar__brand i { font: 400 12px inherit; font-style: normal; color: var(--muted-foreground); }
+.bar__ico { width: 26px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--neutral-400, #a3a3a3); font: 400 11px var(--font-mono, monospace); position: relative; }
+.bar__ico--on { background: var(--secondary); color: var(--foreground); }
+.bar__ico s { position: absolute; top: 2px; right: 3px; width: 5px; height: 5px; border-radius: 999px; background: var(--warning, #b45309); }
+.bar__body { height: 78px; display: grid; place-items: center; font: 400 10.5px var(--font-mono, monospace); color: var(--neutral-400, #a3a3a3); background: var(--muted); }
+.was { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0 0; }
+.was span { font: 400 10.5px var(--font-mono, monospace); color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 6px; padding: 5px 9px; }
 a { color: var(--foreground); }
 </style>
 </head>
@@ -86,7 +103,7 @@ a { color: var(--foreground); }
 <div class="kicker">Arke Studio · design system · what shipped</div>
 <h1>Since the prototype</h1>
 <p class="lede">
-  Six surfaces exist in the app that the prototype never drew, and one it drew differently. None
+  Six surfaces exist in the app that the prototype never drew, and two it drew differently. None
   of them is a redesign: each came out of a question asked while using the thing. This page records
   what they look like and why, so the prototype and the product can be read together without one
   quietly contradicting the other.
@@ -301,7 +318,79 @@ a { color: var(--foreground); }
   key we cannot show, and the cost figure we will not invent.
 </p>
 
-<h2><span class="n">07</span>Still to draw</h2>
+<h2><span class="n">07</span>One chrome, on every screen</h2>
+<p>
+  This is the one place the product now disagrees with the prototype outright, so it is worth
+  setting out plainly. <strong>The app had five different top bars.</strong> A world put settings
+  and activity as icons on the <em>left</em> and the words "Arke Studio" in the middle; home put
+  the lockup at top-<em>left</em> and the same two destinations as text buttons on the right; the
+  production bar, the new-world bar and the activity bar each carried a bare "Arke" in the
+  top-right and neither control at all. Three placements for the same three things.
+</p>
+<div class="was">
+  <span>world · icons left, "Arke Studio" centre, "Arke" right</span>
+  <span>home · lockup left, Activity/Settings as buttons right</span>
+  <span>production · title centre, "Arke" right</span>
+  <span>new world · back left, label centre, "Arke" right</span>
+  <span>launch · "Arke" right, nothing else</span>
+</div>
+<p style="margin-top:16px">
+  None of that is visible from any single screen. You only see it by walking all forty-one, which
+  is now what a test does.
+</p>
+
+<div class="stage stage--tight">
+  <div class="win">
+    <div class="bar">
+      <div class="bar__side">
+        <span class="bar__back">‹ Worlds</span>
+        <span class="bar__ctx">The Undersong</span>
+      </div>
+      <div class="bar__brand"><b>Arke</b><i>Studio</i></div>
+      <div class="bar__side bar__side--r">
+        <span class="bar__ico">∿<s></s></span>
+        <span class="bar__ico">≡</span>
+      </div>
+    </div>
+    <div class="bar__body">the screen</div>
+  </div>
+  <p class="caption" style="margin:14px 0 0">Left: where you are. Centre: the wordmark. Right: activity, then settings — always in that order.</p>
+</div>
+
+<p>
+  <strong>The wordmark is centred on the window, not on the row.</strong> The desktop shell parks
+  its native window controls in the top-right ~138px and the bar reserves that margin, so a
+  flex-centred mark lands about 69px left of true centre on desktop and dead centre in a browser —
+  the same code drawing two different layouts. It is absolutely placed instead.
+</p>
+<p>
+  <strong>The prototype drew home's lockup at top-left, and that is what changed.</strong> It is a
+  better composition on that one screen. It is also the reason the mark moved on every other
+  screen, and a mark that moves is not a mark. Consistency across forty-one screens is worth more
+  than the one composition it came from.
+</p>
+<table>
+  <tr><th>Screen</th><th>Left</th><th>Controls</th></tr>
+  <tr><td>World picker</td><td>—</td><td>Both. This is the top; the wordmark already says where you are.</td></tr>
+  <tr><td>A world</td><td>‹ Worlds · world name</td><td>Both</td></tr>
+  <tr><td>A production</td><td>‹ World · title · format</td><td>Both</td></tr>
+  <tr><td>New world</td><td>‹ Back · new world</td><td>Both</td></tr>
+  <tr><td>Activity</td><td>‹ Home · activity</td><td>Both, activity lit</td></tr>
+  <tr><td>Settings</td><td>—</td><td>Both, settings lit. The panel keeps its own close: an exit is not a destination.</td></tr>
+  <tr><td>Launch</td><td>—</td><td><strong>Neither.</strong> Nothing is configured yet and the only thing that has happened is the download the screen is already showing.</td></tr>
+</table>
+<p>
+  The notification is the activity icon with a dot, and the dot has one meaning: a job that could
+  not be reconciled, or a queue someone paused — the same source as <em>Needs you</em>. It never
+  lights for anything else, which is what makes it worth looking at.
+</p>
+<p>
+  The mark in motion — ten loading animations built on the same three forms of it — is on its own
+  page: <a href="loading.html">Loading: ten variations</a>. One of the ten is adopted and shipping:
+  the sweep, at every wait in the app. The other nine stay on that page as the argument for it.
+</p>
+
+<h2><span class="n">08</span>Still to draw</h2>
 <p>Named here rather than left to be discovered.</p>
 <table>
   <tr><th>Surface</th><th>Where it stands</th></tr>
