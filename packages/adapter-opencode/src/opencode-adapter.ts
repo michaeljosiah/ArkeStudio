@@ -99,37 +99,39 @@ export class OpenCodeAdapter implements HarnessAdapter {
     return { sessionId };
   }
 
+  /**
+   * The turn body OpenCode actually wants.
+   *
+   * NO client messageID, deliberately. OpenCode orders a session's messages by id, and its ids
+   * are monotonic and time-sortable; a client-generated id sorts BEFORE the last assistant
+   * reply, so the agent loop sees no new input and exits at step 0 — every turn after the first
+   * dies in silence. The server assigns the id; our correlation id stays on this side of the
+   * wire, where the receipts always used it anyway.
+   */
+  private turnBody(input: SendMessageInput): { parts: Array<{ type: "text"; text: string }> } {
+    return { parts: input.parts.map((p) => ({ type: "text" as const, text: p.text })) };
+  }
+
   /** Fire-and-watch (the only mode authoring uses): completion arrives on the event stream. */
   async dispatchAsync(input: SendMessageInput): Promise<SendReceipt> {
     const correlationId = input.correlationId ?? `corr_${Date.now().toString(36)}`;
-    const text = input.parts.map((p) => p.text).join("\n\n");
     const session = this.sessions.get(input.sessionId);
     const directory = session?.cwd;
-    // The /api prompt call blocks until the turn completes on some versions; never await it
-    // here — the receipt returns immediately and the stream reports progress (R-13, D7).
+    // prompt_async answers 204 and runs the turn; progress arrives on the stream (R-13, D7).
     void (async () => {
       try {
         await this.http.req(
           "POST",
-          `/api/session/${input.sessionId}/prompt`,
-          { prompt: { text } },
+          `/session/${input.sessionId}/prompt_async`,
+          this.turnBody(input),
           directory ? { directory } : {},
         );
-      } catch {
-        try {
-          await this.http.req(
-            "POST",
-            `/session/${input.sessionId}/prompt_async`,
-            { parts: [{ type: "text", text }], messageID: correlationId },
-            directory ? { directory } : {},
-          );
-        } catch (err) {
-          this.push({
-            type: "session.error",
-            sessionId: input.sessionId,
-            message: err instanceof Error ? err.message : String(err),
-          });
-        }
+      } catch (err) {
+        this.push({
+          type: "session.error",
+          sessionId: input.sessionId,
+          message: err instanceof Error ? err.message : String(err),
+        });
       }
     })();
     return { sessionId: input.sessionId, correlationId };

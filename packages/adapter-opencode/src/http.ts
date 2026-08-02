@@ -70,9 +70,15 @@ export class OpenCodeHttp {
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
-  /** Open the SSE stream; the caller parses the body. Tries /api/event then /global/event. */
+  /**
+   * Open the SSE stream. `/global/event` first, and the order is the whole point: all three
+   * endpoints accept the connection, so "first one that answers" silently picks a channel that
+   * carries almost nothing. Measured against OpenCode 1.18.10 over one turn — /global/event
+   * 35 KB with the deltas and the idle, /api/event 2.7 KB with a single update, /event a
+   * heartbeat and nothing else. A turn ran and the app never heard about it.
+   */
   async openEventStream(signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
-    for (const path of ["/api/event", "/global/event", "/event"]) {
+    for (const path of ["/global/event", "/api/event", "/event"]) {
       const res = await fetch(this.url(path), {
         headers: { Accept: "text/event-stream" },
         ...(signal ? { signal } : {}),
