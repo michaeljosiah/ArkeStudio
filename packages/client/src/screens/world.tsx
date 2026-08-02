@@ -244,6 +244,33 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
     .reverse()
     .find((j) => j.status === "succeeded" && (j.landedFiles?.length ?? 0) > 0 && !dismissed.includes(j.id));
 
+  // A job that failed used to leave the button back at rest with nothing said — which is
+  // exactly what "I clicked it and cannot see anything" looks like from the outside.
+  const newest = [...mine].reverse()[0];
+  const failed = newest?.status === "failed" && !dismissed.includes(newest.id) ? newest : undefined;
+  if (failed && !candidate) {
+    return (
+      <div className="fy-keyart">
+        <div className="fy-set__why">
+          <span className="fy-set__dot fy-set__dot--warn" />
+          <span>The key art did not come back — {failed.error ?? "the provider refused it"}</span>
+        </div>
+        <Button
+          variant="ghost"
+          onClick={() => {
+            setDismissed((prev) => [...prev, failed.id]);
+            generateWorldImage(worldId);
+          }}
+        >
+          Try again
+        </Button>
+        <button type="button" className="fy-set__link" onClick={() => setDismissed((prev) => [...prev, failed.id])}>
+          Dismiss
+        </button>
+      </div>
+    );
+  }
+
   if (candidate) {
     return (
       <div className="fy-keyart">

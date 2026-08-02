@@ -772,13 +772,17 @@ export function NewWorldScreen() {
               }}
             >
               <span style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)" }}>No world image yet</span>
-              {/* Still disabled here, and now honestly so: an image job needs a world folder
-                  to land in, and the hub it points at can finally do it. */}
-              <Button disabled title="Image jobs need the world folder — generate it from the world's hub, once you begin">
-                Generate from the logline
-              </Button>
-              <span className="fy-mono" style={{ fontSize: 9 }}>
-                title · logline · tone ride along · comes back as a take
+              {/*
+                There was a button here for months that could never be pressed: an image job
+                needs a world folder to land in, and on this screen there is no world yet. A
+                control that can never be enabled is a trap — it reads as broken, and it caught
+                the same person twice. The sentence says where the thing actually happens.
+              */}
+              <span
+                className="fy-mono"
+                style={{ fontSize: 9, textAlign: "center", maxWidth: 190, lineHeight: 1.5 }}
+              >
+                key art is made from the logline in the world's hub, once you begin
               </span>
             </div>
             <div style={{ padding: "12px 8px 0" }}>
