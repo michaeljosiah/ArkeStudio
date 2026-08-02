@@ -163,6 +163,7 @@ export { SETUP_CATALOGUE, catalogueTotalMb, type CatalogueEntry } from "./setup/
 export { nodeSetupDeps } from "./setup/node-deps.js";
 export { GrantStore, type RememberedGrant } from "./harness/grants.js";
 export { WorldQueryServer } from "./harness/world-query.js";
+export { harnessTrace } from "./harness/trace.js";
 export { castRefs, canonStamp, extract } from "./index-db/citations.js";
 export {
   contradictionCandidates,

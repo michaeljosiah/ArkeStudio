@@ -11,6 +11,7 @@ import {
   defaultAppRoot,
   FsWorldProvider,
   nodeSetupDeps,
+  harnessTrace,
   registerExitBackstop,
   type Cipher,
   type DatabaseCtor,
@@ -119,7 +120,12 @@ async function start(): Promise<void> {
     { ledger: childLedger },
   );
   const adapter = discovered
-    ? new OpenCodeAdapter({ baseUrl: () => `http://127.0.0.1:${opencodeSupervisor.port ?? 0}` })
+    ? new OpenCodeAdapter({
+        baseUrl: () => `http://127.0.0.1:${opencodeSupervisor.port ?? 0}`,
+        // The adapter's own account of itself — connects, stalls, resyncs, dispatches. When a
+        // chat sticks, this file answers "what did the app hear, and when" without a debugger.
+        onTrace: harnessTrace(appRoot),
+      })
     : null;
   if (discovered) {
     console.log(`[arke] OpenCode: ${discovered.source} (${discovered.version ?? "unknown version"})`);

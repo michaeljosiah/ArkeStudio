@@ -31,6 +31,12 @@ export interface OpenCodeAdapterOptions {
   baseUrl: () => string;
   /** Overridable so a test can prove the watchdog without waiting a minute and a half. */
   streamSilenceMs?: number;
+  /**
+   * One line per adapter-lifecycle fact — connects, stalls, resyncs, dispatch outcomes. The
+   * host appends them to logs/harness.jsonl. Diagnosing "the chat is stuck" from outside the
+   * process has cost days; this is the app saying what it did, when it did it.
+   */
+  onTrace?: (line: Record<string, unknown>) => void;
 }
 
 interface TrackedSession {
@@ -65,6 +71,14 @@ export class OpenCodeAdapter implements HarnessAdapter {
 
   constructor(private readonly opts: OpenCodeAdapterOptions) {
     this.http = new OpenCodeHttp({ baseUrl: opts.baseUrl });
+  }
+
+  private trace(what: string, detail: Record<string, unknown> = {}): void {
+    try {
+      this.opts.onTrace?.({ at: new Date().toISOString(), what, ...detail });
+    } catch {
+      /* a broken trace sink must never break the adapter */
+    }
   }
 
   capabilities(): ReadonlySet<HarnessCapability> {
@@ -104,6 +118,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
     }
     if (!sessionId) throw new Error("OpenCode did not return a session id");
     this.sessions.set(sessionId, { purpose: input.purpose, ...(input.cwd ? { cwd: input.cwd } : {}) });
+    this.trace("session.created", { sessionId, agent: input.agent ?? null, baseUrl: this.opts.baseUrl() });
     this.push({ type: "session.created", sessionId });
     return { sessionId };
   }
@@ -135,7 +150,9 @@ export class OpenCodeAdapter implements HarnessAdapter {
           this.turnBody(input),
           directory ? { directory } : {},
         );
+        this.trace("dispatch.accepted", { sessionId: input.sessionId });
       } catch (err) {
+        this.trace("dispatch.failed", { sessionId: input.sessionId, error: String(err) });
         this.push({
           type: "session.error",
           sessionId: input.sessionId,
@@ -187,9 +204,13 @@ export class OpenCodeAdapter implements HarnessAdapter {
           .reverse()
           .find((m) => m.info?.role === "assistant" && typeof m.info.time?.completed === "number");
         const id = done?.info?.id;
-        if (id === undefined || this.reportedMessage.get(sessionId) === id) continue;
+        if (id === undefined || this.reportedMessage.get(sessionId) === id) {
+          this.trace("resync.nothing-new", { sessionId });
+          continue;
+        }
         this.reportedMessage.set(sessionId, id);
         const text = (done?.parts ?? []).map((p) => p.text ?? "").join("");
+        this.trace("resync.recovered", { sessionId, messageId: id, chars: text.length });
         if (text.trim().length > 0) this.push({ type: "message.completed", sessionId, text });
       } catch {
         /* a session we cannot read is not a reason to abandon the reconnect */
@@ -320,12 +341,17 @@ export class OpenCodeAdapter implements HarnessAdapter {
         let watchdog: ReturnType<typeof setTimeout> | undefined;
         const heard = (): void => {
           clearTimeout(watchdog);
-          watchdog = setTimeout(giveUp, this.opts.streamSilenceMs ?? STREAM_SILENCE_MS);
+          watchdog = setTimeout(() => {
+            this.trace("stream.stalled", { silenceMs: this.opts.streamSilenceMs ?? STREAM_SILENCE_MS });
+            giveUp();
+          }, this.opts.streamSilenceMs ?? STREAM_SILENCE_MS);
           (watchdog as { unref?: () => void }).unref?.();
         };
         try {
+          const opened = this.opts.baseUrl();
           const stream = await this.http.openEventStream(attempt.signal);
           backoff = 500;
+          this.trace("stream.connected", { baseUrl: opened });
           heard();
           // OpenCode cannot replay what we missed (no Last-Event-ID), so ask REST what happened
           // while we were not listening. Without this a turn that finished during the gap is
@@ -341,6 +367,9 @@ export class OpenCodeAdapter implements HarnessAdapter {
                 if (event.type === "message.completed" && "sessionId" in event && event.correlationId) {
                   this.reportedMessage.set(event.sessionId, event.correlationId);
                 }
+                if (event.type === "message.completed" || event.type === "session.error") {
+                  this.trace(`stream.${event.type}`, "sessionId" in event ? { sessionId: event.sessionId } : {});
+                }
                 // Only surface events for sessions this adapter created — the harness may be a
                 // user's own installation with its own unrelated activity.
                 if ("sessionId" in event && event.sessionId && !this.sessions.has(event.sessionId)) {
@@ -353,8 +382,8 @@ export class OpenCodeAdapter implements HarnessAdapter {
               if (this.deadLetters.length > 100) this.deadLetters.shift();
             }
           }
-        } catch {
-          /* stream dropped — reconnect below */
+        } catch (err) {
+          this.trace("stream.dropped", { error: String(err) });
         } finally {
           clearTimeout(watchdog);
           signal.removeEventListener("abort", giveUp);

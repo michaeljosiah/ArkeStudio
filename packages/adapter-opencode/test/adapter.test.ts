@@ -286,7 +286,12 @@ describe("the event stream survives a harness that goes quiet (R-2, R-14)", () =
     // speak again — and the app is deaf while the turn it is waiting for completes and passes.
     const stub = new StubOpenCode();
     await stub.start();
-    const adapter = new OpenCodeAdapter({ baseUrl: () => stub.baseUrl(), streamSilenceMs: 150 });
+    const traces: string[] = [];
+    const adapter = new OpenCodeAdapter({
+      baseUrl: () => stub.baseUrl(),
+      streamSilenceMs: 150,
+      onTrace: (line) => traces.push(String(line["what"])),
+    });
     await adapter.init();
     const { sessionId } = await adapter.createSession({ purpose: "authoring" });
 
@@ -319,5 +324,11 @@ describe("the event stream survives a harness that goes quiet (R-2, R-14)", () =
     await stub.stop();
 
     assert.ok(seen.includes("message.completed"), `the missed turn is reported — saw ${seen.join(", ") || "nothing"}`);
+    // And the trace is the story a human reads afterwards: it stalled, it reconnected, it
+    // recovered — in that order, without attaching a debugger to anything.
+    const stall = traces.indexOf("stream.stalled");
+    const recovered = traces.indexOf("resync.recovered");
+    assert.ok(stall !== -1, `the stall is on the record — traces: ${traces.join(", ")}`);
+    assert.ok(recovered > stall, "and the recovery follows it");
   });
 });
