@@ -74,6 +74,7 @@ export {
   type FileOutcome,
   type ImportReport,
 } from "./artifacts/filing.js";
+export { spoolBytes, spoolDir, spoolName, SPOOL_LIMIT_BYTES, sweepSpool } from "./artifacts/spool.js";
 export { recordTakesFromJob } from "./takes/arrival.js";
 export { exportWorld, runExport, WORLD_EXPORT_EXCLUDED, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 export { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";

@@ -30,6 +30,15 @@ if ((window as { arke?: unknown }).arke !== undefined) {
   document.documentElement.classList.add("is-desktop");
 }
 
+// A file dropped anywhere but a drop target would otherwise be *opened* — the window navigates
+// to it and the studio is replaced by a picture of a bell tower, with no way back. The composer
+// stops its own drops with preventDefault; this stops every other one.
+for (const type of ["dragover", "drop"] as const) {
+  window.addEventListener(type, (e) => {
+    if (!e.defaultPrevented) e.preventDefault();
+  });
+}
+
 // Hash routing so the same bundle works from Vite, file:// and the packaged app.
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
