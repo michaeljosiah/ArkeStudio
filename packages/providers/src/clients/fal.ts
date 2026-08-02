@@ -1,5 +1,9 @@
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
 import { jsonRequest, tryProbe } from "./http.js";
+// Generated beside the manifest rows, from the same fetch, so a model can never be offered
+// with no route behind it — the failure that used to read "no endpoint mapping" at dispatch,
+// long after the estimate had been shown and accepted.
+import { FAL_ENDPOINTS as ENDPOINTS } from "../fal-catalogue.generated.js";
 import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
 
 /**
@@ -10,13 +14,6 @@ import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequ
  * by key, no listing of recent requests → an interrupted submission reconciles by asking the
  * user (§2.9). No cost figure in any response → ledger actuals are manifest-derived (R-17).
  */
-
-/** Manifest id → FAL endpoint path. Hand-maintained beside the manifest. */
-const ENDPOINTS: Record<string, string> = {
-  "flux-pro-1.1": "fal-ai/flux-pro/v1.1",
-  "seedance-2.0": "fal-ai/bytedance/seedance/v1/pro",
-  "aurora-upscale": "fal-ai/aura-sr",
-};
 
 export class FalClient implements ProviderClient {
   readonly id = "fal" as const;

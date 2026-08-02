@@ -12,6 +12,7 @@ import {
   type ClientDeclarations,
 } from "@arke-studio/contracts";
 import { requireModel, SHIPPED_MANIFEST } from "../src/manifest-data.js";
+import { FAL_ENDPOINTS } from "../src/fal-catalogue.generated.js";
 
 const model = (id: string) => {
   const hit = SHIPPED_MANIFEST.models.find((m) => m.id === id);
@@ -30,8 +31,24 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     const refused = requireModel(SHIPPED_MANIFEST, "sora-9000");
     assert.equal(refused.ok, false);
     assert.ok(!refused.ok && /not in the model manifest/.test(refused.reason));
-    assert.ok(!refused.ok && refused.reason.includes("v7"));
+    assert.ok(!refused.ok && refused.reason.includes("v8"));
     assert.equal(requireModel(SHIPPED_MANIFEST, "seedance-2.0").ok, true);
+  });
+
+  it("every FAL model the manifest offers has a route behind it", () => {
+    // The failure this prevents: a model offered in the picker, estimated, accepted, and only
+    // then refused at dispatch with "no endpoint mapping" — after the user had committed.
+    const offered = SHIPPED_MANIFEST.models.filter((m) => m.provider === "fal");
+    assert.ok(offered.length > 0);
+    for (const m of offered) {
+      assert.ok(FAL_ENDPOINTS[m.id], `${m.id} has a fal route`);
+      assert.match(FAL_ENDPOINTS[m.id]!, /^[a-z0-9-]+\/[a-z0-9./-]+$/, `${m.id}'s route looks like a fal route`);
+    }
+    // And nothing routes anywhere the manifest does not offer, which would be a model the app
+    // can submit but never estimate.
+    for (const id of Object.keys(FAL_ENDPOINTS)) {
+      assert.ok(offered.some((m) => m.id === id), `${id} is offered in the manifest`);
+    }
   });
 
   it("capability copy matches the manifest for accepting and refusing models (R-10)", () => {
@@ -47,22 +64,42 @@ describe("the shipped manifest (R-9, §3.2)", () => {
 });
 
 describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
+  // These check the arithmetic, so they read the rate out of the manifest rather than repeating
+  // it. The old versions hard-coded figures from a hand-written price list, and every one of
+  // them failed the day the prices came from fal instead of from memory — which told us nothing
+  // about the estimator, only that a price had changed.
   it("per second, with the resolution override", () => {
     const seedance = model("seedance-2.0");
-    assert.equal(estimateMicroUsd(seedance, { durationSec: 6 }), 130002);
-    assert.equal(estimateMicroUsd(seedance, { durationSec: 6, resolution: "1080p" }), 259998);
-    assert.equal(estimateMicroUsd(seedance, { durationSec: 6, resolution: "720p" }), 130002);
+    assert.equal(seedance.pricing.kind, "perSecond");
+    if (seedance.pricing.kind !== "perSecond") return;
+    const base = seedance.pricing.microUsdPerSecond;
+    const hd = seedance.pricing.byResolution?.["1080p"] ?? base;
+    assert.equal(estimateMicroUsd(seedance, { durationSec: 6 }), base * 6);
+    assert.equal(estimateMicroUsd(seedance, { durationSec: 6, resolution: "1080p" }), hd * 6);
+    assert.equal(estimateMicroUsd(seedance, { durationSec: 6, resolution: "720p" }), base * 6);
   });
 
   it("per image, with count and resolution override", () => {
-    assert.equal(estimateMicroUsd(model("flux-pro-1.1"), {}), 40000);
-    assert.equal(estimateMicroUsd(model("flux-pro-1.1"), { images: 4 }), 160000);
+    const banana = model("nano-banana-2");
+    assert.equal(banana.pricing.kind, "perImage");
+    if (banana.pricing.kind !== "perImage") return;
+    const each = banana.pricing.microUsdPerImage;
+    assert.equal(estimateMicroUsd(banana, {}), each);
+    assert.equal(estimateMicroUsd(banana, { images: 4 }), each * 4);
     assert.equal(estimateMicroUsd(model("soul-2.0"), { images: 2, resolution: "4k" }), 240000);
   });
 
   it("per megapixel rounds up, once", () => {
-    assert.equal(estimateMicroUsd(model("aurora-upscale"), { megapixels: 8.3 }), 66400);
-    assert.equal(estimateMicroUsd(model("aurora-upscale"), { megapixels: 0.001 }), 8);
+    const flux = model("flux-2-pro");
+    assert.equal(flux.pricing.kind, "perMegapixel");
+    if (flux.pricing.kind !== "perMegapixel") return;
+    const perMp = flux.pricing.microUsdPerMegapixel;
+    // Fractional megapixels are charged as such; it is the money that rounds up, not the area.
+    // The expectation goes through milli-units like the estimator does — 8.3 * 30000 in plain
+    // floating point is 249000.00000000003, and ceiling that overcharges by a micro-dollar.
+    const expect = (mp: number) => Math.ceil((Math.round(mp * 1000) * perMp) / 1000);
+    assert.equal(estimateMicroUsd(flux, { megapixels: 8.3 }), expect(8.3));
+    assert.equal(estimateMicroUsd(flux, { megapixels: 0.001 }), expect(0.001), "never down to nothing");
   });
 
   it("per character", () => {
