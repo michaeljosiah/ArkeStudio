@@ -278,3 +278,46 @@ describe("discovery (R-1)", () => {
     }
   });
 });
+
+describe("the event stream survives a harness that goes quiet (R-2, R-14)", () => {
+  it("hangs up on a silent stream, reconnects, and reports the turn it missed", async () => {
+    // The failure this reproduces: a restarted harness leaves a half-open socket. It never
+    // errors and never yields, so the reader waits forever on a connection that will never
+    // speak again — and the app is deaf while the turn it is waiting for completes and passes.
+    const stub = new StubOpenCode();
+    await stub.start();
+    const adapter = new OpenCodeAdapter({ baseUrl: () => stub.baseUrl(), streamSilenceMs: 150 });
+    await adapter.init();
+    const { sessionId } = await adapter.createSession({ purpose: "authoring" });
+
+    const abort = new AbortController();
+    const seen: string[] = [];
+    const events = adapter.streamEvents(abort.signal);
+    const pump = (async () => {
+      for await (const e of events) {
+        seen.push(e.type);
+        if (e.type === "message.completed") break;
+      }
+    })();
+
+    // Wait for the first connection, then go quiet without closing it.
+    await new Promise((r) => setTimeout(r, 120));
+    assert.equal(stub.streamCount, 1, "connected once");
+    stub.stallStreams();
+
+    // The turn completes while nobody is listening — REST is the only record of it.
+    stub.replayMessages = [
+      {
+        info: { id: "msg_missed", sessionID: sessionId, role: "assistant", time: { completed: Date.now() } },
+        parts: [{ text: "the answer nobody heard" }],
+      },
+    ];
+
+    await Promise.race([pump, new Promise((r) => setTimeout(r, 6000))]);
+    abort.abort();
+    await adapter.dispose();
+    await stub.stop();
+
+    assert.ok(seen.includes("message.completed"), `the missed turn is reported — saw ${seen.join(", ") || "nothing"}`);
+  });
+});

@@ -24,6 +24,7 @@ export class StubOpenCode {
   docPaths: string[] = [
     "/api/health",
     "/api/event",
+    "/global/event",
     "/api/session",
     "/api/session/{sessionID}/prompt",
     "/api/session/{sessionID}/interrupt",
@@ -54,7 +55,7 @@ export class StubOpenCode {
             .end(JSON.stringify({ info: { version: "9.9.9-stub" }, paths }));
           return;
         }
-        if (url.pathname === "/api/event") {
+        if (url.pathname === "/api/event" || url.pathname === "/global/event" || url.pathname === "/event") {
           res.writeHead(200, {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
@@ -69,6 +70,14 @@ export class StubOpenCode {
         if (url.pathname === "/api/session" && req.method === "POST") {
           const id = `ses_stub_${++this.sessionCounter}`;
           res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ data: { id } }));
+          return;
+        }
+        if (/^\/session\/[^/]+\/message$/.test(url.pathname) && req.method === "GET") {
+          res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(this.replayMessages));
+          return;
+        }
+        if (/^\/session\/[^/]+\/prompt_async$/.test(url.pathname)) {
+          res.writeHead(204).end();
           return;
         }
         if (/^\/api\/session\/[^/]+\/prompt$/.test(url.pathname)) {
@@ -103,6 +112,30 @@ export class StubOpenCode {
     const line = `data: ${JSON.stringify(event)}\n\n`;
     for (const client of this.sseClients) client.write(line);
   }
+
+  /** How many stream consumers are attached right now — a reconnect is one more of these. */
+  get streamCount(): number {
+    return this.sseClients.size;
+  }
+
+  /**
+   * Go silent without hanging up: the socket stays open, no bytes ever arrive again. This is
+   * what a restarted harness leaves behind, and what a reader waits on forever unless something
+   * decides the silence has gone on too long.
+   */
+  stallStreams(): void {
+    for (const client of this.sseClients) {
+      client.socket?.pause();
+      this.stalled.add(client);
+    }
+    this.sseClients.clear();
+  }
+
+  /** Held so stop() can destroy them — a paused socket would otherwise outlive the server. */
+  private stalled = new Set<ServerResponse>();
+
+  /** What GET /session/:id/message replays — how a reconnecting adapter learns what it missed. */
+  replayMessages: unknown[] = [];
 
   private turnCounter = 0;
 
@@ -148,6 +181,8 @@ export class StubOpenCode {
   async stop(): Promise<void> {
     for (const client of this.sseClients) client.end();
     this.sseClients.clear();
+    for (const client of this.stalled) client.socket?.destroy();
+    this.stalled.clear();
     const server = this.server;
     this.server = null;
     if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
