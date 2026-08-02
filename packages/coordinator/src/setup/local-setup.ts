@@ -145,8 +145,14 @@ export class LocalSetupService {
     for (const f of spec.files) {
       const path = join(this.modelsDir(), spec.dir, f.file);
       const info = await stat(toExtendedLength(path)).catch(() => null);
-      // A file that exists but is obviously a fragment is not presence.
-      if (!info || info.size < 1024) return false;
+      // Existence under the real name IS completion: a download writes to .partial and only a
+      // whole file is ever renamed in (see fetchFile below).
+      //
+      // This used to also require 1024 bytes as a fragment heuristic, which was both redundant
+      // and wrong. Kokoro's config.json is 44 bytes — a legitimate, complete file — so the
+      // check failed on every start and re-fetched 88 MB of weights that were already there,
+      // every time the app opened. A size floor cannot tell a small file from a broken one.
+      if (!info || info.size === 0) return false;
     }
     return true;
   }
