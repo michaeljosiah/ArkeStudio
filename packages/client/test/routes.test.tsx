@@ -40,11 +40,17 @@ describe("screen inventory", () => {
 
   it("smoke-renders the root router", () => {
     const html = renderAt("/");
-    // The launch screen, by what it is rather than by a wordmark: the reel and the one line
-    // that says what is happening. It carried "Arke Studio" until the reel replaced it.
+    // The launch screen, by what it is rather than by a wordmark: the reel, and — with nothing
+    // left to fetch — a door and a version number. The progress line, the byte counts and the
+    // note about where worlds live all answered "what is it doing", which nobody is asking
+    // once it is done.
     assert.ok(html.includes('data-screen="launch"'), "the root route mounts the launch screen");
     assert.ok(html.includes("setup-reel.mp4"), "the reel plays while the runtimes come down");
-    assert.ok(html.includes("Setting up your studio."), "and it says what it is doing");
+    assert.ok(html.includes("Continue"), "and when it is ready, the way in");
+    assert.ok(html.includes("fy-launch__version"), "with the version under it");
+    for (const chatter of ["Setting up your studio.", "One-time setup", "everything ready"]) {
+      assert.ok(!html.includes(chatter), `"${chatter}" is not shown once there is nothing to wait for`);
+    }
   });
 
   it("renders the degraded reasons when children are unavailable (R-6)", () => {

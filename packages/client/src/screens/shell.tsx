@@ -179,6 +179,9 @@ export function LaunchScreen() {
   // Setup never walks off on its own — the user continues when they're ready (no worlds →
   // first run; otherwise the picker, R-8).
   const ready = connection === "open" && state !== null;
+  // Nothing left to fetch and somewhere to go: the only state where this screen is finished
+  // rather than working.
+  const settled = ready && !downloading;
   const steps = setupSteps(connection, state, env !== null);
   const components = setup?.components ?? [];
 
@@ -242,6 +245,23 @@ export function LaunchScreen() {
           />
         </div>
         <div className="fy-launch__panel">
+          {/*
+            Once there is nothing left to fetch, the panel is a door and a version number.
+            The progress bar, the byte counts and the reassurance about where worlds live were
+            all answers to "what is it doing" — a question nobody is asking any more.
+          */}
+          {settled ? (
+            <div className="fy-launch__done">
+              <Button
+                variant="primary"
+                onClick={() => navigate(state!.worlds.length === 0 ? "/first-run" : "/worlds", { replace: true })}
+              >
+                Continue
+              </Button>
+              <span className="fy-launch__version">v{state?.app.version ?? ""}</span>
+            </div>
+          ) : (
+            <>
           <div className="fy-launch__row">
             <span className="fy-launch__title">Setting up your studio.</span>
           </div>
@@ -274,9 +294,11 @@ export function LaunchScreen() {
               title={ready ? undefined : "Waiting for the studio to finish setting up"}
               onClick={() => navigate(state!.worlds.length === 0 ? "/first-run" : "/worlds", { replace: true })}
             >
-              {ready ? (downloading ? "Continue in the background →" : "Continue") : "Setting up…"}
+              {ready ? "Continue in the background →" : "Setting up…"}
             </Button>
           </div>
+            </>
+          )}
         </div>
       </div>
     </div>

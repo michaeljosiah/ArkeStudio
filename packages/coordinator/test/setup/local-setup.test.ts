@@ -132,6 +132,51 @@ describe("fetching the local runtimes at setup", () => {
     assert.ok(d.calls.indexOf("run ollama pull llama3.1:8b") > d.calls.findIndex((c) => c.includes("OllamaSetup.exe")));
   });
 
+  it("counts a small file as present — a 44-byte config is not a fragment", async () => {
+    // The bug this pins: presence required 1024 bytes per file as a fragment heuristic, and
+    // Kokoro's config.json is 44 bytes of legitimate JSON. So every launch decided the voice
+    // weights were missing and fetched 88 MB that were already on the disk. A size floor
+    // cannot tell a small file from a broken one; the .partial rename already does that.
+    const appRoot = await root();
+    const withTinyFile = catalogue().map((e) =>
+      e.id === "weights"
+        ? {
+            ...e,
+            spec: {
+              kind: "files" as const,
+              dir: "whisper",
+              files: [
+                { url: "https://example.test/ggml.bin", file: "ggml.bin", sizeMb: 1, magic: GGML_MAGIC },
+                { url: "https://example.test/config.json", file: "config.json", sizeMb: 1 },
+              ],
+            },
+          }
+        : e,
+    );
+    await mkdir(join(appRoot, "models", "whisper"), { recursive: true });
+    await writeFile(join(appRoot, "models", "whisper", "ggml.bin"), bytes(4096));
+    await writeFile(join(appRoot, "models", "whisper", "config.json"), '{"model_type": "style_text_to_speech_2"}');
+
+    const d = deps({ installed: true });
+    const events: DomainEvent[] = [];
+    const svc = new LocalSetupService(d, (e) => events.push(e), { appRoot, catalogue: withTinyFile, throttleMs: 0 });
+    await svc.run();
+
+    assert.equal(last(events).components.find((c) => c.id === "weights")!.state, "present");
+    assert.ok(!d.calls.some((c) => c.startsWith("fetch")), "nothing was downloaded again");
+  });
+
+  it("an empty file is still not presence — a rename that lost its bytes is not a download", async () => {
+    const appRoot = await root();
+    await mkdir(join(appRoot, "models", "whisper"), { recursive: true });
+    await writeFile(join(appRoot, "models", "whisper", "ggml.bin"), new Uint8Array(0));
+    const d = deps({ installed: true });
+    const events: DomainEvent[] = [];
+    const svc = new LocalSetupService(d, (e) => events.push(e), { appRoot, catalogue: catalogue(), throttleMs: 0 });
+    await svc.run();
+    assert.equal(last(events).components.find((c) => c.id === "weights")!.state, "ready", "it was fetched again");
+  });
+
   it("fetches nothing on a second launch — presence is detected first", async () => {
     const appRoot = await root();
     await mkdir(join(appRoot, "models", "whisper"), { recursive: true });
