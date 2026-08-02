@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ManifestModel, WorldMeta } from "@arke-studio/contracts";
+import { buildSessionConfig } from "@arke-studio/adapter-opencode";
+import type { HarnessEvent } from "@arke-studio/contracts";
+import { makeArtDirector, worldBrief } from "../../src/references/art-director.js";
+import { tempDir } from "../tmp.js";
 import {
   WORLD_IMAGE_CANDIDATE,
   WORLD_IMAGE_DIR,
@@ -71,5 +75,87 @@ describe("the world's key image", () => {
     assert.equal(request.landing.dir, WORLD_IMAGE_DIR);
     assert.equal(request.landing.name, WORLD_IMAGE_CANDIDATE);
     assert.ok(!request.landing.dir.includes("world-art"), "the world keeps the image it has until asked");
+  });
+});
+
+/** A harness that answers with whatever the test hands it, once. */
+function directorAdapter(reply: string | null) {
+  const subs = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null }>();
+  const push = (event: HarnessEvent) => {
+    for (const s of subs) {
+      s.queue.push(event);
+      s.wake?.();
+      s.wake = null;
+    }
+  };
+  return {
+    id: "director",
+    capabilities: () => new Set([]),
+    readiness: () => ({ ready: true }),
+    async createSession() {
+      return { sessionId: "art_1" };
+    },
+    async sendMessage(input: { sessionId: string }) {
+      return { sessionId: input.sessionId, correlationId: "c" };
+    },
+    async dispatchAsync(input: { sessionId: string }) {
+      if (reply !== null) void (async () => push({ type: "message.completed", sessionId: input.sessionId, text: reply }))();
+      return { sessionId: input.sessionId, correlationId: "c" };
+    },
+    streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {
+      const sub: { queue: HarnessEvent[]; wake: (() => void) | null } = { queue: [], wake: null };
+      subs.add(sub);
+      return {
+        [Symbol.asyncIterator]() {
+          return (async function* () {
+            try {
+              while (!signal?.aborted) {
+                const next = sub.queue.shift();
+                if (next) {
+                  yield next;
+                  continue;
+                }
+                await new Promise<void>((resolve) => {
+                  signal?.addEventListener("abort", () => resolve(), { once: true });
+                  sub.wake = resolve;
+                });
+              }
+            } finally {
+              subs.delete(sub);
+            }
+          })();
+        },
+      };
+    },
+  } as never;
+}
+
+describe("the art director", () => {
+  const director = async (reply: string | null) =>
+    makeArtDirector(directorAdapter(reply), () => buildSessionConfig({}), await tempDir("art-"));
+
+  it("tells the model only what the world says about itself", () => {
+    const brief = worldBrief(meta(), ["The tide is law in the harbour", "Bell-ringers are sworn, not hired"]);
+    assert.ok(brief.includes("The Undersong"));
+    assert.ok(brief.includes("A coastal city where a drowned god still sings"));
+    assert.ok(brief.includes("The tide is law in the harbour"), "settled canon rides along");
+    const bare = worldBrief(meta({ tone: undefined, genre: undefined }), []);
+    assert.ok(!bare.includes("Tone:") && !bare.includes("Established"), "nothing is invented to fill a field");
+  });
+
+  it("returns the prompt it wrote, fenced or not", async () => {
+    // How the answer really arrives: a sentence, then a fenced block.
+    const fenced = ["Here you go:", "```json", '{"prompt": "A drowned harbour at dusk, wet basalt, sodium light"}', "```"].join("\n");
+    const run = await director(fenced);
+    assert.equal(await run("brief"), "A drowned harbour at dusk, wet basalt, sodium light");
+  });
+
+  it("returns null rather than nonsense when the answer is not a prompt", async () => {
+    // Null is the caller's signal to fall back to the plain assembly. A picture still gets
+    // made; the art director is a suggestion, never a gate.
+    const prose = await director("I think a moody harbour would be lovely, don't you?");
+    assert.equal(await prose("brief"), null);
+    const empty = await director('{"prompt": ""}');
+    assert.equal(await empty("brief"), null);
   });
 });

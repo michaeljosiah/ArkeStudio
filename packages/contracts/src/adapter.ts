@@ -22,7 +22,7 @@ export interface SessionRef {
 }
 
 /** What a session is for — selects the agent configuration and the confinement posture (§17.1). */
-export const SessionPurpose = z.enum(["authoring", "drafting", "extraction", "ask"]);
+export const SessionPurpose = z.enum(["authoring", "drafting", "extraction", "ask", "art-prompt"]);
 export type SessionPurpose = z.infer<typeof SessionPurpose>;
 
 export interface CreateSessionInput {

@@ -234,6 +234,12 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
 
   const mine = (state?.app.jobs ?? []).filter((j) => j.worldId === worldId && j.target.kind === "world-image");
   const running = mine.find((j) => j.status !== "succeeded" && j.status !== "failed" && j.status !== "cancelled");
+  // The prompt is written by the harness before the job exists, so for a few seconds after the
+  // click there is nothing in the queue to show. Without this the button looks like it missed.
+  const [asking, setAsking] = useState(false);
+  useEffect(() => {
+    if (asking && mine.length > 0) setAsking(false);
+  }, [asking, mine.length]);
   const candidate = [...mine]
     .reverse()
     .find((j) => j.status === "succeeded" && (j.landedFiles?.length ?? 0) > 0 && !dismissed.includes(j.id));
@@ -281,11 +287,14 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
     <div className="fy-keyart">
       <Button
         variant="ghost"
-        disabled={running !== undefined || reason !== undefined}
+        disabled={asking || running !== undefined || reason !== undefined}
         {...(reason ? { title: reason } : {})}
-        onClick={() => generateWorldImage(worldId)}
+        onClick={() => {
+          setAsking(true);
+          generateWorldImage(worldId);
+        }}
       >
-        {running ? "Making the key art…" : "Generate key art from the logline"}
+        {asking ? "Writing the prompt…" : running ? "Making the key art…" : "Generate key art from the logline"}
       </Button>
       <span className="fy-keyart__note">
         {reason ??

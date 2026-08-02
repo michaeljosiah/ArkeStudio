@@ -1,0 +1,83 @@
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { z } from "zod";
+import type { HarnessAdapter, WorldMeta } from "@arke-studio/contracts";
+import { extractJson } from "../canon/ask.js";
+import { atomicWriteFile } from "../world/atomic.js";
+import { toExtendedLength } from "../world/paths.js";
+
+/**
+ * The art director: one harness turn that turns what a world *is* into a prompt an image model
+ * can use.
+ *
+ * Concatenating the logline and posting it at an image model is a weak prompt — the logline is
+ * written for a reader ("a drowned god still sings") and an image model wants a subject, a
+ * light, a lens and a material. A writing model is good at that translation, and we already
+ * have one running.
+ *
+ * It is a suggestion, never a gate: if the harness is down, slow, or answers with something
+ * that is not a prompt, the caller falls back to the plain assembly and the picture is still
+ * made. Nothing here is allowed to be the reason a button does nothing.
+ */
+
+const WALL_CLOCK_MS = 45_000;
+const PromptSchema = z.object({ prompt: z.string().min(1).max(2000) });
+
+/** What the art director is told. Only what the world itself says — no invented context. */
+export function worldBrief(meta: WorldMeta, canonLines: readonly string[]): string {
+  const lines = [
+    `World: ${meta.name}`,
+    meta.logline?.trim() ? `Logline: ${meta.logline.trim()}` : "",
+    meta.tone?.trim() ? `Tone: ${meta.tone.trim()}` : "",
+    meta.genre?.trim() ? `Genre: ${meta.genre.trim()}` : "",
+    canonLines.length > 0 ? `Established, and binding:\n${canonLines.map((l) => `- ${l}`).join("\n")}` : "",
+  ];
+  return lines.filter((l) => l.length > 0).join("\n");
+}
+
+export function makeArtDirector(
+  adapter: HarnessAdapter,
+  buildConfig: (input: { worldQueryUrl?: string }) => Record<string, unknown>,
+  scratchRoot: string,
+): (brief: string) => Promise<string | null> {
+  return async (brief) => {
+    const sandbox = join(scratchRoot, `art-${Date.now().toString(36)}`);
+    await mkdir(toExtendedLength(sandbox), { recursive: true });
+    await atomicWriteFile(join(sandbox, "opencode.json"), JSON.stringify(buildConfig({}), null, 2) + "\n");
+    const session = await adapter.createSession({ purpose: "art-prompt", cwd: sandbox, agent: "art-director" });
+
+    let finalText = "";
+    const abort = new AbortController();
+    const events = adapter.streamEvents(abort.signal);
+    const collected = (async () => {
+      for await (const event of events) {
+        if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
+        if (event.type === "message.completed") {
+          finalText = event.text ?? "";
+          return;
+        }
+        if (event.type === "session.error") throw new Error(event.message);
+      }
+    })();
+    await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: brief }] });
+
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      deadline = setTimeout(() => reject(new Error("the art director took too long")), WALL_CLOCK_MS);
+    });
+    try {
+      await Promise.race([collected, timeout]);
+    } finally {
+      clearTimeout(deadline);
+      abort.abort();
+    }
+    // extractJson throws when there is no object at all — prose, an apology, an empty reply.
+    // All of those are the same answer here: no prompt, use the plain assembly instead.
+    try {
+      const parsed = PromptSchema.safeParse(extractJson(finalText));
+      return parsed.success ? parsed.data.prompt.trim() : null;
+    } catch {
+      return null;
+    }
+  };
+}
