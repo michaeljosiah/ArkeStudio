@@ -624,6 +624,42 @@ export class Coordinator {
         }
         return;
       }
+      case "archive-world": {
+        // Anything not in this set is still going somewhere, so the world stays put.
+        const TERMINAL_JOB_STATUS = new Set(["succeeded", "failed", "cancelled"]);
+        const archive = this.opts.provider.archiveWorld?.bind(this.opts.provider);
+        if (!archive) return;
+        const summary = this.readModel.getState().worlds.find((w) => w.worldId === msg.worldId);
+        const refuse = (reason: string) =>
+          this.emit({ at: new Date().toISOString(), type: "world.archive-refused", worldId: msg.worldId, reason });
+        // Work in flight keeps its world. Moving the folder under a running job turns a job
+        // that would have finished into one that fails writing its result somewhere gone.
+        const inFlight = this.readModel
+          .getState()
+          .app.jobs.filter((j) => j.worldId === msg.worldId && !TERMINAL_JOB_STATUS.has(j.status));
+        if (inFlight.length > 0) {
+          refuse(
+            `${inFlight.length} job${inFlight.length === 1 ? " is" : "s are"} still running for this world — let them finish or cancel them first`,
+          );
+          return;
+        }
+        try {
+          const { folder } = await archive(msg.worldId);
+          if (this.readModel.getState().world?.meta.worldId === msg.worldId) this.readModel.setWorld(null);
+          this.readModel.setWorlds(await this.opts.provider.listWorlds());
+          this.emit({
+            at: new Date().toISOString(),
+            type: "world.archived",
+            worldId: msg.worldId,
+            name: summary?.name ?? "that world",
+            folder: basename(folder),
+          });
+        } catch (err) {
+          refuse(err instanceof Error ? err.message : String(err));
+        }
+        this.transport.broadcastSnapshot();
+        return;
+      }
       case "reload-world": {
         const reload = this.opts.provider.reloadWorld?.bind(this.opts.provider);
         if (!reload) return;

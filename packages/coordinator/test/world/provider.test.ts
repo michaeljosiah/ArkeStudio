@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { tempDir } from "../tmp.js";
@@ -155,5 +155,54 @@ describe("cold-scan budget (§2.13)", () => {
     assert.equal(bundle.canon.length, 200);
     assert.equal(bundle.productions[0]!.takes.length, 500);
     assert.ok(elapsed < 10_000, `cold scan took ${Math.round(elapsed)}ms — budget is 10s`);
+  });
+});
+
+describe("archiving a world", () => {
+  it("moves the folder whole, and the library stops listing it", async () => {
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+    const [world] = await provider.listWorlds();
+    assert.ok(world);
+
+    const { folder } = await provider.archiveWorld(world.worldId);
+    assert.equal(folder, join(root, "archive", "the-undersong"));
+    // Whole means whole: the journal and the world file travel with it, so putting it back is
+    // a move rather than a restore from anything.
+    assert.ok(JSON.parse(await readFile(join(folder, "world.json"), "utf8")).worldId === world.worldId);
+    await stat(join(folder, "changes.jsonl"));
+    await assert.rejects(stat(join(root, "worlds", "the-undersong")), "and it is no longer in the library");
+    assert.deepEqual(await provider.listWorlds(), []);
+    await provider.close();
+  });
+
+  it("archives an open world by closing it first", async () => {
+    // Windows will not move a directory holding an open index, and the error it gives for that
+    // reads as a permissions problem — so the close is part of archiving, not the caller's job.
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+    const [world] = await provider.listWorlds();
+    assert.ok(world);
+    await provider.loadWorld(world.worldId);
+
+    const { folder } = await provider.archiveWorld(world.worldId);
+    await stat(join(folder, "world.json"));
+    assert.equal(provider.openStore(), null, "the world is no longer open");
+    await provider.close();
+  });
+
+  it("keeps the first archive when a world of the same name is archived again", async () => {
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+    const first = (await provider.listWorlds())[0]!;
+    await provider.archiveWorld(first.worldId);
+
+    // A second world under the same slug — archived, it must not overwrite the first.
+    const { worldId } = await provider.createWorld({ name: "The Undersong" });
+    const { folder } = await provider.archiveWorld(worldId);
+    assert.notEqual(folder, join(root, "archive", "the-undersong"));
+    await stat(join(root, "archive", "the-undersong", "world.json"));
+    await stat(join(folder, "world.json"));
+    await provider.close();
   });
 });

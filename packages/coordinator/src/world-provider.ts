@@ -18,6 +18,8 @@ export interface WorldProvider {
     genre?: string;
   }): Promise<{ worldId: string; slug: string }>;
   reloadWorld?(worldId: string): Promise<WorldBundle>;
+  /** Move a world out of the library into `archive/`, whole. Returns where it went. */
+  archiveWorld?(worldId: string): Promise<{ folder: string }>;
   reconcileExternalEdit?(worldId: string, path: string): Promise<WorldBundle>;
   onWorldStale?(cb: (worldId: string) => void): void;
   /** The accept gate over the open world (SPEC-004). Null until a world is open. */

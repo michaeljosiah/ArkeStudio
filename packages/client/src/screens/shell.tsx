@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router";
 import { Badge, Button, Callout, Input, StatusDot, Textarea, cx, type StatusDotTone } from "../components/ui.js";
 import { EmptyState } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
-import { ChevronLeft, Plus, X } from "../components/icons.js";
+import { Archive, ChevronLeft, Plus, X } from "../components/icons.js";
 import { Portrait } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
 import { shortDateTime } from "../lib/format.js";
@@ -14,6 +14,7 @@ import {
   clearCredential,
   attachHostFiles,
   attachHostText,
+  archiveWorld,
   createSheetFromSentence,
   createWorld,
   genesisAttachFiles,
@@ -31,6 +32,7 @@ import {
   setCredential,
   setRoutingDefault,
   setSpendThreshold,
+  useArchiveNote,
   useDiagnosticsBundle,
   useEnvCheck,
   useExports as useExportsState,
@@ -372,6 +374,8 @@ export function WorldPickerScreen() {
   const { state } = useStore();
   const navigate = useNavigate();
   const worlds = state?.worlds ?? [];
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const archiveNote = useArchiveNote();
   const hour = new Date().getHours();
   const greeting = hour < 5 ? "Working late" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const lede =
@@ -406,6 +410,12 @@ export function WorldPickerScreen() {
           <p className="fy-hero__lede" style={{ margin: "10px 0 0", maxWidth: 540 }}>
             {lede}
           </p>
+          {archiveNote && (
+            <div className="fy-set__why" style={{ marginTop: 10 }}>
+              <span className={cx("fy-set__dot", archiveNote.refused ? "fy-set__dot--warn" : "fy-set__dot--ok")} />
+              <span>{archiveNote.text}</span>
+            </div>
+          )}
         </div>
         {worlds.length === 0 ? (
           <div style={{ padding: "54px 88px" }}>
@@ -431,6 +441,41 @@ export function WorldPickerScreen() {
                   <div className="fy-worldcard__frame">
                     <Portrait worldSlug={w.slug} path="world-art.png" label={`${w.name}: key art`} radius={10} />
                   </div>
+                  {/* Archiving is two clicks and no dialog: the second click is the consent,
+                      and the words say what actually happens to the folder. */}
+                  {confirming === w.worldId ? (
+                    <div className="fy-worldcard__confirm" onClick={(e) => e.stopPropagation()}>
+                      <span>Move {w.name} to the archive folder? Nothing is deleted.</span>
+                      <span className="fy-worldcard__confirmacts">
+                        <button
+                          type="button"
+                          className="fy-set__b fy-set__b--go"
+                          onClick={() => {
+                            archiveWorld(w.worldId);
+                            setConfirming(null);
+                          }}
+                        >
+                          Archive
+                        </button>
+                        <button type="button" className="fy-set__b" onClick={() => setConfirming(null)}>
+                          Keep
+                        </button>
+                      </span>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="fy-worldcard__archive"
+                      aria-label={`Archive ${w.name}`}
+                      title="Archive — moves the folder, deletes nothing"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirming(w.worldId);
+                      }}
+                    >
+                      <Archive size={13} />
+                    </button>
+                  )}
                   <div className="fy-worldcard__name">{w.name}</div>
                   {w.logline && <div className="fy-worldcard__logline">{w.logline}</div>}
                   <div className="fy-worldcard__meta">

@@ -37,6 +37,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       genesisId: GenesisIdSchema.optional(),
     })
     .strict(),
+  /**
+   * Archive a world: out of the library, still on the disk. The folder moves to `archive/`
+   * whole, so what comes next — recovery, or deleting it for good — is a decision taken later
+   * and somewhere else, never a side effect of tidying up.
+   */
+  z.object({ kind: z.literal("archive-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: reload after an external change made the open world stale (R-23). */
   z.object({ kind: z.literal("reload-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: adopt one closed-world edit — snapshot, bump, log (R-28). */
