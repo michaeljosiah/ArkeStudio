@@ -1,26 +1,24 @@
 import { ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts";
+import { FAL_MODELS } from "./fal-catalogue.generated.js";
 
 /**
- * The shipped model manifest (SPEC-008 §2.5, D9): hand-maintained, seeded from FAL's and
- * Higgsfield's catalogues, updated with app releases. Drift detection (R-13) is the guard
- * against it going stale — never a network fetch.
+ * The shipped model manifest (SPEC-008 §2.5, D9): read at start, never fetched at run time.
+ * Drift detection (R-13) is the guard against it going stale.
  *
- * Prices are integer micro-dollars (R-14). Sources: provider pricing pages as of 2026-07-28.
+ * The FAL rows are generated from fal's own catalogue — see
+ * scripts/sync-fal-catalogue.mjs. They used to be written from memory, and were wrong: a model
+ * named "Seedance 2.0" pointed at the v1 route. Everything else here is still hand-maintained
+ * from provider pricing pages, because those providers publish no catalogue we can read.
+ *
+ * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 7,
-  generated: "2026-07-28",
+  manifestVersion: 8,
+  generated: "2026-08-02",
   models: [
+    // ---- fal: generated from the live catalogue ---------------------------
+    ...FAL_MODELS,
     // ---- video ------------------------------------------------------------
-    {
-      id: "seedance-2.0",
-      provider: "fal",
-      capability: "video",
-      displayName: "Seedance 2.0",
-      accepts: { referenceImages: 4, startFrame: true, endFrame: true },
-      limits: { maxDurationSec: 15, resolutions: ["720p", "1080p"], aspects: ["16:9", "9:16", "1:1"] },
-      pricing: { kind: "perSecond", microUsdPerSecond: 21667, byResolution: { "1080p": 43333 } },
-    },
     {
       id: "halcyon-1.5",
       provider: "higgsfield",
@@ -32,15 +30,6 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     },
     // ---- image ------------------------------------------------------------
     {
-      id: "flux-pro-1.1",
-      provider: "fal",
-      capability: "image",
-      displayName: "FLUX Pro 1.1",
-      accepts: { referenceImages: 1, startFrame: false, endFrame: false },
-      limits: { resolutions: ["720p", "1080p", "1440p"], aspects: ["16:9", "9:16", "1:1", "4:3"] },
-      pricing: { kind: "perImage", microUsdPerImage: 40000 },
-    },
-    {
       id: "soul-2.0",
       provider: "higgsfield",
       capability: "image",
@@ -48,15 +37,6 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       accepts: { referenceImages: 3, startFrame: false, endFrame: false },
       limits: { resolutions: ["1080p", "4k"], aspects: ["16:9", "1:1"] },
       pricing: { kind: "perImage", microUsdPerImage: 60000, byResolution: { "4k": 120000 } },
-    },
-    {
-      id: "aurora-upscale",
-      provider: "fal",
-      capability: "image",
-      displayName: "Aurora Upscale",
-      accepts: { referenceImages: 1, startFrame: false, endFrame: false },
-      limits: {},
-      pricing: { kind: "perMegapixel", microUsdPerMegapixel: 8000 },
     },
     {
       id: "gpt-image-2",

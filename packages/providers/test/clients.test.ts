@@ -113,10 +113,10 @@ describe("fal submit/poll round-trip carries the endpoint in the remote id", () 
       return new Response(JSON.stringify({ request_id: "req-9" }), { status: 200 });
     };
     const client = new FalClient(fetchImpl);
-    const submitted = await client.submit("k", { model: "flux-pro-1.1", capability: "image", params: { prompt: "x" } });
-    assert.equal(submitted.remoteId, "fal-ai/flux-pro/v1.1::req-9");
+    const submitted = await client.submit("k", { model: "flux-2-pro", capability: "image", params: { prompt: "x" } });
+    assert.equal(submitted.remoteId, "fal-ai/flux-2-pro::req-9");
     const poll = await client.poll("k", submitted.remoteId);
     assert.equal(poll.state, "running");
-    assert.match(seen[1]!, /fal-ai\/flux-pro\/v1\.1\/requests\/req-9\/status/);
+    assert.match(seen[1]!, /fal-ai\/flux-2-pro\/requests\/req-9\/status/);
   });
 });
