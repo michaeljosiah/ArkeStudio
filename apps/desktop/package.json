@@ -6,7 +6,7 @@
   "type": "module",
   "main": "dist/main.cjs",
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "npm run build --workspace @arke-studio/client && node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "rebuild:native": "node scripts/rebuild-native.mjs",
     "start": "npm run build && npm run rebuild:native && electron dist/main.cjs",
