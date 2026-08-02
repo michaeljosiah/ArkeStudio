@@ -10,7 +10,10 @@ import { makeAdapterExtractor } from "../../src/artifacts/model.js";
  * can be asked to say nothing at all. `interrupted` records whether the session was actually
  * told to stop, which is the difference between a Stop button and a Stop-shaped button.
  */
-function extractionAdapter(reply: string | null): HarnessAdapter & { interrupted: string[] } {
+/** interrupt is optional on the port, so the mock states it — the extractor reaches it by cast. */
+type ExtractionMock = HarnessAdapter & { interrupted: string[]; interrupt: (sessionId: string) => Promise<void> };
+
+function extractionAdapter(reply: string | null): ExtractionMock {
   const subscribers = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null }>();
   const push = (event: HarnessEvent) => {
     for (const sub of subscribers) {
@@ -19,7 +22,7 @@ function extractionAdapter(reply: string | null): HarnessAdapter & { interrupted
       sub.wake = null;
     }
   };
-  const adapter: HarnessAdapter & { interrupted: string[] } = {
+  const adapter: ExtractionMock = {
     interrupted: [] as string[],
     id: "extractor",
     capabilities: () => new Set([]),
