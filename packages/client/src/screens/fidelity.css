@@ -1039,6 +1039,15 @@
   color: var(--foreground);
   outline: none;
 }
+/*
+ * The composer shows focus on its own border (:focus-within above), so the editor inside must
+ * not also draw the global :focus-visible ring — clipped by the container, all you saw of that
+ * ring was its bottom edge: a stray line across the composer the moment you clicked in.
+ */
+.fy-cx__editor:focus-visible {
+  box-shadow: none;
+  border-radius: 0;
+}
 .fy-cx__placeholder {
   position: absolute;
   inset-inline: 0;
