@@ -179,6 +179,27 @@ td:first-child { color: var(--foreground); font-family: var(--font-mono, monospa
   font: 500 12.5px inherit; display: inline-flex; align-items: center;
 }
 
+/* --- the extraction offer, under the composer ---------------------------- */
+.off {
+  border: 1px solid var(--border); border-radius: var(--radius-md, 9px);
+  background: var(--background); padding: 11px 14px;
+}
+.off__row { display: flex; align-items: center; gap: 10px; }
+.off__dot { width: 6px; height: 6px; border-radius: 999px; background: var(--muted-foreground); flex: none; }
+.off__dot--live { background: var(--foreground); animation: offpulse 1.4s ease-in-out infinite; }
+.off__dot--done { background: var(--success, #15803d); }
+@keyframes offpulse { 0%,100% { opacity: 1 } 50% { opacity: .3 } }
+.off__t { flex: 1; min-width: 0; font: 400 12.5px/1.5 inherit; color: var(--muted-foreground); }
+.off__t strong { color: var(--foreground); font-weight: 600; }
+.off__acts { display: flex; gap: 6px; flex: none; }
+.off__b {
+  height: 26px; padding: 0 11px; border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border); background: var(--background);
+  font: 500 12px inherit; color: var(--foreground); cursor: pointer;
+}
+.off__b--go { background: var(--primary); color: var(--primary-foreground); border-color: transparent; }
+.off__note { font: 400 10.5px var(--font-mono, monospace); color: var(--muted-foreground); margin: 7px 0 0 16px; }
+
 /* ==========================================================================
    SCREEN MOCK — the new-world screen at true proportions.
    ========================================================================== */
@@ -546,7 +567,87 @@ td:first-child { color: var(--foreground); font-family: var(--font-mono, monospa
 </div>
 <p class="caption">The attached PDF appears twice on purpose: as a chip while it is part of what you are saying, and in the rail because it has been filed and will outlast the turn.</p>
 
-<h2><span class="n">07</span>What is not in this page</h2>
+<h2><span class="n">07</span>Attaching a document, and the offer</h2>
+<p>
+  Attaching a document is usually a way of saying <em>“this already exists — use it”</em>. So the
+  studio offers to read it. But reading it is a model turn that costs money, and nothing in this
+  app spends without you, so the offer comes <strong>before</strong> the reading, never after.
+</p>
+<p>
+  The offer lives in a strip under the composer — not in the transcript, because you have not said
+  anything yet, and not inside the chip, because it is about what happens next rather than what the
+  file is. One line, dismissible, and it never blocks you from just carrying on typing.
+</p>
+
+<div class="stage">
+  <div class="off">
+    <div class="off__row">
+      <span class="off__dot"></span>
+      <span class="off__t"><strong>series-bible.pdf</strong> is filed. Read it for facts?</span>
+      <span class="off__acts"><button class="off__b off__b--go">Read it</button><button class="off__b">Not now</button></span>
+    </div>
+    <div class="off__note">40 pages · reading it costs one turn on Claude Sonnet 4.6, about £0.04</div>
+  </div>
+</div>
+<p class="caption">Offered · the cost is named before you decide, not after.</p>
+
+<div class="grid2">
+  <div>
+    <div class="stage stage--tight">
+      <div class="off">
+        <div class="off__row">
+          <span class="off__dot off__dot--live"></span>
+          <span class="off__t">Reading series-bible.pdf — page 12 of 40</span>
+          <span class="off__acts"><button class="off__b">Stop</button></span>
+        </div>
+      </div>
+    </div>
+    <p class="caption">Reading · stoppable, and it keeps what it found.</p>
+  </div>
+  <div>
+    <div class="stage stage--tight">
+      <div class="off">
+        <div class="off__row">
+          <span class="off__dot off__dot--done"></span>
+          <span class="off__t"><strong>14 facts</strong> found in series-bible.pdf, each quoting the line it came from.</span>
+          <span class="off__acts"><button class="off__b off__b--go">Review them</button></span>
+        </div>
+      </div>
+    </div>
+    <p class="caption">Found · nothing is canon until you accept it, one at a time.</p>
+  </div>
+</div>
+
+<div class="stage stage--tight">
+  <div class="off">
+    <div class="off__row">
+      <span class="off__dot"></span>
+      <span class="off__t">Nothing in series-bible.pdf that the canon does not already say.</span>
+    </div>
+  </div>
+</div>
+<p class="caption">Empty-handed · said plainly, because a silent nothing reads as a failure.</p>
+
+<table>
+  <tr><th>Rule</th><th>Why</th></tr>
+  <tr><td>Offer, don't read</td><td>Extraction is a paid turn. The button is the consent.</td></tr>
+  <tr><td>Name the cost first</td><td>Pages and an estimate, in the offer — not a bill afterwards.</td></tr>
+  <tr><td>Only documents</td><td>An image or an audio file has nothing to extract yet; they file silently with no offer.</td></tr>
+  <tr><td>Never blocks typing</td><td>The strip is advisory. Ignoring it and carrying on is a valid answer.</td></tr>
+  <tr><td>Facts quote their source</td><td>The existing pipeline verifies each candidate against a real span; the offer inherits that.</td></tr>
+</table>
+
+<div class="flag">
+  <div class="flag__t">This reuses a pipeline that already exists</div>
+  <p>
+    Filing, extraction and per-candidate accept/reject are already built — <code>file-artifact</code>,
+    <code>extract-artifact</code> and <code>resolve-extraction</code>. The only new thing here is the
+    offer: a surface that puts an existing capability where the intent is, instead of leaving it on
+    a screen you have to go and find.
+  </p>
+</div>
+
+<h2><span class="n">08</span>What is not in this page</h2>
 <p>
   The <code>/</code> command palette and the <code>@</code> picker both open above the composer as
   floating lists. They are drawn in the prototype already and unchanged by this proposal, so I have
