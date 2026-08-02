@@ -32,6 +32,8 @@ export class ReadModel {
         spend: null,
         runtime: null,
         drift: [],
+        agents: [],
+        harnessModels: [],
         queues: [],
         setup: null,
         env: null,
@@ -54,6 +56,15 @@ export class ReadModel {
   /** The one-shot environment verification, kept so late-joining clients still see it. */
   setEnv(env: NonNullable<ClientState["app"]["env"]>): void {
     this.state = { ...this.state, app: { ...this.state.app, env } };
+  }
+
+  /** The roster as it will run, and what the harness says it can run. */
+  setAgents(agents: ClientState["app"]["agents"]): void {
+    this.state = { ...this.state, app: { ...this.state.app, agents } };
+  }
+
+  setHarnessModels(harnessModels: ClientState["app"]["harnessModels"]): void {
+    this.state = { ...this.state, app: { ...this.state.app, harnessModels } };
   }
 
   getState(): ClientState {

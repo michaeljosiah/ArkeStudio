@@ -257,6 +257,22 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("set-routing-default"), capability: CapabilitySchema, modelId: z.string().min(1) })
     .strict(),
+  /**
+   * Configure one agent: which model runs it, and what it is for. Clearing a field returns
+   * that half to the shipped default. The confinement rules are not addressable here.
+   */
+  z
+    .object({
+      kind: z.literal("set-agent-config"),
+      agent: z.string().min(1).max(64),
+      /** null clears the override and returns the agent to the harness's own model. */
+      model: z.string().min(1).nullable().optional(),
+      /** null clears the override and returns the agent to its shipped brief. */
+      brief: z.string().min(1).max(8000).nullable().optional(),
+    })
+    .strict(),
+  /** Ask the harness what it can run — providers, their models, and its own defaults. */
+  z.object({ kind: z.literal("list-harness-models") }).strict(),
   /** SPEC-008 R-19: the rolling spend threshold — alerts, never blocks (D10). */
   z
     .object({

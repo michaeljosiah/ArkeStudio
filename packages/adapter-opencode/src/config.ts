@@ -1,4 +1,4 @@
-import { ROSTER } from "./roster.js";
+import { promptFor, ROSTER } from "./roster.js";
 
 /**
  * Session configuration written by Studio (SPEC-005 R-5, R-6, R-10, D5).
@@ -21,15 +21,22 @@ export interface SessionConfigInput {
   worldQueryUrl?: string;
   /** Concrete model for authoring, e.g. "anthropic/claude-sonnet-5" or "ollama/llama3.3". */
   model?: string;
+  /**
+   * Per-agent overrides from Settings. A brief replaces what the agent is for; it can never
+   * replace the confinement preamble or the tool denials below — those are what the accept
+   * gate assumes, and an agent talked out of them fails in ways that look like our bugs.
+   */
+  agents?: Record<string, { model?: string; brief?: string }>;
 }
 
 /** The opencode.json object written into a session's working directory. */
 export function buildSessionConfig(input: SessionConfigInput): Record<string, unknown> {
   const agent: Record<string, unknown> = {};
   for (const member of ROSTER) {
+    const override = input.agents?.[member.name];
     agent[member.name] = {
       description: member.description,
-      prompt: member.prompt,
+      prompt: override?.brief ? promptFor({ ...member, brief: override.brief }) : member.prompt,
       // Deny shell/network tools per agent; documented as risk reduction (R-10). The harness
       // honouring its own config is assumed; detection at accept is the layer that holds.
       tools: { ...DENIED_TOOLS },
@@ -55,7 +62,10 @@ export function buildSessionConfig(input: SessionConfigInput): Record<string, un
         webfetch: "deny",
         websearch: "deny",
       },
-      ...(input.model ? { model: input.model } : {}),
+      // The agent's own choice wins over the session-wide one; absent, OpenCode keeps using
+      // whatever it is configured with, which is the only safe default — pinning a model the
+      // user's OpenCode has no auth for would break every session.
+      ...(override?.model ?? input.model ? { model: override?.model ?? input.model } : {}),
     };
   }
   return {

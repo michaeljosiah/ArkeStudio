@@ -927,6 +927,16 @@ export function validateProvider(provider: ProviderId): void {
   send({ kind: "validate-provider", provider });
 }
 
+/** Configure one agent. null clears that half back to what shipped. */
+export function setAgentConfig(agent: string, patch: { model?: string | null; brief?: string | null }): void {
+  send({ kind: "set-agent-config", agent, ...patch });
+}
+
+/** Ask the harness what it can run. Nothing happens if it is not up — the list stays empty. */
+export function listHarnessModels(): void {
+  send({ kind: "list-harness-models" });
+}
+
 export function setRoutingDefault(capability: Capability, modelId: string): void {
   send({ kind: "set-routing-default", capability, modelId });
 }

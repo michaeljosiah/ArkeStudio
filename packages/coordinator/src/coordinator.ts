@@ -108,8 +108,17 @@ export interface CoordinatorOptions {
   appRoot?: string;
   /** Session-config builders from the adapter package, injected to keep dependencies one-way. */
   authoring?: {
-    buildConfig: (input: { worldQueryUrl?: string }) => Record<string, unknown>;
+    buildConfig: (input: {
+      worldQueryUrl?: string;
+      agents?: Record<string, { model?: string; brief?: string }>;
+    }) => Record<string, unknown>;
     agentForPurpose: (purpose: "authoring" | "drafting" | "extraction" | "ask") => string;
+    /**
+     * The shipped roster, injected like everything else from the adapter package. The
+     * coordinator needs it to show what each agent is for and to tell an edited brief from the
+     * original — it never needs to know how a prompt is assembled.
+     */
+    roster?: ReadonlyArray<{ name: string; description: string; brief: string }>;
   };
   /** SPEC-008: credential cipher (Electron safeStorage in the desktop; a fake in tests). */
   cipher?: Cipher;
@@ -178,6 +187,10 @@ export class Coordinator {
   private readonly carrying = new Map<string, Promise<void>>();
   /** Documents being read for facts right now, so the reading can be stopped (SPEC-015 §2). */
   private readonly reading = new Map<string, AbortController>();
+  /** Session config builder with the user's agent settings folded in. */
+  private readonly buildConfig: ((input: { worldQueryUrl?: string }) => Record<string, unknown>) | undefined;
+  /** Per-agent model and brief overrides, as last read from settings. */
+  private agentOverrides: Record<string, { model?: string; brief?: string }> | undefined;
   private started = false;
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
   private readonly secrets = new SecretRegistry();
@@ -250,18 +263,25 @@ export class Coordinator {
       },
     });
     this.worldQuery = new WorldQueryServer(() => this.opts.provider.openStore?.() ?? null);
+    // Every session config goes through here, so a per-agent override reaches genesis,
+    // authoring, extraction and ask alike — or none of them. Read at build time rather than
+    // captured, so changing a model in Settings applies to the next session, not the next run.
+    const configure = opts.authoring?.buildConfig;
+    this.buildConfig = configure
+      ? (input) => configure({ ...input, ...(this.agentOverrides ? { agents: this.agentOverrides } : {}) })
+      : undefined;
     this.grants = opts.appRoot ? new GrantStore(opts.appRoot) : null;
     this.authoring =
       opts.adapter && opts.authoring
         ? new AuthoringService(opts.adapter, (event) => this.emit(event), {
-            buildConfig: opts.authoring.buildConfig,
+            buildConfig: this.buildConfig!,
             agentForPurpose: opts.authoring.agentForPurpose,
           })
         : null;
     this.genesis =
       opts.adapter && opts.authoring
         ? new GenesisService(opts.adapter, (event) => this.emit(event), {
-            buildConfig: opts.authoring.buildConfig,
+            buildConfig: this.buildConfig!,
           })
         : null;
     this.setup =
@@ -278,7 +298,7 @@ export class Coordinator {
         : null;
     this.askService = opts.authoring
       ? new AskService(opts.adapter, {
-          buildConfig: opts.authoring.buildConfig,
+          buildConfig: this.buildConfig!,
           scratchRoot: opts.appRoot ? `${opts.appRoot}/.ask` : `${opts.changeLogPath}.ask`,
         })
       : null;
@@ -472,6 +492,10 @@ export class Coordinator {
     await this.providerService.init();
     const manifest = this.opts.manifest ?? null;
     const settings = this.appSettings ? await this.appSettings.load() : null;
+    // Read once here so the first session of the run already carries the user's choices —
+    // not the second, after something happened to touch settings.
+    this.agentOverrides = settings?.agents;
+    this.refreshAgents(settings?.agents ?? {});
     const entries = this.ledger ? await this.ledger.readAll() : [];
     this.readModel.seedAppConfig({
       manifest,
@@ -1127,6 +1151,29 @@ export class Coordinator {
         });
         return;
       }
+      case "set-agent-config": {
+        if (!this.appSettings) return;
+        const settings = await this.appSettings.setAgent(msg.agent, {
+          ...(msg.model !== undefined ? { model: msg.model } : {}),
+          ...(msg.brief !== undefined ? { brief: msg.brief } : {}),
+        });
+        this.agentOverrides = settings.agents;
+        // Sessions already open keep the config they were started with; the next one picks
+        // this up. Said plainly in the UI rather than pretended away.
+        this.refreshAgents(settings.agents);
+        this.transport.broadcastSnapshot();
+        return;
+      }
+      case "list-harness-models": {
+        const list = this.opts.adapter?.listModels;
+        if (!list) return;
+        const models = await list.call(this.opts.adapter).catch(() => []);
+        this.readModel.setHarnessModels(
+          models.map((m) => ({ id: m.id, provider: m.provider, ...(m.displayName ? { displayName: m.displayName } : {}) })),
+        );
+        this.transport.broadcastSnapshot();
+        return;
+      }
       case "set-spend-threshold": {
         if (!this.appSettings) return;
         const settings = await this.appSettings.setSpend(msg.thresholdMicroUsd, msg.periodDays);
@@ -1599,7 +1646,7 @@ export class Coordinator {
           if (!extractor && this.opts.adapter?.readiness().ready && this.opts.authoring) {
             extractor = makeAdapterExtractor(
               this.opts.adapter,
-              this.opts.authoring.buildConfig,
+              this.buildConfig!,
               this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`,
             );
           }
@@ -1901,6 +1948,28 @@ export class Coordinator {
         return;
       }
     }
+  }
+
+  /**
+   * The roster as it will actually run. Both halves are published — what shipped and what the
+   * user changed it to — so no screen has to guess which is in force.
+   */
+  private refreshAgents(overrides: Record<string, { model?: string; brief?: string }>): void {
+    const roster = this.opts.authoring?.roster;
+    if (!roster) return;
+    this.readModel.setAgents(
+      roster.map((a) => {
+        const over = overrides[a.name];
+        return {
+          name: a.name,
+          description: a.description,
+          shippedBrief: a.brief,
+          brief: over?.brief ?? a.brief,
+          ...(over?.model ? { model: over.model } : {}),
+          edited: over?.brief !== undefined && over.brief !== a.brief,
+        };
+      }),
+    );
   }
 
   /** Gate operations mutate the world; every client re-syncs from a fresh snapshot. */

@@ -21,6 +21,7 @@ import {
 import {
   agentForPurpose,
   buildSessionConfig,
+  ROSTER,
   credentialEnv,
   discoverOpenCode,
   OpenCodeAdapter,
@@ -173,7 +174,7 @@ async function start(): Promise<void> {
     jobsSeedPath: join(appRoot, "queue", "jobs.jsonl"),
     ledgerSeedPath: join(appRoot, "ledger.jsonl"),
     appRoot,
-    authoring: { buildConfig: buildSessionConfig, agentForPurpose },
+    authoring: { buildConfig: buildSessionConfig, agentForPurpose, roster: ROSTER },
     cipher,
     validators: providerClients,
     manifest: SHIPPED_MANIFEST,
