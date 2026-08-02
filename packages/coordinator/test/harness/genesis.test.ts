@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { buildSessionConfig } from "@arke-studio/adapter-opencode";
 import type { DomainEvent, HarnessAdapter, HarnessEvent } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
+import { attachToSandbox } from "../../src/artifacts/genesis-attachments.js";
 import { GenesisService } from "../../src/harness/genesis.js";
 
 /** An adapter that behaves like a world-author: writes draft.json into its cwd, then replies. */
@@ -252,6 +253,27 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     assert.equal(adapter.prompts.length, 2, "one conversation turn, then one narrow ask");
     const statuses = events.filter((e) => e.type === "genesis.status").map((e) => (e.type === "genesis.status" ? e.status : ""));
     assert.deepEqual(statuses, ["running", "completed"]);
+  });
+
+  it("tells the agent what it has been handed, once, and not again after that", async () => {
+    // Handing a file over has to mean something in the conversation. It sits in the agent's
+    // own working directory, but a model does not go looking — so it is named in the prompt,
+    // once. Named every turn it reads as an instruction to keep re-reading it.
+    const dir = await tempDir("arke-genesis-attach-");
+    const adapter = talkingAdapter();
+    const genesis = new GenesisService(adapter, () => {}, { buildConfig: () => buildSessionConfig({}) });
+    await attachToSandbox(dir, await (async () => {
+      const src = join(await tempDir("arke-genesis-src-"), "Series Bible.md");
+      await writeFile(src, "# The Undersong\n");
+      return src;
+    })());
+
+    await genesis.run(dir, "gen-attach", "A lighthouse that only appears in fog.");
+    assert.match(adapter.prompts[0]!, /attachments\/series-bible\.md/, "the first turn names it");
+    assert.ok(!/attachments/.test(adapter.prompts[1]!), "the narrow draft ask does not repeat it");
+
+    await genesis.run(dir, "gen-attach", "Who keeps the light?");
+    assert.ok(!/attachments/.test(adapter.prompts[2]!), "and neither does the next turn");
   });
 
   it("the wall clock ends the turn even when the harness never answers", async () => {

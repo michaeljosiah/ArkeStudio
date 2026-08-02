@@ -1,11 +1,12 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   GenesisDraftSchema,
   type DomainEvent,
   type GenesisDraft,
   type HarnessAdapter,
 } from "@arke-studio/contracts";
+import { GENESIS_ATTACHMENTS_DIR, sandboxAttachments } from "../artifacts/genesis-attachments.js";
 import { atomicWriteFile } from "../world/atomic.js";
 
 /**
@@ -64,6 +65,13 @@ The author says:`;
 export class GenesisService {
   private readonly turns = new Map<string, ActiveTurn>();
   private readonly sessions = new Map<string, string>();
+  /**
+   * Which attachments the agent has already been told about. Handing over a file has to mean
+   * something in the conversation — the file is in its working directory, but a model does not
+   * go looking. Announced once each: a list repeated every turn reads as an instruction to keep
+   * re-reading them.
+   */
+  private readonly announced = new Map<string, Set<string>>();
 
   constructor(
     private readonly adapter: HarnessAdapter,
@@ -78,6 +86,18 @@ export class GenesisService {
   /** The conversation is over — begun or abandoned; the sandbox's fate is the caller's. */
   release(genesisId: string): void {
     this.sessions.delete(genesisId);
+    this.announced.delete(genesisId);
+  }
+
+  /** The line that tells the agent what it has been handed, for files it has not seen named. */
+  private async handoverNote(dir: string, genesisId: string): Promise<string> {
+    const seen = this.announced.get(genesisId) ?? new Set<string>();
+    const fresh = (await sandboxAttachments(dir)).map((p) => basename(p)).filter((n) => !seen.has(n));
+    if (fresh.length === 0) return "";
+    for (const name of fresh) seen.add(name);
+    this.announced.set(genesisId, seen);
+    const list = fresh.map((n) => `./${GENESIS_ATTACHMENTS_DIR}/${n}`).join(", ");
+    return `\n\n[The author has attached ${list} — read what is useful before replying, and use it rather than inventing around it.]`;
   }
 
   /** One conversational turn in the sandbox. Failure is a stated status, never a throw. */
@@ -149,9 +169,10 @@ export class GenesisService {
 
     try {
       const events = this.adapter.streamEvents(abort.signal);
+      const handover = await this.handoverNote(dir, genesisId);
       await this.adapter.dispatchAsync({
         sessionId,
-        parts: [{ type: "text", text: firstTurn ? `${PROTOCOL}\n\n${text}` : text }],
+        parts: [{ type: "text", text: `${firstTurn ? `${PROTOCOL}\n\n` : ""}${text}${handover}` }],
       });
 
       for await (const event of events) {

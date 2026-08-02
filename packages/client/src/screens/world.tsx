@@ -2434,8 +2434,10 @@ export function CanonThreadScreen() {
               {...(worldId === undefined ? {} : { onAttach: () => attachFiles(worldId) })}
               {...(worldId !== undefined && hostCanAttach()
                 ? {
-                    onAttachFiles: (files: readonly File[]) => attachHostFiles(worldId, files),
-                    onAttachText: (text: string) => attachHostText(worldId, text, "pasted-note.txt"),
+                    onAttachFiles: (files: readonly File[]) =>
+                      attachHostFiles({ kind: "file-artifact", worldId }, files),
+                    onAttachText: (text: string) =>
+                      attachHostText({ kind: "file-artifact", worldId }, text, "pasted-note.txt"),
                   }
                 : {})}
               attachments={attached}

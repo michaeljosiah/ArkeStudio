@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
+import { GenesisIdSchema, ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
 
@@ -29,6 +29,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       logline: z.string().max(500).optional(),
       tone: z.string().max(200).optional(),
       genre: z.string().max(200).optional(),
+      /**
+       * Begun from a genesis conversation: whatever was attached to it waits in that sandbox
+       * and is filed into the world as it opens. Without this the files would be swept with
+       * the sandbox, and handing something over would have meant nothing.
+       */
+      genesisId: GenesisIdSchema.optional(),
     })
     .strict(),
   /** SPEC-002: reload after an external change made the open world stale (R-23). */
@@ -101,14 +107,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("genesis-chat"),
-      genesisId: z.string().regex(/^[a-z0-9][a-z0-9-]{2,40}$/),
+      genesisId: GenesisIdSchema,
       text: z.string().min(1).max(4000),
     })
     .strict(),
   /** The genesis conversation is over (begun or abandoned) — the sandbox is removed. */
-  z
-    .object({ kind: z.literal("genesis-discard"), genesisId: z.string().regex(/^[a-z0-9][a-z0-9-]{2,40}$/) })
-    .strict(),
+  z.object({ kind: z.literal("genesis-discard"), genesisId: GenesisIdSchema }).strict(),
   /** SPEC-005 R-16: a human's decision on a harness backstop prompt. */
   z
     .object({
@@ -532,6 +536,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("attach-files"), worldId: UlidSchema, links: z.array(z.string()).optional() })
     .strict(),
+  /**
+   * The same two gestures before a world exists. A genesis conversation has no world to file
+   * into, so what is attached waits in the sandbox — which is also the agent's own working
+   * directory, so it can read what you handed it — and moves into the world at Begin.
+   */
+  z
+    .object({ kind: z.literal("genesis-attach"), genesisId: GenesisIdSchema, sourcePath: z.string().min(1) })
+    .strict(),
+  z.object({ kind: z.literal("genesis-attach-files"), genesisId: GenesisIdSchema }).strict(),
   /** SPEC-015 R-9..R-11: stage one — file everything, exclude system files, report all of it. */
   z.object({ kind: z.literal("import-folder"), worldId: UlidSchema, sourcePath: z.string().min(1) }).strict(),
   /** SPEC-015 R-12..R-14: stage two — grounded extraction into a pending batch. */

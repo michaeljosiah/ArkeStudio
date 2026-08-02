@@ -30,6 +30,14 @@ export function ulid(now: number = Date.now()): string {
 
 export const UlidSchema = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/, "expected a 26-char Crockford ULID");
 
+/**
+ * A genesis conversation's id. Not a ULID: it exists before the world does, and it names a
+ * directory on disk, so it is held to what a directory name may safely be.
+ */
+export const GenesisIdSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9-]{2,40}$/, "expected a genesis id: lowercase, digits and dashes");
+
 /** Record-kind prefixes used across the world model and the app-level logs. */
 export const ID_PREFIXES = {
   take: "tk",
