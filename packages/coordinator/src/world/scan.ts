@@ -238,8 +238,14 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     .filter((c): c is NonNullable<typeof c> => c !== null)
     .slice(-50);
 
+  // One stat, not a walk: either the candidate is there or it is not.
+  const keyArtCandidate = await stat(toExtendedLength(join(dir, "incoming", "world-image", "candidate.png")))
+    .then(() => "incoming/world-image/candidate.png")
+    .catch(() => null);
+
   const bundle: WorldBundle = {
     meta,
+    keyArtCandidate,
     sheets,
     canon,
     referenceKits,

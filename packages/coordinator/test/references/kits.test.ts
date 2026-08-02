@@ -123,6 +123,22 @@ describe("the reference loop (R-6, D1, D3, §3.2)", () => {
     assert.notEqual(requests[0]!.input.params["prompt"], requests[3]!.input.params["prompt"]);
   });
 
+  it("every candidate and every tile lands under its own name", () => {
+    // Four candidates were asked for, four jobs dispatched, four charges made — and one file
+    // arrived, because each landed as the provider's own "image-1.png" in the same directory
+    // and overwrote the last. From the outside that is "generate looks does not work".
+    const where = (input: { landing?: { dir: string; name?: string } }) =>
+      `${input.landing?.dir ?? ""}/${input.landing?.name ?? "<unnamed>"}`;
+
+    const requests = establishRequests(WORLD_META, SHEET, null, MODEL, 4);
+    assert.equal(new Set(requests.map((r) => where(r.input))).size, 4, "four candidates, four filenames");
+
+    const angles = ["head-front", "head-left-three-quarter"] as const;
+    const tiles = angles.map((a) => tileRequest(WORLD_META, SHEET, null, MODEL, a));
+    assert.equal(new Set(tiles.map((t) => where(t.input))).size, 2, "a turnaround does not overwrite itself");
+    assert.match(where(tiles[0]!.input), /head-front/, "named by what it is");
+  });
+
   it("a stale tile is flagged wherever shown, never blocked (R-17)", () => {
     assert.equal(tileIsStale({ angle: "body-full", status: "generated", file: "b.png", sheetVersion: 3 }, 4), true);
     assert.equal(tileIsStale({ angle: "head-front", status: "locked", file: "a.png", sheetVersion: 4 }, 4), false);

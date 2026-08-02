@@ -361,6 +361,7 @@ const state: ClientState = {
       },
     ],
     problems: [],
+    keyArtCandidate: null,
     externalEdits: [],
     stale: false,
   },

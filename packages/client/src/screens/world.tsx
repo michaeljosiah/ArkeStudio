@@ -234,15 +234,17 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
 
   const mine = (state?.app.jobs ?? []).filter((j) => j.worldId === worldId && j.target.kind === "world-image");
   const running = mine.find((j) => j.status !== "succeeded" && j.status !== "failed" && j.status !== "cancelled");
+  // Whether there is something to answer comes from the world itself, not from the job that
+  // made it. A finished job stays in the queue log for good, so asking it "did you land a
+  // file" answered yes on every visit — long after that file had been used or discarded.
+  const waiting = state?.world?.keyArtCandidate ?? null;
   // The prompt is written by the harness before the job exists, so for a few seconds after the
   // click there is nothing in the queue to show. Without this the button looks like it missed.
   const [asking, setAsking] = useState(false);
   useEffect(() => {
     if (asking && mine.length > 0) setAsking(false);
   }, [asking, mine.length]);
-  const candidate = [...mine]
-    .reverse()
-    .find((j) => j.status === "succeeded" && (j.landedFiles?.length ?? 0) > 0 && !dismissed.includes(j.id));
+  const candidate = waiting !== null && !dismissed.includes(waiting) ? waiting : null;
 
   // A job that failed used to leave the button back at rest with nothing said — which is
   // exactly what "I clicked it and cannot see anything" looks like from the outside.
@@ -275,7 +277,7 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
     return (
       <div className="fy-keyart">
         <div className="fy-keyart__shot">
-          <Portrait worldSlug={slug} path={candidate.landedFiles![0]!} label="Key art, just made" radius={8} />
+          <Portrait worldSlug={slug} path={candidate} label="Key art, just made" radius={8} />
         </div>
         <div className="fy-keyart__ask">
           <span>Keep this as the world's key image?</span>
@@ -283,7 +285,7 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
             <Button
               onClick={() => {
                 useWorldImage(worldId);
-                setDismissed((prev) => [...prev, candidate.id]);
+                setDismissed((prev) => [...prev, candidate]);
               }}
             >
               Use this
@@ -293,7 +295,7 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
               className="fy-set__link"
               onClick={() => {
                 discardWorldImage(worldId);
-                setDismissed((prev) => [...prev, candidate.id]);
+                setDismissed((prev) => [...prev, candidate]);
               }}
             >
               Discard
@@ -2812,7 +2814,9 @@ export function ArtifactsScreen() {
         </div>
         <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 16 }}>
           <Input
-            placeholder="C:\\path\\to\\your\\notes"
+            // A JSX attribute string is literal — no escapes — so backslashes doubled for a JS
+            // string rendered on screen as they were written. The braces make it a JS string.
+            placeholder={"C:\\path\\to\\your\\notes"}
             value={importPath}
             onChange={(e) => setImportPath(e.target.value)}
             style={{ minWidth: 280 }}
