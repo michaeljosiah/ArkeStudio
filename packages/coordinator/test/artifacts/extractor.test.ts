@@ -11,9 +11,18 @@ import { makeAdapterExtractor } from "../../src/artifacts/model.js";
  * told to stop, which is the difference between a Stop button and a Stop-shaped button.
  */
 /** interrupt is optional on the port, so the mock states it — the extractor reaches it by cast. */
-type ExtractionMock = HarnessAdapter & { interrupted: string[]; interrupt: (sessionId: string) => Promise<void> };
+type ExtractionMock = HarnessAdapter & {
+  interrupted: string[];
+  interrupt: (sessionId: string) => Promise<void>;
+  /** Resolves once a turn is actually in flight, so a test can stop it without racing a clock. */
+  dispatched: Promise<void>;
+};
 
 function extractionAdapter(reply: string | null): ExtractionMock {
+  let announce: () => void = () => {};
+  const dispatched = new Promise<void>((resolve) => {
+    announce = resolve;
+  });
   const subscribers = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null }>();
   const push = (event: HarnessEvent) => {
     for (const sub of subscribers) {
@@ -24,6 +33,7 @@ function extractionAdapter(reply: string | null): ExtractionMock {
   };
   const adapter: ExtractionMock = {
     interrupted: [] as string[],
+    dispatched,
     id: "extractor",
     capabilities: () => new Set([]),
     readiness: () => ({ ready: true }),
@@ -34,6 +44,7 @@ function extractionAdapter(reply: string | null): ExtractionMock {
       return { sessionId: input.sessionId, correlationId: "c" };
     },
     async dispatchAsync(input) {
+      announce();
       if (reply !== null) {
         void (async () => push({ type: "message.completed", sessionId: input.sessionId, text: reply }))();
       }
@@ -95,10 +106,26 @@ describe("reading a document through the harness", () => {
     const extract = makeAdapterExtractor(adapter, () => buildSessionConfig({}), await tempDir("extract-"));
     const control = new AbortController();
     const running = extract("In the harbour the tide is law.", "bible.md", control.signal);
-    setTimeout(() => control.abort(), 50).unref?.();
+    // Waiting for the dispatch rather than a stopwatch: on a slow machine a timer-based stop
+    // lands during setup instead of mid-turn and tests something else entirely.
+    await adapter.dispatched;
+    control.abort();
 
     await assert.rejects(running, /stopped/, "a stop is an ending, not an empty result");
     assert.deepEqual(adapter.interrupted, ["ex_1"], "the session was told");
+  });
+
+  it("a stop landing during setup still stops it, rather than running to the wall clock", async () => {
+    // The gap CI found: the sandbox and the session are made before any turn, and a listener
+    // added to an already-aborted signal never fires. A stop in that window used to do nothing
+    // — the turn ran on and failed two minutes later with "took too long".
+    const adapter = extractionAdapter(null);
+    const extract = makeAdapterExtractor(adapter, () => buildSessionConfig({}), await tempDir("extract-"));
+    const control = new AbortController();
+    const running = extract("In the harbour the tide is law.", "bible.md", control.signal);
+    control.abort(); // while mkdir/config/createSession are still in flight
+
+    await assert.rejects(running, /stopped/);
   });
 
   it("does not even open a session when it was stopped before it began", async () => {

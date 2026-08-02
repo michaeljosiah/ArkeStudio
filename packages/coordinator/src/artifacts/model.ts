@@ -58,8 +58,13 @@ export function makeAdapterExtractor(
     await mkdir(toExtendedLength(sandbox), { recursive: true });
     await atomicWriteFile(join(sandbox, "opencode.json"), JSON.stringify(buildConfig({}), null, 2) + "\n");
     const session = await adapter.createSession({ purpose: "extraction", cwd: sandbox, agent: "extraction" });
+    // Making the sandbox and opening the session takes long enough to be stopped inside — on a
+    // slow machine, easily. Checked here so a stop during setup ends it before a turn is ever
+    // dispatched, rather than starting one nobody is waiting for.
+    if (signal?.aborted) throw stopped();
 
     const turn = async (prompt: string): Promise<string> => {
+      if (signal?.aborted) throw stopped();
       let finalText = "";
       const abort = new AbortController();
       // Stopping has to end the wait, not just ask the harness to stop: a session that
@@ -72,6 +77,10 @@ export function makeAdapterExtractor(
         abort.abort();
       };
       signal?.addEventListener("abort", onStop, { once: true });
+      // A listener added to an already-aborted signal never fires. Miss this and a stop that
+      // lands in the gap is a stop that does nothing: the turn runs to the 120s wall clock and
+      // reports "took too long" — which is what CI saw, and what the user would have seen.
+      if (signal?.aborted) onStop();
       const events = adapter.streamEvents(abort.signal);
       const collected = (async () => {
         for await (const event of events) {
