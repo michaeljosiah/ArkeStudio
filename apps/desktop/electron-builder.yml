@@ -14,13 +14,20 @@ npmRebuild: false
 # Where an installed copy looks for its next version (SPEC-016 R-12, R-13). This block is what
 # makes electron-builder emit `latest.yml` beside the installers and bake `app-update.yml` into
 # the app — without it, autoUpdater.checkForUpdates() has no feed to read and fails silently.
-# `releaseType: draft` means a tag build stages a release; a human publishes it, and only then
-# do installed copies see it.
+#
+# `releaseType: release` publishes the moment the tag builds, so a v* tag IS the upgrade — that
+# is the whole point, and it is why the tag must never be pushed casually.
+#
+# This setting and the workflow must move together. electron-builder refuses to upload into a
+# release whose type does not match ("existing type not compatible with publishing type"), and
+# it fails by SKIPPING the upload — leaving a release with no installer and no latest.yml, which
+# looks fine on GitHub and silently breaks every client's update check. So: nothing pre-creates
+# the release here; electron-builder creates it, published, and uploads into its own.
 publish:
   provider: github
   owner: michaeljosiah
   repo: ArkeStudio
-  releaseType: draft
+  releaseType: release
 directories:
   output: release
 files:

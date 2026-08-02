@@ -1,6 +1,9 @@
 # Cuts a version. Push a tag like v0.2.0 and this builds the installers, writes the update
-# metadata (latest.yml) that installed copies read, and stages a DRAFT GitHub Release holding
-# both. Nothing reaches an installed app until a human publishes that draft.
+# metadata (latest.yml) that installed copies read, and PUBLISHES a GitHub Release holding both.
+#
+# Published, not drafted: a v* tag is the upgrade. Every installed copy will offer this build the
+# next time it checks. That makes the tag the point of no return — it is easy to delete a release
+# and impossible to un-tell the copies that already saw it.
 #
 # The difference from package.yml: that one hands you an installer to test, on any branch, with
 # no update metadata and no release. This one is the published channel.
@@ -20,7 +23,7 @@ on:
         required: true
 
 permissions:
-  contents: write # creating the draft release and uploading its assets
+  contents: write # creating the release and uploading its assets
 
 jobs:
   windows:
@@ -54,14 +57,16 @@ jobs:
       - name: Build the workspaces
         run: npm run build
 
-      # --publish always: uploads the installers, the blockmaps and latest.yml to a draft
-      # release for this tag, creating it if it does not exist.
-      - name: Package and stage the draft release
+      # --publish always: creates the release for this tag and uploads the installers, the
+      # blockmaps and latest.yml into it. Nothing pre-creates the release — see the publish
+      # block in electron-builder.yml for why that matters.
+      - name: Package and publish the release
         run: npm run release --workspace @arke-studio/desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # A copy that outlives the draft, so a botched release can still be inspected.
+      # A copy that outlives the release, so a botched one can still be inspected after
+      # the release itself is deleted.
       - uses: actions/upload-artifact@v4
         with:
           name: ArkeStudio-${{ inputs.tag || github.ref_name }}
