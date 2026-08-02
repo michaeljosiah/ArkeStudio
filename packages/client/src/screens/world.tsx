@@ -6,6 +6,7 @@ import {
   designatedCompilation,
   formatMicroUsd,
   headGate,
+  PROVIDERS,
   tileIsStale,
   type CanonEntry,
   type Sheet,
@@ -32,6 +33,9 @@ import {
   stopExtraction,
   useReading,
   attachHostFiles,
+  discardWorldImage,
+  generateWorldImage,
+  useWorldImage,
   attachHostText,
   hostCanAttach,
   designateCompilation,
@@ -210,6 +214,87 @@ function WorldConditionBanners() {
 // ---- Overview --------------------------------------------------------------
 
 /** The world hub (prototype 1c): hero, the cast fanned like held cards, and two ways in. */
+/**
+ * The world's key image: generate it from the logline, then keep or discard what comes back.
+ *
+ * This is what the disabled button on the new-world screen always promised and never did. It
+ * lives here rather than there because an image job needs a world folder to land in, and on
+ * the new-world screen there is no world yet — which is exactly what that button's tooltip
+ * said, pointing at a hub that had nothing on it.
+ */
+function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: string; hasLogline: boolean }) {
+  const { state } = useStore();
+  const [dismissed, setDismissed] = useState<readonly string[]>([]);
+  const configured = new Set((state?.app.providers ?? []).filter((p) => p.configured).map((p) => p.id));
+  const routed = state?.app.routing.defaults["image"];
+  const model =
+    state?.app.manifest?.models.find((m) => m.id === routed && m.capability === "image") ??
+    state?.app.manifest?.models.find((m) => m.capability === "image");
+  const usable = model !== undefined && (configured.has(model.provider) || PROVIDERS[model.provider].local === true);
+
+  const mine = (state?.app.jobs ?? []).filter((j) => j.worldId === worldId && j.target.kind === "world-image");
+  const running = mine.find((j) => j.status !== "succeeded" && j.status !== "failed" && j.status !== "cancelled");
+  const candidate = [...mine]
+    .reverse()
+    .find((j) => j.status === "succeeded" && (j.landedFiles?.length ?? 0) > 0 && !dismissed.includes(j.id));
+
+  if (candidate) {
+    return (
+      <div className="fy-keyart">
+        <div className="fy-keyart__shot">
+          <Portrait worldSlug={slug} path={candidate.landedFiles![0]!} label="Key art, just made" radius={8} />
+        </div>
+        <div className="fy-keyart__ask">
+          <span>Keep this as the world's key image?</span>
+          <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <Button
+              onClick={() => {
+                useWorldImage(worldId);
+                setDismissed((prev) => [...prev, candidate.id]);
+              }}
+            >
+              Use this
+            </Button>
+            <button
+              type="button"
+              className="fy-set__link"
+              onClick={() => {
+                discardWorldImage(worldId);
+                setDismissed((prev) => [...prev, candidate.id]);
+              }}
+            >
+              Discard
+            </button>
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // Both reasons name the thing to go and fix, rather than greying out in silence.
+  const reason = !hasLogline
+    ? "Give the world a logline first — it is what the image is made from"
+    : !usable
+      ? "Frames & stills has no provider with a key — set one in Settings"
+      : undefined;
+  return (
+    <div className="fy-keyart">
+      <Button
+        variant="ghost"
+        disabled={running !== undefined || reason !== undefined}
+        {...(reason ? { title: reason } : {})}
+        onClick={() => generateWorldImage(worldId)}
+      >
+        {running ? "Making the key art…" : "Generate key art from the logline"}
+      </Button>
+      <span className="fy-keyart__note">
+        {reason ??
+          (model ? `${PROVIDERS[model.provider].displayName} · ${model.displayName} · comes back for a yes` : "")}
+      </span>
+    </div>
+  );
+}
+
 export function WorldOverviewScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
@@ -244,6 +329,7 @@ export function WorldOverviewScreen() {
         </div>
         <h1 className="fy-hero__title">{world.meta.name}</h1>
         {world.meta.logline && <p className="fy-hero__lede">{world.meta.logline}</p>}
+        <WorldKeyArt worldId={worldId!} slug={world.meta.slug} hasLogline={Boolean(world.meta.logline)} />
       </div>
       <div className="fy-fan">
         {characters.map((sheet, i) => {

@@ -684,6 +684,22 @@ export function genesisAttachFiles(genesisId: string): void {
   send({ kind: "genesis-attach-files", genesisId });
 }
 
+/**
+ * The world's key image, from its own name, logline and tone. An ordinary image job: estimated
+ * before it runs, in the ledger, cancellable from Activity like anything else that spends.
+ */
+export function generateWorldImage(worldId: string): void {
+  send({ kind: "generate-world-image", worldId });
+}
+
+export function useWorldImage(worldId: string): void {
+  send({ kind: "use-world-image", worldId });
+}
+
+export function discardWorldImage(worldId: string): void {
+  send({ kind: "discard-world-image", worldId });
+}
+
 /** Move a world out of the library. The folder survives in archive/ — this is not a delete. */
 export function archiveWorld(worldId: string): void {
   send({ kind: "archive-world", worldId });

@@ -772,7 +772,9 @@ export function NewWorldScreen() {
               }}
             >
               <span style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)" }}>No world image yet</span>
-              <Button disabled title="Image jobs need the world folder — generate from the hub once it exists">
+              {/* Still disabled here, and now honestly so: an image job needs a world folder
+                  to land in, and the hub it points at can finally do it. */}
+              <Button disabled title="Image jobs need the world folder — generate it from the world's hub, once you begin">
                 Generate from the logline
               </Button>
               <span className="fy-mono" style={{ fontSize: 9 }}>
@@ -1309,6 +1311,7 @@ const ROUTED_CAPABILITIES: readonly Capability[] = ["video", "image", "voice-tts
 export function SettingsWhoDoesWhatScreen() {
   const { state } = useStore();
   const manifest = state?.app.manifest ?? null;
+  const configured = new Set((state?.app.providers ?? []).filter((p) => p.configured).map((p) => p.id));
   const routing = state?.app.routing ?? { defaults: {}, faults: [] };
   const drift = state?.app.drift ?? [];
   return (
@@ -1324,6 +1327,12 @@ export function SettingsWhoDoesWhatScreen() {
         const options = (manifest?.models ?? []).filter((m) => m.capability === capability);
         const selected = routing.defaults[capability];
         const selectedModel = options.find((m) => m.id === selected);
+        // A model whose provider has no key cannot run. It stays listed, so the option is known
+        // to exist, and stays unselectable, so a dispatch cannot be routed into a dead end and
+        // fail after the estimate has been shown and accepted.
+        const usable = (m: (typeof options)[number]) =>
+          configured.has(m.provider) || PROVIDER_TABLE[m.provider].local === true;
+        const stranded = selectedModel !== undefined && !usable(selectedModel);
         return (
           <div key={capability} className="fy-set__row">
             <span className="fy-set__routelabel">{CAPABILITY_LABEL[capability]}</span>
@@ -1336,14 +1345,23 @@ export function SettingsWhoDoesWhatScreen() {
             >
               {options.length === 0 && <option value="">nothing in the manifest for this</option>}
               {selected === undefined && options.length > 0 && <option value="">no default set</option>}
-              {options.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {PROVIDER_TABLE[m.provider].displayName} · {m.displayName}
-                </option>
-              ))}
+              {[...options]
+                .sort((a, b) => Number(usable(b)) - Number(usable(a)))
+                .map((m) => (
+                  <option key={m.id} value={m.id} disabled={!usable(m)}>
+                    {PROVIDER_TABLE[m.provider].displayName} · {m.displayName}
+                    {usable(m) ? "" : ` — needs a ${PROVIDER_TABLE[m.provider].displayName} key`}
+                  </option>
+                ))}
             </select>
             {/* The capability copy is the manifest speaking (R-10): refs, frames, caps. */}
-            {selectedModel && <span className="fy-set__state">{modelCapabilityCopy(selectedModel)}</span>}
+            {selectedModel && !stranded && <span className="fy-set__state">{modelCapabilityCopy(selectedModel)}</span>}
+            {stranded && (
+              <span className="fy-set__state">
+                routed here, but {PROVIDER_TABLE[selectedModel.provider].displayName} has no key
+              </span>
+            )}
+            <span className={cx("fy-set__dot", stranded ? "fy-set__dot--warn" : selectedModel && "fy-set__dot--ok")} />
           </div>
         );
       })}

@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { copyFile, readFile, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   DomainEventSchema,
@@ -52,6 +52,12 @@ import { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
 import { previewCacheFile, VoiceService, type CloudVoiceSource, type SidecarLike } from "./voice/service.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import { establishRequests, imageModelFor, missingTileAngles, tileRequest } from "./references/generate.js";
+import {
+  WORLD_IMAGE_CANDIDATE,
+  WORLD_IMAGE_DIR,
+  WORLD_IMAGE_FILE,
+  worldImageRequest,
+} from "./references/world-image.js";
 import {
   chooseAnchor,
   compileGrid,
@@ -1813,6 +1819,41 @@ export class Coordinator {
           Uint8Array.from(Buffer.from(msg.audioBase64, "base64")),
           msg.contentType,
         );
+        return;
+      }
+      case "generate-world-image": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.jobQueue || !this.opts.manifest) return;
+        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
+        // The screen disables the button without a usable image model and says why; this is the
+        // backstop for a frame that arrives anyway.
+        if (!model) return;
+        await this.jobQueue.enqueue(worldImageRequest(store.getBundle().meta, model)).catch(() => {});
+        return;
+      }
+      case "use-world-image": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const from = join(store.dir, WORLD_IMAGE_DIR, WORLD_IMAGE_CANDIDATE);
+        const to = join(store.dir, WORLD_IMAGE_FILE);
+        // Through gateOp so the copy rides the world's suppression envelope — our own write
+        // must not come back at the user as an external edit (SPEC-011).
+        await store
+          .gateOp(async () => {
+            await copyFile(toExtendedLength(from), toExtendedLength(to));
+            await rm(toExtendedLength(from), { force: true });
+          })
+          .catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "discard-world-image": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await store
+          .gateOp(async () => rm(toExtendedLength(join(store.dir, WORLD_IMAGE_DIR, WORLD_IMAGE_CANDIDATE)), { force: true }))
+          .catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "establish-look": {
