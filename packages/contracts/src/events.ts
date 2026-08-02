@@ -193,6 +193,41 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
 
   /**
+   * Reading a document for facts (SPEC-015 stage two), as the chat sees it. Extraction was
+   * silent before: it ran, wrote a batch into the artifact and said nothing, so a screen could
+   * only find out by noticing the snapshot had changed. These two events are what let the offer
+   * under the composer say "reading…", "14 found", or "nothing this file evidences".
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("extraction.started"),
+      worldId: UlidSchema,
+      artifactId: z.string().min(1),
+      file: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("extraction.finished"),
+      worldId: UlidSchema,
+      artifactId: z.string().min(1),
+      file: z.string().min(1),
+      /**
+       * Every ending is named. "nothing" and "no-text" are not failures and must not read as
+       * one; "stopped" is the user's own doing; "unavailable" is the harness, not the file.
+       */
+      outcome: z.enum(["found", "nothing", "no-text", "stopped", "unavailable", "failed"]),
+      /** Offered, after verification — never what the model claimed. */
+      found: z.number().int().min(0),
+      /** Quotes that did not appear in the document, dropped before anyone saw them (D3). */
+      dropped: z.number().int().min(0),
+      reason: z.string().optional(),
+    })
+    .strict(),
+
+  /**
    * One file handed to a genesis conversation. Outcome rather than two event types: there is
    * no world yet, so there is no artifact to name and nothing to look up — a chip and, when it
    * would not go, the reason, is the whole of what the screen can say.

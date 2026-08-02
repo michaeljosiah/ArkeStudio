@@ -16,6 +16,7 @@ import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
 import { ActivityIcon, ChevronRight, Play, Plus, Search, Sliders } from "../components/icons.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
+import { ExtractionOffer } from "../components/extraction-offer.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Wave } from "./production.js";
 import { shortDateTime } from "../lib/format.js";
@@ -28,6 +29,8 @@ import {
   createProduction,
   createSheetFromSentence,
   attachFiles,
+  stopExtraction,
+  useReading,
   attachHostFiles,
   attachHostText,
   hostCanAttach,
@@ -2371,6 +2374,25 @@ export function CanonThreadScreen() {
     reason: n.reason,
   }));
 
+  // The offer to read a document, for the most recent one attached here. Only documents: an
+  // image or a recording has nothing to quote from, so they file with no offer at all. One at a
+  // time — a strip per attachment would be a queue of decisions nobody asked for.
+  const reading = useReading();
+  const [offerDone, setOfferDone] = useState<readonly string[]>([]);
+  const offerable = [...attached]
+    .reverse()
+    .find((a) => a.kind === "document" && !offerDone.includes(a.artifactId));
+  const offer = offerable
+    ? {
+        artifactId: offerable.artifactId,
+        file: offerable.file,
+        state: reading[offerable.artifactId]?.state,
+        found: reading[offerable.artifactId]?.found ?? 0,
+        dropped: reading[offerable.artifactId]?.dropped ?? 0,
+        reason: reading[offerable.artifactId]?.reason,
+      }
+    : null;
+
   // Draft-in-context (18a): the thread's conversation runs on a proposal over the entry file.
   const chatPath = entry ? `canon/${entry.id}.md` : null;
   const chatProposal =
@@ -2447,6 +2469,19 @@ export function CanonThreadScreen() {
                 ? {}
                 : { disabledReason: "Chat needs OpenCode running — the form below still settles it." })}
             />
+            {offer && worldId !== undefined && (
+              <ExtractionOffer
+                file={offer.file}
+                {...(offer.state !== undefined ? { state: offer.state } : {})}
+                found={offer.found}
+                dropped={offer.dropped}
+                {...(offer.reason !== undefined ? { reason: offer.reason } : {})}
+                onRead={() => extractArtifact(worldId, offer.artifactId)}
+                onStop={() => stopExtraction(worldId, offer.artifactId)}
+                onReview={() => navigate(`/w/${worldId}/artifacts`)}
+                onDismiss={() => setOfferDone((prev) => [...prev, offer.artifactId])}
+              />
+            )}
           </div>
           <div style={{ marginTop: "auto" }}>
             <div className="fy-fieldlabel">What it turned out to be</div>

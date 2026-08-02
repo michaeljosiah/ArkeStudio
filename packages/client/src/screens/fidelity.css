@@ -1158,6 +1158,49 @@
 }
 .fy-cx__chip--bad .fy-cx__chipname { color: var(--muted-foreground); }
 .fy-cx__chip--bad .fy-cx__chipkind { text-transform: none; letter-spacing: 0; }
+/*
+ * The extraction offer, under the composer (design-system/composer.html §07). A strip, not a
+ * dialog: it states what could happen next and never blocks the box above it.
+ */
+.fy-off {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--background);
+  padding: 11px 14px;
+}
+.fy-off__row { display: flex; align-items: center; gap: 10px; }
+.fy-off__dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--muted-foreground);
+}
+.fy-off__dot--live { background: var(--foreground); animation: fy-offpulse 1.4s ease-in-out infinite; }
+.fy-off__dot--done { background: var(--success); }
+@keyframes fy-offpulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.fy-off__t { flex: 1; min-width: 0; font: 400 12.5px/1.5 var(--font-sans); color: var(--muted-foreground); }
+.fy-off__t strong { color: var(--foreground); font-weight: 600; }
+.fy-off__acts { display: flex; gap: 6px; flex: none; }
+.fy-off__b {
+  height: 26px;
+  padding: 0 11px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--background);
+  font: 500 12px var(--font-sans);
+  color: var(--foreground);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-off__b:hover { background: var(--accent); }
+.fy-off__b--go { background: var(--primary); color: var(--primary-foreground); border-color: transparent; }
+.fy-off__b--go:hover { background: var(--primary); opacity: 0.9; }
+.fy-off__note { margin: 7px 0 0 16px; font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
 .fy-cx__reason {
   border-top: 1px solid var(--border);
   background: var(--neutral-50);

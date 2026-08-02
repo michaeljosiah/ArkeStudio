@@ -91,6 +91,20 @@ interface StoreState {
       refusals: Array<{ name: string; reason: string }>;
     }
   >;
+  /**
+   * Reading a document for facts, keyed by artifact. What the offer under the composer shows —
+   * and the reason it can say "nothing in it" rather than going quiet and looking broken.
+   */
+  reading: Record<
+    string,
+    {
+      file: string;
+      state: "reading" | "found" | "nothing" | "no-text" | "stopped" | "unavailable" | "failed";
+      found: number;
+      dropped: number;
+      reason?: string;
+    }
+  >;
   permissions: Record<string, PendingPermission>;
   askResults: Record<string, AskResult>;
   canonSearches: Record<string, CanonSearchState>;
@@ -144,6 +158,7 @@ let current: StoreState = {
   transcripts: {},
   genesis: {},
   setupStatus: null,
+  reading: {},
   permissions: {},
   askResults: {},
   canonSearches: {},
@@ -266,6 +281,7 @@ function handleFrame(json: string): void {
     let authoring = current.authoring;
     let transcripts = current.transcripts;
     let genesis = current.genesis;
+    let reading = current.reading;
     let setupStatus = current.setupStatus;
     let permissions = current.permissions;
     const event = frame.event;
@@ -325,6 +341,19 @@ function handleFrame(json: string): void {
                 attachments: [...g.attachments.filter((a) => a.name !== event.name), { name: event.name, kind: event.kind }],
               }
             : { ...g, refusals: [...g.refusals.slice(-2), { name: event.name, reason: event.reason ?? "it would not go in" }] },
+      };
+    } else if (event.type === "extraction.started") {
+      reading = { ...reading, [event.artifactId]: { file: event.file, state: "reading", found: 0, dropped: 0 } };
+    } else if (event.type === "extraction.finished") {
+      reading = {
+        ...reading,
+        [event.artifactId]: {
+          file: event.file,
+          state: event.outcome === "found" ? "found" : event.outcome,
+          found: event.found,
+          dropped: event.dropped,
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
       };
     } else if (event.type === "authoring.status") {
       const existing = authoring[event.proposalId] ?? { status: event.status, lines: [] };
@@ -462,6 +491,7 @@ function handleFrame(json: string): void {
       transcripts,
       genesis,
       setupStatus,
+      reading,
       permissions,
       askResults,
       canonSearches,
@@ -1084,6 +1114,15 @@ export function extractArtifact(worldId: string, artifactId: string): void {
   send({ kind: "extract-artifact", worldId, artifactId });
 }
 
+export function stopExtraction(worldId: string, artifactId: string): void {
+  send({ kind: "stop-extraction", worldId, artifactId });
+}
+
+/** How the reading of each document is going — the offer under the composer reads this. */
+export function useReading(): StoreState["reading"] {
+  return useStore().reading;
+}
+
 export function resolveExtraction(worldId: string, artifactId: string, candidateHash: string, decision: "accept" | "reject"): void {
   send({ kind: "resolve-extraction", worldId, artifactId, candidateHash, decision });
 }
@@ -1202,6 +1241,7 @@ export function __setStateForTest(state: ClientState): void {
   transcripts: {},
   genesis: {},
   setupStatus: null,
+    reading: {},
     permissions: {},
     askResults: {},
     canonSearches: {},

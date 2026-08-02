@@ -50,16 +50,37 @@ export function makeAdapterExtractor(
   adapter: HarnessAdapter,
   buildConfig: (input: { worldQueryUrl?: string }) => Record<string, unknown>,
   scratchRoot: string,
-): (text: string, artifactFile: string) => Promise<RawCandidate[]> {
-  return async (text, artifactFile) => {
+): (text: string, artifactFile: string, signal?: AbortSignal) => Promise<RawCandidate[]> {
+  return async (text, artifactFile, signal) => {
+    const stopped = () => new Error("stopped");
+    if (signal?.aborted) throw stopped();
     const sandbox = join(scratchRoot, `extract-${Date.now().toString(36)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
     await atomicWriteFile(join(sandbox, "opencode.json"), JSON.stringify(buildConfig({}), null, 2) + "\n");
     const session = await adapter.createSession({ purpose: "extraction", cwd: sandbox, agent: "extraction" });
+    // Making the sandbox and opening the session takes long enough to be stopped inside — on a
+    // slow machine, easily. Checked here so a stop during setup ends it before a turn is ever
+    // dispatched, rather than starting one nobody is waiting for.
+    if (signal?.aborted) throw stopped();
 
     const turn = async (prompt: string): Promise<string> => {
+      if (signal?.aborted) throw stopped();
       let finalText = "";
       const abort = new AbortController();
+      // Stopping has to end the wait, not just ask the harness to stop: a session that
+      // accepted a prompt without starting a turn answers an interrupt with silence, and the
+      // strip would sit on "Reading…" for as long as anyone watched. Same lesson as genesis.
+      const onStop = () => {
+        void (adapter as { interrupt?: (id: string) => Promise<void> }).interrupt
+          ?.call(adapter, session.sessionId)
+          .catch(() => {});
+        abort.abort();
+      };
+      signal?.addEventListener("abort", onStop, { once: true });
+      // A listener added to an already-aborted signal never fires. Miss this and a stop that
+      // lands in the gap is a stop that does nothing: the turn runs to the 120s wall clock and
+      // reports "took too long" — which is what CI saw, and what the user would have seen.
+      if (signal?.aborted) onStop();
       const events = adapter.streamEvents(abort.signal);
       const collected = (async () => {
         for await (const event of events) {
@@ -82,8 +103,13 @@ export function makeAdapterExtractor(
         await Promise.race([collected, timeout]);
       } finally {
         clearTimeout(deadline);
+        signal?.removeEventListener("abort", onStop);
         abort.abort();
       }
+      // The stream ends on a stop as well as on an answer, so an empty reply after an abort is
+      // a stop, not an extraction that found nothing. Saying which is the difference between
+      // "you stopped it" and "there is nothing in this document".
+      if (signal?.aborted) throw stopped();
       return finalText;
     };
 
