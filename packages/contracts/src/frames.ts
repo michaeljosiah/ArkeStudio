@@ -42,6 +42,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * whole, so what comes next — recovery, or deleting it for good — is a decision taken later
    * and somewhere else, never a side effect of tidying up.
    */
+  /**
+   * The world's key image, from what the world already says about itself: name, logline, tone
+   * and genre become one image job through the ordinary queue — estimated before it runs,
+   * recorded in the ledger, cancellable like anything else that spends.
+   */
+  z.object({ kind: z.literal("generate-world-image"), worldId: UlidSchema }).strict(),
+  /** Keep the candidate that came back — it becomes world-art.png. */
+  z.object({ kind: z.literal("use-world-image"), worldId: UlidSchema }).strict(),
+  /** Or do not: the candidate is deleted and the world keeps the image it had. */
+  z.object({ kind: z.literal("discard-world-image"), worldId: UlidSchema }).strict(),
   z.object({ kind: z.literal("archive-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: reload after an external change made the open world stale (R-23). */
   z.object({ kind: z.literal("reload-world"), worldId: UlidSchema }).strict(),

@@ -1520,6 +1520,25 @@
   cursor: default;
 }
 .fy-worldcard__confirmacts { display: flex; gap: 8px; justify-content: center; }
+/* The key-art offer under the world's hero: one row, never a dialog over the world. */
+.fy-keyart {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.fy-keyart__note { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
+.fy-keyart__shot { width: 132px; height: 74px; overflow: hidden; border-radius: 8px; flex: none; }
+.fy-keyart__ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font: 400 12.5px/1.5 var(--font-sans);
+  color: var(--muted-foreground);
+  text-align: left;
+}
 .fy-set__aboutname { font: 650 26px var(--font-sans); letter-spacing: -0.02em; }
 .fy-set__aboutmeta { font: 400 11px var(--font-mono); color: var(--neutral-400); }
 .fy-set__aboutline { font: 400 12.5px var(--font-sans); color: var(--muted-foreground); margin-top: 5px; }
