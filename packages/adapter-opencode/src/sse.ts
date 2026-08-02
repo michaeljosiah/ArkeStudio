@@ -6,6 +6,12 @@
 export async function* parseSse(
   body: ReadableStream<Uint8Array>,
   signal?: AbortSignal,
+  /**
+   * Called on every chunk read, including heartbeats — which carry no `data:` line and so are
+   * never yielded. A liveness watchdog has to watch the bytes, not the events, or it mistakes a
+   * quiet-but-healthy stream for a dead one.
+   */
+  onChunk?: () => void,
 ): AsyncGenerator<unknown> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -14,6 +20,7 @@ export async function* parseSse(
     while (true) {
       if (signal?.aborted) return;
       const { done, value } = await reader.read();
+      if (!done) onChunk?.();
       if (done) return;
       buffer += decoder.decode(value, { stream: true });
 

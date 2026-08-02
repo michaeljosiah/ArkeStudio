@@ -29,12 +29,21 @@ import { parseSse } from "./sse.js";
 export interface OpenCodeAdapterOptions {
   /** Resolved lazily so supervisor restarts on new ports keep working. */
   baseUrl: () => string;
+  /** Overridable so a test can prove the watchdog without waiting a minute and a half. */
+  streamSilenceMs?: number;
 }
 
 interface TrackedSession {
   purpose: CreateSessionInput["purpose"];
   cwd?: string;
 }
+
+/**
+ * Hang up on a stream that has said nothing for this long. OpenCode heartbeats every 30s, so
+ * this is three missed beats — long enough never to fire on a healthy quiet stream, short
+ * enough that a dead one is noticed before a turn's wall clock expires.
+ */
+const STREAM_SILENCE_MS = 90_000;
 
 export class OpenCodeAdapter implements HarnessAdapter {
   readonly id = "opencode";
@@ -158,6 +167,36 @@ export class OpenCodeAdapter implements HarnessAdapter {
 
   private readonly turnListeners = new Set<(event: HarnessEvent) => void>();
 
+  /** The last assistant message we have already reported per session, so a resync repeats nothing. */
+  private readonly reportedMessage = new Map<string, string>();
+
+  /**
+   * Catch up over REST after a reconnect. For every session this adapter owns, ask what the
+   * last assistant message is; if it finished and we never announced it, announce it now.
+   * Missing news is worse than late news — a caller waiting on message.completed has no other
+   * way to learn the turn is over.
+   */
+  private async resyncCompletedTurns(): Promise<void> {
+    for (const sessionId of this.sessions.keys()) {
+      try {
+        const messages = await this.http.req<
+          Array<{ info?: { id?: string; role?: string; time?: { completed?: number } }; parts?: Array<{ text?: string }> }>
+        >("GET", `/session/${sessionId}/message`);
+        if (!Array.isArray(messages)) continue;
+        const done = [...messages]
+          .reverse()
+          .find((m) => m.info?.role === "assistant" && typeof m.info.time?.completed === "number");
+        const id = done?.info?.id;
+        if (id === undefined || this.reportedMessage.get(sessionId) === id) continue;
+        this.reportedMessage.set(sessionId, id);
+        const text = (done?.parts ?? []).map((p) => p.text ?? "").join("");
+        if (text.trim().length > 0) this.push({ type: "message.completed", sessionId, text });
+      } catch {
+        /* a session we cannot read is not a reason to abandon the reconnect */
+      }
+    }
+  }
+
   /** Interrupt a running turn; the proposal keeps whatever the agent had written (R-12, R-13). */
   async interrupt(sessionId: string): Promise<void> {
     try {
@@ -253,40 +292,82 @@ export class OpenCodeAdapter implements HarnessAdapter {
 
   private readonly pumpAbort = new AbortController();
 
+  /**
+   * Read the harness's event stream, forever, reconnecting when it drops.
+   *
+   * The watchdog is the load-bearing part, and the app was deaf for hours without it.
+   *
+   * A stalled read is dropped on a watchdog. A half-open socket — the peer gone without a
+   * FIN, which is what a restarted harness leaves behind — never errors and never yields, so
+   * `for await` waits forever on a connection that will never speak again. OpenCode heartbeats
+   * every 30s; three missed beats and we hang up and dial again.
+   *
+   * Releasing `pumping` in `finally` is hygiene rather than the fix: this loop only ends when the
+   * adapter is disposed, so a leaked guard was never what kept it quiet. Measured, not assumed —
+   * the recovery test still passes with the guard deliberately leaked.
+   */
   private async pump(): Promise<void> {
     if (this.pumping) return;
     this.pumping = true;
-    const signal = this.pumpAbort.signal;
-    let backoff = 500;
-    while (!this.disposed && !signal.aborted) {
-      try {
-        const stream = await this.http.openEventStream(signal);
-        backoff = 500;
-        for await (const raw of parseSse(stream, signal)) {
-          const outcome = normalizeOpenCode(raw, this.normalizeState);
-          if (outcome.kind === "events") {
-            for (const event of outcome.events) {
-              // Only surface events for sessions this adapter created — the harness may be a
-              // user's own installation with its own unrelated activity.
-              if ("sessionId" in event && event.sessionId && !this.sessions.has(event.sessionId)) {
-                continue;
+    try {
+      const signal = this.pumpAbort.signal;
+      let backoff = 500;
+      while (!this.disposed && !signal.aborted) {
+        // Per attempt, so a stalled stream can be hung up on without disposing the adapter.
+        const attempt = new AbortController();
+        const giveUp = () => attempt.abort();
+        signal.addEventListener("abort", giveUp, { once: true });
+        let watchdog: ReturnType<typeof setTimeout> | undefined;
+        const heard = (): void => {
+          clearTimeout(watchdog);
+          watchdog = setTimeout(giveUp, this.opts.streamSilenceMs ?? STREAM_SILENCE_MS);
+          (watchdog as { unref?: () => void }).unref?.();
+        };
+        try {
+          const stream = await this.http.openEventStream(attempt.signal);
+          backoff = 500;
+          heard();
+          // OpenCode cannot replay what we missed (no Last-Event-ID), so ask REST what happened
+          // while we were not listening. Without this a turn that finished during the gap is
+          // lost for good and the caller waits out its whole deadline for news that already
+          // came and went. Arke's adapter resyncs on every reconnect for the same reason.
+          await this.resyncCompletedTurns();
+          for await (const raw of parseSse(stream, attempt.signal, heard)) {
+            const outcome = normalizeOpenCode(raw, this.normalizeState);
+            if (outcome.kind === "events") {
+              for (const event of outcome.events) {
+                // Remember what the stream already told us, so a later resync does not say it
+                // twice. correlationId carries the message id the completion came from.
+                if (event.type === "message.completed" && "sessionId" in event && event.correlationId) {
+                  this.reportedMessage.set(event.sessionId, event.correlationId);
+                }
+                // Only surface events for sessions this adapter created — the harness may be a
+                // user's own installation with its own unrelated activity.
+                if ("sessionId" in event && event.sessionId && !this.sessions.has(event.sessionId)) {
+                  continue;
+                }
+                this.push(event);
               }
-              this.push(event);
+            } else if (outcome.kind === "dead-letter") {
+              this.deadLetters.push({ reason: outcome.reason, at: Date.now() });
+              if (this.deadLetters.length > 100) this.deadLetters.shift();
             }
-          } else if (outcome.kind === "dead-letter") {
-            this.deadLetters.push({ reason: outcome.reason, at: Date.now() });
-            if (this.deadLetters.length > 100) this.deadLetters.shift();
           }
+        } catch {
+          /* stream dropped — reconnect below */
+        } finally {
+          clearTimeout(watchdog);
+          signal.removeEventListener("abort", giveUp);
         }
-      } catch {
-        /* stream dropped — reconnect below */
+        if (this.disposed || signal.aborted) return;
+        await new Promise((r) => {
+          const t = setTimeout(r, backoff);
+          (t as { unref?: () => void }).unref?.();
+        });
+        backoff = Math.min(backoff * 2, 10_000);
       }
-      if (this.disposed || signal.aborted) return;
-      await new Promise((r) => {
-        const t = setTimeout(r, backoff);
-        (t as { unref?: () => void }).unref?.();
-      });
-      backoff = Math.min(backoff * 2, 10_000);
+    } finally {
+      this.pumping = false;
     }
   }
 
