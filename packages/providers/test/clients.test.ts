@@ -104,6 +104,29 @@ describe("declarations are honest per provider (T-9)", () => {
   });
 });
 
+describe("openai image submission", () => {
+  it("sends only fields the endpoint takes, so a neutral param cannot 400 the job", async () => {
+    // Read from a real failure: params carried `references: []` — a FAL concept — and OpenAI
+    // answered 400. To the user that read as "the image failed", not "we sent a word it does
+    // not know", and nothing in the app said either.
+    let sent: Record<string, unknown> = {};
+    const fetchImpl: FetchLike = async (_url, init) => {
+      sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from("png").toString("base64") }] }), { status: 200 });
+    };
+    const client = new OpenAiClient(fetchImpl);
+    await client.submit("k", {
+      model: "gpt-image-2",
+      capability: "image",
+      params: { prompt: "a drowned harbour", references: [], size: "1024x1024" },
+    });
+    assert.equal(sent["prompt"], "a drowned harbour");
+    assert.equal(sent["size"], "1024x1024");
+    assert.equal(sent["model"], "gpt-image-2");
+    assert.ok(!("references" in sent), "the field OpenAI has never heard of does not go");
+  });
+});
+
 describe("fal submit/poll round-trip carries the endpoint in the remote id", () => {
   it("polls the endpoint-scoped status url", async () => {
     const seen: string[] = [];

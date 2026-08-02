@@ -20,7 +20,12 @@ import { toExtendedLength } from "../world/paths.js";
  * made. Nothing here is allowed to be the reason a button does nothing.
  */
 
-const WALL_CLOCK_MS = 45_000;
+/**
+ * Measured, not guessed. The first real run answered in 93 seconds and I had given up at 45,
+ * so the plain assembly went to the image model while a perfectly good prompt was still being
+ * written. Extraction allows 120s for the same kind of turn; this matches it.
+ */
+const WALL_CLOCK_MS = 120_000;
 const PromptSchema = z.object({ prompt: z.string().min(1).max(2000) });
 
 /** What the art director is told. Only what the world itself says — no invented context. */
