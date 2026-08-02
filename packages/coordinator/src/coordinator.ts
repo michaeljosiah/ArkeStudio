@@ -1031,6 +1031,22 @@ export class Coordinator {
             proposalId: draft.proposal.id,
           });
           await this.refreshWorldSnapshot(msg.worldId);
+          // Settling a sketch nobody asked to review. Beginning a world stages one of these per
+          // character and per place, and every one arrived in Needs you wanting a decision that
+          // had already been made by pressing Begin. A refusal here is not fatal: the proposal
+          // stays staged and the author can settle it themselves.
+          const settle = async () => {
+            if (msg.settle !== true) return;
+            const outcome = await gate.accept(draft.proposal.id).catch(() => null);
+            if (outcome === null || outcome.status !== "accepted") {
+              void this.appLog?.append({
+                kind: "sheet.settle-refused",
+                proposalId: draft.proposal.id,
+                status: outcome?.status ?? "threw",
+              });
+            }
+            await this.refreshWorldSnapshot(msg.worldId);
+          };
           // When the harness is up, the sheet-editor drafts the full sketch inside the
           // proposal; without it, the skeleton with the author's sentence still stands.
           if (this.authoring && this.opts.adapter?.readiness().ready) {
@@ -1047,7 +1063,12 @@ export class Coordinator {
                 },
                 worldQueryUrl,
               )
+              // Settled after the draft lands, so what is settled is the written sheet and not
+              // the empty skeleton it started as.
+              .then(() => settle())
               .then(() => this.refreshWorldSnapshot(msg.worldId));
+          } else {
+            await settle();
           }
         } catch {
           this.transport.broadcastSnapshot();

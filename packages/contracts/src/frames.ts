@@ -206,6 +206,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sheetType: z.enum(["character", "location", "faction"]),
       name: z.string().min(1).max(200),
       sentence: z.string().min(1).max(2000),
+      /**
+       * Settle it as soon as it is drafted, without asking. Used when beginning a world: the
+       * author already said yes to this cast by pressing Begin, and a sheet is a sketch that
+       * can be changed by typing in it. Asking six times in a row for permission to write down
+       * what they just described is a toll, not a gate.
+       *
+       * Everywhere else the gate stands. Joining the cast later is a deliberate act, and the
+       * review is the point of it.
+       */
+      settle: z.boolean().optional(),
     })
     .strict(),
   /** SPEC-007 R-12: duplicate a sheet — sketch, origin recorded at the source's version. */
