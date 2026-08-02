@@ -251,6 +251,54 @@ describe("the live adapter over the stub server", () => {
   });
 });
 
+describe("listing what the harness can run", () => {
+  const stub = new StubOpenCode();
+  let adapter: OpenCodeAdapter;
+
+  before(async () => {
+    await stub.start();
+    adapter = new OpenCodeAdapter({ baseUrl: () => stub.baseUrl() });
+    await adapter.init();
+  });
+  after(async () => {
+    await adapter.dispose();
+    await stub.stop();
+  });
+
+  it("asks what the user is signed in to, not what exists in the world", async () => {
+    // Measured against a real harness: /config/providers answers with 3 providers and 41
+    // models; /provider's full catalogue holds 178 providers and 5,864. The picker wants the
+    // first number.
+    stub.configProviders = {
+      providers: [
+        { id: "github-copilot", models: { "claude-sonnet-4.6": { name: "Claude Sonnet 4.6" }, "gpt-5.5": {} } },
+        { id: "openai", models: { "gpt-5.6-sol": { name: "GPT-5.6 Sol" } } },
+      ],
+      default: { "github-copilot": "claude-sonnet-4.6", openai: "gpt-5.6-sol" },
+    };
+    stub.apiModels = [{ id: "big-pickle", providerID: "opencode" }];
+
+    const models = await adapter.listModels();
+    assert.deepEqual(
+      models.map((m) => `${m.provider}/${m.id}`).sort(),
+      ["github-copilot/claude-sonnet-4.6", "github-copilot/gpt-5.5", "openai/gpt-5.6-sol"],
+      "the gateway's own catalogue is not the answer to this question",
+    );
+    assert.equal(models.find((m) => m.id === "claude-sonnet-4.6")?.isDefault, true);
+    assert.equal(models.find((m) => m.id === "gpt-5.5")?.isDefault, undefined);
+  });
+
+  it("falls back to the gateway catalogue when there is no /config/providers, minus the dead ones", async () => {
+    stub.configProviders = null;
+    stub.apiModels = [
+      { id: "big-pickle", providerID: "opencode", name: "Big Pickle" },
+      { id: "ling-3.0-flash-free", providerID: "opencode", status: "deprecated" },
+    ];
+    const models = await adapter.listModels();
+    assert.deepEqual(models.map((m) => m.id), ["big-pickle"], "deprecated models are not offered");
+  });
+});
+
 describe("per-agent settings", () => {
   type Agent = { prompt: string; model?: string; tools: Record<string, boolean>; permission: Record<string, string> };
   const agentsIn = (config: Record<string, unknown>) => config["agent"] as Record<string, Agent>;

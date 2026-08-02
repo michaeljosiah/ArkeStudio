@@ -20,6 +20,10 @@ export class StubOpenCode {
   readonly requests: CapturedRequest[] = [];
   private sseClients = new Set<ServerResponse>();
   private sessionCounter = 0;
+  /** What /config/providers answers with; null makes the endpoint absent (older servers). */
+  configProviders: { providers: Array<{ id: string; models: Record<string, { name?: string }> }>; default?: Record<string, string> } | null = null;
+  /** What /api/model answers with; null makes it absent. */
+  apiModels: Array<{ id: string; providerID: string; name?: string; status?: string }> | null = null;
   /** Paths advertised at /doc — tests override to simulate under-capable servers. */
   docPaths: string[] = [
     "/api/health",
@@ -95,6 +99,14 @@ export class StubOpenCode {
         }
         if (/^\/api\/session\/[^/]+\/permission\/[^/]+\/reply$/.test(url.pathname)) {
           res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({}));
+          return;
+        }
+        if (url.pathname === "/config/providers" && this.configProviders) {
+          res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(this.configProviders));
+          return;
+        }
+        if (url.pathname === "/api/model" && this.apiModels) {
+          res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ data: this.apiModels }));
           return;
         }
         res.writeHead(404).end();

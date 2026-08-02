@@ -28,8 +28,14 @@ export function SettingsAgentsScreen() {
     if (harnessReady) listHarnessModels();
   }, [harnessReady]);
 
+  // Grouped by provider, and inside each group the provider's own default first and named as
+  // such. Forty-odd models across three providers is a lot to read; the one they would have
+  // picked themselves is the one worth finding without reading.
   const byProvider = new Map<string, typeof models>();
   for (const m of models) byProvider.set(m.provider, [...(byProvider.get(m.provider) ?? []), m]);
+  for (const [provider, list] of byProvider) {
+    byProvider.set(provider, [...list].sort((a, b) => Number(b.isDefault ?? false) - Number(a.isDefault ?? false)));
+  }
 
   return (
     <div data-screen="settings-agents" className="fy-set">
@@ -59,6 +65,7 @@ export function SettingsAgentsScreen() {
                     {list.map((m) => (
                       <option key={`${provider}/${m.id}`} value={`${provider}/${m.id}`}>
                         {m.displayName ?? m.id}
+                        {m.isDefault ? " · this provider's default" : ""}
                       </option>
                     ))}
                   </optgroup>

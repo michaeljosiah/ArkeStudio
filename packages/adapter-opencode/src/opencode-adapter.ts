@@ -232,32 +232,52 @@ export class OpenCodeAdapter implements HarnessAdapter {
     return this.normalizeState.tokensBySession.get(sessionId) ?? 0;
   }
 
+  /**
+   * What this harness can actually run, and nothing else.
+   *
+   * `/config/providers` is the right question: it answers with the providers the user is
+   * authenticated for and their models — three providers and forty-one models on a real
+   * machine, against 178 providers and 5,864 models in `/provider`'s full catalogue.
+   *
+   * `/api/model` used to be asked first, which was a mistake worth recording. It answers with
+   * one provider's own gateway catalogue — 24 models, 17 of them marked deprecated — so the
+   * picker showed a long list of models the user had never heard of while omitting the
+   * providers they had actually signed in to. It stays as a fallback for servers with no
+   * `/config/providers`, with deprecated rows dropped.
+   */
   async listModels(): Promise<ModelInfo[]> {
     try {
-      const res = await this.http.req<{ data?: Array<{ id?: string; providerID?: string; name?: string }> }>(
-        "GET",
-        "/api/model",
-      );
+      const res = await this.http.req<{
+        providers?: Array<{ id: string; models?: Record<string, { name?: string }> }>;
+        default?: Record<string, string>;
+      }>("GET", "/config/providers");
+      const out: ModelInfo[] = [];
+      for (const provider of res.providers ?? []) {
+        const preferred = res.default?.[provider.id];
+        for (const [id, model] of Object.entries(provider.models ?? {})) {
+          out.push({
+            id,
+            provider: provider.id,
+            ...(model.name ? { displayName: model.name } : {}),
+            // What this provider would pick if we did not: worth putting first in its group.
+            ...(id === preferred ? { isDefault: true } : {}),
+          });
+        }
+      }
+      if (out.length > 0) return out;
+      throw new Error("no providers configured");
+    } catch {
+      const res = await this.http.req<{
+        data?: Array<{ id?: string; providerID?: string; name?: string; status?: string }>;
+      }>("GET", "/api/model");
       const rows = Array.isArray(res.data) ? res.data : [];
       return rows
-        .filter((m) => m.id)
+        .filter((m) => m.id && m.status !== "deprecated")
         .map((m) => ({
           id: m.id!,
           provider: m.providerID ?? "unknown",
           ...(m.name ? { displayName: m.name } : {}),
         }));
-    } catch {
-      const res = await this.http.req<{ providers?: Array<{ id: string; models?: Record<string, { name?: string }> }> }>(
-        "GET",
-        "/config/providers",
-      );
-      const out: ModelInfo[] = [];
-      for (const provider of res.providers ?? []) {
-        for (const [id, model] of Object.entries(provider.models ?? {})) {
-          out.push({ id, provider: provider.id, ...(model.name ? { displayName: model.name } : {}) });
-        }
-      }
-      return out;
     }
   }
 

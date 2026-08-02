@@ -186,7 +186,16 @@ export const ClientStateSchema = z
           .default([]),
         /** What the harness says it can run, when it has been asked. Empty until then. */
         harnessModels: z
-          .array(z.object({ id: z.string(), provider: z.string(), displayName: z.string().optional() }).strict())
+          .array(
+            z
+              .object({
+                id: z.string(),
+                provider: z.string(),
+                displayName: z.string().optional(),
+                isDefault: z.boolean().optional(),
+              })
+              .strict(),
+          )
           .default([]),
         spend: SpendStatusSchema.nullable().default(null),
         runtime: LocalRuntimeStatusSchema.nullable().default(null),

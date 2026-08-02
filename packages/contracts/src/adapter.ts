@@ -71,6 +71,8 @@ export interface ModelInfo {
   id: string;
   provider: string;
   displayName?: string;
+  /** The model this provider would use if nobody chose — shown first, marked as such. */
+  isDefault?: boolean;
 }
 
 export const PermissionVerb = z.enum(["once", "always", "reject"]);
