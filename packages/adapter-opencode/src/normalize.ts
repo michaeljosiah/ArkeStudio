@@ -249,7 +249,19 @@ export function normalizeOpenCode(raw: unknown, state: NormalizeState): Normaliz
       }
       // The /api generation marks turn completion on the message itself (`finish`), and does
       // not always follow with a session.idle — treat it as the turn's end.
-      if (info?.sessionID && role === "assistant" && typeof info.finish === "string" && info.finish.length > 0) {
+      //
+      // Except when the finish is a tool call. A turn that reads a file finishes its first
+      // message with "tool-calls" and carries straight on; taking that for the end reports a
+      // completed turn carrying no text, seconds before the agent says anything. The
+      // session.next branch above has always known this (`!/tool/i`) — this one did not, so a
+      // world-author asked to read an attachment answered with silence.
+      if (
+        info?.sessionID &&
+        role === "assistant" &&
+        typeof info.finish === "string" &&
+        info.finish.length > 0 &&
+        !/tool/i.test(info.finish)
+      ) {
         const last = state.textBySession.get(info.sessionID);
         state.textBySession.delete(info.sessionID);
         return {

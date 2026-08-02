@@ -95,6 +95,40 @@ describe("normalisation (R-14, R-15)", () => {
     assert.equal(state.tokensBySession.get(s), 650, "usage accumulates across steps");
   });
 
+  it("does not end the turn when a message finished only to call a tool", () => {
+    // Read from a real trace (2026-08-02): a world-author asked to read an attachment finished
+    // its first message with "tool-calls", read the file, and answered eight seconds later.
+    // Treating that first finish as the end reported a completed turn carrying no text, so the
+    // screen showed a spinner that stopped and nothing else — the agent was still working.
+    const state = createNormalizeState();
+    const s = "ses_api";
+    const message = (finish: string, extra: Record<string, unknown> = {}) =>
+      normalizeOpenCode(
+        { type: "message.updated", properties: { info: { id: "m1", sessionID: s, role: "assistant", finish, ...extra } } },
+        state,
+      );
+
+    // The text the agent had produced before reaching for the tool.
+    normalizeOpenCode(
+      {
+        type: "message.part.updated",
+        properties: { part: { sessionID: s, messageID: "m1", type: "text", text: "Let me read it." } },
+      },
+      state,
+    );
+
+    for (const midTurn of ["tool-calls", "tool_calls", "TOOL_USE"]) {
+      assert.equal(message(midTurn).kind, "ignore", `"${midTurn}" is a continuation, not an ending`);
+    }
+    assert.ok(state.textBySession.get(s), "and the text so far is still held, not thrown away");
+
+    const end = message("stop");
+    assert.equal(end.kind, "events");
+    const completed = end.kind === "events" ? end.events[0]! : null;
+    assert.equal(completed?.type, "message.completed");
+    assert.equal(completed?.type === "message.completed" && completed.text, "Let me read it.");
+  });
+
   it("tracks token usage for the budget check (R-13)", () => {
     const state = createNormalizeState();
     normalizeOpenCode(
