@@ -29,6 +29,11 @@ export interface ChildRecord {
   ownerStartedAt: number;
   /** When the record was made (epoch ms) — immediately after spawn, so ≈ child start. */
   recordedAt: number;
+  /**
+   * For a grandchild found behind a shell-shim wrapper: the wrapper's recorded pid.
+   * Lineage metadata only — the sweep treats every record the same way.
+   */
+  parentPid?: number;
 }
 
 export interface ProcessInfo {
@@ -134,8 +139,58 @@ export const platformProbe: ProcessProbe = async (pids) => {
   return process.platform === "win32" ? probeWin32(valid) : probePosix(valid);
 };
 
+export interface DescendantInfo extends ProcessInfo {
+  parentPid: number;
+}
+
+/**
+ * Live descendants of `rootPid`, transitively. taskkill /T can only walk a tree whose root
+ * is still alive; this snapshot is what lets a stop or sweep reach the grandchildren after
+ * the wrapper between them has died. Windows-only — elsewhere there is no shell shim and no
+ * wrapper, so the answer is always empty. Throws when the process table cannot be read.
+ */
+export async function listDescendants(rootPid: number): Promise<DescendantInfo[]> {
+  if (process.platform !== "win32") return [];
+  if (!Number.isSafeInteger(rootPid) || rootPid <= 0) return [];
+  // One query for the whole table; ParentProcessId is not filterable transitively in CIM,
+  // so the tree walk happens here. Dead parents keep their pid in ParentProcessId, which is
+  // exactly what makes orphaned grandchildren findable.
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "$rows = @(Get-CimInstance Win32_Process | ForEach-Object {",
+    "  [pscustomobject]@{ p = [int]$_.ProcessId; pp = [int]$_.ParentProcessId; n = [string]$_.Name; s = if ($_.CreationDate) { ([System.DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } else { $null } }",
+    "})",
+    "ConvertTo-Json -Compress -InputObject $rows",
+  ].join("\n");
+  const stdout = await runCollect(
+    powershellPath(),
+    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+  );
+  const rows = JSON.parse(stdout.trim() === "" ? "[]" : stdout) as { p: number; pp: number; n: string; s: number | null }[];
+  const byParent = new Map<number, typeof rows>();
+  for (const row of rows) {
+    const siblings = byParent.get(row.pp);
+    if (siblings) siblings.push(row);
+    else byParent.set(row.pp, [row]);
+  }
+  const found: DescendantInfo[] = [];
+  const visited = new Set<number>([rootPid]);
+  const queue = [rootPid];
+  // Recycled pids can make the parent graph cyclic; the visited set keeps the walk finite.
+  while (queue.length > 0) {
+    const pid = queue.shift()!;
+    for (const row of byParent.get(pid) ?? []) {
+      if (visited.has(row.p)) continue;
+      visited.add(row.p);
+      found.push({ pid: row.p, parentPid: row.pp, image: row.n.toLowerCase(), startedAt: row.s ?? null });
+      queue.push(row.p);
+    }
+  }
+  return found;
+}
+
 /** Force-kill the whole tree under `pid` — grandchildren orphan on Windows otherwise. */
-async function killTree(pid: number): Promise<void> {
+export async function killTree(pid: number): Promise<void> {
   if (process.platform === "win32") {
     await runCollect("taskkill", ["/pid", String(pid), "/T", "/F"], { okCodes: [0, 128, 255, 1] }).catch(() => "");
   } else {

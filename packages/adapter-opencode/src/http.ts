@@ -77,13 +77,33 @@ export class OpenCodeHttp {
    * 35 KB with the deltas and the idle, /api/event 2.7 KB with a single update, /event a
    * heartbeat and nothing else. A turn ran and the app never heard about it.
    */
-  async openEventStream(signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+  async openEventStream(signal?: AbortSignal): Promise<{ path: string; body: ReadableStream<Uint8Array> }> {
+    // Never dial port 0 — the supervisor has no child yet. Dialling anyway is how the app went
+    // deaf on every boot: /global/event was tried before the port existed and REJECTED, the
+    // child came up milliseconds later, and the loop fell through to /api/event on the real
+    // port — connected, heartbeating, and carrying nothing. A connection failure must retry
+    // the SAME channel, never downgrade it; only an HTTP answer saying "no such endpoint"
+    // (404) may move the loop on.
+    while (new URL(this.opts.baseUrl()).port === "0") {
+      if (signal?.aborted) throw new OpenCodeError("GET", "/global/event", 0, "aborted before the harness had a port");
+      await new Promise((r) => {
+        const t = setTimeout(r, 250);
+        (t as { unref?: () => void }).unref?.();
+      });
+    }
     for (const path of ["/global/event", "/api/event", "/event"]) {
       const res = await fetch(this.url(path), {
         headers: { Accept: "text/event-stream" },
         ...(signal ? { signal } : {}),
       }).catch(() => null);
-      if (res?.ok && res.body) return res.body;
+      if (res?.ok && res.body) return { path, body: res.body };
+      // Connection failure (null) or a server error: this endpoint may still be the right one —
+      // fail the attempt and let the caller's backoff retry it, rather than sliding down to a
+      // channel that answers but starves.
+      if (res === null || res.status >= 500) {
+        throw new OpenCodeError("GET", path, res?.status ?? 0, "event stream unreachable — retry, do not downgrade");
+      }
+      // 404 and friends: genuinely absent on this server generation — try the next channel.
     }
     throw new OpenCodeError("GET", "/api/event", 0, "no event stream reachable");
   }
