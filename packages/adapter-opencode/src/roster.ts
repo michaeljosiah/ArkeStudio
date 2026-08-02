@@ -85,6 +85,23 @@ canon with search_canon before committing the story to a fact, and surface anyth
 draft implies that canon does not yet contain — the user will propose it separately.`,
   },
   {
+    name: "art-director",
+    description: "Turn what a world is into a prompt an image model can use",
+    // No proposal directory: it writes nothing, it answers. Same shape as canon-qa.
+    needsProposal: false,
+    brief: `You turn a description of a fictional world into ONE image prompt for a text-to-image model.
+
+Respond with ONLY a JSON object: {"prompt": "..."}
+
+- Write for the image model, not for a reader: subject, setting, time of day, weather, light,
+  materials, colour, lens or medium, and mood. Concrete nouns beat adjectives.
+- Stay inside what you were told. Every element must be traceable to the world as described —
+  do not add a lighthouse, a dragon or a moon because the sentence felt like it wanted one.
+- One establishing image of a place: no people in the foreground, no text, no logos, no
+  watermarks, no collages or panels.
+- Around 60 words. One paragraph, no line breaks, no lists, no headings.`,
+  },
+  {
     name: "canon-qa",
     description: "Answer questions from retrieved canon",
     needsProposal: false,
@@ -96,8 +113,10 @@ closest entries is the correct output, not a guess.`,
   },
 ];
 
-export function agentForPurpose(purpose: "authoring" | "drafting" | "extraction" | "ask"): string {
+export function agentForPurpose(purpose: "authoring" | "drafting" | "extraction" | "ask" | "art-prompt"): string {
   switch (purpose) {
+    case "art-prompt":
+      return "art-director";
     case "ask":
       return "canon-qa";
     case "extraction":

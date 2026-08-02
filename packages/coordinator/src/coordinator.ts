@@ -52,6 +52,7 @@ import { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
 import { previewCacheFile, VoiceService, type CloudVoiceSource, type SidecarLike } from "./voice/service.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import { establishRequests, imageModelFor, missingTileAngles, tileRequest } from "./references/generate.js";
+import { makeArtDirector, worldBrief } from "./references/art-director.js";
 import {
   WORLD_IMAGE_CANDIDATE,
   WORLD_IMAGE_DIR,
@@ -118,7 +119,7 @@ export interface CoordinatorOptions {
       worldQueryUrl?: string;
       agents?: Record<string, { model?: string; brief?: string }>;
     }) => Record<string, unknown>;
-    agentForPurpose: (purpose: "authoring" | "drafting" | "extraction" | "ask") => string;
+    agentForPurpose: (purpose: "authoring" | "drafting" | "extraction" | "ask" | "art-prompt") => string;
     /**
      * The shipped roster, injected like everything else from the adapter package. The
      * coordinator needs it to show what each agent is for and to tell an edited brief from the
@@ -1828,7 +1829,34 @@ export class Coordinator {
         // The screen disables the button without a usable image model and says why; this is the
         // backstop for a frame that arrives anyway.
         if (!model) return;
-        await this.jobQueue.enqueue(worldImageRequest(store.getBundle().meta, model)).catch(() => {});
+        const bundle = store.getBundle();
+        // Ask the harness to write the prompt, and carry on without it if it cannot. A writing
+        // model turns "a drowned god still sings" into light, material and lens; the plain
+        // assembly is a weaker prompt, but it is a prompt, and a picture still gets made.
+        let prompt: string | null = null;
+        if (this.opts.adapter?.readiness().ready && this.buildConfig) {
+          const director = makeArtDirector(
+            this.opts.adapter,
+            this.buildConfig,
+            this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
+          );
+          // The most-cited canon first: what the world has settled about itself is what an
+          // establishing image should be true to.
+          const canonLines = bundle.canon
+            .filter((c) => c.status !== "open")
+            .slice(0, 6)
+            .map((c) => c.title);
+          prompt = await director(worldBrief(bundle.meta, canonLines)).catch(() => null);
+          void this.appLog?.append({
+            kind: prompt ? "world-image.prompt-written" : "world-image.prompt-unavailable",
+            worldId: msg.worldId,
+            ...(prompt ? { prompt } : {}),
+          });
+        }
+        const request = worldImageRequest(bundle.meta, model);
+        await this.jobQueue
+          .enqueue(prompt ? { ...request, params: { ...request.params, prompt } } : request)
+          .catch(() => {});
         return;
       }
       case "use-world-image": {
