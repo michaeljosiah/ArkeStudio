@@ -365,6 +365,59 @@ describe("SPEC-017 art direction and scoped looks", () => {
     assert.ok(outside.shots.every((shotPlan) => shotPlan.references.every((reference) => !reference.file?.includes("council-coat"))));
     await store.close();
   });
+
+  it("carries a scene-attached look only in that scene", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const scene = production.scenes[0]!;
+    const maren = bundle.referenceKits.find((kit) => kit.sheetId === "maren-kest")!;
+    const withLook = {
+      ...maren,
+      looks: [
+        {
+          id: "third-verse",
+          file: "looks/third-verse.png",
+          kind: "condition-age" as const,
+          prompt: "After the third verse",
+          acceptedAt: CLOCK(),
+          attachedTo: { kind: "scene" as const, productionId: production.meta.id, sceneId: scene.id },
+        },
+      ],
+    };
+    const kits = bundle.referenceKits.map((kit) => (kit.sheetId === maren.sheetId ? withLook : kit));
+    const inside = planScene(
+      {
+        world: bundle.meta,
+        artDirection: bundle.artDirection,
+        productionId: production.meta.id,
+        sheets: bundle.sheets,
+        kits,
+        scene,
+        selections: production.selections,
+        model: VIDEO_MODEL,
+      },
+      "per-shot",
+    );
+    assert.ok(inside.shots.some((shotPlan) => shotPlan.references.some((reference) => reference.file?.includes("third-verse"))));
+
+    const otherScene = { ...scene, id: "sc_other" };
+    const outside = planScene(
+      {
+        world: bundle.meta,
+        artDirection: bundle.artDirection,
+        productionId: production.meta.id,
+        sheets: bundle.sheets,
+        kits,
+        scene: otherScene,
+        selections: production.selections,
+        model: VIDEO_MODEL,
+      },
+      "per-shot",
+    );
+    assert.ok(outside.shots.every((shotPlan) => shotPlan.references.every((reference) => !reference.file?.includes("third-verse"))));
+    await store.close();
+  });
 });
 
 describe("inheritance (R-1, D1, §3.2): a production is a lens, not a container", () => {

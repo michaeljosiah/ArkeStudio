@@ -38,6 +38,17 @@ const model: ManifestModel = {
   pricing: { kind: "perMegapixel", microUsdPerMegapixel: 30000 },
 };
 
+const direction = {
+  version: 3,
+  description: "Painterly, tidal, restrained.",
+  masterLook: "world-art.png",
+  acceptedAt: "2026-07-18T10:00:00Z",
+  history: [],
+  derived: false,
+  reach: { visualAssets: 1, referenceKits: 1, productions: 1, earlierAcceptedTakes: 0 },
+  overrides: [],
+};
+
 describe("the world's key image", () => {
   it("puts the author's own sentence in, as written", () => {
     const prompt = worldImagePrompt(meta());
@@ -61,13 +72,15 @@ describe("the world's key image", () => {
   });
 
   it("is an ordinary image job, so the queue can estimate, ledger and cancel it", () => {
-    const request = worldImageRequest(meta(), model);
+    const request = worldImageRequest(meta(), model, direction);
     assert.equal(request.capability, "image");
     assert.equal(request.provider, "fal");
     assert.equal(request.model, "flux-2-pro");
     assert.equal(request.target.kind, "world-image");
     assert.equal(request.target.id, meta().worldId);
     assert.ok(request.estimatedMicroUsd > 0, "estimated before it runs, like everything that spends");
+    assert.match(request.params.prompt, /Painterly, tidal, restrained/);
+    assert.deepEqual(request.params.artDirection, { version: 3, source: "world", transport: "text" });
   });
 
   it("lands where it can be looked at and said yes to, not straight over the world's image", () => {

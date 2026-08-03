@@ -1914,9 +1914,19 @@ export class Coordinator {
             ...(prompt ? { prompt } : {}),
           });
         }
-        const request = worldImageRequest(bundle.meta, model);
+        const request = worldImageRequest(bundle.meta, model, bundle.artDirection);
         await this.jobQueue
-          .enqueue(prompt ? { ...request, params: { ...request.params, prompt } } : request)
+          .enqueue(
+            prompt
+              ? {
+                  ...request,
+                  params: {
+                    ...request.params,
+                    prompt: `${bundle.artDirection.description}. ${prompt}`,
+                  },
+                }
+              : request,
+          )
           .catch(() => {});
         return;
       }

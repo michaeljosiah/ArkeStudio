@@ -1,4 +1,4 @@
-import type { ManifestModel, WorldMeta } from "@arke-studio/contracts";
+import type { ManifestModel, ResolvedArtDirection, WorldMeta } from "@arke-studio/contracts";
 import { estimateMicroUsd } from "@arke-studio/contracts";
 
 /**
@@ -15,9 +15,10 @@ export const WORLD_IMAGE_DIR = "incoming/world-image";
 export const WORLD_IMAGE_CANDIDATE = "candidate.png";
 export const WORLD_IMAGE_FILE = "world-art.png";
 
-export function worldImagePrompt(meta: WorldMeta): string {
+export function worldImagePrompt(meta: WorldMeta, direction?: ResolvedArtDirection): string {
   const parts = [
     `Key art for "${meta.name}"`,
+    direction?.description,
     meta.logline?.trim(),
     meta.tone?.trim() ? `Tone: ${meta.tone.trim()}.` : undefined,
     meta.genre?.trim() ? `Genre: ${meta.genre.trim()}.` : undefined,
@@ -29,7 +30,7 @@ export function worldImagePrompt(meta: WorldMeta): string {
 }
 
 /** The job, shaped like every other image job so the queue treats it like every other one. */
-export function worldImageRequest(meta: WorldMeta, model: ManifestModel) {
+export function worldImageRequest(meta: WorldMeta, model: ManifestModel, direction?: ResolvedArtDirection) {
   const estimatedMicroUsd = estimateMicroUsd(model, { images: 1, megapixels: 1 });
   return {
     worldId: meta.worldId,
@@ -39,7 +40,18 @@ export function worldImageRequest(meta: WorldMeta, model: ManifestModel) {
     model: model.id,
     // No references: a world has no reference kit. Sending an empty list would be a field the
     // provider has to know to ignore, and OpenAI does not — it answers unknown fields with 400.
-    params: { prompt: worldImagePrompt(meta) },
+    params: {
+      prompt: worldImagePrompt(meta, direction),
+      ...(direction
+        ? {
+            artDirection: {
+              version: direction.version,
+              source: "world",
+              transport: "text",
+            },
+          }
+        : {}),
+    },
     estimatedMicroUsd,
     landing: { dir: WORLD_IMAGE_DIR, name: WORLD_IMAGE_CANDIDATE },
   };

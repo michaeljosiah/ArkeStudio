@@ -624,22 +624,37 @@ export function CharacterLooksScreen() {
                   Use as main photo
                 </Button>
                 <select
-                  defaultValue=""
+                  value={
+                    selectedLook.attachedTo?.kind === "production"
+                      ? `production:${selectedLook.attachedTo.productionId}`
+                      : selectedLook.attachedTo?.kind === "scene"
+                        ? `scene:${selectedLook.attachedTo.productionId}:${selectedLook.attachedTo.sceneId}`
+                        : ""
+                  }
                   onChange={(event) => {
-                    const productionId = event.target.value;
+                    const [scope, productionId, sceneId] = event.target.value.split(":");
                     attachCharacterLook(
                       world.meta.worldId,
                       sheetId,
                       selectedLook.id,
-                      productionId ? { kind: "production", productionId } : null,
+                      scope === "production" && productionId
+                        ? { kind: "production", productionId }
+                        : scope === "scene" && productionId && sceneId
+                          ? { kind: "scene", productionId, sceneId }
+                          : null,
                     );
                   }}
                 >
                   <option value="">Not attached</option>
                   {world.productions.map((production) => (
-                    <option key={production.meta.id} value={production.meta.id}>
-                      Attach to {production.meta.title}
-                    </option>
+                    <optgroup key={production.meta.id} label={production.meta.title}>
+                      <option value={`production:${production.meta.id}`}>Entire production</option>
+                      {production.scenes.map((scene) => (
+                        <option key={scene.id} value={`scene:${production.meta.id}:${scene.id}`}>
+                          Scene {scene.number} · {scene.title}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </>
