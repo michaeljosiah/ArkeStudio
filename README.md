@@ -8,7 +8,7 @@ because they share it.
 
 [![CI](https://github.com/michaeljosiah/ArkeStudio/actions/workflows/ci.yml/badge.svg)](https://github.com/michaeljosiah/ArkeStudio/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/michaeljosiah/ArkeStudio?label=release)](https://github.com/michaeljosiah/ArkeStudio/releases/latest)
-![Licence](https://img.shields.io/badge/licence-MIT_intended-lightgrey)
+[![Licence](https://img.shields.io/badge/licence-MIT-black)](LICENSE)
 
 </div>
 
@@ -90,13 +90,12 @@ you.
 
 ## Status
 
-**Early.** Arke Studio is in design, working from a clickable prototype of the full flow —
-world genesis, canon, cast, reference kits, productions, the cut, and the narrative-game
-graph. There is no installable build yet.
+**Early, and running.** World genesis, canon, cast, reference kits, world art direction and
+productions are built; signed Windows installers ship from the releases page. The narrative-game
+graph is designed in the prototype and not yet implemented.
 
-This repository currently holds the concept. Code, specifications and a licence file will
-follow here.
+This repository holds the code, the specifications and the design system.
 
 ## Licence
 
-Intended: MIT. The `LICENSE` file lands with the first code.
+MIT. See [LICENSE](LICENSE).
