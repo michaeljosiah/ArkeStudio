@@ -90,11 +90,13 @@ import {
 
 export function WorldLayout() {
   const { worldId } = useParams();
+  const location = useLocation();
   useOpenWorldGuard(worldId);
   const { state } = useStore();
   const world = state?.world;
   const nav = [
     ["", "Overview"],
+    ["art-direction", "Art direction"],
     ["cast", "Characters"],
     ["locations", "Locations"],
     ["factions", "Factions"],
@@ -102,12 +104,22 @@ export function WorldLayout() {
     ["artifacts", "Artifacts"],
     ["productions", "Productions"],
   ] as const;
+  if (location.pathname.endsWith("/art-direction/propose")) {
+    return (
+      <div className="fy-app">
+        <div className="fy-content fy-content--fixed">
+          <Outlet />
+        </div>
+      </div>
+    );
+  }
+  const onArtDirection = location.pathname.endsWith("/art-direction");
   return (
     <div className="fy-app">
       <AppChrome
         back={{ label: "Worlds", to: "/worlds" }}
-        context={world ? { label: world.meta.name } : undefined}
-        divided={false}
+        context={world ? { label: onArtDirection ? `${world.meta.name} · art direction` : world.meta.name } : undefined}
+        divided={onArtDirection}
       />
       <div className="fy-content">
         <nav className="fy-pillnav">

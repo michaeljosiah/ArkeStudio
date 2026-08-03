@@ -726,6 +726,23 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "stage-art-direction-change": {
+        const gate = this.opts.provider.gate?.();
+        if (!gate) return;
+        try {
+          const proposal = await gate.stageArtDirectionChange(msg.description, msg.masterLook);
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.staged",
+            worldId: msg.worldId,
+            proposalId: proposal.id,
+          });
+        } catch {
+          /* the refreshed snapshot is authoritative */
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "proposal-accept": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;

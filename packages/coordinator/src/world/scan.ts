@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  ArtDirectionRecordSchema,
   ArtifactSidecarSchema,
   CanonEntrySchema,
   ChangeRecordSchema,
@@ -16,6 +17,9 @@ import {
   StoryOverviewSchema,
   TakeSchema,
   WorldMetaSchema,
+  resolveArtDirection,
+  type ArtDirectionOverride,
+  type ArtDirectionRecord,
   type ProductionBundle,
   type Sheet,
   type SheetKind,
@@ -124,6 +128,14 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
 
   manifest["world.json"] = sha256(await read(join(dir, "world.json")));
 
+  let artDirectionRecord: ArtDirectionRecord | null = null;
+  const artDirectionPath = "art-direction/art-direction.json";
+  if (await exists(join(dir, artDirectionPath))) {
+    artDirectionRecord = await tryParse(artDirectionPath, (raw) =>
+      ArtDirectionRecordSchema.parse(JSON.parse(raw)),
+    );
+  }
+
   const sheets: Sheet[] = [];
   for (const { dir: sub, type } of SHEET_DIRS) {
     for (const file of (await listDir(join(dir, sub))).filter((f) => f.endsWith(".md")).sort()) {
@@ -227,7 +239,17 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     const ripple = (await exists(join(dir, ".proposals", pid, "ripple.json")))
       ? await tryParse(`.proposals/${pid}/ripple.json`, (raw) => RipplePreviewSchema.parse(JSON.parse(raw)))
       : null;
-    proposals.push({ proposal, ripple });
+    const proposedArtDirection =
+      proposal.kind === "art-direction"
+        ? await tryParse(`.proposals/${pid}/${artDirectionPath}`, (raw) =>
+            ArtDirectionRecordSchema.parse(JSON.parse(raw)),
+          )
+        : null;
+    proposals.push({
+      proposal,
+      ripple,
+      ...(proposedArtDirection ? { artDirection: proposedArtDirection } : {}),
+    });
   }
 
   const changes = (await readChanges(join(dir, "changes.jsonl")))
@@ -243,8 +265,77 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     .then(() => "incoming/world-image/candidate.png")
     .catch(() => null);
 
+  const resolved = resolveArtDirection(meta, artDirectionRecord);
+  const overrides: ArtDirectionOverride[] = [];
+  for (const kit of referenceKits) {
+    if (!kit.styleOverride?.trim()) continue;
+    const sheet = sheets.find((candidate) => candidate.id === kit.sheetId);
+    if (!sheet) continue;
+    overrides.push({
+      id: sheet.id,
+      name: sheet.name,
+      kind: sheet.type,
+      description: kit.styleOverride.trim(),
+    });
+  }
+  for (const production of productions) {
+    if (!production.meta.styleOverride?.trim()) continue;
+    overrides.push({
+      id: production.meta.id,
+      name: production.meta.title,
+      kind: "production",
+      description: production.meta.styleOverride.trim(),
+    });
+  }
+  overrides.sort((a, b) => a.name.localeCompare(b.name));
+
+  const visualAssets = new Set<string>();
+  if (resolved.masterLook) visualAssets.add(resolved.masterLook);
+  for (const entry of resolved.history) if (entry.masterLook) visualAssets.add(entry.masterLook);
+  for (const artifact of artifacts) {
+    if (artifact.kind === "image" || artifact.kind === "board") visualAssets.add(`artifacts/${artifact.file}`);
+  }
+  for (const kit of referenceKits) {
+    for (const tile of kit.tiles) if (tile.file) visualAssets.add(`references/${kit.sheetId}/${tile.file}`);
+    for (const compilation of kit.compilations) {
+      visualAssets.add(`references/${kit.sheetId}/${compilation.file}`);
+    }
+  }
+  for (const production of productions) {
+    for (const scene of production.scenes) {
+      if (scene.board) visualAssets.add(`productions/${production.meta.id}/${scene.board.image}`);
+    }
+    for (const take of production.takes) {
+      if (take.kind !== "voice" && take.media) {
+        visualAssets.add(`productions/${production.meta.id}/takes/${take.id}/${take.media}`);
+      }
+    }
+  }
+
+  let earlierAcceptedTakes = 0;
+  for (const production of productions) {
+    const latest = new Map<string, "accept" | "reject">();
+    for (const review of production.reviews) latest.set(review.takeId, review.decision);
+    earlierAcceptedTakes += production.takes.filter(
+      (take) =>
+        latest.get(take.id) === "accept" &&
+        take.provenance.artDirectionVersion !== undefined &&
+        take.provenance.artDirectionVersion < resolved.version,
+    ).length;
+  }
+
   const bundle: WorldBundle = {
     meta,
+    artDirection: {
+      ...resolved,
+      reach: {
+        visualAssets: visualAssets.size,
+        referenceKits: referenceKits.filter((kit) => !kit.styleOverride?.trim()).length,
+        productions: productions.filter((production) => !production.meta.styleOverride?.trim()).length,
+        earlierAcceptedTakes,
+      },
+      overrides,
+    },
     keyArtCandidate,
     sheets,
     canon,

@@ -41,11 +41,17 @@ function count(haystack: string, needle: string): number {
  * already showing, so it carries the wordmark and no controls.
  */
 const WITHOUT_CONTROLS = new Set(["launch"]);
+/** Full-frame accept gates draw their own composition exactly as approved. */
+const WITHOUT_CHROME = new Set(["art-direction-proposal"]);
 
 describe("app chrome", () => {
   for (const screen of SCREENS) {
     it(`${screen.id} carries exactly one wordmark, centred`, () => {
       const html = renderAt(screen.samplePath);
+      if (WITHOUT_CHROME.has(screen.id)) {
+        assert.equal(count(html, 'class="fy-titlebar__brand"'), 0, `${screen.id} is a full-frame gate`);
+        return;
+      }
       assert.equal(
         count(html, 'class="fy-titlebar__brand"'),
         1,
@@ -56,6 +62,10 @@ describe("app chrome", () => {
 
     it(`${screen.id} puts activity and settings on the right, in that order`, () => {
       const html = renderAt(screen.samplePath);
+      if (WITHOUT_CHROME.has(screen.id)) {
+        assert.ok(!html.includes("fy-titlebar__side--right"), `${screen.id} is a full-frame gate`);
+        return;
+      }
       if (WITHOUT_CONTROLS.has(screen.id)) {
         assert.ok(!html.includes('aria-label="Settings"'), `${screen.id} is the exception and has no controls`);
         return;

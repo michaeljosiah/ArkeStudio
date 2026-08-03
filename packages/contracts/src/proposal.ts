@@ -21,7 +21,8 @@ export const ProposalKindSchema = z.enum([
   "scene-draft",
   "scene-edit",
   "extraction",
-  "restore",
+    "restore",
+    "art-direction",
 ]);
 export type ProposalKind = z.infer<typeof ProposalKindSchema>;
 
@@ -87,6 +88,10 @@ export const RippleKindSchema = z.enum([
   "contradiction-candidates",
   "gains-cross-reference",
   "productions-see-new-revision",
+  "visual-assets-keep-look",
+  "reference-kits-see-new-look",
+  "productions-inherit-look",
+  "overrides-keep-own-look",
 ]);
 export type RippleKind = z.infer<typeof RippleKindSchema>;
 

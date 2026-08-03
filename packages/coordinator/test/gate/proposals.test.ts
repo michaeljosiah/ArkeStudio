@@ -106,6 +106,38 @@ describe("proposal lifecycle (R-1..R-4, R-16)", () => {
 });
 
 describe("accept: one commit, versions derived (R-11, R-12)", () => {
+  it("stages art direction without changing the world, then accepts the next immutable version", async () => {
+    const { dir, store, gate } = await openGate();
+    const before = store.getBundle().artDirection;
+    const proposal = await gate.stageArtDirectionChange(
+      "Editorial maritime illustration on weathered paper.",
+      before.masterLook,
+    );
+
+    assert.equal(store.getBundle().artDirection.version, 3, "staging changes nothing downstream");
+    assert.equal(store.getBundle().artDirection.description, before.description);
+    const staged = store.getBundle().proposals.find((item) => item.proposal.id === proposal.id);
+    assert.equal(staged?.artDirection?.version, 4);
+    assert.equal(
+      staged?.ripple?.items.find((item) => item.kind === "visual-assets-keep-look")?.targets.length,
+      before.reach.visualAssets,
+      "the proposal and page derive reach from one fact",
+    );
+
+    const outcome = await gate.accept(proposal.id);
+    assert.equal(outcome.status, "accepted");
+    const after = store.getBundle().artDirection;
+    assert.equal(after.version, 4);
+    assert.equal(after.description, "Editorial maritime illustration on weathered paper.");
+    assert.equal(after.history.find((entry) => entry.version === 3)?.description, before.description);
+    assert.equal(
+      JSON.parse(await readFile(join(dir, "art-direction", "art-direction.json"), "utf8")).version,
+      4,
+    );
+    assert.ok(await stat(join(dir, ".history", "art-direction", "v4.json")));
+    await store.close();
+  });
+
   it("lands a sheet and two canon entries as one commit with one revision bump", async () => {
     const { dir, store, gate } = await openGate();
     const proposal = await gate.stage({

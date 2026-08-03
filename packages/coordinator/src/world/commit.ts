@@ -1,6 +1,11 @@
 import { mkdir, readdir, readFile, rm, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { newId } from "@arke-studio/contracts";
+import {
+  ArtDirectionRecordSchema,
+  deriveArtDirectionDescription,
+  newId,
+  WorldMetaSchema,
+} from "@arke-studio/contracts";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
 import { appendChanges, hasCommitLine } from "./change-writer.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
@@ -113,6 +118,7 @@ type Classified =
   | { track: "chapter"; production: string; file: string }
   | { track: "story"; production: string }
   | { track: "production-meta"; production: string }
+  | { track: "art-direction" }
   | { track: "unversioned" };
 
 export function classify(path: string): Classified {
@@ -128,6 +134,7 @@ export function classify(path: string): Classified {
   if (m) return { track: "story", production: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/production\.json$/.exec(path);
   if (m) return { track: "production-meta", production: m[1]! };
+  if (path === "art-direction/art-direction.json") return { track: "art-direction" };
   return { track: "unversioned" };
 }
 
@@ -263,6 +270,39 @@ export class Committer {
           versions[f.path] = toVersion;
         }
         if (baseDoc) historyPrev = `${dirPath}/v${fromVersion}.json`;
+      } else if (kind.track === "art-direction") {
+        const proposed = ArtDirectionRecordSchema.parse(JSON.parse(newContent!));
+        const base = live !== null ? ArtDirectionRecordSchema.parse(JSON.parse(live)) : null;
+        const worldMeta = WorldMetaSchema.parse(worldDoc.value);
+        fromVersion = base?.version ?? 1;
+        toVersion = fromVersion + 1;
+        const previous = base
+          ? {
+              version: base.version,
+              description: base.description,
+              ...(base.masterLook ? { masterLook: base.masterLook } : {}),
+              acceptedAt: base.acceptedAt,
+            }
+          : {
+              version: 1,
+              description: deriveArtDirectionDescription(worldMeta),
+              acceptedAt: worldMeta.created,
+            };
+        const next = ArtDirectionRecordSchema.parse({
+          version: toVersion,
+          description: proposed.description,
+          ...(proposed.masterLook ? { masterLook: proposed.masterLook } : {}),
+          acceptedAt: at,
+          history: [...(base?.history ?? []), previous],
+        });
+        newContent = `${JSON.stringify(next, null, 2)}\n`;
+        historyPrev = base ? `.history/art-direction/v${fromVersion}.json` : null;
+        historyNew = `.history/art-direction/v${toVersion}.json`;
+        fieldsChanged = [
+          ...(base?.description !== next.description ? ["description"] : []),
+          ...(base?.masterLook !== next.masterLook ? ["master-look"] : []),
+        ];
+        versions[f.path] = toVersion;
       }
       // production-meta and unversioned: change-logged only, no history, no stamps (§2.4.1).
 

@@ -70,6 +70,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sections: z.array(z.object({ heading: z.string().min(1), body: z.string() }).strict()).min(1),
     })
     .strict(),
+  /** SPEC-017: changing the shared world look is staged, never written as a field edit. */
+  z
+    .object({
+      kind: z.literal("stage-art-direction-change"),
+      worldId: UlidSchema,
+      description: z.string().trim().min(1).max(4000),
+      /** World-relative path of a master look already admitted to the world. */
+      masterLook: z.string().min(1).nullable().optional(),
+    })
+    .strict(),
   /** SPEC-004: gate decisions. confirmRipples carries the authoritative signature on re-confirm (R-10). */
   z
     .object({

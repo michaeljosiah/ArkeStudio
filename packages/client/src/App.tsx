@@ -13,6 +13,7 @@ import {
   WorldPickerScreen,
 } from "./screens/shell.js";
 import { SettingsAgentsScreen } from "./screens/agents.js";
+import { ArtDirectionProposalScreen, ArtDirectionScreen } from "./screens/art-direction.js";
 import {
   ArtifactsScreen,
   CanonEntryScreen,
@@ -80,6 +81,8 @@ export function App() {
 
       <Route path="/w/:worldId" element={<WorldLayout />}>
         <Route index element={<WorldOverviewScreen />} />
+        <Route path="art-direction" element={<ArtDirectionScreen />} />
+        <Route path="art-direction/propose" element={<ArtDirectionProposalScreen />} />
         <Route path="cast" element={<CastScreen />} />
         <Route path="cast/new" element={<NewCharacterScreen />} />
         <Route path="cast/:sheetId" element={<CharacterDetailScreen />} />

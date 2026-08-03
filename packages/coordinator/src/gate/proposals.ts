@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  ArtDirectionRecordSchema,
   newId,
   ProposalSchema,
   RipplePreviewSchema,
@@ -159,6 +160,39 @@ export class ProposalManager {
       summary,
       source,
       targets: [{ path, content: doc.serialize() }],
+    });
+  }
+
+  /** Stage the next world-look version. Acceptance, not this form write, stamps the version. */
+  async stageArtDirectionChange(description: string, masterLook: string | null | undefined): Promise<Proposal> {
+    const bundle = this.store.getBundle();
+    const current = bundle.artDirection;
+    const acceptedAt = current.acceptedAt ?? bundle.meta.created;
+    const proposed = ArtDirectionRecordSchema.parse({
+      version: current.version + 1,
+      description,
+      ...(masterLook ? { masterLook } : {}),
+      acceptedAt: this.store.now(),
+      history: [
+        ...current.history,
+        {
+          version: current.version,
+          description: current.description,
+          ...(current.masterLook ? { masterLook: current.masterLook } : {}),
+          acceptedAt,
+        },
+      ],
+    });
+    return this.stage({
+      kind: "art-direction",
+      summary: `Change world look to v${current.version + 1}`,
+      source: "form",
+      targets: [
+        {
+          path: "art-direction/art-direction.json",
+          content: `${JSON.stringify(proposed, null, 2)}\n`,
+        },
+      ],
     });
   }
 
@@ -347,6 +381,41 @@ export class ProposalManager {
     const items: RippleItem[] = [];
     const index = this.store.getIndex();
     const bundle = this.store.getBundle();
+    if (proposal.kind === "art-direction") {
+      const reach = bundle.artDirection.reach;
+      items.push(
+        {
+          kind: "visual-assets-keep-look",
+          summary: `${reach.visualAssets} visual assets stay as they are; new work sees the next look`,
+          targets: Array.from({ length: reach.visualAssets }, (_, index) => `visual-asset-${index + 1}`),
+        },
+        {
+          kind: "reference-kits-see-new-look",
+          summary: `${reach.referenceKits} reference kits see a newer world look`,
+          targets: bundle.referenceKits.filter((kit) => !kit.styleOverride?.trim()).map((kit) => kit.sheetId),
+        },
+        {
+          kind: "productions-inherit-look",
+          summary: `${reach.productions} productions inherit the next look on dispatch`,
+          targets: bundle.productions
+            .filter((production) => !production.meta.styleOverride?.trim())
+            .map((production) => production.meta.id),
+        },
+        {
+          kind: "takes-pinned-to-old-version",
+          summary: `${reach.earlierAcceptedTakes} accepted takes remain pinned to their original look`,
+          targets: Array.from({ length: reach.earlierAcceptedTakes }, (_, index) => `accepted-take-${index + 1}`),
+        },
+      );
+      if (bundle.artDirection.overrides.length > 0) {
+        items.push({
+          kind: "overrides-keep-own-look",
+          summary: `${bundle.artDirection.overrides.length} overrides keep their own look`,
+          targets: bundle.artDirection.overrides.map((override) => override.id),
+        });
+      }
+      return { computedAt: this.store.now(), governing: false, items };
+    }
     if (index) {
       for (const target of proposal.targets) {
         const kind = classify(target.path);
@@ -464,6 +533,7 @@ function readVersion(path: string, raw: string): number | null {
     if (kind.track === "scene" || kind.track === "story") {
       return ((JSON.parse(raw) as { version?: number }).version ?? 1);
     }
+    if (kind.track === "art-direction") return ArtDirectionRecordSchema.parse(JSON.parse(raw)).version;
   } catch {
     return null;
   }

@@ -14,6 +14,7 @@ import type { WorldStore } from "../world/store.js";
 interface Provenance {
   canonRevision: number;
   sheets: Record<string, number>;
+  artDirectionVersion?: number;
 }
 
 function provenanceOf(job: Job): Provenance {

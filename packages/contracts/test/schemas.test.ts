@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   ArtifactSidecarSchema,
+  ArtDirectionRecordSchema,
   CanonEntrySchema,
   ChangeRecordSchema,
   ClientMessageSchema,
@@ -22,6 +23,7 @@ import {
   ulid,
   UlidSchema,
   WorldMetaSchema,
+  deriveArtDirectionDescription,
   newId,
 } from "../src/index.js";
 
@@ -73,6 +75,61 @@ describe("world.json", () => {
 
   it("rejects unknown fields rather than passing a partial object through", () => {
     assert.throws(() => WorldMetaSchema.parse({ ...valid, color: "teal" }));
+  });
+});
+
+describe("world art direction", () => {
+  it("validates a versioned record with image-bearing history", () => {
+    const record = {
+      version: 3,
+      description: "Painterly, tidal, restrained.",
+      masterLook: "art-direction/master-look-v3.png",
+      acceptedAt: "2026-07-18T10:00:00Z",
+      history: [
+        {
+          version: 2,
+          description: "Cold-water realism.",
+          masterLook: "art-direction/master-look-v2.png",
+          acceptedAt: "2026-06-04T10:00:00Z",
+        },
+      ],
+    };
+    assert.deepEqual(ArtDirectionRecordSchema.parse(record), record);
+  });
+
+  it("derives a non-blank description even when tone and genre are absent", () => {
+    assert.match(
+      deriveArtDirectionDescription({
+        worldId: WORLD_ID,
+        slug: "the-undersong",
+        schemaVersion: 1,
+        name: "The Undersong",
+        canonRevision: 42,
+        nextCanonId: 45,
+        created: "2026-05-02T09:14:00Z",
+        updated: "2026-07-30T18:22:00Z",
+      }),
+      /The Undersong/,
+    );
+  });
+
+  it("rejects blank direction and history at or beyond the current version", () => {
+    assert.throws(() =>
+      ArtDirectionRecordSchema.parse({
+        version: 2,
+        description: " ",
+        acceptedAt: "2026-07-18T10:00:00Z",
+        history: [],
+      }),
+    );
+    assert.throws(() =>
+      ArtDirectionRecordSchema.parse({
+        version: 2,
+        description: "Graphic maritime illustration.",
+        acceptedAt: "2026-07-18T10:00:00Z",
+        history: [{ version: 2, description: "Same version.", acceptedAt: "2026-06-04T10:00:00Z" }],
+      }),
+    );
   });
 });
 

@@ -23,9 +23,9 @@ function renderAt(path: string): string {
 }
 
 describe("screen inventory", () => {
-  it("covers the full §2.9 inventory (41 screens)", () => {
-    assert.equal(SCREENS.length, 41);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 41, "screen ids are unique");
+  it("covers the full screen inventory (43 screens)", () => {
+    assert.equal(SCREENS.length, 43);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 43, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {
@@ -65,5 +65,20 @@ describe("screen inventory", () => {
     assert.ok(cast.includes("Maren Kest"));
     const canon = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/canon`);
     assert.ok(canon.includes("Tide-calling"));
+  });
+
+  it("renders the complete art-direction surface from its resolved record", () => {
+    const html = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/art-direction`);
+    for (const copy of [
+      "WORLD ART DIRECTION",
+      "WHAT FOLLOWS THIS LOOK",
+      "NOT FOLLOWING IT",
+      "HISTORY",
+      "24 visual assets",
+      "The Chorister",
+      "Cold-water realism",
+    ]) {
+      assert.ok(html.includes(copy), `art direction names ${copy}`);
+    }
   });
 });

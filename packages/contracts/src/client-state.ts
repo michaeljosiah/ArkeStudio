@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ArtifactSidecarSchema } from "./artifact.js";
+import { ArtDirectionRecordSchema, ResolvedArtDirectionSchema } from "./art-direction.js";
 import { ChangeRecordSchema } from "./change.js";
 import { HealthStatusSchema } from "./events.js";
 import { IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
@@ -104,6 +105,8 @@ export const StagedProposalSchema = z
   .object({
     proposal: ProposalSchema,
     ripple: RipplePreviewSchema.nullable(),
+    /** Present for art-direction proposals so review renders the proposed record, not a guess. */
+    artDirection: ArtDirectionRecordSchema.optional(),
   })
   .strict();
 export type StagedProposal = z.infer<typeof StagedProposalSchema>;
@@ -130,6 +133,7 @@ export type ExternalEdit = z.infer<typeof ExternalEditSchema>;
 export const WorldBundleSchema = z
   .object({
     meta: WorldMetaSchema,
+    artDirection: ResolvedArtDirectionSchema,
     sheets: z.array(SheetSchema),
     canon: z.array(CanonEntrySchema),
     referenceKits: z.array(ReferenceKitSchema),

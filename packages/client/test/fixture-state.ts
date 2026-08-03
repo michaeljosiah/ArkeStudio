@@ -125,6 +125,43 @@ const state: ClientState = {
       created: "2026-05-02T09:14:00Z",
       updated: AT,
     },
+    artDirection: {
+      version: 3,
+      description:
+        "Painterly, tidal, restrained. Weathered maritime realism, visible brushwork, slate and sea-glass colour, one warm practical light, fog with real depth.",
+      masterLook: "world-art.png",
+      acceptedAt: "2026-07-18T10:00:00Z",
+      derived: false,
+      history: [
+        {
+          version: 1,
+          description: "First world image",
+          masterLook: "world-art.png",
+          acceptedAt: "2026-05-19T10:00:00Z",
+        },
+        {
+          version: 2,
+          description: "Cold-water realism",
+          masterLook: "world-art.png",
+          acceptedAt: "2026-06-04T10:00:00Z",
+        },
+      ],
+      reach: { visualAssets: 24, referenceKits: 6, productions: 3, earlierAcceptedTakes: 15 },
+      overrides: [
+        {
+          id: "the-chorister",
+          name: "The Chorister",
+          kind: "character",
+          description: "Veiled charcoal portraiture.",
+        },
+        {
+          id: "hymnal",
+          name: "Hymnal",
+          kind: "production",
+          description: "Graphic illuminated manuscript.",
+        },
+      ],
+    },
     sheets: [
       {
         id: "maren-kest",

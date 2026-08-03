@@ -328,8 +328,11 @@ export function composeDispatches(
   world: WorldBundle,
 ): EnqueueInput[] {
   // Provenance frozen at dispatch (SPEC-013 R-2): canon revision and every cited sheet version.
-  const provenanceFor = (sheetIds: string[]): { canonRevision: number; sheets: Record<string, number> } => ({
+  const provenanceFor = (
+    sheetIds: string[],
+  ): { canonRevision: number; sheets: Record<string, number>; artDirectionVersion: number } => ({
     canonRevision: world.meta.canonRevision,
+    artDirectionVersion: world.artDirection.version,
     sheets: Object.fromEntries(
       sheetIds
         .map((id) => world.sheets.find((s) => s.id === id))

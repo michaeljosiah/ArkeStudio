@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { cp, readFile, rename, writeFile } from "node:fs/promises";
+import { cp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tempDir } from "../tmp.js";
@@ -13,6 +13,18 @@ import { FIXTURE_WORLD, makeTempWorld } from "./helpers.js";
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
 
 describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
+  it("resolves a missing art-direction file as a visible, non-blank derived v1", async () => {
+    const dir = await makeTempWorld();
+    await rm(join(dir, "art-direction"), { recursive: true, force: true });
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    const direction = store.getBundle().artDirection;
+    assert.equal(direction.version, 1);
+    assert.equal(direction.derived, true);
+    assert.match(direction.description, /quiet dread/);
+    assert.equal(direction.masterLook, undefined);
+    await store.close();
+  });
+
   it("enforces single-process ownership and reclaims stale locks (R-3)", async () => {
     const dir = await makeTempWorld();
     const first = await WorldStore.open(dir, { clock: CLOCK });

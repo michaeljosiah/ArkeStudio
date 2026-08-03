@@ -46,6 +46,8 @@ export const ProvenanceSchema = z
   .object({
     canonRevision: z.number().int().min(0),
     sheets: z.record(SlugSchema, z.number().int().min(1)),
+    /** Frozen at dispatch; later world-look versions never rewrite this value. */
+    artDirectionVersion: z.number().int().min(1).optional(),
   })
   .strict();
 export type Provenance = z.infer<typeof ProvenanceSchema>;

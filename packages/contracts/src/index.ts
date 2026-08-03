@@ -24,3 +24,4 @@ export * from "./voice.js";
 export * from "./planning.js";
 export * from "./cut.js";
 export * from "./activity.js";
+export * from "./art-direction.js";

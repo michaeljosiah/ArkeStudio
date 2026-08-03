@@ -728,6 +728,19 @@ export function stageSheetEdit(
   send({ kind: "stage-sheet-edit", worldId, path, summary, sections });
 }
 
+export function stageArtDirectionChange(
+  worldId: string,
+  description: string,
+  masterLook?: string | null,
+): void {
+  send({
+    kind: "stage-art-direction-change",
+    worldId,
+    description,
+    ...(masterLook !== undefined ? { masterLook } : {}),
+  });
+}
+
 export function acceptProposal(worldId: string, proposalId: string, confirmRipples?: string): void {
   send({
     kind: "proposal-accept",

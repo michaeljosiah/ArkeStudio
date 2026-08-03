@@ -140,6 +140,8 @@ export const ProductionSchema = z
     logline: z.string().optional(),
     /** Display vocabulary ("in-progress", "cutting", …) — unversioned, change-logged only (§2.4.1). */
     status: z.string().min(1),
+    /** Optional production-specific visual language; the world surface names this exception. */
+    styleOverride: z.string().min(1).optional(),
     created: IsoDateTimeSchema,
     updated: IsoDateTimeSchema,
   })
