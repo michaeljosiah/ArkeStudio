@@ -137,6 +137,8 @@ export const WorldBundleSchema = z
     sheets: z.array(SheetSchema),
     canon: z.array(CanonEntrySchema),
     referenceKits: z.array(ReferenceKitSchema),
+    referenceTakes: z.array(TakeSchema).default([]),
+    referenceReviews: z.array(ReviewDecisionSchema).default([]),
     /** Unaccepted main-photo candidates found on disk, grouped by sheet id. */
     referenceCandidates: z.record(SlugSchema, z.array(z.string())).default({}),
     artifacts: z.array(ArtifactSidecarSchema),

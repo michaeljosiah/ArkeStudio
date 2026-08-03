@@ -158,6 +158,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
 
   const referenceKits = [];
   const referenceCandidates: Record<string, string[]> = {};
+  const referenceTakes = [];
   for (const sheetId of await listDir(join(dir, "references"))) {
     if (await exists(join(dir, "references", sheetId, "kit.json"))) {
       const kit = await tryParse(`references/${sheetId}/kit.json`, (raw) =>
@@ -170,6 +171,13 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       .sort()
       .map((file) => `references/${sheetId}/candidates/${file}`);
     if (candidates.length > 0) referenceCandidates[sheetId] = candidates;
+    for (const takeDir of await listDir(join(dir, "references", sheetId, "takes"))) {
+      if (!(await exists(join(dir, "references", sheetId, "takes", takeDir, "take.json")))) continue;
+      const take = await tryParse(`references/${sheetId}/takes/${takeDir}/take.json`, (raw) =>
+        TakeSchema.parse(JSON.parse(raw)),
+      );
+      if (take) referenceTakes.push(take);
+    }
   }
 
   const artifacts = [];
@@ -235,6 +243,16 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       : {};
 
     productions.push({ meta: metaDoc, story, treatment, chapters, scenes, takes, reviews, selections });
+  }
+
+  let referenceReviews: WorldBundle["referenceReviews"] = [];
+  if (await exists(join(dir, "references", "reviews.jsonl"))) {
+    referenceReviews = (await readChanges(join(dir, "references", "reviews.jsonl")))
+      .map((line) => {
+        const parsed = ReviewDecisionSchema.safeParse(line);
+        return parsed.success ? parsed.data : null;
+      })
+      .filter((review): review is NonNullable<typeof review> => review !== null);
   }
 
   const proposals: StagedProposal[] = [];
@@ -307,6 +325,11 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       visualAssets.add(`references/${kit.sheetId}/${compilation.file}`);
     }
   }
+  for (const take of referenceTakes) {
+    if (take.media && take.reference) {
+      visualAssets.add(`references/${take.reference.sheetId}/takes/${take.id}/${take.media}`);
+    }
+  }
   for (const production of productions) {
     for (const scene of production.scenes) {
       if (scene.board) visualAssets.add(`productions/${production.meta.id}/${scene.board.image}`);
@@ -319,6 +342,14 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
   }
 
   let earlierAcceptedTakes = 0;
+  const latestReferenceReviews = new Map<string, "accept" | "reject">();
+  for (const review of referenceReviews) latestReferenceReviews.set(review.takeId, review.decision);
+  earlierAcceptedTakes += referenceTakes.filter(
+    (take) =>
+      latestReferenceReviews.get(take.id) === "accept" &&
+      take.provenance.artDirectionVersion !== undefined &&
+      take.provenance.artDirectionVersion < resolved.version,
+  ).length;
   for (const production of productions) {
     const latest = new Map<string, "accept" | "reject">();
     for (const review of production.reviews) latest.set(review.takeId, review.decision);
@@ -347,6 +378,8 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     canon,
     referenceKits,
     referenceCandidates,
+    referenceTakes,
+    referenceReviews,
     artifacts,
     productions,
     proposals,

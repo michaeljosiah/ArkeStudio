@@ -96,6 +96,7 @@ export const MainPhotoSchema = z
     file: z.string().min(1),
     source: z.enum(["generated", "upload", "promotion", "legacy"]),
     sourceJobId: JobIdSchema.optional(),
+    sourceTakeId: TakeIdSchema.optional(),
     sheetVersion: z.number().int().min(1).optional(),
     artDirectionVersion: z.number().int().min(1).optional(),
     acceptedAt: IsoDateTimeSchema.optional(),
@@ -110,6 +111,7 @@ export const CharacterLookSchema = z
     kind: z.enum(["costume", "pose-expression", "condition-age"]),
     prompt: z.string().min(1),
     sourceJobId: JobIdSchema.optional(),
+    sourceTakeId: TakeIdSchema.optional(),
     artDirectionVersion: z.number().int().min(1).optional(),
     acceptedAt: IsoDateTimeSchema,
     attachedTo: z

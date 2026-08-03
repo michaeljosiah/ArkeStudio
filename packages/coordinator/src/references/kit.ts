@@ -8,7 +8,9 @@ import {
   type Compilation,
   type ReferenceAngle,
   type ReferenceKit,
+  type ReviewDecision,
   type Sheet,
+  type Take,
 } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { sha256 } from "../world/text-files.js";
@@ -42,18 +44,37 @@ async function writeKit(
   sheetId: string,
   kit: ReferenceKit,
   baseRaw: string | null,
+  review?: ReviewDecision,
 ): Promise<void> {
+  const files: import("../world/commit.js").CommitFileInput[] = [
+    {
+      path: kitPath(sheetId),
+      action: baseRaw === null ? "create" : "replace",
+      content: JSON.stringify(kit, null, 2) + "\n",
+      baseHash: baseRaw === null ? null : sha256(baseRaw),
+    },
+  ];
+  if (review) {
+    const path = "references/reviews.jsonl";
+    let raw = "";
+    let existed = false;
+    try {
+      raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+      existed = true;
+    } catch {
+      /* first review */
+    }
+    files.push({
+      path,
+      action: existed ? "replace" : "create",
+      content: raw + JSON.stringify(review) + "\n",
+      baseHash: existed ? sha256(raw) : null,
+    });
+  }
   await store.commit({
-    kind: "kit-edit",
-    source: "form",
-    files: [
-      {
-        path: kitPath(sheetId),
-        action: baseRaw === null ? "create" : "replace",
-        content: JSON.stringify(kit, null, 2) + "\n",
-        baseHash: baseRaw === null ? null : sha256(baseRaw),
-      },
-    ],
+    kind: review ? "reference-accept" : "kit-edit",
+    source: review ? "review:user" : "form",
+    files,
   });
 }
 
@@ -136,12 +157,13 @@ export async function chooseAnchor(
   sheetId: string,
   input: {
     file: string;
-    takeId?: string;
     jobId?: Job["id"];
+    takeId?: Take["id"];
     sheetVersion: number;
     artDirectionVersion?: number;
     source?: "generated" | "upload" | "promotion";
     acceptedAt?: string;
+    review?: ReviewDecision;
   },
 ): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheetId);
@@ -172,19 +194,21 @@ export async function chooseAnchor(
         file: input.file,
         source: input.source ?? "generated",
         ...(input.jobId ? { sourceJobId: input.jobId } : {}),
+        ...(input.takeId ? { sourceTakeId: input.takeId } : {}),
         sheetVersion: input.sheetVersion,
         ...(input.artDirectionVersion ? { artDirectionVersion: input.artDirectionVersion } : {}),
         ...(input.acceptedAt ? { acceptedAt: input.acceptedAt } : {}),
       },
     },
     raw,
+    input.review,
   );
 }
 
 export async function acceptCharacterSheet(
   store: WorldStore,
   sheet: Sheet,
-  input: { file: string; jobId: Job["id"]; artDirectionVersion: number },
+  input: { file: string; takeId: Take["id"]; artDirectionVersion: number; review?: ReviewDecision },
 ): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheet.id);
   const photo = kit.mainPhoto?.file ?? kit.anchor;
@@ -195,7 +219,7 @@ export async function acceptCharacterSheet(
     sheetVersion: sheet.version,
     tiles: [],
     compiledAt: store.now(),
-    source: input.jobId,
+    source: input.takeId,
     accepted: true,
     anchorFile: photo,
     artDirectionVersion: input.artDirectionVersion,
@@ -206,6 +230,7 @@ export async function acceptCharacterSheet(
     sheet.id,
     { ...kit, compilations: [...others, compilation], designatedCompilation: input.file },
     raw,
+    input.review,
   );
 }
 
@@ -218,7 +243,9 @@ export async function acceptCharacterLook(
     kind: "costume" | "pose-expression" | "condition-age";
     prompt: string;
     jobId: Job["id"];
+    takeId: Take["id"];
     artDirectionVersion: number;
+    review?: ReviewDecision;
   },
 ): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheetId);
@@ -236,12 +263,14 @@ export async function acceptCharacterLook(
           kind: input.kind,
           prompt: input.prompt,
           sourceJobId: input.jobId,
+          sourceTakeId: input.takeId,
           artDirectionVersion: input.artDirectionVersion,
           acceptedAt: store.now(),
         },
       ],
     },
     raw,
+    input.review,
   );
 }
 
@@ -252,6 +281,7 @@ export async function promoteCharacterLook(store: WorldStore, sheet: Sheet, look
   await chooseAnchor(store, sheet.id, {
     file: look.file,
     jobId: look.sourceJobId,
+    takeId: look.sourceTakeId,
     sheetVersion: sheet.version,
     artDirectionVersion: look.artDirectionVersion,
     source: "promotion",

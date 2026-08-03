@@ -67,6 +67,37 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
 }
 
 describe("needs-you is derived, never appended to (R-3, D1, §3.2)", () => {
+  it("includes unreviewed character reference takes and removes them by decision", () => {
+    const take = {
+      id: "tk_01J8A0000000000000000000R1",
+      coversShots: [],
+      kind: "main-photo" as const,
+      reference: { sheetId: "maren-kest" },
+      provider: "fal",
+      model: "flux",
+      provenance: { canonRevision: 1, sheets: { "maren-kest": 1 } },
+      references: [],
+      params: {},
+      cost: { estimatedMicroUsd: 40000, actualMicroUsd: null },
+      dispatchedAt: "2026-08-03T10:00:00Z",
+    };
+    const state = baseState(
+      {},
+      {
+        meta: { worldId: WORLD, name: "The Undersong", updated: "2026-08-03T10:00:00Z" },
+        externalEdits: [],
+        proposals: [],
+        productions: [],
+        referenceTakes: [take],
+        referenceReviews: [],
+      } as never,
+    );
+    assert.ok(computeNeedsYou(state).some((entry) => entry.ref === take.id));
+    state.world!.referenceReviews = [
+      { ts: "2026-08-03T10:01:00Z", takeId: take.id, decision: "accept", by: "user" },
+    ];
+    assert.ok(!computeNeedsYou(state).some((entry) => entry.ref === take.id));
+  });
   const worldWithTake = (reviewed: boolean): ClientState["world"] =>
     ({
       meta: { worldId: WORLD, name: "The Undersong", updated: "2026-08-01T09:00:00Z" },

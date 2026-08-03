@@ -394,6 +394,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
+      kind: z.literal("reject-reference-take"),
+      worldId: UlidSchema,
+      takeId: z.string().min(1),
+      field: z.string().min(1).max(200),
+      note: z.string().max(1000).optional(),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal("promote-character-look"),
       worldId: UlidSchema,
       sheetId: SlugSchema,

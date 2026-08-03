@@ -254,6 +254,25 @@ describe("takes and reviews", () => {
     assert.deepEqual(TakeSchema.parse(take), take);
   });
 
+  it("validates a reference take without a production job or shot", () => {
+    const referenceTake = {
+      id: newId("tk"),
+      coversShots: [],
+      kind: "main-photo",
+      reference: { sheetId: "maren-kest" },
+      provider: "user",
+      model: "upload",
+      provenance: { canonRevision: 42, sheets: { "maren-kest": 4 }, artDirectionVersion: 3 },
+      references: [],
+      params: {},
+      cost: { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "local-zero" },
+      dispatchedAt: "2026-08-03T12:00:00Z",
+      completedAt: "2026-08-03T12:00:00Z",
+      media: "portrait.png",
+    };
+    assert.deepEqual(TakeSchema.parse(referenceTake), referenceTake);
+  });
+
   it("has no status field — review decisions are not properties of the take", () => {
     assert.throws(() => TakeSchema.parse({ ...take, status: "accepted" }));
   });

@@ -255,6 +255,8 @@ export class FsWorldProvider implements WorldProvider {
     // bundle passes through, and labelled as-of now. A crash leaving them stale is honest by
     // construction — the label always says when they were true.
     let unreviewedTakes = 0;
+    const decidedReferences = new Set(bundle.referenceReviews.map((review) => review.takeId));
+    unreviewedTakes += bundle.referenceTakes.filter((take) => !decidedReferences.has(take.id)).length;
     for (const production of bundle.productions) {
       const decided = new Set(production.reviews.map((r) => r.takeId));
       unreviewedTakes += production.takes.filter((t) => !decided.has(t.id)).length;

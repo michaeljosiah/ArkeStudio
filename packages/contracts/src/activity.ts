@@ -96,6 +96,20 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
 
   // Class 4 — money already spent, sitting unused: precise for the OPEN world (R-7).
   if (world) {
+    const decidedReferences = new Set((world.referenceReviews ?? []).map((review) => review.takeId));
+    for (const take of world.referenceTakes ?? []) {
+      if (decidedReferences.has(take.id)) continue;
+      entries.push({
+        urgency: 4,
+        kind: "unreviewed-take",
+        title: "reference take awaiting review",
+        detail: `${take.kind} for ${take.reference?.sheetId ?? "reference set"}`,
+        at: take.completedAt ?? take.dispatchedAt,
+        worldId: world.meta.worldId,
+        actions: ["review"],
+        ref: take.id,
+      });
+    }
     for (const production of world.productions) {
       const decided = new Set(production.reviews.map((r) => r.takeId));
       for (const take of production.takes) {

@@ -16,7 +16,7 @@ import {
  * uses (selections.json, mutable) are three different things and live in three places.
  */
 
-export const TakeKindSchema = z.enum(["clip", "frame", "still", "voice", "sheet"]);
+export const TakeKindSchema = z.enum(["clip", "frame", "still", "voice", "main-photo", "sheet", "look"]);
 export type TakeKind = z.infer<typeof TakeKindSchema>;
 
 /**
@@ -55,12 +55,15 @@ export type Provenance = z.infer<typeof ProvenanceSchema>;
 export const TakeSchema = z
   .object({
     id: TakeIdSchema,
-    jobId: JobIdSchema,
+    /** User-uploaded reference takes have no generating job. */
+    jobId: JobIdSchema.optional(),
     /** Present when produced by a whole-scene pass (§10.3). */
     passId: PassIdSchema.optional(),
     /** One shot per-shot; several for a pass segment. */
-    coversShots: z.array(ShotIdSchema).min(1),
+    /** Reference takes cover a sheet rather than a shot and therefore carry an empty array. */
+    coversShots: z.array(ShotIdSchema),
     kind: TakeKindSchema,
+    reference: z.object({ sheetId: SlugSchema }).strict().optional(),
     provider: z.string().min(1),
     model: z.string().min(1),
     provenance: ProvenanceSchema,

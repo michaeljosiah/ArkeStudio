@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   attachmentFor,
@@ -40,6 +40,7 @@ import {
 } from "../../src/references/kit.js";
 import { decodePng, encodePng, solidImage } from "../../src/references/png.js";
 import { WorldStore } from "../../src/world/store.js";
+import { recordReferenceReview, recordReferenceTake, referenceReviewDecision } from "../../src/references/takes.js";
 import { makeTempWorld } from "../world/helpers.js";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
@@ -512,7 +513,7 @@ describe("kit mutations through the one commit primitive", () => {
     });
     await acceptCharacterSheet(store, SHEET, {
       file: "character-sheet.png",
-      jobId: "jb_01J8E0000000000000000000J2",
+      takeId: "tk_01J8E0000000000000000000T2",
       artDirectionVersion: 3,
     });
     let kit = (await readKit(store, "maren-kest"))!.kit;
@@ -525,6 +526,7 @@ describe("kit mutations through the one commit primitive", () => {
       kind: "costume",
       prompt: "Formal council coat",
       jobId: "jb_01J8E0000000000000000000J3",
+      takeId: "tk_01J8E0000000000000000000T3",
       artDirectionVersion: 3,
     });
     kit = (await readKit(store, "maren-kest"))!.kit;
@@ -557,5 +559,61 @@ describe("kit mutations through the one commit primitive", () => {
     });
     assert.equal(requests.length, 4);
     assert.deepEqual(requests[0]!.input.params["references"], ["references/maren-kest/main-photo.png"]);
+  });
+
+  it("records immutable reference takes and accepts review plus kit designation atomically", async () => {
+    const { dir, store } = await open();
+    const landed = "references/maren-kest/incoming/character-sheet-test.png";
+    await mkdir(join(dir, "references", "maren-kest", "incoming"), { recursive: true });
+    await writeFile(join(dir, landed), "generated-sheet-bytes");
+    const job = {
+      id: "jb_01J8E0000000000000000000J9",
+      idempotencyKey: "01J8E1000000000000000000K9",
+      worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+      target: { kind: "character-sheet", id: "maren-kest/g9" },
+      capability: "image",
+      provider: "fal",
+      model: "flux-pro-1.1",
+      params: { prompt: "one composite", references: ["references/maren-kest/head-front.png"], artDirection: { version: 3 } },
+      estimatedMicroUsd: 40000,
+      status: "succeeded",
+      providerJobId: "fal-g9",
+      attempt: 1,
+      landedFiles: [landed],
+      error: null,
+      createdAt: CLOCK(),
+      updatedAt: CLOCK(),
+    } as const;
+    const take = await recordReferenceTake(store, job as never);
+    assert.ok(take);
+    const takePath = join(dir, "references", "maren-kest", "takes", take.id, "take.json");
+    const before = await readFile(takePath);
+
+    const review = referenceReviewDecision(store.now(), take, "accept");
+    await acceptCharacterSheet(store, SHEET, {
+      file: `takes/${take.id}/${take.media}`,
+      takeId: take.id,
+      artDirectionVersion: 3,
+      review,
+    });
+    const after = store.getBundle();
+    assert.equal(after.referenceReviews.find((candidate) => candidate.takeId === take.id)?.decision, "accept");
+    assert.equal(
+      after.referenceKits.find((kit) => kit.sheetId === "maren-kest")?.designatedCompilation,
+      `takes/${take.id}/${take.media}`,
+    );
+    assert.deepEqual(await readFile(takePath), before, "review never rewrites take.json");
+
+    const second = await recordReferenceTake(store, { ...job, id: "jb_01J8E0000000000000000000JA" } as never);
+    assert.ok(second);
+    await recordReferenceReview(store, second, "reject", { field: "identity", note: "profile drifted" });
+    const final = store.getBundle();
+    assert.equal(final.referenceReviews.find((candidate) => candidate.takeId === second.id)?.decision, "reject");
+    assert.equal(
+      final.referenceKits.find((kit) => kit.sheetId === "maren-kest")?.designatedCompilation,
+      `takes/${take.id}/${take.media}`,
+      "rejection leaves accepted identity untouched",
+    );
+    await store.close();
   });
 });

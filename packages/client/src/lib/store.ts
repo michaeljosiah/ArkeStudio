@@ -1058,6 +1058,16 @@ export function acceptCharacterLook(
   send({ kind: "accept-character-look", worldId, sheetId, file, lookKind, prompt });
 }
 
+export function rejectReferenceTake(worldId: string, takeId: string, field: string, note?: string): void {
+  send({
+    kind: "reject-reference-take",
+    worldId,
+    takeId,
+    field,
+    ...(note ? { note } : {}),
+  });
+}
+
 export function promoteCharacterLook(worldId: string, sheetId: string, lookId: string): void {
   send({ kind: "promote-character-look", worldId, sheetId, lookId });
 }

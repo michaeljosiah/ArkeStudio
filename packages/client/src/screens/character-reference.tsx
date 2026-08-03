@@ -15,6 +15,7 @@ import {
   generateMainPhoto,
   importMainPhotoCandidate,
   promoteCharacterLook,
+  rejectReferenceTake,
   useStore,
 } from "../lib/store.js";
 
@@ -80,21 +81,6 @@ function CharacterHeader({ active }: { active: "reference" | "looks" }) {
   );
 }
 
-function succeededFiles(
-  jobs: NonNullable<ReturnType<typeof useStore>["state"]>["app"]["jobs"],
-  kind: string,
-  sheetId: string,
-) {
-  return jobs
-    .filter(
-      (job) =>
-        job.status === "succeeded" &&
-        job.target.kind === kind &&
-        job.target.id?.startsWith(`${sheetId}/`) === true,
-    )
-    .flatMap((job) => job.landedFiles ?? []);
-}
-
 export function CharacterReferenceScreen() {
   const { worldId, sheetId } = useParams();
   const navigate = useNavigate();
@@ -106,9 +92,14 @@ export function CharacterReferenceScreen() {
   const photo = kit ? mainPhotoFor(kit) : null;
   const compilation = kit ? designatedCompilation(kit) : null;
   const stale = kit && compilation ? compilationIsStale(kit, compilation, sheet.version) : false;
-  const sheetCandidates = succeededFiles(state?.app.jobs ?? [], "character-sheet", sheetId).filter(
-    (file) => !kit?.compilations.some((candidate) => file.endsWith(candidate.file)),
-  );
+  const pendingSheetTake = [...world.referenceTakes]
+    .reverse()
+    .find(
+      (take) =>
+        take.kind === "sheet" &&
+        take.reference?.sheetId === sheetId &&
+        !world.referenceReviews.some((review) => review.takeId === take.id),
+    );
   const runningSheet = (state?.app.jobs ?? []).some(
     (job) =>
       job.target.kind === "character-sheet" &&
@@ -170,14 +161,26 @@ export function CharacterReferenceScreen() {
               {compilation ? "Regenerate" : "Generate"}
             </Button>
           </div>
-          {sheetCandidates.length > 0 && (
+          {pendingSheetTake && (
             <div className="fy-reference-candidates">
               <span>One new composite is ready for review.</span>
               <Button
                 variant="primary"
-                onClick={() => acceptCharacterSheet(world.meta.worldId, sheetId, sheetCandidates.at(-1)!)}
+                onClick={() =>
+                  acceptCharacterSheet(
+                    world.meta.worldId,
+                    sheetId,
+                    `references/${sheetId}/takes/${pendingSheetTake.id}/${pendingSheetTake.media}`,
+                  )
+                }
               >
                 Accept character sheet
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => rejectReferenceTake(world.meta.worldId, pendingSheetTake.id, "identity")}
+              >
+                Reject
               </Button>
             </div>
           )}
@@ -335,12 +338,19 @@ export function ReplaceMainPhotoScreen() {
   const [worldRef, setWorldRef] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   if (!world || !sheet || !sheetId) return null;
-  const candidates = [
-    ...(world.referenceCandidates[sheetId] ?? []),
-    ...succeededFiles(state?.app.jobs ?? [], "main-photo-candidate", sheetId),
-  ].filter((file, index, all) => all.indexOf(file) === index);
   const current = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = current ? mainPhotoFor(current) : null;
+  const generatedCandidates = world.referenceTakes
+    .filter(
+      (take) =>
+        take.kind === "main-photo" &&
+        take.reference?.sheetId === sheetId &&
+        !world.referenceReviews.some((review) => review.takeId === take.id),
+    )
+    .map((take) => `references/${sheetId}/takes/${take.id}/${take.media}`);
+  const candidates = [...(world.referenceCandidates[sheetId] ?? []), ...generatedCandidates].filter(
+    (file, index, all) => all.indexOf(file) === index,
+  );
   const model = state?.app.manifest?.models.find((candidate) => candidate.capability === "image");
   const canImport = typeof window !== "undefined" && window.arke !== undefined;
   const refs = uploaded && photo ? [`references/${sheetId}/${photo.file}`] : [];
@@ -492,7 +502,6 @@ export function CharacterLooksScreen() {
   const { worldId, sheetId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);
-  const { state } = useStore();
   const [kind, setKind] = useState<"costume" | "pose-expression" | "condition-age">("costume");
   const [mode, setMode] = useState<"stay-close" | "push-it">("stay-close");
   const [prompt, setPrompt] = useState(
@@ -501,9 +510,13 @@ export function CharacterLooksScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   if (!world || !sheet || !sheetId) return null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
-  const pending = succeededFiles(state?.app.jobs ?? [], "character-look", sheetId).filter(
-    (file) => !(kit?.looks ?? []).some((look) => file.endsWith(look.file)),
+  const pendingLooks = world.referenceTakes.filter(
+    (take) =>
+      take.kind === "look" &&
+      take.reference?.sheetId === sheetId &&
+      !world.referenceReviews.some((review) => review.takeId === take.id),
   );
+  const pending = pendingLooks.map((take) => `references/${sheetId}/takes/${take.id}/${take.media}`);
   const images = [...(kit?.looks ?? []).map((look) => `references/${sheetId}/${look.file}`), ...pending];
   const selectedLook = kit?.looks?.find((look) => `references/${sheetId}/${look.file}` === selected);
   return (
