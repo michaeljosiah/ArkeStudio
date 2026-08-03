@@ -205,6 +205,7 @@ export function GenerateCharacterSheetScreen() {
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = kit ? mainPhotoFor(kit) : null;
   const model = state?.app.manifest?.models.find((candidate) => candidate.capability === "image");
+  const referencesAsText = (model?.accepts.referenceImages ?? 0) === 0;
   const estimate = model
     ? formatMicroUsd(model.pricing.kind === "perImage" ? model.pricing.microUsdPerImage : 0)
     : "cost unavailable";
@@ -283,6 +284,12 @@ export function GenerateCharacterSheetScreen() {
                 {override && style ? "Generation override" : `World look v${world.artDirection.version}`}
               </strong>
             </div>
+            {referencesAsText && (
+              <p className="fy-reference-fallback">
+                {model?.displayName ?? "This model"} accepts no reference images. The world look and main-photo
+                identity are translated into the prompt before generation.
+              </p>
+            )}
           </section>
         </div>
         <footer>
@@ -330,6 +337,7 @@ export function ReplaceMainPhotoScreen() {
   const candidates = succeededFiles(state?.app.jobs ?? [], "main-photo-candidate", sheetId);
   const current = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = current ? mainPhotoFor(current) : null;
+  const model = state?.app.manifest?.models.find((candidate) => candidate.capability === "image");
   const refs = uploaded && photo ? [`references/${sheetId}/${photo.file}`] : [];
   return (
     <div className="fy-mainphoto-scrim" data-screen="replace-main-photo">
@@ -399,7 +407,11 @@ export function ReplaceMainPhotoScreen() {
             ))}
           </div>
           <div className="fy-mainphoto-dialog__generate">
-            <span>up to 4 previews</span>
+            <span>
+              {(model?.accepts.referenceImages ?? 0) === 0
+                ? `${model?.displayName ?? "Model"} · look carries as text`
+                : "up to 4 previews"}
+            </span>
             <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}>
               Cancel
             </Button>

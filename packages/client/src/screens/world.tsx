@@ -229,6 +229,7 @@ function WorldConditionBanners() {
  */
 function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: string; hasLogline: boolean }) {
   const { state } = useStore();
+  const world = state?.world;
   const [dismissed, setDismissed] = useState<readonly string[]>([]);
   const configured = new Set((state?.app.providers ?? []).filter((p) => p.configured).map((p) => p.id));
   const routed = state?.app.routing.defaults["image"];
@@ -332,7 +333,9 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
       </Button>
       <span className="fy-keyart__note">
         {reason ??
-          (model ? `${PROVIDERS[model.provider].displayName} · ${model.displayName} · comes back for a yes` : "")}
+          (model
+            ? `${PROVIDERS[model.provider].displayName} · ${model.displayName} · World look v${world?.artDirection.version ?? 1} carries as text · comes back for a yes`
+            : "")}
       </span>
     </div>
   );

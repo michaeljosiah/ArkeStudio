@@ -31,7 +31,7 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     const refused = requireModel(SHIPPED_MANIFEST, "sora-9000");
     assert.equal(refused.ok, false);
     assert.ok(!refused.ok && /not in the model manifest/.test(refused.reason));
-    assert.ok(!refused.ok && refused.reason.includes("v8"));
+    assert.ok(!refused.ok && refused.reason.includes("v9"));
     assert.equal(requireModel(SHIPPED_MANIFEST, "seedance-2.0").ok, true);
   });
 
@@ -54,6 +54,14 @@ describe("the shipped manifest (R-9, §3.2)", () => {
   it("capability copy matches the manifest for accepting and refusing models (R-10)", () => {
     assert.equal(modelCapabilityCopy(model("seedance-2.0")), "refs ×4 · frames · 15s");
     assert.equal(modelCapabilityCopy(model("halcyon-1.5")), "no refs · frames · 12s");
+  });
+
+  it("declares role support and does not advertise references OpenAI drops", () => {
+    for (const imageModel of SHIPPED_MANIFEST.models.filter((candidate) => candidate.capability === "image")) {
+      assert.equal(typeof imageModel.accepts.referenceRoles, "boolean", `${imageModel.id} declares role support`);
+    }
+    assert.equal(model("gpt-image-2").accepts.referenceImages, 0);
+    assert.equal(model("gpt-image-2").accepts.referenceRoles, false);
   });
 
   it("pass packing computes from the duration cap (§2.5)", () => {

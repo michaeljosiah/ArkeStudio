@@ -114,4 +114,14 @@ describe("screen inventory", () => {
     assert.ok(looks.includes("Optional visual exploration, outside the identity package."));
     assert.ok(looks.includes("Explorations do not automatically join the identity package."));
   });
+
+  it("names the inherited world look on the remaining visual generation surfaces", () => {
+    const worldId = FIXTURE_STATE.world!.meta.worldId;
+    const workspace = renderAt(`/w/${worldId}/p/saltlight/generate`);
+    const dispatch = renderAt(`/w/${worldId}/p/saltlight/generate/dispatch`);
+    assert.ok(workspace.includes("World look · v"));
+    assert.ok(workspace.includes("carries as text"));
+    assert.ok(dispatch.includes("World look · v"));
+    assert.ok(dispatch.includes("carried in the prompt"));
+  });
 });

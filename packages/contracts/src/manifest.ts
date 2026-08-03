@@ -46,6 +46,8 @@ export const ModelAcceptsSchema = z
   .object({
     /** Maximum reference images; 0 means the model takes none, said before commit (R-10). */
     referenceImages: z.number().int().min(0),
+    /** True only when the provider has separate style and identity image inputs. */
+    referenceRoles: z.boolean().optional(),
     startFrame: z.boolean(),
     endFrame: z.boolean(),
   })

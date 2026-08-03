@@ -857,6 +857,12 @@ export function GenerateScreen() {
         <div className="fy-gen__label" style={{ marginTop: 16 }}>
           Frames <span className="fy-mono">start required · end optional</span>
         </div>
+        {world && (
+          <div className="fy-worldlook-line">
+            <span>World look · v{world.artDirection.version}</span>
+            <small>inherited · carries as text</small>
+          </div>
+        )}
         <div className="fy-framerow">
           {prevFrame ? (
             <div className="fy-frame">
@@ -1110,6 +1116,13 @@ export function DispatchDialogScreen() {
             </Button>
           ))}
         </div>
+        {world && model && (
+          <Callout title={`World look · v${world.artDirection.version}`}>
+            Inherited from this world and carried in the prompt. {model.accepts.referenceImages === 0
+              ? `${model.displayName} accepts no reference images, so identity and style are translated into prose before commit.`
+              : "Identity references remain distinct from the world's style treatment."}
+          </Callout>
+        )}
         <div className="fy-choicerow">
           {models.map((m) => (
             <Button key={m.id} variant={m.id === model?.id ? "primary" : "ghost"} onClick={() => setModelId(m.id)}>

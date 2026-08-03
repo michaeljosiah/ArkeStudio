@@ -13,18 +13,21 @@ import { FAL_MODELS } from "./fal-catalogue.generated.js";
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 8,
+  manifestVersion: 9,
   generated: "2026-08-02",
   models: [
     // ---- fal: generated from the live catalogue ---------------------------
-    ...FAL_MODELS,
+    ...FAL_MODELS.map((model) => ({
+      ...model,
+      accepts: { ...model.accepts, referenceRoles: false },
+    })),
     // ---- video ------------------------------------------------------------
     {
       id: "halcyon-1.5",
       provider: "higgsfield",
       capability: "video",
       displayName: "Halcyon 1.5",
-      accepts: { referenceImages: 0, startFrame: true, endFrame: true },
+      accepts: { referenceImages: 0, referenceRoles: false, startFrame: true, endFrame: true },
       limits: { maxDurationSec: 12, resolutions: ["720p", "1080p"], aspects: ["16:9", "9:16"] },
       pricing: { kind: "perSecond", microUsdPerSecond: 35000 },
     },
@@ -34,7 +37,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       provider: "higgsfield",
       capability: "image",
       displayName: "Soul 2.0",
-      accepts: { referenceImages: 3, startFrame: false, endFrame: false },
+      accepts: { referenceImages: 3, referenceRoles: false, startFrame: false, endFrame: false },
       limits: { resolutions: ["1080p", "4k"], aspects: ["16:9", "1:1"] },
       pricing: { kind: "perImage", microUsdPerImage: 60000, byResolution: { "4k": 120000 } },
     },
@@ -43,7 +46,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       provider: "openai",
       capability: "image",
       displayName: "GPT Image 2",
-      accepts: { referenceImages: 4, startFrame: false, endFrame: false },
+      accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
       limits: { resolutions: ["1024", "2048"], aspects: ["1:1", "3:2", "2:3"] },
       pricing: { kind: "perImage", microUsdPerImage: 40000 },
     },

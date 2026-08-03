@@ -73,7 +73,7 @@ const state: ClientState = {
       },
     ],
     manifest: {
-      manifestVersion: 7,
+      manifestVersion: 9,
       generated: "2026-07-28",
       models: [
         {
@@ -81,7 +81,7 @@ const state: ClientState = {
           provider: "fal",
           capability: "video",
           displayName: "Seedance 2.0",
-          accepts: { referenceImages: 4, startFrame: true, endFrame: true },
+          accepts: { referenceImages: 4, referenceRoles: false, startFrame: true, endFrame: true },
           limits: { maxDurationSec: 15, resolutions: ["720p", "1080p"], aspects: ["16:9"] },
           pricing: { kind: "perSecond", microUsdPerSecond: 21667, byResolution: { "1080p": 43333 } },
         },

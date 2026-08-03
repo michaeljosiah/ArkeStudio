@@ -195,6 +195,7 @@ export function characterSheetRequest(
   if (!photo) throw new Error("character sheet generation needs an accepted main photo");
   const style = styleOverride ?? kit.styleOverride ?? direction.description;
   const estimatedMicroUsd = estimateMicroUsd(model, { images: 1 });
+  const identityReferences = model.accepts.referenceImages > 0 ? [`references/${sheet.id}/${photo}`] : [];
   return {
     estimatedMicroUsd,
     input: {
@@ -205,12 +206,13 @@ export function characterSheetRequest(
       model: model.id,
       params: {
         prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. One composite character sheet on a clean neutral field: front, three-quarter, profile and back turnaround; expression studies; costume and prop details; clear relative proportions. Preserve the supplied identity exactly.`,
-        references: [`references/${sheet.id}/${photo}`],
-        referenceRoles: [{ file: `references/${sheet.id}/${photo}`, role: "identity" }],
+        references: identityReferences,
+        referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
         artDirection: {
           version: direction.version,
           source: styleOverride ? "generation" : kit.styleOverride ? "sheet" : "world",
           transport: "text",
+          identityTransport: identityReferences.length > 0 ? "image" : "text",
         },
       },
       estimatedMicroUsd,
@@ -240,6 +242,7 @@ export function characterLookRequests(
   if (!photo) throw new Error("looks need an accepted main photo");
   const style = kit.styleOverride ?? direction.description;
   const estimatedMicroUsd = estimateMicroUsd(model, { images: 1 });
+  const identityReferences = model.accepts.referenceImages > 0 ? [`references/${sheet.id}/${photo}`] : [];
   return Array.from({ length: input.count }, (_, index) => ({
     estimatedMicroUsd,
     input: {
@@ -250,14 +253,15 @@ export function characterLookRequests(
       model: model.id,
       params: {
         prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}. ${input.mode === "stay-close" ? "Stay close to the accepted identity and proportions." : "Push the styling while preserving the accepted identity."} Optional ${input.kind.replace("-", " ")} exploration; do not redefine identity.`,
-        references: [`references/${sheet.id}/${photo}`],
-        referenceRoles: [{ file: `references/${sheet.id}/${photo}`, role: "identity" }],
+        references: identityReferences,
+        referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
         lookKind: input.kind,
         lookPrompt: input.prompt,
         artDirection: {
           version: direction.version,
           source: kit.styleOverride ? "sheet" : "world",
           transport: "text",
+          identityTransport: identityReferences.length > 0 ? "image" : "text",
         },
       },
       estimatedMicroUsd,

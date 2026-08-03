@@ -2071,6 +2071,10 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-sheet-dialog__summary { margin-top: 24px; padding: 14px; border-radius: 10px; background: var(--neutral-50); display: grid; grid-template-columns: 80px 1fr; gap: 8px 16px; }
 .fy-sheet-dialog__summary span { font: 400 10px var(--font-mono); color: var(--neutral-400); }
 .fy-sheet-dialog__summary strong { font: 500 11.5px var(--font-sans); }
+.fy-reference-fallback { margin-top: 12px; padding: 10px 12px; border-left: 2px solid var(--warning); background: var(--warning-bg); font: 400 10px/1.5 var(--font-mono); color: var(--neutral-600); }
+.fy-worldlook-line { margin-top: 14px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; display: flex; align-items: center; background: var(--neutral-50); }
+.fy-worldlook-line span { font: 500 11px var(--font-sans); }
+.fy-worldlook-line small { margin-left: auto; font: 400 9px var(--font-mono); color: var(--neutral-400); }
 .fy-sheet-dialog > footer { height: 72px; flex: none; border-top: 1px solid var(--border); padding: 0 26px; display: flex; align-items: center; gap: 12px; }
 .fy-sheet-dialog > footer > span { font: 400 10px var(--font-mono); color: var(--neutral-400); }
 .fy-sheet-dialog > footer > span:nth-child(2) { color: var(--success); }

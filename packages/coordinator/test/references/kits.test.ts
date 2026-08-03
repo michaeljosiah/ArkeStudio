@@ -118,6 +118,14 @@ describe("the reference loop (R-6, D1, D3, §3.2)", () => {
     assert.ok(!(sheetRequest.input.params["references"] as string[]).includes("world-art.png"));
     assert.match(String(sheetRequest.input.params["prompt"]), /Painterly, tidal, restrained/);
 
+    const textOnly = { ...MODEL, accepts: { ...MODEL.accepts, referenceImages: 0 } };
+    const fallback = characterSheetRequest(WORLD_META, DIRECTION, SHEET, kit, textOnly, "g0");
+    assert.deepEqual(fallback.input.params["references"], []);
+    assert.equal(
+      (fallback.input.params["artDirection"] as { identityTransport: string }).identityTransport,
+      "text",
+    );
+
     const mainRequests = mainPhotoRequests(WORLD_META, DIRECTION, SHEET, null, MODEL, {
       prompt: "A clear portrait.",
       count: 2,
