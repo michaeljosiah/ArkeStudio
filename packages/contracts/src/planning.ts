@@ -1,4 +1,5 @@
-import { compilationIsStale, designatedCompilation, type ReferenceKit } from "./reference.js";
+import { compilationIsStale, designatedCompilation, mainPhotoFor, type ReferenceKit } from "./reference.js";
+import type { ResolvedArtDirection } from "./art-direction.js";
 import { referenceBudget, type BudgetCandidate, type BudgetResult } from "./reference-budget.js";
 import { estimateMicroUsd, type ManifestModel } from "./manifest.js";
 import type { Scene, Shot } from "./scene.js";
@@ -48,44 +49,77 @@ export function resolveCast(description: string, sheets: Sheet[]): ResolvedCast 
 // ---------------------------------------------------------------------------
 
 /** The assembled form: cited sheets, the scene's location, the tone, the shot's direction. */
-export function assemblePrompt(world: WorldMeta, sheets: Sheet[], scene: Scene, shot: Shot): string {
+export function assemblePrompt(
+  world: WorldMeta,
+  sheets: Sheet[],
+  scene: Scene,
+  shot: Shot,
+  artDirection?: string,
+): string {
   const { cast } = resolveCast(shot.description, sheets);
   const parts: string[] = [];
-  const style = [world.tone, world.genre].filter((s): s is string => typeof s === "string" && s.length > 0).join(", ");
+  const style =
+    artDirection ??
+    [world.tone, world.genre].filter((s): s is string => typeof s === "string" && s.length > 0).join(", ");
   if (style) parts.push(style);
-  const location = scene.inherits?.location !== undefined ? sheets.find((s) => s.id === scene.inherits!.location) : undefined;
+  const location =
+    scene.inherits?.location !== undefined
+      ? sheets.find((s) => s.id === scene.inherits!.location)
+      : undefined;
   if (location) {
-    const look = location.sections.find((s) => s.heading === "Look")?.body.split(/[.!?]/)[0]?.trim();
+    const look = location.sections
+      .find((s) => s.heading === "Look")
+      ?.body.split(/[.!?]/)[0]
+      ?.trim();
     parts.push(look ? `${location.name} — ${look}` : location.name);
   }
   if (scene.inherits?.timeOfDay) parts.push(scene.inherits.timeOfDay);
   // The description with mentions replaced by name + a clause of appearance.
   let description = shot.description;
   for (const { sheet } of cast) {
-    const appearance = sheet.sections.find((s) => s.heading === "Appearance")?.body.split(/[.!?]/)[0]?.trim();
-    description = description.replaceAll(`@${sheet.id}`, appearance ? `${sheet.name} (${appearance})` : sheet.name);
+    const appearance = sheet.sections
+      .find((s) => s.heading === "Appearance")
+      ?.body.split(/[.!?]/)[0]
+      ?.trim();
+    description = description.replaceAll(
+      `@${sheet.id}`,
+      appearance ? `${sheet.name} (${appearance})` : sheet.name,
+    );
   }
   parts.push(description.trim());
   if (shot.camera) parts.push(shot.camera);
   if (shot.audio?.kind && shot.audio.kind !== "silence") {
     parts.push(shot.audio.line ? `${shot.audio.kind}: "${shot.audio.line}"` : shot.audio.kind);
   }
-  return parts.filter((p) => p.length > 0).join(". ").replace(/\.\./g, ".");
+  return parts
+    .filter((p) => p.length > 0)
+    .join(". ")
+    .replace(/\.\./g, ".");
 }
 
 /** What the dispatch will actually say: the override when present, else the assembled form. */
-export function promptFor(world: WorldMeta, sheets: Sheet[], scene: Scene, shot: Shot): { text: string; overridden: boolean } {
+export function promptFor(
+  world: WorldMeta,
+  sheets: Sheet[],
+  scene: Scene,
+  shot: Shot,
+  artDirection?: string,
+): { text: string; overridden: boolean } {
   if (shot.promptOverride) return { text: shot.promptOverride.text, overridden: true };
-  return { text: assemblePrompt(world, sheets, scene, shot), overridden: false };
+  return { text: assemblePrompt(world, sheets, scene, shot, artDirection), overridden: false };
 }
 
 /** Cited sheets that advanced past the override's recorded versions (R-16, D7). */
-export function overrideStaleAgainst(shot: Shot, sheets: Sheet[]): Array<{ sheetId: string; from: number; to: number }> {
+export function overrideStaleAgainst(
+  shot: Shot,
+  sheets: Sheet[],
+): Array<{ sheetId: string; from: number; to: number }> {
   if (!shot.promptOverride) return [];
   const out: Array<{ sheetId: string; from: number; to: number }> = [];
   for (const [sheetId, pinned] of Object.entries(shot.promptOverride.sheetVersions)) {
     const sheet = sheets.find((s) => s.id === sheetId);
-    if (sheet && sheet.version > (pinned as number)) out.push({ sheetId, from: pinned as number, to: sheet.version });
+    if (sheet && sheet.version > (pinned as number))
+      out.push({ sheetId, from: pinned as number, to: sheet.version });
   }
   return out;
 }
@@ -129,7 +163,10 @@ export function packScene(shots: Shot[], capSec: number): PackResult {
   for (const shot of shots) {
     const duration = shot.durationSec ?? DEFAULT_SHOT_SEC;
     if (duration > capSec) {
-      return { ok: false, oversizeShot: { shotId: shot.id, number: shot.number, durationSec: duration, capSec } };
+      return {
+        ok: false,
+        oversizeShot: { shotId: shot.id, number: shot.number, durationSec: duration, capSec },
+      };
     }
     if (cursor + duration > capSec) close();
     current.push({ shotId: shot.id, number: shot.number, startSec: cursor, endSec: cursor + duration });
@@ -147,21 +184,64 @@ export function packScene(shots: Shot[], capSec: number): PackResult {
 export interface AttachmentDecision {
   sheetId: string;
   file: string | null;
-  mode: "designated" | "sketch-citation";
+  mode: "designated" | "main-photo" | "scoped-look" | "sketch-citation";
+  role: "primary" | "secondary";
   staleGap: string | null;
 }
 
-export function attachmentFor(kit: ReferenceKit | null, sheet: Sheet): AttachmentDecision {
+export function attachmentFor(
+  kit: ReferenceKit | null,
+  sheet: Sheet,
+  role: "primary" | "secondary" = "primary",
+  scope?: { productionId?: string; sceneId?: string },
+): AttachmentDecision {
+  const scopedLook = kit?.looks?.find((look) => {
+    if (!look.attachedTo || !scope?.productionId) return false;
+    if (look.attachedTo.productionId !== scope.productionId) return false;
+    return look.attachedTo.kind === "production" || look.attachedTo.sceneId === scope.sceneId;
+  });
+  if (role === "primary" && scopedLook) {
+    return {
+      sheetId: sheet.id,
+      file: `references/${sheet.id}/${scopedLook.file}`,
+      mode: "scoped-look",
+      role,
+      staleGap: null,
+    };
+  }
   const designated = kit ? designatedCompilation(kit) : null;
+  const photo = kit ? mainPhotoFor(kit) : null;
+  if (role === "secondary") {
+    return photo && designated
+      ? {
+          sheetId: sheet.id,
+          file: `references/${sheet.id}/${photo.file}`,
+          mode: "main-photo",
+          role,
+          staleGap: null,
+        }
+      : { sheetId: sheet.id, file: null, mode: "sketch-citation", role, staleGap: null };
+  }
   if (!kit || !designated) {
-    return { sheetId: sheet.id, file: null, mode: "sketch-citation", staleGap: null };
+    return photo
+      ? {
+          sheetId: sheet.id,
+          file: `references/${sheet.id}/${photo.file}`,
+          mode: "main-photo",
+          role,
+          staleGap: null,
+        }
+      : { sheetId: sheet.id, file: null, mode: "sketch-citation", role, staleGap: null };
   }
   const stale = compilationIsStale(kit, designated, sheet.version);
   return {
     sheetId: sheet.id,
     file: `references/${sheet.id}/${designated.file}`,
     mode: "designated",
-    staleGap: stale ? `model sheet is v${designated.sheetVersion}; ${sheet.name} is at v${sheet.version}` : null,
+    role,
+    staleGap: stale
+      ? `model sheet is v${designated.sheetVersion}; ${sheet.name} is at v${sheet.version}`
+      : null,
   };
 }
 
@@ -176,7 +256,11 @@ export interface DispatchWarnings {
   staleModelSheets: string[];
   retiredCitations: string[];
   unknownMentions: string[];
-  overriddenStale: Array<{ shotId: string; number: number; against: Array<{ sheetId: string; from: number; to: number }> }>;
+  overriddenStale: Array<{
+    shotId: string;
+    number: number;
+    against: Array<{ sheetId: string; from: number; to: number }>;
+  }>;
 }
 
 export interface ScenePlanInput {
@@ -187,6 +271,8 @@ export interface ScenePlanInput {
   selections: Selections;
   model: ManifestModel;
   resolution?: string;
+  productionId?: string;
+  artDirection?: ResolvedArtDirection;
 }
 
 export interface ShotDispatchPlan {
@@ -205,7 +291,10 @@ export interface ScenePlan {
   warnings: DispatchWarnings;
 }
 
-function sceneCast(scene: Scene, sheets: Sheet[]): { resolved: ResolvedCast; perShot: Map<string, ResolvedCast> } {
+function sceneCast(
+  scene: Scene,
+  sheets: Sheet[],
+): { resolved: ResolvedCast; perShot: Map<string, ResolvedCast> } {
   const perShot = new Map<string, ResolvedCast>();
   const seen = new Map<string, { sheet: Sheet; retired: boolean }>();
   const unknown = new Set<string>();
@@ -218,7 +307,14 @@ function sceneCast(scene: Scene, sheets: Sheet[]): { resolved: ResolvedCast; per
   return { resolved: { cast: [...seen.values()], unknown: [...unknown] }, perShot };
 }
 
-function budgetFor(cast: ResolvedCast["cast"], kits: ReferenceKit[], scene: Scene, sheets: Sheet[], model: ManifestModel) {
+function budgetFor(
+  cast: ResolvedCast["cast"],
+  kits: ReferenceKit[],
+  scene: Scene,
+  sheets: Sheet[],
+  model: ManifestModel,
+  productionId?: string,
+) {
   const withLocation: Array<{ sheet: Sheet; retired: boolean }> = [...cast];
   const locationId = scene.inherits?.location;
   if (locationId !== undefined && !withLocation.some((c) => c.sheet.id === locationId)) {
@@ -230,7 +326,15 @@ function budgetFor(cast: ResolvedCast["cast"], kits: ReferenceKit[], scene: Scen
     kind: entry.sheet.type,
     ...(entry.sheet.billing !== undefined ? { billing: entry.sheet.billing } : {}),
     appearanceOrder: i,
-    hasReference: attachmentFor(kits.find((k) => k.sheetId === entry.sheet.id) ?? null, entry.sheet).file !== null,
+    hasReference:
+      attachmentFor(kits.find((k) => k.sheetId === entry.sheet.id) ?? null, entry.sheet, "primary", {
+        ...(productionId ? { productionId } : {}),
+        sceneId: scene.id,
+      }).file !== null,
+    hasSecondaryReference:
+      entry.sheet.type === "character" &&
+      attachmentFor(kits.find((k) => k.sheetId === entry.sheet.id) ?? null, entry.sheet, "secondary").file !==
+        null,
   }));
   return referenceBudget(candidates, model);
 }
@@ -244,16 +348,33 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
 
   const shots: ShotDispatchPlan[] = scene.shots.map((shot) => {
     const cast = perShot.get(shot.id)!;
-    const budget = budgetFor(cast.cast, kits, scene, sheets, model);
+    const budget = budgetFor(cast.cast, kits, scene, sheets, model, input.productionId);
     const references = budget.carried.map((c) =>
-      attachmentFor(kits.find((k) => k.sheetId === c.sheetId) ?? null, sheets.find((s) => s.id === c.sheetId)!),
+      attachmentFor(
+        kits.find((k) => k.sheetId === c.sheetId) ?? null,
+        sheets.find((s) => s.id === c.sheetId)!,
+        c.referenceRole,
+        { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id },
+      ),
     );
     const duration = shot.durationSec ?? DEFAULT_SHOT_SEC;
     const estimate =
       model.capability === "video"
-        ? estimateMicroUsd(model, { durationSec: duration, ...(input.resolution !== undefined ? { resolution: input.resolution } : {}) })
-        : estimateMicroUsd(model, { images: 1, ...(input.resolution !== undefined ? { resolution: input.resolution } : {}) });
-    return { shot, prompt: promptFor(world, sheets, scene, shot), references, budget, estimatedMicroUsd: estimate };
+        ? estimateMicroUsd(model, {
+            durationSec: duration,
+            ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
+          })
+        : estimateMicroUsd(model, {
+            images: 1,
+            ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
+          });
+    return {
+      shot,
+      prompt: promptFor(world, sheets, scene, shot, input.artDirection?.description),
+      references,
+      budget,
+      estimatedMicroUsd: estimate,
+    };
   });
 
   const perShotTotal = shots.reduce((a, s) => a + s.estimatedMicroUsd, 0);
@@ -270,7 +391,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
         )
       : perShotTotal;
 
-  const sceneBudget = budgetFor(resolved.cast, kits, scene, sheets, model);
+  const sceneBudget = budgetFor(resolved.cast, kits, scene, sheets, model, input.productionId);
   const warnings: DispatchWarnings = {
     shotsWithoutFrame: scene.shots
       .filter((s) => !(selections[s.id]?.startFrameTakeId ?? null))

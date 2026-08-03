@@ -42,7 +42,7 @@ function count(haystack: string, needle: string): number {
  */
 const WITHOUT_CONTROLS = new Set(["launch"]);
 /** Full-frame accept gates draw their own composition exactly as approved. */
-const WITHOUT_CHROME = new Set(["art-direction-proposal"]);
+const WITHOUT_CHROME = new Set(["art-direction-proposal", "replace-main-photo", "model-sheet-generate"]);
 
 describe("app chrome", () => {
   for (const screen of SCREENS) {

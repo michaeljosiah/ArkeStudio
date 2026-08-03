@@ -6,6 +6,7 @@ import {
   designatedCompilation,
   formatMicroUsd,
   headGate,
+  mainPhotoFor,
   PROVIDERS,
   tileIsStale,
   type CanonEntry,
@@ -104,7 +105,11 @@ export function WorldLayout() {
     ["artifacts", "Artifacts"],
     ["productions", "Productions"],
   ] as const;
-  if (location.pathname.endsWith("/art-direction/propose")) {
+  if (
+    location.pathname.endsWith("/art-direction/propose") ||
+    location.pathname.endsWith("/main-photo") ||
+    location.pathname.endsWith("/model-sheet")
+  ) {
     return (
       <div className="fy-app">
         <div className="fy-content fy-content--fixed">
@@ -765,38 +770,40 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const sheetPath = `${sheet.type === "character" ? "characters" : `${sheet.type}s`}/${sheet.id}.md`;
   const refs = sheetRefsMap[sheet.id];
   const isCharacter = sheet.type === "character";
-  const kitTiles = (kit?.tiles ?? []).filter((t) => t.status !== "empty" && t.file !== undefined);
-  const nextAngle = (kit?.tiles ?? []).find((t) => t.status === "empty")?.angle;
+  const mainPhoto = kit ? mainPhotoFor(kit) : null;
+  const characterSheet = kit ? designatedCompilation(kit) : null;
   const slug = world.meta.slug;
   const side = isCharacter ? (
         <div className="fy-sheet__side">
           <div className="fy-fan__drift">
             <div className="fy-designcard">
               <div className="fy-designcard__frame">
-                <Portrait worldSlug={slug} path={sheetPortraitPath(sheet.id)} label={`${sheet.name}: portrait`} radius={8} />
+                <Portrait
+                  worldSlug={slug}
+                  path={mainPhoto ? `references/${sheet.id}/${mainPhoto.file}` : sheetPortraitPath(sheet.id)}
+                  label={`${sheet.name}: main photo`}
+                  radius={8}
+                />
               </div>
               <div className="fy-designcard__caption">
-                <span className="fy-designcard__title">Design sheet v{sheet.version}</span>
-                <span className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`} />
-                <span className="fy-designcard__note">{sheet.status === "locked" ? "canon locked" : "sketch"}</span>
+                <span className="fy-designcard__title">Main photo</span>
+                <span className={`fy-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />
+                <span className="fy-designcard__note">{mainPhoto ? "identity anchor" : "outstanding"}</span>
               </div>
             </div>
           </div>
-          <div className="fy-turnstrip">
-            {kitTiles.slice(0, 2).map((t) => (
-              <div
-                key={t.angle}
-                className="fy-turnstrip__tile"
-                onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}
-              >
-                <Portrait worldSlug={slug} path={`references/${sheet.id}/${t.file!}`} label={t.angle.replace(/-/g, " ")} radius={8} />
-              </div>
-            ))}
-            <button type="button" className="fy-turnstrip__add" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}>
-              <Plus size={16} />
-              <span>{nextAngle ? nextAngle.replace(/-/g, " ") : "Kit"}</span>
-            </button>
-          </div>
+          <button type="button" className="fy-overview-sheet" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}>
+            <span>
+              <Portrait
+                worldSlug={slug}
+                path={characterSheet ? `references/${sheet.id}/${characterSheet.file}` : ""}
+                label="Character sheet outstanding"
+                radius={9}
+              />
+            </span>
+            <strong>Character sheet</strong>
+            <small>{characterSheet ? "accepted · current" : "outstanding"}</small>
+          </button>
         </div>
   ) : null;
   const main = (
@@ -823,9 +830,12 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         </div>
         <div className="fy-sheet__actions">
           {isCharacter && (
-            <Button variant="primary" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}>
-              Generate looks{kit ? ` · ${kit.tiles.filter((t) => t.status !== "empty").length}` : ""}
-            </Button>
+            <>
+              <Button variant="primary" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}>
+                Reference
+              </Button>
+              <Button onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/looks`)}>More looks</Button>
+            </>
           )}
           <Button onClick={() => navigate(`/w/${worldId}/${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${sheet.id}/edit`)}>
             Edit the sheet
@@ -1014,10 +1024,18 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   );
   if (isCharacter) {
     return (
-      <div className="fy-sheet" data-screen={screenId}>
-        {side}
-        {main}
-      </div>
+      <>
+        <nav className="fy-seg fy-character-overview-tabs">
+          <span className="fy-seg__item fy-seg__item--active">Overview</span>
+          <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}>Reference</button>
+          <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/looks`)}>More looks</button>
+          <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}>Voice</button>
+        </nav>
+        <div className="fy-sheet" data-screen={screenId}>
+          {side}
+          {main}
+        </div>
+      </>
     );
   }
   // Locations and factions (prototype 23b): full-height establishing view, facts to the right.

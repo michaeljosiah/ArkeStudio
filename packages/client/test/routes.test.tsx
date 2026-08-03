@@ -23,9 +23,9 @@ function renderAt(path: string): string {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (43 screens)", () => {
-    assert.equal(SCREENS.length, 43);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 43, "screen ids are unique");
+  it("covers the full screen inventory (45 screens)", () => {
+    assert.equal(SCREENS.length, 45);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 45, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {
@@ -80,5 +80,38 @@ describe("screen inventory", () => {
     ]) {
       assert.ok(html.includes(copy), `art direction names ${copy}`);
     }
+  });
+
+  it("renders the approved two-image character workflow", () => {
+    const base = `/w/${FIXTURE_STATE.world!.meta.worldId}/cast/maren-kest`;
+    const reference = renderAt(`${base}/kit`);
+    for (const copy of [
+      "Main photo",
+      "ACCEPTED · IDENTITY ANCHOR",
+      "Character sheet",
+      "multiple views · one composite image",
+      "1 reference: Character sheet",
+      "multiple: Main photo + Character sheet",
+    ]) {
+      assert.ok(reference.includes(copy), `Reference matches the approved frame: ${copy}`);
+    }
+
+    const generator = renderAt(`${base}/model-sheet`);
+    for (const copy of [
+      "Generate character sheet",
+      "one composite identity reference",
+      "World look · v",
+      "reference set",
+    ]) {
+      assert.ok(generator.includes(copy), `Sheet generator states ${copy}`);
+    }
+
+    const replace = renderAt(`${base}/main-photo`);
+    assert.ok(replace.includes("Replacing the main photo makes the current character sheet stale."));
+    assert.ok(replace.includes("World look · v"));
+
+    const looks = renderAt(`${base}/looks`);
+    assert.ok(looks.includes("Optional visual exploration, outside the identity package."));
+    assert.ok(looks.includes("Explorations do not automatically join the identity package."));
   });
 });

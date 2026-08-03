@@ -4,6 +4,7 @@ import {
   headGate,
   lockedTiles,
   ReferenceKitSchema,
+  type Job,
   type Compilation,
   type ReferenceAngle,
   type ReferenceKit,
@@ -24,7 +25,10 @@ import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "./
 
 const kitPath = (sheetId: string): string => `references/${sheetId}/kit.json`;
 
-export async function readKit(store: WorldStore, sheetId: string): Promise<{ kit: ReferenceKit; raw: string } | null> {
+export async function readKit(
+  store: WorldStore,
+  sheetId: string,
+): Promise<{ kit: ReferenceKit; raw: string } | null> {
   try {
     const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(kitPath(sheetId)))), "utf8");
     return { kit: ReferenceKitSchema.parse(JSON.parse(raw)), raw };
@@ -33,7 +37,12 @@ export async function readKit(store: WorldStore, sheetId: string): Promise<{ kit
   }
 }
 
-async function writeKit(store: WorldStore, sheetId: string, kit: ReferenceKit, baseRaw: string | null): Promise<void> {
+async function writeKit(
+  store: WorldStore,
+  sheetId: string,
+  kit: ReferenceKit,
+  baseRaw: string | null,
+): Promise<void> {
   await store.commit({
     kind: "kit-edit",
     source: "form",
@@ -48,29 +57,31 @@ async function writeKit(store: WorldStore, sheetId: string, kit: ReferenceKit, b
   });
 }
 
-/** A fresh kit with the standard slots (R-1). */
+/** A fresh SPEC-017 kit. Legacy tile arrays remain readable but new kits generate no angle tiles. */
 export function emptyKit(sheetId: string): ReferenceKit {
   return {
     sheetId,
-    tiles: [
-      { angle: "head-front", status: "empty" },
-      { angle: "head-left-three-quarter", status: "empty" },
-      { angle: "head-right-three-quarter", status: "empty" },
-      { angle: "head-profile", status: "empty" },
-      { angle: "body-full", status: "empty" },
-      { angle: "body-back", status: "empty" },
-    ],
+    tiles: [],
     compilations: [],
+    looks: [],
   };
 }
 
-async function loadOrEmpty(store: WorldStore, sheetId: string): Promise<{ kit: ReferenceKit; raw: string | null }> {
+async function loadOrEmpty(
+  store: WorldStore,
+  sheetId: string,
+): Promise<{ kit: ReferenceKit; raw: string | null }> {
   const existing = await readKit(store, sheetId);
   return existing ?? { kit: emptyKit(sheetId), raw: null };
 }
 
 /** Lock a generated tile into the reference set (R-3, D3). */
-export async function lockTile(store: WorldStore, sheetId: string, angle: ReferenceAngle, name?: string): Promise<void> {
+export async function lockTile(
+  store: WorldStore,
+  sheetId: string,
+  angle: ReferenceAngle,
+  name?: string,
+): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheetId);
   const tile = kit.tiles.find(
     (t) => t.angle === angle && (name === undefined || t.name === name) && t.status === "generated",
@@ -80,7 +91,9 @@ export async function lockTile(store: WorldStore, sheetId: string, angle: Refere
   const next: ReferenceKit = {
     ...kit,
     // The first locked head-front becomes the anchor if none exists (D2).
-    ...(kit.anchor === undefined && angle === "head-front" && tile.file !== undefined ? { anchor: tile.file } : {}),
+    ...(kit.anchor === undefined && angle === "head-front" && tile.file !== undefined
+      ? { anchor: tile.file }
+      : {}),
   };
   await writeKit(store, sheetId, next, raw);
 }
@@ -106,7 +119,9 @@ export async function supersedeTile(
     status: incoming.lock ? "locked" : "generated",
     file: incoming.file,
     sheetVersion: incoming.sheetVersion,
-    ...(incoming.takeId !== undefined ? { sourceTakeId: incoming.takeId as ReferenceKit["tiles"][number]["sourceTakeId"] } : {}),
+    ...(incoming.takeId !== undefined
+      ? { sourceTakeId: incoming.takeId as ReferenceKit["tiles"][number]["sourceTakeId"] }
+      : {}),
   });
   const next: ReferenceKit = {
     ...kit,
@@ -119,7 +134,15 @@ export async function supersedeTile(
 export async function chooseAnchor(
   store: WorldStore,
   sheetId: string,
-  input: { file: string; takeId?: string; sheetVersion: number },
+  input: {
+    file: string;
+    takeId?: string;
+    jobId?: Job["id"];
+    sheetVersion: number;
+    artDirectionVersion?: number;
+    source?: "generated" | "upload" | "promotion";
+    acceptedAt?: string;
+  },
 ): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheetId);
   for (const tile of kit.tiles) {
@@ -127,18 +150,137 @@ export async function chooseAnchor(
       tile.status = "superseded";
     }
   }
-  kit.tiles.push({
-    angle: "head-front",
-    status: "locked",
-    file: input.file,
-    sheetVersion: input.sheetVersion,
-    ...(input.takeId !== undefined ? { sourceTakeId: input.takeId as ReferenceKit["tiles"][number]["sourceTakeId"] } : {}),
-  });
+  if (kit.tiles.length > 0) {
+    kit.tiles.push({
+      angle: "head-front",
+      status: "locked",
+      file: input.file,
+      sheetVersion: input.sheetVersion,
+      ...(input.takeId !== undefined
+        ? { sourceTakeId: input.takeId as ReferenceKit["tiles"][number]["sourceTakeId"] }
+        : {}),
+    });
+  }
   // The most consequential accept in the product: everything downstream inherits this face.
-  await writeKit(store, sheetId, { ...kit, anchor: input.file }, raw);
+  await writeKit(
+    store,
+    sheetId,
+    {
+      ...kit,
+      anchor: input.file,
+      mainPhoto: {
+        file: input.file,
+        source: input.source ?? "generated",
+        ...(input.jobId ? { sourceJobId: input.jobId } : {}),
+        sheetVersion: input.sheetVersion,
+        ...(input.artDirectionVersion ? { artDirectionVersion: input.artDirectionVersion } : {}),
+        ...(input.acceptedAt ? { acceptedAt: input.acceptedAt } : {}),
+      },
+    },
+    raw,
+  );
 }
 
-export async function setStyleOverride(store: WorldStore, sheetId: string, style: string | null): Promise<void> {
+export async function acceptCharacterSheet(
+  store: WorldStore,
+  sheet: Sheet,
+  input: { file: string; jobId: Job["id"]; artDirectionVersion: number },
+): Promise<void> {
+  const { kit, raw } = await loadOrEmpty(store, sheet.id);
+  const photo = kit.mainPhoto?.file ?? kit.anchor;
+  if (!photo) throw new Error("accepting a character sheet needs an accepted main photo");
+  const compilation: Compilation = {
+    file: input.file,
+    format: "character-sheet",
+    sheetVersion: sheet.version,
+    tiles: [],
+    compiledAt: store.now(),
+    source: input.jobId,
+    accepted: true,
+    anchorFile: photo,
+    artDirectionVersion: input.artDirectionVersion,
+  };
+  const others = kit.compilations.filter((candidate) => candidate.file !== input.file);
+  await writeKit(
+    store,
+    sheet.id,
+    { ...kit, compilations: [...others, compilation], designatedCompilation: input.file },
+    raw,
+  );
+}
+
+export async function acceptCharacterLook(
+  store: WorldStore,
+  sheetId: string,
+  input: {
+    id: string;
+    file: string;
+    kind: "costume" | "pose-expression" | "condition-age";
+    prompt: string;
+    jobId: Job["id"];
+    artDirectionVersion: number;
+  },
+): Promise<void> {
+  const { kit, raw } = await loadOrEmpty(store, sheetId);
+  const others = (kit.looks ?? []).filter((look) => look.id !== input.id);
+  await writeKit(
+    store,
+    sheetId,
+    {
+      ...kit,
+      looks: [
+        ...others,
+        {
+          id: input.id,
+          file: input.file,
+          kind: input.kind,
+          prompt: input.prompt,
+          sourceJobId: input.jobId,
+          artDirectionVersion: input.artDirectionVersion,
+          acceptedAt: store.now(),
+        },
+      ],
+    },
+    raw,
+  );
+}
+
+export async function promoteCharacterLook(store: WorldStore, sheet: Sheet, lookId: string): Promise<void> {
+  const loaded = await loadOrEmpty(store, sheet.id);
+  const look = loaded.kit.looks?.find((candidate) => candidate.id === lookId);
+  if (!look) throw new Error(`no accepted look "${lookId}"`);
+  await chooseAnchor(store, sheet.id, {
+    file: look.file,
+    jobId: look.sourceJobId,
+    sheetVersion: sheet.version,
+    artDirectionVersion: look.artDirectionVersion,
+    source: "promotion",
+    acceptedAt: store.now(),
+  });
+}
+
+export async function attachCharacterLook(
+  store: WorldStore,
+  sheetId: string,
+  lookId: string,
+  scope: NonNullable<ReferenceKit["looks"]>[number]["attachedTo"] | null,
+): Promise<void> {
+  const { kit, raw } = await loadOrEmpty(store, sheetId);
+  const looks = [...(kit.looks ?? [])];
+  const index = looks.findIndex((look) => look.id === lookId);
+  if (index === -1) throw new Error(`no accepted look "${lookId}"`);
+  const next = { ...looks[index]! };
+  if (scope) next.attachedTo = scope;
+  else delete next.attachedTo;
+  looks[index] = next;
+  await writeKit(store, sheetId, { ...kit, looks }, raw);
+}
+
+export async function setStyleOverride(
+  store: WorldStore,
+  sheetId: string,
+  style: string | null,
+): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheetId);
   const next = { ...kit };
   if (style === null) delete next.styleOverride;
@@ -273,6 +415,8 @@ export function kitReport(kit: ReferenceKit | null): {
   const filled = new Set(
     effective.tiles.filter((t) => t.status === "locked" || t.status === "generated").map((t) => t.angle),
   );
-  const missing = ([...new Set(effective.tiles.map((t) => t.angle))] as ReferenceAngle[]).filter((a) => !filled.has(a));
+  const missing = ([...new Set(effective.tiles.map((t) => t.angle))] as ReferenceAngle[]).filter(
+    (a) => !filled.has(a),
+  );
   return { gate, missing };
 }

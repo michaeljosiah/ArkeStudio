@@ -413,6 +413,37 @@ describe("reference kits", () => {
   it("round-trips unchanged", () => {
     assert.deepEqual(ReferenceKitSchema.parse(kit), kit);
   });
+
+  it("adds the two-image kit without making legacy tiles migrate", () => {
+    const next = {
+      ...kit,
+      mainPhoto: {
+        file: "main-photo.png",
+        source: "generated",
+        sourceJobId: newId("jb"),
+        sheetVersion: 4,
+        artDirectionVersion: 3,
+        acceptedAt: "2026-08-03T12:00:00Z",
+      },
+      compilations: [
+        ...kit.compilations,
+        {
+          file: "character-sheet-v4.png",
+          format: "character-sheet",
+          sheetVersion: 4,
+          tiles: [],
+          compiledAt: "2026-08-03T12:02:00Z",
+          source: newId("jb"),
+          accepted: true,
+          anchorFile: "main-photo.png",
+          artDirectionVersion: 3,
+        },
+      ],
+      looks: [],
+    };
+    assert.deepEqual(ReferenceKitSchema.parse(next), next);
+    assert.deepEqual(ReferenceKitSchema.parse(kit), kit, "the six-tile shape still parses unchanged");
+  });
 });
 
 describe("change records", () => {

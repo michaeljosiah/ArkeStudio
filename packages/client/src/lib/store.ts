@@ -1010,6 +1010,66 @@ export function chooseAnchor(worldId: string, sheetId: string, file: string): vo
   send({ kind: "choose-anchor", worldId, sheetId, file });
 }
 
+export function generateMainPhoto(
+  worldId: string,
+  sheetId: string,
+  prompt: string,
+  count: number,
+  identityReferences: string[],
+): void {
+  send({ kind: "generate-main-photo", worldId, sheetId, prompt, count, identityReferences });
+}
+
+export function generateCharacterSheet(worldId: string, sheetId: string, styleOverride?: string): void {
+  send({
+    kind: "generate-character-sheet",
+    worldId,
+    sheetId,
+    ...(styleOverride ? { styleOverride } : {}),
+  });
+}
+
+export function acceptCharacterSheet(worldId: string, sheetId: string, file: string): void {
+  send({ kind: "accept-character-sheet", worldId, sheetId, file });
+}
+
+export function generateCharacterLooks(
+  worldId: string,
+  sheetId: string,
+  lookKind: "costume" | "pose-expression" | "condition-age",
+  mode: "stay-close" | "push-it",
+  prompt: string,
+  count: number,
+): void {
+  send({ kind: "generate-character-looks", worldId, sheetId, lookKind, mode, prompt, count });
+}
+
+export function acceptCharacterLook(
+  worldId: string,
+  sheetId: string,
+  file: string,
+  lookKind: "costume" | "pose-expression" | "condition-age",
+  prompt: string,
+): void {
+  send({ kind: "accept-character-look", worldId, sheetId, file, lookKind, prompt });
+}
+
+export function promoteCharacterLook(worldId: string, sheetId: string, lookId: string): void {
+  send({ kind: "promote-character-look", worldId, sheetId, lookId });
+}
+
+export function attachCharacterLook(
+  worldId: string,
+  sheetId: string,
+  lookId: string,
+  scope:
+    | { kind: "production"; productionId: string }
+    | { kind: "scene"; productionId: string; sceneId: string }
+    | null,
+): void {
+  send({ kind: "attach-character-look", worldId, sheetId, lookId, scope });
+}
+
 export function lockTile(worldId: string, sheetId: string, angle: ReferenceAngle, name?: string): void {
   send({ kind: "lock-tile", worldId, sheetId, angle, ...(name !== undefined ? { name } : {}) });
 }

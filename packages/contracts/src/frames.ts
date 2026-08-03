@@ -341,6 +341,77 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("choose-anchor"), worldId: UlidSchema, sheetId: SlugSchema, file: z.string().min(1) })
     .strict(),
+  z
+    .object({
+      kind: z.literal("generate-main-photo"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      prompt: z.string().trim().min(1).max(2000),
+      count: z.number().int().min(1).max(4),
+      identityReferences: z.array(z.string().min(1)).max(4),
+    })
+    .strict(),
+  /** SPEC-017: one composite generation, conditioned on the accepted main photo. */
+  z
+    .object({
+      kind: z.literal("generate-character-sheet"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      styleOverride: z.string().trim().min(1).max(4000).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("accept-character-sheet"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      file: z.string().min(1),
+    })
+    .strict(),
+  /** Optional looks stay outside identity until promotion or scoped attachment. */
+  z
+    .object({
+      kind: z.literal("generate-character-looks"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      lookKind: z.enum(["costume", "pose-expression", "condition-age"]),
+      mode: z.enum(["stay-close", "push-it"]),
+      prompt: z.string().trim().min(1).max(2000),
+      count: z.number().int().min(1).max(4),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("accept-character-look"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      file: z.string().min(1),
+      lookKind: z.enum(["costume", "pose-expression", "condition-age"]),
+      prompt: z.string().trim().min(1).max(2000),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("promote-character-look"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      lookId: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("attach-character-look"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      lookId: z.string().min(1),
+      scope: z
+        .discriminatedUnion("kind", [
+          z.object({ kind: z.literal("production"), productionId: SlugSchema }).strict(),
+          z.object({ kind: z.literal("scene"), productionId: SlugSchema, sceneId: z.string().min(1) }).strict(),
+        ])
+        .nullable(),
+    })
+    .strict(),
   /** SPEC-010 R-3: admit a generated tile to the reference set. */
   z
     .object({

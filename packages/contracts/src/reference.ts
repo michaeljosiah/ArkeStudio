@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDateTimeSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { IsoDateTimeSchema, JobIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
 
 /**
  * Reference kits and model sheets (SPEC-010; master spec §6). `references/<sheet>/kit.json` is
@@ -62,7 +62,12 @@ export const ReferenceTileSchema = z
   .strict();
 export type ReferenceTile = z.infer<typeof ReferenceTileSchema>;
 
-export const CompilationFormatSchema = z.enum(["classic-grid", "pitch-board", "expression-board"]);
+export const CompilationFormatSchema = z.enum([
+  "classic-grid",
+  "pitch-board",
+  "expression-board",
+  "character-sheet",
+]);
 export type CompilationFormat = z.infer<typeof CompilationFormatSchema>;
 
 /** A compiled model sheet (R-9): records the sheet version and exact tile set (R-12). */
@@ -76,12 +81,46 @@ export const CompilationSchema = z
     tiles: z.array(z.string()),
     compiledAt: IsoDateTimeSchema,
     /** "local" for the deterministic grid (R-10); the producing take for generated formats. */
-    source: z.union([z.literal("local"), TakeIdSchema]),
+    source: z.union([z.literal("local"), TakeIdSchema, JobIdSchema]),
     /** Generated formats land only on acceptance (R-11); the local grid is born accepted. */
     accepted: z.boolean(),
+    /** Direct sheets record the main photo that conditioned the generation (SPEC-017 R-15). */
+    anchorFile: z.string().min(1).optional(),
+    artDirectionVersion: z.number().int().min(1).optional(),
   })
   .strict();
 export type Compilation = z.infer<typeof CompilationSchema>;
+
+export const MainPhotoSchema = z
+  .object({
+    file: z.string().min(1),
+    source: z.enum(["generated", "upload", "promotion", "legacy"]),
+    sourceJobId: JobIdSchema.optional(),
+    sheetVersion: z.number().int().min(1).optional(),
+    artDirectionVersion: z.number().int().min(1).optional(),
+    acceptedAt: IsoDateTimeSchema.optional(),
+  })
+  .strict();
+export type MainPhoto = z.infer<typeof MainPhotoSchema>;
+
+export const CharacterLookSchema = z
+  .object({
+    id: z.string().min(1),
+    file: z.string().min(1),
+    kind: z.enum(["costume", "pose-expression", "condition-age"]),
+    prompt: z.string().min(1),
+    sourceJobId: JobIdSchema.optional(),
+    artDirectionVersion: z.number().int().min(1).optional(),
+    acceptedAt: IsoDateTimeSchema,
+    attachedTo: z
+      .discriminatedUnion("kind", [
+        z.object({ kind: z.literal("production"), productionId: SlugSchema }).strict(),
+        z.object({ kind: z.literal("scene"), productionId: SlugSchema, sceneId: z.string().min(1) }).strict(),
+      ])
+      .optional(),
+  })
+  .strict();
+export type CharacterLook = z.infer<typeof CharacterLookSchema>;
 
 export const ReferenceKitSchema = z
   .object({
@@ -91,12 +130,16 @@ export const ReferenceKitSchema = z
      * D2). By convention the locked head-front tile's file.
      */
     anchor: z.string().optional(),
+    /** SPEC-017 identity anchor. `anchor` remains for existing six-tile kits. */
+    mainPhoto: MainPhotoSchema.optional(),
     tiles: z.array(ReferenceTileSchema),
     compilations: z.array(CompilationSchema).default([]),
     /** Exactly one compilation rides along with dispatches (R-13, D8); file reference. */
     designatedCompilation: z.string().optional(),
     /** Per-sheet rendering-style override; travels with this sheet only (R-16, D12). */
     styleOverride: z.string().optional(),
+    /** Optional exploration; never dispatches unless attached to a production or scene. */
+    looks: z.array(CharacterLookSchema).optional(),
   })
   .strict();
 export type ReferenceKit = z.infer<typeof ReferenceKitSchema>;
@@ -124,13 +167,44 @@ export function tileIsStale(tile: ReferenceTile, sheetVersion: number): boolean 
 }
 
 /** A compilation is stale when the sheet advanced or the locked set no longer matches (§2.8). */
-export function compilationIsStale(kit: ReferenceKit, compilation: Compilation, sheetVersion: number): boolean {
+export function compilationIsStale(
+  kit: ReferenceKit,
+  compilation: Compilation,
+  sheetVersion: number,
+): boolean {
   if (compilation.sheetVersion < sheetVersion) return true;
+  if (compilation.format === "character-sheet") {
+    const photo = mainPhotoFor(kit);
+    return photo === null || compilation.anchorFile !== photo.file;
+  }
   const lockedNow = lockedTiles(kit)
     .map((t) => t.file!)
     .sort();
   const compiledFrom = [...compilation.tiles].sort();
   return lockedNow.join("\n") !== compiledFrom.join("\n");
+}
+
+/** Accepted identity anchor, with a synthesized record for existing six-tile kits (R-24). */
+export function mainPhotoFor(kit: ReferenceKit): MainPhoto | null {
+  if (kit.mainPhoto) return kit.mainPhoto;
+  if (!kit.anchor) return null;
+  const tile = kit.tiles.find((candidate) => candidate.file === kit.anchor && candidate.status === "locked");
+  return {
+    file: kit.anchor,
+    source: "legacy",
+    ...(tile?.sheetVersion ? { sheetVersion: tile.sheetVersion } : {}),
+  };
+}
+
+export function mainPhotoGate(kit: ReferenceKit | null): { ready: boolean; outstanding: string } {
+  return {
+    ready: kit !== null && mainPhotoFor(kit) !== null,
+    outstanding: "an accepted main photo",
+  };
+}
+
+export function characterSheetFor(kit: ReferenceKit): Compilation | null {
+  return designatedCompilation(kit);
 }
 
 /** The one that rides along (R-13, D8): explicit designation, else the newest accepted. */

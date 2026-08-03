@@ -51,7 +51,15 @@ import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./
 import { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
 import { previewCacheFile, VoiceService, type CloudVoiceSource, type SidecarLike } from "./voice/service.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
-import { establishRequests, imageModelFor, missingTileAngles, tileRequest } from "./references/generate.js";
+import {
+  characterLookRequests,
+  characterSheetRequest,
+  establishRequests,
+  imageModelFor,
+  mainPhotoRequests,
+  missingTileAngles,
+  tileRequest,
+} from "./references/generate.js";
 import { makeArtDirector, worldBrief } from "./references/art-director.js";
 import {
   WORLD_IMAGE_CANDIDATE,
@@ -60,12 +68,16 @@ import {
   worldImageRequest,
 } from "./references/world-image.js";
 import {
+  acceptCharacterLook,
+  acceptCharacterSheet,
+  attachCharacterLook,
   chooseAnchor,
   compileGrid,
   designate,
   landGrid,
   lockTile,
   readKit,
+  promoteCharacterLook,
   setStyleOverride,
   supersedeTile,
 } from "./references/kit.js";
@@ -1389,6 +1401,8 @@ export class Coordinator {
         const plan = planScene(
           {
             world: bundle.meta,
+            artDirection: bundle.artDirection,
+            productionId: production.meta.id,
             sheets: bundle.sheets,
             kits: bundle.referenceKits,
             scene,
@@ -1930,7 +1944,8 @@ export class Coordinator {
         const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
         if (!model) return;
         const kit = (await readKit(store, msg.sheetId))?.kit ?? null;
-        for (const request of establishRequests(store.getBundle().meta, sheet, kit, model, msg.count)) {
+        const bundle = store.getBundle();
+        for (const request of establishRequests(bundle.meta, sheet, kit, model, msg.count, bundle.artDirection)) {
           await this.jobQueue.enqueue(request.input).catch(() => {});
         }
         return;
@@ -1940,7 +1955,136 @@ export class Coordinator {
         if (!store) return;
         const sheet = store.getBundle().sheets.find((s) => s.id === msg.sheetId);
         if (!sheet) return;
-        await chooseAnchor(store, msg.sheetId, { file: msg.file, sheetVersion: sheet.version }).catch(() => {});
+        const job = this.jobQueue
+          ?.listJobs()
+          .find((candidate) => candidate.status === "succeeded" && candidate.landedFiles?.some((file) => file.endsWith(msg.file)));
+        const artDirection = job?.params["artDirection"] as { version?: number } | undefined;
+        await chooseAnchor(store, msg.sheetId, {
+          file: msg.file,
+          ...(job ? { jobId: job.id } : {}),
+          sheetVersion: sheet.version,
+          artDirectionVersion: artDirection?.version ?? store.getBundle().artDirection.version,
+          source: "generated",
+          acceptedAt: store.now(),
+        }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "generate-main-photo": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.jobQueue || !this.opts.manifest) return;
+        const bundle = store.getBundle();
+        const sheet = bundle.sheets.find((candidate) => candidate.id === msg.sheetId);
+        const kit = (await readKit(store, msg.sheetId))?.kit ?? null;
+        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
+        if (!sheet || !model) return;
+        const requests = mainPhotoRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
+          prompt: msg.prompt,
+          count: msg.count,
+          identityReferences: msg.identityReferences,
+          generationKey: Date.now().toString(36),
+        });
+        for (const request of requests) await this.jobQueue.enqueue(request.input).catch(() => {});
+        return;
+      }
+      case "generate-character-sheet": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.jobQueue || !this.opts.manifest) return;
+        const bundle = store.getBundle();
+        const sheet = bundle.sheets.find((candidate) => candidate.id === msg.sheetId);
+        const kit = (await readKit(store, msg.sheetId))?.kit;
+        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
+        if (!sheet || !kit || !model) return;
+        const generationKey = Date.now().toString(36);
+        const request = characterSheetRequest(
+          bundle.meta,
+          bundle.artDirection,
+          sheet,
+          kit,
+          model,
+          generationKey,
+          msg.styleOverride,
+        );
+        await this.jobQueue.enqueue(request.input).catch(() => {});
+        return;
+      }
+      case "accept-character-sheet": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.jobQueue) return;
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
+        const job = this.jobQueue
+          .listJobs()
+          .find(
+            (candidate) =>
+              candidate.status === "succeeded" &&
+              candidate.target.kind === "character-sheet" &&
+              candidate.landedFiles?.includes(msg.file),
+          );
+        if (!sheet || !job) return;
+        const artDirection = job.params["artDirection"] as { version?: number } | undefined;
+        await acceptCharacterSheet(store, sheet, {
+          file: msg.file.replace(`references/${msg.sheetId}/`, ""),
+          jobId: job.id,
+          artDirectionVersion: artDirection?.version ?? store.getBundle().artDirection.version,
+        }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "generate-character-looks": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.jobQueue || !this.opts.manifest) return;
+        const bundle = store.getBundle();
+        const sheet = bundle.sheets.find((candidate) => candidate.id === msg.sheetId);
+        const kit = (await readKit(store, msg.sheetId))?.kit;
+        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
+        if (!sheet || !kit || !model) return;
+        const requests = characterLookRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
+          kind: msg.lookKind,
+          mode: msg.mode,
+          prompt: msg.prompt,
+          count: msg.count,
+          generationKey: Date.now().toString(36),
+        });
+        for (const request of requests) await this.jobQueue.enqueue(request.input).catch(() => {});
+        return;
+      }
+      case "accept-character-look": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.jobQueue) return;
+        const job = this.jobQueue
+          .listJobs()
+          .find(
+            (candidate) =>
+              candidate.status === "succeeded" &&
+              candidate.target.kind === "character-look" &&
+              candidate.landedFiles?.includes(msg.file),
+          );
+        if (!job) return;
+        const artDirection = job.params["artDirection"] as { version?: number } | undefined;
+        await acceptCharacterLook(store, msg.sheetId, {
+          id: job.target.id?.split("/").slice(1).join("-") ?? job.id,
+          file: msg.file.replace(`references/${msg.sheetId}/`, ""),
+          kind: msg.lookKind,
+          prompt: msg.prompt,
+          jobId: job.id,
+          artDirectionVersion: artDirection?.version ?? store.getBundle().artDirection.version,
+        }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "promote-character-look": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
+        if (!sheet) return;
+        await promoteCharacterLook(store, sheet, msg.lookId).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "attach-character-look": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await attachCharacterLook(store, msg.sheetId, msg.lookId, msg.scope).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }

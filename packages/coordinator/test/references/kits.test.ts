@@ -7,20 +7,34 @@ import {
   compilationIsStale,
   designatedCompilation,
   headGate,
+  mainPhotoFor,
+  mainPhotoGate,
   referenceBudget,
   tileIsStale,
   type ManifestModel,
   type ReferenceKit,
   type Sheet,
 } from "@arke-studio/contracts";
-import { establishRequests, missingTileAngles, styleLine, tileRequest } from "../../src/references/generate.js";
 import {
+  characterLookRequests,
+  characterSheetRequest,
+  establishRequests,
+  mainPhotoRequests,
+  missingTileAngles,
+  styleLine,
+  tileRequest,
+} from "../../src/references/generate.js";
+import {
+  acceptCharacterLook,
+  acceptCharacterSheet,
+  attachCharacterLook,
   chooseAnchor,
   compileGrid,
   designate,
   landGrid,
   lockTile,
   readKit,
+  promoteCharacterLook,
   setStyleOverride,
   supersedeTile,
 } from "../../src/references/kit.js";
@@ -79,7 +93,42 @@ const SHEET = {
   ],
 } as unknown as Sheet;
 
+const DIRECTION = {
+  version: 3,
+  description: "Painterly, tidal, restrained.",
+  masterLook: "world-art.png",
+  acceptedAt: "2026-07-18T10:00:00Z",
+  history: [],
+  derived: false,
+  reach: { visualAssets: 1, referenceKits: 1, productions: 1, earlierAcceptedTakes: 0 },
+  overrides: [],
+};
+
 describe("the reference loop (R-6, D1, D3, §3.2)", () => {
+  it("separates identity from style and never carries the world's subject as a reference", () => {
+    const kit = kitOf([], {
+      anchor: "main-photo.png",
+      mainPhoto: { file: "main-photo.png", source: "generated", sheetVersion: 4 },
+    });
+    const sheetRequest = characterSheetRequest(WORLD_META, DIRECTION, SHEET, kit, MODEL, "g1");
+    assert.deepEqual(sheetRequest.input.params["references"], ["references/maren-kest/main-photo.png"]);
+    assert.deepEqual(sheetRequest.input.params["referenceRoles"], [
+      { file: "references/maren-kest/main-photo.png", role: "identity" },
+    ]);
+    assert.ok(!(sheetRequest.input.params["references"] as string[]).includes("world-art.png"));
+    assert.match(String(sheetRequest.input.params["prompt"]), /Painterly, tidal, restrained/);
+
+    const mainRequests = mainPhotoRequests(WORLD_META, DIRECTION, SHEET, null, MODEL, {
+      prompt: "A clear portrait.",
+      count: 2,
+      identityReferences: [],
+      generationKey: "g2",
+    });
+    assert.equal(mainRequests.length, 2);
+    assert.deepEqual(mainRequests[0]!.input.params["references"], []);
+    assert.equal((mainRequests[0]!.input.params["artDirection"] as { transport: string }).transport, "text");
+  });
+
   it("the anchor rides first; locked tiles follow; unlocked and superseded never ride", () => {
     const kit = kitOf(
       [
@@ -246,6 +295,41 @@ describe("the reference budget (R-15, D9, §3.2) — the silent-truncation suite
     assert.match(result.notice!, /dropping the-vigil, the-ebb-council/);
   });
 
+  it("spends one slot per character before a second slot on the lead", () => {
+    const threeCharacters = [
+      {
+        sheetId: "maren-kest",
+        kind: "character" as const,
+        billing: "lead",
+        appearanceOrder: 0,
+        hasReference: true,
+        hasSecondaryReference: true,
+      },
+      {
+        sheetId: "bray-half-hitch",
+        kind: "character" as const,
+        billing: "support",
+        appearanceOrder: 1,
+        hasReference: true,
+        hasSecondaryReference: true,
+      },
+      {
+        sheetId: "the-chorister",
+        kind: "character" as const,
+        billing: "support",
+        appearanceOrder: 2,
+        hasReference: true,
+        hasSecondaryReference: true,
+      },
+    ];
+    const three: ManifestModel = { ...MODEL, accepts: { ...MODEL.accepts, referenceImages: 3 } };
+    const result = referenceBudget(threeCharacters, three);
+    assert.deepEqual(
+      result.carried.map((candidate) => `${candidate.sheetId}:${candidate.referenceRole}`),
+      ["maren-kest:primary", "bray-half-hitch:primary", "the-chorister:primary"],
+    );
+  });
+
   it("is stable across runs and updates when the model changes", () => {
     const two: ManifestModel = { ...MODEL, accepts: { ...MODEL.accepts, referenceImages: 2 } };
     const a = referenceBudget(candidates, two);
@@ -271,6 +355,58 @@ describe("the reference budget (R-15, D9, §3.2) — the silent-truncation suite
 });
 
 describe("staleness, attachment and designation (R-13, R-14, D8, D10)", () => {
+  it("uses the sheet for one slot, photo plus sheet for two, and photo alone before a sheet", () => {
+    const direct = kitOf([], {
+      anchor: "main-photo.png",
+      mainPhoto: { file: "main-photo.png", source: "generated", sheetVersion: 4 },
+      compilations: [
+        {
+          file: "character-sheet.png",
+          format: "character-sheet",
+          sheetVersion: 4,
+          tiles: [],
+          compiledAt: CLOCK(),
+          source: "jb_01J8E0000000000000000000J2",
+          accepted: true,
+          anchorFile: "main-photo.png",
+        },
+      ],
+      designatedCompilation: "character-sheet.png",
+    });
+    assert.equal(attachmentFor(direct, SHEET).file, "references/maren-kest/character-sheet.png");
+    assert.equal(
+      attachmentFor(direct, SHEET, "secondary").file,
+      "references/maren-kest/main-photo.png",
+    );
+
+    const photoOnly = kitOf([], {
+      anchor: "main-photo.png",
+      mainPhoto: { file: "main-photo.png", source: "upload", sheetVersion: 4 },
+    });
+    assert.equal(attachmentFor(photoOnly, SHEET).file, "references/maren-kest/main-photo.png");
+    assert.equal(mainPhotoGate(photoOnly).ready, true);
+    assert.equal(mainPhotoFor(photoOnly)?.file, "main-photo.png");
+  });
+
+  it("marks a direct character sheet stale when the main photo changes", () => {
+    const direct = kitOf([], {
+      mainPhoto: { file: "main-photo-v2.png", source: "promotion", sheetVersion: 4 },
+      compilations: [
+        {
+          file: "character-sheet.png",
+          format: "character-sheet",
+          sheetVersion: 4,
+          tiles: [],
+          compiledAt: CLOCK(),
+          source: "jb_01J8E0000000000000000000J2",
+          accepted: true,
+          anchorFile: "main-photo-v1.png",
+        },
+      ],
+    });
+    assert.equal(compilationIsStale(direct, direct.compilations[0]!, 4), true);
+  });
+
   it("a stale designated compilation is attached anyway, with its gap named", () => {
     const kit = kitOf(
       [{ angle: "head-front", status: "locked", file: "a.png", sheetVersion: 3 }],
@@ -355,5 +491,63 @@ describe("kit mutations through the one commit primitive", () => {
     assert.equal(kit.styleOverride, undefined);
     assert.equal(styleLine(WORLD_META, kit), "quiet dread, coastal fantasy", "canon unchanged");
     await store.close();
+  });
+
+  it("accepts a direct sheet, keeps looks optional, and promotion takes the anchor-replacement path", async () => {
+    const { store } = await open();
+    await chooseAnchor(store, "maren-kest", {
+      file: "main-photo.png",
+      jobId: "jb_01J8E0000000000000000000J1",
+      sheetVersion: 4,
+      artDirectionVersion: 3,
+      acceptedAt: CLOCK(),
+    });
+    await acceptCharacterSheet(store, SHEET, {
+      file: "character-sheet.png",
+      jobId: "jb_01J8E0000000000000000000J2",
+      artDirectionVersion: 3,
+    });
+    let kit = (await readKit(store, "maren-kest"))!.kit;
+    assert.equal(kit.designatedCompilation, "character-sheet.png");
+    assert.equal(kit.compilations.find((candidate) => candidate.file === "character-sheet.png")?.tiles.length, 0);
+
+    await acceptCharacterLook(store, "maren-kest", {
+      id: "council-coat",
+      file: "looks/council-coat.png",
+      kind: "costume",
+      prompt: "Formal council coat",
+      jobId: "jb_01J8E0000000000000000000J3",
+      artDirectionVersion: 3,
+    });
+    kit = (await readKit(store, "maren-kest"))!.kit;
+    assert.equal(kit.mainPhoto?.file, "main-photo.png", "accepting a look does not change identity");
+
+    await attachCharacterLook(store, "maren-kest", "council-coat", {
+      kind: "production",
+      productionId: "saltlight",
+    });
+    assert.equal((await readKit(store, "maren-kest"))!.kit.looks?.[0]?.attachedTo?.kind, "production");
+
+    await promoteCharacterLook(store, SHEET, "council-coat");
+    kit = (await readKit(store, "maren-kest"))!.kit;
+    assert.equal(kit.mainPhoto?.file, "looks/council-coat.png");
+    assert.equal(compilationIsStale(kit, designatedCompilation(kit)!, SHEET.version), true);
+    await store.close();
+  });
+
+  it("generates looks only after a main photo and carries it as identity", () => {
+    const kit = kitOf([], {
+      anchor: "main-photo.png",
+      mainPhoto: { file: "main-photo.png", source: "generated", sheetVersion: 4 },
+    });
+    const requests = characterLookRequests(WORLD_META, DIRECTION, SHEET, kit, MODEL, {
+      kind: "costume",
+      mode: "stay-close",
+      prompt: "Formal council coat",
+      count: 4,
+      generationKey: "g3",
+    });
+    assert.equal(requests.length, 4);
+    assert.deepEqual(requests[0]!.input.params["references"], ["references/maren-kest/main-photo.png"]);
   });
 });

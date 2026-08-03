@@ -233,6 +233,13 @@ const state: ClientState = {
       {
         sheetId: "maren-kest",
         anchor: "head-front.png",
+        mainPhoto: {
+          file: "head-front.png",
+          source: "legacy",
+          sheetVersion: 4,
+          artDirectionVersion: 3,
+          acceptedAt: "2026-07-14T09:00:00Z",
+        },
         tiles: [
           { angle: "head-front", status: "locked", file: "head-front.png", sheetVersion: 4 },
           { angle: "body-full", status: "generated", file: "body-full.png", sheetVersion: 3 },
@@ -241,15 +248,18 @@ const state: ClientState = {
         compilations: [
           {
             file: "model-sheet-v4.png",
-            format: "classic-grid",
+            format: "character-sheet",
             sheetVersion: 4,
             tiles: ["head-front.png"],
             compiledAt: "2026-07-14T09:00:00Z",
             source: "local",
             accepted: true,
+            anchorFile: "head-front.png",
+            artDirectionVersion: 3,
           },
         ],
         designatedCompilation: "model-sheet-v4.png",
+        looks: [],
       },
     ],
     artifacts: [

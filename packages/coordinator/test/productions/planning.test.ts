@@ -292,6 +292,81 @@ describe("the dispatch dialog warnings (R-20, D12, §3.2)", () => {
   });
 });
 
+describe("SPEC-017 art direction and scoped looks", () => {
+  it("uses the resolved world direction in production prompts", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const scene = production.scenes[0]!;
+    const plan = planScene(
+      {
+        world: bundle.meta,
+        artDirection: bundle.artDirection,
+        productionId: production.meta.id,
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene,
+        selections: production.selections,
+        model: VIDEO_MODEL,
+      },
+      "per-shot",
+    );
+    assert.match(plan.shots[0]!.prompt.text, /Painterly, tidal, restrained/);
+    await store.close();
+  });
+
+  it("carries an attached look only inside its named production", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const scene = production.scenes[0]!;
+    const maren = bundle.referenceKits.find((kit) => kit.sheetId === "maren-kest")!;
+    const withLook = {
+      ...maren,
+      looks: [
+        {
+          id: "council-coat",
+          file: "looks/council-coat.png",
+          kind: "costume" as const,
+          prompt: "Formal council coat",
+          acceptedAt: CLOCK(),
+          attachedTo: { kind: "production" as const, productionId: production.meta.id },
+        },
+      ],
+    };
+    const inside = planScene(
+      {
+        world: bundle.meta,
+        artDirection: bundle.artDirection,
+        productionId: production.meta.id,
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits.map((kit) => (kit.sheetId === maren.sheetId ? withLook : kit)),
+        scene,
+        selections: production.selections,
+        model: VIDEO_MODEL,
+      },
+      "per-shot",
+    );
+    assert.ok(inside.shots.some((shotPlan) => shotPlan.references.some((reference) => reference.file?.includes("council-coat"))));
+
+    const outside = planScene(
+      {
+        world: bundle.meta,
+        artDirection: bundle.artDirection,
+        productionId: "another-production",
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits.map((kit) => (kit.sheetId === maren.sheetId ? withLook : kit)),
+        scene,
+        selections: production.selections,
+        model: VIDEO_MODEL,
+      },
+      "per-shot",
+    );
+    assert.ok(outside.shots.every((shotPlan) => shotPlan.references.every((reference) => !reference.file?.includes("council-coat"))));
+    await store.close();
+  });
+});
+
 describe("inheritance (R-1, D1, §3.2): a production is a lens, not a container", () => {
   it("no production file contains a copy of a world entity; a sheet advance is visible at next plan", async () => {
     const { dir, store, gate } = await open();

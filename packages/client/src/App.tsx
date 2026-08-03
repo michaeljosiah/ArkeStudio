@@ -15,6 +15,12 @@ import {
 import { SettingsAgentsScreen } from "./screens/agents.js";
 import { ArtDirectionProposalScreen, ArtDirectionScreen } from "./screens/art-direction.js";
 import {
+  CharacterLooksScreen,
+  CharacterReferenceScreen,
+  GenerateCharacterSheetScreen,
+  ReplaceMainPhotoScreen,
+} from "./screens/character-reference.js";
+import {
   ArtifactsScreen,
   CanonEntryScreen,
   CanonScreen,
@@ -25,13 +31,11 @@ import {
   FactionsScreen,
   LocationDetailScreen,
   LocationsScreen,
-  ModelSheetScreen,
   NewCanonScreen,
   NewCharacterScreen,
   NewLocationScreen,
   NewProductionScreen,
   ProductionsScreen,
-  ReferenceKitScreen,
   VoicePickerScreen,
   WorldLayout,
   WorldOverviewScreen,
@@ -87,8 +91,10 @@ export function App() {
         <Route path="cast/new" element={<NewCharacterScreen />} />
         <Route path="cast/:sheetId" element={<CharacterDetailScreen />} />
         <Route path="cast/:sheetId/edit" element={<CharacterEditScreen />} />
-        <Route path="cast/:sheetId/kit" element={<ReferenceKitScreen />} />
-        <Route path="cast/:sheetId/model-sheet" element={<ModelSheetScreen />} />
+        <Route path="cast/:sheetId/kit" element={<CharacterReferenceScreen />} />
+        <Route path="cast/:sheetId/looks" element={<CharacterLooksScreen />} />
+        <Route path="cast/:sheetId/main-photo" element={<ReplaceMainPhotoScreen />} />
+        <Route path="cast/:sheetId/model-sheet" element={<GenerateCharacterSheetScreen />} />
         <Route path="cast/:sheetId/voice" element={<VoicePickerScreen />} />
         <Route path="locations" element={<LocationsScreen />} />
         <Route path="locations/new" element={<NewLocationScreen />} />

@@ -7,6 +7,7 @@ import {
   type ModelManifest,
   type ReferenceAngle,
   type ReferenceKit,
+  type ResolvedArtDirection,
   type Sheet,
   type WorldMeta,
 } from "@arke-studio/contracts";
@@ -32,13 +33,19 @@ const ANGLE_PROMPT: Record<ReferenceAngle, string> = {
 /** The style line: the world's art direction unless the sheet overrides it (R-16, D12). */
 export function styleLine(world: WorldMeta, kit: ReferenceKit | null): string {
   if (kit?.styleOverride) return kit.styleOverride;
-  return [world.tone, world.genre].filter((s): s is string => typeof s === "string" && s.length > 0).join(", ");
+  return [world.tone, world.genre]
+    .filter((s): s is string => typeof s === "string" && s.length > 0)
+    .join(", ");
 }
 
 function sheetDescription(sheet: Sheet): string {
   const essence = sheet.sections.find((s) => s.heading === "Essence" || s.heading === "Look")?.body ?? "";
   const appearance = sheet.sections.find((s) => s.heading === "Appearance")?.body ?? "";
-  return [essence, appearance].filter((s) => s.trim().length > 0).join(" ").replace(/\s+/g, " ").trim();
+  return [essence, appearance]
+    .filter((s) => s.trim().length > 0)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export interface TileRequest {
@@ -97,8 +104,10 @@ export function establishRequests(
   kit: ReferenceKit | null,
   model: ManifestModel,
   count: number,
+  direction?: ResolvedArtDirection,
 ): TileRequest[] {
   const estimated = estimateMicroUsd(model, { images: 1 });
+  const style = kit?.styleOverride ?? direction?.description ?? styleLine(world, kit);
   return Array.from({ length: count }, (_, i) => ({
     angle: "head-front" as const,
     estimatedMicroUsd: estimated,
@@ -109,14 +118,153 @@ export function establishRequests(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: `${styleLine(world, kit)}. ${sheet.name} — ${sheetDescription(sheet)}. ${ANGLE_PROMPT["head-front"]}, character reference, candidate ${i + 1} of ${count}, distinct interpretation.`,
+        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${ANGLE_PROMPT["head-front"]}, character reference, candidate ${i + 1} of ${count}, distinct interpretation.`,
         references: [],
+        ...(direction
+          ? {
+              artDirection: {
+                version: direction.version,
+                source: kit?.styleOverride ? "sheet" : "world",
+                transport: "text",
+              },
+            }
+          : {}),
       },
       estimatedMicroUsd: estimated,
       // Named by candidate. Four candidates asked for, four jobs dispatched, four charges on
       // the account — and one file, because they all landed as "image-1.png" on top of each
       // other. That is what "generate looks does not work" looked like.
       landing: { dir: `references/${sheet.id}/candidates`, name: `candidate-${i + 1}.png` },
+    },
+  }));
+}
+
+export interface CharacterGenerationRequest {
+  input: EnqueueInput;
+  estimatedMicroUsd: number;
+}
+
+export function mainPhotoRequests(
+  world: WorldMeta,
+  direction: ResolvedArtDirection,
+  sheet: Sheet,
+  kit: ReferenceKit | null,
+  model: ManifestModel,
+  input: { prompt: string; count: number; identityReferences: string[]; generationKey: string },
+): CharacterGenerationRequest[] {
+  const style = kit?.styleOverride ?? direction.description;
+  const estimatedMicroUsd = estimateMicroUsd(model, { images: 1 });
+  const identityReferences = input.identityReferences.slice(0, model.accepts.referenceImages);
+  return Array.from({ length: input.count }, (_, index) => ({
+    estimatedMicroUsd,
+    input: {
+      worldId: world.worldId,
+      target: { kind: "main-photo-candidate", id: `${sheet.id}/${input.generationKey}/${index + 1}` },
+      capability: "image",
+      provider: model.provider,
+      model: model.id,
+      params: {
+        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}. Head-and-shoulders identity portrait, face and physical identity clear, restrained neutral expression, no text or montage.`,
+        references: identityReferences,
+        referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
+        artDirection: {
+          version: direction.version,
+          source: kit?.styleOverride ? "sheet" : "world",
+          transport: "text",
+        },
+      },
+      estimatedMicroUsd,
+      landing: {
+        dir: `references/${sheet.id}/candidates`,
+        name: `main-photo-${input.generationKey}-${index + 1}.png`,
+      },
+    },
+  }));
+}
+
+export function characterSheetRequest(
+  world: WorldMeta,
+  direction: ResolvedArtDirection,
+  sheet: Sheet,
+  kit: ReferenceKit,
+  model: ManifestModel,
+  generationKey: string,
+  styleOverride?: string,
+): CharacterGenerationRequest {
+  const photo = kit.mainPhoto?.file ?? kit.anchor;
+  if (!photo) throw new Error("character sheet generation needs an accepted main photo");
+  const style = styleOverride ?? kit.styleOverride ?? direction.description;
+  const estimatedMicroUsd = estimateMicroUsd(model, { images: 1 });
+  return {
+    estimatedMicroUsd,
+    input: {
+      worldId: world.worldId,
+      target: { kind: "character-sheet", id: `${sheet.id}/${generationKey}` },
+      capability: "image",
+      provider: model.provider,
+      model: model.id,
+      params: {
+        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. One composite character sheet on a clean neutral field: front, three-quarter, profile and back turnaround; expression studies; costume and prop details; clear relative proportions. Preserve the supplied identity exactly.`,
+        references: [`references/${sheet.id}/${photo}`],
+        referenceRoles: [{ file: `references/${sheet.id}/${photo}`, role: "identity" }],
+        artDirection: {
+          version: direction.version,
+          source: styleOverride ? "generation" : kit.styleOverride ? "sheet" : "world",
+          transport: "text",
+        },
+      },
+      estimatedMicroUsd,
+      landing: {
+        dir: `references/${sheet.id}/incoming`,
+        name: `character-sheet-${generationKey}.png`,
+      },
+    },
+  };
+}
+
+export function characterLookRequests(
+  world: WorldMeta,
+  direction: ResolvedArtDirection,
+  sheet: Sheet,
+  kit: ReferenceKit,
+  model: ManifestModel,
+  input: {
+    kind: "costume" | "pose-expression" | "condition-age";
+    mode: "stay-close" | "push-it";
+    prompt: string;
+    count: number;
+    generationKey: string;
+  },
+): CharacterGenerationRequest[] {
+  const photo = kit.mainPhoto?.file ?? kit.anchor;
+  if (!photo) throw new Error("looks need an accepted main photo");
+  const style = kit.styleOverride ?? direction.description;
+  const estimatedMicroUsd = estimateMicroUsd(model, { images: 1 });
+  return Array.from({ length: input.count }, (_, index) => ({
+    estimatedMicroUsd,
+    input: {
+      worldId: world.worldId,
+      target: { kind: "character-look", id: `${sheet.id}/${input.generationKey}/${index + 1}` },
+      capability: "image",
+      provider: model.provider,
+      model: model.id,
+      params: {
+        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}. ${input.mode === "stay-close" ? "Stay close to the accepted identity and proportions." : "Push the styling while preserving the accepted identity."} Optional ${input.kind.replace("-", " ")} exploration; do not redefine identity.`,
+        references: [`references/${sheet.id}/${photo}`],
+        referenceRoles: [{ file: `references/${sheet.id}/${photo}`, role: "identity" }],
+        lookKind: input.kind,
+        lookPrompt: input.prompt,
+        artDirection: {
+          version: direction.version,
+          source: kit.styleOverride ? "sheet" : "world",
+          transport: "text",
+        },
+      },
+      estimatedMicroUsd,
+      landing: {
+        dir: `references/${sheet.id}/looks/incoming`,
+        name: `look-${input.generationKey}-${index + 1}.png`,
+      },
     },
   }));
 }
@@ -144,10 +292,21 @@ export function missingTileAngles(
     }
   }
   if (group === "head" && (kit === null || kit.anchor === undefined)) {
-    return { ok: false, reason: "establish a look first — the anchor is the reference everything else carries" };
+    return {
+      ok: false,
+      reason: "establish a look first — the anchor is the reference everything else carries",
+    };
   }
   const present = new Set(
-    tiles.filter((t) => t.status === "locked" || t.status === "generated" || t.status === "pending" || t.status === "rendering").map((t) => t.angle),
+    tiles
+      .filter(
+        (t) =>
+          t.status === "locked" ||
+          t.status === "generated" ||
+          t.status === "pending" ||
+          t.status === "rendering",
+      )
+      .map((t) => t.angle),
   );
   return { ok: true, angles: groupAngles.filter((a) => !present.has(a)) };
 }

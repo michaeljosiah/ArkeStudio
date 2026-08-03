@@ -1050,6 +1050,8 @@ export function DispatchDialogScreen() {
     if (!world || !production || !scene || !model) return null;
     const input = {
       world: world.meta,
+      artDirection: world.artDirection,
+      productionId: production.meta.id,
       sheets: world.sheets,
       kits: world.referenceKits,
       scene,
@@ -1065,7 +1067,15 @@ export function DispatchDialogScreen() {
   if (warnings) {
     for (const s of warnings.shotsWithoutFrame) warningRows.push({ key: `nf-${s.shotId}`, text: `shot ${s.number} has no accepted frame` });
     for (const name of warnings.sketchCitations) warningRows.push({ key: `sk-${name}`, text: `${name} is a sketch — dispatch cites an unlocked sheet` });
-    for (const d of warnings.droppedReferences) warningRows.push({ key: `dr-${d.sheetId}`, text: `${d.sheetId}'s reference is dropped — over the model's cap` });
+    for (const d of warnings.droppedReferences) {
+      warningRows.push({
+        key: `dr-${d.sheetId}-${d.referenceRole ?? "primary"}`,
+        text:
+          d.referenceRole === "secondary"
+            ? `${d.sheetId}'s main photo is dropped — its character sheet still travels`
+            : `${d.sheetId}'s reference is dropped — over the model's cap`,
+      });
+    }
     for (const g of warnings.staleModelSheets) warningRows.push({ key: `st-${g}`, text: g });
     for (const name of warnings.retiredCitations) warningRows.push({ key: `re-${name}`, text: `${name} is retired and still cited here` });
     for (const u of warnings.unknownMentions) warningRows.push({ key: `un-${u}`, text: `@${u} resolves to nothing — check the description` });

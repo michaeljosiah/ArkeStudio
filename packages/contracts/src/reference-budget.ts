@@ -17,6 +17,9 @@ export interface BudgetCandidate {
   appearanceOrder: number;
   /** Whether a reference image actually exists to carry (a designated compilation). */
   hasReference: boolean;
+  /** A character with both sheet and main photo may spend a spare slot on identity depth. */
+  hasSecondaryReference?: boolean;
+  referenceRole?: "primary" | "secondary";
 }
 
 export interface BudgetResult {
@@ -42,13 +45,26 @@ function rank(a: BudgetCandidate, b: BudgetCandidate): number {
   return a.appearanceOrder - b.appearanceOrder;
 }
 
+function referenceLabel(candidate: BudgetCandidate): string {
+  return candidate.referenceRole === "secondary"
+    ? `${candidate.sheetId} (second reference)`
+    : candidate.sheetId;
+}
+
 /**
  * Deterministic selection under the model's accepted count (R-15). Candidates without a
  * reference to carry never consume budget — they ride in the prompt regardless.
  */
 export function referenceBudget(candidates: BudgetCandidate[], model: ManifestModel): BudgetResult {
   const accepted = model.accepts.referenceImages;
-  const carriable = candidates.filter((c) => c.hasReference).sort(rank);
+  const primaries = candidates
+    .filter((c) => c.hasReference)
+    .map((candidate) => ({ ...candidate, referenceRole: "primary" as const }))
+    .sort(rank);
+  const secondaries = primaries
+    .filter((candidate) => candidate.hasSecondaryReference === true)
+    .map((candidate) => ({ ...candidate, referenceRole: "secondary" as const }));
+  const carriable = [...primaries, ...secondaries];
   if (accepted === 0) {
     return {
       carried: [],
@@ -56,21 +72,30 @@ export function referenceBudget(candidates: BudgetCandidate[], model: ManifestMo
       notice:
         carriable.length > 0
           ? `${model.displayName} accepts no reference images — identity rides in the prompt for ${carriable
-              .map((c) => c.sheetId)
+              .map(referenceLabel)
               .join(", ")}`
           : null,
     };
   }
-  const carried = carriable.slice(0, accepted);
-  const dropped = carriable.slice(accepted);
+  // Breadth before depth: every cited sheet gets its primary before any character gets a second.
+  const carriedPrimaries = primaries.slice(0, accepted);
+  const remaining = Math.max(0, accepted - carriedPrimaries.length);
+  const eligibleSecondaries = secondaries.filter((secondary) =>
+    carriedPrimaries.some((primary) => primary.sheetId === secondary.sheetId),
+  );
+  const carried = [...carriedPrimaries, ...eligibleSecondaries.slice(0, remaining)];
+  const carriedKeys = new Set(carried.map((candidate) => `${candidate.sheetId}:${candidate.referenceRole}`));
+  const dropped = carriable.filter(
+    (candidate) => !carriedKeys.has(`${candidate.sheetId}:${candidate.referenceRole}`),
+  );
   return {
     carried,
     dropped,
     notice:
       dropped.length > 0
         ? `${model.displayName} accepts ${accepted} reference${accepted === 1 ? "" : "s"}: carrying ${carried
-            .map((c) => c.sheetId)
-            .join(", ")} — dropping ${dropped.map((c) => c.sheetId).join(", ")}`
+            .map(referenceLabel)
+            .join(", ")} — dropping ${dropped.map(referenceLabel).join(", ")}`
         : null,
   };
 }

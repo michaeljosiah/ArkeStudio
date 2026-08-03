@@ -5,7 +5,6 @@ import {
   estimateMicroUsd,
   parseMentions,
   planScene,
-  promptFor,
   SceneSchema,
   ulid,
   type ArtifactSidecar,
@@ -371,7 +370,7 @@ export function composeDispatches(
       model: model.id,
       params: {
         prompt: shotsInPass
-          .map((s) => `[shot ${s.shot.number} · ${s.shot.durationSec ?? 4}s] ${promptFor(world.meta, world.sheets, scene, s.shot).text}`)
+          .map((s) => `[shot ${s.shot.number} · ${s.shot.durationSec ?? 4}s] ${s.prompt.text}`)
           .join("\n"),
         references,
         durationSec: pass.durationSec,
