@@ -39,6 +39,10 @@ Character portraits share an extra clause so the roster reads as one cast:
 | Choose hero | `ms-choose` | `assets/ms-choose.png` | ✅ Generated |
 | Interact hero | `ms-interact` | `assets/ms-interact.png` | ✅ Generated |
 | New-character image example | `nc-image` | — | ◻ Not generated (optional; any portrait works for the demo) |
+| Art direction: World look | `art-style-world` | `assets/art-direction-world.png` | ✅ Generated |
+| Art direction: Cinematic | `art-style-cinematic` | `assets/art-direction-cinematic.png` | ✅ Generated |
+| Art direction: Illustrated | `art-style-illustrated` | `assets/art-direction-illustrated.png` | ✅ Generated |
+| Art direction: Animated | `art-style-animated` | `assets/art-direction-animated.png` | ✅ Generated |
 
 Statuses: **✅ Generated** (asset in place) · **⟳ Regenerate** (prompt changed since the asset was made) · **◻ Not generated**. If you rewrite a prompt below, flip its row to ⟳.
 
@@ -174,6 +178,38 @@ One image, 3 columns × 2 rows, generous flat gutters so panels crop cleanly. No
 
 **Scene 4 master board** (~16:10)
 A film storyboard sheet of six cinematic panels in a strict 3-column, 2-row grid, every panel exactly the same size, separated by wide flat pale warm-grey gutters, no labels, no text anywhere. Panel 1: medium close-up of a weathered young woman with salt-crusted braids in an oilskin coat gripping a ship's rail at night, head tilted, listening, harbour fog behind. Panel 2: extreme wide from a cliff at night, the dark sea going still and lifting into a single ribbon of pale light running toward a distant lighthouse, high horizon. Panel 3: close-up of a brass lantern flame guttering sideways in wind, a tall austere woman in a storm coat with a white streak in her dark hair behind it. Panel 4: insert close-up of the braided woman's collar, a frayed woven thread beginning to glow faint blue-green against wet oilskin. Panel 5: night two-shot on a ship's deck, the austere lantern-bearing woman and the braided young woman exchanging a look, fog moving between them. Panel 6: locked wide of an empty flooded pier at blue hour, the braided woman small at its far end, back to camera, distant lighthouse beam just passed. Same characters, costumes, palette and lighting across all six panels, painterly cinematic concept art within each panel, muted teal-slate palette with one warm lantern accent, soft volumetric fog, filmic lighting, high detail, no text, no watermark, no border
+
+---
+
+## Art-direction picker, matched style studies
+
+Landscape 3:2. Generate each prompt independently and save it under the listed asset name.
+
+The subject and composition are deliberately locked across the set. The only meaningful difference should be rendering treatment. This lets the picker answer "how should it look?" rather than accidentally comparing four different scenes.
+
+**Shared composition**
+
+Maren Kest stands at the rail of a weathered harbour boat at blue hour, shown waist-up in left-facing three-quarter profile. She is a lean, wind-worn woman in her late twenties with dark salt-crusted braids, pale grey eyes, a long cracked oilskin coat and a faint teal thread glowing at the collar. Her left hand grips the wet rail while her head tilts as if hearing something beneath the water. Behind her: a drowned stone harbour, one distant lighthouse beam, low fog, slate sea and a single amber deck lantern. Medium shot, eye-level camera, 50mm-equivalent framing, Maren on the left third, open harbour on the right, no text, no lettering, no logo, no watermark, no border, no collage.
+
+Keep Maren's face, pose, costume, camera, crop, objects, weather and time of day identical in all four outputs.
+
+**World look** (`assets/art-direction-world.png`)
+
+Maren Kest stands at the rail of a weathered harbour boat at blue hour, shown waist-up in left-facing three-quarter profile. She is a lean, wind-worn woman in her late twenties with dark salt-crusted braids, pale grey eyes, a long cracked oilskin coat and a faint teal thread glowing at the collar. Her left hand grips the wet rail while her head tilts as if hearing something beneath the water. Behind her: a drowned stone harbour, one distant lighthouse beam, low fog, slate sea and a single amber deck lantern. Medium shot, eye-level camera, 50mm-equivalent framing, Maren on the left third, open harbour on the right. Painterly cinematic concept art with visible but controlled brushwork, grounded anatomy, tactile weathered materials, layered atmospheric depth, muted teal and slate palette, one restrained amber practical light, soft volumetric fog, emotionally quiet dark-fantasy production design, polished feature-film concept-art finish. No text, no lettering, no logo, no watermark, no border, no collage.
+
+**Cinematic** (`assets/art-direction-cinematic.png`)
+
+Maren Kest stands at the rail of a weathered harbour boat at blue hour, shown waist-up in left-facing three-quarter profile. She is a lean, wind-worn woman in her late twenties with dark salt-crusted braids, pale grey eyes, a long cracked oilskin coat and a faint teal thread glowing at the collar. Her left hand grips the wet rail while her head tilts as if hearing something beneath the water. Behind her: a drowned stone harbour, one distant lighthouse beam, low fog, slate sea and a single amber deck lantern. Medium shot, eye-level camera, 50mm cinema lens, Maren on the left third, open harbour on the right. Photoreal live-action film still, natural skin and wet fabric texture, subtle anamorphic softness without visible black bars, shallow depth of field, cool available blue-hour light balanced by one warm lantern practical, restrained film grain, gentle highlight halation, realistic fog and water, premium historical-fantasy cinematography, physically plausible materials and lighting. No text, no lettering, no logo, no watermark, no border, no collage.
+
+**Illustrated** (`assets/art-direction-illustrated.png`)
+
+Maren Kest stands at the rail of a weathered harbour boat at blue hour, shown waist-up in left-facing three-quarter profile. She is a lean, wind-worn woman in her late twenties with dark salt-crusted braids, pale grey eyes, a long cracked oilskin coat and a faint teal thread glowing at the collar. Her left hand grips the wet rail while her head tilts as if hearing something beneath the water. Behind her: a drowned stone harbour, one distant lighthouse beam, low fog, slate sea and a single amber deck lantern. Medium shot, eye-level camera, 50mm-equivalent framing, Maren on the left third, open harbour on the right. Sophisticated editorial illustration on toothy off-white paper, layered gouache and dry-brush pigment, selective charcoal contour, simplified but accurate anatomy, broad graphic shadow shapes, visible paper grain, restrained teal-slate colour blocks and one amber accent, expressive mark-making in fog and water, elegant contemporary book-jacket finish, tactile and handmade rather than photoreal. No text, no lettering, no logo, no watermark, no border, no collage.
+
+**Animated** (`assets/art-direction-animated.png`)
+
+Maren Kest stands at the rail of a weathered harbour boat at blue hour, shown waist-up in left-facing three-quarter profile. She is a lean, wind-worn woman in her late twenties with dark salt-crusted braids, pale grey eyes, a long cracked oilskin coat and a faint teal thread glowing at the collar. Her left hand grips the wet rail while her head tilts as if hearing something beneath the water. Behind her: a drowned stone harbour, one distant lighthouse beam, low fog, slate sea and a single amber deck lantern. Medium shot, eye-level camera, 50mm-equivalent framing, Maren on the left third, open harbour on the right. High-end 2D feature-animation keyframe, strong readable silhouette, designed angular shapes softened by expressive eyes, clean confident linework, graphic cel-shaded planes with painterly texture in the background, controlled proportions suitable for repeatable character animation, muted teal-slate palette with one amber practical light, atmospheric depth built from layered shapes, emotionally expressive and cinematic without becoming photoreal or childish. No text, no lettering, no logo, no watermark, no border, no collage.
+
+The **Describe your own** card intentionally has no generated thumbnail: its empty, text-led treatment communicates that the user defines the visual language.
 
 ---
 
