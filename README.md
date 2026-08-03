@@ -1,14 +1,14 @@
 <div align="center">
 
-# Arke Studio
+<img src=".github/assets/readme-banner.png" alt="Arke Studio — the world is the asset. Author once. Produce everywhere." width="100%">
 
-### The world is the asset.
-
-**Author once. Produce everywhere.**
-
-Invent a character, a place, a rule about how your world works — once. Every book,
+Invent a character, a place, a rule about how your world works, once. Every book,
 film, song and game you make from it draws on the same source, and stays consistent
 because they share it.
+
+[![CI](https://github.com/michaeljosiah/ArkeStudio/actions/workflows/ci.yml/badge.svg)](https://github.com/michaeljosiah/ArkeStudio/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/michaeljosiah/ArkeStudio?label=release)](https://github.com/michaeljosiah/ArkeStudio/releases/latest)
+![Licence](https://img.shields.io/badge/licence-MIT_intended-lightgrey)
 
 </div>
 
