@@ -13,6 +13,7 @@ import {
   generateCharacterLooks,
   generateCharacterSheet,
   generateMainPhoto,
+  importMainPhotoCandidate,
   promoteCharacterLook,
   useStore,
 } from "../lib/store.js";
@@ -334,10 +335,14 @@ export function ReplaceMainPhotoScreen() {
   const [worldRef, setWorldRef] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   if (!world || !sheet || !sheetId) return null;
-  const candidates = succeededFiles(state?.app.jobs ?? [], "main-photo-candidate", sheetId);
+  const candidates = [
+    ...(world.referenceCandidates[sheetId] ?? []),
+    ...succeededFiles(state?.app.jobs ?? [], "main-photo-candidate", sheetId),
+  ].filter((file, index, all) => all.indexOf(file) === index);
   const current = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = current ? mainPhotoFor(current) : null;
   const model = state?.app.manifest?.models.find((candidate) => candidate.capability === "image");
+  const canImport = typeof window !== "undefined" && window.arke !== undefined;
   const refs = uploaded && photo ? [`references/${sheetId}/${photo.file}`] : [];
   return (
     <div className="fy-mainphoto-scrim" data-screen="replace-main-photo">
@@ -366,7 +371,16 @@ export function ReplaceMainPhotoScreen() {
             </button>
           </div>
           <div className="fy-mainphoto-dialog__refbuttons">
-            <Button onClick={() => setUploaded(!uploaded)}>Upload reference</Button>
+            <Button
+              disabled={!canImport}
+              title={canImport ? "Choose an image from this computer" : "Upload is available in the desktop app"}
+              onClick={() => {
+                importMainPhotoCandidate(world.meta.worldId, sheetId);
+                setUploaded(true);
+              }}
+            >
+              Upload reference
+            </Button>
             <Button onClick={() => setWorldRef(!worldRef)}>Choose from world</Button>
           </div>
           <div className="fy-mainphoto-dialog__refs">

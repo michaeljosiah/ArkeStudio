@@ -157,6 +157,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
   }
 
   const referenceKits = [];
+  const referenceCandidates: Record<string, string[]> = {};
   for (const sheetId of await listDir(join(dir, "references"))) {
     if (await exists(join(dir, "references", sheetId, "kit.json"))) {
       const kit = await tryParse(`references/${sheetId}/kit.json`, (raw) =>
@@ -164,6 +165,11 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       );
       if (kit) referenceKits.push(kit);
     }
+    const candidates = (await listDir(join(dir, "references", sheetId, "candidates")))
+      .filter((file) => /\.(png|jpe?g|webp)$/i.test(file))
+      .sort()
+      .map((file) => `references/${sheetId}/candidates/${file}`);
+    if (candidates.length > 0) referenceCandidates[sheetId] = candidates;
   }
 
   const artifacts = [];
@@ -340,6 +346,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     sheets,
     canon,
     referenceKits,
+    referenceCandidates,
     artifacts,
     productions,
     proposals,

@@ -1010,6 +1010,10 @@ export function chooseAnchor(worldId: string, sheetId: string, file: string): vo
   send({ kind: "choose-anchor", worldId, sheetId, file });
 }
 
+export function importMainPhotoCandidate(worldId: string, sheetId: string): void {
+  send({ kind: "import-main-photo-candidate", worldId, sheetId });
+}
+
 export function generateMainPhoto(
   worldId: string,
   sheetId: string,

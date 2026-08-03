@@ -1,5 +1,5 @@
-import { copyFile, readFile, rm } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
+import { basename, extname, join } from "node:path";
 import {
   DomainEventSchema,
   JobSchema,
@@ -1964,9 +1964,32 @@ export class Coordinator {
           ...(job ? { jobId: job.id } : {}),
           sheetVersion: sheet.version,
           artDirectionVersion: artDirection?.version ?? store.getBundle().artDirection.version,
-          source: "generated",
+          source: job ? "generated" : "upload",
           acceptedAt: store.now(),
         }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "import-main-photo-candidate": {
+        const store = this.opts.provider.openStore?.();
+        const pick = this.opts.pickFiles;
+        if (!store || !pick) return;
+        const [source] = await pick({ accept: [".png", ".jpg", ".jpeg", ".webp"] }).catch(() => []);
+        if (!source) return;
+        const extension = extname(source).toLowerCase();
+        if (![".png", ".jpg", ".jpeg", ".webp"].includes(extension)) return;
+        await store
+          .gateOp(async () => {
+            const name = `upload-${Date.now().toString(36)}${extension}`;
+            await mkdir(toExtendedLength(join(store.dir, "references", msg.sheetId, "candidates")), {
+              recursive: true,
+            });
+            await copyFile(
+              toExtendedLength(source),
+              toExtendedLength(join(store.dir, "references", msg.sheetId, "candidates", name)),
+            );
+          })
+          .catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }

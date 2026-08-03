@@ -262,6 +262,7 @@ const state: ClientState = {
         looks: [],
       },
     ],
+    referenceCandidates: {},
     artifacts: [
       {
         id: "ar_01J8G0000000000000000000R1",

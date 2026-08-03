@@ -341,6 +341,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("choose-anchor"), worldId: UlidSchema, sheetId: SlugSchema, file: z.string().min(1) })
     .strict(),
+  /** Ask the trusted host picker for an image; it lands as a candidate, never straight as identity. */
+  z.object({ kind: z.literal("import-main-photo-candidate"), worldId: UlidSchema, sheetId: SlugSchema }).strict(),
   z
     .object({
       kind: z.literal("generate-main-photo"),

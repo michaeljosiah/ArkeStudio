@@ -25,6 +25,24 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await store.close();
   });
 
+  it("surfaces uploaded main-photo candidates without accepting them", async () => {
+    const dir = await makeTempWorld();
+    const candidates = join(dir, "references", "maren-kest", "candidates");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(candidates, { recursive: true });
+    await writeFile(join(candidates, "upload-test.png"), "candidate-bytes");
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    assert.deepEqual(store.getBundle().referenceCandidates["maren-kest"], [
+      "references/maren-kest/candidates/upload-test.png",
+    ]);
+    assert.notEqual(
+      store.getBundle().referenceKits.find((kit) => kit.sheetId === "maren-kest")?.mainPhoto?.file,
+      "candidates/upload-test.png",
+      "finding the upload does not accept it",
+    );
+    await store.close();
+  });
+
   it("enforces single-process ownership and reclaims stale locks (R-3)", async () => {
     const dir = await makeTempWorld();
     const first = await WorldStore.open(dir, { clock: CLOCK });
