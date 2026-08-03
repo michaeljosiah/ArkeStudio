@@ -8,6 +8,151 @@ Character portraits share an extra clause so the roster reads as one cast:
 
 > …consistent character-sheet style, three-quarter view, plain dark neutral backdrop, chest-up framing
 
+## Website motion artifacts
+
+The refreshed website is media-led. It renders a poster image while an artifact is unavailable, so each video can be produced independently without blocking the page. Deliver final files to `assets/site-video/` under the filenames below.
+
+### Delivery contract
+
+- Desktop master: 1920×1080 unless a slot below says otherwise; 30 fps; H.264 MP4 and VP9 WebM.
+- No baked-in words, controls, logos or subtitles. The website supplies all text.
+- Every background loop is muted, 8–16 seconds, and must return to a nearly identical first frame without a visible cut.
+- Product demonstrations use the real prototype UI. Do not ask an image or video model to generate interface text.
+- Generated world footage must use the named image as its first-frame and identity reference.
+- Keep action inside the centre 80% so the same master can crop to desktop and mobile.
+- Also export the first frame as a 1920px-wide WebP poster when it improves on the existing fallback.
+- Check every loop with sound off and at `prefers-reduced-motion`; its poster must communicate the same claim.
+
+| Artifact | Files | Poster already in page | Slot |
+|---|---|---|---|
+| Undersong hero | `hero-undersong.mp4`, `.webm` | `world-undersong.png` | Hero, 16:9 |
+| Accept gate | `accept-gate.mp4`, `.webm` | `site-loop2.png` | Mechanic card, 4:3 crop |
+| Canon refusal | `canon-refusal.mp4`, `.webm` | `site-canon.png` | Mechanic card, 4:3 crop |
+| Identity travels | `identity-travels.mp4`, `.webm` | `maren-sheet-pitchboard.png` | Mechanic card, 4:3 crop |
+| Studio loop | `studio-loop.mp4`, `.webm` | `site-loop1.png` | Product stage, 16:9 |
+| Voice mode | `voice-mode.mp4`, `.webm` | `drowned-quarter.png` | Feature stage, portrait-safe 4:3 |
+| One world, many works | `one-world-many-works.mp4`, `.webm` | `saltlight-shot15.png` | Manifesto, 16:9 |
+
+### 1. Undersong hero
+
+**Intent:** still, assured and inhabited. This is a world waiting to be authored, not an effects reel.
+
+**Image-to-video prompt**
+
+> Use the supplied image of The Undersong as the exact first frame. A locked cinematic wide shot of the drowned harbour at blue hour, viewed low over the water. Half-submerged bell towers and a distant lighthouse remain fixed beneath heavy coastal fog. A narrow ribbon of pale bioluminescent light moves slowly below the water toward the city. One amber lantern glows on a weathered pier. The camera makes an extremely slow, stable push forward with no pan, roll or reframing. Water moves gently, fog drifts laterally, the lighthouse beam crosses once, and the underwater light pulses subtly. Quiet, ominous, premium historical fantasy. Preserve architecture, horizon, palette and composition exactly. Fourteen seconds, seamless loop; first and final frames must match closely.
+
+**Negative prompt:** cuts, people entering, dialogue, text, logos, camera shake, aerial movement, fast water, lightning, explosions, morphing architecture, moving horizon, new boats, day-to-night transition, exaggerated glow.
+
+**Acceptance:** lighthouse and buildings do not deform; there is only one warm accent; the loop point is invisible; overlaid white text stays legible on the left.
+
+### 2. Accept gate
+
+**Source:** record the real prototype at 1360×850. Use the proposed scene or canon draft surface.
+
+**Capture brief**
+
+1. Begin on a conversation with a complete proposal already staged.
+2. Move focus to the proposal; changed fields resolve one after another, 120 ms apart.
+3. Reveal the computed ripple count and affected productions.
+4. Hold on the Accept button without pressing for one second.
+5. Press Accept; the proposal settles and the version advances once.
+6. Return to the staged first state with a short crossfade for the loop.
+
+**Motion:** 8 seconds, one focus at a time, cursor absent, no decorative zoom. Interface material moves quickly and precisely: 180–260 ms ease-out entrances, exits 30% faster.
+
+**Acceptance:** the sequence visibly proves `proposal → ripple → accept`; no live record changes before the click; all UI text is sharp and real.
+
+### 3. Canon refusal
+
+**Source:** record the real Canon Q&A refusal state in the prototype.
+
+**Capture brief**
+
+1. The question appears: “Who collects rent in the Drowned Quarter?”
+2. Search count advances to all 42 entries.
+3. Closest entries appear with `CANON-021` cited.
+4. The sentence “The canon doesn't answer this, and it won't guess” becomes the focus.
+5. The `Open as thread` action appears, but is not committed.
+
+**Motion:** 8 seconds. Text should reveal by block, not with a typewriter effect. Hold the refusal for at least 2.5 seconds.
+
+**Acceptance:** no answer is fabricated; the closest entry is explicitly a non-answer; refusal is readable in the card crop.
+
+### 4. Identity travels
+
+**Intent:** show structural consistency, not a magical transformation.
+
+**Hybrid composition brief**
+
+1. Begin with Maren's accepted main photo, full frame.
+2. Pull back to reveal it seated in the Character Kit UI.
+3. The accepted character sheet joins beside it.
+4. A thin reference line travels from both records to three finished frames: close portrait, medium deck shot, wide pier shot.
+5. The three frames settle as a production strip; Maren's face, braids, oilskin and proportions remain consistent.
+
+Use `char-maren.png`, `maren-sheet-pitchboard.png`, `scene4-shot12.png`, `scene4-shot14b.png` and `scene4-shot15.png`. Composite in motion graphics; do not regenerate these frames.
+
+**Motion:** 9 seconds, 30 fps. Clean 2D camera and mask transitions only. No simulated 3D cards, bouncing, elastic easing or particle effects.
+
+**Acceptance:** both source images remain identifiable; every destination frame is visibly the same Maren; the sequence reads without labels.
+
+### 5. Studio loop
+
+**Source:** record the real prototype. This is the principal product film on the page.
+
+**Capture brief**
+
+1. World hub: The Undersong, cast and canon visible.
+2. Character: Maren's main photo and character sheet.
+3. Scene: shot cards for Scene 4.
+4. Take: generated shot 15 awaiting review.
+5. Cut: accepted shots assembled with two remaining gaps.
+
+Use editorial cuts motivated by the selected object: click Maren to enter the sheet, select Saltlight to enter the scene, select the take to enter review. Each surface holds long enough to understand. The final cut view dissolves back to the hub.
+
+**Motion:** 20–22 seconds, 30 fps. Browser capture at 1360×850, delivered inside a 1920×1080 master. No cursor trail, fake text, speed ramps or soundtrack baked into the loop.
+
+**Acceptance:** every transition follows a plausible user action; the same world and character are recognisable throughout; the cut contains only accepted takes.
+
+### 6. Voice mode
+
+**Source:** record the real voice composer surface, then composite over the existing Drowned Quarter poster only if the prototype needs environmental framing.
+
+**Capture brief**
+
+1. Resting state reads `Hold to speak`.
+2. Held state reads `Listening`; a partial transcript appears: “The bells in the Drowned Quarter only ring…”
+3. Correct one misheard proper noun in place.
+4. Release to send; state changes to `Thinking`.
+5. Written reply lands first, then state changes to `Speaking`.
+6. A proposed canon entry appears beside the reply; Accept remains a separate untouched control.
+
+**Motion:** 10 seconds. Waveform motion must be secondary to the written state labels. Do not rely on colour. Preserve a readable still for reduced motion.
+
+**Acceptance:** listening, thinking and speaking are each named; audio does not accept anything; the transcript remains visible as the record.
+
+### 7. One world, many works
+
+**Intent:** one source becoming several works without changing identity or visual language.
+
+**Composition prompt**
+
+> Build a cinematic triptych from the supplied Undersong assets. Begin on the single accepted portrait of Maren Kest. The composition widens into three adjacent authored outcomes drawn from the same world: on the left, a manuscript page and restrained story layout; in the centre, the Saltlight pier shot playing as a cinematic frame; on the right, a finished still on a dark contact sheet. Maren's identity, oilskin costume and teal-slate world look remain consistent wherever she appears. Transitions are clean editorial masks following the geometry of the panels, not generative morphs. The background remains dark and atmospheric with one amber practical light. Twelve seconds, seamless loop.
+
+Use `char-maren.png`, `banner-story.png`, `saltlight-shot15.png`, `scene4-shot12.png` and `maren-sheet-pitchboard.png`. Composite these sources; do not generate words into the manuscript.
+
+**Negative prompt:** identity drift, costume change, collage clutter, floating cards, illegible generated text, particles, lens flares, fast zooms, new characters, changing art style.
+
+**Acceptance:** three production types are distinct at a glance; all feel like The Undersong; crop leaves the lower-left clear for website copy.
+
+### Optional 8. Art-direction transition reel
+
+This is not wired as a required video because the four stills work without motion. Produce it if the treatment transition can preserve identity exactly.
+
+> Use the exact same Maren Kest composition, pose, framing, costume and environment across four treatments: painterly world look, live-action cinematic, editorial illustration and feature animation. Transition only the rendering treatment. Identity, silhouette, camera, crop, lighting direction and background geometry remain fixed. Each treatment holds for two seconds; transitions take one second and feel like material resolving across the frame, never a crossfade or character morph. Twelve seconds, seamless loop, 30 fps. No text, labels, added objects, facial changes or camera movement.
+
+Use the four `art-direction-*.png` images as hard keyframes. Reject the result if facial landmarks or hand position move between treatments.
+
 ---
 
 ## Status
