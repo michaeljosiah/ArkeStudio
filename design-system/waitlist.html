@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arke Studio — build the world once</title>
+<meta name="description" content="An AI production studio for storytellers and worldbuilders. Characters who stay themselves across a novel, a film and a game. Join the waitlist.">
+<meta property="og:title" content="Arke Studio — build the world once">
+<meta property="og:description" content="Every AI tool forgets your world. Arke remembers. Join the waitlist.">
+<meta property="og:image" content="assets/world-undersong.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/fonts.css">
+<style>
+/* ==========================================================================
+   Arke Studio — holding page.
+   Deliberately self-contained: the colour tokens are inlined rather than
+   linked, so this deploys with one stylesheet (fonts) and one image. Every
+   value below is copied from the design system, not invented.
+   ========================================================================== */
+:root {
+  --background:#FFFFFF; --foreground:#0A0A0A; --muted:#F5F5F5; --muted-foreground:#737373;
+  --border:#E5E5E5; --primary:#171717; --primary-foreground:#FAFAFA;
+  --neutral-50:#FAFAFA; --neutral-300:#D4D4D4; --neutral-400:#A1A1A1;
+  --font-sans:"Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono:"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --ease-out:cubic-bezier(0.16,1,0.3,1);
+}
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+  margin:0; background:var(--background); color:var(--foreground);
+  font-family:var(--font-sans); -webkit-font-smoothing:antialiased;
+}
+a { color:inherit; }
+.wrap { max-width:1120px; margin:0 auto; padding:0 32px; }
+
+/* ---- masthead ---------------------------------------------------------- */
+.top { position:absolute; top:0; left:0; right:0; z-index:3; }
+.top__in { display:flex; align-items:center; height:74px; }
+.mark { display:flex; align-items:baseline; gap:8px; color:#fff; }
+.mark b { font:650 19px var(--font-sans); letter-spacing:-.02em; }
+.mark span { font:400 14px var(--font-sans); color:rgba(255,255,255,.62); }
+.top__gh {
+  margin-left:auto; font:500 12.5px var(--font-sans); color:rgba(255,255,255,.8);
+  text-decoration:none; border:1px solid rgba(255,255,255,.22); border-radius:999px;
+  padding:7px 15px; transition:.18s var(--ease-out);
+}
+.top__gh:hover { background:rgba(255,255,255,.1); color:#fff; }
+
+/* ---- hero -------------------------------------------------------------- */
+.hero { position:relative; min-height:660px; display:flex; align-items:flex-end; overflow:hidden; }
+.hero__img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.hero__wash {
+  position:absolute; inset:0;
+  background:linear-gradient(180deg, rgba(6,9,13,.72) 0%, rgba(6,9,13,.42) 34%, rgba(6,9,13,.93) 100%);
+}
+/* Vertical only — these elements also carry .wrap, whose horizontal padding is the
+   only thing keeping text off the edge once the viewport is narrower than max-width. */
+.hero__in { position:relative; z-index:2; width:100%; padding-top:150px; padding-bottom:58px; color:#fff; }
+.eyebrow {
+  font:500 10.5px var(--font-mono); letter-spacing:.19em; text-transform:uppercase;
+  color:rgba(255,255,255,.62);
+}
+h1 {
+  margin:20px 0 0; font:650 clamp(38px,6.2vw,74px)/1.02 var(--font-sans);
+  letter-spacing:-.035em; max-width:16ch;
+}
+h1 .dim { color:rgba(255,255,255,.42); display:block; }
+.lede {
+  margin:22px 0 0; font:400 16.5px/1.65 var(--font-sans);
+  color:rgba(255,255,255,.8); max-width:52ch;
+}
+.lede b { color:#fff; font-weight:600; }
+
+/* ---- the one thing this page is for ------------------------------------ */
+.join { margin:34px 0 0; max-width:520px; }
+.join__row { display:flex; gap:9px; }
+.join input {
+  flex:1; min-width:0; height:50px; padding:0 18px; border-radius:12px;
+  border:1px solid rgba(255,255,255,.26); background:rgba(255,255,255,.1);
+  color:#fff; font:400 14.5px var(--font-sans); backdrop-filter:blur(6px);
+  transition:.18s var(--ease-out);
+}
+.join input::placeholder { color:rgba(255,255,255,.5); }
+.join input:focus { outline:none; border-color:#fff; background:rgba(255,255,255,.16); }
+.join button {
+  height:50px; padding:0 26px; border:0; border-radius:12px; cursor:pointer;
+  background:#fff; color:#0A0A0A; font:600 14.5px var(--font-sans); white-space:nowrap;
+  transition:.18s var(--ease-out);
+}
+.join button:hover { transform:translateY(-1px); }
+.join__note { margin:11px 0 0; font:400 11.5px/1.6 var(--font-mono); color:rgba(255,255,255,.52); }
+.chips { display:flex; flex-wrap:wrap; gap:7px 20px; margin:38px 0 0; }
+.chips span {
+  font:500 10px var(--font-mono); letter-spacing:.15em; text-transform:uppercase;
+  color:rgba(255,255,255,.55);
+}
+.chips span::before { content:"◆ "; color:rgba(255,255,255,.32); }
+
+/* ---- the three ---------------------------------------------------------- */
+.three { padding-top:96px; padding-bottom:8px; }
+.kicker { font:500 10.5px var(--font-mono); letter-spacing:.19em; text-transform:uppercase; color:var(--muted-foreground); }
+h2 { margin:14px 0 0; font:650 clamp(28px,3.6vw,42px)/1.1 var(--font-sans); letter-spacing:-.03em; max-width:20ch; }
+.sub { margin:14px 0 0; font:400 15px/1.7 var(--font-sans); color:var(--muted-foreground); max-width:60ch; }
+.grid { display:grid; grid-template-columns:repeat(3,1fr); gap:26px; margin:52px 0 0; }
+.card { border-top:2px solid var(--foreground); padding:18px 0 0; }
+.card__n { font:500 10px var(--font-mono); letter-spacing:.16em; color:var(--neutral-400); }
+.card h3 { margin:11px 0 0; font:600 18px/1.3 var(--font-sans); letter-spacing:-.015em; }
+.card p { margin:9px 0 0; font:400 13.5px/1.7 var(--font-sans); color:var(--muted-foreground); }
+
+/* ---- in the open -------------------------------------------------------- */
+.open { margin:96px 0 0; background:var(--neutral-50); border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+.open__in { padding-top:64px; padding-bottom:64px; display:grid; grid-template-columns:1fr 1fr; gap:52px; align-items:start; }
+.now { display:flex; flex-direction:column; gap:0; }
+.now__row { display:flex; align-items:baseline; gap:14px; padding:13px 0; border-bottom:1px solid var(--border); }
+.now__row:last-child { border-bottom:0; }
+.now__t { font:500 13.5px var(--font-sans); }
+.now__s { margin-left:auto; font:400 10px var(--font-mono); letter-spacing:.13em; text-transform:uppercase; color:var(--neutral-400); white-space:nowrap; }
+.now__s--live { color:var(--foreground); }
+
+/* ---- foot --------------------------------------------------------------- */
+.foot { padding-top:52px; padding-bottom:64px; display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+.foot__m { font:400 11px var(--font-mono); letter-spacing:.1em; text-transform:uppercase; color:var(--neutral-400); }
+.foot__l { margin-left:auto; display:flex; gap:22px; font:400 12.5px var(--font-sans); color:var(--muted-foreground); }
+.foot__l a { text-decoration:none; }
+.foot__l a:hover { color:var(--foreground); }
+
+@media (max-width:860px) {
+  .grid, .open__in { grid-template-columns:1fr; }
+  .join__row { flex-direction:column; }
+  .foot__l { margin-left:0; width:100%; }
+}
+/* Motion is decoration here; the page reads identically without it. */
+@keyframes rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+.hero__in > * { animation:rise .7s var(--ease-out) both; }
+.hero__in > *:nth-child(2) { animation-delay:.06s; }
+.hero__in > *:nth-child(3) { animation-delay:.12s; }
+.hero__in > *:nth-child(4) { animation-delay:.18s; }
+.hero__in > *:nth-child(5) { animation-delay:.24s; }
+@media (prefers-reduced-motion:reduce) {
+  html { scroll-behavior:auto; }
+  *,*::before,*::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="top"><div class="wrap top__in">
+  <div class="mark"><b>Arke</b><span>Studio</span></div>
+  <a class="top__gh" href="https://github.com/michaeljosiah/ArkeStudio" target="_blank" rel="noreferrer">Built in the open ↗</a>
+</div></header>
+
+<section class="hero">
+  <img class="hero__img" src="assets/world-undersong.png" alt="The drowned harbour of The Undersong at dusk">
+  <div class="hero__wash"></div>
+  <div class="wrap hero__in">
+    <div class="eyebrow">An AI production studio for storytellers and worldbuilders</div>
+    <h1>Every AI tool forgets your world.<span class="dim">Arke remembers.</span></h1>
+    <p class="lede">
+      Characters who stay themselves across a novel, a film and a game. Canon that cites its
+      sources and refuses to invent. A visual language every image inherits.
+      <b>Build the world once. Produce it everywhere.</b>
+    </p>
+
+    <!--
+      WAITLIST FORM — the action below is a placeholder and must be replaced with a real
+      endpoint before this page goes anywhere (Formspree, Buttondown, ConvertKit, Tally…).
+      As written it does nothing: no address is stored, sent or collected.
+    -->
+    <form class="join" action="REPLACE_WITH_YOUR_FORM_ENDPOINT" method="post">
+      <div class="join__row">
+        <input type="email" name="email" required autocomplete="email"
+               placeholder="you@yourstudio.com" aria-label="Email address">
+        <button type="submit">Get early access</button>
+      </div>
+      <p class="join__note">One email when it opens. Nothing else, ever.</p>
+    </form>
+
+    <div class="chips">
+      <span>Local first</span><span>Open source</span><span>Human accepted</span><span>Provider independent</span>
+    </div>
+  </div>
+</section>
+
+<section class="wrap three">
+  <div class="kicker">Three mechanics · one studio</div>
+  <h2>Built to remember what other tools forget.</h2>
+  <p class="sub">
+    Most creative tools are organised around projects. Arke starts one level higher — with the
+    world every project shares.
+  </p>
+  <div class="grid">
+    <div class="card">
+      <div class="card__n">01</div>
+      <h3>Nothing changes until you accept.</h3>
+      <p>Every draft arrives as a proposal. Arke works out what it would affect, shows you the
+         ripple, and then waits. The screen is the gate.</p>
+    </div>
+    <div class="card">
+      <div class="card__n">02</div>
+      <h3>Canon that knows when to refuse.</h3>
+      <p>Ask the world anything. Every claim cites the entry behind it — and when the record is
+         silent, Arke says so instead of inventing behind your back.</p>
+    </div>
+    <div class="card">
+      <div class="card__n">03</div>
+      <h3>Identity that travels.</h3>
+      <p>A main photo and one character sheet become the reference set, and they follow the
+         character into every frame, on every provider that takes them.</p>
+    </div>
+  </div>
+</section>
+
+<section class="open"><div class="wrap open__in">
+  <div>
+    <div class="kicker">In the workshop</div>
+    <h2 style="font-size:clamp(24px,3vw,34px)">You can watch it being built.</h2>
+    <p class="sub">
+      Arke is free and MIT-licensed, and the work happens in public — specs, design and commits.
+      Nothing on this page is a mock-up of something we hope to do later.
+    </p>
+  </div>
+  <div class="now">
+    <div class="now__row"><span class="now__t">The accept gate</span><span class="now__s now__s--live">Working</span></div>
+    <div class="now__row"><span class="now__t">Canon, with citations and refusals</span><span class="now__s now__s--live">Working</span></div>
+    <div class="now__row"><span class="now__t">World art direction, versioned</span><span class="now__s now__s--live">Working</span></div>
+    <div class="now__row"><span class="now__t">The two-image character kit</span><span class="now__s now__s--live">Working</span></div>
+    <div class="now__row"><span class="now__t">Voice mode — speak to the studio</span><span class="now__s">In build</span></div>
+    <div class="now__row"><span class="now__t">Interactive productions</span><span class="now__s">Designed</span></div>
+  </div>
+</div></section>
+
+<footer class="wrap foot">
+  <div class="foot__m">Free · MIT licence · Windows 11 · x64 + ARM64</div>
+  <div class="foot__l">
+    <a href="https://github.com/michaeljosiah/ArkeStudio" target="_blank" rel="noreferrer">GitHub ↗</a>
+    <a href="#top">Join the waitlist</a>
+  </div>
+</footer>
+
+</body>
+</html>
