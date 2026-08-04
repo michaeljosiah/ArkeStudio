@@ -14,6 +14,23 @@ function argValue(name: string): string | null {
 
 const port = argValue("arke-ws-port");
 const appVersion = argValue("arke-app-version") ?? "0.0.0";
+type ThemePreference = "system" | "light" | "dark";
+type ResolvedTheme = "light" | "dark";
+const rawThemePreference = argValue("arke-theme-preference");
+const rawResolvedTheme = argValue("arke-resolved-theme");
+const themePreference: ThemePreference =
+  rawThemePreference === "light" || rawThemePreference === "dark" ? rawThemePreference : "system";
+const resolvedTheme: ResolvedTheme = rawResolvedTheme === "dark" ? "dark" : "light";
+const currentTheme = ipcRenderer.sendSync("arke:get-theme") as
+  | { preference?: unknown; resolved?: unknown }
+  | undefined;
+const startupTheme = {
+  preference:
+    currentTheme?.preference === "system" || currentTheme?.preference === "light" || currentTheme?.preference === "dark"
+      ? currentTheme.preference
+      : themePreference,
+  resolved: currentTheme?.resolved === "dark" || currentTheme?.resolved === "light" ? currentTheme.resolved : resolvedTheme,
+} satisfies { preference: ThemePreference; resolved: ResolvedTheme };
 const wsUrl = port ? `ws://127.0.0.1:${port}` : null;
 /** Read-only media base (design-fidelity pass): same server, plain GET. */
 const httpBase = port ? `http://127.0.0.1:${port}` : null;
@@ -22,7 +39,8 @@ const httpBase = port ? `http://127.0.0.1:${port}` : null;
  * Where an attachment is going. The renderer names the destination, the host names the path —
  * neither knows the other's half, and the two only meet in the frame that leaves here.
  */
-type AttachTarget = { kind: "file-artifact"; worldId: string } | { kind: "genesis-attach"; genesisId: string };
+type AttachTarget =
+  { kind: "file-artifact"; worldId: string } | { kind: "genesis-attach"; genesisId: string };
 
 type FrameListener = (frameJson: string) => void;
 type StatusListener = (status: "connecting" | "open" | "closed") => void;
@@ -39,6 +57,7 @@ const bridge = {
   appVersion,
   platform: process.platform as string,
   httpBase,
+  theme: startupTheme,
 
   /** (Re)establish the socket to the embedded coordinator. Loopback only. */
   connect(): void {
@@ -81,6 +100,25 @@ const bridge = {
     return () => ipcRenderer.removeListener("arke:activate-activity", activate);
   },
 
+  setHostTheme(preference: ThemePreference): void {
+    ipcRenderer.send("arke:set-host-theme", preference);
+  },
+
+  onThemeChange(
+    listener: (theme: { preference: ThemePreference; resolved: ResolvedTheme }) => void,
+  ): () => void {
+    const changed = (
+      _event: Electron.IpcRendererEvent,
+      theme: { preference: ThemePreference; resolved: ResolvedTheme },
+    ) => listener(theme);
+    ipcRenderer.on("arke:theme-changed", changed);
+    return () => ipcRenderer.removeListener("arke:theme-changed", changed);
+  },
+
+  themeReady(): void {
+    ipcRenderer.send("arke:theme-ready");
+  },
+
   /**
    * Files dropped on, or pasted into, the composer.
    *
@@ -121,7 +159,11 @@ const bridge = {
     // writes a zero-byte file and the attachment fails silently, which is the worst outcome.
     const raw: unknown = bytes;
     const view = ArrayBuffer.isView(raw)
-      ? new Uint8Array((raw as ArrayBufferView).buffer, (raw as ArrayBufferView).byteOffset, (raw as ArrayBufferView).byteLength)
+      ? new Uint8Array(
+          (raw as ArrayBufferView).buffer,
+          (raw as ArrayBufferView).byteOffset,
+          (raw as ArrayBufferView).byteLength,
+        )
       : raw instanceof ArrayBuffer
         ? new Uint8Array(raw)
         : Array.isArray(raw)

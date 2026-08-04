@@ -1,5 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
 import {
   AppSettingsSchema,
   type AppSettings,
@@ -7,7 +6,9 @@ import {
   type Capability,
   type ModelManifest,
   type RoutingFault,
+  type ThemePreference,
 } from "@arke-studio/contracts";
+import { atomicWriteFile } from "./world/atomic.js";
 
 /**
  * App-level settings at `%APP_ROOT%\settings.json` (SPEC-008 §2.7): routing defaults that
@@ -32,10 +33,7 @@ export class AppSettingsFile {
   }
 
   private async persist(settings: AppSettings): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true });
-    const tmp = join(dirname(this.path), `.tmp-settings-${process.pid}`);
-    await writeFile(tmp, JSON.stringify(settings, null, 2) + "\n", "utf8");
-    await rename(tmp, this.path);
+    await atomicWriteFile(this.path, JSON.stringify(settings, null, 2) + "\n");
     this.cache = settings;
   }
 
@@ -60,7 +58,10 @@ export class AppSettingsFile {
    * an agent left with nothing is dropped from settings entirely, so "as shipped" is the
    * absence of a record rather than a record that happens to be empty.
    */
-  async setAgent(agent: string, patch: { model?: string | null; brief?: string | null }): Promise<AppSettings> {
+  async setAgent(
+    agent: string,
+    patch: { model?: string | null; brief?: string | null },
+  ): Promise<AppSettings> {
     const current = await this.load();
     const existing = current.agents[agent] ?? {};
     const next: { model?: string; brief?: string } = { ...existing };
@@ -90,6 +91,13 @@ export class AppSettingsFile {
   async setBackgroundNotifications(preference: BackgroundNotificationPreference): Promise<AppSettings> {
     const current = await this.load();
     const next: AppSettings = { ...current, backgroundNotifications: preference };
+    await this.persist(next);
+    return next;
+  }
+
+  async setAppearanceTheme(theme: ThemePreference): Promise<AppSettings> {
+    const current = await this.load();
+    const next: AppSettings = { ...current, appearance: { theme } };
     await this.persist(next);
     return next;
   }

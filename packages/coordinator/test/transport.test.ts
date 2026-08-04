@@ -19,6 +19,7 @@ const STATE: ClientState = {
     routing: { defaults: {}, faults: [] },
     spend: null,
     backgroundNotifications: "issues-only",
+    appearance: { theme: "system" },
     runtime: null,
     voiceRuntime: null,
     drift: [],

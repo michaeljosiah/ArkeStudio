@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   ArtifactSidecarSchema,
   ArtDirectionRecordSchema,
+  AppSettingsSchema,
   CanonEntrySchema,
   ChangeRecordSchema,
   ClientMessageSchema,
@@ -47,6 +48,29 @@ describe("ids", () => {
     const a = ulid(1000);
     const b = ulid(2000);
     assert.ok(a < b, "earlier timestamp must sort first");
+  });
+});
+
+describe("appearance settings", () => {
+  it("defaults missing and malformed values to system", () => {
+    assert.equal(AppSettingsSchema.parse({}).appearance.theme, "system");
+    assert.equal(AppSettingsSchema.parse({ appearance: { theme: "sepia" } }).appearance.theme, "system");
+  });
+
+  it("validates appearance commands and events", () => {
+    assert.deepEqual(ClientMessageSchema.parse({ kind: "set-appearance-theme", preference: "dark" }), {
+      kind: "set-appearance-theme",
+      preference: "dark",
+    });
+    assert.deepEqual(
+      DomainEventSchema.parse({
+        at: "2026-08-04T10:00:00Z",
+        type: "appearance.changed",
+        preference: "light",
+      }),
+      { at: "2026-08-04T10:00:00Z", type: "appearance.changed", preference: "light" },
+    );
+    assert.throws(() => ClientMessageSchema.parse({ kind: "set-appearance-theme", preference: "sepia" }));
   });
 });
 

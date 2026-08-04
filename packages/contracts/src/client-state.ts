@@ -10,6 +10,7 @@ import { ProposalSchema, RipplePreviewSchema } from "./proposal.js";
 import { ProviderStatusSchema } from "./provider.js";
 import {
   LocalRuntimeStatusSchema,
+  AppearanceSettingsSchema,
   BackgroundNotificationPreferenceSchema,
   ManifestDriftSchema,
   RoutingDefaultsSchema,
@@ -215,6 +216,7 @@ export const ClientStateSchema = z
           .default([]),
         spend: SpendStatusSchema.nullable().default(null),
         backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
+        appearance: AppearanceSettingsSchema.default({ theme: "system" }),
         runtime: LocalRuntimeStatusSchema.nullable().default(null),
         voiceRuntime: VoiceRuntimeStatusSchema.nullable().default(null),
         drift: z.array(ManifestDriftSchema).default([]),

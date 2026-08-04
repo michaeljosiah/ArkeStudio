@@ -4,7 +4,7 @@ import { DomainEventSchema } from "./events.js";
 import { GenesisIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, UlidSchema } from "./ids.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
-import { BackgroundNotificationPreferenceSchema } from "./settings.js";
+import { BackgroundNotificationPreferenceSchema, ThemePreferenceSchema } from "./settings.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then `event` frames, sequence
@@ -340,6 +340,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("set-background-notifications"),
       preference: BackgroundNotificationPreferenceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("set-appearance-theme"),
+      preference: ThemePreferenceSchema,
     })
     .strict(),
   /** SPEC-009 R-14: cancel a job in any non-terminal state; remote cancel attempted where supported. */

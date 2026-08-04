@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { deriveCapabilityAvailability, type CapabilityProbe, type ModelManifest } from "@arke-studio/contracts";
+import {
+  deriveCapabilityAvailability,
+  type CapabilityProbe,
+  type ModelManifest,
+} from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { AppSettingsFile, routingFaults } from "../../src/app-settings.js";
 import { CredentialStore, type Cipher } from "../../src/credentials/store.js";
@@ -16,7 +21,12 @@ const cipher: Cipher = {
 
 async function makeService(probes: CapabilityProbe[] | Error) {
   const dir = await tempDir("arke-prov-");
-  const credentials = new CredentialStore(join(dir, "credentials.dat"), cipher, new SecretRegistry(), async () => {});
+  const credentials = new CredentialStore(
+    join(dir, "credentials.dat"),
+    cipher,
+    new SecretRegistry(),
+    async () => {},
+  );
   await credentials.set("fal", "sk-fal-testkey-000000000");
   const service = new ProviderService(
     credentials,
@@ -135,7 +145,10 @@ describe("routing defaults resolve to concrete models (R-20, R-21 posture, D1)",
     const dir = await tempDir("arke-settings-");
     const settings = new AppSettingsFile(join(dir, "settings.json"));
     await settings.setRoutingDefault("video", "seedance-2.0", manifest);
-    const shrunk: ModelManifest = { ...manifest, models: manifest.models.filter((m) => m.id !== "seedance-2.0") };
+    const shrunk: ModelManifest = {
+      ...manifest,
+      models: manifest.models.filter((m) => m.id !== "seedance-2.0"),
+    };
     const faults = routingFaults(await settings.load(), shrunk);
     assert.equal(faults.length, 1);
     assert.equal(faults[0]!.capability, "video");
@@ -152,5 +165,25 @@ describe("background notification settings", () => {
     assert.equal((await settings.load()).backgroundNotifications, "background-results-and-issues");
     await settings.setBackgroundNotifications("off");
     assert.equal((await settings.load()).backgroundNotifications, "off");
+  });
+});
+
+describe("appearance settings", () => {
+  it("defaults to system, persists explicit themes, and repairs malformed appearance only", async () => {
+    const dir = await tempDir("arke-settings-");
+    const path = join(dir, "settings.json");
+    const settings = new AppSettingsFile(path);
+    assert.equal((await settings.load()).appearance.theme, "system");
+    await settings.setAppearanceTheme("dark");
+    assert.equal((await new AppSettingsFile(path).load()).appearance.theme, "dark");
+
+    await writeFile(
+      path,
+      JSON.stringify({ routing: { video: "seedance-2.0" }, appearance: { theme: "sepia" } }),
+      "utf8",
+    );
+    const repaired = await new AppSettingsFile(path).load();
+    assert.equal(repaired.appearance.theme, "system");
+    assert.equal(repaired.routing.video, "seedance-2.0");
   });
 });

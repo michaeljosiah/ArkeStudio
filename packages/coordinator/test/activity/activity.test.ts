@@ -53,6 +53,7 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
       routing: { defaults: {}, faults: [] },
       spend: null,
       backgroundNotifications: "issues-only",
+      appearance: { theme: "system" },
       runtime: null,
       voiceRuntime: null,
       drift: [],

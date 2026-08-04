@@ -9,6 +9,7 @@ import { Loading } from "../components/loading.js";
 import { Portrait } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
 import { shortDateTime } from "../lib/format.js";
+import { setThemePreference, useResolvedTheme, useThemePreference, type ThemePreference } from "../lib/theme.js";
 import {
   cancelExport as cancelExportMsg,
   cancelJob,
@@ -906,6 +907,7 @@ export function SettingsLayout() {
                 {(
                   [
                     ["providers", "Providers"],
+                    ["appearance", "Appearance"],
                     ["notifications", "Notifications"],
                     ["local-runtime", "Local runtime"],
                     ["agents", "Agents"],
@@ -1187,6 +1189,41 @@ export function SettingsNotificationsScreen() {
         issues include failed or uncertain generations, result preparation, and paused providers ·
         result notifications contain no world or character names
       </div>
+    </div>
+  );
+}
+
+const APPEARANCE_OPTIONS: Array<{ preference: ThemePreference; title: string; detail: string }> = [
+  { preference: "system", title: "System", detail: "Follow Windows appearance" },
+  { preference: "light", title: "Light", detail: "Always use the light theme" },
+  { preference: "dark", title: "Dark", detail: "Always use the dark theme" },
+];
+
+export function SettingsAppearanceScreen() {
+  const preference = useThemePreference();
+  const resolved = useResolvedTheme();
+  return (
+    <div data-screen="settings-appearance" className="fy-set">
+      <div className="fy-set__eyebrow">THEME</div>
+      <fieldset className="fy-theme-options">
+        <legend className="fy-sr-only">Theme</legend>
+        {APPEARANCE_OPTIONS.map((option) => (
+          <label key={option.preference} className="fy-theme-option">
+            <span className="fy-theme-option__copy">
+              <span className="fy-set__title">{option.title}</span>
+              <span className="fy-set__caps">{option.detail}</span>
+            </span>
+            <input
+              type="radio"
+              name="appearance-theme"
+              value={option.preference}
+              checked={preference === option.preference}
+              onChange={() => setThemePreference(option.preference)}
+            />
+          </label>
+        ))}
+      </fieldset>
+      <div className="fy-set__note">currently using {resolved} · stored for the application, never in a world</div>
     </div>
   );
 }

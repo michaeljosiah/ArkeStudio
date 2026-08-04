@@ -79,6 +79,12 @@
   --selection-bg: var(--neutral-200);
   --selection-fg: var(--foreground);
 
+  /* Fixed-contrast controls and labels drawn over user media. */
+  --media-overlay-bg: var(--neutral-950);
+  --media-overlay-fg: var(--neutral-50);
+  --media-control-bg: var(--neutral-50);
+  --media-control-fg: var(--neutral-950);
+
   /* Legacy brand names → monochrome, so nothing renders teal/orange */
   --teal:        var(--primary);
   --teal-700:    #000000;
@@ -127,8 +133,13 @@
   --warning-bg: #241803;
   --danger-bg:  #2A0E0E;
 
+  --text-secondary: var(--neutral-300);
+  --text-placeholder: var(--neutral-500);
+  --faint:      var(--neutral-500);
   --ink-soft:   var(--neutral-300);
   --line-soft:  #1F1F1F;
+  --selection-bg: var(--neutral-700);
+  --selection-fg: var(--neutral-50);
 }
 
 ::selection { background: var(--selection-bg); color: var(--selection-fg); }

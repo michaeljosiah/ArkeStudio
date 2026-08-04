@@ -35,7 +35,10 @@ describe("credential storage (R-5, R-8, §3.2)", () => {
     const raw = await readFile(join(dir, "credentials.dat"), "utf8");
     assert.ok(!raw.includes(KEY), "plaintext never rests on disk");
     const stored = (JSON.parse(raw) as { entries: Record<string, string> }).entries["fal"]!;
-    assert.ok(Buffer.from(stored, "base64").toString().startsWith("enc:"), "what rests is the cipher's output");
+    assert.ok(
+      Buffer.from(stored, "base64").toString().startsWith("enc:"),
+      "what rests is the cipher's output",
+    );
     assert.equal(aclCalls.length, 1, "ACL reset on write");
     assert.equal(await store.get("fal"), KEY, "round-trips through the cipher");
 
@@ -76,7 +79,10 @@ describe("redaction at the logging boundary (R-7, §3.2)", () => {
 
     const raw = await readFile(join(dir, "app.jsonl"), "utf8");
     assert.ok(!raw.includes(KEY), "the registered secret is gone from every string");
-    assert.ok(!raw.includes("never-registered-token"), "credential-shaped fields are masked even unregistered");
+    assert.ok(
+      !raw.includes("never-registered-token"),
+      "credential-shaped fields are masked even unregistered",
+    );
     assert.ok(raw.includes(REDACTED));
   });
 
@@ -106,12 +112,19 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
         jobs: [],
         ledger: [],
         providers: [
-          { id: "fal", configured: true, validation: "valid", probes: [{ capability: "video", available: true }], fault: null },
+          {
+            id: "fal",
+            configured: true,
+            validation: "valid",
+            probes: [{ capability: "video", available: true }],
+            fault: null,
+          },
         ],
         manifest: null,
         routing: { defaults: {}, faults: [] },
         spend: null,
         backgroundNotifications: "issues-only",
+        appearance: { theme: "system" },
         runtime: null,
         voiceRuntime: null,
         drift: [],

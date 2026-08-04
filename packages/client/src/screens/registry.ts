@@ -22,6 +22,8 @@ export const SCREENS: ScreenEntry[] = [
   { id: "new-world", samplePath: "/worlds/new" },
   { id: "settings-providers", samplePath: "/settings/providers" },
   { id: "settings-notifications", samplePath: "/settings/notifications" },
+  { id: "settings-appearance", samplePath: "/settings/appearance" },
+  { id: "settings-agents", samplePath: "/settings/agents" },
   { id: "settings-local-runtime", samplePath: "/settings/local-runtime" },
   { id: "settings-who-does-what", samplePath: "/settings/who-does-what" },
   { id: "settings-about", samplePath: "/settings/about" },
