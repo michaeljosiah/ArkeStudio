@@ -4,6 +4,7 @@
 .ui-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-2);
   padding: var(--control-pad-y) var(--control-pad-x);
   border-radius: var(--radius-control);
@@ -11,7 +12,13 @@
   font: var(--type-ui);
   cursor: pointer;
   transition: var(--transition-control);
+  white-space: nowrap;
+  line-height: 1;
 }
+.ui-btn--sm { height: var(--space-8); padding-inline: var(--space-3); font-size: 13px; }
+.ui-btn--default { min-height: 36px; }
+.ui-btn--lg { height: var(--space-10); padding-inline: var(--space-6); }
+.ui-btn--icon { width: 36px; height: 36px; padding: 0; }
 .ui-btn:disabled {
   cursor: not-allowed;
   opacity: 0.5;
@@ -19,6 +26,7 @@
 .ui-btn--primary {
   background: var(--primary);
   color: var(--primary-foreground);
+  box-shadow: var(--shadow-xs);
 }
 .ui-btn--primary:hover:not(:disabled) {
   background: var(--neutral-800);
@@ -30,7 +38,15 @@
   background: var(--secondary);
   color: var(--secondary-foreground);
   border-color: var(--border);
+  box-shadow: var(--shadow-xs);
 }
+.ui-btn--outline {
+  background: var(--background);
+  color: var(--foreground);
+  border-color: var(--border);
+  box-shadow: var(--shadow-xs);
+}
+.ui-btn--outline:hover:not(:disabled) { background: var(--accent); }
 .ui-btn--secondary:hover:not(:disabled) {
   background: var(--accent);
   border-color: var(--neutral-300);

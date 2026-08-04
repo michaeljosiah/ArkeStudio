@@ -300,7 +300,8 @@ function handleFrame(json: string): void {
     const gateNotices = Object.fromEntries(
       Object.entries(current.gateNotices).filter(([id]) => openIds.has(id)),
     );
-    emitChange({ ...current, state: frame.state, gateNotices });
+    const changedWorld = current.state?.world?.meta.worldId !== frame.state.world?.meta.worldId;
+    emitChange({ ...current, state: frame.state, gateNotices, sheetRefs: changedWorld ? {} : current.sheetRefs });
   } else if (current.state) {
     let gateNotices = current.gateNotices;
     let authoring = current.authoring;
@@ -548,7 +549,7 @@ function handleFrame(json: string): void {
       };
     } else if (event.type === "canon.refs") {
       canonRefs = { ...canonRefs, [event.entryId]: { citedBy: event.citedBy, ripples: event.ripples } };
-    } else if (event.type === "sheet.refs") {
+    } else if (event.type === "sheet.refs" && event.worldId === current.state.world?.meta.worldId) {
       sheetRefs = {
         ...sheetRefs,
         [event.sheetId]: {

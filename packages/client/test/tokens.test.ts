@@ -62,6 +62,21 @@ describe("design tokens", () => {
     assert.match(globals, /prefers-reduced-motion:\s*reduce/);
   });
 
+  it("locks the canonical Cast ledger geometry", () => {
+    const css = readFileSync(join(SRC, "screens", "fidelity.css"), "utf8");
+    for (const declaration of [
+      "--cast-gutter: 96px",
+      "--cast-feature: 400px",
+      "--cast-gap: 60px",
+      "--cast-portrait-width: 380px",
+      "--cast-portrait-height: 440px",
+      "padding: 7px 14px",
+    ]) {
+      assert.ok(css.includes(declaration), `Cast geometry includes ${declaration}`);
+    }
+    assert.match(css, /@media \(max-width: 900px\)[\s\S]*\.fy-content--cast \.fy-split \{ flex-direction: column/);
+  });
+
   it("keeps credential material out of the client (R-10; SPEC-008 R-5, R-6)", () => {
     // Key ENTRY is legitimate since SPEC-008 (write-only: the value goes up once, no frame
     // carries one back). What must never appear client-side: decryption, persistence, or

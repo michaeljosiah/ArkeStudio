@@ -6,14 +6,17 @@ import { useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, t
  * a token reference in ui.css.
  */
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "destructive";
+type ButtonVariant = "primary" | "secondary" | "outline" | "ghost" | "destructive";
+type ButtonSize = "sm" | "default" | "lg" | "icon";
 
 export function Button({
   variant = "secondary",
+  size = "default",
   className,
+  type = "button",
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant }) {
-  return <button className={cx("ui-btn", `ui-btn--${variant}`, className)} {...rest} />;
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant; size?: ButtonSize }) {
+  return <button type={type} className={cx("ui-btn", `ui-btn--${variant}`, `ui-btn--${size}`, className)} {...rest} />;
 }
 
 export function IconButton({

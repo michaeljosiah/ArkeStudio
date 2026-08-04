@@ -120,6 +120,7 @@ export function WorldLayout() {
     );
   }
   const onArtDirection = location.pathname.endsWith("/art-direction");
+  const onCast = location.pathname.endsWith("/cast");
   return (
     <div className="fy-app">
       <AppChrome
@@ -127,7 +128,7 @@ export function WorldLayout() {
         context={world ? { label: onArtDirection ? `${world.meta.name} · art direction` : world.meta.name } : undefined}
         divided={onArtDirection}
       />
-      <div className="fy-content">
+      <div className={cx("fy-content", onCast && "fy-content--cast")}>
         <nav className="fy-pillnav">
           {nav.map(([slug, label]) => (
             <NavLink
@@ -503,16 +504,33 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
-  const [featuredId, setFeaturedId] = useState<string | null>(null);
+  const sheetRefs = useSheetRefs();
   const sheets = world?.sheets.filter((s) => s.type === kind && s.retired !== true) ?? [];
   const retired = world?.sheets.filter((s) => s.type === kind && s.retired === true).length ?? 0;
   const locked = sheets.filter((s) => s.status === "locked").length;
   const sketches = sheets.filter((s) => s.status === "sketch").length;
-  const featured = sheets.find((s) => s.id === featuredId) ?? sheets[0] ?? null;
+  const featured = sheets[0] ?? null;
   const slug = world?.meta.slug;
   const roleOf = (sheet: Sheet): string =>
     [sheet.role, sheet.billing].filter(Boolean).join(" · ") ||
     (sheet.sections[0]?.body.split(/[.!?]/)[0] ?? "").slice(0, 60);
+  const featureCopy = (sheet: Sheet): string => {
+    const identity = [sheet.role, sheet.billing].filter(Boolean).join(" · ");
+    let essence = sheet.sections.find((section) => section.heading.toLowerCase() === "essence")?.body.trim() ?? "";
+    if (sheet.role && essence.toLowerCase().startsWith(`${sheet.role.toLowerCase()}.`)) {
+      essence = essence.slice(sheet.role.length + 1).trim();
+    }
+    return [identity, essence].filter(Boolean).join(" — ");
+  };
+  const reachOf = (sheet: Sheet): string => {
+    const refs = sheetRefs[sheet.id];
+    if (!refs) return "… refs · … productions";
+    return `${refs.tiles} ref${refs.tiles === 1 ? "" : "s"} · ${refs.productions.length} production${refs.productions.length === 1 ? "" : "s"}`;
+  };
+  useEffect(() => {
+    if (!worldId) return;
+    for (const sheet of sheets) requestSheetRefs(worldId, sheet.id);
+  }, [worldId, sheets.map((sheet) => sheet.id).join("|")]);
   return (
     <div data-screen={screenId}>
       <div className="fy-corner">
@@ -542,12 +560,12 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
                   <span className={cx("fy-dot", featured.status === "locked" ? "fy-dot--ok" : "fy-dot--sketch")} />
                   <span className="fy-feature__note">{featured.status === "locked" ? "canon locked" : "sketch"}</span>
                 </div>
-                <div className="fy-feature__sub">{roleOf(featured)}</div>
+                <div className="fy-feature__sub">{featureCopy(featured)}</div>
                 <div className="fy-feature__actions">
-                  <Button onClick={() => navigate(detailPath(featured.id))}>Open sheet</Button>
+                  <Button variant="primary" size="sm" onClick={() => navigate(detailPath(featured.id))}>Open sheet</Button>
                   {kind === "character" && (
-                    <Button variant="secondary" onClick={() => navigate(`/w/${worldId}/cast/${featured.id}/kit`)}>
-                      Generate looks
+                    <Button variant="outline" size="sm" onClick={() => navigate(`/w/${worldId}/cast/${featured.id}/looks`)}>
+                      More looks
                     </Button>
                   )}
                 </div>
@@ -557,7 +575,7 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
           <div className="fy-split__main">
             <div className="fy-ledgerhead">
               <span className="fy-ledgerhead__label">
-                {title} · {sheets.length}
+                {kind === "character" ? "The cast" : title} · {sheets.length}
               </span>
               <span className="fy-ledgerhead__meta">
                 {locked} canon-locked · {sketches} sketch{sketches === 1 ? "" : "es"}
@@ -570,9 +588,8 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
                   key={sheet.id}
                   type="button"
                   className={cx("fy-row", featured?.id === sheet.id && "fy-row--selected")}
-                  onClick={() =>
-                    featured?.id === sheet.id ? navigate(detailPath(sheet.id)) : setFeaturedId(sheet.id)
-                  }
+                  aria-label={`${sheet.name}, ${sheet.status === "locked" ? "canon locked" : "sketch"}, ${reachOf(sheet)}${featured?.id === sheet.id ? ", featured" : ""}. Open sheet`}
+                  onClick={() => navigate(detailPath(sheet.id))}
                 >
                   <div className="fy-row__thumb">
                     <Portrait
@@ -588,13 +605,13 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
                       <span
                         className={cx("fy-dot", sheet.status === "locked" ? "fy-dot--ok" : "fy-dot--sketch")}
                         style={{ width: 6, height: 6 }}
+                        aria-hidden="true"
                       />
                     </div>
                     <div className="fy-row__sub">{roleOf(sheet)}</div>
                   </div>
                   <span className="fy-row__meta">
-                    {sheet.status === "locked" ? `v${sheet.version}` : `sketch · v${sheet.version}`}
-                    {sheet.voice ? " · voiced" : ""}
+                    {reachOf(sheet)}
                   </span>
                   <span className="fy-row__chev">
                     <ChevronRight />

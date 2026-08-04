@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { App } from "../src/App.js";
-import { __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setStateForTest } from "../src/lib/store.js";
 import { SCREENS } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -94,6 +94,33 @@ describe("screen inventory", () => {
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }
+  });
+
+  it("renders the canonical Cast ledger copy, reach, actions, and direct rows", () => {
+    const world = FIXTURE_STATE.world!;
+    __setStateForTest(FIXTURE_STATE);
+    __applyEventForTest({
+      at: "2026-08-04T12:00:00Z",
+      type: "sheet.refs",
+      worldId: world.meta.worldId,
+      sheetId: "maren-kest",
+      tiles: 14,
+      productions: ["saltlight", "hymnal", "undertow"],
+      artifacts: [],
+      scenes: [],
+      takesByVersion: {},
+      incomingLinks: [],
+    });
+    const html = renderAt(`/w/${world.meta.worldId}/cast`).replace(/<!-- -->/g, "");
+    assert.ok(html.includes("The cast · 1"));
+    assert.ok(html.includes("Tide-caller · lead — She hears the verse under the harbour."));
+    assert.ok(html.includes("14 refs · 3 productions"));
+    assert.ok(html.includes("Open sheet"));
+    assert.ok(html.includes("More looks"));
+    assert.ok(html.includes("ui-btn--primary ui-btn--sm"));
+    assert.ok(html.includes("ui-btn--outline ui-btn--sm"));
+    assert.ok(html.includes("canon locked, 14 refs · 3 productions, featured. Open sheet"));
+    assert.ok(!html.includes("Generate looks"));
   });
 
   it("renders the complete art-direction surface from its resolved record", () => {
