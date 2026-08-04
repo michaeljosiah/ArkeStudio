@@ -19,7 +19,7 @@ import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
 import { ChevronRight, Play, Plus, Search } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
-import { Portrait, sheetPortraitPath } from "../components/portrait.js";
+import { characterPortraitPath, Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
 import { ExtractionOffer } from "../components/extraction-offer.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
@@ -392,7 +392,7 @@ export function WorldOverviewScreen() {
                   onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}`)}
                 >
                   <div className="fy-polaroid__frame">
-                    <Portrait worldSlug={slug} path={sheetPortraitPath(sheet.id)} label={sheet.name} />
+                    <Portrait worldSlug={slug} path={characterPortraitPath(world, sheet.id)} label={sheet.name} />
                   </div>
                   <div className="fy-polaroid__name">{sheet.name}</div>
                   <div className="fy-polaroid__role">
@@ -530,7 +530,12 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
             <div className="fy-split__side">
               <div className="fy-feature">
                 <div className="fy-feature__frame">
-                  <Portrait worldSlug={slug} path={sheetPortraitPath(featured.id)} label={featured.name} radius={9} />
+                  <Portrait
+                    worldSlug={slug}
+                    path={kind === "character" ? characterPortraitPath(world, featured.id) : sheetPortraitPath(featured.id)}
+                    label={featured.name}
+                    radius={9}
+                  />
                 </div>
                 <div className="fy-feature__title">
                   {featured.name}
@@ -570,7 +575,12 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
                   }
                 >
                   <div className="fy-row__thumb">
-                    <Portrait worldSlug={slug} path={sheetPortraitPath(sheet.id)} label={sheet.name} radius={6} />
+                    <Portrait
+                      worldSlug={slug}
+                      path={kind === "character" ? characterPortraitPath(world, sheet.id) : sheetPortraitPath(sheet.id)}
+                      label={sheet.name}
+                      radius={6}
+                    />
                   </div>
                   <div style={{ minWidth: 0 }}>
                     <div className="fy-row__name">

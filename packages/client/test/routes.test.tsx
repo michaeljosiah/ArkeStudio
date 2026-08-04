@@ -67,6 +67,35 @@ describe("screen inventory", () => {
     assert.ok(canon.includes("Tide-calling"));
   });
 
+  it("uses the accepted immutable main photo on World overview and Cast", () => {
+    const world = FIXTURE_STATE.world!;
+    const nested = "takes/tk_01J8A0000000000000000000P9/new-main.webp";
+    const referenceKits = world.referenceKits.map((kit) =>
+      kit.sheetId === "maren-kest"
+        ? {
+            ...kit,
+            anchor: nested,
+            mainPhoto: { ...kit.mainPhoto!, file: nested },
+          }
+        : kit,
+    );
+    __setStateForTest({ ...FIXTURE_STATE, world: { ...world, referenceKits } });
+    try {
+      const expected = "references/maren-kest/takes/tk_01J8A0000000000000000000P9/new-main.webp";
+      for (const path of [
+        `/w/${world.meta.worldId}`,
+        `/w/${world.meta.worldId}/cast`,
+        `/w/${world.meta.worldId}/cast/maren-kest`,
+      ]) {
+        const html = renderAt(path);
+        assert.ok(html.includes(expected), `${path} uses the accepted identity`);
+        assert.ok(!html.includes("references/maren-kest/head-front.png"));
+      }
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
   it("renders the complete art-direction surface from its resolved record", () => {
     const html = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/art-direction`);
     for (const copy of [
