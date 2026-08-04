@@ -187,3 +187,25 @@ describe("appearance settings", () => {
     assert.equal(repaired.routing.video, "seedance-2.0");
   });
 });
+
+describe("Voxa settings", () => {
+  it("defaults safely and persists a configured executable as an argument-free path", async () => {
+    const dir = await tempDir("arke-settings-");
+    const path = join(dir, "settings.json");
+    const settings = new AppSettingsFile(path);
+    assert.deepEqual((await settings.load()).voxa, {
+      executablePath: null,
+      modelRoot: null,
+      extraArgs: [],
+    });
+    await settings.setVoxa({
+      executablePath: "C:\\Program Files\\Voxa\\voxa.exe",
+      extraArgs: ["--acceleration", "cpu"],
+    });
+    assert.deepEqual((await new AppSettingsFile(path).load()).voxa, {
+      executablePath: "C:\\Program Files\\Voxa\\voxa.exe",
+      modelRoot: null,
+      extraArgs: ["--acceleration", "cpu"],
+    });
+  });
+});

@@ -14,7 +14,9 @@ import {
   cancelExport as cancelExportMsg,
   cancelJob,
   checkUpdates,
+  chooseVoxaExecutable,
   clearCredential,
+  clearVoxaExecutable,
   attachHostFiles,
   attachHostText,
   archiveWorld,
@@ -29,9 +31,12 @@ import {
   generateDiagnostics,
   listProviderCalls,
   openDataFolder,
+  openModelFolder,
   openThread,
   openWorld,
   resolveHeldJob,
+  repairVoiceModels,
+  restartVoxa,
   retryJobFinalization,
   resumeQueue,
   setCredential,
@@ -52,8 +57,12 @@ import {
   useStore,
   useUpdateStatus,
   useVoiceSidecar as useVoiceSidecarState,
+  useVoiceRuntimeTest,
+  useBundledVoxa,
+  testLocalVoice,
   validateProvider,
 } from "../lib/store.js";
+import { playAudio, usePlayback } from "../lib/audio.js";
 import {
   computeNeedsYou,
   computeRunning,
@@ -1303,12 +1312,30 @@ function SetupComponents() {
 export function SettingsLocalRuntimeScreen() {
   const { state } = useStore();
   const runtime = state?.app.runtime ?? null;
+  const voiceRuntime = state?.app.voiceRuntime ?? null;
+  const voiceTest = useVoiceRuntimeTest();
+  const playback = usePlayback();
+  const playedTest = useRef<string | null>(null);
   useEffect(() => {
     if (!runtime) detectRuntimes();
     // Detection runs once per mount when nothing is known yet; Re-detect is the manual path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    if (voiceTest?.status !== "ready" || !voiceTest.audioBase64 || playedTest.current === voiceTest.requestId) return;
+    playedTest.current = voiceTest.requestId;
+    void playAudio(voiceTest.requestId, `data:audio/wav;base64,${voiceTest.audioBase64}`);
+  }, [voiceTest]);
   const gbOrUnknown = (mb: number | null) => (mb === null ? "could not measure" : `${Math.round(mb / 1024)} GB`);
+  const sourceLabel = voiceRuntime?.source === "environment"
+    ? "Environment override"
+    : voiceRuntime?.source === "configured"
+      ? "Configured Voxa"
+      : voiceRuntime?.source === "bundled"
+        ? "Bundled Voxa"
+        : "Runtime missing";
+  const engineTone = (engine: { state: string } | undefined) =>
+    engine?.state === "ready" ? "fy-set__dot--ok" : engine?.state === "unknown" ? "" : "fy-set__dot--warn";
   return (
     <div data-screen="settings-local-runtime" className="fy-set">
       <div className="fy-set__eyebrow">THIS MACHINE</div>
@@ -1330,21 +1357,68 @@ export function SettingsLocalRuntimeScreen() {
 
       <SetupComponents />
 
-      <div className="fy-set__row">
+      <div className="fy-set__eyebrow">LOCAL VOICE RUNTIME</div>
+      <div className="fy-set__row fy-set__row--stack">
+        <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">
-            {state?.app.voiceRuntime?.source === "bundled"
-              ? `Bundled Voxa ${state.app.voiceRuntime.version}`
-              : "Voxa local speech"}
+            {sourceLabel}{voiceRuntime?.version ? ` ${voiceRuntime.version}` : ""}
           </div>
           <div className="fy-set__caps">
-            {state?.app.voiceRuntime
-              ? `${state.app.voiceRuntime.architecture} · Kokoro voice · Whisper dictation`
-              : "starts with Arke Studio; model weights download separately"}
+            {voiceRuntime?.executableName ? `${voiceRuntime.executableName} · ` : ""}
+            {voiceRuntime?.architecture ?? voiceRuntime?.expectedArchitecture ?? "unknown architecture"} · {voiceRuntime?.processState ?? "unconfigured"}
           </div>
         </div>
         <HealthDot label="Voxa local speech" health={state?.app.health.voice} />
+        </div>
+        <div className="fy-set__why">
+          <span className={cx("fy-set__dot", voiceRuntime?.detail === "Ready" ? "fy-set__dot--ok" : "fy-set__dot--warn")} />
+          <span>{voiceRuntime?.detail ?? "Runtime discovery has not completed."}</span>
+        </div>
+        {voiceRuntime?.configurationWarning && (
+          <div className="fy-set__why">
+            <span className="fy-set__dot fy-set__dot--warn" />
+            <span>{voiceRuntime.configurationWarning}</span>
+          </div>
+        )}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+          <Button onClick={() => chooseVoxaExecutable()}>Choose Voxa executable</Button>
+          {voiceRuntime?.bundledAvailable && voiceRuntime.source === "configured" && (
+            <button type="button" className="fy-set__link" onClick={() => useBundledVoxa()}>Use bundled Voxa</button>
+          )}
+          {voiceRuntime?.configured && (
+            <button type="button" className="fy-set__link" onClick={() => clearVoxaExecutable()}>Clear custom path</button>
+          )}
+          <button type="button" className="fy-set__link" onClick={() => restartVoxa()}>Restart runtime</button>
+          <button type="button" className="fy-set__link" onClick={() => repairVoiceModels()}>Download/repair voice models</button>
+          <button type="button" className="fy-set__link" onClick={() => openModelFolder()}>Open model folder</button>
+          <button type="button" className="fy-set__link" onClick={() => testLocalVoice()} disabled={voiceTest?.status === "testing"}>
+            {voiceTest?.status === "testing" ? "Testing…" : "Test local voice"}
+          </button>
+        </div>
+        {voiceTest && (
+          <div className="fy-set__note">
+            {voiceTest.detail}
+            {voiceTest.status === "ready" && voiceTest.audioBase64 && playback.status !== "playing" && (
+              <> · <button type="button" className="fy-set__link" onClick={() => void playAudio(voiceTest.requestId, `data:audio/wav;base64,${voiceTest.audioBase64}`)}>Play test</button></>
+            )}
+          </div>
+        )}
       </div>
+
+      {(["kokoro", "whisper", "phonemizer"] as const).map((engine) => {
+        const engineStatus = voiceRuntime?.engineStatus[engine];
+        return (
+          <div key={engine} className="fy-set__row">
+            <div className="fy-set__name fy-set__name--wide">
+              <div className="fy-set__title">{engine === "kokoro" ? "Kokoro voice" : engine === "whisper" ? "Whisper dictation" : "espeak-ng phonemizer"}</div>
+              <div className="fy-set__caps">{engineStatus?.detail ?? "Managed by Arke Studio"}</div>
+            </div>
+            <span className="fy-set__state">{engineStatus?.state ?? "unknown"}</span>
+            <span className={cx("fy-set__dot", engineTone(engineStatus))} />
+          </div>
+        );
+      })}
 
       <div className="fy-set__eyebrow">LOCAL MODELS</div>
       {(runtime?.models ?? []).map((m) => (

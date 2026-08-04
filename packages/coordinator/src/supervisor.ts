@@ -54,7 +54,9 @@ export interface SupervisedSpec {
   /** Path probed at http://127.0.0.1:<port>; 2xx → healthy. Default "/health". */
   healthPath?: string;
   /** Optional protocol validation after a 2xx response; false means not ready yet. */
-  validateHealth?: (response: Response) => boolean | Promise<boolean>;
+  validateHealth?: (
+    response: Response,
+  ) => boolean | { ok: boolean; reason?: string } | Promise<boolean | { ok: boolean; reason?: string }>;
   /** Replace the inherited environment instead of passing credentials and unrelated host state. */
   inheritEnv?: boolean;
   /** How long the child has to become healthy before it is declared failed. */
@@ -116,6 +118,7 @@ export class ChildSupervisor extends EventEmitter {
   private leashWarned = false;
   /** Live descendants of the current child (win32 shell shims) — see adoptDescendants. */
   private descendants: DescendantInfo[] = [];
+  private healthFailure: string | undefined;
 
   constructor(spec: SupervisedSpec, deps: SupervisorDeps = {}) {
     super();
@@ -171,10 +174,28 @@ export class ChildSupervisor extends EventEmitter {
     await this.spawnOnce();
   }
 
+  /** Stop, replace launch configuration, and start again without restarting the application. */
+  async reconfigure(
+    patch: Pick<SupervisedSpec, "command" | "args" | "env" | "inheritEnv">,
+  ): Promise<void> {
+    await this.stop();
+    this.spec.command = patch.command;
+    this.spec.args = patch.args;
+    this.spec.env = patch.env;
+    this.spec.inheritEnv = patch.inheritEnv ?? true;
+    await this.start();
+  }
+
+  async restart(): Promise<void> {
+    await this.stop();
+    await this.start();
+  }
+
   private async spawnOnce(): Promise<void> {
     const command = this.spec.command;
     if (command === null) return;
     this.setStatus("starting");
+    this.healthFailure = undefined;
     const port = await allocateLoopbackPort();
     this._port = port;
     const args = (this.spec.args ?? []).map((a) => a.replaceAll("{port}", String(port)));
@@ -191,13 +212,14 @@ export class ChildSupervisor extends EventEmitter {
         shell: needsShell,
       });
     } catch (err) {
-      this.setStatus("failed", `${this.id} failed to spawn: ${String(err)}`);
+      const code = typeof err === "object" && err !== null && "code" in err ? String(err.code) : "spawn error";
+      this.setStatus("failed", `${this.id} failed to spawn (${code})`);
       return;
     }
     this.child = child;
 
     const spawnError = new Promise<string | null>((resolve) => {
-      child.once("error", (err) => resolve(String(err)));
+      child.once("error", (err: NodeJS.ErrnoException) => resolve(err.code ?? "spawn error"));
       child.once("spawn", () => resolve(null));
     });
     const errored = await spawnError;
@@ -232,7 +254,8 @@ export class ChildSupervisor extends EventEmitter {
     if (this.child === child) this.child = null;
     this.setStatus(
       "failed",
-      `${this.id} did not become healthy within ${Math.round(this.spec.readyTimeoutMs / 1000)}s`,
+      this.healthFailure ??
+        `${this.id} did not become healthy within ${Math.round(this.spec.readyTimeoutMs / 1000)}s`,
     );
   }
 
@@ -340,7 +363,13 @@ export class ChildSupervisor extends EventEmitter {
     while (Date.now() < deadline && !this.stopping && this.child === child) {
       try {
         const res = await fetch(this.healthUrl(), { signal: AbortSignal.timeout(1_000) });
-        if (res.ok && (!this.spec.validateHealth || (await this.spec.validateHealth(res)))) return true;
+        if (res.ok) {
+          if (!this.spec.validateHealth) return true;
+          const validation = await this.spec.validateHealth(res);
+          const ok = typeof validation === "boolean" ? validation : validation.ok;
+          if (ok) return true;
+          if (typeof validation !== "boolean" && validation.reason) this.healthFailure = validation.reason;
+        }
       } catch {
         /* not up yet */
       }

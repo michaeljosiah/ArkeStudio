@@ -106,6 +106,17 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       revision: z.number().int(),
     })
     .strict(),
+  /** Transient Settings test result. Audio is never written to the change log or diagnostics. */
+  z
+    .object({
+      ...base,
+      type: z.literal("voice.runtime-test"),
+      requestId: UlidSchema,
+      status: z.enum(["testing", "ready", "failed"]),
+      detail: z.string(),
+      audioBase64: z.string().nullable(),
+    })
+    .strict(),
 
   z
     .object({
