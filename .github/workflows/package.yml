@@ -28,6 +28,10 @@ jobs:
 
       - run: npm ci
 
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.201
+
       # The client's dist/ is staged into the installer as extraResources, so the whole
       # workspace builds before the packager runs.
       - name: Build the workspaces
@@ -36,6 +40,9 @@ jobs:
       # verify:licenses → esbuild → rebuild:native → electron-builder, in that order.
       - name: Package
         run: npm run package --workspace @arke-studio/desktop
+
+      - name: Smoke bundled Voxa
+        run: npm run smoke:voxa:x64 --workspace @arke-studio/desktop
 
       - uses: actions/upload-artifact@v4
         with:

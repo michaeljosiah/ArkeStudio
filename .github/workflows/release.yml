@@ -54,37 +54,35 @@ jobs:
 
       - run: npm ci
 
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.201
+
       - name: Build the workspaces
         run: npm run build
 
-      # Create the release FIRST, so electron-builder has one to upload into.
-      #
-      # Letting it create its own looks simpler and is broken: it publishes each artifact
-      # concurrently, and two of them raced to create the release for v0.2.0 and v0.2.1 —
-      # same tag, same second, two releases. One got the installers and latest.yml, the other
-      # got a single blockmap, and clients resolving "the release for this tag" hit the wrong
-      # one: `Cannot find latest.yml … 404`. An app that cannot read the feed cannot update.
-      #
-      # Published, not draft, to match `releaseType: release` — electron-builder refuses to
-      # upload into a release whose type differs, and it refuses by skipping the upload.
-      - name: Open the release for this tag
+      # Package without publishing. Voxa/espeak preparation, architecture validation, licence
+      # checks and afterPack inspection all finish before the public release exists.
+      - name: Package the release candidates
+        run: npm run release --workspace @arke-studio/desktop
+
+      - name: Smoke bundled Voxa
+        run: npm run smoke:voxa:x64 --workspace @arke-studio/desktop
+
+      # One serialized upload after both architectures pass. This avoids both the old concurrent
+      # electron-builder release race and publishing a release before runtime gates complete.
+      - name: Publish the verified release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${{ inputs.tag || github.ref_name }}"
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "$tag already exists — uploading into it"
+            echo "$tag already exists — replacing verified assets"
           else
             gh release create "$tag" --title "$tag" --notes "$(git tag -l --format='%(contents)' "$tag")"
           fi
-
-      # --publish always: uploads the installers, the blockmaps and latest.yml into the release
-      # opened above.
-      - name: Package and publish the release
-        run: npm run release --workspace @arke-studio/desktop
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          gh release upload "$tag" apps/desktop/release/*.exe apps/desktop/release/*.blockmap apps/desktop/release/latest*.yml --clobber
 
       # A copy that outlives the release, so a botched one can still be inspected after
       # the release itself is deleted.

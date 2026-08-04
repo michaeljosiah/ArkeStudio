@@ -20,6 +20,7 @@ const STATE: ClientState = {
     spend: null,
     backgroundNotifications: "issues-only",
     runtime: null,
+    voiceRuntime: null,
     drift: [],
     agents: [],
     harnessModels: [],

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -309,12 +310,14 @@ export class LocalSetupService {
     let received = 0;
     let head: number[] = [];
     let lastEmit = 0;
+    const hash = spec.sha256 ? createHash("sha256") : null;
 
     try {
       for await (const chunk of res.body) {
         if (this.abort.signal.aborted) throw new Error("stopped");
         if (head.length < 4) head = [...head, ...Array.from(chunk.subarray(0, 4 - head.length))];
         received += chunk.byteLength;
+        hash?.update(chunk);
         if (!sink.write(chunk)) await new Promise<void>((r) => sink.once("drain", () => r()));
 
         const now = Date.now();
@@ -339,6 +342,10 @@ export class LocalSetupService {
     if (res.contentLength !== null && received !== res.contentLength) {
       await rm(toExtendedLength(partial), { force: true }).catch(() => {});
       throw new Error(`${spec.file}: the download stopped short (${received} of ${res.contentLength} bytes)`);
+    }
+    if (spec.sha256 && hash?.digest("hex") !== spec.sha256) {
+      await rm(toExtendedLength(partial), { force: true }).catch(() => {});
+      throw new Error(`${spec.file}: checksum mismatch`);
     }
 
     // Only a whole file ever takes the real name — a partial is never mistaken for presence.

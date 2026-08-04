@@ -23,6 +23,7 @@ export async function buildDiagnosticsBundle(
       routing: state.app.routing,
       spend: state.app.spend,
       runtime: state.app.runtime,
+      voiceRuntime: state.app.voiceRuntime,
       drift: state.app.drift,
       manifestVersion: state.app.manifest?.manifestVersion ?? null,
       jobCount: state.app.jobs.length,

@@ -23,7 +23,7 @@ import {
 } from "./settings.js";
 import { SetupStatusSchema } from "./setup.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
-import { RankedVoiceSchema } from "./voice.js";
+import { RankedVoiceSchema, VoiceRuntimeStatusSchema } from "./voice.js";
 
 /**
  * The normalised domain-event union (SPEC-001 R-2, R-3). Everything the coordinator pushes to
@@ -374,6 +374,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("voice.sidecar"),
       state: z.enum(["not-started", "downloading", "unavailable", "ready"]),
       detail: z.string(),
+      runtime: VoiceRuntimeStatusSchema.nullable().optional(),
     })
     .strict(),
 

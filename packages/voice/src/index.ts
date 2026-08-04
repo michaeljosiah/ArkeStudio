@@ -22,8 +22,16 @@ export type LocalVoice = z.infer<typeof LocalVoiceSchema>;
 export const SidecarHealthSchema = z
   .object({
     ok: z.boolean(),
-    version: z.string().optional(),
-    engines: z.array(z.string()).optional(),
+    version: z.string().min(1),
+    protocolVersion: z.literal(1),
+    architecture: z.enum(["x64", "arm64"]),
+    engines: z.array(z.enum(["kokoro", "whisper"])),
+    engineStatus: z
+      .object({
+        kokoro: z.object({ ready: z.boolean(), reason: z.string().optional() }).strict(),
+        whisper: z.object({ ready: z.boolean(), reason: z.string().optional() }).strict(),
+      })
+      .strict(),
     /** Model-download state (R-3): absent when nothing is downloading. */
     downloading: z
       .object({ model: z.string(), receivedMb: z.number(), totalMb: z.number() })
@@ -34,6 +42,10 @@ export const SidecarHealthSchema = z
   })
   .strict();
 export type SidecarHealth = z.infer<typeof SidecarHealthSchema>;
+
+export function compatibleSidecarHealth(health: SidecarHealth, architecture: "x64" | "arm64"): boolean {
+  return health.ok && health.architecture === architecture && health.engines.includes("kokoro") && health.engines.includes("whisper");
+}
 
 /** The four degradation states, each worth distinct copy (§2.10, T-17). */
 export type SidecarState =
@@ -53,7 +65,7 @@ export function sidecarState(health: SidecarHealth | null): SidecarState {
   if (!health.ok || health.unavailableReason !== undefined) {
     return { state: "unavailable", detail: health.unavailableReason ?? "a local model failed verification" };
   }
-  return { state: "ready", detail: `Voxa ${health.version ?? ""}`.trim() };
+  return { state: "ready", detail: `Voxa ${health.version} · ${health.architecture}` };
 }
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;

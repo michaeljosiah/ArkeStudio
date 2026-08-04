@@ -1316,6 +1316,7 @@ export function DictationButton({ onText }: { onText: (text: string) => void }) 
   const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
   const [requestId, setRequestId] = useState<string | null>(null);
   const sidecar = useVoiceSidecar();
+  const { state } = useStore();
   const dictation = useDictation();
   const result = requestId ? dictation[requestId] : undefined;
   useEffect(() => {
@@ -1325,7 +1326,10 @@ export function DictationButton({ onText }: { onText: (text: string) => void }) 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result?.text]);
-  const unavailable = sidecar !== null && sidecar.state !== "ready";
+  const unavailable =
+    sidecar !== null && sidecar.state !== "ready"
+      ? state?.app.health.voice.status !== "healthy" || state?.app.voiceRuntime?.engineStatus.whisper.ready !== true
+      : false;
   const start = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });

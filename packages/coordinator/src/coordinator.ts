@@ -200,6 +200,7 @@ export interface CoordinatorOptions {
     sidecarHealth?: () => Promise<{
       state: "not-started" | "downloading" | "unavailable" | "ready";
       detail: string;
+      runtime?: ClientState["app"]["voiceRuntime"];
     }>;
     localPresets: VoiceCandidate[];
     cloudSources: CloudVoiceSource[];

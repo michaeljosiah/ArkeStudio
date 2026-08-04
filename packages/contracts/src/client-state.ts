@@ -20,6 +20,7 @@ import { SetupStatusSchema } from "./setup.js";
 import { ReferenceKitSchema } from "./reference.js";
 import { SceneSchema, SelectionsSchema } from "./scene.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
+import { VoiceRuntimeStatusSchema } from "./voice.js";
 import {
   CanonEntrySchema,
   ChapterSummarySchema,
@@ -215,6 +216,7 @@ export const ClientStateSchema = z
         spend: SpendStatusSchema.nullable().default(null),
         backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
         runtime: LocalRuntimeStatusSchema.nullable().default(null),
+        voiceRuntime: VoiceRuntimeStatusSchema.nullable().default(null),
         drift: z.array(ManifestDriftSchema).default([]),
         /** Per-provider queue state: pauses with reasons, held counts (SPEC-009 R-8, R-11). */
         queues: z.array(QueueStatusSchema).default([]),

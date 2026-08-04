@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "dotnetSdk": "10.0.201",
+  "voxa": {
+    "repository": "https://github.com/michaeljosiah/voxa.git",
+    "commit": "ae0d90aac0b8917d68e3404841b66cebc9154f33",
+    "project": "src/Voxa.ArkeSidecar/Voxa.ArkeSidecar.csproj",
+    "version": "0.8.0-alpha",
+    "protocolVersion": 1,
+    "vcRuntime": {
+      "x64": {
+        "url": "https://download.microsoft.com/download/4/7/c/47c6134b-d61f-4024-83bd-b9c9ea951c25/Microsoft.VCLibs.x64.14.00.Desktop.appx",
+        "sha256": "B56A9101F706F9D95F815F5B7FA6EFBAC972E86573D378B96A07CFF5540C5961"
+      },
+      "arm64": {
+        "url": "https://download.microsoft.com/download/4/7/c/47c6134b-d61f-4024-83bd-b9c9ea951c25/Microsoft.VCLibs.arm64.14.00.Desktop.appx",
+        "sha256": "9A7F6D69EA6CF042EA8680B7CD0BFAA9C04F0F6CC89055D43F7F6CD0250508D3"
+      }
+    }
+  },
+  "espeakNg": {
+    "version": "1.52.0",
+    "commit": "4870adfa25b1a32b4361592f1be8a40337c58d6c",
+    "sourceUrl": "https://codeload.github.com/espeak-ng/espeak-ng/zip/4870adfa25b1a32b4361592f1be8a40337c58d6c",
+    "sourceSha256": "096F0915470C3BBA4F9E3BA274485E453F26DEDCCB5C28A33F871A84F5E064A9",
+    "windowsX64Url": "https://github.com/rhasspy/piper-phonemize/releases/download/2023.11.14-4/piper-phonemize_windows_amd64.zip",
+    "windowsX64Sha256": "A6F1A3F80EBA222C1B8EB3904A9C18781F3C21827BD2DC36BD85B216A306D945",
+    "windowsArm64Packages": [
+      {
+        "url": "https://repo.msys2.org/mingw/clangarm64/mingw-w64-clang-aarch64-espeak-ng-1.52.0.r141.g0d451f8c-1-any.pkg.tar.zst",
+        "sha256": "EED579F0F75F4BDAA7F13ECB10533FE8C85FEAAEF6DD42B0AE0809039AFA200C"
+      },
+      {
+        "url": "https://repo.msys2.org/mingw/clangarm64/mingw-w64-clang-aarch64-pcaudiolib-1.3-1-any.pkg.tar.zst",
+        "sha256": "2877FDDE408DEF621FB1D2EC9454315E51F095B7A4633F13FE55727E5EA17DD5"
+      },
+      {
+        "url": "https://repo.msys2.org/mingw/clangarm64/mingw-w64-clang-aarch64-libc%2B%2B-22.1.8-1-any.pkg.tar.zst",
+        "sha256": "6755AA5A658D0A906E1E8477858B3518FD87D380AC5C854A226F5A3A2C78D794"
+      }
+    ],
+    "windowsArm64Sources": [
+      {
+        "url": "https://repo.msys2.org/mingw/sources/mingw-w64-espeak-ng-1.52.0.r141.g0d451f8c-1.src.tar.zst",
+        "sha256": "6076337F5D053E7B32F16679CDDFB29919105FB6D9522DE6E246FB1BF3DA9909"
+      },
+      {
+        "url": "https://repo.msys2.org/mingw/sources/mingw-w64-pcaudiolib-1.3-1.src.tar.zst",
+        "sha256": "625884C08FC51745DE85DADA72DF39E6E926AE098407BDA716367E51DEC8D3BB"
+      }
+    ]
+  }
+}

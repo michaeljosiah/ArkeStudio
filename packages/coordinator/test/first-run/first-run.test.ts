@@ -157,6 +157,10 @@ describe("the licence gate (R-9, D5, §3.2)", () => {
     await mkdir(join(fakeRepo, "apps", "desktop", "build-resources", "ffmpeg"), { recursive: true });
     await writeFile(join(fakeRepo, "apps", "desktop", "build-resources", "ffmpeg", "ffmpeg.exe"), "");
     await cp(script, join(fakeRepo, "apps", "desktop", "scripts", "verify-licenses.mjs"));
+    await cp(
+      resolve(here, "../../../../apps/desktop/scripts/runtime-support.mjs"),
+      join(fakeRepo, "apps", "desktop", "scripts", "runtime-support.mjs"),
+    );
     await writeFile(
       join(fakeRepo, "THIRD-PARTY-NOTICES.md"),
       "# notices\nbetter-sqlite3 Electron SQLite Geist\n", // ffmpeg row deliberately absent
@@ -165,6 +169,11 @@ describe("the licence gate (R-9, D5, §3.2)", () => {
       () => execFileSync("node", [join(fakeRepo, "apps", "desktop", "scripts", "verify-licenses.mjs")], { encoding: "utf8" }),
       /Command failed|licence gate/i,
       "a component with no recorded obligation cannot ship (D5)",
+    );
+    assert.throws(
+      () => execFileSync("node", [join(fakeRepo, "apps", "desktop", "scripts", "verify-licenses.mjs"), "--require-runtimes"], { encoding: "utf8" }),
+      /required|runtime|licence gate/i,
+      "an installer cannot be built without both architecture runtimes",
     );
   });
 });

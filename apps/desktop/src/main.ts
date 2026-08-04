@@ -27,7 +27,15 @@ import {
   OpenCodeAdapter,
 } from "@arke-studio/adapter-opencode";
 import { createProviderClients, ElevenLabsClient, probeRuntime, SHIPPED_MANIFEST } from "@arke-studio/providers";
-import { KOKORO_PRESETS, localCandidates, sidecarState, VoxaClient } from "@arke-studio/voice";
+import {
+  compatibleSidecarHealth,
+  KOKORO_PRESETS,
+  localCandidates,
+  sidecarState,
+  SidecarHealthSchema,
+  VoxaClient,
+  type SidecarHealth,
+} from "@arke-studio/voice";
 import { BackgroundNotificationController } from "./background-notifications.js";
 
 /**
@@ -81,6 +89,11 @@ function ffmpegPath(): string | null {
   if (process.env["ARKE_FFMPEG"]) return process.env["ARKE_FFMPEG"];
   const bundled = app.isPackaged ? join(process.resourcesPath, "ffmpeg", "ffmpeg.exe") : null;
   return bundled !== null && existsSync(bundled) ? bundled : null;
+}
+
+function windowsArchitecture(): "x64" | "arm64" | null {
+  if (process.arch === "x64" || process.arch === "arm64") return process.arch;
+  return null;
 }
 
 let coordinator: Coordinator | null = null;
@@ -184,11 +197,38 @@ async function start(): Promise<void> {
 
   // The Voxa sidecar (SPEC-011): supervised like the harness; local inference only (D1).
   // The client resolves the supervisor's port lazily so restarts keep working.
+  const voxaSpec = childSpec("voxa", "ARKE_VOXA_CMD", "ARKE_VOXA_ARGS", join("voxa", "voxa.exe"));
+  const bundledVoxa = app.isPackaged && process.env["ARKE_VOXA_CMD"] === undefined;
+  const expectedArchitecture = windowsArchitecture();
+  let voxaHealth: SidecarHealth | null = null;
+  const voxaArgs = bundledVoxa
+    ? [
+        "--host", "127.0.0.1",
+        "--port", "{port}",
+        "--kokoro-model", join(appRoot, "models", "kokoro-82m", "model_quantized.onnx"),
+        "--kokoro-config", join(appRoot, "models", "kokoro-82m", "config.json"),
+        "--kokoro-voices", join(appRoot, "models", "kokoro-82m", "voices"),
+        "--whisper-model", join(appRoot, "models", "whisper-base-en", "ggml-base.en.bin"),
+        "--espeak", join(process.resourcesPath, "espeak-ng", "espeak-ng.exe"),
+        "--espeak-data", join(process.resourcesPath, "espeak-ng", "share", "espeak-ng-data"),
+      ]
+    : voxaSpec.args;
   const voxaSupervisor = new ChildSupervisor(
     {
-      ...childSpec("voxa", "ARKE_VOXA_CMD", "ARKE_VOXA_ARGS", join("voxa", "voxa.exe")),
+      ...voxaSpec,
+      args: voxaArgs,
       healthPath: "/health",
       readyTimeoutMs: 30_000,
+      inheritEnv: !bundledVoxa,
+      ...(bundledVoxa ? { env: { SystemRoot: process.env["SystemRoot"] ?? "C:\\Windows" } } : {}),
+      validateHealth: async (response) => {
+        if (expectedArchitecture === null) return false;
+        const parsed = await response.json().catch(() => null);
+        const health = parsed ? SidecarHealthSchema.safeParse(parsed) : null;
+        if (!health?.success || !compatibleSidecarHealth(health.data, expectedArchitecture)) return false;
+        voxaHealth = health.data;
+        return true;
+      },
     },
     { ledger: childLedger },
   );
@@ -272,7 +312,25 @@ async function start(): Promise<void> {
       : { ok: false, reason: "the native index binding did not load — search and counts degrade; authoring still works" },
     voice: {
       sidecar: voxaSidecar,
-      sidecarHealth: async () => sidecarState(await voxaAt().health()),
+    sidecarHealth: async () => {
+      const health = await voxaAt().health();
+      voxaHealth = health;
+      const status = sidecarState(health);
+      return {
+        ...status,
+        runtime:
+          voxaHealth && bundledVoxa
+            ? {
+                source: "bundled" as const,
+                version: voxaHealth.version,
+                protocolVersion: voxaHealth.protocolVersion,
+                architecture: voxaHealth.architecture,
+                engines: voxaHealth.engines,
+                engineStatus: voxaHealth.engineStatus,
+              }
+            : null,
+      };
+    },
       localPresets: localCandidates(KOKORO_PRESETS),
       cloudSources: [
         {

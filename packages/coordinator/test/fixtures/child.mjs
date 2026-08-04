@@ -14,7 +14,11 @@ const server = http.createServer((_req, res) => {
     // The body carries this process's pid so shim tests can find the grandchild doing the
     // real work behind a .cmd wrapper.
     res.writeHead(200);
-    res.end(JSON.stringify({ ok: true, pid: process.pid }));
+    res.end(JSON.stringify({
+      ok: true,
+      pid: process.pid,
+      protocolVersion: process.env.PROTOCOL_VERSION ? Number(process.env.PROTOCOL_VERSION) : undefined,
+    }));
   }
 });
 server.listen(port, "127.0.0.1");

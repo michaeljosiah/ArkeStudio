@@ -98,6 +98,21 @@ describe("ChildSupervisor", () => {
     await eventually(() => processGone(pid!));
   });
 
+  it("requires the configured health protocol before becoming healthy", async () => {
+    const sup = new ChildSupervisor({
+      id: "voxa",
+      command: process.execPath,
+      args: [CHILD],
+      env: { MODE: "healthy", PROTOCOL_VERSION: "2" },
+      validateHealth: async (response) => (await response.json() as { protocolVersion?: number }).protocolVersion === 1,
+      readyTimeoutMs: 500,
+      probeIntervalMs: 50,
+    });
+    await sup.start();
+    assert.equal(sup.status, "failed");
+    assert.match(sup.reason ?? "", /did not become healthy/);
+  });
+
   it("declares failure with a stated reason when a child never becomes healthy, and kills it (R-5)", async () => {
     const sup = new ChildSupervisor({
       id: "voxa",

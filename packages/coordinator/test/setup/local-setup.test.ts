@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -243,6 +244,30 @@ describe("fetching the local runtimes at setup", () => {
     const weights = last(events).components.find((c) => c.id === "weights")!;
     assert.equal(weights.state, "failed");
     assert.match(weights.detail ?? "", /not the file we asked for/);
+  });
+
+  it("rejects a checksum mismatch before the model becomes visible", async () => {
+    const appRoot = await root();
+    const events: DomainEvent[] = [];
+    const payload = bytes(2048);
+    const entries = catalogue().filter((c) => c.id === "weights");
+    const weights = entries[0]!;
+    if (weights.spec.kind !== "files") throw new Error("test catalogue changed");
+    const catalogueWithDigest = [{
+      ...weights,
+      spec: {
+        ...weights.spec,
+        files: [{ ...weights.spec.files[0]!, sha256: createHash("sha256").update("different").digest("hex") }],
+      },
+    }];
+    const svc = new LocalSetupService(deps({ chunks: [payload] }), (event) => events.push(event), {
+      appRoot,
+      catalogue: catalogueWithDigest,
+      throttleMs: 0,
+    });
+    await svc.run();
+    assert.match(last(events).components[0]!.detail ?? "", /checksum mismatch/);
+    await assert.rejects(readFile(join(appRoot, "models", "whisper", "ggml.bin")));
   });
 
   it("sweeps the debris of a cancelled run before starting a new one", async () => {

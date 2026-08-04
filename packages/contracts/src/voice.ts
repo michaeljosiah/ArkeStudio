@@ -22,6 +22,23 @@ export const VoiceCandidateSchema = z
   .strict();
 export type VoiceCandidate = z.infer<typeof VoiceCandidateSchema>;
 
+export const VoiceRuntimeStatusSchema = z
+  .object({
+    source: z.literal("bundled"),
+    version: z.string().min(1),
+    protocolVersion: z.literal(1),
+    architecture: z.enum(["x64", "arm64"]),
+    engines: z.array(z.enum(["kokoro", "whisper"])),
+    engineStatus: z
+      .object({
+        kokoro: z.object({ ready: z.boolean(), reason: z.string().optional() }).strict(),
+        whisper: z.object({ ready: z.boolean(), reason: z.string().optional() }).strict(),
+      })
+      .strict(),
+  })
+  .strict();
+export type VoiceRuntimeStatus = z.infer<typeof VoiceRuntimeStatusSchema>;
+
 export const RankedVoiceSchema = z
   .object({
     candidate: VoiceCandidateSchema,

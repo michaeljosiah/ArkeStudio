@@ -32,6 +32,7 @@ export class ReadModel {
         spend: null,
         backgroundNotifications: "issues-only",
         runtime: null,
+        voiceRuntime: null,
         drift: [],
         agents: [],
         harnessModels: [],
@@ -147,6 +148,13 @@ export class ReadModel {
         this.state = { ...this.state, app: { ...this.state.app, runtime: event.runtime } };
         return;
       }
+      case "voice.sidecar": {
+        this.state = {
+          ...this.state,
+          app: { ...this.state.app, ...(event.runtime !== undefined ? { voiceRuntime: event.runtime } : {}) },
+        };
+        return;
+      }
       case "manifest.drift": {
         this.state = { ...this.state, app: { ...this.state.app, drift: event.reports } };
         return;
@@ -222,7 +230,6 @@ export class ReadModel {
       case "voice.candidates":
       case "voice.preview":
       case "dictation.result":
-      case "voice.sidecar":
       case "export.progress":
       case "import.report":
       case "artifact.notice":

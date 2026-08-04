@@ -9,7 +9,7 @@ import {
   type Sheet,
   type VoiceCandidate,
 } from "@arke-studio/contracts";
-import { KOKORO_PRESETS, localCandidates, sidecarState, VoxaClient } from "../src/index.js";
+import { compatibleSidecarHealth, KOKORO_PRESETS, localCandidates, sidecarState, VoxaClient } from "../src/index.js";
 
 const SHEET = {
   id: "maren-kest",
@@ -123,7 +123,14 @@ describe("the sidecar client and its four states (R-4, §2.10)", () => {
       if (url.endsWith("/stt")) return new Response(JSON.stringify({ text: "hello harbour" }), { status: 200 });
       if (url.endsWith("/tts")) return new Response(new Uint8Array([82, 73, 70, 70]), { status: 200 });
       if (url.endsWith("/voices")) return new Response(JSON.stringify([]), { status: 200 });
-      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      return new Response(JSON.stringify({
+        ok: true,
+        version: "0.8.0",
+        protocolVersion: 1,
+        architecture: "x64",
+        engines: ["kokoro", "whisper"],
+        engineStatus: { kokoro: { ready: true }, whisper: { ready: true } },
+      }), { status: 200 });
     }, "http://127.0.0.1:5901");
     await client.health();
     await client.listVoices();
@@ -136,12 +143,15 @@ describe("the sidecar client and its four states (R-4, §2.10)", () => {
   it("maps health to the four degradation states with real copy", () => {
     assert.equal(sidecarState(null).state, "not-started");
     assert.match(sidecarState(null).detail, /cloud voice still works/);
-    const downloading = sidecarState({ ok: false, downloading: { model: "kokoro-int8", receivedMb: 40, totalMb: 92 } });
+    const base = { version: "0.8.0", protocolVersion: 1 as const, architecture: "x64" as const, engines: ["kokoro", "whisper"] as const, engineStatus: { kokoro: { ready: true }, whisper: { ready: true } } };
+    const downloading = sidecarState({ ...base, ok: false, downloading: { model: "kokoro-int8", receivedMb: 40, totalMb: 92 } });
     assert.equal(downloading.state, "downloading");
     assert.match(downloading.detail, /40 of 92 MB/);
-    const broken = sidecarState({ ok: false, unavailableReason: "kokoro weights failed verification" });
+    const broken = sidecarState({ ...base, ok: false, unavailableReason: "kokoro weights failed verification" });
     assert.equal(broken.state, "unavailable");
-    assert.equal(sidecarState({ ok: true, version: "1.4.0" }).state, "ready");
+    assert.equal(sidecarState({ ...base, ok: true }).state, "ready");
+    assert.equal(compatibleSidecarHealth({ ...base, ok: true, engines: [...base.engines] }, "x64"), true);
+    assert.equal(compatibleSidecarHealth({ ...base, ok: true, engines: [...base.engines] }, "arm64"), false);
   });
 
   it("the local catalogue is presets, uniformly shaped, never cloneable (R-6, D4)", () => {

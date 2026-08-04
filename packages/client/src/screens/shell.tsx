@@ -1290,6 +1290,22 @@ export function SettingsLocalRuntimeScreen() {
 
       <SetupComponents />
 
+      <div className="fy-set__row">
+        <div className="fy-set__name fy-set__name--wide">
+          <div className="fy-set__title">
+            {state?.app.voiceRuntime?.source === "bundled"
+              ? `Bundled Voxa ${state.app.voiceRuntime.version}`
+              : "Voxa local speech"}
+          </div>
+          <div className="fy-set__caps">
+            {state?.app.voiceRuntime
+              ? `${state.app.voiceRuntime.architecture} · Kokoro voice · Whisper dictation`
+              : "starts with Arke Studio; model weights download separately"}
+          </div>
+        </div>
+        <HealthDot label="Voxa local speech" health={state?.app.health.voice} />
+      </div>
+
       <div className="fy-set__eyebrow">LOCAL MODELS</div>
       {(runtime?.models ?? []).map((m) => (
         <div key={m.modelId} className={cx("fy-set__row--stack", "fy-set__row", m.state === "disabled" && "fy-set__row--off")}>
