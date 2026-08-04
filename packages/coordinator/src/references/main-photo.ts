@@ -139,7 +139,7 @@ export async function acceptMainPhoto(
 
   if (candidatePath) {
     try {
-      await removeCandidate(join(store.dir, candidatePath));
+      await store.ownedWrite(() => removeCandidate(join(store.dir, candidatePath!)));
     } catch (err) {
       return { status: "accepted", candidateRetained: true, cleanupError: message(err) };
     }
