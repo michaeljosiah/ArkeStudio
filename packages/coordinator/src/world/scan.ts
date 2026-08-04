@@ -117,9 +117,8 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
   const tryParse = async <T>(rel: string, parse: (raw: string) => T): Promise<T | null> => {
     try {
       const raw = await read(join(dir, rel));
-      const value = parse(raw);
       manifest[toPortable(rel)] = sha256(raw);
-      return value;
+      return parse(raw);
     } catch (err) {
       problems.push({ path: toPortable(rel), message: (err as Error).message.slice(0, 500) });
       return null;

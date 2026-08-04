@@ -7,22 +7,17 @@ import { watch, type FSWatcher } from "node:fs";
  */
 
 const DEBOUNCE_MS = 400;
-/**
- * Paths the app owns operationally — changes here are ours or derived, never "external".
- * `.proposals/` is staging: authoring agents legitimately write there mid-session (SPEC-005),
- * the gate rescans after every operation, and base hashes protect the live world regardless.
- */
+/** Known operational paths can be ignored as an optimization; all other names are hints only. */
 const IGNORED = [
   /^\.commit([/\\]|$)/,
   /^\.index([/\\]|$)/,
   /^\.history([/\\]|$)/,
   /^\.proposals([/\\]|$)/,
-  /^\.cache([/\\]|$)/, // derived previews and staging (SPEC-011) — regenerable, never canon
-  /^\.staging([/\\]|$)/, // the queue's artifact staging area (SPEC-009 R-12)
+  /^\.cache([/\\]|$)/,
+  /^\.staging([/\\]|$)/,
   /^world\.lock$/,
   /\.tmp-[0-9A-Z]+$/i,
 ];
-
 export interface WatcherDeps {
   /** Injectable for the error-path unit tests; defaults to fs.watch. */
   watch?: typeof watch;
@@ -44,11 +39,9 @@ export class WorldWatcher {
     try {
       const watcher = open(this.dir, { recursive: true }, (_event, filename) => {
         if (this.suppressed > 0) return;
-        // Windows delivers null filenames on rename bursts — overwhelmingly our own SQLite/
-        // journal traffic straggling past the suppression window. Closed-world reconciliation
-        // (R-28) still catches anything a dropped event would have flagged.
-        if (filename === null || filename === "") return;
-        if (IGNORED.some((rx) => rx.test(filename))) return;
+        // A filename is only a hint. Windows may omit it and editors may report an incomplete
+        // rename sequence; the store verifies the complete byte manifest after debounce.
+        if (filename !== null && filename !== "" && IGNORED.some((pattern) => pattern.test(filename))) return;
         if (this.timer) clearTimeout(this.timer);
         this.timer = setTimeout(() => this.onExternalChange(), DEBOUNCE_MS);
       });
