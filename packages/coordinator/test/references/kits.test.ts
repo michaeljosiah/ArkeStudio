@@ -548,6 +548,8 @@ describe("kit mutations through the one commit primitive", () => {
     await acceptCharacterSheet(store, SHEET, {
       file: "character-sheet.png",
       takeId: "tk_01J8E0000000000000000000T2",
+      sheetVersion: 4,
+      anchorFile: "main-photo.png",
       artDirectionVersion: 3,
     });
     let kit = (await readKit(store, "maren-kest"))!.kit;
@@ -608,7 +610,17 @@ describe("kit mutations through the one commit primitive", () => {
       capability: "image",
       provider: "fal",
       model: "flux-pro-1.1",
-      params: { prompt: "one composite", references: ["references/maren-kest/head-front.png"], artDirection: { version: 3 } },
+      params: {
+        prompt: "one composite",
+        references: ["references/maren-kest/head-front.png"],
+        artDirection: { version: 3 },
+        provenance: {
+          canonRevision: 42,
+          sheets: { "maren-kest": 4 },
+          artDirectionVersion: 3,
+          anchorFile: "head-front.png",
+        },
+      },
       estimatedMicroUsd: 40000,
       status: "succeeded",
       providerJobId: "fal-g9",
@@ -632,6 +644,8 @@ describe("kit mutations through the one commit primitive", () => {
     await acceptCharacterSheet(store, SHEET, {
       file: `takes/${take.id}/${take.media}`,
       takeId: take.id,
+      sheetVersion: take.provenance.sheets["maren-kest"]!,
+      anchorFile: (take.params["provenance"] as { anchorFile: string }).anchorFile,
       artDirectionVersion: 3,
       review,
     });
@@ -642,6 +656,21 @@ describe("kit mutations through the one commit primitive", () => {
       `takes/${take.id}/${take.media}`,
     );
     assert.deepEqual(await readFile(takePath), before, "review never rewrites take.json");
+
+    // The world moves after dispatch. Accepting this take must preserve what generated it and
+    // remain stale against the newer sheet/photo rather than laundering it as current.
+    await chooseAnchor(store, "maren-kest", {
+      file: "new-main-photo.png",
+      sheetVersion: 5,
+      artDirectionVersion: 3,
+      acceptedAt: CLOCK(),
+    });
+    const accepted = (await readKit(store, "maren-kest"))!.kit.compilations.find(
+      (candidate) => candidate.file === `takes/${take.id}/${take.media}`,
+    )!;
+    assert.equal(accepted.sheetVersion, 4);
+    assert.equal(accepted.anchorFile, "head-front.png");
+    assert.equal(compilationIsStale((await readKit(store, "maren-kest"))!.kit, accepted, 5), true);
 
     const second = await recordReferenceTake(store, { ...job, id: "jb_01J8E0000000000000000000JA" } as never);
     assert.ok(second);

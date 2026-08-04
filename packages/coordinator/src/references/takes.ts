@@ -20,8 +20,11 @@ export async function recordReferenceTake(store: WorldStore, job: Job): Promise<
   if (!kind || !landed || !sheetId) return null;
   const existing = store.getBundle().referenceTakes.find((take) => take.jobId === job.id);
   if (existing) return existing;
-  const sheet = store.getBundle().sheets.find((candidate) => candidate.id === sheetId);
-  if (!sheet) return null;
+  const frozen = job.params["provenance"] as
+    | { canonRevision?: number; sheets?: Record<string, number>; artDirectionVersion?: number; anchorFile?: string }
+    | undefined;
+  const sheetVersion = frozen?.sheets?.[sheetId];
+  if (frozen?.canonRevision === undefined || sheetVersion === undefined) return null;
   const id = `tk_${ulid()}` as Take["id"];
   const media = basename(landed);
   const artDirection = job.params["artDirection"] as { version?: number } | undefined;
@@ -34,9 +37,11 @@ export async function recordReferenceTake(store: WorldStore, job: Job): Promise<
     provider: job.provider,
     model: job.model,
     provenance: {
-      canonRevision: store.getBundle().meta.canonRevision,
-      sheets: { [sheetId]: sheet.version },
-      ...(artDirection?.version ? { artDirectionVersion: artDirection.version } : {}),
+      canonRevision: frozen.canonRevision,
+      sheets: { [sheetId]: sheetVersion },
+      ...(frozen.artDirectionVersion ?? artDirection?.version
+        ? { artDirectionVersion: frozen.artDirectionVersion ?? artDirection!.version }
+        : {}),
     },
     ...(typeof job.params["prompt"] === "string" ? { prompt: job.params["prompt"] as string } : {}),
     references: (job.params["references"] as string[] | undefined) ?? [],

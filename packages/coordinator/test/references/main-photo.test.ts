@@ -39,7 +39,10 @@ describe("main-photo acceptance boundary", () => {
       capability: "image",
       provider: "fal",
       model: "flux",
-      params: { prompt: "portrait" },
+      params: {
+        prompt: "portrait",
+        provenance: { canonRevision: 42, sheets: { "maren-kest": 4 }, artDirectionVersion: 3 },
+      },
       estimatedMicroUsd: 40000,
       status: "succeeded",
       providerJobId: "remote-1",
