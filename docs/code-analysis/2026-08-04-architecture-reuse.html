@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code Quality &amp; Design Audit - Architecture Reuse</title>
+  <style>
+    :root{--bg:#0f1419;--panel:#161b22;--panel2:#1c2330;--border:#2d3748;--text:#d7dde6;--muted:#8b97a8;--accent:#4fc3f7;--accent2:#81d4fa;--good:#66bb6a;--warn:#ffb74d;--bad:#ef5350;--code-bg:#11151c}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 "Segoe UI",system-ui,sans-serif}
+    .wrap{max-width:1100px;margin:0 auto;padding:30px 22px 60px} header.doc{border-bottom:1px solid var(--border);padding-bottom:22px} h1{font-size:30px;line-height:1.2;margin:0 0 8px} h2{font-size:21px;margin:30px 0 12px;padding-bottom:7px;border-bottom:1px solid var(--border)} h3{font-size:18px;margin:24px 0 8px}.sub{color:var(--muted);font-size:16px}.meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-top:20px}.meta{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:11px}.meta b{display:block;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}.meta span{display:block;margin-top:3px}.callout{background:var(--panel);border-left:4px solid var(--accent);padding:15px 17px;margin:12px 0}.callout.good{border-color:var(--good)}.callout.warn{border-color:var(--warn)}.callout.danger{border-color:var(--bad)}nav{background:var(--panel);border:1px solid var(--border);padding:14px 18px}nav a{color:var(--accent2);margin-right:18px;white-space:nowrap}table{width:100%;border-collapse:collapse;background:var(--panel);margin:12px 0 20px}th,td{text-align:left;vertical-align:top;border:1px solid var(--border);padding:9px 10px}th{background:var(--panel2);color:var(--accent2)}code,pre{font-family:"Cascadia Code",Consolas,monospace;font-size:12px}code{color:var(--accent2)}pre{background:var(--code-bg);border:1px solid var(--border);padding:12px;overflow:auto;color:var(--text)}.badge{display:inline-block;border:1px solid var(--muted);border-radius:12px;padding:1px 8px;margin-right:5px;font-size:11px;color:var(--muted);vertical-align:middle}.critical{color:var(--bad);border-color:var(--bad)}.major{color:var(--warn);border-color:var(--warn)}.minor{color:var(--accent);border-color:var(--accent)}.note{color:var(--muted)}.finding{padding-top:4px}.finding .location{float:right;color:var(--accent2);font-weight:normal}.muted{color:var(--muted)}ul{padding-left:20px}a{color:var(--accent2)}
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <header class="doc">
+    <h1>Code Quality &amp; Design Audit - Architecture Reuse</h1>
+    <div class="sub">Assessment of whether Arke Studio's core logic is abstracted from its React/Electron interface.</div>
+    <div class="meta-grid">
+      <div class="meta"><b>Scope</b><span>Whole workspace</span></div>
+      <div class="meta"><b>Branch/commit</b><span>main / cecba85</span></div>
+      <div class="meta"><b>Build</b><span>Pass, warning noted</span></div>
+      <div class="meta"><b>Tests</b><span>358 pass, 1 skipped</span></div>
+      <div class="meta"><b>Date</b><span>2026-08-04</span></div>
+      <div class="meta"><b>Files reviewed</b><span>218 linted; architecture paths sampled</span></div>
+    </div>
+  </header>
+
+  <h2 id="contents">Contents</h2>
+  <nav>
+    <a href="#summary">Executive summary</a>
+    <a href="#scorecard">Scorecard</a>
+    <a href="#index">Findings</a>
+    <a href="#intentional">Intentional design</a>
+    <a href="#quick-wins">Quick wins</a>
+  </nav>
+
+  <h2 id="summary">Executive Summary</h2>
+  <div class="callout good">
+    <strong>Yes, mostly.</strong> The authoritative business logic is substantially separated from the React/Electron UI. React sends validated commands and renders coordinator snapshots/events; filesystem mutation, proposal acceptance, ripple computation, queueing, provider dispatch, extraction verification, and review operations live outside the UI. A second interface can reuse the existing WebSocket protocol immediately, or use the coordinator's lower-level Node services.
+    <p>The qualification is important: <code>Coordinator</code> is an application server and protocol dispatcher, not a clean UI-independent application API. Its client-message dispatcher is private and its read model is explicitly client-shaped. A new interface can reuse the core, but either needs to speak the existing WebSocket contract or work around the coordinator by assembling lower-level services.</p>
+    <p>Nothing found blocks shipping the current desktop UI. The main architectural improvement before committing to multiple interfaces is to expose a public application-command service and keep WebSocket transport as an adapter around it.</p>
+  </div>
+
+  <h2 id="scorecard">Dimension Scorecard</h2>
+  <table>
+    <thead><tr><th>Dimension</th><th>Findings</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>Business-logic placement &amp; layering</td><td>1 Major, 1 Minor</td><td>Authoritative mutation is in coordinator/services, but orchestration and transport are concentrated in one client-shaped class.</td></tr>
+      <tr><td>Bad TypeScript/Node practices</td><td>Clean in reviewed boundary</td><td>Typecheck and lint pass; no UI-to-filesystem or UI-to-provider leakage found.</td></tr>
+      <tr><td>DRY violations</td><td>Clean</td><td>Shared contracts and injected provider seams avoid relevant duplication.</td></tr>
+      <tr><td>Performance / hot path</td><td>Clean for this question</td><td>No reuse-specific hot-path issue identified; the client bundle warning is unrelated to core reuse.</td></tr>
+      <tr><td>Simplification / optimization</td><td>1 Minor</td><td>Remove an unnecessary package-level adapter dependency or move adapter-only entrypoints out of the core package.</td></tr>
+      <tr><td>Over-engineering</td><td>Clean</td><td>Injected seams are exercised by tests and have clear host/provider isolation value.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="index">Findings Index</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Dimension</th><th>Severity</th><th>Confidence</th><th>Location</th><th>Problem</th></tr></thead>
+    <tbody>
+      <tr><td><a href="#f1">AR-1</a></td><td>Layering</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>packages/coordinator/src/coordinator.ts:641-677</code></td><td>The coordinator's private client-protocol dispatcher is also the application command API.</td></tr>
+      <tr><td><a href="#f2">AR-2</a></td><td>Layering</td><td><span class="badge minor">Minor</span></td><td><span class="badge">Likely</span></td><td><code>packages/coordinator/package.json:14-20</code></td><td>The coordinator package declares the OpenCode adapter as a runtime dependency despite injecting the adapter contract.</td></tr>
+      <tr><td><a href="#f3">AR-3</a></td><td>Simplification</td><td><span class="badge minor">Minor</span></td><td><span class="badge">Certain</span></td><td><code>packages/coordinator/package.json:6-12</code></td><td>Core packages expose TypeScript source directly and have no compiled library artifact, limiting drop-in reuse outside this workspace.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="findings">Detailed Findings</h2>
+
+  <section class="finding" id="f1">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> Coordinator API is coupled to the client protocol <span class="location"><code>coordinator.ts:641-677</code></span></h3>
+    <p><strong>Dimension:</strong> Business-logic placement &amp; layering</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>private async handleClientMessage(msg: ClientMessage): Promise&lt;void&gt; {
+  switch (msg.kind) {
+    case "open-world":
+      await this.openWorld(msg.worldId);
+    case "create-world":
+      await create({ name: msg.name, ... });
+      await this.openWorld(worldId);
+      ...</code></pre>
+    <p><strong>Why it matters:</strong> The same class constructs its WebSocket transport at <code>coordinator.ts:280-289</code>, returns a <code>ClientState</code> read model, and dispatches a large UI command union from <code>contracts/src/frames.ts:20-125</code> (the union continues to line 707). A second React-like client can reuse the protocol. A CLI, REST API, native UI, or embedded host cannot call the command operations directly because the dispatcher is private and there is no public application-command interface. Such clients must either implement the WebSocket protocol or duplicate orchestration around lower-level services.</p>
+    <p><strong>Recommendation:</strong> Extract a public application facade, for example <code>CoordinatorCommands</code>, with methods grouped by use case. Keep <code>Transport</code> as an adapter that validates <code>ClientMessage</code>, invokes the facade, and broadcasts snapshots/events. Do not move business rules into the new interface; move only command routing and request-shape translation.</p>
+    <p><strong>Effort:</strong> Involved, but incremental. Existing tests can pin each extracted command path before transport is reduced.</p>
+  </section>
+
+  <section class="finding" id="f2">
+    <h3><span class="badge minor">MINOR</span><span class="badge">LIKELY</span> Coordinator package has an avoidable OpenCode dependency <span class="location"><code>coordinator/package.json:14-20</code></span></h3>
+    <p><strong>Dimension:</strong> Business-logic placement &amp; layering</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>"dependencies": {
+  "@arke-studio/adapter-opencode": "*",
+  "@arke-studio/contracts": "*",
+  ...
+}</code></pre>
+    <p>The core options instead accept the replaceable contract <code>adapter: HarnessAdapter | null</code> and injected adapter configuration builders at <code>coordinator.ts:124-147</code>. The desktop composition root supplies the concrete adapter at <code>apps/desktop/src/main.ts:169-182</code>.</p>
+    <p><strong>Why it matters:</strong> A host using a different authoring harness still installs and resolves the OpenCode adapter through the coordinator package, even though the core's main runtime path is contract-based. This weakens the stated dependency direction and makes alternate-host packaging less minimal.</p>
+    <p><strong>Recommendation:</strong> Move the dev entrypoint and any adapter-specific wiring to a host/dev package, then remove the production dependency if the coordinator source no longer imports the adapter. Keep the injected <code>HarnessAdapter</code> contract in <code>contracts</code>.</p>
+    <p><strong>Effort:</strong> Trivial to moderate; verify with typecheck and coordinator tests.</p>
+  </section>
+
+  <section class="finding" id="f3">
+    <h3><span class="badge minor">MINOR</span><span class="badge">CERTAIN</span> Core packages are source-level reusable, not independently consumable artifacts <span class="location"><code>coordinator/package.json:6-12</code></span></h3>
+    <p><strong>Dimension:</strong> Simplification / optimization</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>"main": "./src/index.ts",
+"types": "./src/index.ts",
+"scripts": {
+  "typecheck": "tsc -p tsconfig.json --noEmit"
+}</code></pre>
+    <p>The shared packages use <code>noEmit: true</code> in <code>tsconfig.base.json:2-16</code>. The client is explicitly an application bundle, with no library entrypoint, at <code>packages/client/package.json:5-12</code>.</p>
+    <p><strong>Why it matters:</strong> Another interface can reuse the core inside this monorepo with a TypeScript loader or bundler. It cannot currently consume a stable compiled package with declarations from a separate repository or ordinary runtime without reproducing the workspace toolchain and source layout.</p>
+    <p><strong>Recommendation:</strong> If a second interface becomes a real product, add a build/publish boundary for <code>contracts</code> and the intended core facade: emitted JavaScript, declarations, explicit exports, and a compatibility policy. Do not package the entire coordinator surface prematurely.</p>
+    <p><strong>Effort:</strong> Moderate; unnecessary until an external consumer or separately deployed interface exists.</p>
+  </section>
+
+  <h2 id="intentional">Confirmed-Intentional Design</h2>
+  <ul>
+    <li><strong>Thin UI boundary:</strong> The product specification explicitly says the React client is a thin client over a local coordinator, <code>docs/specification.md:99-145</code>. The preload exposes a narrow bridge for connection, sending, and subscription at <code>apps/desktop/src/preload.ts:38-75</code>.</li>
+    <li><strong>Injected host/provider capabilities:</strong> Files, credentials, SQLite, ffmpeg, providers, voice, and updates are passed through <code>CoordinatorOptions</code> at <code>packages/coordinator/src/coordinator.ts:124-187</code>; Electron supplies them at <code>apps/desktop/src/main.ts:169-249</code>. This is a useful host seam, not speculative abstraction.</li>
+    <li><strong>Client event folding:</strong> React folds snapshots/events in <code>packages/client/src/lib/store.ts:194-263</code>. This is synchronization of a client read model, not authoritative persistence or business mutation. The coordinator remains the source of events and state.</li>
+    <li><strong>Reusable pure/core operations:</strong> The coordinator exports world, gate, queue, extraction, production, and reference operations at <code>packages/coordinator/src/index.ts:1-185</code>; tests exercise these without React, including transport, read model, gate, queue, and world-provider tests.</li>
+  </ul>
+
+  <h2 id="quick-wins">Quick Wins</h2>
+  <ol>
+    <li>Document the supported reuse levels: existing WebSocket protocol for alternate clients; Node service imports for in-workspace hosts; no stable external package API yet.</li>
+    <li>Remove the coordinator's unnecessary runtime dependency on <code>@arke-studio/adapter-opencode</code> once dev-only imports are relocated.</li>
+    <li>When a second interface is approved, extract the command facade before adding interface-specific behavior. Keep transport translation outside the use-case methods.</li>
+  </ol>
+
+  <h2 id="appendix">Appendix</h2>
+  <div class="callout warn">
+    <strong>Verification:</strong> <code>npm run typecheck</code> passed; <code>npm run lint</code> passed with 0 warnings/errors; <code>npm run build</code> passed. The desktop build emitted a warning that <code>import.meta</code> is unavailable in the CJS output at <code>packages/coordinator/src/index-db/sqlite.ts:21</code>. <code>npm test</code> reported 358 passing tests and 1 skipped test. One existing licence-gate test prints a failure message while the test itself passes; it concerns third-party notices, not architecture reuse.
+  </div>
+  <p class="muted">No application code was modified for this assessment. This report is the only created file.</p>
+</main>
+</body>
+</html>
