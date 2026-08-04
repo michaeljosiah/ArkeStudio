@@ -327,6 +327,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("detect-runtimes") }).strict(),
   /** SPEC-009 R-14: cancel a job in any non-terminal state; remote cancel attempted where supported. */
   z.object({ kind: z.literal("cancel-job"), jobId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("retry-job-finalization"), jobId: z.string().min(1) }).strict(),
   /**
    * SPEC-009 R-4/D4: resolve a job held as needs-reconciliation. "resubmit" accepts the stated
    * duplicate risk; "discard" abandons the attempt (its ledger entry still lands, R-15).

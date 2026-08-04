@@ -682,8 +682,25 @@ describe("kit mutations through the one commit primitive", () => {
       createdAt: CLOCK(),
       updatedAt: CLOCK(),
     } as const;
-    const take = await recordReferenceTake(store, job as never);
+    const ledgerEntry = {
+      ts: CLOCK(),
+      worldId: job.worldId,
+      jobId: job.id,
+      provider: job.provider,
+      model: job.model,
+      outcome: "succeeded" as const,
+      estimatedMicroUsd: job.estimatedMicroUsd,
+      actualMicroUsd: 38000,
+      actualSource: "provider-reported" as const,
+    };
+    const take = await recordReferenceTake(store, job as never, ledgerEntry);
     assert.ok(take);
+    assert.equal(take.id, `tk_${job.id.slice(3)}`);
+    assert.deepEqual(take.cost, {
+      estimatedMicroUsd: 40000,
+      actualMicroUsd: 38000,
+      actualSource: "provider-reported",
+    });
     assert.deepEqual(
       take.params,
       job.params,

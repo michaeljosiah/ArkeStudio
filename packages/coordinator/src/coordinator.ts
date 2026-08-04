@@ -292,6 +292,14 @@ export class Coordinator {
             },
             onProviderFault: (provider, message) => this.reportProviderFault(provider as ProviderId, message),
             onTerminal: (job) => this.onJobTerminal(job),
+            onFinalizationFailure: (job) => {
+              void this.appLog?.append({
+                kind: "job.finalization-failed",
+                jobId: job.id,
+                worldId: job.worldId,
+                targetKind: job.target.kind,
+              });
+            },
           })
         : null;
     this.voiceService = opts.voice
@@ -535,7 +543,9 @@ export class Coordinator {
   }
 
   async openWorld(worldId: string): Promise<void> {
-    const bundle = await this.opts.provider.loadWorld(worldId);
+    await this.opts.provider.loadWorld(worldId);
+    await this.jobQueue?.retryFinalizationsForWorld(worldId);
+    const bundle = this.opts.provider.openStore?.()?.getBundle() ?? (await this.opts.provider.loadWorld(worldId));
     this.readModel.setWorld(bundle);
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
@@ -603,7 +613,11 @@ export class Coordinator {
           job.target.kind,
         )
       ) {
-        await recordReferenceTake(store, job).catch(() => null);
+        const ledgerEntry = this.ledger
+          ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+          : undefined;
+        const take = await recordReferenceTake(store, job, ledgerEntry);
+        if (!take) throw new Error("reference take finalization produced no take");
       }
       if (
         (job.target.kind === "shot" || job.target.kind === "scene-pass" || job.target.kind === "voice-line") &&
@@ -2739,6 +2753,10 @@ export class Coordinator {
       }
       case "cancel-job": {
         await this.jobQueue?.cancel(msg.jobId);
+        return;
+      }
+      case "retry-job-finalization": {
+        await this.jobQueue?.retryFinalization(msg.jobId);
         return;
       }
       case "resolve-held-job": {

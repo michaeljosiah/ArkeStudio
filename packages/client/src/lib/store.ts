@@ -1068,6 +1068,10 @@ export function cancelJob(jobId: string): void {
   send({ kind: "cancel-job", jobId });
 }
 
+export function retryJobFinalization(jobId: string): void {
+  send({ kind: "retry-job-finalization", jobId });
+}
+
 /** Resolve a held (needs-reconciliation) job: accept the duplicate risk, or abandon. */
 export function resolveHeldJob(jobId: string, decision: "resubmit" | "discard"): void {
   send({ kind: "resolve-held-job", jobId, decision });

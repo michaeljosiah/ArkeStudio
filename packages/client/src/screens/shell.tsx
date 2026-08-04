@@ -30,6 +30,7 @@ import {
   openThread,
   openWorld,
   resolveHeldJob,
+  retryJobFinalization,
   resumeQueue,
   setCredential,
   setRoutingDefault,
@@ -1565,6 +1566,11 @@ export function ActivityScreen() {
                             Abandon · prior cost unknown
                           </Button>
                         </>
+                      )}
+                      {entry.actions.includes("retry-finalization") && entry.ref && (
+                        <Button onClick={() => retryJobFinalization(entry.ref!)}>
+                          Retry finalization · no regeneration or charge
+                        </Button>
                       )}
                       {entry.actions.includes("settings") && entry.ref && (
                         <>

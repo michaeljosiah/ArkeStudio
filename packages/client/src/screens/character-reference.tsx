@@ -150,6 +150,13 @@ export function CharacterReferenceScreen() {
       job.target.id?.startsWith(`${sheetId}/`) &&
       !["succeeded", "failed", "cancelled"].includes(job.status),
   );
+  const sheetFinalization = (state?.app.jobs ?? []).find(
+    (job) =>
+      job.target.kind === "character-sheet" &&
+      job.target.id?.startsWith(`${sheetId}/`) === true &&
+      job.finalization?.status !== undefined &&
+      job.finalization.status !== "complete",
+  )?.finalization;
   return (
     <div data-screen="reference-kit">
       <CharacterHeader active="reference" />
@@ -218,6 +225,13 @@ export function CharacterReferenceScreen() {
                 </div>
               ))}
             </div>
+          )}
+          {sheetFinalization && (
+            <p className="fy-reference-fallback">
+              {sheetFinalization.status === "pending"
+                ? "Generation completed. Preparing the review take."
+                : sheetFinalization.error}
+            </p>
           )}
           <div className="fy-reference-card__dispatch">
             <span>1 reference: Character sheet</span>
