@@ -244,6 +244,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, routing: { defaults: event.routing, faults: event.faults } } };
     case "spend.status":
       return { ...state, app: { ...state.app, spend: event.spend } };
+    case "background-notifications.changed":
+      return { ...state, app: { ...state.app, backgroundNotifications: event.preference } };
     case "runtime.status":
       return { ...state, app: { ...state.app, runtime: event.runtime } };
     case "manifest.drift":
@@ -1061,6 +1063,12 @@ export function setSpendThreshold(thresholdMicroUsd: number, periodDays: number)
 
 export function detectRuntimes(): void {
   send({ kind: "detect-runtimes" });
+}
+
+export function setBackgroundNotifications(
+  preference: ClientState["app"]["backgroundNotifications"],
+): void {
+  send({ kind: "set-background-notifications", preference });
 }
 
 // ---- SPEC-009: the job queue -----------------------------------------------

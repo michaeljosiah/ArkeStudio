@@ -132,6 +132,14 @@ const REFERENCE_FINALIZATION_TARGETS = new Set([
   "character-sheet",
   "character-look",
 ]);
+const FOLLOW_ON_TARGETS = new Set([
+  ...REFERENCE_FINALIZATION_TARGETS,
+  "reference-tile",
+  "shot",
+  "scene-pass",
+  "voice-line",
+  "voice-preview",
+]);
 
 function landedName(job: Job, artifact: DispatchArtifact, index: number): string {
   const requested = index === 0 && job.landing?.name !== undefined ? job.landing.name : artifact.name;
@@ -219,6 +227,7 @@ export class JobQueue {
     return {
       provider,
       paused: lane.paused !== null,
+      ...(lane.paused ? { pauseKind: lane.paused.kind } : {}),
       ...(lane.paused ? { reason: lane.paused.reason } : {}),
       held,
     };
@@ -305,9 +314,9 @@ export class JobQueue {
 
   private pauseLane(provider: string, kind: "fault" | "offline" | "credential", reason: string): void {
     const lane = this.lane(provider);
-    const wasPaused = lane.paused !== null;
+    const previousKind = lane.paused?.kind;
     lane.paused = { kind, reason };
-    if (!wasPaused) {
+    if (previousKind !== kind) {
       // Told once (R-8) — and only a real fault is a provider fault upstream.
       if (kind === "fault") this.opts.onProviderFault?.(provider, reason);
       this.emitQueueStatus(provider);
@@ -603,8 +612,9 @@ export class JobQueue {
     }
     if (this.disposed) return;
     const landedJob = { ...job, ...(landed.length > 0 ? { landedFiles: landed } : {}) };
+    const needsFollowOn = FOLLOW_ON_TARGETS.has(landedJob.target.kind) && landedJob.landedFiles?.[0] !== undefined;
     await this.terminalize(
-      this.needsReferenceFinalization(landedJob)
+      needsFollowOn
         ? {
             ...landedJob,
             finalization: { status: "pending", error: null, updatedAt: this.clock() },
@@ -637,6 +647,7 @@ export class JobQueue {
     try {
       await this.opts.onTerminal?.(terminal);
       if (terminal.finalization?.status === "pending") await this.completeFinalization(terminal);
+      else if (terminal.status === "succeeded") this.emitReady(terminal);
     } catch {
       if (terminal.finalization?.status === "pending") await this.failFinalization(terminal);
     }
@@ -731,6 +742,10 @@ export class JobQueue {
           job.finalization?.status !== "complete"
         ) {
           await this.retryFinalization(job.id);
+        } else if (job.status === "succeeded" && job.finalization?.status === "pending") {
+          // Non-reference follow-ons are not replay-safe. Surface the interrupted preparation
+          // honestly instead of duplicating takes or mutating a reference kit on startup.
+          await this.failFinalization(job);
         }
         continue;
       }
@@ -862,15 +877,23 @@ export class JobQueue {
   }
 
   private async completeFinalization(job: Job): Promise<void> {
-    await this.transition({
+    const completed: Job = {
       ...job,
       finalization: { status: "complete", error: null, updatedAt: this.clock() },
       updatedAt: this.clock(),
-    });
+    };
+    await this.transition(completed);
+    this.emitReady(completed);
+  }
+
+  private emitReady(job: Job): void {
+    this.opts.emit({ at: this.clock(), type: "job.ready", job });
   }
 
   private async failFinalization(job: Job): Promise<void> {
-    const error = "Generation completed, but the review take could not be recorded. Retry finalization; this will not contact the provider or charge again.";
+    const error = this.needsReferenceFinalization(job)
+      ? "Generation completed, but its result could not be prepared. Retry finalization; this will not contact the provider or charge again."
+      : "Generation completed, but its result could not be prepared. Open Activity for details; no additional provider charge was made.";
     const failed: Job = {
       ...job,
       finalization: { status: "failed", error, updatedAt: this.clock() },

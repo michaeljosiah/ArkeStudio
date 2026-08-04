@@ -111,6 +111,7 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
         manifest: null,
         routing: { defaults: {}, faults: [] },
         spend: null,
+        backgroundNotifications: "issues-only",
         runtime: null,
         drift: [],
         agents: [],

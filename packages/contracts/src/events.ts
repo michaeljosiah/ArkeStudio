@@ -15,6 +15,7 @@ import { ProviderStatusSchema } from "./provider.js";
 import { ShotSelectionSchema } from "./scene.js";
 import {
   LocalRuntimeStatusSchema,
+  BackgroundNotificationPreferenceSchema,
   ManifestDriftSchema,
   RoutingDefaultsSchema,
   RoutingFaultSchema,
@@ -136,6 +137,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
 
   /** Full row on every transition — jobs are small and the client never patches by hand. */
   z.object({ ...base, type: z.literal("job.updated"), job: JobSchema }).strict(),
+  /** A succeeded job's artifacts and coordinator follow-on are ready for use. */
+  z.object({ ...base, type: z.literal("job.ready"), job: JobSchema }).strict(),
 
   /** One correlated acknowledgement after all durable enqueue attempts for a user action. */
   z
@@ -420,6 +423,13 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
   /** Rolling spend re-evaluated on a ledger append or a settings change (SPEC-008 R-19, D10). */
   z.object({ ...base, type: z.literal("spend.status"), spend: SpendStatusSchema }).strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("background-notifications.changed"),
+      preference: BackgroundNotificationPreferenceSchema,
+    })
+    .strict(),
   /** Local runtime detection completed (SPEC-008 R-22, D12). */
   z.object({ ...base, type: z.literal("runtime.status"), runtime: LocalRuntimeStatusSchema }).strict(),
   /** Estimate-versus-actual divergence crossed the drift threshold (SPEC-008 R-13, §2.11). */

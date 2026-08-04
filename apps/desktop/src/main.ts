@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, shell } from "electron";
 import electronUpdater from "electron-updater";
 import {
   ChildLedger,
@@ -28,6 +28,7 @@ import {
 } from "@arke-studio/adapter-opencode";
 import { createProviderClients, ElevenLabsClient, probeRuntime, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { KOKORO_PRESETS, localCandidates, sidecarState, VoxaClient } from "@arke-studio/voice";
+import { BackgroundNotificationController } from "./background-notifications.js";
 
 /**
  * The Electron-ABI SQLite binding (SPEC-003 R-7). Aliased so the Node-ABI copy used by tests
@@ -85,6 +86,40 @@ function ffmpegPath(): string | null {
 let coordinator: Coordinator | null = null;
 let window: BrowserWindow | null = null;
 let shuttingDown = false;
+let activityActivationReady = false;
+let pendingActivityActivation = false;
+
+function activateActivity(): void {
+  if (shuttingDown || !window || window.isDestroyed()) return;
+  if (activityActivationReady) window.webContents.send("arke:activate-activity");
+  else pendingActivityActivation = true;
+}
+
+const backgroundNotifications = new BackgroundNotificationController({
+  packaged: app.isPackaged,
+  platform: process.platform,
+  supported: () => Notification.isSupported(),
+  window: () =>
+    window
+      ? {
+          isFocused: () => window?.isFocused() ?? false,
+          isDestroyed: () => window?.isDestroyed() ?? true,
+          isMinimized: () => window?.isMinimized() ?? false,
+          isVisible: () => window?.isVisible() ?? false,
+          restore: () => window?.restore(),
+          show: () => window?.show(),
+          focus: () => window?.focus(),
+          activateActivity: activateActivity,
+        }
+      : null,
+  create: (input) => {
+    const notification = new Notification(input);
+    return {
+      onClick: (listener) => notification.on("click", listener),
+      show: () => notification.show(),
+    };
+  },
+});
 
 async function start(): Promise<void> {
   // Updater posture (SPEC-016 D7): never auto-download, always install at exit.
@@ -246,6 +281,7 @@ async function start(): Promise<void> {
         },
       ],
     },
+    observeEvent: (event) => backgroundNotifications.observe(event),
   });
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
@@ -254,6 +290,7 @@ async function start(): Promise<void> {
   coordinator.superviseAs("voice", voxaSupervisor);
 
   const { port } = await coordinator.start(0);
+  backgroundNotifications.arm(coordinator.getState());
 
   // Pasting. A screenshot off the clipboard has no file behind it, so the bytes come here, land
   // in the spool and go into the world by the ordinary filing path. The window sends bytes and
@@ -268,6 +305,14 @@ async function start(): Promise<void> {
     if (!bytes) return { reason: "the clipboard gave us nothing we could write" };
     const name = typeof input?.name === "string" ? input.name : "pasted";
     return await spoolBytes(appRoot, name, bytes).catch((err: unknown) => ({ reason: String(err) }));
+  });
+  ipcMain.on("arke:activity-activation-ready", (event) => {
+    if (!window || event.sender !== window.webContents) return;
+    activityActivationReady = true;
+    if (pendingActivityActivation) {
+      pendingActivityActivation = false;
+      window.webContents.send("arke:activate-activity");
+    }
   });
 
   window = new BrowserWindow({
@@ -290,8 +335,16 @@ async function start(): Promise<void> {
     },
   });
   window.once("ready-to-show", () => window?.show());
+  window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) activityActivationReady = false;
+  });
+  window.webContents.on("render-process-gone", () => {
+    activityActivationReady = false;
+  });
   window.on("closed", () => {
     window = null;
+    activityActivationReady = false;
+    pendingActivityActivation = false;
   });
 
   const devServer = process.env.ARKE_DEV_SERVER_URL;
@@ -314,6 +367,7 @@ async function start(): Promise<void> {
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  backgroundNotifications.stop();
   const stop = coordinator?.stop() ?? Promise.resolve();
   // A child that will not die must not hold the app open forever.
   await Promise.race([stop, new Promise((r) => setTimeout(r, 5_000))]);
@@ -330,7 +384,10 @@ if (!gotLock) {
     }
   });
 
-  app.whenReady().then(() => void start());
+  app.whenReady().then(() => {
+    if (process.platform === "win32") app.setAppUserModelId("studio.arke.app");
+    void start();
+  });
 
   app.on("window-all-closed", () => {
     app.quit();

@@ -7,6 +7,7 @@
   "main": "dist/main.cjs",
   "scripts": {
     "build": "npm run build --workspace @arke-studio/client && node scripts/build.mjs",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "rebuild:native": "node scripts/rebuild-native.mjs",
     "start": "npm run build && npm run rebuild:native && electron dist/main.cjs",
@@ -28,6 +29,7 @@
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.25.12",
+    "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }
 }

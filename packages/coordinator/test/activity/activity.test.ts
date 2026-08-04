@@ -52,6 +52,7 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
       manifest: null,
       routing: { defaults: {}, faults: [] },
       spend: null,
+      backgroundNotifications: "issues-only",
       runtime: null,
       drift: [],
       agents: [],
@@ -242,7 +243,7 @@ describe("actions offered only where the state permits (R-13, D10, §3.2)", () =
 });
 
 describe("running work (R-2, D6, D7)", () => {
-  it("shows generated reference work while its review take is being prepared", () => {
+  it("shows generated work while its result is being prepared", () => {
     const pending = job({
       status: "succeeded",
       target: { kind: "character-sheet", id: "maren-kest/g1" },
@@ -250,7 +251,7 @@ describe("running work (R-2, D6, D7)", () => {
       finalization: { status: "pending", error: null, updatedAt: "2026-08-01T10:01:00Z" },
     });
     const [entry] = computeRunning(baseState({ jobs: [pending] }));
-    assert.match(entry?.detail ?? "", /generated · preparing review take/);
+    assert.match(entry?.detail ?? "", /generated · preparing result/);
     assert.equal(entry?.cancellable, false);
   });
 

@@ -74,6 +74,13 @@ const bridge = {
     statusListeners.add(onStatus);
   },
 
+  onActivateActivity(listener: () => void): () => void {
+    const activate = () => listener();
+    ipcRenderer.on("arke:activate-activity", activate);
+    ipcRenderer.send("arke:activity-activation-ready");
+    return () => ipcRenderer.removeListener("arke:activate-activity", activate);
+  },
+
   /**
    * Files dropped on, or pasted into, the composer.
    *

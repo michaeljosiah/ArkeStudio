@@ -18,6 +18,7 @@ const STATE: ClientState = {
     manifest: null,
     routing: { defaults: {}, faults: [] },
     spend: null,
+    backgroundNotifications: "issues-only",
     runtime: null,
     drift: [],
     agents: [],

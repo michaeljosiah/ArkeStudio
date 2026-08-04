@@ -30,6 +30,13 @@ export const SpendSettingsSchema = z
   .strict();
 export type SpendSettings = z.infer<typeof SpendSettingsSchema>;
 
+export const BackgroundNotificationPreferenceSchema = z.enum([
+  "background-results-and-issues",
+  "issues-only",
+  "off",
+]);
+export type BackgroundNotificationPreference = z.infer<typeof BackgroundNotificationPreferenceSchema>;
+
 /**
  * What the user has changed about an agent. Absent fields mean "as shipped": no model pins the
  * agent to whatever the harness is configured with, and no brief leaves the shipped one alone.
@@ -51,6 +58,7 @@ export const AppSettingsSchema = z
   .object({
     routing: RoutingDefaultsSchema.default({}),
     spend: SpendSettingsSchema.default({ thresholdMicroUsd: 0, periodDays: 7 }),
+    backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
     /** Per-agent overrides, keyed by roster name. */
     agents: z.record(z.string().min(1), AgentSettingsSchema).default({}),
   })
