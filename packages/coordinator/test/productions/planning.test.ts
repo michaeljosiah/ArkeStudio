@@ -18,6 +18,7 @@ import {
 import { ProposalManager } from "../../src/gate/proposals.js";
 import {
   compileBoard,
+  composeDispatches,
   createChapter,
   createProduction,
   exportBoard,
@@ -288,6 +289,76 @@ describe("the dispatch dialog warnings (R-20, D12, §3.2)", () => {
     );
     assert.ok(tight.warnings.droppedReferences.length > 0);
     assert.ok(tight.warnings.droppedReferences.every((d) => d.sheetId.length > 0));
+    await store.close();
+  });
+});
+
+describe("whole-scene reference budgeting", () => {
+  it("uses one authoritative budget for warnings and each submitted pass", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const base = production.scenes[0]!;
+    const scene: Scene = {
+      ...base,
+      shots: [
+        { ...base.shots[0]!, id: "sh_90", number: 90, description: "@maren-kest at the rail", durationSec: 4 },
+        { ...base.shots[0]!, id: "sh_91", number: 91, description: "@the-chorister at the bell", durationSec: 4 },
+      ],
+    };
+    const model = { ...VIDEO_MODEL, accepts: { ...VIDEO_MODEL.accepts, referenceImages: 1 } };
+    const plan = planScene(
+      {
+        world: bundle.meta,
+        artDirection: bundle.artDirection,
+        productionId: production.meta.id,
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene,
+        selections: {},
+        model,
+      },
+      "whole-scene",
+    );
+    const [request] = composeDispatches(bundle.meta.worldId, production.meta.id, scene, plan, model, bundle);
+    const references = request!.params["references"] as string[];
+    assert.equal(references.length, 1);
+    assert.equal(plan.passReferences[0]!.references[0]!.file, references[0]);
+    assert.deepEqual(plan.warnings.droppedReferences, plan.passReferences[0]!.budget.dropped);
+    assert.equal(Object.keys((request!.params["provenance"] as { sheets: object }).sheets).length, 1);
+    await store.close();
+  });
+
+  it("budgets every packed pass independently and honors zero-reference models", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const base = production.scenes[0]!;
+    const scene: Scene = {
+      ...base,
+      shots: [
+        { ...base.shots[0]!, id: "sh_92", number: 92, description: "@maren-kest", durationSec: 10 },
+        { ...base.shots[0]!, id: "sh_93", number: 93, description: "@the-chorister", durationSec: 10 },
+      ],
+    };
+    const model = { ...VIDEO_MODEL, accepts: { ...VIDEO_MODEL.accepts, referenceImages: 0 } };
+    const plan = planScene(
+      {
+        world: bundle.meta,
+        productionId: production.meta.id,
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene,
+        selections: {},
+        model,
+      },
+      "whole-scene",
+    );
+    assert.equal(plan.passReferences.length, 2);
+    const requests = composeDispatches(bundle.meta.worldId, production.meta.id, scene, plan, model, bundle);
+    assert.equal(requests.length, 2);
+    assert.ok(requests.every((request) => (request.params["references"] as string[]).length === 0));
+    assert.ok(plan.passReferences.every((pass) => pass.budget.carried.length === 0));
     await store.close();
   });
 });

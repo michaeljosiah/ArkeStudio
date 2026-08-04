@@ -286,6 +286,7 @@ export interface ShotDispatchPlan {
 export interface ScenePlan {
   mode: "per-shot" | "whole-scene";
   shots: ShotDispatchPlan[];
+  passReferences: Array<{ passIndex: number; references: AttachmentDecision[]; budget: BudgetResult }>;
   pack: PackResult;
   totalEstimatedMicroUsd: number;
   warnings: DispatchWarnings;
@@ -378,6 +379,26 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   });
 
   const perShotTotal = shots.reduce((a, s) => a + s.estimatedMicroUsd, 0);
+  const passReferences = pack.ok
+    ? pack.passes.map((pass) => {
+        const seen = new Map<string, ResolvedCast["cast"][number]>();
+        for (const entry of pass.plan) {
+          for (const cast of perShot.get(entry.shotId)?.cast ?? []) {
+            if (!seen.has(cast.sheet.id)) seen.set(cast.sheet.id, cast);
+          }
+        }
+        const budget = budgetFor([...seen.values()], kits, scene, sheets, model, input.productionId);
+        const references = budget.carried.map((candidate) =>
+          attachmentFor(
+            kits.find((kit) => kit.sheetId === candidate.sheetId) ?? null,
+            sheets.find((sheet) => sheet.id === candidate.sheetId)!,
+            candidate.referenceRole,
+            { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id },
+          ),
+        );
+        return { passIndex: pass.index, references, budget };
+      })
+    : [];
   const wholeSceneTotal =
     pack.ok && model.capability === "video"
       ? pack.passes.reduce(
@@ -392,12 +413,24 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       : perShotTotal;
 
   const sceneBudget = budgetFor(resolved.cast, kits, scene, sheets, model, input.productionId);
+  const droppedReferences =
+    mode === "whole-scene"
+      ? passReferences
+          .flatMap((pass) => pass.budget.dropped)
+          .filter(
+            (candidate, index, all) =>
+              all.findIndex(
+                (other) =>
+                  other.sheetId === candidate.sheetId && other.referenceRole === candidate.referenceRole,
+              ) === index,
+          )
+      : sceneBudget.dropped;
   const warnings: DispatchWarnings = {
     shotsWithoutFrame: scene.shots
       .filter((s) => !(selections[s.id]?.startFrameTakeId ?? null))
       .map((s) => ({ shotId: s.id, number: s.number })),
     sketchCitations: resolved.cast.filter((c) => c.sheet.status === "sketch").map((c) => c.sheet.name),
-    droppedReferences: sceneBudget.dropped,
+    droppedReferences,
     staleModelSheets: resolved.cast
       .map((c) => attachmentFor(kits.find((k) => k.sheetId === c.sheet.id) ?? null, c.sheet).staleGap)
       .filter((g): g is string => g !== null),
@@ -411,6 +444,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   return {
     mode,
     shots,
+    passReferences,
     pack,
     totalEstimatedMicroUsd: mode === "whole-scene" ? wholeSceneTotal : perShotTotal,
     warnings,
