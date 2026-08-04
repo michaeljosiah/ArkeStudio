@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
 import { toast, Toaster } from "sonner";
-import { subscribeQueueResults, type QueueEnqueueResult } from "../lib/store.js";
+import type { Job } from "@arke-studio/contracts";
+import { subscribeJobReady, subscribeQueueResults, type QueueEnqueueResult } from "../lib/store.js";
 
 export interface QueueToastCopy {
   kind: "success" | "error" | "none";
@@ -23,6 +24,14 @@ export function queueToastCopy(result: QueueEnqueueResult): QueueToastCopy {
   if (result.disposition === "not-queued") return { kind: "none", title: "" };
   const accepted = result.acceptedJobIds.length;
   if (result.disposition === "accepted") {
+    if (result.command === "generate-character-sheet") {
+      return {
+        kind: "success",
+        title: result.characterName
+          ? `Character sheet for ${result.characterName} is queued for generation`
+          : "Character sheet is queued for generation",
+      };
+    }
     return {
       kind: "success",
       title:
@@ -47,6 +56,15 @@ export function queueToastCopy(result: QueueEnqueueResult): QueueToastCopy {
   };
 }
 
+export function jobReadyToastCopy(job: Job): QueueToastCopy {
+  if (job.target.kind !== "character-sheet") return { kind: "none", title: "" };
+  const characterName = typeof job.params["characterName"] === "string" ? job.params["characterName"] : null;
+  return {
+    kind: "success",
+    title: characterName ? `Character sheet for ${characterName} is ready` : "Character sheet is ready",
+  };
+}
+
 export function QueueToaster() {
   const navigate = useNavigate();
 
@@ -61,6 +79,24 @@ export function QueueToaster() {
         };
         if (copy.kind === "success") toast.success(copy.title, options);
         else toast.error(copy.title, options);
+      }),
+    [navigate],
+  );
+
+  useEffect(
+    () =>
+      subscribeJobReady((job) => {
+        const copy = jobReadyToastCopy(job);
+        if (copy.kind === "none") return;
+        const sheetId = job.target.id?.split("/")[0];
+        toast.success(copy.title, {
+          action: sheetId
+            ? {
+                label: "View",
+                onClick: () => navigate(`/w/${job.worldId}/cast/${sheetId}/kit`),
+              }
+            : { label: "Activity", onClick: () => navigate("/activity") },
+        });
       }),
     [navigate],
   );

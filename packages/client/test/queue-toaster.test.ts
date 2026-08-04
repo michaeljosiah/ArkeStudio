@@ -4,7 +4,8 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { QueueEnqueueResult } from "../src/lib/store.js";
-import { queueToastCopy } from "../src/components/queue-toaster.js";
+import { jobReadyToastCopy, queueToastCopy } from "../src/components/queue-toaster.js";
+import type { Job } from "@arke-studio/contracts";
 
 const result = (overrides: Partial<QueueEnqueueResult> = {}): QueueEnqueueResult => ({
   at: "2026-08-04T09:00:00Z",
@@ -44,6 +45,36 @@ describe("queue toast copy", () => {
       ),
       { kind: "success", title: "4 previews added to Activity" },
     );
+  });
+
+  it("clearly names queued and completed character sheets", () => {
+    assert.deepEqual(
+      queueToastCopy(
+        result({ command: "generate-character-sheet", characterName: "Maren Kest" }),
+      ),
+      { kind: "success", title: "Character sheet for Maren Kest is queued for generation" },
+    );
+    const ready = {
+      id: "jb_01J8E0000000000000000000J1",
+      idempotencyKey: "01J8E1000000000000000000K9",
+      worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+      target: { kind: "character-sheet", id: "maren-kest/g1" },
+      capability: "image",
+      provider: "fal",
+      model: "flux",
+      params: { characterName: "Maren Kest" },
+      estimatedMicroUsd: 40000,
+      status: "succeeded",
+      providerJobId: "remote-1",
+      attempt: 1,
+      error: null,
+      createdAt: "2026-08-04T09:00:00Z",
+      updatedAt: "2026-08-04T09:01:00Z",
+    } satisfies Job;
+    assert.deepEqual(jobReadyToastCopy(ready), {
+      kind: "success",
+      title: "Character sheet for Maren Kest is ready",
+    });
   });
 
   it("states partial and rejected work accurately", () => {

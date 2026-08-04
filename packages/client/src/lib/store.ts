@@ -7,6 +7,7 @@ import {
   type ClientMessage,
   type ClientState,
   type DomainEvent,
+  type Job,
   type ProviderCallRecord,
   type ProviderId,
   type QueueCommand,
@@ -200,18 +201,28 @@ let current: StoreState = {
   providerCallsByJob: {},
 };
 
-export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-result" }>;
-const pendingQueueRequests = new Map<string, QueueCommand>();
+export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-result" }> & {
+  characterName?: string;
+};
+const pendingQueueRequests = new Map<string, { command: QueueCommand; characterName?: string }>();
 const queueResultListeners = new Set<(result: QueueEnqueueResult) => void>();
+const jobReadyListeners = new Set<(job: Job) => void>();
 
 export function subscribeQueueResults(listener: (result: QueueEnqueueResult) => void): () => void {
   queueResultListeners.add(listener);
   return () => queueResultListeners.delete(listener);
 }
 
-function queueRequest(command: QueueCommand): string {
+export function subscribeJobReady(listener: (job: Job) => void): () => void {
+  jobReadyListeners.add(listener);
+  return () => jobReadyListeners.delete(listener);
+}
+
+function queueRequest(command: QueueCommand, characterName?: string): string {
   const requestId = ulid();
-  if (current.connection === "open") pendingQueueRequests.set(requestId, command);
+  if (current.connection === "open") {
+    pendingQueueRequests.set(requestId, { command, ...(characterName ? { characterName } : {}) });
+  }
   return requestId;
 }
 const listeners = new Set<() => void>();
@@ -371,10 +382,14 @@ function handleFrame(json: string): void {
     const event = frame.event;
     if (event.type === "queue.enqueue-result") {
       const expected = pendingQueueRequests.get(event.requestId);
-      if (expected === event.command) {
+      if (expected?.command === event.command) {
         pendingQueueRequests.delete(event.requestId);
-        for (const listener of queueResultListeners) listener(event);
+        const result = { ...event, ...(expected.characterName ? { characterName: expected.characterName } : {}) };
+        for (const listener of queueResultListeners) listener(result);
       }
+    }
+    if (event.type === "job.ready") {
+      for (const listener of jobReadyListeners) listener(event.job);
     }
     if (event.type === "proposal.blocked") {
       gateNotices = {
@@ -1250,14 +1265,25 @@ export function generateMainPhoto(
   });
 }
 
-export function generateCharacterSheet(worldId: string, sheetId: string, styleOverride?: string): void {
-  send({
+export function generateCharacterSheet(
+  worldId: string,
+  sheetId: string,
+  styleOverride?: string,
+  characterName?: string,
+): string | null {
+  const requestId = queueRequest("generate-character-sheet", characterName);
+  const sent = send({
     kind: "generate-character-sheet",
     worldId,
     sheetId,
-    requestId: queueRequest("generate-character-sheet"),
+    requestId,
     ...(styleOverride ? { styleOverride } : {}),
   });
+  if (!sent) {
+    pendingQueueRequests.delete(requestId);
+    return null;
+  }
+  return requestId;
 }
 
 export function acceptCharacterSheet(worldId: string, sheetId: string, takeId: string): void {

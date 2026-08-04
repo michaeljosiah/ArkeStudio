@@ -129,6 +129,7 @@ describe("the reference loop (R-6, D1, D3, §3.2)", () => {
     assert.deepEqual(sheetRequest.input.params["referenceRoles"], [
       { file: "references/maren-kest/main-photo.png", role: "identity" },
     ]);
+    assert.equal(sheetRequest.input.params["characterName"], "Maren Kest");
     assert.ok(!(sheetRequest.input.params["references"] as string[]).includes("world-art.png"));
     assert.match(String(sheetRequest.input.params["prompt"]), /Painterly, tidal, restrained/);
 
