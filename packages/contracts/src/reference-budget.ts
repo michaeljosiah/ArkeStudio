@@ -53,7 +53,7 @@ function referenceLabel(candidate: BudgetCandidate): string {
 
 /**
  * Deterministic selection under the model's accepted count (R-15). Candidates without a
- * reference to carry never consume budget — they ride in the prompt regardless.
+ * reference to carry never consume budget; existing sheet prose still remains in the prompt.
  */
 export function referenceBudget(candidates: BudgetCandidate[], model: ManifestModel): BudgetResult {
   const accepted = model.accepts.referenceImages;
@@ -71,7 +71,7 @@ export function referenceBudget(candidates: BudgetCandidate[], model: ManifestMo
       dropped: carriable,
       notice:
         carriable.length > 0
-          ? `${model.displayName} accepts no reference images — identity rides in the prompt for ${carriable
+          ? `${model.displayName} accepts no reference images — those images are omitted; only existing sheet descriptions remain for ${carriable
               .map(referenceLabel)
               .join(", ")}`
           : null,

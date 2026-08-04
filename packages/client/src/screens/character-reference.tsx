@@ -116,12 +116,17 @@ function routedImageModel(state: ReturnType<typeof useStore>["state"]): Manifest
 
 function modelSummary(model: ManifestModel | null, workflow: "main-photo" | "character-sheet" | "character-look", count = 1) {
   if (!model) return "Image model · cost unavailable";
-  const fallback = model.accepts.referenceImages === 0 ? " · identity by prompt" : "";
+  const fallback = model.accepts.referenceImages === 0 ? " · identity conditioning unavailable" : "";
   return `${PROVIDERS[model.provider].displayName} · ${model.displayName} · ${modelCapabilityCopy(model)}${fallback} · ${formatMicroUsd(estimateCharacterImageMicroUsd(model, workflow, count))}`;
 }
 
-function modelCanDispatch(model: ManifestModel | null, workflow: "main-photo" | "character-sheet" | "character-look") {
+function modelCanDispatch(
+  model: ManifestModel | null,
+  workflow: "main-photo" | "character-sheet" | "character-look",
+  needsIdentityReference = false,
+) {
   if (!model) return false;
+  if (needsIdentityReference && model.accepts.referenceImages === 0) return false;
   return characterImageEstimateIsUsable(model, estimateCharacterImageMicroUsd(model, workflow));
 }
 
@@ -352,7 +357,7 @@ export function GenerateCharacterSheetScreen() {
           </Button>
           <Button
             variant="primary"
-            disabled={!photo || !modelCanDispatch(model, "character-sheet")}
+            disabled={!photo || !modelCanDispatch(model, "character-sheet", true)}
             onClick={() => {
               generateCharacterSheet(
                 world.meta.worldId,
@@ -648,7 +653,7 @@ export function CharacterLooksScreen() {
             <span>4 variations · {modelSummary(model, "character-look", 4)}</span>
             <Button
               variant="primary"
-              disabled={!prompt.trim() || !photo || !modelCanDispatch(model, "character-look")}
+              disabled={!prompt.trim() || !photo || !modelCanDispatch(model, "character-look", true)}
               onClick={() =>
                 generateCharacterLooks(world.meta.worldId, sheetId, kind, mode, prompt.trim(), 4)
               }

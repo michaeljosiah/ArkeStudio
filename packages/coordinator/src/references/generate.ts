@@ -183,6 +183,9 @@ export function mainPhotoRequests(
   model: ManifestModel,
   input: { prompt: string; count: number; identityReferences: string[]; generationKey: string },
 ): CharacterGenerationRequest[] {
+  if (input.identityReferences.length > 0 && model.accepts.referenceImages === 0) {
+    throw new Error(`${model.displayName} cannot receive identity reference images`);
+  }
   const style = kit?.styleOverride ?? direction.description;
   const estimatedMicroUsd = pricedCharacterImage(model, "main-photo");
   const identityReferences = input.identityReferences.slice(0, model.accepts.referenceImages);
@@ -224,6 +227,9 @@ export function characterSheetRequest(
   generationKey: string,
   styleOverride?: string,
 ): CharacterGenerationRequest {
+  if (model.accepts.referenceImages === 0) {
+    throw new Error(`${model.displayName} cannot receive the accepted main photo`);
+  }
   const photo = kit.mainPhoto?.file ?? kit.anchor;
   if (!photo) throw new Error("character sheet generation needs an accepted main photo");
   const style = styleOverride ?? kit.styleOverride ?? direction.description;
@@ -273,6 +279,9 @@ export function characterLookRequests(
     generationKey: string;
   },
 ): CharacterGenerationRequest[] {
+  if (model.accepts.referenceImages === 0) {
+    throw new Error(`${model.displayName} cannot receive the accepted main photo`);
+  }
   const photo = kit.mainPhoto?.file ?? kit.anchor;
   if (!photo) throw new Error("looks need an accepted main photo");
   const style = kit.styleOverride ?? direction.description;

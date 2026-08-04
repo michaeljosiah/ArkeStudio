@@ -53,7 +53,22 @@ export class HiggsfieldClient implements ProviderClient {
   }
 
   async submit(key: string, request: SubmitRequest): Promise<SubmitResult> {
-    const { output, ...params } = request.params;
+    const references = request.params["references"];
+    if (Array.isArray(references) && references.length > 0) {
+      throw new Error(`higgsfield: ${request.model} has no implemented reference-image transport`);
+    }
+    const internal = new Set([
+      "references",
+      "referenceRoles",
+      "artDirection",
+      "provenance",
+      "lookKind",
+      "lookPrompt",
+      "shotPlan",
+    ]);
+    const { output, ...params } = Object.fromEntries(
+      Object.entries(request.params).filter(([key]) => !internal.has(key)),
+    );
     const size = output as { aspect?: unknown; resolution?: unknown } | undefined;
     const imageOutput =
       request.capability === "image"

@@ -9,7 +9,7 @@ import type { Capability, CapabilityProbe, ClientDeclarations, ProviderId } from
 export interface SubmitRequest {
   model: string;
   capability: Capability;
-  /** Provider-ready parameters, assembled by SPEC-009's prompt assembly. */
+  /** Coordinator-neutral parameters; each client must validate and map its provider boundary. */
   params: Record<string, unknown>;
   /** Attached when the provider honours it (declared via supportsIdempotencyKey). */
   idempotencyKey?: string;
