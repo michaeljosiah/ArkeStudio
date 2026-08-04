@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { mainPhotoFor, type WorldBundle } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
 
 /**
@@ -40,4 +41,11 @@ export function Portrait({
 /** The conventional portrait path for a sheet: its kit's front tile. */
 export function sheetPortraitPath(sheetId: string): string {
   return `references/${sheetId}/head-front.png`;
+}
+
+/** The accepted character identity, preserving immutable nested take paths. */
+export function characterPortraitPath(world: WorldBundle | null | undefined, sheetId: string): string {
+  const kit = world?.referenceKits.find((candidate) => candidate.sheetId === sheetId);
+  const photo = kit ? mainPhotoFor(kit) : null;
+  return photo ? `references/${sheetId}/${photo.file}` : sheetPortraitPath(sheetId);
 }
