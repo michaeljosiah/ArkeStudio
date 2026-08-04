@@ -23,9 +23,9 @@ function renderAt(path: string): string {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (46 screens)", () => {
-    assert.equal(SCREENS.length, 46);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 46, "screen ids are unique");
+  it("covers the full screen inventory (48 screens)", () => {
+    assert.equal(SCREENS.length, 48);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 48, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {

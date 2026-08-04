@@ -26,6 +26,13 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
 h1,
 h2,
 h3,

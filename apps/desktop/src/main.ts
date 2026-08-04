@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, safeStorage, shell } from "electron";
 import electronUpdater from "electron-updater";
 import {
   ChildLedger,
@@ -26,7 +26,12 @@ import {
   discoverOpenCode,
   OpenCodeAdapter,
 } from "@arke-studio/adapter-opencode";
-import { createProviderClients, ElevenLabsClient, probeRuntime, SHIPPED_MANIFEST } from "@arke-studio/providers";
+import {
+  createProviderClients,
+  ElevenLabsClient,
+  probeRuntime,
+  SHIPPED_MANIFEST,
+} from "@arke-studio/providers";
 import {
   compatibleSidecarHealth,
   KOKORO_PRESETS,
@@ -37,6 +42,8 @@ import {
   type SidecarHealth,
 } from "@arke-studio/voice";
 import { BackgroundNotificationController } from "./background-notifications.js";
+import { resolveTheme, themePalette, type ResolvedTheme } from "./theme.js";
+import type { ThemePreference } from "@arke-studio/contracts";
 
 /**
  * The Electron-ABI SQLite binding (SPEC-003 R-7). Aliased so the Node-ABI copy used by tests
@@ -79,7 +86,8 @@ const appRoot = defaultAppRoot();
  */
 function childSpec(id: string, cmdVar: string, argsVar: string, bundled?: string) {
   const bundledPath = app.isPackaged && bundled !== undefined ? join(process.resourcesPath, bundled) : null;
-  const command = process.env[cmdVar] ?? (bundledPath !== null && existsSync(bundledPath) ? bundledPath : null);
+  const command =
+    process.env[cmdVar] ?? (bundledPath !== null && existsSync(bundledPath) ? bundledPath : null);
   const args = process.env[argsVar]?.split(" ").filter(Boolean) ?? [];
   return { id, command, args };
 }
@@ -101,6 +109,31 @@ let window: BrowserWindow | null = null;
 let shuttingDown = false;
 let activityActivationReady = false;
 let pendingActivityActivation = false;
+let themePreference: ThemePreference = "system";
+let resolvedTheme: ResolvedTheme = "light";
+let rendererThemeReady = false;
+let windowReady = false;
+
+function showWindowWhenThemed(): void {
+  if (windowReady && rendererThemeReady && window && !window.isDestroyed()) window.show();
+}
+
+function applyHostTheme(preference: ThemePreference, notifyRenderer = true): void {
+  themePreference = preference;
+  nativeTheme.themeSource = preference;
+  resolvedTheme = resolveTheme(preference, nativeTheme.shouldUseDarkColors);
+  const palette = themePalette(resolvedTheme);
+  if (window && !window.isDestroyed()) {
+    window.setBackgroundColor(palette.background);
+    window.setTitleBarOverlay({ color: palette.overlay, symbolColor: palette.symbols, height: 44 });
+    if (notifyRenderer)
+      window.webContents.send("arke:theme-changed", { preference, resolved: resolvedTheme });
+  }
+}
+
+nativeTheme.on("updated", () => {
+  if (themePreference === "system") applyHostTheme("system");
+});
 
 function activateActivity(): void {
   if (shuttingDown || !window || window.isDestroyed()) return;
@@ -233,7 +266,8 @@ async function start(): Promise<void> {
     { ledger: childLedger },
   );
   registerExitBackstop(opencodeSupervisor, voxaSupervisor);
-  const voxaAt = () => new VoxaClient((url, init) => fetch(url, init), `http://127.0.0.1:${voxaSupervisor.port ?? 0}`);
+  const voxaAt = () =>
+    new VoxaClient((url, init) => fetch(url, init), `http://127.0.0.1:${voxaSupervisor.port ?? 0}`);
   const voxaSidecar = {
     listVoices: () => voxaAt().listVoices(),
     synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }) =>
@@ -270,7 +304,9 @@ async function start(): Promise<void> {
                   if (m) onProgress(Math.min(99, Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])));
                 });
                 child.on("error", reject);
-                child.on("exit", (code) => (code === 0 ? resolvePromise() : reject(new Error(`ffmpeg exited ${code}`))));
+                child.on("exit", (code) =>
+                  code === 0 ? resolvePromise() : reject(new Error(`ffmpeg exited ${code}`)),
+                );
               }),
           },
         }
@@ -282,7 +318,9 @@ async function start(): Promise<void> {
       check: async () => {
         if (!app.isPackaged) return null;
         const result = await electronUpdater.autoUpdater.checkForUpdates();
-        return result && result.updateInfo.version !== app.getVersion() ? { version: result.updateInfo.version } : null;
+        return result && result.updateInfo.version !== app.getVersion()
+          ? { version: result.updateInfo.version }
+          : null;
       },
       download: async () => {
         await electronUpdater.autoUpdater.downloadUpdate();
@@ -309,7 +347,10 @@ async function start(): Promise<void> {
     openPath: (p) => void shell.openPath(p),
     nativeIndex: sqlite
       ? { ok: true }
-      : { ok: false, reason: "the native index binding did not load — search and counts degrade; authoring still works" },
+      : {
+          ok: false,
+          reason: "the native index binding did not load — search and counts degrade; authoring still works",
+        },
     voice: {
       sidecar: voxaSidecar,
     sidecarHealth: async () => {
@@ -339,7 +380,10 @@ async function start(): Promise<void> {
         },
       ],
     },
-    observeEvent: (event) => backgroundNotifications.observe(event),
+    observeEvent: (event) => {
+      backgroundNotifications.observe(event);
+      if (event.type === "appearance.changed") applyHostTheme(event.preference);
+    },
   });
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
@@ -349,6 +393,7 @@ async function start(): Promise<void> {
 
   const { port } = await coordinator.start(0);
   backgroundNotifications.arm(coordinator.getState());
+  applyHostTheme(coordinator.getState().app.appearance.theme, false);
 
   // Pasting. A screenshot off the clipboard has no file behind it, so the bytes come here, land
   // in the spool and go into the world by the ordinary filing path. The window sends bytes and
@@ -372,6 +417,23 @@ async function start(): Promise<void> {
       window.webContents.send("arke:activate-activity");
     }
   });
+  ipcMain.on("arke:set-host-theme", (event, preference: unknown) => {
+    if (!window || event.sender !== window.webContents) return;
+    if (preference === "system" || preference === "light" || preference === "dark") {
+      applyHostTheme(preference);
+    }
+  });
+  ipcMain.on("arke:get-theme", (event) => {
+    if (!window || event.sender !== window.webContents) return;
+    event.returnValue = { preference: themePreference, resolved: resolvedTheme };
+  });
+  ipcMain.on("arke:theme-ready", (event) => {
+    if (!window || event.sender !== window.webContents) return;
+    rendererThemeReady = true;
+    showWindowWhenThemed();
+  });
+
+  const palette = themePalette(resolvedTheme);
 
   window = new BrowserWindow({
     width: 1440,
@@ -379,22 +441,33 @@ async function start(): Promise<void> {
     minWidth: 1024,
     minHeight: 640,
     show: false,
-    backgroundColor: "#FFFFFF",
-    // The native frame is hidden; white overlay controls sit inside the app's own 44px
-    // titlebars, so the chrome is white and no bar is spent on a window title.
+    backgroundColor: palette.background,
+    // The native frame is hidden; overlay controls sit inside the app's own 44px titlebars.
     titleBarStyle: "hidden",
-    titleBarOverlay: { color: "#FFFFFF", symbolColor: "#0A0A0A", height: 44 },
+    titleBarOverlay: { color: palette.overlay, symbolColor: palette.symbols, height: 44 },
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      additionalArguments: [`--arke-ws-port=${port}`, `--arke-app-version=${__APP_VERSION__}`],
+      additionalArguments: [
+        `--arke-ws-port=${port}`,
+        `--arke-app-version=${__APP_VERSION__}`,
+        `--arke-theme-preference=${themePreference}`,
+        `--arke-resolved-theme=${resolvedTheme}`,
+      ],
     },
   });
-  window.once("ready-to-show", () => window?.show());
+  window.once("ready-to-show", () => {
+    windowReady = true;
+    showWindowWhenThemed();
+  });
   window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) activityActivationReady = false;
+    if (isMainFrame && !isInPlace) {
+      activityActivationReady = false;
+      rendererThemeReady = false;
+      window?.hide();
+    }
   });
   window.webContents.on("render-process-gone", () => {
     activityActivationReady = false;
@@ -403,6 +476,8 @@ async function start(): Promise<void> {
     window = null;
     activityActivationReady = false;
     pendingActivityActivation = false;
+    rendererThemeReady = false;
+    windowReady = false;
   });
 
   const devServer = process.env.ARKE_DEV_SERVER_URL;

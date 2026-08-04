@@ -37,6 +37,16 @@ export const BackgroundNotificationPreferenceSchema = z.enum([
 ]);
 export type BackgroundNotificationPreference = z.infer<typeof BackgroundNotificationPreferenceSchema>;
 
+export const ThemePreferenceSchema = z.enum(["system", "light", "dark"]);
+export type ThemePreference = z.infer<typeof ThemePreferenceSchema>;
+
+export const AppearanceSettingsSchema = z
+  .object({
+    theme: ThemePreferenceSchema.default("system"),
+  })
+  .strict();
+export type AppearanceSettings = z.infer<typeof AppearanceSettingsSchema>;
+
 /**
  * What the user has changed about an agent. Absent fields mean "as shipped": no model pins the
  * agent to whatever the harness is configured with, and no brief leaves the shipped one alone.
@@ -59,6 +69,12 @@ export const AppSettingsSchema = z
     routing: RoutingDefaultsSchema.default({}),
     spend: SpendSettingsSchema.default({ thresholdMicroUsd: 0, periodDays: 7 }),
     backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
+    appearance: z
+      .preprocess(
+        (value) => (AppearanceSettingsSchema.safeParse(value).success ? value : {}),
+        AppearanceSettingsSchema,
+      )
+      .default({ theme: "system" }),
     /** Per-agent overrides, keyed by roster name. */
     agents: z.record(z.string().min(1), AgentSettingsSchema).default({}),
   })

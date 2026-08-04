@@ -239,6 +239,7 @@ export class Coordinator {
   private readonly buildConfig: ((input: { worldQueryUrl?: string }) => Record<string, unknown>) | undefined;
   /** Per-agent model and brief overrides, as last read from settings. */
   private agentOverrides: Record<string, { model?: string; brief?: string }> | undefined;
+  private appearanceWrite = Promise.resolve();
   private started = false;
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
   private readonly secrets = new SecretRegistry();
@@ -387,8 +388,8 @@ export class Coordinator {
   emit(event: DomainEvent): void {
     const parsed = DomainEventSchema.parse(event);
     this.readModel.apply(parsed);
-    if (parsed.type !== "health.changed") {
-      // Health is transient signal, not audit; everything else lands in the log.
+    if (parsed.type !== "health.changed" && parsed.type !== "appearance.changed") {
+      // Health and application appearance are transient/user-interface state, not domain audit.
       void this.changeLog.append({ kind: "event", event: parsed });
     }
     this.transport.broadcast(parsed);
@@ -563,7 +564,8 @@ export class Coordinator {
   async openWorld(worldId: string): Promise<void> {
     await this.opts.provider.loadWorld(worldId);
     await this.jobQueue?.retryFinalizationsForWorld(worldId);
-    const bundle = this.opts.provider.openStore?.()?.getBundle() ?? (await this.opts.provider.loadWorld(worldId));
+    const bundle =
+      this.opts.provider.openStore?.()?.getBundle() ?? (await this.opts.provider.loadWorld(worldId));
     this.readModel.setWorld(bundle);
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
@@ -588,6 +590,7 @@ export class Coordinator {
         : {}),
       ...(settings ? { spend: evaluateSpend(entries, settings.spend, new Date()) } : {}),
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
+      ...(settings ? { appearance: settings.appearance } : {}),
       ...(manifest ? { drift: detectDrift(entries, manifest) } : {}),
     });
   }
@@ -637,7 +640,9 @@ export class Coordinator {
         if (!take) throw new Error("reference take finalization produced no take");
       }
       if (
-        (job.target.kind === "shot" || job.target.kind === "scene-pass" || job.target.kind === "voice-line") &&
+        (job.target.kind === "shot" ||
+          job.target.kind === "scene-pass" ||
+          job.target.kind === "voice-line") &&
         job.landedFiles?.[0] !== undefined &&
         job.productionId !== undefined
       ) {
@@ -660,7 +665,8 @@ export class Coordinator {
       if (job.target.kind === "voice-preview" && job.landedFiles?.[0] !== undefined) {
         // The audition is ready; the landed file IS the cache entry (R-10).
         const [sheetId, provider, voiceId] = (job.target.id ?? "").split("/");
-        if (!sheetId || !provider || !voiceId) throw new Error("voice preview finalization target is unavailable");
+        if (!sheetId || !provider || !voiceId)
+          throw new Error("voice preview finalization target is unavailable");
         this.emit({
           at: new Date().toISOString(),
           type: "voice.preview",
@@ -1462,6 +1468,19 @@ export class Coordinator {
           type: "background-notifications.changed",
           preference: settings.backgroundNotifications,
         });
+        return;
+      }
+      case "set-appearance-theme": {
+        if (!this.appSettings) return;
+        this.appearanceWrite = this.appearanceWrite.catch(() => {}).then(async () => {
+          const settings = await this.appSettings!.setAppearanceTheme(msg.preference);
+          this.emit({
+            at: new Date().toISOString(),
+            type: "appearance.changed",
+            preference: settings.appearance.theme,
+          });
+        });
+        await this.appearanceWrite;
         return;
       }
       case "create-production": {
@@ -2333,7 +2352,11 @@ export class Coordinator {
           );
           return;
         }
-        await this.enqueueBatch(msg.requestId, msg.kind, requests.map((request) => request.input));
+        await this.enqueueBatch(
+          msg.requestId,
+          msg.kind,
+          requests.map((request) => request.input),
+        );
         return;
       }
       case "choose-anchor": {
@@ -2555,8 +2578,7 @@ export class Coordinator {
           return;
         const review = referenceReviewDecision(store.now(), take, "accept");
         const frozen = take.params["provenance"] as
-          | { sheets?: Record<string, number>; anchorFile?: string }
-          | undefined;
+          { sheets?: Record<string, number>; anchorFile?: string } | undefined;
         const sheetVersion = frozen?.sheets?.[msg.sheetId] ?? take.provenance.sheets[msg.sheetId];
         if (sheetVersion === undefined || !frozen?.anchorFile) return;
         await acceptCharacterSheet(store, sheet, {
@@ -2738,7 +2760,9 @@ export class Coordinator {
         }
         let requests;
         try {
-          requests = angles.map((angle) => tileRequest(store.getBundle().meta, sheet, kit, model, angle).input);
+          requests = angles.map(
+            (angle) => tileRequest(store.getBundle().meta, sheet, kit, model, angle).input,
+          );
         } catch {
           this.rejectEnqueue(
             msg.requestId,

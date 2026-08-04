@@ -246,6 +246,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, spend: event.spend } };
     case "background-notifications.changed":
       return { ...state, app: { ...state.app, backgroundNotifications: event.preference } };
+    case "appearance.changed":
+      return { ...state, app: { ...state.app, appearance: { theme: event.preference } } };
     case "runtime.status":
       return { ...state, app: { ...state.app, runtime: event.runtime } };
     case "voice.sidecar":
@@ -307,7 +309,12 @@ function handleFrame(json: string): void {
       Object.entries(current.gateNotices).filter(([id]) => openIds.has(id)),
     );
     const changedWorld = current.state?.world?.meta.worldId !== frame.state.world?.meta.worldId;
-    emitChange({ ...current, state: frame.state, gateNotices, sheetRefs: changedWorld ? {} : current.sheetRefs });
+    emitChange({
+      ...current,
+      state: frame.state,
+      gateNotices,
+      sheetRefs: changedWorld ? {} : current.sheetRefs,
+    });
   } else if (current.state) {
     let gateNotices = current.gateNotices;
     let authoring = current.authoring;
@@ -655,8 +662,10 @@ export function initStore(): void {
   bridge.connect();
 }
 
-export function send(msg: ClientMessage): void {
-  bridge?.send(JSON.stringify(msg));
+export function send(msg: ClientMessage): boolean {
+  if (!bridge || current.connection !== "open") return false;
+  bridge.send(JSON.stringify(msg));
+  return true;
 }
 
 export function openWorld(worldId: string): void {
@@ -1069,9 +1078,7 @@ export function detectRuntimes(): void {
   send({ kind: "detect-runtimes" });
 }
 
-export function setBackgroundNotifications(
-  preference: ClientState["app"]["backgroundNotifications"],
-): void {
+export function setBackgroundNotifications(preference: ClientState["app"]["backgroundNotifications"]): void {
   send({ kind: "set-background-notifications", preference });
 }
 

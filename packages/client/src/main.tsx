@@ -22,10 +22,12 @@ import "./screens/screens.css";
 import "./screens/fidelity.css";
 import { App } from "./App.js";
 import { initStore } from "./lib/store.js";
+import { initializeTheme } from "./lib/theme.js";
 
+initializeTheme();
 initStore();
 
-// Under the desktop shell the native frame is hidden and white overlay window controls sit
+// Under the desktop shell the native frame is hidden and overlay window controls sit
 // in the top-right — in-app titlebars shift their own right-side content clear of them.
 if ((window as { arke?: unknown }).arke !== undefined) {
   document.documentElement.classList.add("is-desktop");

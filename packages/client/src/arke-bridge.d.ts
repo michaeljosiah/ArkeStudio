@@ -2,6 +2,7 @@
 export interface ArkeBridge {
   appVersion: string;
   platform: string;
+  theme?: { preference: ThemePreference; resolved: ResolvedTheme };
   connect(): void;
   send(json: string): void;
   subscribe(
@@ -9,6 +10,11 @@ export interface ArkeBridge {
     onStatus: (status: "connecting" | "open" | "closed") => void,
   ): void;
   onActivateActivity?(listener: () => void): () => void;
+  setHostTheme?(preference: ThemePreference): void;
+  onThemeChange?(
+    listener: (theme: { preference: ThemePreference; resolved: ResolvedTheme }) => void,
+  ): () => void;
+  themeReady?(): void;
   /**
    * Desktop only, and optional for that reason: a browser session has no host to resolve a
    * dropped file's path, so the composer simply does not offer the affordance there.
@@ -21,10 +27,12 @@ export interface ArkeBridge {
   ): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
+export type ThemePreference = "system" | "light" | "dark";
+export type ResolvedTheme = "light" | "dark";
+
 /** A world to file into, or a genesis conversation that does not have one yet. */
 export type AttachTarget =
-  | { kind: "file-artifact"; worldId: string }
-  | { kind: "genesis-attach"; genesisId: string };
+  { kind: "file-artifact"; worldId: string } | { kind: "genesis-attach"; genesisId: string };
 
 declare global {
   interface Window {

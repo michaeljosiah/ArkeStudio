@@ -15,6 +15,7 @@ import { ProviderStatusSchema } from "./provider.js";
 import { ShotSelectionSchema } from "./scene.js";
 import {
   LocalRuntimeStatusSchema,
+  ThemePreferenceSchema,
   BackgroundNotificationPreferenceSchema,
   ManifestDriftSchema,
   RoutingDefaultsSchema,
@@ -429,6 +430,13 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       ...base,
       type: z.literal("background-notifications.changed"),
       preference: BackgroundNotificationPreferenceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("appearance.changed"),
+      preference: ThemePreferenceSchema,
     })
     .strict(),
   /** Local runtime detection completed (SPEC-008 R-22, D12). */

@@ -6,6 +6,7 @@ import {
   LaunchScreen,
   NewWorldScreen,
   SettingsAboutScreen,
+  SettingsAppearanceScreen,
   SettingsLayout,
   SettingsLocalRuntimeScreen,
   SettingsNotificationsScreen,
@@ -60,9 +61,11 @@ import {
 } from "./screens/production.js";
 import { Navigate } from "react-router";
 import { QueueToaster } from "./components/queue-toaster.js";
+import { useThemePreference } from "./lib/theme.js";
 
 export function App() {
   const navigate = useNavigate();
+  useThemePreference();
   useEffect(() => window.arke?.onActivateActivity?.(() => navigate("/activity")), [navigate]);
   return (
     <>
@@ -81,6 +84,7 @@ export function App() {
           <Route path="/settings" element={<SettingsLayout />}>
             <Route index element={<Navigate to="providers" replace />} />
             <Route path="providers" element={<SettingsProvidersScreen />} />
+            <Route path="appearance" element={<SettingsAppearanceScreen />} />
             <Route path="notifications" element={<SettingsNotificationsScreen />} />
             <Route path="local-runtime" element={<SettingsLocalRuntimeScreen />} />
             <Route path="agents" element={<SettingsAgentsScreen />} />

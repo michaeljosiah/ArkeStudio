@@ -94,6 +94,7 @@ const state: ClientState = {
       alerted: false,
     },
     backgroundNotifications: "issues-only",
+    appearance: { theme: "system" },
     runtime: null,
     voiceRuntime: null,
     drift: [],
