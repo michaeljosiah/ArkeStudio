@@ -123,6 +123,43 @@ describe("screen inventory", () => {
     assert.ok(!html.includes("Generate looks"));
   });
 
+  it("bounds verbose Cast feature copy without changing short copy", () => {
+    const world = FIXTURE_STATE.world!;
+    const featured = world.sheets.find((sheet) => sheet.id === "maren-kest")!;
+    const longEssence = `She carries ${"a tide-worn secret ".repeat(20)}beneath the harbour.`;
+    const fullCopy = `${featured.role} · ${featured.billing} — ${longEssence}`;
+    const expected = `${Array.from(fullCopy).slice(0, 179).join("").trimEnd()}…`;
+    const sheets = world.sheets.map((sheet) =>
+      sheet.id === featured.id
+        ? {
+            ...sheet,
+            sections: sheet.sections.map((section) =>
+              section.heading === "Essence" ? { ...section, body: longEssence } : section,
+            ),
+          }
+        : sheet,
+    );
+    __setStateForTest({ ...FIXTURE_STATE, world: { ...world, sheets } });
+    try {
+      const html = renderAt(`/w/${world.meta.worldId}/cast`).replace(/<!-- -->/g, "");
+      assert.ok(html.includes(expected), "feature copy is capped at 180 characters including the ellipsis");
+      assert.ok(!html.includes(fullCopy), "the full verbose copy is not rendered on the listing");
+      assert.ok(!html.includes("beneath the harbour."), "content beyond the limit is omitted from the listing");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  it("renders an accessible enlarged portrait dialog on Cast", () => {
+    const world = FIXTURE_STATE.world!;
+    const html = renderAt(`/w/${world.meta.worldId}/cast`);
+    assert.match(html, /<button[^>]*aria-label="View larger portrait of Maren Kest"[^>]*aria-haspopup="dialog"/);
+    assert.ok(html.includes('<dialog class="fy-portrait-dialog"'));
+    assert.ok(html.includes('aria-labelledby="portrait-dialog-title-maren-kest"'));
+    assert.ok(html.includes('aria-label="Close portrait"'));
+    assert.ok(html.includes('alt="Maren Kest portrait"'));
+  });
+
   it("renders the complete art-direction surface from its resolved record", () => {
     const html = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/art-direction`);
     for (const copy of [

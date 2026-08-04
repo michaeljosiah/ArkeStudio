@@ -77,6 +77,12 @@ describe("design tokens", () => {
     assert.match(css, /@media \(max-width: 900px\)[\s\S]*\.fy-content--cast \.fy-split \{ flex-direction: column/);
   });
 
+  it("keeps Cast on the shared world menu positioning", () => {
+    const css = readFileSync(join(SRC, "screens", "fidelity.css"), "utf8");
+    assert.doesNotMatch(css, /\.fy-content--cast \.fy-pillnav/, "Cast must not override the shared menu");
+    assert.match(css, /@media \(max-width: 900px\)[\s\S]*\.fy-pillnav \{ overflow-x: auto;/);
+  });
+
   it("keeps credential material out of the client (R-10; SPEC-008 R-5, R-6)", () => {
     // Key ENTRY is legitimate since SPEC-008 (write-only: the value goes up once, no frame
     // carries one back). What must never appear client-side: decryption, persistence, or
