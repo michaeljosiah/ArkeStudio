@@ -21,15 +21,9 @@ const rawResolvedTheme = argValue("arke-resolved-theme");
 const themePreference: ThemePreference =
   rawThemePreference === "light" || rawThemePreference === "dark" ? rawThemePreference : "system";
 const resolvedTheme: ResolvedTheme = rawResolvedTheme === "dark" ? "dark" : "light";
-const currentTheme = ipcRenderer.sendSync("arke:get-theme") as
-  | { preference?: unknown; resolved?: unknown }
-  | undefined;
 const startupTheme = {
-  preference:
-    currentTheme?.preference === "system" || currentTheme?.preference === "light" || currentTheme?.preference === "dark"
-      ? currentTheme.preference
-      : themePreference,
-  resolved: currentTheme?.resolved === "dark" || currentTheme?.resolved === "light" ? currentTheme.resolved : resolvedTheme,
+  preference: themePreference,
+  resolved: resolvedTheme,
 } satisfies { preference: ThemePreference; resolved: ResolvedTheme };
 const wsUrl = port ? `ws://127.0.0.1:${port}` : null;
 /** Read-only media base (design-fidelity pass): same server, plain GET. */

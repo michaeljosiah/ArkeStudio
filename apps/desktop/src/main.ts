@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, safeStorage, shell } from "electron";
@@ -79,6 +79,19 @@ const clientIndex = isDev
 
 /** The real on-disk app root (SPEC-002 §2.2): %USERPROFILE%\ArkeStudio, env-overridable. */
 const appRoot = defaultAppRoot();
+const desktopLog = join(appRoot, "logs", "desktop.jsonl");
+
+function traceDesktop(kind: string, detail: Record<string, unknown> = {}): void {
+  try {
+    appendFileSync(
+      desktopLog,
+      `${JSON.stringify({ at: new Date().toISOString(), kind, ...detail })}\n`,
+      "utf8",
+    );
+  } catch {
+    /* Diagnostics must never prevent startup. */
+  }
+}
 
 /**
  * Child commands: environment override first, then the bundled binary in a packaged build
@@ -113,9 +126,14 @@ let themePreference: ThemePreference = "system";
 let resolvedTheme: ResolvedTheme = "light";
 let rendererThemeReady = false;
 let windowReady = false;
+let windowShowFallback: ReturnType<typeof setTimeout> | null = null;
 
 function showWindowWhenThemed(): void {
-  if (windowReady && rendererThemeReady && window && !window.isDestroyed()) window.show();
+  if (!windowReady || !rendererThemeReady || !window || window.isDestroyed()) return;
+  if (windowShowFallback) clearTimeout(windowShowFallback);
+  windowShowFallback = null;
+  traceDesktop("window.shown", { reason: "themed" });
+  window.show();
 }
 
 function applyHostTheme(preference: ThemePreference, notifyRenderer = true): void {
@@ -423,13 +441,10 @@ async function start(): Promise<void> {
       applyHostTheme(preference);
     }
   });
-  ipcMain.on("arke:get-theme", (event) => {
-    if (!window || event.sender !== window.webContents) return;
-    event.returnValue = { preference: themePreference, resolved: resolvedTheme };
-  });
   ipcMain.on("arke:theme-ready", (event) => {
     if (!window || event.sender !== window.webContents) return;
     rendererThemeReady = true;
+    traceDesktop("window.theme-ready");
     showWindowWhenThemed();
   });
 
@@ -458,21 +473,44 @@ async function start(): Promise<void> {
       ],
     },
   });
+  traceDesktop("window.created", { themePreference, resolvedTheme });
+  windowShowFallback = setTimeout(() => {
+    if (!window || window.isDestroyed()) return;
+    traceDesktop("window.shown", {
+      reason: "readiness-timeout",
+      windowReady,
+      rendererThemeReady,
+      loading: window.webContents.isLoading(),
+      visible: window.isVisible(),
+    });
+    window.show();
+  }, 5_000);
   window.once("ready-to-show", () => {
     windowReady = true;
+    traceDesktop("window.ready-to-show");
     showWindowWhenThemed();
+  });
+  window.webContents.on("did-finish-load", () => traceDesktop("window.did-finish-load"));
+  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (isMainFrame) traceDesktop("window.did-fail-load", { errorCode, errorDescription, validatedURL });
+  });
+  window.webContents.on("preload-error", (_event, preloadPath, error) => {
+    traceDesktop("window.preload-error", { preloadPath, error: String(error) });
   });
   window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
     if (isMainFrame && !isInPlace) {
       activityActivationReady = false;
       rendererThemeReady = false;
-      window?.hide();
+      if (window?.isVisible()) window.hide();
     }
   });
-  window.webContents.on("render-process-gone", () => {
+  window.webContents.on("render-process-gone", (_event, details) => {
     activityActivationReady = false;
+    traceDesktop("window.render-process-gone", { reason: details.reason, exitCode: details.exitCode });
   });
   window.on("closed", () => {
+    if (windowShowFallback) clearTimeout(windowShowFallback);
+    windowShowFallback = null;
     window = null;
     activityActivationReady = false;
     pendingActivityActivation = false;
