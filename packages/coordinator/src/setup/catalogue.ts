@@ -19,6 +19,8 @@ export interface DownloadFile {
   sizeMb: number;
   /** First bytes the finished file must have — a truncated or error-page download fails loudly. */
   magic?: readonly number[];
+  /** Immutable artifact digest; checked before the file receives its real name. */
+  sha256?: string;
 }
 
 export type ComponentKind =
@@ -78,12 +80,17 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     displayName: "Kokoro 82M · voice",
     purpose: "Speaks lines on this machine, in the six preset voices",
     sizeMb: 400,
-    caveat: "the weights land now; the local voice runtime that plays them arrives with a later build",
     spec: {
       kind: "files",
       dir: "kokoro-82m",
       files: [
-        { url: `${KOKORO}/onnx/model_q8f16.onnx`, file: "model_q8f16.onnx", sizeMb: 90, magic: ONNX_MAGIC },
+        {
+          url: `${KOKORO}/onnx/model_quantized.onnx`,
+          file: "model_quantized.onnx",
+          sizeMb: 93,
+          magic: ONNX_MAGIC,
+          sha256: "fbae9257e1e05ffc727e951ef9b9c98418e6d79f1c9b6b13bd59f5c9028a1478",
+        },
         { url: `${KOKORO}/config.json`, file: "config.json", sizeMb: 1 },
         ...KOKORO_VOICES.map((v) => ({ url: `${KOKORO}/voices/${v}.bin`, file: `voices/${v}.bin`, sizeMb: 1 })),
       ],
@@ -96,7 +103,6 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     // The small English model, deliberately: enough to dictate an instruction, and a fraction
     // of Large v3's 3.1 GB. A bigger one is a choice for Settings, not a cost at setup.
     sizeMb: 141,
-    caveat: "the weights land now; the local voice runtime that runs them arrives with a later build",
     spec: {
       kind: "files",
       dir: "whisper-base-en",

@@ -248,6 +248,10 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, backgroundNotifications: event.preference } };
     case "runtime.status":
       return { ...state, app: { ...state.app, runtime: event.runtime } };
+    case "voice.sidecar":
+      return event.runtime === undefined
+        ? state
+        : { ...state, app: { ...state.app, voiceRuntime: event.runtime } };
     case "manifest.drift":
       return { ...state, app: { ...state.app, drift: event.reports } };
     case "queue.status": {

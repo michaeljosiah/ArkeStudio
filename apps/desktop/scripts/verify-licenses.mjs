@@ -2,7 +2,8 @@
 // its obligations recorded in THIRD-PARTY-NOTICES.md BEFORE it may be bundled. A missing row
 // fails the package step — a licence question found here is a task, not a shipping delay.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -41,6 +42,58 @@ if (existsSync(buildResources)) {
       failures.push("espeak-ng is staged but its notice row does not record the never-linked arrangement (R-10)");
     }
   }
+}
+
+if (process.argv.includes("--require-runtimes")) for (const arch of ["x64", "arm64"]) {
+  const voxa = join(buildResources, "voxa", arch);
+  const espeak = join(buildResources, "espeak-ng", arch);
+  for (const [component, root, executable] of [
+    ["Voxa", voxa, "voxa.exe"],
+    ["espeak-ng", espeak, "espeak-ng.exe"],
+  ]) {
+    if (!existsSync(join(root, executable))) {
+      failures.push(`${component} ${arch} runtime is required but ${executable} is absent`);
+      continue;
+    }
+    if (!existsSync(join(root, "runtime-manifest.json"))) failures.push(`${component} ${arch} has no checksum manifest`);
+    else {
+      try { verifyManifest(root); } catch (error) { failures.push(`${component} ${arch}: ${String(error)}`); }
+    }
+    try {
+      assertPeArchitecture(join(root, executable), arch);
+    } catch (error) {
+      failures.push(String(error));
+    }
+  }
+  if (!existsSync(join(voxa, "LICENSE.voxa.txt"))) failures.push(`Voxa ${arch} licence text is absent`);
+  if (!existsSync(join(voxa, "THIRD-PARTY-NOTICES", "PACKAGES.txt"))) failures.push(`Voxa ${arch} dependency notice index is absent`);
+  if (!existsSync(join(voxa, "THIRD-PARTY-NOTICES", "DOTNET-LICENSE.txt"))) failures.push(`Voxa ${arch} .NET licence is absent`);
+  if (!existsSync(join(voxa, "THIRD-PARTY-NOTICES", "DOTNET-THIRD-PARTY-NOTICES.txt"))) failures.push(`Voxa ${arch} .NET notices are absent`);
+  if (existsSync(join(voxa, "THIRD-PARTY-NOTICES", "PACKAGES.txt"))) {
+    for (const row of readFileSync(join(voxa, "THIRD-PARTY-NOTICES", "PACKAGES.txt"), "utf8").trim().split("\n")) {
+      const packageId = row.split(" | ")[0];
+      const prefix = packageId.replaceAll("/", "-") + "--";
+      if (!readdirSync(join(voxa, "THIRD-PARTY-NOTICES")).some((name) => name.startsWith(prefix))) {
+        failures.push(`Voxa ${arch} dependency ${packageId} has no retained licence text`);
+      }
+    }
+  }
+  if (!existsSync(join(voxa, "LICENSE.microsoft-vclibs.txt"))) failures.push(`Microsoft VC runtime ${arch} notice is absent`);
+  for (const runtime of [
+    "msvcp140.dll", "msvcp140_1.dll", "vcruntime140.dll",
+    ...(arch === "x64" ? ["vcruntime140_1.dll"] : []), "vcomp140.dll",
+  ]) {
+    if (!existsSync(join(voxa, runtime))) failures.push(`Voxa ${arch} native dependency ${runtime} is absent`);
+  }
+  if (!existsSync(join(espeak, "LICENSE.espeak-ng.txt"))) failures.push(`espeak-ng ${arch} licence/source offer is absent`);
+  if (!existsSync(join(espeak, "SOURCE-espeak-ng-1.52.0.zip"))) failures.push(`espeak-ng ${arch} source archive is absent`);
+  if (arch === "arm64") {
+    if (!existsSync(join(espeak, "LICENSE.pcaudiolib.txt"))) failures.push("ARM64 pcaudiolib licence text is absent");
+    if (!existsSync(join(espeak, "LICENSE.libc++.txt"))) failures.push("ARM64 libc++ licence text is absent");
+    if (!existsSync(join(espeak, "SOURCE-arm64-dependency-1.src.tar.zst"))) failures.push("ARM64 espeak source package is absent");
+    if (!existsSync(join(espeak, "SOURCE-arm64-dependency-2.src.tar.zst"))) failures.push("ARM64 pcaudiolib source package is absent");
+  }
+  if (!existsSync(join(espeak, "share", "espeak-ng-data"))) failures.push(`espeak-ng ${arch} data directory is absent`);
 }
 
 if (failures.length > 0) {

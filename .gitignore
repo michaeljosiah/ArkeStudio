@@ -8,6 +8,8 @@ design-system/uploads/
 node_modules/
 dist/
 release/
+apps/desktop/build-resources/
+.runtime-work/
 *.tsbuildinfo
 
 # Local dev scratch (dev coordinator change log, etc.)

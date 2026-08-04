@@ -7,12 +7,16 @@
   "main": "dist/main.cjs",
   "scripts": {
     "build": "npm run build --workspace @arke-studio/client && node scripts/build.mjs",
-    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "test": "node --import tsx --test \"test/**/*.test.ts\" \"test/**/*.test.mjs\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "rebuild:native": "node scripts/rebuild-native.mjs",
     "start": "npm run build && npm run rebuild:native && electron dist/main.cjs",
-    "package": "npm run verify:licenses && npm run build && npm run rebuild:native && electron-builder --publish never",
-    "release": "npm run verify:licenses && npm run build && npm run rebuild:native && electron-builder --publish always",
+    "prepare:runtimes:x64": "node scripts/prepare-runtimes.mjs --arch x64",
+    "prepare:runtimes:arm64": "node scripts/prepare-runtimes.mjs --arch arm64",
+    "prepare:runtimes": "npm run prepare:runtimes:x64 && npm run prepare:runtimes:arm64",
+    "smoke:voxa:x64": "node scripts/smoke-voxa.mjs --root build-resources/voxa/x64",
+    "package": "npm run prepare:runtimes && npm run verify:licenses -- --require-runtimes && npm run build && node scripts/package-windows.mjs --publish never",
+    "release": "npm run prepare:runtimes && npm run verify:licenses -- --require-runtimes && npm run build && node scripts/package-windows.mjs --publish never",
     "verify:licenses": "node scripts/verify-licenses.mjs"
   },
   "dependencies": {
@@ -30,6 +34,7 @@
     "electron-builder": "^26.15.3",
     "esbuild": "^0.25.12",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "yaml": "^2.6.0"
   }
 }

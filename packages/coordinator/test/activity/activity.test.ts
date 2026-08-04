@@ -54,6 +54,7 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
       spend: null,
       backgroundNotifications: "issues-only",
       runtime: null,
+      voiceRuntime: null,
       drift: [],
       agents: [],
       harnessModels: [],

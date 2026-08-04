@@ -53,6 +53,10 @@ export interface SupervisedSpec {
   env?: Record<string, string>;
   /** Path probed at http://127.0.0.1:<port>; 2xx → healthy. Default "/health". */
   healthPath?: string;
+  /** Optional protocol validation after a 2xx response; false means not ready yet. */
+  validateHealth?: (response: Response) => boolean | Promise<boolean>;
+  /** Replace the inherited environment instead of passing credentials and unrelated host state. */
+  inheritEnv?: boolean;
   /** How long the child has to become healthy before it is declared failed. */
   readyTimeoutMs?: number;
   probeIntervalMs?: number;
@@ -100,8 +104,8 @@ export interface SupervisorDeps {
 
 export class ChildSupervisor extends EventEmitter {
   readonly id: string;
-  private readonly spec: Required<Omit<SupervisedSpec, "command" | "args" | "env">> &
-    Pick<SupervisedSpec, "command" | "args" | "env">;
+  private readonly spec: Required<Omit<SupervisedSpec, "command" | "args" | "env" | "validateHealth">> &
+    Pick<SupervisedSpec, "command" | "args" | "env" | "validateHealth">;
   private readonly deps: SupervisorDeps;
   private child: ChildProcess | null = null;
   private _port: number | null = null;
@@ -124,6 +128,7 @@ export class ChildSupervisor extends EventEmitter {
       probeIntervalMs: spec.probeIntervalMs ?? 250,
       maxRestarts: spec.maxRestarts ?? 3,
       backoffMs: spec.backoffMs ?? 500,
+      inheritEnv: spec.inheritEnv ?? true,
     };
   }
 
@@ -180,7 +185,7 @@ export class ChildSupervisor extends EventEmitter {
     let child: ChildProcess;
     try {
       child = spawn(command, args, {
-        env: { ...process.env, ...this.spec.env, PORT: String(port) },
+        env: { ...(this.spec.inheritEnv ? process.env : {}), ...this.spec.env, PORT: String(port) },
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
         shell: needsShell,
@@ -335,7 +340,7 @@ export class ChildSupervisor extends EventEmitter {
     while (Date.now() < deadline && !this.stopping && this.child === child) {
       try {
         const res = await fetch(this.healthUrl(), { signal: AbortSignal.timeout(1_000) });
-        if (res.ok) return true;
+        if (res.ok && (!this.spec.validateHealth || (await this.spec.validateHealth(res)))) return true;
       } catch {
         /* not up yet */
       }

@@ -95,6 +95,7 @@ const state: ClientState = {
     },
     backgroundNotifications: "issues-only",
     runtime: null,
+    voiceRuntime: null,
     drift: [],
     agents: [],
     harnessModels: [],
