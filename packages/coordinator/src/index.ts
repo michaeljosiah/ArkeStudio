@@ -5,6 +5,7 @@ export { Coordinator, type CoordinatorOptions } from "./coordinator.js";
 export { CredentialStore, type Cipher } from "./credentials/store.js";
 export { buildDiagnosticsBundle } from "./diagnostics.js";
 export { ProviderService, type KeyValidator } from "./providers/service.js";
+export { ProviderCallStore } from "./providers/call-store.js";
 export { REDACTED, redactDeep, SecretRegistry } from "./redact.js";
 export {
   detectDrift,

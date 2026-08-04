@@ -1680,6 +1680,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   flex-direction: column;
   overflow-y: auto;
 }
+
+.fy-provider-calls { margin-top: 24px; padding: 18px; border: 1px solid var(--border); background: var(--background); }
+.fy-provider-calls__head, .fy-provider-call > summary, .fy-provider-call__payloads { display: flex; gap: 12px; }
+.fy-provider-calls__head { align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+.fy-provider-call { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+.fy-provider-call > summary { align-items: center; flex-wrap: wrap; cursor: pointer; font-weight: 600; }
+.fy-provider-call__meta, .fy-provider-call__label { margin: 10px 0 6px; font: 11px var(--type-mono, monospace); color: var(--muted-foreground); }
+.fy-provider-call__payloads > div { min-width: 0; flex: 1; }
+.fy-provider-call pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: var(--muted); border: 1px solid var(--border); font: 11px/1.5 var(--type-mono, monospace); }
+@media (max-width: 800px) { .fy-provider-call__payloads { flex-direction: column; } }
 .fy-activityrow { display: flex; align-items: center; gap: 14px; padding: 11px 4px; border-bottom: 1px solid var(--border); }
 .fy-activityrow__title { font: 600 13px var(--font-sans); }
 .fy-activityrow__sub { font: 400 10.5px/1.5 var(--font-mono); color: var(--neutral-400); margin-top: 2px; }

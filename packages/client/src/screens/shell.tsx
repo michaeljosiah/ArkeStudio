@@ -27,6 +27,7 @@ import {
   detectRuntimes,
   downloadUpdate,
   generateDiagnostics,
+  listProviderCalls,
   openDataFolder,
   openThread,
   openWorld,
@@ -39,6 +40,7 @@ import {
   setSpendThreshold,
   useArchiveNote,
   useDiagnosticsBundle,
+  useProviderCalls,
   useEnvCheck,
   useExports as useExportsState,
   useGenesis,
@@ -64,6 +66,7 @@ import {
   type Capability,
   type ComponentHealth,
   type ProviderId,
+  type ProviderCallRecord,
   type ProviderStatus,
 } from "@arke-studio/contracts";
 
@@ -1541,6 +1544,42 @@ export function SettingsAboutScreen() {
 
 const TERMINAL_JOB = new Set(["succeeded", "failed", "cancelled"]);
 
+function ProviderCallInspector({ jobId, onClose }: { jobId: string | null; onClose: () => void }) {
+  const calls = useProviderCalls(jobId);
+  useEffect(() => listProviderCalls(jobId), [jobId]);
+  const copy = (call: ProviderCallRecord) => void navigator.clipboard.writeText(JSON.stringify(call, null, 2));
+  return (
+    <section className="fy-provider-calls" aria-label="Provider calls">
+      <div className="fy-provider-calls__head">
+        <div><div className="fy-eyebrow-sm">PROVIDER CALLS</div><div className="fy-mono">{jobId ?? "100 most recent calls"}</div></div>
+        <Button variant="ghost" onClick={onClose}>Close</Button>
+      </div>
+      <Callout tone="warning" title="Sensitive local history">
+        Requests and responses may contain prompts and world content. Credentials and binary media are redacted or summarized.
+      </Callout>
+      {calls === null && <div className="fy-mono">loading call history…</div>}
+      {calls?.length === 0 && <div className="fy-mono">No recorded calls. Calls made before this feature are not recoverable.</div>}
+      {calls?.map((call) => (
+        <details key={call.id} className="fy-provider-call" open={calls.length === 1}>
+          <summary>
+            <span>{call.operation}</span><span className="fy-mono">{call.method} {call.endpoint}</span>
+            <Badge tone={call.status === "succeeded" || call.status === "accepted" ? "success" : call.status === "pending" ? "warning" : "danger"}>
+              {call.status === "pending" ? "outcome unknown" : call.status}
+            </Badge>
+          </summary>
+          <div className="fy-provider-call__meta">{shortDateTime(call.startedAt)} · attempt {call.attempt ?? "—"} · HTTP {call.httpStatus ?? "no response"} · {call.elapsedMs === null ? "still pending" : `${call.elapsedMs} ms`}</div>
+          {call.error && <Callout tone="warning" title={`${call.error.name}${call.error.code ? ` · ${call.error.code}` : ""}`}>{call.error.message}</Callout>}
+          <div className="fy-provider-call__payloads">
+            <div><div className="fy-provider-call__label">REQUEST</div><pre>{JSON.stringify(call.request, null, 2)}</pre></div>
+            <div><div className="fy-provider-call__label">RESPONSE</div><pre>{call.response === null ? "No response was witnessed." : JSON.stringify(call.response, null, 2)}</pre></div>
+          </div>
+          <Button variant="ghost" onClick={() => copy(call)}>Copy sensitive call JSON</Button>
+        </details>
+      ))}
+    </section>
+  );
+}
+
 export function ActivityScreen() {
   const { state } = useStore();
   const reconcileReport = useReconcileReport();
@@ -1548,6 +1587,8 @@ export function ActivityScreen() {
   const exportsState = useExportsState();
   const navigate = useNavigate();
   const [scope, setScope] = useState<"active" | "all">("active");
+  const [inspectedJobId, setInspectedJobId] = useState<string | null>(null);
+  const [inspectAllCalls, setInspectAllCalls] = useState(false);
   const activeWorldId = state?.world?.meta.worldId ?? null;
 
   const jobs = [...(state?.app.jobs ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -1624,6 +1665,7 @@ export function ActivityScreen() {
                       Cancel
                     </Button>
                   )}
+                  {r.kind === "job" && <Button variant="ghost" onClick={() => setInspectedJobId(r.ref)}>Calls</Button>}
                   {r.cancellable && r.kind === "export" && activeWorldId && (
                     <Button variant="ghost" onClick={() => cancelExportMsg(activeWorldId, r.ref)}>
                       Cancel
@@ -1646,6 +1688,7 @@ export function ActivityScreen() {
                     </div>
                     <div className="fy-activityrow__sub">{entry.detail}</div>
                     <div style={{ display: "flex", gap: "var(--space-2)", marginTop: 8, flexWrap: "wrap" }}>
+                      {entry.ref && jobs.some((job) => job.id === entry.ref) && <Button variant="ghost" onClick={() => setInspectedJobId(entry.ref!)}>Provider calls</Button>}
                       {entry.actions.includes("resolve") && entry.ref && (
                         <>
                           <Button onClick={() => resolveHeldJob(entry.ref!, "resubmit")}>Resubmit · may charge again</Button>
@@ -1703,8 +1746,12 @@ export function ActivityScreen() {
               {jobActions(job).includes("retry") && (
                 <span className="scr-field__hint">failed — retry from its production's dispatch dialog</span>
               )}
+              <Button variant="ghost" onClick={() => setInspectedJobId(job.id)}>Provider calls</Button>
             </div>
           ))}
+          {(inspectedJobId || inspectAllCalls) && (
+            <ProviderCallInspector jobId={inspectAllCalls ? null : inspectedJobId} onClose={() => { setInspectedJobId(null); setInspectAllCalls(false); }} />
+          )}
         </div>
         <div className="fy-activity__side">
           <div style={{ font: "600 13px var(--font-sans)" }}>
@@ -1769,6 +1816,7 @@ export function ActivityScreen() {
           </div>
           <div style={{ flex: 1 }} />
           <Button onClick={() => navigate("/settings/providers")}>Providers &amp; keys</Button>
+          <Button variant="ghost" onClick={() => { setInspectedJobId(null); setInspectAllCalls(true); }}>All provider calls</Button>
         </div>
       </div>
     </div>

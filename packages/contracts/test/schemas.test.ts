@@ -567,6 +567,8 @@ describe("domain events and frames", () => {
   it("validates client messages", () => {
     assert.doesNotThrow(() => ClientMessageSchema.parse({ kind: "hello", lastSeq: 12 }));
     assert.doesNotThrow(() => ClientMessageSchema.parse({ kind: "open-world", worldId: WORLD_ID }));
+    assert.doesNotThrow(() => ClientMessageSchema.parse({ kind: "list-provider-calls", jobId: null }));
+    assert.doesNotThrow(() => ClientMessageSchema.parse({ kind: "list-provider-calls", jobId: `jb_${"0".repeat(26)}` }));
     assert.doesNotThrow(() =>
       ClientMessageSchema.parse({ kind: "generate-world-image", worldId: WORLD_ID, requestId: WORLD_ID }),
     );
