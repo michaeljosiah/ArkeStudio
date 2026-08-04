@@ -377,9 +377,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   --cast-portrait-width: 380px;
   --cast-portrait-height: 440px;
 }
-.fy-content--cast .fy-pillnav { position: absolute; top: 12px; left: 50%; margin: 0; transform: translateX(-50%); }
 .fy-content--cast .fy-corner { top: 14px; }
-.fy-content--cast .fy-split { padding-top: 78px; }
+.fy-content--cast .fy-split { padding-top: 28px; }
 .fy-split { display: flex; gap: var(--cast-gap, 60px); padding: 28px var(--cast-gutter, 96px) 40px; align-items: flex-start; }
 .fy-split__side { flex: none; width: 400px; animation: fy-fade-up 0.7s var(--ease-out) 0.1s both; }
 .fy-split__main { flex: 1; min-width: 0; animation: fy-fade-up 0.7s var(--ease-out) 0.2s both; }
@@ -395,6 +394,18 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-content--cast .fy-feature { padding-inline: 9px; }
 .fy-feature__frame { width: 100%; height: 440px; }
 .fy-content--cast .fy-feature__frame { width: var(--cast-portrait-width); height: var(--cast-portrait-height); }
+.fy-feature__portrait-button {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  cursor: zoom-in;
+}
+.fy-feature__portrait-button:disabled { cursor: default; }
+.fy-feature__portrait-button:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
 .fy-feature__title {
   display: flex;
   align-items: center;
@@ -406,6 +417,28 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-feature__note { margin-left: auto; font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
 .fy-feature__sub { margin: 3px 6px 0; font: 400 13px/1.5 var(--font-sans); color: var(--muted-foreground); }
 .fy-feature__actions { display: flex; gap: 8px; margin: 14px 6px 2px; }
+
+.fy-portrait-dialog {
+  width: min(920px, calc(100vw - 48px));
+  max-width: none;
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+.fy-portrait-dialog::backdrop { background: color-mix(in srgb, var(--neutral-950) 72%, transparent); }
+.fy-portrait-dialog__panel { display: flex; flex-direction: column; max-height: calc(100vh - 48px); }
+.fy-portrait-dialog__head { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border); }
+.fy-portrait-dialog__head h2 { margin: 0; font: 600 16px var(--font-sans); }
+.fy-portrait-dialog__close { display: inline-flex; align-items: center; justify-content: center; margin-left: auto; width: 32px; height: 32px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; cursor: pointer; }
+.fy-portrait-dialog__close:hover { background: var(--accent); }
+.fy-portrait-dialog__close:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-portrait-dialog__image { min-height: 0; padding: var(--space-5); background: var(--neutral-950); }
+.fy-portrait-dialog__image .fy-portrait { width: 100%; height: calc(100vh - 150px); object-fit: contain; }
 
 .fy-ledgerhead {
   display: flex;
@@ -458,12 +491,11 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 @media (max-width: 1100px) {
   .fy-content--cast { --cast-gutter: var(--space-7); --cast-gap: var(--space-8); }
-  .fy-content--cast .fy-corner { top: var(--space-16); right: var(--space-7); }
-  .fy-content--cast .fy-split { padding-top: 112px; }
+  .fy-content--cast .fy-corner { right: var(--space-7); }
 }
 
 @media (max-width: 900px) {
-  .fy-content--cast .fy-pillnav { position: sticky; left: auto; transform: none; margin: var(--space-3) auto 0; overflow-x: auto; max-width: calc(100% - var(--space-6)); }
+  .fy-pillnav { overflow-x: auto; max-width: calc(100% - var(--space-6)); }
   .fy-content--cast .fy-corner { position: static; display: flex; justify-content: flex-end; padding: var(--space-4) var(--space-7) 0; }
   .fy-content--cast .fy-split { flex-direction: column; padding-top: var(--space-6); }
   .fy-content--cast .fy-split__side { width: min(var(--cast-feature), 100%); }
@@ -1680,6 +1712,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   flex-direction: column;
   overflow-y: auto;
 }
+
+.fy-provider-calls { margin-top: 24px; padding: 18px; border: 1px solid var(--border); background: var(--background); }
+.fy-provider-calls__head, .fy-provider-call > summary, .fy-provider-call__payloads { display: flex; gap: 12px; }
+.fy-provider-calls__head { align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+.fy-provider-call { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+.fy-provider-call > summary { align-items: center; flex-wrap: wrap; cursor: pointer; font-weight: 600; }
+.fy-provider-call__meta, .fy-provider-call__label { margin: 10px 0 6px; font: 11px var(--type-mono, monospace); color: var(--muted-foreground); }
+.fy-provider-call__payloads > div { min-width: 0; flex: 1; }
+.fy-provider-call pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: var(--muted); border: 1px solid var(--border); font: 11px/1.5 var(--type-mono, monospace); }
+@media (max-width: 800px) { .fy-provider-call__payloads { flex-direction: column; } }
 .fy-activityrow { display: flex; align-items: center; gap: 14px; padding: 11px 4px; border-bottom: 1px solid var(--border); }
 .fy-activityrow__title { font: 600 13px var(--font-sans); }
 .fy-activityrow__sub { font: 400 10.5px/1.5 var(--font-mono); color: var(--neutral-400); margin-top: 2px; }
@@ -2063,6 +2105,14 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-reference-card__image--photo { height: 430px; flex: none; }
 .fy-reference-card__image--sheet { height: 390px; flex: none; }
 .fy-reference-card__image .fy-portrait { border-radius: 0; object-fit: cover; }
+.fy-character-sheet-preview { width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; display: block; }
+.fy-character-sheet-preview:focus-visible { outline: 2px solid var(--ring); outline-offset: -4px; }
+.fy-character-sheet-preview .fy-portrait { width: 100%; height: 100%; object-fit: cover; }
+.fy-reference-card__generating { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--neutral-700) 42%, transparent), transparent 48%), var(--neutral-950); color: var(--media-overlay-fg); text-align: center; }
+.fy-reference-card__generating .fy-loading { padding: 0; }
+.fy-reference-card__generating .fy-loading__mark { --foreground: var(--media-overlay-fg); --neutral-300: var(--neutral-600); }
+.fy-reference-card__generating .fy-loading__label { color: color-mix(in srgb, var(--media-overlay-fg) 72%, transparent); }
+.fy-reference-card__generating > p { max-width: 310px; margin-top: 14px; font: 400 10.5px/1.5 var(--font-mono); color: color-mix(in srgb, var(--media-overlay-fg) 58%, transparent); }
 .fy-reference-card__status { position: absolute; left: 14px; top: 14px; padding: 5px 9px; border-radius: 999px; background: color-mix(in srgb, var(--media-control-bg) 92%, transparent); font: 500 9.5px var(--font-mono); color: var(--media-control-fg); }
 .fy-reference-card__status--warn { color: var(--warning); background: var(--warning-bg); }
 .fy-reference-card__foot { display: flex; align-items: center; gap: 12px; padding: 15px 17px; }
@@ -2075,6 +2125,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-reference-candidates { border-top: 1px solid var(--border); padding: 8px 15px; display: flex; align-items: center; gap: 10px; background: var(--success-bg); }
 .fy-reference-candidates span { font: 400 10px var(--font-mono); color: var(--success); }
 .fy-reference-candidates .ui-btn { margin-left: auto; }
+.fy-character-sheet-dialog { width: min(1200px, calc(100vw - 48px)); }
+.fy-character-sheet-dialog .fy-portrait-dialog__image .fy-portrait { height: calc(100vh - 150px); object-fit: contain; }
 
 /* Generate character sheet (31b) */
 .fy-generation-scrim { width: 100%; min-height: 850px; height: 100%; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--neutral-200) 72%, var(--background)); overflow: auto; padding: 40px; }
@@ -2084,6 +2136,17 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-sheet-dialog > header p { font: 400 10px var(--font-mono); color: var(--neutral-400); margin-top: 3px; }
 .fy-sheet-dialog > header button { margin-left: auto; border: 0; background: transparent; font-size: 22px; color: var(--neutral-400); cursor: pointer; }
 .fy-sheet-dialog__body { flex: 1; min-height: 0; display: flex; }
+.fy-sheet-dialog__result { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--muted); }
+.fy-sheet-dialog__result-message { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 48px; }
+.fy-sheet-dialog__result-message .fy-loading { padding: 0; }
+.fy-sheet-dialog__result-message > strong { font: 650 20px var(--font-sans); }
+.fy-sheet-dialog__result-message > p { max-width: 450px; margin: 14px 0 22px; font: 400 12px/1.6 var(--font-mono); color: var(--neutral-400); }
+.fy-sheet-dialog__generated-image { flex: 1; min-height: 0; margin: 22px 22px 0; overflow: hidden; border-radius: 12px; background: var(--neutral-950); }
+.fy-sheet-dialog__generated-image .fy-portrait { object-fit: contain; }
+.fy-sheet-dialog__result-actions { min-height: 90px; display: flex; align-items: center; gap: 10px; padding: 16px 22px; }
+.fy-sheet-dialog__result-actions > div { min-width: 0; margin-right: auto; }
+.fy-sheet-dialog__result-actions strong { font: 600 14px var(--font-sans); }
+.fy-sheet-dialog__result-actions p { margin-top: 3px; font: 400 10px var(--font-mono); color: var(--neutral-400); }
 .fy-sheet-dialog__identity { width: 440px; flex: none; padding: 26px 30px 24px; background: var(--muted); border-right: 1px solid var(--border); }
 .fy-sheet-dialog__identity > div { height: 420px; overflow: hidden; border-radius: 12px; }
 .fy-sheet-dialog__identity strong { display: block; font: 600 14px var(--font-sans); margin-top: 12px; }

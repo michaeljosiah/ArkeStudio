@@ -44,6 +44,7 @@ import {
   setPromptOverride,
 } from "./productions/ops.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
+import { ProviderCallStore } from "./providers/call-store.js";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "./queue/dispatcher.js";
 import { enqueueInputs } from "./queue/acknowledge.js";
 import {
@@ -173,6 +174,9 @@ export interface CoordinatorOptions {
   };
   /** SPEC-008: credential cipher (Electron safeStorage in the desktop; a fake in tests). */
   cipher?: Cipher;
+  /** Shared with provider-call capture so known credentials are scrubbed from owner-visible payloads. */
+  secretRegistry?: SecretRegistry;
+  providerCalls?: ProviderCallStore;
   /** SPEC-008: per-provider key validators, injected from @arke-studio/providers. */
   validators?: Partial<Record<ProviderId, KeyValidator>>;
   /** SPEC-008: the shipped model manifest. */
@@ -212,6 +216,10 @@ export interface CoordinatorOptions {
       detail: string;
       runtime?: ClientState["app"]["voiceRuntime"];
     }>;
+    /** Host-owned executable picker. The selected path never crosses to the renderer. */
+    chooseExecutable?: () => Promise<string | null>;
+    applySettings?: (settings: import("@arke-studio/contracts").VoxaSettings) => Promise<void>;
+    restart?: () => Promise<void>;
     localPresets: VoiceCandidate[];
     cloudSources: CloudVoiceSource[];
   };
@@ -250,9 +258,10 @@ export class Coordinator {
   /** Per-agent model and brief overrides, as last read from settings. */
   private agentOverrides: Record<string, { model?: string; brief?: string }> | undefined;
   private appearanceWrite = Promise.resolve();
+  private voiceModelsChanged = false;
   private started = false;
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
-  private readonly secrets = new SecretRegistry();
+  private readonly secrets: SecretRegistry;
   private readonly appLog: AppLog | null;
   private readonly credentials: CredentialStore | null;
   private readonly providerService: ProviderService;
@@ -266,6 +275,7 @@ export class Coordinator {
   private readonly exports = new Map<string, ExportHandle>();
 
   constructor(private readonly opts: CoordinatorOptions) {
+    this.secrets = opts.secretRegistry ?? new SecretRegistry();
     this.readModel = new ReadModel(opts.appVersion);
     this.changeLog = new ChangeLog(opts.changeLogPath);
     this.appLog = opts.appRoot ? new AppLog(join(opts.appRoot, "logs", "app.jsonl"), this.secrets) : null;
@@ -375,7 +385,20 @@ export class Coordinator {
             opts.setup,
             (event) => {
               // The snapshot carries it too: a window that opens mid-download still sees it.
-              if (event.type === "setup.status") this.readModel.setSetup(event.setup);
+              if (event.type === "setup.status") {
+                const previous = this.readModel.getState().app.setup;
+                const completedVoiceModel = event.setup.components.some((component) => {
+                  if (component.id !== "kokoro-82m" && component.id !== "whisper-base-en") return false;
+                  const before = previous?.components.find((item) => item.id === component.id)?.state;
+                  return component.state === "ready" && before !== "ready" && before !== "present";
+                });
+                this.readModel.setSetup(event.setup);
+                if (completedVoiceModel) this.voiceModelsChanged = true;
+                if (!event.setup.running && this.voiceModelsChanged) {
+                  this.voiceModelsChanged = false;
+                  void opts.voice?.restart?.().catch(() => {});
+                }
+              }
               this.emit(event);
             },
             { appRoot: opts.appRoot },
@@ -400,7 +423,11 @@ export class Coordinator {
   emit(event: DomainEvent): void {
     const parsed = DomainEventSchema.parse(event);
     this.readModel.apply(parsed);
-    if (parsed.type !== "health.changed" && parsed.type !== "appearance.changed") {
+    if (
+      parsed.type !== "health.changed" &&
+      parsed.type !== "appearance.changed" &&
+      parsed.type !== "voice.runtime-test"
+    ) {
       // Health and application appearance are transient/user-interface state, not domain audit.
       void this.changeLog.append({ kind: "event", event: parsed });
     }
@@ -1529,6 +1556,65 @@ export class Coordinator {
         await this.appearanceWrite;
         return;
       }
+      case "choose-voxa-executable": {
+        if (!this.appSettings || !this.opts.voice?.chooseExecutable || !this.opts.voice.applySettings) return;
+        const executablePath = await this.opts.voice.chooseExecutable().catch(() => null);
+        if (executablePath === null) return;
+        const settings = await this.appSettings.setVoxa({ executablePath });
+        await this.opts.voice.applySettings(settings.voxa).catch(() => {});
+        return;
+      }
+      case "clear-voxa-executable":
+      case "use-bundled-voxa": {
+        if (!this.appSettings || !this.opts.voice?.applySettings) return;
+        const settings = await this.appSettings.setVoxa({ executablePath: null });
+        await this.opts.voice.applySettings(settings.voxa).catch(() => {});
+        return;
+      }
+      case "restart-voxa": {
+        await this.opts.voice?.restart?.().catch(() => {});
+        return;
+      }
+      case "repair-voice-models": {
+        await this.setup?.repair("kokoro-82m");
+        await this.setup?.repair("whisper-base-en");
+        await this.setup?.run();
+        return;
+      }
+      case "open-model-folder": {
+        if (this.opts.appRoot) this.opts.openPath?.(join(this.opts.appRoot, "models"));
+        return;
+      }
+      case "test-local-voice": {
+        const base = { at: new Date().toISOString(), type: "voice.runtime-test" as const, requestId: msg.requestId };
+        this.emit({ ...base, status: "testing", detail: "Testing Voxa voice synthesis", audioBase64: null });
+        try {
+          const sidecar = this.opts.voice?.sidecar;
+          if (!sidecar) throw new Error("Voxa is unavailable");
+          const voices = await sidecar.listVoices();
+          const voice = voices[0];
+          if (!voice) throw new Error("Voxa returned no compatible voices");
+          const audio = await sidecar.synthesize({
+            voiceId: voice.id,
+            text: "The harbour remembers.",
+          });
+          if (audio.byteLength < 44) throw new Error("Voxa returned invalid audio");
+          this.emit({
+            ...base,
+            status: "ready",
+            detail: "Local voice is ready",
+            audioBase64: Buffer.from(audio).toString("base64"),
+          });
+        } catch {
+          this.emit({
+            ...base,
+            status: "failed",
+            detail: "Local voice test failed. Check the runtime and model states below.",
+            audioBase64: null,
+          });
+        }
+        return;
+      }
       case "create-production": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -1971,6 +2057,22 @@ export class Coordinator {
           type: "diagnostics.ready",
           bundle: JSON.stringify(bundle, null, 2),
         });
+        return;
+      }
+      case "list-provider-calls": {
+        const calls =
+          (await (msg.jobId === null
+            ? this.opts.providerCalls?.listRecent()
+            : this.opts.providerCalls?.listForJob(msg.jobId))) ?? [];
+        // Full payloads are transient: never duplicate them into coordinator.jsonl or support diagnostics.
+        this.transport.broadcast(
+          DomainEventSchema.parse({
+            at: new Date().toISOString(),
+            type: "provider-calls.ready",
+            jobId: msg.jobId,
+            calls,
+          }),
+        );
         return;
       }
       case "open-data-folder": {
@@ -3162,11 +3264,13 @@ export class Coordinator {
   async stop(): Promise<void> {
     this.setup?.dispose();
     this.jobQueue?.dispose();
+    await this.jobQueue?.drain();
     await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
     await this.opts.adapter?.dispose?.().catch(() => {});
     await this.worldQuery.stop();
     await this.transport.stop();
     await this.opts.provider.close?.();
+    await this.opts.providerCalls?.drain();
     await this.changeLog.drain();
   }
 }

@@ -105,6 +105,21 @@ describe("Windows background notifications", () => {
     assert.equal(h.shown.length, 1);
   });
 
+  it("names the character in a completed character sheet notification", () => {
+    const h = harness();
+    h.controller.arm(state([]));
+    h.controller.observe(
+      readyEvent(
+        job({
+          status: "succeeded",
+          target: { kind: "character-sheet", id: "maren-kest/g1" },
+          params: { characterName: "Maren Kest" },
+        }),
+      ),
+    );
+    assert.equal(h.shown[0]?.body, "Character sheet for Maren Kest is ready in Arke Studio.");
+  });
+
   it("does not expose raw errors in failure copy", () => {
     const h = harness();
     h.controller.arm(state([job()]));

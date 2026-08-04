@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { mainPhotoFor, type WorldBundle } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
 
@@ -11,14 +11,19 @@ export function Portrait({
   path,
   label,
   radius = 7,
+  onAvailabilityChange,
 }: {
   worldSlug: string | undefined;
   /** World-relative media path, e.g. "references/maren-kest/head-front.png". */
   path: string;
   label: string;
   radius?: number;
+  onAvailabilityChange?: (available: boolean) => void;
 }) {
   const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+  }, [worldSlug, path]);
   if (!worldSlug || failed) {
     return (
       <div className="fy-portrait--fallback" style={{ borderRadius: radius }}>
@@ -33,7 +38,11 @@ export function Portrait({
       src={mediaUrl(worldSlug, path)}
       alt={label}
       draggable={false}
-      onError={() => setFailed(true)}
+      onLoad={() => onAvailabilityChange?.(true)}
+      onError={() => {
+        setFailed(true);
+        onAvailabilityChange?.(false);
+      }}
     />
   );
 }

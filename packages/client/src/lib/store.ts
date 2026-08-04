@@ -7,6 +7,8 @@ import {
   type ClientMessage,
   type ClientState,
   type DomainEvent,
+  type Job,
+  type ProviderCallRecord,
   type ProviderId,
   type QueueCommand,
   type RankedVoice,
@@ -119,6 +121,12 @@ interface StoreState {
   /** SPEC-011: dictation results by requestId — inserted as editable text, never submitted. */
   dictation: Record<string, { text: string | null; error: string | null }>;
   voiceSidecar: { state: "not-started" | "downloading" | "unavailable" | "ready"; detail: string } | null;
+  voiceRuntimeTest: {
+    requestId: string;
+    status: "testing" | "ready" | "failed";
+    detail: string;
+    audioBase64: string | null;
+  } | null;
   /** Last main-photo accept result by sheet; null status means the command is in flight. */
   mainPhotoAcceptance: Record<
     string,
@@ -150,6 +158,7 @@ interface StoreState {
     detail: string | null;
   } | null;
   diagnosticsBundle: string | null;
+  providerCallsByJob: Record<string, ProviderCallRecord[]>;
 }
 
 export interface VoiceCandidatesState {
@@ -180,6 +189,7 @@ let current: StoreState = {
   voiceAudio: {},
   dictation: {},
   voiceSidecar: null,
+  voiceRuntimeTest: null,
   mainPhotoAcceptance: {},
   exportsState: {},
   importReport: null,
@@ -188,20 +198,31 @@ let current: StoreState = {
   envCheck: null,
   updateStatus: null,
   diagnosticsBundle: null,
+  providerCallsByJob: {},
 };
 
-export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-result" }>;
-const pendingQueueRequests = new Map<string, QueueCommand>();
+export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-result" }> & {
+  characterName?: string;
+};
+const pendingQueueRequests = new Map<string, { command: QueueCommand; characterName?: string }>();
 const queueResultListeners = new Set<(result: QueueEnqueueResult) => void>();
+const jobReadyListeners = new Set<(job: Job) => void>();
 
 export function subscribeQueueResults(listener: (result: QueueEnqueueResult) => void): () => void {
   queueResultListeners.add(listener);
   return () => queueResultListeners.delete(listener);
 }
 
-function queueRequest(command: QueueCommand): string {
+export function subscribeJobReady(listener: (job: Job) => void): () => void {
+  jobReadyListeners.add(listener);
+  return () => jobReadyListeners.delete(listener);
+}
+
+function queueRequest(command: QueueCommand, characterName?: string): string {
   const requestId = ulid();
-  if (current.connection === "open") pendingQueueRequests.set(requestId, command);
+  if (current.connection === "open") {
+    pendingQueueRequests.set(requestId, { command, ...(characterName ? { characterName } : {}) });
+  }
   return requestId;
 }
 const listeners = new Set<() => void>();
@@ -361,10 +382,14 @@ function handleFrame(json: string): void {
     const event = frame.event;
     if (event.type === "queue.enqueue-result") {
       const expected = pendingQueueRequests.get(event.requestId);
-      if (expected === event.command) {
+      if (expected?.command === event.command) {
         pendingQueueRequests.delete(event.requestId);
-        for (const listener of queueResultListeners) listener(event);
+        const result = { ...event, ...(expected.characterName ? { characterName: expected.characterName } : {}) };
+        for (const listener of queueResultListeners) listener(result);
       }
+    }
+    if (event.type === "job.ready") {
+      for (const listener of jobReadyListeners) listener(event.job);
     }
     if (event.type === "proposal.blocked") {
       gateNotices = {
@@ -498,6 +523,7 @@ function handleFrame(json: string): void {
     let voiceAudio = current.voiceAudio;
     let dictation = current.dictation;
     let voiceSidecar = current.voiceSidecar;
+    let voiceRuntimeTest = current.voiceRuntimeTest;
     let mainPhotoAcceptance = current.mainPhotoAcceptance;
     if (event.type === "voice.candidates") {
       voiceCandidates = {
@@ -520,6 +546,13 @@ function handleFrame(json: string): void {
       dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
     } else if (event.type === "voice.sidecar") {
       voiceSidecar = { state: event.state, detail: event.detail };
+    } else if (event.type === "voice.runtime-test") {
+      voiceRuntimeTest = {
+        requestId: event.requestId,
+        status: event.status,
+        detail: event.detail,
+        audioBase64: event.audioBase64,
+      };
     } else if (event.type === "main-photo.acceptance") {
       mainPhotoAcceptance = {
         ...mainPhotoAcceptance,
@@ -560,6 +593,7 @@ function handleFrame(json: string): void {
     let envCheck = current.envCheck;
     let updateStatus = current.updateStatus;
     let diagnosticsBundle = current.diagnosticsBundle;
+    let providerCallsByJob = current.providerCallsByJob;
     if (event.type === "env.check") {
       envCheck = {
         pathBudgetOk: event.pathBudgetOk,
@@ -572,6 +606,8 @@ function handleFrame(json: string): void {
       updateStatus = { status: event.status, version: event.version, detail: event.detail };
     } else if (event.type === "diagnostics.ready") {
       diagnosticsBundle = event.bundle;
+    } else if (event.type === "provider-calls.ready") {
+      providerCallsByJob = { ...providerCallsByJob, [event.jobId ?? "all"]: event.calls };
     }
     let exportsState = current.exportsState;
     if (event.type === "export.progress") {
@@ -633,6 +669,7 @@ function handleFrame(json: string): void {
       voiceAudio,
       dictation,
       voiceSidecar,
+      voiceRuntimeTest,
       mainPhotoAcceptance,
       exportsState,
       importReport,
@@ -641,6 +678,7 @@ function handleFrame(json: string): void {
       envCheck,
       updateStatus,
       diagnosticsBundle,
+      providerCallsByJob,
     });
   }
 }
@@ -1116,6 +1154,36 @@ export function detectRuntimes(): void {
   send({ kind: "detect-runtimes" });
 }
 
+export function chooseVoxaExecutable(): void {
+  send({ kind: "choose-voxa-executable" });
+}
+
+export function clearVoxaExecutable(): void {
+  send({ kind: "clear-voxa-executable" });
+}
+
+export function useBundledVoxa(): void {
+  send({ kind: "use-bundled-voxa" });
+}
+
+export function restartVoxa(): void {
+  send({ kind: "restart-voxa" });
+}
+
+export function repairVoiceModels(): void {
+  send({ kind: "repair-voice-models" });
+}
+
+export function openModelFolder(): void {
+  send({ kind: "open-model-folder" });
+}
+
+export function testLocalVoice(): string {
+  const requestId = ulid();
+  send({ kind: "test-local-voice", requestId });
+  return requestId;
+}
+
 export function setBackgroundNotifications(preference: ClientState["app"]["backgroundNotifications"]): void {
   send({ kind: "set-background-notifications", preference });
 }
@@ -1197,14 +1265,25 @@ export function generateMainPhoto(
   });
 }
 
-export function generateCharacterSheet(worldId: string, sheetId: string, styleOverride?: string): void {
-  send({
+export function generateCharacterSheet(
+  worldId: string,
+  sheetId: string,
+  styleOverride?: string,
+  characterName?: string,
+): string | null {
+  const requestId = queueRequest("generate-character-sheet", characterName);
+  const sent = send({
     kind: "generate-character-sheet",
     worldId,
     sheetId,
-    requestId: queueRequest("generate-character-sheet"),
+    requestId,
     ...(styleOverride ? { styleOverride } : {}),
   });
+  if (!sent) {
+    pendingQueueRequests.delete(requestId);
+    return null;
+  }
+  return requestId;
 }
 
 export function acceptCharacterSheet(worldId: string, sheetId: string, takeId: string): void {
@@ -1558,6 +1637,14 @@ export function generateDiagnostics(): void {
   send({ kind: "generate-diagnostics" });
 }
 
+export function listProviderCalls(jobId: string | null): void {
+  send({ kind: "list-provider-calls", jobId });
+}
+
+export function useProviderCalls(jobId: string | null): ProviderCallRecord[] | null {
+  return useStore().providerCallsByJob[jobId ?? "all"] ?? null;
+}
+
 export function openDataFolder(): void {
   send({ kind: "open-data-folder" });
 }
@@ -1615,6 +1702,10 @@ export function useVoiceSidecar(): {
   return useStore().voiceSidecar;
 }
 
+export function useVoiceRuntimeTest(): StoreState["voiceRuntimeTest"] {
+  return useStore().voiceRuntimeTest;
+}
+
 const getSnapshot = (): StoreState => current;
 const subscribe = (l: () => void): (() => void) => {
   listeners.add(l);
@@ -1656,6 +1747,7 @@ export function __setStateForTest(state: ClientState): void {
     voiceAudio: {},
     dictation: {},
     voiceSidecar: null,
+    voiceRuntimeTest: null,
     mainPhotoAcceptance: {},
     exportsState: {},
     importReport: null,
@@ -1664,6 +1756,7 @@ export function __setStateForTest(state: ClientState): void {
     envCheck: null,
     updateStatus: null,
     diagnosticsBundle: null,
+    providerCallsByJob: {},
   });
 }
 

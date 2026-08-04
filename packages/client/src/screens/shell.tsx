@@ -15,7 +15,9 @@ import {
   cancelExport as cancelExportMsg,
   cancelJob,
   checkUpdates,
+  chooseVoxaExecutable,
   clearCredential,
+  clearVoxaExecutable,
   attachHostFiles,
   attachHostText,
   archiveWorld,
@@ -28,10 +30,14 @@ import {
   detectRuntimes,
   downloadUpdate,
   generateDiagnostics,
+  listProviderCalls,
   openDataFolder,
+  openModelFolder,
   openThread,
   openWorld,
   resolveHeldJob,
+  repairVoiceModels,
+  restartVoxa,
   retryJobFinalization,
   resumeQueue,
   setCredential,
@@ -40,6 +46,7 @@ import {
   setSpendThreshold,
   useArchiveNote,
   useDiagnosticsBundle,
+  useProviderCalls,
   useEnvCheck,
   useExports as useExportsState,
   useGenesis,
@@ -51,8 +58,12 @@ import {
   useStore,
   useUpdateStatus,
   useVoiceSidecar as useVoiceSidecarState,
+  useVoiceRuntimeTest,
+  useBundledVoxa,
+  testLocalVoice,
   validateProvider,
 } from "../lib/store.js";
+import { playAudio, usePlayback } from "../lib/audio.js";
 import {
   computeNeedsYou,
   computeRunning,
@@ -65,6 +76,7 @@ import {
   type Capability,
   type ComponentHealth,
   type ProviderId,
+  type ProviderCallRecord,
   type ProviderStatus,
 } from "@arke-studio/contracts";
 
@@ -1314,12 +1326,30 @@ function SetupComponents() {
 export function SettingsLocalRuntimeScreen() {
   const { state } = useStore();
   const runtime = state?.app.runtime ?? null;
+  const voiceRuntime = state?.app.voiceRuntime ?? null;
+  const voiceTest = useVoiceRuntimeTest();
+  const playback = usePlayback();
+  const playedTest = useRef<string | null>(null);
   useEffect(() => {
     if (!runtime) detectRuntimes();
     // Detection runs once per mount when nothing is known yet; Re-detect is the manual path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    if (voiceTest?.status !== "ready" || !voiceTest.audioBase64 || playedTest.current === voiceTest.requestId) return;
+    playedTest.current = voiceTest.requestId;
+    void playAudio(voiceTest.requestId, `data:audio/wav;base64,${voiceTest.audioBase64}`);
+  }, [voiceTest]);
   const gbOrUnknown = (mb: number | null) => (mb === null ? "could not measure" : `${Math.round(mb / 1024)} GB`);
+  const sourceLabel = voiceRuntime?.source === "environment"
+    ? "Environment override"
+    : voiceRuntime?.source === "configured"
+      ? "Configured Voxa"
+      : voiceRuntime?.source === "bundled"
+        ? "Bundled Voxa"
+        : "Runtime missing";
+  const engineTone = (engine: { state: string } | undefined) =>
+    engine?.state === "ready" ? "fy-set__dot--ok" : engine?.state === "unknown" ? "" : "fy-set__dot--warn";
   return (
     <div data-screen="settings-local-runtime" className="fy-set">
       <div className="fy-set__eyebrow">THIS MACHINE</div>
@@ -1341,21 +1371,68 @@ export function SettingsLocalRuntimeScreen() {
 
       <SetupComponents />
 
-      <div className="fy-set__row">
+      <div className="fy-set__eyebrow">LOCAL VOICE RUNTIME</div>
+      <div className="fy-set__row fy-set__row--stack">
+        <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">
-            {state?.app.voiceRuntime?.source === "bundled"
-              ? `Bundled Voxa ${state.app.voiceRuntime.version}`
-              : "Voxa local speech"}
+            {sourceLabel}{voiceRuntime?.version ? ` ${voiceRuntime.version}` : ""}
           </div>
           <div className="fy-set__caps">
-            {state?.app.voiceRuntime
-              ? `${state.app.voiceRuntime.architecture} · Kokoro voice · Whisper dictation`
-              : "starts with Arke Studio; model weights download separately"}
+            {voiceRuntime?.executableName ? `${voiceRuntime.executableName} · ` : ""}
+            {voiceRuntime?.architecture ?? voiceRuntime?.expectedArchitecture ?? "unknown architecture"} · {voiceRuntime?.processState ?? "unconfigured"}
           </div>
         </div>
         <HealthDot label="Voxa local speech" health={state?.app.health.voice} />
+        </div>
+        <div className="fy-set__why">
+          <span className={cx("fy-set__dot", voiceRuntime?.detail === "Ready" ? "fy-set__dot--ok" : "fy-set__dot--warn")} />
+          <span>{voiceRuntime?.detail ?? "Runtime discovery has not completed."}</span>
+        </div>
+        {voiceRuntime?.configurationWarning && (
+          <div className="fy-set__why">
+            <span className="fy-set__dot fy-set__dot--warn" />
+            <span>{voiceRuntime.configurationWarning}</span>
+          </div>
+        )}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+          <Button onClick={() => chooseVoxaExecutable()}>Choose Voxa executable</Button>
+          {voiceRuntime?.bundledAvailable && voiceRuntime.source === "configured" && (
+            <button type="button" className="fy-set__link" onClick={() => useBundledVoxa()}>Use bundled Voxa</button>
+          )}
+          {voiceRuntime?.configured && (
+            <button type="button" className="fy-set__link" onClick={() => clearVoxaExecutable()}>Clear custom path</button>
+          )}
+          <button type="button" className="fy-set__link" onClick={() => restartVoxa()}>Restart runtime</button>
+          <button type="button" className="fy-set__link" onClick={() => repairVoiceModels()}>Download/repair voice models</button>
+          <button type="button" className="fy-set__link" onClick={() => openModelFolder()}>Open model folder</button>
+          <button type="button" className="fy-set__link" onClick={() => testLocalVoice()} disabled={voiceTest?.status === "testing"}>
+            {voiceTest?.status === "testing" ? "Testing…" : "Test local voice"}
+          </button>
+        </div>
+        {voiceTest && (
+          <div className="fy-set__note">
+            {voiceTest.detail}
+            {voiceTest.status === "ready" && voiceTest.audioBase64 && playback.status !== "playing" && (
+              <> · <button type="button" className="fy-set__link" onClick={() => void playAudio(voiceTest.requestId, `data:audio/wav;base64,${voiceTest.audioBase64}`)}>Play test</button></>
+            )}
+          </div>
+        )}
       </div>
+
+      {(["kokoro", "whisper", "phonemizer"] as const).map((engine) => {
+        const engineStatus = voiceRuntime?.engineStatus[engine];
+        return (
+          <div key={engine} className="fy-set__row">
+            <div className="fy-set__name fy-set__name--wide">
+              <div className="fy-set__title">{engine === "kokoro" ? "Kokoro voice" : engine === "whisper" ? "Whisper dictation" : "espeak-ng phonemizer"}</div>
+              <div className="fy-set__caps">{engineStatus?.detail ?? "Managed by Arke Studio"}</div>
+            </div>
+            <span className="fy-set__state">{engineStatus?.state ?? "unknown"}</span>
+            <span className={cx("fy-set__dot", engineTone(engineStatus))} />
+          </div>
+        );
+      })}
 
       <div className="fy-set__eyebrow">LOCAL MODELS</div>
       {(runtime?.models ?? []).map((m) => (
@@ -1555,6 +1632,42 @@ export function SettingsAboutScreen() {
 
 const TERMINAL_JOB = new Set(["succeeded", "failed", "cancelled"]);
 
+function ProviderCallInspector({ jobId, onClose }: { jobId: string | null; onClose: () => void }) {
+  const calls = useProviderCalls(jobId);
+  useEffect(() => listProviderCalls(jobId), [jobId]);
+  const copy = (call: ProviderCallRecord) => void navigator.clipboard.writeText(JSON.stringify(call, null, 2));
+  return (
+    <section className="fy-provider-calls" aria-label="Provider calls">
+      <div className="fy-provider-calls__head">
+        <div><div className="fy-eyebrow-sm">PROVIDER CALLS</div><div className="fy-mono">{jobId ?? "100 most recent calls"}</div></div>
+        <Button variant="ghost" onClick={onClose}>Close</Button>
+      </div>
+      <Callout tone="warning" title="Sensitive local history">
+        Requests and responses may contain prompts and world content. Credentials and binary media are redacted or summarized.
+      </Callout>
+      {calls === null && <div className="fy-mono">loading call history…</div>}
+      {calls?.length === 0 && <div className="fy-mono">No recorded calls. Calls made before this feature are not recoverable.</div>}
+      {calls?.map((call) => (
+        <details key={call.id} className="fy-provider-call" open={calls.length === 1}>
+          <summary>
+            <span>{call.operation}</span><span className="fy-mono">{call.method} {call.endpoint}</span>
+            <Badge tone={call.status === "succeeded" || call.status === "accepted" ? "success" : call.status === "pending" ? "warning" : "danger"}>
+              {call.status === "pending" ? "outcome unknown" : call.status}
+            </Badge>
+          </summary>
+          <div className="fy-provider-call__meta">{shortDateTime(call.startedAt)} · attempt {call.attempt ?? "—"} · HTTP {call.httpStatus ?? "no response"} · {call.elapsedMs === null ? "still pending" : `${call.elapsedMs} ms`}</div>
+          {call.error && <Callout tone="warning" title={`${call.error.name}${call.error.code ? ` · ${call.error.code}` : ""}`}>{call.error.message}</Callout>}
+          <div className="fy-provider-call__payloads">
+            <div><div className="fy-provider-call__label">REQUEST</div><pre>{JSON.stringify(call.request, null, 2)}</pre></div>
+            <div><div className="fy-provider-call__label">RESPONSE</div><pre>{call.response === null ? "No response was witnessed." : JSON.stringify(call.response, null, 2)}</pre></div>
+          </div>
+          <Button variant="ghost" onClick={() => copy(call)}>Copy sensitive call JSON</Button>
+        </details>
+      ))}
+    </section>
+  );
+}
+
 export function ActivityScreen() {
   const { state } = useStore();
   const reconcileReport = useReconcileReport();
@@ -1562,6 +1675,8 @@ export function ActivityScreen() {
   const exportsState = useExportsState();
   const navigate = useNavigate();
   const [scope, setScope] = useState<"active" | "all">("active");
+  const [inspectedJobId, setInspectedJobId] = useState<string | null>(null);
+  const [inspectAllCalls, setInspectAllCalls] = useState(false);
   const activeWorldId = state?.world?.meta.worldId ?? null;
 
   const jobs = [...(state?.app.jobs ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -1638,6 +1753,7 @@ export function ActivityScreen() {
                       Cancel
                     </Button>
                   )}
+                  {r.kind === "job" && <Button variant="ghost" onClick={() => setInspectedJobId(r.ref)}>Calls</Button>}
                   {r.cancellable && r.kind === "export" && activeWorldId && (
                     <Button variant="ghost" onClick={() => cancelExportMsg(activeWorldId, r.ref)}>
                       Cancel
@@ -1660,6 +1776,7 @@ export function ActivityScreen() {
                     </div>
                     <div className="fy-activityrow__sub">{entry.detail}</div>
                     <div style={{ display: "flex", gap: "var(--space-2)", marginTop: 8, flexWrap: "wrap" }}>
+                      {entry.ref && jobs.some((job) => job.id === entry.ref) && <Button variant="ghost" onClick={() => setInspectedJobId(entry.ref!)}>Provider calls</Button>}
                       {entry.actions.includes("resolve") && entry.ref && (
                         <>
                           <Button onClick={() => resolveHeldJob(entry.ref!, "resubmit")}>Resubmit · may charge again</Button>
@@ -1717,8 +1834,12 @@ export function ActivityScreen() {
               {jobActions(job).includes("retry") && (
                 <span className="scr-field__hint">failed — retry from its production's dispatch dialog</span>
               )}
+              <Button variant="ghost" onClick={() => setInspectedJobId(job.id)}>Provider calls</Button>
             </div>
           ))}
+          {(inspectedJobId || inspectAllCalls) && (
+            <ProviderCallInspector jobId={inspectAllCalls ? null : inspectedJobId} onClose={() => { setInspectedJobId(null); setInspectAllCalls(false); }} />
+          )}
         </div>
         <div className="fy-activity__side">
           <div style={{ font: "600 13px var(--font-sans)" }}>
@@ -1783,6 +1904,7 @@ export function ActivityScreen() {
           </div>
           <div style={{ flex: 1 }} />
           <Button onClick={() => navigate("/settings/providers")}>Providers &amp; keys</Button>
+          <Button variant="ghost" onClick={() => { setInspectedJobId(null); setInspectAllCalls(true); }}>All provider calls</Button>
         </div>
       </div>
     </div>

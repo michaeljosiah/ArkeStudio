@@ -144,6 +144,43 @@ describe("screen inventory", () => {
     assert.ok(!html.includes("Generate looks"));
   });
 
+  it("bounds verbose Cast feature copy without changing short copy", () => {
+    const world = FIXTURE_STATE.world!;
+    const featured = world.sheets.find((sheet) => sheet.id === "maren-kest")!;
+    const longEssence = `She carries ${"a tide-worn secret ".repeat(20)}beneath the harbour.`;
+    const fullCopy = `${featured.role} · ${featured.billing} — ${longEssence}`;
+    const expected = `${Array.from(fullCopy).slice(0, 179).join("").trimEnd()}…`;
+    const sheets = world.sheets.map((sheet) =>
+      sheet.id === featured.id
+        ? {
+            ...sheet,
+            sections: sheet.sections.map((section) =>
+              section.heading === "Essence" ? { ...section, body: longEssence } : section,
+            ),
+          }
+        : sheet,
+    );
+    __setStateForTest({ ...FIXTURE_STATE, world: { ...world, sheets } });
+    try {
+      const html = renderAt(`/w/${world.meta.worldId}/cast`).replace(/<!-- -->/g, "");
+      assert.ok(html.includes(expected), "feature copy is capped at 180 characters including the ellipsis");
+      assert.ok(!html.includes(fullCopy), "the full verbose copy is not rendered on the listing");
+      assert.ok(!html.includes("beneath the harbour."), "content beyond the limit is omitted from the listing");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  it("renders an accessible enlarged portrait dialog on Cast", () => {
+    const world = FIXTURE_STATE.world!;
+    const html = renderAt(`/w/${world.meta.worldId}/cast`);
+    assert.match(html, /<button[^>]*aria-label="View larger portrait of Maren Kest"[^>]*aria-haspopup="dialog"/);
+    assert.ok(html.includes('<dialog class="fy-portrait-dialog"'));
+    assert.ok(html.includes('aria-labelledby="portrait-dialog-title-maren-kest"'));
+    assert.ok(html.includes('aria-label="Close portrait"'));
+    assert.ok(html.includes('alt="Maren Kest portrait"'));
+  });
+
   it("renders the complete art-direction surface from its resolved record", () => {
     const html = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/art-direction`);
     for (const copy of [
@@ -329,6 +366,45 @@ describe("screen inventory", () => {
       assert.ok(text.includes("2 new composites are ready for review."));
       assert.ok(html.includes(older.id) && html.includes(newer.id));
       assert.ok(html.indexOf(newer.id) < html.indexOf(older.id), "newest completion is presented first");
+      assert.ok(
+        html.includes(`references/maren-kest/takes/${newer.id}/character-sheet.png`),
+        "the newest generated sheet is visible for review",
+      );
+      assert.match(html, /aria-label="View larger character sheet for Maren Kest"[^>]*aria-haspopup="dialog"/);
+      assert.ok(html.includes('aria-label="Close character sheet"'));
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  it("shows an in-place character sheet loader while generation is active", () => {
+    const world = FIXTURE_STATE.world!;
+    const running = {
+      id: "jb_01J8E0000000000000000000J6",
+      idempotencyKey: "01J8E1000000000000000000K6",
+      worldId: world.meta.worldId,
+      target: { kind: "character-sheet", id: "maren-kest/g1" },
+      capability: "image" as const,
+      provider: "fal",
+      model: "flux",
+      params: { characterName: "Maren Kest" },
+      estimatedMicroUsd: 40000,
+      status: "running" as const,
+      providerJobId: "remote-sheet-1",
+      attempt: 1,
+      error: null,
+      createdAt: "2026-08-04T09:00:00Z",
+      updatedAt: "2026-08-04T09:00:00Z",
+    };
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      app: { ...FIXTURE_STATE.app, jobs: [...FIXTURE_STATE.app.jobs, running] },
+    });
+    try {
+      const html = renderAt(`/w/${world.meta.worldId}/cast/maren-kest/kit`);
+      assert.ok(html.includes("Generating character sheet for Maren Kest"));
+      assert.ok(html.includes("You can leave this page"));
+      assert.ok(html.includes("GENERATING"));
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }

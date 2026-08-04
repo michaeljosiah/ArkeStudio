@@ -25,17 +25,15 @@ type CommandRunner = (command: string, args: string[], timeoutMs: number) => Pro
 
 const runCommand: CommandRunner = (command, args, timeoutMs) =>
   new Promise((resolve) => {
-    execFile(
-      command,
-      args,
-      {
-        timeout: timeoutMs,
-        encoding: "utf8",
-        // Windows cannot execute npm's .cmd/.bat shims without cmd.exe.
-        shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(command),
-        windowsHide: true,
-      },
-      (error, stdout) => {
+    const shim = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
+    const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const executable = shim ? (process.env["ComSpec"] ?? "cmd.exe") : command;
+    const executableArgs = shim ? ["/d", "/s", "/c", [quote(command), ...args.map(quote)].join(" ")] : args;
+    let settled = false;
+    const child = execFile(executable, executableArgs, { encoding: "utf8", windowsHide: true }, (error, stdout) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         const code =
           error && typeof (error as { code?: unknown }).code === "number"
             ? (error as { code: number }).code
@@ -43,8 +41,18 @@ const runCommand: CommandRunner = (command, args, timeoutMs) =>
               ? null
               : 0;
         resolve({ status: code, stdout: stdout || "" });
-      },
-    );
+      });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      if (process.platform === "win32" && child.pid !== undefined) {
+        execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }, () => {});
+      } else {
+        child.kill("SIGKILL");
+      }
+      resolve({ status: null, stdout: "" });
+    }, timeoutMs);
+    timer.unref?.();
   });
 
 async function versionOf(command: string, run: CommandRunner): Promise<string | null> {

@@ -58,6 +58,7 @@ ipcRenderer.on("arke:startup-state", (_event, state: StartupState & { port?: num
   }
   for (const listener of startupListeners) listener(startupState);
 });
+ipcRenderer.send("arke:startup-state-ready");
 
 function notifyStatus(status: "connecting" | "open" | "closed"): void {
   for (const l of statusListeners) l(status);

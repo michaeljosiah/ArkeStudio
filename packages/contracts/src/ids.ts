@@ -47,6 +47,7 @@ export const ID_PREFIXES = {
   artifact: "ar",
   commit: "cm",
   session: "sess",
+  providerCall: "pc",
 } as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
@@ -64,6 +65,7 @@ export const JobIdSchema = prefixedIdSchema("jb");
 export const PassIdSchema = prefixedIdSchema("ps");
 export const ProposalIdSchema = prefixedIdSchema("pr");
 export const ArtifactIdSchema = prefixedIdSchema("ar");
+export const ProviderCallIdSchema = prefixedIdSchema("pc");
 
 /**
  * Entity slugs are filenames (master spec §2.2): lowercase kebab-case, no spaces. Kept

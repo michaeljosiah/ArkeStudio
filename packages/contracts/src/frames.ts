@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { GenesisIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, UlidSchema } from "./ids.js";
+import { GenesisIdSchema, JobIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, UlidSchema } from "./ids.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
 import { BackgroundNotificationPreferenceSchema, ThemePreferenceSchema } from "./settings.js";
@@ -336,6 +336,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** SPEC-008 R-22: re-run local runtime detection on demand. */
   z.object({ kind: z.literal("detect-runtimes") }).strict(),
+  /** Voxa configuration stays host-owned: none of these messages contains a filesystem path. */
+  z.object({ kind: z.literal("choose-voxa-executable") }).strict(),
+  z.object({ kind: z.literal("clear-voxa-executable") }).strict(),
+  z.object({ kind: z.literal("use-bundled-voxa") }).strict(),
+  z.object({ kind: z.literal("restart-voxa") }).strict(),
+  z.object({ kind: z.literal("repair-voice-models") }).strict(),
+  z.object({ kind: z.literal("open-model-folder") }).strict(),
+  z.object({ kind: z.literal("test-local-voice"), requestId: UlidSchema }).strict(),
   z
     .object({
       kind: z.literal("set-background-notifications"),
@@ -350,6 +358,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** SPEC-009 R-14: cancel a job in any non-terminal state; remote cancel attempted where supported. */
   z.object({ kind: z.literal("cancel-job"), jobId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("list-provider-calls"), jobId: JobIdSchema.nullable() }).strict(),
   z.object({ kind: z.literal("retry-job-finalization"), jobId: z.string().min(1) }).strict(),
   /**
    * SPEC-009 R-4/D4: resolve a job held as needs-reconciliation. "resubmit" accepts the stated

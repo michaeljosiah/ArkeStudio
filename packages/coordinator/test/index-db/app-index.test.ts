@@ -78,6 +78,26 @@ describe("the app index (R-5, R-6, R-15, D2, D3)", () => {
     await restarted.close();
   });
 
+  it("replaces a cached row when a known folder now contains a different world", async () => {
+    const { root, worldDir } = await makeTempRoot();
+    const provider = new FsWorldProvider(root);
+    const [known] = await provider.listWorlds();
+    await provider.close();
+
+    const metaPath = join(worldDir, "world.json");
+    const meta = JSON.parse(await readFile(metaPath, "utf8"));
+    meta.worldId = "01J8F3K2QW9VZX4N7M0RTYB6HE";
+    meta.name = "Replacement World";
+    await writeFile(metaPath, JSON.stringify(meta, null, 2) + "\n", "utf8");
+
+    const restarted = new FsWorldProvider(root);
+    const worlds = await restarted.listWorlds();
+    assert.equal(worlds.length, 1);
+    assert.notEqual(worlds[0]!.worldId, known!.worldId);
+    assert.equal(worlds[0]!.name, "Replacement World");
+    await restarted.close();
+  });
+
   it("rebuilds jobs and ledger from the append-only logs, and deleting it loses nothing (R-5)", async () => {
     const root = await tempDir("arke-appidx-");
     const { cp, mkdir } = await import("node:fs/promises");

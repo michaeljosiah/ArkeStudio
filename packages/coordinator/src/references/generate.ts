@@ -245,6 +245,7 @@ export function characterSheetRequest(
       provider: model.provider,
       model: model.id,
       params: {
+        characterName: sheet.name,
         prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. One composite character sheet on a clean neutral field: front, three-quarter, profile and back turnaround; expression studies; costume and prop details; clear relative proportions. Preserve the supplied identity exactly.`,
         references: identityReferences,
         referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),

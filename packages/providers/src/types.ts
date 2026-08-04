@@ -69,6 +69,32 @@ export class ProviderRequestRejectedError extends Error {
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
+export interface ProviderCallContext {
+  jobId?: string;
+  attempt?: number;
+  model?: string;
+}
+
+export interface ProviderCallCapture {
+  start(input: {
+    provider: ProviderId;
+    operation: string;
+    context?: ProviderCallContext;
+    method: string;
+    endpoint: string;
+    headers: Record<string, string>;
+    body: unknown;
+  }): Promise<string>;
+  finish(id: string, input: { status: number; headers: Record<string, string>; body: unknown }): Promise<void>;
+  fail(id: string, error: unknown): Promise<void>;
+}
+
+export interface VoiceCatalogueClient extends ProviderClient {
+  listVoicesCatalog(key: string): Promise<
+    Array<{ provider: string; voiceId: string; label: string; attributes: string[]; local: boolean; canClone: boolean }>
+  >;
+}
+
 export interface ProviderClient {
   readonly id: ProviderId;
   readonly declarations: ClientDeclarations;
@@ -79,8 +105,10 @@ export interface ProviderClient {
    */
   validateKey(key: string): Promise<CapabilityProbe[]>;
 
-  submit(key: string, request: SubmitRequest): Promise<SubmitResult>;
-  poll(key: string, remoteId: string): Promise<PollResult>;
-  fetchArtifacts(key: string, remoteId: string): Promise<FetchedArtifact[]>;
-  cancel(key: string, remoteId: string): Promise<void>;
+  submit(key: string, request: SubmitRequest, context?: ProviderCallContext): Promise<SubmitResult>;
+  poll(key: string, remoteId: string, context?: ProviderCallContext): Promise<PollResult>;
+  fetchArtifacts(key: string, remoteId: string, context?: ProviderCallContext): Promise<FetchedArtifact[]>;
+  cancel(key: string, remoteId: string, context?: ProviderCallContext): Promise<void>;
+  lookupByKey?(key: string, idempotencyKey: string, context?: ProviderCallContext): Promise<{ remoteId: string } | null>;
+  listRecent?(key: string, context?: ProviderCallContext): Promise<Array<{ remoteId: string; idempotencyKey?: string; createdAt: string }>>;
 }

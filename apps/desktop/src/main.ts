@@ -8,8 +8,11 @@ import {
   ChildLedger,
   ChildSupervisor,
   Coordinator,
+  AppSettingsFile,
   defaultAppRoot,
   FsWorldProvider,
+  ProviderCallStore,
+  SecretRegistry,
   nodeSetupDeps,
   harnessTrace,
   spoolBytes,
@@ -28,12 +31,11 @@ import {
 } from "@arke-studio/adapter-opencode";
 import {
   createProviderClients,
-  ElevenLabsClient,
   probeRuntime,
   SHIPPED_MANIFEST,
+  type VoiceCatalogueClient,
 } from "@arke-studio/providers";
 import {
-  compatibleSidecarHealth,
   KOKORO_PRESETS,
   localCandidates,
   sidecarState,
@@ -44,7 +46,19 @@ import {
 import { BackgroundNotificationController } from "./background-notifications.js";
 import { launchDesktop, StartupController, type StartupState } from "./startup.js";
 import { resolveTheme, themePalette, type ResolvedTheme } from "./theme.js";
-import type { ThemePreference } from "@arke-studio/contracts";
+import {
+  environmentVoxaArgs,
+  safeVoxaExtraArgs,
+  selectVoxa,
+  validateVoxaExecutable,
+  type VoxaSelection,
+} from "./voxa-runtime.js";
+import type {
+  ThemePreference,
+  VoiceRuntimeFailure,
+  VoiceRuntimeStatus,
+  VoxaSettings,
+} from "@arke-studio/contracts";
 
 /**
  * The Electron-ABI SQLite binding (SPEC-003 R-7). Aliased so the Node-ABI copy used by tests
@@ -94,18 +108,6 @@ function traceDesktop(kind: string, detail: Record<string, unknown> = {}): void 
   }
 }
 
-/**
- * Child commands: environment override first, then the bundled binary in a packaged build
- * (SPEC-016 R-8). Absent both, the feature degrades with its stated reason.
- */
-function childSpec(id: string, cmdVar: string, argsVar: string, bundled?: string) {
-  const bundledPath = app.isPackaged && bundled !== undefined ? join(process.resourcesPath, bundled) : null;
-  const command =
-    process.env[cmdVar] ?? (bundledPath !== null && existsSync(bundledPath) ? bundledPath : null);
-  const args = process.env[argsVar]?.split(" ").filter(Boolean) ?? [];
-  return { id, command, args };
-}
-
 /** The bundled ffmpeg (SPEC-013 R-19 via SPEC-016 R-8), or an explicit path, or nothing. */
 function ffmpegPath(): string | null {
   if (process.env["ARKE_FFMPEG"]) return process.env["ARKE_FFMPEG"];
@@ -116,6 +118,11 @@ function ffmpegPath(): string | null {
 function windowsArchitecture(): "x64" | "arm64" | null {
   if (process.arch === "x64" || process.arch === "arm64") return process.arch;
   return null;
+}
+
+function bundledVoxaPath(): string | null {
+  const path = app.isPackaged ? join(process.resourcesPath, "voxa", "voxa.exe") : null;
+  return path !== null && existsSync(path) ? path : null;
 }
 
 let coordinator: Coordinator | null = null;
@@ -130,6 +137,7 @@ let windowReady = false;
 let windowShowFallback: ReturnType<typeof setTimeout> | null = null;
 let startupController: StartupController | null = null;
 let startupProvider: FsWorldProvider | null = null;
+let startupState: StartupState = { status: "initializing" };
 
 function showWindowWhenThemed(): void {
   if (!windowReady || !rendererThemeReady || !window || window.isDestroyed()) return;
@@ -189,6 +197,7 @@ const backgroundNotifications = new BackgroundNotificationController({
 });
 
 function publishStartup(state: StartupState): void {
+  startupState = state;
   traceDesktop(
     `startup.${state.status}`,
     state.status === "ready"
@@ -216,6 +225,10 @@ function registerHostIpc(): void {
       pendingActivityActivation = false;
       window.webContents.send("arke:activate-activity");
     }
+  });
+  ipcMain.on("arke:startup-state-ready", (event) => {
+    if (!window || event.sender !== window.webContents) return;
+    window.webContents.send("arke:startup-state", startupState);
   });
   ipcMain.on("arke:set-host-theme", (event, preference: unknown) => {
     if (!window || event.sender !== window.webContents) return;
@@ -297,6 +310,14 @@ async function createWindow(): Promise<void> {
       if (window?.isVisible()) window.hide();
     }
   });
+  window.webContents.on("will-navigate", (event, url) => {
+    const allowed = process.env.ARKE_DEV_SERVER_URL ?? `file://${clientIndex.replace(/\\/g, "/")}`;
+    if (!url.startsWith(allowed)) event.preventDefault();
+  });
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url);
+    return { action: "deny" };
+  });
   window.webContents.on("render-process-gone", (_event, details) => {
     activityActivationReady = false;
     traceDesktop("window.render-process-gone", { reason: details.reason, exitCode: details.exitCode });
@@ -377,49 +398,90 @@ async function initialize(): Promise<{ port: number }> {
   };
 
   // One client set serves validation (SPEC-008) and dispatch (SPEC-009).
-  const providerClients = createProviderClients((url, init) => fetch(url, init));
+  const providerSecrets = new SecretRegistry();
+  const providerCalls = new ProviderCallStore(join(appRoot, "provider-calls", "calls.jsonl"), providerSecrets);
+  const providerClients = createProviderClients((url, init) => fetch(url, init), providerCalls);
 
-  // The Voxa sidecar (SPEC-011): supervised like the harness; local inference only (D1).
-  // The client resolves the supervisor's port lazily so restarts keep working.
-  const voxaSpec = childSpec("voxa", "ARKE_VOXA_CMD", "ARKE_VOXA_ARGS", join("voxa", "voxa.exe"));
-  const bundledVoxa = app.isPackaged && process.env["ARKE_VOXA_CMD"] === undefined;
+  // Voxa discovery is environment -> configured -> bundled -> absent. Configured paths stay
+  // in the main process; renderer state receives only source, basename, and safe categories.
+  const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
+  let voxaSettings = (await hostSettings.load()).voxa;
   const expectedArchitecture = windowsArchitecture();
+  const discoverVoxa = (settings: VoxaSettings) =>
+    selectVoxa({
+      settings,
+      environmentPath: process.env["ARKE_VOXA_CMD"],
+      bundledPath: bundledVoxaPath(),
+      expectedArchitecture,
+    });
+  let voxaSelection = discoverVoxa(voxaSettings);
   let voxaHealth: SidecarHealth | null = null;
-  const voxaArgs = bundledVoxa
-    ? [
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "{port}",
-        "--kokoro-model",
-        join(appRoot, "models", "kokoro-82m", "model_quantized.onnx"),
-        "--kokoro-config",
-        join(appRoot, "models", "kokoro-82m", "config.json"),
-        "--kokoro-voices",
-        join(appRoot, "models", "kokoro-82m", "voices"),
-        "--whisper-model",
-        join(appRoot, "models", "whisper-base-en", "ggml-base.en.bin"),
-        "--espeak",
-        join(process.resourcesPath, "espeak-ng", "espeak-ng.exe"),
-        "--espeak-data",
-        join(process.resourcesPath, "espeak-ng", "share", "espeak-ng-data"),
-      ]
-    : voxaSpec.args;
+  let endpointCompatible = false;
+  let lastRuntimeFailure: VoiceRuntimeFailure | null = voxaSelection.failure;
+
+  const voxaPaths = (settings: VoxaSettings) => {
+    const modelRoot = settings.modelRoot ?? join(appRoot, "models");
+    const espeakRoot = app.isPackaged
+      ? join(process.resourcesPath, "espeak-ng")
+      : join(repoRoot, "apps", "desktop", "build-resources", "espeak-ng", process.arch);
+    return {
+      kokoroModel: join(modelRoot, "kokoro-82m", "model_quantized.onnx"),
+      kokoroConfig: join(modelRoot, "kokoro-82m", "config.json"),
+      kokoroVoices: join(modelRoot, "kokoro-82m", "voices"),
+      whisperModel: join(modelRoot, "whisper-base-en", "ggml-base.en.bin"),
+      espeak: join(espeakRoot, "espeak-ng.exe"),
+      espeakData: join(espeakRoot, "share", "espeak-ng-data"),
+    };
+  };
+  const voxaLaunch = (selection: VoxaSelection, settings: VoxaSettings) => {
+    const paths = voxaPaths(settings);
+    const advanced = safeVoxaExtraArgs(
+      selection.source === "environment"
+        ? environmentVoxaArgs(process.env["ARKE_VOXA_ARGS_JSON"])
+        : settings.extraArgs,
+    );
+    return {
+      command: selection.command,
+      args: [
+        "--host", "127.0.0.1",
+        "--port", "{port}",
+        "--kokoro-model", paths.kokoroModel,
+        "--kokoro-config", paths.kokoroConfig,
+        "--kokoro-voices", paths.kokoroVoices,
+        "--whisper-model", paths.whisperModel,
+        "--espeak", paths.espeak,
+        "--espeak-data", paths.espeakData,
+        ...advanced,
+      ],
+      env: { SystemRoot: process.env["SystemRoot"] ?? "C:\\Windows" },
+      inheritEnv: false,
+    };
+  };
   const voxaSupervisor = new ChildSupervisor(
     {
-      ...voxaSpec,
-      args: voxaArgs,
+      id: "voxa",
+      ...voxaLaunch(voxaSelection, voxaSettings),
       healthPath: "/health",
       readyTimeoutMs: 30_000,
-      inheritEnv: !bundledVoxa,
-      ...(bundledVoxa ? { env: { SystemRoot: process.env["SystemRoot"] ?? "C:\\Windows" } } : {}),
       validateHealth: async (response) => {
-        if (expectedArchitecture === null) return false;
         const parsed = await response.json().catch(() => null);
         const health = parsed ? SidecarHealthSchema.safeParse(parsed) : null;
-        if (!health?.success || !compatibleSidecarHealth(health.data, expectedArchitecture)) return false;
+        if (!health?.success) {
+          lastRuntimeFailure = "incompatible-health";
+          return { ok: false, reason: "voxa health contract is incompatible" };
+        }
+        if (expectedArchitecture === null || health.data.architecture !== expectedArchitecture) {
+          lastRuntimeFailure = "architecture-mismatch";
+          return { ok: false, reason: "voxa architecture does not match this Arke build" };
+        }
+        if (!health.data.engines.includes("kokoro") || !health.data.engines.includes("whisper")) {
+          lastRuntimeFailure = "incompatible-health";
+          return { ok: false, reason: "voxa health contract omits a required engine" };
+        }
         voxaHealth = health.data;
-        return true;
+        endpointCompatible = true;
+        lastRuntimeFailure = null;
+        return { ok: true };
       },
     },
     { ledger: childLedger },
@@ -434,6 +496,104 @@ async function initialize(): Promise<{ port: number }> {
     transcribe: (audio: Uint8Array, contentType: string) => voxaAt().transcribe(audio, contentType),
   };
 
+  const setupEngine = (id: string, healthReady: boolean) => {
+    const component = coordinator?.getState().app.setup?.components.find((item) => item.id === id);
+    if (component?.state === "downloading" || component?.state === "installing") {
+      return { state: "downloading" as const, detail: "Model download is in progress." };
+    }
+    if (component?.state === "failed") {
+      const verification = /checksum|verification|not the file/i.test(component.detail ?? "");
+      return {
+        state: verification ? "verification-failed" as const : "unavailable" as const,
+        detail: verification ? "Model verification failed." : "Model setup failed.",
+      };
+    }
+    if (component && component.state !== "ready" && component.state !== "present") {
+      return { state: "missing" as const, detail: "Model files are missing." };
+    }
+    return healthReady
+      ? { state: "ready" as const }
+      : { state: "unavailable" as const, detail: "The runtime could not load this model." };
+  };
+
+  const runtimeStatus = (): VoiceRuntimeStatus => {
+    const paths = voxaPaths(voxaSettings);
+    const kokoro = setupEngine("kokoro-82m", voxaHealth?.engineStatus.kokoro.ready ?? false);
+    const whisper = setupEngine("whisper-base-en", voxaHealth?.engineStatus.whisper.ready ?? false);
+    const phonemizerReady = existsSync(paths.espeak) && existsSync(paths.espeakData);
+    let failure = lastRuntimeFailure;
+    if (failure === null && kokoro.state === "verification-failed") failure = "model-verification-failed";
+    if (failure === null && whisper.state === "verification-failed") failure = "model-verification-failed";
+    if (failure === null && voxaHealth?.unavailableReason !== undefined) failure = "model-verification-failed";
+    if (failure === null && kokoro.state === "missing") failure = "kokoro-model-missing";
+    if (failure === null && whisper.state === "missing") failure = "whisper-model-missing";
+    if (failure === null && !phonemizerReady) failure = "phonemizer-unavailable";
+    if (failure === null && voxaSupervisor.status === "failed") failure = "launch-failed";
+    const detail =
+      failure === "runtime-missing" ? "Runtime missing" :
+      failure === "launch-failed" ? "Runtime would not start" :
+      failure === "architecture-mismatch" ? "Runtime architecture does not match" :
+      failure === "incompatible-health" ? "Runtime is running but /health is incompatible" :
+      failure === "kokoro-model-missing" ? "Kokoro model missing" :
+      failure === "whisper-model-missing" ? "Whisper model missing" :
+      failure === "model-verification-failed" ? "Model verification failed" :
+      failure === "phonemizer-unavailable" ? "Phonemizer unavailable" :
+      voxaSupervisor.status === "healthy" && voxaHealth?.ok ? "Ready" : "Runtime is starting";
+    return {
+      source: voxaSelection.source,
+      configured: voxaSelection.configured,
+      bundledAvailable: voxaSelection.bundledAvailable,
+      executableName: voxaSelection.executableName,
+      version: voxaHealth?.version ?? null,
+      protocolVersion: voxaHealth?.protocolVersion ?? null,
+      architecture: voxaHealth?.architecture ?? null,
+      expectedArchitecture,
+      processState: voxaSupervisor.status,
+      endpointCompatible,
+      failureCategory: failure,
+      detail,
+      configurationWarning: voxaSelection.warning,
+      engines: voxaHealth?.engines ?? [],
+      engineStatus: {
+        kokoro,
+        whisper,
+        phonemizer: phonemizerReady
+          ? { state: "ready" }
+          : { state: "unavailable", detail: "The managed espeak-ng runtime is missing." },
+      },
+    };
+  };
+
+  const publishRuntimeStatus = async (): Promise<void> => {
+    const health = voxaSelection.command === null ? null : await voxaAt().health();
+    if (health) {
+      voxaHealth = health;
+      endpointCompatible = health.architecture === expectedArchitecture;
+    }
+    const runtime = runtimeStatus();
+    const status = sidecarState(health);
+    coordinator?.emit({
+      at: new Date().toISOString(),
+      type: "voice.sidecar",
+      state: status.state,
+      detail: runtime.detail,
+      runtime,
+    });
+  };
+
+  const applyVoxaSettings = async (settings: VoxaSettings): Promise<void> => {
+    voxaSettings = settings;
+    voxaSelection = discoverVoxa(settings);
+    voxaHealth = null;
+    endpointCompatible = false;
+    lastRuntimeFailure = voxaSelection.failure;
+    await voxaSupervisor.reconfigure(voxaLaunch(voxaSelection, settings));
+    await publishRuntimeStatus();
+  };
+  voxaSupervisor.on("status", () => {
+    if (coordinator) void publishRuntimeStatus();
+  });
+
   coordinator = new Coordinator({
     provider,
     adapter,
@@ -444,6 +604,8 @@ async function initialize(): Promise<{ port: number }> {
     appRoot,
     authoring: { buildConfig: buildSessionConfig, agentForPurpose, roster: ROSTER },
     cipher,
+    secretRegistry: providerSecrets,
+    providerCalls,
     validators: providerClients,
     manifest: SHIPPED_MANIFEST,
     probeRuntime: () => probeRuntime(appRoot),
@@ -513,29 +675,50 @@ async function initialize(): Promise<{ port: number }> {
     voice: {
       sidecar: voxaSidecar,
       sidecarHealth: async () => {
-        const health = await voxaAt().health();
+        const health = voxaSelection.command === null ? null : await voxaAt().health();
         voxaHealth = health;
-        const status = sidecarState(health);
-        return {
-          ...status,
-          runtime:
-            voxaHealth && bundledVoxa
-              ? {
-                  source: "bundled" as const,
-                  version: voxaHealth.version,
-                  protocolVersion: voxaHealth.protocolVersion,
-                  architecture: voxaHealth.architecture,
-                  engines: voxaHealth.engines,
-                  engineStatus: voxaHealth.engineStatus,
-                }
-              : null,
-        };
+        if (health) endpointCompatible = health.architecture === expectedArchitecture;
+        const runtime = runtimeStatus();
+        return { ...sidecarState(health), detail: runtime.detail, runtime };
+      },
+      chooseExecutable: async () => {
+        const parent = window;
+        if (!parent) return null;
+        const result = await dialog.showOpenDialog(parent, {
+          title: "Choose Voxa executable",
+          buttonLabel: "Use Voxa",
+          properties: ["openFile"],
+          filters: [
+            { name: "Voxa executable", extensions: ["exe"] },
+            { name: "All files", extensions: ["*"] },
+          ],
+        });
+        if (result.canceled || !result.filePaths[0]) return null;
+        const path = result.filePaths[0];
+        const validation = validateVoxaExecutable(path, expectedArchitecture);
+        if (!validation.ok) {
+          await dialog.showMessageBox(parent, {
+            type: "error",
+            title: "Voxa cannot be used",
+            message: validation.detail,
+          });
+          return null;
+        }
+        return path;
+      },
+      applySettings: applyVoxaSettings,
+      restart: async () => {
+        voxaHealth = null;
+        endpointCompatible = false;
+        lastRuntimeFailure = voxaSelection.failure;
+        await voxaSupervisor.restart();
+        await publishRuntimeStatus();
       },
       localPresets: localCandidates(KOKORO_PRESETS),
       cloudSources: [
         {
           provider: "elevenlabs",
-          list: (key: string) => new ElevenLabsClient((url, init) => fetch(url, init)).listVoicesCatalog(key),
+          list: (key: string) => (providerClients.elevenlabs as VoiceCatalogueClient).listVoicesCatalog(key),
         },
       ],
     },

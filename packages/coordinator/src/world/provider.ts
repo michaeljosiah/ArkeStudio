@@ -107,9 +107,31 @@ export class FsWorldProvider implements WorldProvider {
     await this.ensureAppRoot();
     if (this.appIndex?.seeded) {
       const cached = this.appIndex.listWorlds(this.worldsDir());
-      const additions = await this.scanAllSummaries(new Set(cached.map((world) => world.slug)));
+      const cachedByFolder = new Map(cached.map((world) => [world.slug.toLowerCase(), world]));
+      const entries = await readdir(toExtendedLength(this.worldsDir())).catch(() => [] as string[]);
+      const additions: WorldSummary[] = [];
+      const scanFolder = async (folder: string): Promise<void> => {
+        additions.push(...(await this.scanAllSummaries(new Set(entries.filter((entry) => entry !== folder)))));
+      };
+      for (const folder of entries) {
+        const known = cachedByFolder.get(folder.toLowerCase());
+        if (!known) {
+          await scanFolder(folder);
+          continue;
+        }
+        try {
+          const meta = await readWorldMeta(join(this.worldsDir(), folder));
+          if (meta.worldId !== known.worldId || meta.slug !== known.slug) {
+            this.appIndex.removeWorld(known.worldId);
+            await scanFolder(folder);
+          }
+        } catch {
+          /* AppIndex.listWorlds already drops missing known rows; unreadable replacements stay absent. */
+        }
+      }
       for (const summary of additions) this.appIndex.upsertWorld(summary);
-      return [...cached, ...additions].sort((a, b) => b.updated.localeCompare(a.updated));
+      const replaced = new Set(additions.map((world) => world.slug.toLowerCase()));
+      return [...cached.filter((world) => !replaced.has(world.slug.toLowerCase())), ...additions].sort((a, b) => b.updated.localeCompare(a.updated));
     }
     const summaries = await this.scanAllSummaries();
     if (this.appIndex) {
