@@ -19,6 +19,20 @@ export function truncatedPngBytes(): Uint8Array {
   return pngBytes().slice(0, 40);
 }
 
+export function jpegBytes(): Uint8Array {
+  return Uint8Array.from([0xff, 0xd8, ...Array.from({ length: 64 }, () => 0x00), 0xff, 0xd9]);
+}
+
+export function webpBytes(): Uint8Array {
+  return Uint8Array.from([
+    0x52, 0x49, 0x46, 0x46,
+    0x0c, 0x00, 0x00, 0x00,
+    0x57, 0x45, 0x42, 0x50,
+    0x56, 0x50, 0x38, 0x20,
+    0x00, 0x00, 0x00, 0x00,
+  ]);
+}
+
 interface RemoteJob {
   remoteId: string;
   idempotencyKey?: string;

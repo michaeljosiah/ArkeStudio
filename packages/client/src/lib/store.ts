@@ -1006,8 +1006,12 @@ export function establishLook(worldId: string, sheetId: string, count: number): 
   send({ kind: "establish-look", worldId, sheetId, count });
 }
 
-export function chooseAnchor(worldId: string, sheetId: string, file: string): void {
-  send({ kind: "choose-anchor", worldId, sheetId, file });
+export function chooseAnchor(
+  worldId: string,
+  sheetId: string,
+  selection: { source: "take"; takeId: string } | { source: "candidate"; file: string },
+): void {
+  send({ kind: "choose-anchor", worldId, sheetId, selection });
 }
 
 export function importMainPhotoCandidate(worldId: string, sheetId: string): void {
@@ -1033,8 +1037,8 @@ export function generateCharacterSheet(worldId: string, sheetId: string, styleOv
   });
 }
 
-export function acceptCharacterSheet(worldId: string, sheetId: string, file: string): void {
-  send({ kind: "accept-character-sheet", worldId, sheetId, file });
+export function acceptCharacterSheet(worldId: string, sheetId: string, takeId: string): void {
+  send({ kind: "accept-character-sheet", worldId, sheetId, takeId });
 }
 
 export function generateCharacterLooks(
@@ -1051,11 +1055,9 @@ export function generateCharacterLooks(
 export function acceptCharacterLook(
   worldId: string,
   sheetId: string,
-  file: string,
-  lookKind: "costume" | "pose-expression" | "condition-age",
-  prompt: string,
+  takeId: string,
 ): void {
-  send({ kind: "accept-character-look", worldId, sheetId, file, lookKind, prompt });
+  send({ kind: "accept-character-look", worldId, sheetId, takeId });
 }
 
 export function rejectReferenceTake(worldId: string, takeId: string, field: string, note?: string): void {

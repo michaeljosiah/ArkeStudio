@@ -242,7 +242,7 @@ export async function acceptCharacterLook(
     file: string;
     kind: "costume" | "pose-expression" | "condition-age";
     prompt: string;
-    jobId: Job["id"];
+    jobId?: Job["id"];
     takeId: Take["id"];
     artDirectionVersion: number;
     review?: ReviewDecision;
@@ -262,7 +262,7 @@ export async function acceptCharacterLook(
           file: input.file,
           kind: input.kind,
           prompt: input.prompt,
-          sourceJobId: input.jobId,
+          ...(input.jobId ? { sourceJobId: input.jobId } : {}),
           sourceTakeId: input.takeId,
           artDirectionVersion: input.artDirectionVersion,
           acceptedAt: store.now(),

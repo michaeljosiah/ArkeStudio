@@ -140,6 +140,37 @@ describe("screen inventory", () => {
     }
   });
 
+  it("shows every pending character sheet take in deterministic order", () => {
+    const world = FIXTURE_STATE.world!;
+    const take = (id: string, completedAt: string) => ({
+      id,
+      coversShots: [],
+      kind: "sheet" as const,
+      reference: { sheetId: "maren-kest" },
+      provider: "fal",
+      model: "flux",
+      provenance: { canonRevision: 42, sheets: { "maren-kest": 4 } },
+      references: [],
+      params: {},
+      cost: { estimatedMicroUsd: 40000, actualMicroUsd: null },
+      dispatchedAt: "2026-08-04T06:00:00Z",
+      completedAt,
+      media: "character-sheet.png",
+    });
+    const older = take("tk_01J8A0000000000000000000R1", "2026-08-04T06:01:00Z");
+    const newer = take("tk_01J8A0000000000000000000R2", "2026-08-04T06:02:00Z");
+    __setStateForTest({ ...FIXTURE_STATE, world: { ...world, referenceTakes: [older, newer] } });
+    try {
+      const html = renderAt(`/w/${world.meta.worldId}/cast/maren-kest/kit`);
+      const text = html.replace(/<!-- -->/g, "");
+      assert.ok(text.includes("2 new composites are ready for review."));
+      assert.ok(html.includes(older.id) && html.includes(newer.id));
+      assert.ok(html.indexOf(newer.id) < html.indexOf(older.id), "newest completion is presented first");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
   it("names the inherited world look on the remaining visual generation surfaces", () => {
     const worldId = FIXTURE_STATE.world!.meta.worldId;
     const workspace = renderAt(`/w/${worldId}/p/saltlight/generate`);

@@ -53,6 +53,25 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     await provider.close();
   });
 
+  it("serves preserved character image formats with matching MIME types", async () => {
+    const { root } = await makeTempRoot();
+    const mediaDir = join(root, "worlds", "the-undersong", "references", "maren-kest", "takes", "tk_formats");
+    await mkdir(mediaDir, { recursive: true });
+    await writeFile(join(mediaDir, "portrait.jpg"), "jpeg");
+    await writeFile(join(mediaDir, "portrait.webp"), "webp");
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+
+    assert.equal(
+      (await provider.serveMedia("the-undersong", "references/maren-kest/takes/tk_formats/portrait.jpg"))?.contentType,
+      "image/jpeg",
+    );
+    assert.equal(
+      (await provider.serveMedia("the-undersong", "references/maren-kest/takes/tk_formats/portrait.webp"))?.contentType,
+      "image/webp",
+    );
+    await provider.close();
+  });
+
   it("reads and writes the deepest path the layout allows via extended-length prefixes (R-10)", async () => {
     // Build a path beyond the classic 260-char limit and prove our own I/O handles it.
     const base = await tempDir("arke-deep-");

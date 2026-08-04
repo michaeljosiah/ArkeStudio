@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { GenesisIdSchema, ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
+import { GenesisIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, UlidSchema } from "./ids.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
 
@@ -339,7 +339,20 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** SPEC-010 D2: the chosen candidate becomes the anchor — the most consequential accept. */
   z
-    .object({ kind: z.literal("choose-anchor"), worldId: UlidSchema, sheetId: SlugSchema, file: z.string().min(1) })
+    .object({
+      kind: z.literal("choose-anchor"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      selection: z.discriminatedUnion("source", [
+        z.object({ source: z.literal("take"), takeId: TakeIdSchema }).strict(),
+        z
+          .object({
+            source: z.literal("candidate"),
+            file: z.string().regex(/^[^/\\]+\.(?:png|jpe?g|webp)$/i, "expected an image filename"),
+          })
+          .strict(),
+      ]),
+    })
     .strict(),
   /** Ask the trusted host picker for an image; it lands as a candidate, never straight as identity. */
   z.object({ kind: z.literal("import-main-photo-candidate"), worldId: UlidSchema, sheetId: SlugSchema }).strict(),
@@ -367,7 +380,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("accept-character-sheet"),
       worldId: UlidSchema,
       sheetId: SlugSchema,
-      file: z.string().min(1),
+      takeId: TakeIdSchema,
     })
     .strict(),
   /** Optional looks stay outside identity until promotion or scoped attachment. */
@@ -387,9 +400,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("accept-character-look"),
       worldId: UlidSchema,
       sheetId: SlugSchema,
-      file: z.string().min(1),
-      lookKind: z.enum(["costume", "pose-expression", "condition-age"]),
-      prompt: z.string().trim().min(1).max(2000),
+      takeId: TakeIdSchema,
     })
     .strict(),
   z

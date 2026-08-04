@@ -40,7 +40,7 @@ export async function recordReferenceTake(store: WorldStore, job: Job): Promise<
     },
     ...(typeof job.params["prompt"] === "string" ? { prompt: job.params["prompt"] as string } : {}),
     references: (job.params["references"] as string[] | undefined) ?? [],
-    params: {},
+    params: job.params,
     cost: { estimatedMicroUsd: job.estimatedMicroUsd, actualMicroUsd: null },
     dispatchedAt: job.createdAt,
     completedAt: store.now(),
@@ -52,6 +52,21 @@ export async function recordReferenceTake(store: WorldStore, job: Job): Promise<
     await copyFile(toExtendedLength(join(store.dir, landed)), toExtendedLength(join(dir, media)));
     await atomicWriteFile(join(dir, "take.json"), JSON.stringify(take, null, 2) + "\n");
   });
+  return take;
+}
+
+/** Resolve one undecided reference take by durable identity, never by its non-unique media name. */
+export function pendingReferenceTake(
+  takes: readonly Take[],
+  reviews: readonly ReviewDecision[],
+  takeId: Take["id"],
+  sheetId: string,
+  kind: "main-photo" | "sheet" | "look",
+): Take | null {
+  const take = takes.find(
+    (candidate) => candidate.id === takeId && candidate.kind === kind && candidate.reference?.sheetId === sheetId,
+  );
+  if (!take || reviews.some((review) => review.takeId === take.id)) return null;
   return take;
 }
 

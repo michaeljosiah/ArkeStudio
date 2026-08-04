@@ -92,7 +92,9 @@ describe("needs-you is derived, never appended to (R-3, D1, §3.2)", () => {
         referenceReviews: [],
       } as never,
     );
-    assert.ok(computeNeedsYou(state).some((entry) => entry.ref === take.id));
+    const item = computeNeedsYou(state).find((entry) => entry.ref === take.id);
+    assert.ok(item);
+    assert.equal(item.reviewPath, `/w/${WORLD}/cast/maren-kest/main-photo`);
     state.world!.referenceReviews = [
       { ts: "2026-08-03T10:01:00Z", takeId: take.id, decision: "accept", by: "user" },
     ];

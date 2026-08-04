@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { DomainEvent, Job, LedgerEntry } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { JobQueue, type EnqueueInput } from "../../src/queue/dispatcher.js";
-import { FakeProvider, pngBytes, truncatedPngBytes } from "./fake-provider.js";
+import { FakeProvider, jpegBytes, pngBytes, truncatedPngBytes, webpBytes } from "./fake-provider.js";
 
 /**
  * The exactly-once suite (SPEC-009 §3.2): kills are simulated by disposing the running queue
@@ -454,6 +454,43 @@ describe("artifact verification (R-12, R-13, D12)", () => {
     const entries = await readdir(h.worldDir, { recursive: true }).catch(() => []);
     assert.ok(!entries.some((e) => String(e).includes("frame.png")));
     assert.equal(h.ledger.entries.length, 1);
+    h.queue.dispose();
+  });
+
+  for (const sample of [
+    { label: "JPEG", contentType: "image/jpeg", data: jpegBytes(), extension: "jpg" },
+    { label: "WebP", contentType: "image/webp", data: webpBytes(), extension: "webp" },
+    { label: "WebP without provider metadata", contentType: "application/octet-stream", data: webpBytes(), extension: "webp" },
+  ]) {
+    it(`preserves ${sample.label} bytes and extension for character images`, async () => {
+      const fake = new FakeProvider({});
+      fake.artifacts = [{ name: "provider-output.png", contentType: sample.contentType, data: sample.data }];
+      const h = await makeHarness({ fake });
+      await h.queue.start();
+      const job = await h.queue.enqueue({
+        ...INPUT,
+        target: { kind: "character-sheet", id: "maren-kest/g1" },
+        capability: "image",
+        landing: { dir: "references/maren-kest/incoming", name: "character-sheet-g1.png" },
+      });
+      await until(() => foldedJob(h, job.id)?.status === "succeeded");
+      const relative = `references/maren-kest/incoming/character-sheet-g1.${sample.extension}`;
+      assert.deepEqual(foldedJob(h, job.id)?.landedFiles, [relative]);
+      assert.deepEqual(new Uint8Array(await readFile(join(h.worldDir, relative))), sample.data);
+      h.queue.dispose();
+    });
+  }
+
+  it("rejects a declared image type that disagrees with the bytes", async () => {
+    const fake = new FakeProvider({});
+    fake.artifacts = [{ name: "frame.png", contentType: "image/png", data: jpegBytes() }];
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, landing: { dir: "takes/tk_mismatch" } });
+    await until(() => foldedJob(h, job.id)?.status === "failed");
+    assert.match(foldedJob(h, job.id)!.error!, /not a PNG/);
+    const entries = await readdir(h.worldDir, { recursive: true }).catch(() => []);
+    assert.ok(!entries.some((entry) => String(entry).includes("frame.png")));
     h.queue.dispose();
   });
 });
