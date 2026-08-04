@@ -47,6 +47,17 @@ export const AppearanceSettingsSchema = z
   .strict();
 export type AppearanceSettings = z.infer<typeof AppearanceSettingsSchema>;
 
+export const VoxaSettingsSchema = z
+  .object({
+    executablePath: z.string().min(1).nullable().default(null),
+    /** null uses `%APP_ROOT%/models`, where local setup writes verified model files. */
+    modelRoot: z.string().min(1).nullable().default(null),
+    /** Advanced arguments are always discrete spawn arguments, never a shell command line. */
+    extraArgs: z.array(z.string()).default([]),
+  })
+  .strict();
+export type VoxaSettings = z.infer<typeof VoxaSettingsSchema>;
+
 /**
  * What the user has changed about an agent. Absent fields mean "as shipped": no model pins the
  * agent to whatever the harness is configured with, and no brief leaves the shipped one alone.
@@ -75,6 +86,12 @@ export const AppSettingsSchema = z
         AppearanceSettingsSchema,
       )
       .default({ theme: "system" }),
+    voxa: z
+      .preprocess(
+        (value) => (VoxaSettingsSchema.safeParse(value).success ? value : {}),
+        VoxaSettingsSchema,
+      )
+      .default({ executablePath: null, modelRoot: null, extraArgs: [] }),
     /** Per-agent overrides, keyed by roster name. */
     agents: z.record(z.string().min(1), AgentSettingsSchema).default({}),
   })

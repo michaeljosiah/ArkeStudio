@@ -120,6 +120,12 @@ interface StoreState {
   /** SPEC-011: dictation results by requestId — inserted as editable text, never submitted. */
   dictation: Record<string, { text: string | null; error: string | null }>;
   voiceSidecar: { state: "not-started" | "downloading" | "unavailable" | "ready"; detail: string } | null;
+  voiceRuntimeTest: {
+    requestId: string;
+    status: "testing" | "ready" | "failed";
+    detail: string;
+    audioBase64: string | null;
+  } | null;
   /** Last main-photo accept result by sheet; null status means the command is in flight. */
   mainPhotoAcceptance: Record<
     string,
@@ -182,6 +188,7 @@ let current: StoreState = {
   voiceAudio: {},
   dictation: {},
   voiceSidecar: null,
+  voiceRuntimeTest: null,
   mainPhotoAcceptance: {},
   exportsState: {},
   importReport: null,
@@ -501,6 +508,7 @@ function handleFrame(json: string): void {
     let voiceAudio = current.voiceAudio;
     let dictation = current.dictation;
     let voiceSidecar = current.voiceSidecar;
+    let voiceRuntimeTest = current.voiceRuntimeTest;
     let mainPhotoAcceptance = current.mainPhotoAcceptance;
     if (event.type === "voice.candidates") {
       voiceCandidates = {
@@ -523,6 +531,13 @@ function handleFrame(json: string): void {
       dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
     } else if (event.type === "voice.sidecar") {
       voiceSidecar = { state: event.state, detail: event.detail };
+    } else if (event.type === "voice.runtime-test") {
+      voiceRuntimeTest = {
+        requestId: event.requestId,
+        status: event.status,
+        detail: event.detail,
+        audioBase64: event.audioBase64,
+      };
     } else if (event.type === "main-photo.acceptance") {
       mainPhotoAcceptance = {
         ...mainPhotoAcceptance,
@@ -639,6 +654,7 @@ function handleFrame(json: string): void {
       voiceAudio,
       dictation,
       voiceSidecar,
+      voiceRuntimeTest,
       mainPhotoAcceptance,
       exportsState,
       importReport,
@@ -1121,6 +1137,36 @@ export function setSpendThreshold(thresholdMicroUsd: number, periodDays: number)
 
 export function detectRuntimes(): void {
   send({ kind: "detect-runtimes" });
+}
+
+export function chooseVoxaExecutable(): void {
+  send({ kind: "choose-voxa-executable" });
+}
+
+export function clearVoxaExecutable(): void {
+  send({ kind: "clear-voxa-executable" });
+}
+
+export function useBundledVoxa(): void {
+  send({ kind: "use-bundled-voxa" });
+}
+
+export function restartVoxa(): void {
+  send({ kind: "restart-voxa" });
+}
+
+export function repairVoiceModels(): void {
+  send({ kind: "repair-voice-models" });
+}
+
+export function openModelFolder(): void {
+  send({ kind: "open-model-folder" });
+}
+
+export function testLocalVoice(): string {
+  const requestId = ulid();
+  send({ kind: "test-local-voice", requestId });
+  return requestId;
 }
 
 export function setBackgroundNotifications(preference: ClientState["app"]["backgroundNotifications"]): void {
@@ -1630,6 +1676,10 @@ export function useVoiceSidecar(): {
   return useStore().voiceSidecar;
 }
 
+export function useVoiceRuntimeTest(): StoreState["voiceRuntimeTest"] {
+  return useStore().voiceRuntimeTest;
+}
+
 const getSnapshot = (): StoreState => current;
 const subscribe = (l: () => void): (() => void) => {
   listeners.add(l);
@@ -1671,6 +1721,7 @@ export function __setStateForTest(state: ClientState): void {
     voiceAudio: {},
     dictation: {},
     voiceSidecar: null,
+    voiceRuntimeTest: null,
     mainPhotoAcceptance: {},
     exportsState: {},
     importReport: null,
