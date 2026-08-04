@@ -25,6 +25,8 @@ import { ExtractionOffer } from "../components/extraction-offer.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Wave } from "./production.js";
 import { shortDateTime } from "../lib/format.js";
+import { mediaUrl } from "../lib/media.js";
+import { pauseAudio, playAudio, stopAudio, usePlayback } from "../lib/audio.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
   askCanon,
@@ -69,6 +71,7 @@ import {
   importFolder,
   requestVoiceCandidates,
   requestVoicePreview,
+  readSheetSection,
   resolveExtraction,
   transcribeDictation,
   useArtifactNotices,
@@ -84,6 +87,7 @@ import {
   useTranscripts,
   useVoiceCandidates,
   useVoicePreviews,
+  useVoiceAudio,
   useVoiceSidecar,
   useWorld,
 } from "../lib/store.js";
@@ -777,6 +781,15 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);
   const navigate = useNavigate();
+  const voiceAudio = useVoiceAudio();
+  const playback = usePlayback();
+  const [readRequestId, setReadRequestId] = useState<string | null>(null);
+  const readResult = readRequestId ? voiceAudio[readRequestId] : undefined;
+  useEffect(() => {
+    if (readResult?.status === "ready" && readResult.file && world) {
+      void playAudio(readResult.requestId, mediaUrl(world.meta.slug, readResult.file));
+    }
+  }, [readResult?.requestId, readResult?.status, readResult?.file, world?.meta.slug]);
   const sheetRefsMap = useSheetRefs();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState<string | null>(null);
@@ -969,13 +982,45 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
       <div className="fy-sheet__grid" style={isCharacter ? undefined : { gridTemplateColumns: "1fr", gap: 14 }}>
         {sheet.sections.map((s) => (
           <div key={s.heading}>
-            <div className="fy-sheet__sechead" style={isCharacter ? undefined : { display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="fy-sheet__sechead" style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {s.heading}
               {!isCharacter && (
                 <span className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`} style={{ width: 5, height: 5 }} />
               )}
+              {isCharacter && s.heading === "Essence" && (
+                <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                  {!sheet.voice ? (
+                    <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}>Choose voice</Button>
+                  ) : !["kokoro", "elevenlabs"].includes(sheet.voice.provider) ? (
+                    <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}>Choose voice again</Button>
+                  ) : playback.requestId === readRequestId && playback.status === "playing" ? (
+                    <><Button variant="ghost" onClick={pauseAudio}>Pause</Button><Button variant="ghost" onClick={stopAudio}>Stop</Button></>
+                  ) : readResult?.status === "confirmation-required" ? (
+                    <span style={{ display: "grid", gap: 4, justifyItems: "end" }}>
+                      <span className="fy-mono">Exact Essence will be sent to ElevenLabs and retained in Activity.</span>
+                      <Button onClick={() => {
+                        if (worldId && readRequestId && readResult.confirmationToken) readSheetSection(worldId, sheet.id, "Essence", readRequestId, readResult.confirmationToken);
+                      }}>
+                        Confirm {readResult.characterCount} characters · {formatMicroUsd(readResult.estimatedMicroUsd)}
+                      </Button>
+                    </span>
+                  ) : (
+                    <Button variant="ghost" disabled={!s.body.trim()} onClick={() => {
+                      if (readResult?.status === "ready" && readResult.file && world) void playAudio(readResult.requestId, mediaUrl(world.meta.slug, readResult.file));
+                      else if (worldId) setReadRequestId(readSheetSection(worldId, sheet.id, "Essence"));
+                    }}>
+                      {readRequestId && !readResult ? "Preparing audio…" : readResult?.status === "ready" ? "Play" : "Read aloud"}
+                    </Button>
+                  )}
+                </span>
+              )}
             </div>
             <div className="fy-sheet__secbody">{s.body}</div>
+            {isCharacter && s.heading === "Essence" && readResult?.status === "failed" && (
+              <Callout tone="warning" title="Read aloud unavailable">
+                {readResult.error} {sheet.voice?.provider === "kokoro" && <Button variant="ghost" onClick={() => navigate("/settings/local-runtime")}>Local runtime</Button>}
+              </Callout>
+            )}
           </div>
         ))}
       </div>
@@ -1676,7 +1721,7 @@ export function VoicePickerScreen() {
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const sheet = useSheet(worldId, sheetId);
-  const [provider, setProvider] = useState("elevenlabs");
+  const [provider, setProvider] = useState<"kokoro" | "elevenlabs">("elevenlabs");
   const [voiceId, setVoiceId] = useState("");
   const [label, setLabel] = useState("");
   const [manual, setManual] = useState(false);
@@ -1724,7 +1769,7 @@ export function VoicePickerScreen() {
               {manual && (
                 <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
                   <div className="fy-choicerow">
-                    {["elevenlabs", "openai", "voxa"].map((p) => (
+                    {(["elevenlabs", "kokoro"] as const).map((p) => (
                       <button
                         key={p}
                         type="button"
@@ -1793,6 +1838,20 @@ function VoiceCandidatesPanel({
   const candidates = useVoiceCandidates()[sheetId ?? ""];
   const previews = useVoicePreviews();
   const sidecar = useVoiceSidecar();
+  const voiceAudio = useVoiceAudio();
+  const playback = usePlayback();
+  const world = useWorld();
+  const [requests, setRequests] = useState<Record<string, string>>({});
+  const autoPlayed = useRef(new Set<string>());
+  useEffect(() => {
+    for (const requestId of Object.values(requests)) {
+      const result = voiceAudio[requestId];
+      if (result?.status === "ready" && result.file && world && !autoPlayed.current.has(requestId)) {
+        autoPlayed.current.add(requestId);
+        void playAudio(requestId, mediaUrl(world.meta.slug, result.file));
+      }
+    }
+  }, [requests, voiceAudio, world]);
   return (
     <>
       {sidecar && sidecar.state !== "ready" && (
@@ -1825,6 +1884,8 @@ function VoiceCandidatesPanel({
           {candidates.ranked.slice(0, 6).map(({ candidate, matched, overlap }, idx) => {
             const key = `${candidate.provider}/${candidate.voiceId}`;
             const preview = previews[key];
+            const requestId = requests[key];
+            const result = requestId ? voiceAudio[requestId] : undefined;
             return (
               <div key={key} className={cx("fy-voicerow", idx === 0 && "fy-voicerow--selected")} style={{ cursor: "default" }}>
                 <span className="fy-voicerow__icon" aria-hidden>
@@ -1843,19 +1904,33 @@ function VoiceCandidatesPanel({
                 </span>
                 <Button
                   variant="ghost"
+                  disabled={Boolean(requestId && !result)}
                   onClick={() => {
-                    if (worldId && sheetId) requestVoicePreview(worldId, sheetId, candidate.provider, candidate.voiceId);
+                    if (result?.status === "ready" && result.file && world) {
+                      void playAudio(result.requestId, mediaUrl(world.meta.slug, result.file));
+                    } else if (worldId && sheetId) {
+                      if (candidate.provider === "kokoro" || candidate.provider === "elevenlabs") {
+                        const supportedProvider = candidate.provider;
+                        setRequests((current) => ({ ...current, [key]: requestVoicePreview(worldId, sheetId, supportedProvider, candidate.voiceId) }));
+                      }
+                    }
                   }}
                 >
-                  {preview?.file
+                  {playback.requestId === requestId && playback.status === "playing"
+                    ? "Playing…"
+                    : requestId && !result
+                      ? "Preparing…"
+                  : result?.file
                     ? "Replay · free"
                     : candidate.local
                       ? "Preview · free"
                       : `Preview${candidates.cloudPreviewMicroUsd !== null ? ` · ${formatMicroUsd(candidates.cloudPreviewMicroUsd)}` : ""}`}
                 </Button>
+                {playback.requestId === requestId && playback.status === "playing" && <Button variant="ghost" onClick={pauseAudio}>Pause</Button>}
+                {playback.requestId === requestId && playback.status !== "idle" && <Button variant="ghost" onClick={stopAudio}>Stop</Button>}
                 <Button
                   onClick={() => {
-                    if (worldId && sheetPath)
+                    if (worldId && sheetPath && (candidate.provider === "kokoro" || candidate.provider === "elevenlabs"))
                       assignVoice(worldId, sheetPath, {
                         provider: candidate.provider,
                         voiceId: candidate.voiceId,
@@ -1865,7 +1940,7 @@ function VoiceCandidatesPanel({
                 >
                   Assign
                 </Button>
-                {preview?.error && <span className="fy-mono">{preview.error}</span>}
+                {(result?.error ?? preview?.error) && <span className="fy-mono">{result?.error ?? preview?.error}</span>}
               </div>
             );
           })}

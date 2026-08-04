@@ -155,6 +155,8 @@ export class ReadModel {
         };
         return;
       }
+      case "voice.audio":
+        return;
       case "manifest.drift": {
         this.state = { ...this.state, app: { ...this.state.app, drift: event.reports } };
         return;

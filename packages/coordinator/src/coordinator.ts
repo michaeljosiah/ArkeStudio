@@ -1,4 +1,5 @@
 import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { basename, extname, join } from "node:path";
 import {
   DomainEventSchema,
@@ -12,6 +13,7 @@ import {
   buildExportPlan,
   CutFileSchema,
   deriveCut,
+  estimateMicroUsd,
   gateLocalRuntimes,
   planScene,
   previewLineFor,
@@ -57,7 +59,15 @@ import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
-import { previewCacheFile, VoiceService, type CloudVoiceSource, type SidecarLike } from "./voice/service.js";
+import {
+  normalizeSpeechText,
+  authoritativeSheetSpeech,
+  previewCacheFile,
+  speechCacheFile,
+  VoiceService,
+  type CloudVoiceSource,
+  type SidecarLike,
+} from "./voice/service.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import { readContainedImageReferences } from "./world/reference-files.js";
 import {
@@ -378,6 +388,7 @@ export class Coordinator {
   }
 
   private readonly askService: AskService | null;
+  private readonly pendingVoiceReads = new Map<string, { token: string; input: EnqueueInput }>();
 
   getState(): ClientState {
     return this.readModel.getState();
@@ -616,7 +627,23 @@ export class Coordinator {
    * surface sees it. Establish candidates just land; the client lists them off the job row.
    */
   private async onJobTerminal(job: Job): Promise<void> {
-    if (job.status !== "succeeded") return;
+    if (job.status !== "succeeded") {
+      if (job.target.kind === "voice-preview" && typeof job.params["requestId"] === "string") {
+        this.emit({
+          at: new Date().toISOString(), type: "voice.audio", requestId: job.params["requestId"] as string,
+          worldId: job.worldId, sheetId: String(job.params["sheetId"]),
+          sheetVersion: Number(job.params["sheetVersion"]),
+          purpose: job.params["purpose"] === "sheet-section" ? "sheet-section" : "candidate-preview",
+          ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
+          provider: "elevenlabs", model: job.model, voiceId: String(job.params["voiceId"]),
+          status: "failed", file: null, cached: false,
+          characterCount: Number(job.params["characterCount"] ?? 0),
+          estimatedMicroUsd: job.estimatedMicroUsd,
+          error: "Voice synthesis failed. Open Activity for details.",
+        });
+      }
+      return;
+    }
     const finalize = async (store: WorldStore) => {
       if (job.target.kind === "reference-tile" && job.landedFiles?.[0] !== undefined) {
         const [sheetId, angle] = (job.target.id ?? "").split("/") as [string, never];
@@ -671,6 +698,19 @@ export class Coordinator {
           file: job.landedFiles[0],
           error: null,
         });
+        if (typeof job.params["requestId"] === "string") {
+          this.emit({
+            at: new Date().toISOString(), type: "voice.audio", requestId: job.params["requestId"] as string,
+            worldId: job.worldId, sheetId: String(job.params["sheetId"]),
+            sheetVersion: Number(job.params["sheetVersion"]),
+            purpose: job.params["purpose"] === "sheet-section" ? "sheet-section" : "candidate-preview",
+            ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
+            provider: "elevenlabs", model: job.model, voiceId,
+            status: "ready", file: job.landedFiles[0], cached: false,
+            characterCount: Number(job.params["characterCount"] ?? 0),
+            estimatedMicroUsd: job.estimatedMicroUsd,
+          });
+        }
       }
     };
     if (this.opts.provider.withWorldStore) {
@@ -730,18 +770,18 @@ export class Coordinator {
     requestId: string,
     command: QueueCommand,
     inputs: readonly EnqueueInput[],
-  ): Promise<void> {
+  ): Promise<{ accepted: boolean; reason?: string }> {
     if (!this.jobQueue) {
       this.rejectEnqueue(
         requestId,
         command,
         "The job queue is unavailable. Try again after restarting the studio.",
       );
-      return;
+      return { accepted: false, reason: "The job queue is unavailable. Try again after restarting the studio." };
     }
     if (inputs.length === 0) {
       this.emitEnqueueResult(requestId, command, 0, [], [], true);
-      return;
+      return { accepted: true };
     }
     const outcome = await enqueueInputs(inputs, (input) => this.jobQueue!.enqueue(input));
     this.emitEnqueueResult(
@@ -751,6 +791,7 @@ export class Coordinator {
       outcome.acceptedJobIds,
       outcome.failures,
     );
+    return { accepted: outcome.acceptedJobIds.length > 0, ...(outcome.failures[0]?.reason ? { reason: outcome.failures[0].reason } : {}) };
   }
 
   /**
@@ -1315,6 +1356,10 @@ export class Coordinator {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
         if (!gate || !store) return;
+        if (msg.voice) {
+          const available = (await this.voiceService?.catalogue().catch(() => [])) ?? [];
+          if (!available.some((voice) => voice.provider === msg.voice!.provider && voice.voiceId === msg.voice!.voiceId)) return;
+        }
         await stageVoiceAssignment(store, gate, { path: msg.path, voice: msg.voice }).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -2136,31 +2181,53 @@ export class Coordinator {
           return;
         }
         const line = previewLineFor(sheet, bundle.productions);
+        const candidate = (await this.voiceService.catalogue()).find(
+          (entry) => entry.provider === msg.provider && entry.voiceId === msg.voiceId,
+        );
+        if (!candidate || (msg.provider !== "kokoro" && msg.provider !== "elevenlabs")) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Choose an available voice again.");
+          return;
+        }
         if (msg.provider === "kokoro") {
           // Local: sidecar synthesis, no queue, no ledger, zero cost (R-2).
           try {
-            const file = await this.voiceService.localPreview(store, sheet, msg.voiceId, line);
+            const result = await this.voiceService.localSpeech(store, msg.voiceId, line.text);
             this.emit({
               at: new Date().toISOString(),
-              type: "voice.preview",
+              type: "voice.audio",
+              requestId: msg.requestId,
               worldId: msg.worldId,
               sheetId: msg.sheetId,
+              sheetVersion: sheet.version,
+              purpose: "candidate-preview",
               provider: msg.provider,
+              model: "kokoro-82m",
               voiceId: msg.voiceId,
-              file,
-              error: null,
+              status: "ready",
+              file: result.file,
+              cached: result.cached,
+              characterCount: normalizeSpeechText(line.text).length,
+              estimatedMicroUsd: 0,
             });
             await this.refreshWorldSnapshot(msg.worldId);
           } catch (err) {
             this.emit({
               at: new Date().toISOString(),
-              type: "voice.preview",
+              type: "voice.audio",
+              requestId: msg.requestId,
               worldId: msg.worldId,
               sheetId: msg.sheetId,
-              provider: msg.provider,
+              sheetVersion: sheet.version,
+              purpose: "candidate-preview",
+              provider: "kokoro",
+              model: "kokoro-82m",
               voiceId: msg.voiceId,
+              status: "failed",
               file: null,
-              error: err instanceof Error ? err.message : String(err),
+              cached: false,
+              characterCount: normalizeSpeechText(line.text).length,
+              estimatedMicroUsd: 0,
+              error: err instanceof Error ? err.message : "Local voice failed.",
             });
           }
           this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
@@ -2169,16 +2236,25 @@ export class Coordinator {
         // Cloud: cache hit replays free; a miss dispatches through the queue (R-2, R-10).
         const cached = previewCacheFile(msg.provider, msg.voiceId, line.text, "mp3");
         try {
-          await readFile(toExtendedLength(join(store.dir, fromPortable(cached))));
+          const bytes = await readFile(toExtendedLength(join(store.dir, fromPortable(cached))));
+          const mp3 = bytes.subarray(0, 3).toString("ascii") === "ID3" || (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0);
+          if (!mp3) throw new Error("invalid cache");
           this.emit({
             at: new Date().toISOString(),
-            type: "voice.preview",
+            type: "voice.audio",
+            requestId: msg.requestId,
             worldId: msg.worldId,
             sheetId: msg.sheetId,
-            provider: msg.provider,
+            sheetVersion: sheet.version,
+            purpose: "candidate-preview",
+            provider: "elevenlabs",
+            model: "eleven-v3",
             voiceId: msg.voiceId,
+            status: "ready",
             file: cached,
-            error: null,
+            cached: true,
+            characterCount: normalizeSpeechText(line.text).length,
+            estimatedMicroUsd: 0,
           });
           this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
           return;
@@ -2200,7 +2276,92 @@ export class Coordinator {
           line,
           model,
         );
-        await this.enqueueBatch(msg.requestId, msg.kind, [request.input]);
+        request.input.params = {
+          ...request.input.params,
+          requestId: msg.requestId,
+          purpose: "candidate-preview",
+          sheetId: sheet.id,
+          sheetVersion: sheet.version,
+          characterCount: normalizeSpeechText(line.text).length,
+        };
+        const queued = await this.enqueueBatch(msg.requestId, msg.kind, [request.input]);
+        if (!queued.accepted) {
+          this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
+            worldId: msg.worldId, sheetId: sheet.id, sheetVersion: sheet.version, purpose: "candidate-preview",
+            provider: "elevenlabs", model: model.id, voiceId: msg.voiceId, status: "failed", file: null,
+            cached: false, characterCount: normalizeSpeechText(line.text).length, estimatedMicroUsd: request.input.estimatedMicroUsd,
+            error: queued.reason ?? "Voice preview could not be queued." });
+        }
+        return;
+      }
+      case "read-sheet-section": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || !this.voiceService) return;
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
+        let resolved: ReturnType<typeof authoritativeSheetSpeech> | null = null;
+        try { if (sheet) resolved = authoritativeSheetSpeech(sheet, msg.sectionHeading); } catch { /* emitted below */ }
+        const text = resolved?.text ?? "";
+        const fail = (error: string) => this.emit({
+          at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
+          worldId: msg.worldId, sheetId: msg.sheetId, sheetVersion: sheet?.version ?? 1,
+          purpose: "sheet-section", sectionHeading: msg.sectionHeading,
+          provider: sheet?.voice?.provider === "elevenlabs" ? "elevenlabs" : "kokoro",
+          model: sheet?.voice?.provider === "elevenlabs" ? "eleven-v3" : "kokoro-82m",
+          voiceId: sheet?.voice?.voiceId ?? "unassigned", status: "failed", file: null,
+          cached: false, characterCount: text.length, estimatedMicroUsd: 0, error,
+        } as DomainEvent);
+        if (!sheet) { fail("The character is no longer available."); return; }
+        try { resolved = authoritativeSheetSpeech(sheet, msg.sectionHeading); }
+        catch (error) { fail(error instanceof Error ? error.message : "Read aloud is unavailable."); return; }
+        const assignmentExists = (await this.voiceService.catalogue()).some(
+          (voice) => voice.provider === resolved!.provider && voice.voiceId === resolved!.voiceId,
+        );
+        if (!assignmentExists) { fail("Choose an available voice again before reading aloud."); return; }
+        if (resolved.provider === "kokoro") {
+          try {
+            const result = await this.voiceService.localSpeech(store, resolved.voiceId, text);
+            this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
+              worldId: msg.worldId, sheetId: sheet.id, sheetVersion: sheet.version, purpose: "sheet-section",
+              sectionHeading: msg.sectionHeading, provider: "kokoro", model: "kokoro-82m",
+              voiceId: resolved.voiceId, status: "ready", file: result.file, cached: result.cached,
+              characterCount: text.length, estimatedMicroUsd: 0 });
+          } catch (error) { fail(error instanceof Error ? error.message : "Local voice failed."); }
+          return;
+        }
+        const model = this.opts.manifest?.models.find((candidate) => candidate.provider === "elevenlabs" && candidate.capability === "voice-tts");
+        if (!model) { fail("ElevenLabs voice is unavailable."); return; }
+        const file = speechCacheFile({ provider: "elevenlabs", model: model.id, voiceId: resolved.voiceId, text, format: "mp3" });
+        try {
+          const bytes = await readFile(toExtendedLength(join(store.dir, fromPortable(file))));
+          const mp3 = bytes.subarray(0, 3).toString("ascii") === "ID3" || (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0);
+          if (!mp3) throw new Error("invalid cache");
+          this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
+            worldId: msg.worldId, sheetId: sheet.id, sheetVersion: sheet.version, purpose: "sheet-section",
+            sectionHeading: msg.sectionHeading, provider: "elevenlabs", model: model.id, voiceId: resolved.voiceId,
+            status: "ready", file, cached: true, characterCount: text.length, estimatedMicroUsd: 0 });
+          return;
+        } catch { /* confirmation required */ }
+        const estimate = estimateMicroUsd(model, { characters: text.length });
+        const token = createHash("sha256").update(`${sheet.id}\n${sheet.version}\n${file}`).digest("hex");
+        const input: EnqueueInput = { worldId: msg.worldId, target: { kind: "voice-preview", id: `${sheet.id}/elevenlabs/${resolved.voiceId}` },
+          capability: "voice-tts", provider: "elevenlabs", model: model.id,
+          params: { voiceId: resolved.voiceId, text, requestId: msg.requestId, purpose: "sheet-section",
+            sheetId: sheet.id, sheetVersion: sheet.version, sectionHeading: msg.sectionHeading, characterCount: text.length },
+          estimatedMicroUsd: estimate, landing: { dir: ".cache/voice-previews", name: file.split("/").pop()! } };
+        if (msg.confirmationToken !== token) {
+          this.pendingVoiceReads.set(msg.requestId, { token, input });
+          this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
+            worldId: msg.worldId, sheetId: sheet.id, sheetVersion: sheet.version, purpose: "sheet-section",
+            sectionHeading: msg.sectionHeading, provider: "elevenlabs", model: model.id, voiceId: resolved.voiceId,
+            status: "confirmation-required", file: null, cached: false, characterCount: text.length,
+            estimatedMicroUsd: estimate, confirmationToken: token });
+          return;
+        }
+        const pending = this.pendingVoiceReads.get(msg.requestId);
+        if (!pending || pending.token !== token) { fail("The read request changed; review it again."); return; }
+        this.pendingVoiceReads.delete(msg.requestId);
+        const queued = await this.enqueueBatch(msg.requestId, msg.kind, [pending.input]);
+        if (!queued.accepted) fail(queued.reason ?? "Voice synthesis could not be queued.");
         return;
       }
       case "transcribe-dictation": {

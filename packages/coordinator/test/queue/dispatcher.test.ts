@@ -391,6 +391,38 @@ describe("reference finalization after provider success", () => {
     assert.equal(fake.submitCount, 0);
     h2.queue.dispose();
   });
+
+  it("replays a landed voice preview finalization safely", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    let finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => void (finalizations += 1) });
+    await h.queue.start();
+    h.queue.dispose();
+    const terminal: Job = {
+      ...INPUT,
+      id: "jb_01J8E000000000000000000V77",
+      idempotencyKey: "01J8E100000000000000000V77",
+      status: "succeeded",
+      providerJobId: "remote-v77",
+      attempt: 1,
+      target: { kind: "voice-preview", id: "maren-kest/elevenlabs/v1" },
+      landedFiles: [".cache/voice-previews/v77.mp3"],
+      finalization: { status: "pending", error: null, updatedAt: "2026-08-04T12:01:00.000Z" },
+      error: null,
+      createdAt: "2026-08-04T12:00:00.000Z",
+      updatedAt: "2026-08-04T12:01:00.000Z",
+    };
+    await appendFile(h.journalPath, `${JSON.stringify(terminal)}\n`, "utf8");
+    h.ledger.entries.push({ ts: terminal.updatedAt, worldId: terminal.worldId, productionId: terminal.productionId!,
+      jobId: terminal.id, provider: terminal.provider, model: terminal.model, outcome: "succeeded",
+      estimatedMicroUsd: terminal.estimatedMicroUsd, actualMicroUsd: terminal.estimatedMicroUsd,
+      actualSource: "manifest-derived" });
+    const h2 = h.revive();
+    await h2.queue.start();
+    assert.equal(foldedJob(h2, terminal.id)?.finalization?.status, "complete");
+    assert.equal(finalizations, 1);
+    h2.queue.dispose();
+  });
 });
 
 describe("provider completion while the owning world is unavailable", () => {
