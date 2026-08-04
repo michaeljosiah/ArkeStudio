@@ -125,6 +125,7 @@ export function establishRequests(
         prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${ANGLE_PROMPT["head-front"]}, character reference, candidate ${i + 1} of ${count}, distinct interpretation.`,
         references: [],
         output: characterImageOutput(model, "reference-tile"),
+        ...(direction ? { provenance: generationProvenance(world, direction, sheet) } : {}),
         ...(direction
           ? {
               artDirection: {

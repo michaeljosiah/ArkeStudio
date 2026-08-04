@@ -33,6 +33,15 @@ export const JobTargetSchema = z
   .strict();
 export type JobTarget = z.infer<typeof JobTargetSchema>;
 
+export const JobFinalizationSchema = z
+  .object({
+    status: z.enum(["pending", "complete", "failed"]),
+    error: z.string().nullable(),
+    updatedAt: IsoDateTimeSchema,
+  })
+  .strict();
+export type JobFinalization = z.infer<typeof JobFinalizationSchema>;
+
 export const JobSchema = z
   .object({
     id: JobIdSchema,
@@ -63,6 +72,8 @@ export const JobSchema = z
       .optional(),
     /** Files landed on success, world-relative, in artifact order. */
     landedFiles: z.array(z.string()).optional(),
+    /** Domain follow-on after provider success, durable and retryable without another charge. */
+    finalization: JobFinalizationSchema.optional(),
     error: z.string().nullable().default(null),
     createdAt: IsoDateTimeSchema,
     updatedAt: IsoDateTimeSchema,

@@ -33,6 +33,7 @@ async function makeHarness(
     getKey?: (p: string) => Promise<string | null>;
     baseConcurrency?: number;
     landInWorld?: (worldId: string, fn: (worldDir: string) => Promise<void>) => Promise<boolean>;
+    onTerminal?: (job: Job) => void | Promise<void>;
   } = {},
 ): Promise<Harness> {
   const dir = await tempDir("arke-queue-");
@@ -48,6 +49,7 @@ function build(
     getKey?: (p: string) => Promise<string | null>;
     baseConcurrency?: number;
     landInWorld?: (worldId: string, fn: (worldDir: string) => Promise<void>) => Promise<boolean>;
+    onTerminal?: (job: Job) => void | Promise<void>;
   },
 ): Harness {
   const events: DomainEvent[] = [];
@@ -72,6 +74,7 @@ function build(
         return true;
       }),
     onProviderFault: (provider, message) => faults.push({ provider, message }),
+    ...(opts.onTerminal ? { onTerminal: opts.onTerminal } : {}),
     maxAttempts: 3,
     backoffBaseMs: 5,
     backoffCapMs: 20,
@@ -136,6 +139,90 @@ describe("the happy path writes exactly one ledger entry and lands artifacts ato
     assert.equal(h.ledger.entries[0]!.actualMicroUsd, INPUT.estimatedMicroUsd);
     assert.ok(h.ledger.entries[0]!.actualMicroUsd! > 0);
     h.queue.dispose();
+  });
+});
+
+describe("reference finalization after provider success", () => {
+  it("retries a failed finalizer without provider or ledger activity", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.artifacts = [{ name: "sheet.png", contentType: "image/png", data: pngBytes() }];
+    let finalizations = 0;
+    let fail = true;
+    const h = await makeHarness(
+      { fake },
+      {
+        onTerminal: () => {
+          finalizations += 1;
+          if (fail) throw new Error("disk busy");
+        },
+      },
+    );
+    await h.queue.start();
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      capability: "image",
+      target: { kind: "character-sheet", id: "maren-kest/finalize" },
+      landing: { dir: "references/maren-kest/incoming", name: "sheet.png" },
+    });
+    await until(() => foldedJob(h, job.id)?.finalization?.status === "failed");
+    assert.equal(fake.submitCount, 1);
+    assert.equal(h.ledger.entries.length, 1);
+    assert.match(foldedJob(h, job.id)?.finalization?.error ?? "", /will not contact the provider or charge again/);
+
+    fail = false;
+    await Promise.all([h.queue.retryFinalization(job.id), h.queue.retryFinalization(job.id)]);
+    assert.equal(foldedJob(h, job.id)?.finalization?.status, "complete");
+    assert.equal(finalizations, 2, "one live attempt and one single-flight retry");
+    assert.equal(fake.submitCount, 1);
+    assert.equal(h.ledger.entries.length, 1);
+
+    h.queue.dispose();
+    const h2 = h.revive();
+    await h2.queue.start();
+    assert.equal(finalizations, 2, "completed finalization is not replayed on restart");
+    assert.equal(fake.submitCount, 1);
+    h2.queue.dispose();
+  });
+
+  it("repairs a legacy succeeded reference job on startup without provider activity", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    let finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => void (finalizations += 1) });
+    await h.queue.start();
+    h.queue.dispose();
+    const terminal: Job = {
+      ...INPUT,
+      id: "jb_01J8E000000000000000000R77",
+      idempotencyKey: "01J8E100000000000000000R77",
+      status: "succeeded",
+      providerJobId: "remote-r77",
+      attempt: 1,
+      target: { kind: "character-sheet", id: "maren-kest/recover" },
+      landedFiles: ["references/maren-kest/incoming/recover.png"],
+      error: null,
+      createdAt: "2026-08-04T12:00:00.000Z",
+      updatedAt: "2026-08-04T12:01:00.000Z",
+    };
+    await appendFile(h.journalPath, `${JSON.stringify(terminal)}\n`, "utf8");
+    h.ledger.entries.push({
+      ts: terminal.updatedAt,
+      worldId: terminal.worldId,
+      productionId: terminal.productionId!,
+      jobId: terminal.id,
+      provider: terminal.provider,
+      model: terminal.model,
+      outcome: "succeeded",
+      estimatedMicroUsd: terminal.estimatedMicroUsd,
+      actualMicroUsd: terminal.estimatedMicroUsd,
+      actualSource: "manifest-derived",
+    });
+    const h2 = h.revive();
+    await h2.queue.start();
+    assert.equal(foldedJob(h2, terminal.id)?.finalization?.status, "complete");
+    assert.equal(finalizations, 1);
+    assert.equal(fake.submitCount, 0);
+    assert.equal(h2.ledger.entries.length, 1);
+    h2.queue.dispose();
   });
 });
 

@@ -18,6 +18,7 @@ export type NeedsYouClass = 1 | 2 | 3 | 4 | 5;
 
 export type NeedsYouAction =
   | "resolve"
+  | "retry-finalization"
   | "settings"
   | "reconcile"
   | "review"
@@ -29,6 +30,7 @@ export interface NeedsYouEntry {
   urgency: NeedsYouClass;
   kind:
     | "job-needs-reconciliation"
+    | "job-finalization-failed"
     | "provider-paused"
     | "external-edits"
     | "unreviewed-take"
@@ -54,6 +56,19 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
 
   // Class 1 — unresolved spend: only the user can decide (D3). Global and precise (R-6).
   for (const job of state.app.jobs) {
+    if (job.finalization?.status === "failed") {
+      entries.push({
+        urgency: 1,
+        kind: "job-finalization-failed",
+        title: `${job.model} output needs review-take repair`,
+        detail: job.finalization.error ?? "generation completed, but its review take is missing",
+        at: job.finalization.updatedAt,
+        worldId: job.worldId,
+        actions: ["retry-finalization"],
+        ref: job.id,
+      });
+      continue;
+    }
     if (job.status !== "needs-reconciliation") continue;
     entries.push({
       urgency: 1,
@@ -217,15 +232,16 @@ export function computeRunning(
 ): RunningEntry[] {
   const entries: RunningEntry[] = [];
   for (const job of state.app.jobs) {
-    if (!RUNNING_JOB.has(job.status)) continue;
+    const finalizing = job.status === "succeeded" && job.finalization?.status === "pending";
+    if (!RUNNING_JOB.has(job.status) && !finalizing) continue;
     entries.push({
       kind: "job",
       title: `${job.model} · ${job.target.kind}${job.target.id !== undefined ? ` ${job.target.id}` : ""}`,
-      detail: `${job.provider} · ${job.status}`,
+      detail: finalizing ? `${job.provider} · generated · preparing review take` : `${job.provider} · ${job.status}`,
       percent: null,
       ref: job.id,
       worldId: job.worldId,
-      cancellable: true, // any non-terminal job cancels (SPEC-009 R-14)
+      cancellable: !finalizing,
     });
   }
   if (extras.sidecar?.state === "downloading") {

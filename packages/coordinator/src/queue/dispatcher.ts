@@ -78,6 +78,8 @@ export interface JobQueueOptions {
   onProviderFault?: (provider: string, message: string) => void;
   /** Fired after a job reaches terminal state and its ledger entry landed (SPEC-010 tile flows). */
   onTerminal?: (job: Job) => void | Promise<void>;
+  /** Safe operational notice for a persisted domain-finalization failure. */
+  onFinalizationFailure?: (job: Job) => void;
   clock?: () => string;
   rng?: () => number;
   maxAttempts?: number;
@@ -110,6 +112,12 @@ const FORMAT_PRESERVING_IMAGE_TARGETS = new Set([
   "character-look",
   "reference-tile",
 ]);
+const REFERENCE_FINALIZATION_TARGETS = new Set([
+  "main-photo-candidate",
+  "establish-candidate",
+  "character-sheet",
+  "character-look",
+]);
 
 function landedName(job: Job, artifact: DispatchArtifact, index: number): string {
   const requested = index === 0 && job.landing?.name !== undefined ? job.landing.name : artifact.name;
@@ -136,6 +144,7 @@ export class JobQueue {
   private disposed = false;
   private accepting = false;
   private readonly resolvingHeld = new Set<string>();
+  private readonly finalizing = new Set<string>();
 
   constructor(private readonly opts: JobQueueOptions) {
     this.journal = new JobJournal(opts.journalPath);
@@ -535,7 +544,18 @@ export class JobQueue {
       }
     }
     if (this.disposed) return;
-    await this.terminalize({ ...job, ...(landed.length > 0 ? { landedFiles: landed } : {}) }, "succeeded", null, costMicroUsd);
+    const landedJob = { ...job, ...(landed.length > 0 ? { landedFiles: landed } : {}) };
+    await this.terminalize(
+      this.needsReferenceFinalization(landedJob)
+        ? {
+            ...landedJob,
+            finalization: { status: "pending", error: null, updatedAt: this.clock() },
+          }
+        : landedJob,
+      "succeeded",
+      null,
+      costMicroUsd,
+    );
   }
 
   // ---- terminal states and the ledger (§2.11) ------------------------------
@@ -552,10 +572,15 @@ export class JobQueue {
     if (this.disposed) return;
     await this.appendLedgerOnce(terminal, costMicroUsd);
     if (this.disposed) return;
+    if (terminal.finalization?.status === "pending" && !(await this.opts.ledger.has(terminal.id))) {
+      await this.failFinalization(terminal);
+      return;
+    }
     try {
       await this.opts.onTerminal?.(terminal);
+      if (terminal.finalization?.status === "pending") await this.completeFinalization(terminal);
     } catch {
-      /* a follow-on hook must never poison the pump */
+      if (terminal.finalization?.status === "pending") await this.failFinalization(terminal);
     }
   }
 
@@ -640,6 +665,14 @@ export class JobQueue {
         if (!(await this.opts.ledger.has(job.id))) {
           await this.appendLedgerOnce(job);
           if (await this.opts.ledger.has(job.id)) report.push({ jobId: job.id, action: "ledger-completed" });
+        }
+        if (
+          job.status === "succeeded" &&
+          (await this.opts.ledger.has(job.id)) &&
+          this.needsReferenceFinalization(job) &&
+          job.finalization?.status !== "complete"
+        ) {
+          await this.retryFinalization(job.id);
         }
         continue;
       }
@@ -764,6 +797,63 @@ export class JobQueue {
     await this.transition(held);
     this.emitQueueStatus(job.provider);
     return { jobId: job.id, action: "held-for-user", detail: held.error ?? undefined };
+  }
+
+  private needsReferenceFinalization(job: Job): boolean {
+    return REFERENCE_FINALIZATION_TARGETS.has(job.target.kind) && job.landedFiles?.[0] !== undefined;
+  }
+
+  private async completeFinalization(job: Job): Promise<void> {
+    await this.transition({
+      ...job,
+      finalization: { status: "complete", error: null, updatedAt: this.clock() },
+      updatedAt: this.clock(),
+    });
+  }
+
+  private async failFinalization(job: Job): Promise<void> {
+    const error = "Generation completed, but the review take could not be recorded. Retry finalization; this will not contact the provider or charge again.";
+    const failed: Job = {
+      ...job,
+      finalization: { status: "failed", error, updatedAt: this.clock() },
+      updatedAt: this.clock(),
+    };
+    await this.transition(failed);
+    this.opts.onFinalizationFailure?.(failed);
+  }
+
+  async retryFinalization(jobId: string): Promise<void> {
+    if (this.finalizing.has(jobId)) return;
+    this.finalizing.add(jobId);
+    try {
+      const job = this.jobs.get(jobId);
+      if (!job || job.status !== "succeeded" || !this.needsReferenceFinalization(job)) return;
+      const pending: Job = {
+        ...job,
+        finalization: { status: "pending", error: null, updatedAt: this.clock() },
+        updatedAt: this.clock(),
+      };
+      await this.transition(pending);
+      try {
+        await this.opts.onTerminal?.(pending);
+        await this.completeFinalization(pending);
+      } catch {
+        await this.failFinalization(pending);
+      }
+    } finally {
+      this.finalizing.delete(jobId);
+    }
+  }
+
+  async retryFinalizationsForWorld(worldId: string): Promise<void> {
+    const jobs = [...this.jobs.values()].filter(
+      (job) =>
+        job.worldId === worldId &&
+        job.status === "succeeded" &&
+        this.needsReferenceFinalization(job) &&
+        job.finalization?.status !== "complete",
+    );
+    for (const job of jobs) await this.retryFinalization(job.id);
   }
 
   /** The user's answer to strategy C (D4): resubmit with eyes open, or abandon honestly. */

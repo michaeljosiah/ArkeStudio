@@ -1,6 +1,6 @@
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { ulid, type Job, type ReviewDecision, type Take } from "@arke-studio/contracts";
+import { ulid, type Job, type LedgerEntry, type ReviewDecision, type Take } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
@@ -13,7 +13,7 @@ function kindFor(job: Job): Take["kind"] | null {
   return null;
 }
 
-export async function recordReferenceTake(store: WorldStore, job: Job): Promise<Take | null> {
+export async function recordReferenceTake(store: WorldStore, job: Job, ledgerEntry?: LedgerEntry): Promise<Take | null> {
   const kind = kindFor(job);
   const landed = job.landedFiles?.[0];
   const sheetId = job.target.id?.split("/")[0];
@@ -25,7 +25,7 @@ export async function recordReferenceTake(store: WorldStore, job: Job): Promise<
     | undefined;
   const sheetVersion = frozen?.sheets?.[sheetId];
   if (frozen?.canonRevision === undefined || sheetVersion === undefined) return null;
-  const id = `tk_${ulid()}` as Take["id"];
+  const id = `tk_${job.id.slice(3)}` as Take["id"];
   const media = basename(landed);
   const artDirection = job.params["artDirection"] as { version?: number } | undefined;
   const take: Take = {
@@ -51,18 +51,24 @@ export async function recordReferenceTake(store: WorldStore, job: Job): Promise<
         ? { sourceCandidate: landed }
         : {}),
     },
-    cost: { estimatedMicroUsd: job.estimatedMicroUsd, actualMicroUsd: null },
+    cost: {
+      estimatedMicroUsd: job.estimatedMicroUsd,
+      actualMicroUsd: ledgerEntry?.actualMicroUsd ?? null,
+      ...(ledgerEntry?.actualSource ? { actualSource: ledgerEntry.actualSource } : {}),
+    },
     dispatchedAt: job.createdAt,
     completedAt: store.now(),
     media,
   };
-  await store.gateOp(async () => {
+  return store.gateOp(async () => {
+    const duplicate = store.getBundle().referenceTakes.find((take) => take.jobId === job.id);
+    if (duplicate) return duplicate;
     const dir = join(store.dir, "references", sheetId, "takes", id);
     await mkdir(toExtendedLength(dir), { recursive: true });
     await copyFile(toExtendedLength(join(store.dir, landed)), toExtendedLength(join(dir, media)));
     await atomicWriteFile(join(dir, "take.json"), JSON.stringify(take, null, 2) + "\n");
+    return take;
   });
-  return take;
 }
 
 /** Resolve one undecided reference take by durable identity, never by its non-unique media name. */

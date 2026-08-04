@@ -67,6 +67,22 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
 }
 
 describe("needs-you is derived, never appended to (R-3, D1, §3.2)", () => {
+  it("surfaces failed reference finalization as a no-charge repair", () => {
+    const failed = job({
+      status: "succeeded",
+      target: { kind: "character-sheet", id: "maren-kest/g1" },
+      landedFiles: ["references/maren-kest/incoming/sheet.png"],
+      finalization: {
+        status: "failed",
+        error: "Generation completed, but the review take could not be recorded.",
+        updatedAt: "2026-08-01T10:01:00Z",
+      },
+    });
+    const [entry] = computeNeedsYou(baseState({ jobs: [failed] }));
+    assert.equal(entry?.kind, "job-finalization-failed");
+    assert.deepEqual(entry?.actions, ["retry-finalization"]);
+  });
+
   it("includes unreviewed character reference takes and removes them by decision", () => {
     const take = {
       id: "tk_01J8A0000000000000000000R1",
@@ -226,6 +242,18 @@ describe("actions offered only where the state permits (R-13, D10, §3.2)", () =
 });
 
 describe("running work (R-2, D6, D7)", () => {
+  it("shows generated reference work while its review take is being prepared", () => {
+    const pending = job({
+      status: "succeeded",
+      target: { kind: "character-sheet", id: "maren-kest/g1" },
+      landedFiles: ["references/maren-kest/incoming/sheet.png"],
+      finalization: { status: "pending", error: null, updatedAt: "2026-08-01T10:01:00Z" },
+    });
+    const [entry] = computeRunning(baseState({ jobs: [pending] }));
+    assert.match(entry?.detail ?? "", /generated · preparing review take/);
+    assert.equal(entry?.cancellable, false);
+  });
+
   it("jobs, downloads and exports appear side by side; instant work does not", () => {
     const state = baseState({ jobs: [job({ status: "running" }), job({ id: "jb_01J8E0000000000000000000J2", status: "succeeded" })] });
     const running = computeRunning(state, {
