@@ -44,7 +44,11 @@ export class ReadModel {
   }
 
   /** Seed the app-config slice at start-up (SPEC-008): manifest, providers, routing, spend. */
-  seedAppConfig(config: Partial<Pick<ClientState["app"], "manifest" | "providers" | "routing" | "spend" | "runtime" | "drift">>): void {
+  seedAppConfig(
+    config: Partial<
+      Pick<ClientState["app"], "manifest" | "providers" | "routing" | "spend" | "runtime" | "drift">
+    >,
+  ): void {
     this.state = { ...this.state, app: { ...this.state.app, ...config } };
   }
 
@@ -151,6 +155,7 @@ export class ReadModel {
         return;
       }
       case "queue.reconciled":
+      case "queue.enqueue-result":
         // A report, not state: the Activity screen shows it transiently; jobs carry the truth.
         return;
       case "entity.changed": {

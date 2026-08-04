@@ -525,12 +525,70 @@ describe("domain events and frames", () => {
         candidateRetained: true,
       }),
     );
+    assert.doesNotThrow(() =>
+      DomainEventSchema.parse({
+        at: "2026-08-04T09:00:00Z",
+        type: "queue.enqueue-result",
+        requestId: WORLD_ID,
+        command: "generate-world-image",
+        disposition: "accepted",
+        requestedCount: 1,
+        acceptedJobIds: ["jb_01J8E0000000000000000000J1"],
+        failures: [],
+      }),
+    );
     assert.throws(() => FrameSchema.parse({ kind: "event", seq: 0, event }));
   });
 
   it("validates client messages", () => {
     assert.doesNotThrow(() => ClientMessageSchema.parse({ kind: "hello", lastSeq: 12 }));
     assert.doesNotThrow(() => ClientMessageSchema.parse({ kind: "open-world", worldId: WORLD_ID }));
+    assert.doesNotThrow(() =>
+      ClientMessageSchema.parse({ kind: "generate-world-image", worldId: WORLD_ID, requestId: WORLD_ID }),
+    );
+    assert.throws(() => ClientMessageSchema.parse({ kind: "generate-world-image", worldId: WORLD_ID }));
+    const queueMessages = [
+      { kind: "establish-look", worldId: WORLD_ID, sheetId: "maren-kest", count: 4 },
+      {
+        kind: "generate-main-photo",
+        worldId: WORLD_ID,
+        sheetId: "maren-kest",
+        prompt: "portrait",
+        count: 4,
+        identityReferences: [],
+      },
+      { kind: "generate-character-sheet", worldId: WORLD_ID, sheetId: "maren-kest" },
+      {
+        kind: "generate-character-looks",
+        worldId: WORLD_ID,
+        sheetId: "maren-kest",
+        lookKind: "costume",
+        mode: "stay-close",
+        prompt: "coat",
+        count: 4,
+      },
+      { kind: "generate-missing-tiles", worldId: WORLD_ID, sheetId: "maren-kest", group: "head" },
+      { kind: "regenerate-tile", worldId: WORLD_ID, sheetId: "maren-kest", angle: "head-front" },
+      {
+        kind: "voice-preview",
+        worldId: WORLD_ID,
+        sheetId: "maren-kest",
+        provider: "elevenlabs",
+        voiceId: "v1",
+      },
+      {
+        kind: "dispatch-scene",
+        worldId: WORLD_ID,
+        productionId: "saltlight",
+        sceneFile: "04-the-verse-rises",
+        mode: "per-shot",
+        modelId: "seedance-2.0",
+      },
+    ];
+    for (const message of queueMessages) {
+      assert.throws(() => ClientMessageSchema.parse(message), `${message.kind} requires request correlation`);
+      assert.doesNotThrow(() => ClientMessageSchema.parse({ ...message, requestId: WORLD_ID }));
+    }
     assert.doesNotThrow(() =>
       ClientMessageSchema.parse({
         kind: "accept-character-sheet",

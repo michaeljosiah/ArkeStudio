@@ -54,11 +54,20 @@ describe("design tokens", () => {
     assert.deepEqual(offenders, [], `hard-coded colours found in: ${offenders.join(", ")}`);
   });
 
+  it("styles queue toasts from tokens and inherits the global reduced-motion policy", () => {
+    const toast = readFileSync(join(SRC, "components", "toast.css"), "utf8");
+    const globals = readFileSync(join(SRC, "theme", "globals.css"), "utf8");
+    assert.ok(toast.includes("var(--card)") && toast.includes("var(--border)"));
+    assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(toast));
+    assert.match(globals, /prefers-reduced-motion:\s*reduce/);
+  });
+
   it("keeps credential material out of the client (R-10; SPEC-008 R-5, R-6)", () => {
     // Key ENTRY is legitimate since SPEC-008 (write-only: the value goes up once, no frame
     // carries one back). What must never appear client-side: decryption, persistence, or
     // direct provider auth — a key the client could read back would break R-6.
-    const suspicious = /(safeStorage|decryptString|localStorage|sessionStorage|api_key|secretKey|Authorization: Bearer|xi-api-key|x-api-key)/i;
+    const suspicious =
+      /(safeStorage|decryptString|localStorage|sessionStorage|api_key|secretKey|Authorization: Bearer|xi-api-key|x-api-key)/i;
     const offenders: string[] = [];
     for (const path of walk(SRC)) {
       if (!/\.(tsx?)$/.test(path)) continue;

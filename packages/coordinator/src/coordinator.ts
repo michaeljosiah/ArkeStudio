@@ -20,6 +20,7 @@ import {
   type LedgerEntry,
   type ModelManifest,
   type ProviderId,
+  type QueueCommand,
   type RuntimeProbes,
   type VoiceCandidate,
 } from "@arke-studio/contracts";
@@ -42,7 +43,14 @@ import {
 } from "./productions/ops.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "./queue/dispatcher.js";
-import { extractText, resolveCandidate, storeBatch, verifyCandidates, type RawCandidate } from "./artifacts/extraction.js";
+import { enqueueInputs } from "./queue/acknowledge.js";
+import {
+  extractText,
+  resolveCandidate,
+  storeBatch,
+  verifyCandidates,
+  type RawCandidate,
+} from "./artifacts/extraction.js";
 import { ATTACHABLE_EXTENSIONS, fileArtifact, importFolder } from "./artifacts/filing.js";
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
@@ -186,13 +194,19 @@ export interface CoordinatorOptions {
   voice?: {
     sidecar: SidecarLike | null;
     /** Poll the sidecar's degradation state; null health = not started. */
-    sidecarHealth?: () => Promise<{ state: "not-started" | "downloading" | "unavailable" | "ready"; detail: string }>;
+    sidecarHealth?: () => Promise<{
+      state: "not-started" | "downloading" | "unavailable" | "ready";
+      detail: string;
+    }>;
     localPresets: VoiceCandidate[];
     cloudSources: CloudVoiceSource[];
   };
 }
 
-const SUPERVISOR_HEALTH: Record<SupervisorStatus, { status: "starting" | "healthy" | "unhealthy" | "unavailable" }> = {
+const SUPERVISOR_HEALTH: Record<
+  SupervisorStatus,
+  { status: "starting" | "healthy" | "unhealthy" | "unavailable" }
+> = {
   unconfigured: { status: "unavailable" },
   starting: { status: "starting" },
   healthy: { status: "healthy" },
@@ -252,7 +266,8 @@ export class Coordinator {
         ? new JobQueue({
             journalPath: join(opts.appRoot, "queue", "jobs.jsonl"),
             clients: opts.dispatchClients,
-            getKey: async (provider) => (this.credentials ? this.credentials.get(provider as ProviderId) : null),
+            getKey: async (provider) =>
+              this.credentials ? this.credentials.get(provider as ProviderId) : null,
             emit: (event) => this.emit(event),
             ledger: {
               has: async (jobId) => (await this.ledger!.readAll()).some((e) => e.jobId === jobId),
@@ -278,7 +293,8 @@ export class Coordinator {
           sidecar: opts.voice.sidecar,
           localPresets: opts.voice.localPresets,
           cloudSources: opts.voice.cloudSources,
-          getKey: async (provider) => (this.credentials ? this.credentials.get(provider as ProviderId) : null),
+          getKey: async (provider) =>
+            this.credentials ? this.credentials.get(provider as ProviderId) : null,
           emit: (event) => this.emit(event),
         })
       : null;
@@ -359,8 +375,7 @@ export class Coordinator {
       // /doc what the server can do, and an under-capable one stays unavailable with a reason.
       if (component === "harness" && status === "healthy" && this.opts.adapter?.init) {
         const adapter = this.opts.adapter;
-        void adapter
-          .init!()
+        void adapter.init!()
           .then(() => {
             const readiness = adapter.readiness();
             this.emit({
@@ -452,7 +467,11 @@ export class Coordinator {
           : null,
         diskFreeMb,
         nativeIndexOk: this.opts.nativeIndex?.ok ?? true,
-        nativeIndexDetail: this.opts.nativeIndex?.ok === false ? (this.opts.nativeIndex.reason ?? "the native index binding failed to load — search and counts degrade; authoring is unaffected") : null,
+        nativeIndexDetail:
+          this.opts.nativeIndex?.ok === false
+            ? (this.opts.nativeIndex.reason ??
+              "the native index binding failed to load — search and counts degrade; authoring is unaffected")
+            : null,
       };
       // Both: the snapshot so late-joining clients see it at all (the window loads after
       // start() in a packaged build), and the event so an open client updates live.
@@ -549,7 +568,11 @@ export class Coordinator {
   /** A credential failed mid-session: a provider fault naming the provider, never a work failure (R-4). */
   reportProviderFault(provider: ProviderId, message: string): void {
     this.providerService.markFault(provider, message);
-    this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
+    this.emit({
+      at: new Date().toISOString(),
+      type: "provider.status",
+      providers: this.providerService.list(),
+    });
   }
 
   /**
@@ -566,9 +589,15 @@ export class Coordinator {
       const sheet = store.getBundle().sheets.find((s) => s.id === sheetId);
       if (!sheet || !angle) return;
       const withinKit = job.landedFiles[0].replace(`references/${sheetId}/`, "");
-      await supersedeTile(store, sheetId, angle, { file: withinKit, sheetVersion: sheet.version }).catch(() => {});
+      await supersedeTile(store, sheetId, angle, { file: withinKit, sheetVersion: sheet.version }).catch(
+        () => {},
+      );
     }
-    if (["main-photo-candidate", "establish-candidate", "character-sheet", "character-look"].includes(job.target.kind)) {
+    if (
+      ["main-photo-candidate", "establish-candidate", "character-sheet", "character-look"].includes(
+        job.target.kind,
+      )
+    ) {
       await recordReferenceTake(store, job).catch(() => null);
     }
     if (
@@ -577,7 +606,9 @@ export class Coordinator {
       job.productionId !== undefined
     ) {
       // SPEC-013: the landed media becomes an immutable take (plus segments for a pass).
-      const ledgerEntry = this.ledger ? (await this.ledger.readAll()).find((e) => e.jobId === job.id) : undefined;
+      const ledgerEntry = this.ledger
+        ? (await this.ledger.readAll()).find((e) => e.jobId === job.id)
+        : undefined;
       const takes = await recordTakesFromJob(store, job, ledgerEntry?.actualMicroUsd ?? null).catch(() => []);
       for (const take of takes) {
         this.emit({
@@ -618,6 +649,64 @@ export class Coordinator {
     return this.jobQueue.enqueue(input);
   }
 
+  private emitEnqueueResult(
+    requestId: string,
+    command: QueueCommand,
+    requestedCount: number,
+    acceptedJobIds: Job["id"][],
+    failures: Array<{ index: number; reason: string }>,
+    notQueued = false,
+  ): void {
+    const disposition = notQueued
+      ? "not-queued"
+      : acceptedJobIds.length === 0
+        ? "rejected"
+        : failures.length > 0
+          ? "partial"
+          : "accepted";
+    this.emit({
+      at: new Date().toISOString(),
+      type: "queue.enqueue-result",
+      requestId,
+      command,
+      disposition,
+      requestedCount,
+      acceptedJobIds,
+      failures,
+    });
+  }
+
+  private rejectEnqueue(requestId: string, command: QueueCommand, reason: string): void {
+    this.emitEnqueueResult(requestId, command, 1, [], [{ index: 0, reason }]);
+  }
+
+  private async enqueueBatch(
+    requestId: string,
+    command: QueueCommand,
+    inputs: readonly EnqueueInput[],
+  ): Promise<void> {
+    if (!this.jobQueue) {
+      this.rejectEnqueue(
+        requestId,
+        command,
+        "The job queue is unavailable. Try again after restarting the studio.",
+      );
+      return;
+    }
+    if (inputs.length === 0) {
+      this.emitEnqueueResult(requestId, command, 0, [], [], true);
+      return;
+    }
+    const outcome = await enqueueInputs(inputs, (input) => this.jobQueue!.enqueue(input));
+    this.emitEnqueueResult(
+      requestId,
+      command,
+      outcome.requestedCount,
+      outcome.acceptedJobIds,
+      outcome.failures,
+    );
+  }
+
   /**
    * Record a terminal job outcome (SPEC-008 R-16): append to the ledger, mirror to the app
    * index via the event fold, re-evaluate the rolling threshold (R-19) and drift (R-13).
@@ -633,7 +722,11 @@ export class Coordinator {
     const wasAlerted = this.getState().app.spend?.alerted ?? false;
     this.emit({ at: new Date().toISOString(), type: "spend.status", spend });
     if (spend.alerted && !wasAlerted) {
-      void this.appLog?.append({ kind: "spend.alert", rollingMicroUsd: spend.rollingMicroUsd, settings: settings.spend });
+      void this.appLog?.append({
+        kind: "spend.alert",
+        rollingMicroUsd: spend.rollingMicroUsd,
+        settings: settings.spend,
+      });
     }
     if (this.opts.manifest) {
       const drift = detectDrift(entries, this.opts.manifest);
@@ -688,7 +781,12 @@ export class Coordinator {
         if (!archive) return;
         const summary = this.readModel.getState().worlds.find((w) => w.worldId === msg.worldId);
         const refuse = (reason: string) =>
-          this.emit({ at: new Date().toISOString(), type: "world.archive-refused", worldId: msg.worldId, reason });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "world.archive-refused",
+            worldId: msg.worldId,
+            reason,
+          });
         // Work in flight keeps its world. Moving the folder under a running job turns a job
         // that would have finished into one that fails writing its result somewhere gone.
         const inFlight = this.readModel
@@ -745,7 +843,12 @@ export class Coordinator {
         if (!gate) return;
         try {
           const proposal = await gate.stageSheetEdit(msg.path, msg.summary, msg.sections, "form");
-          this.emit({ at: new Date().toISOString(), type: "proposal.staged", worldId: msg.worldId, proposalId: proposal.id });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.staged",
+            worldId: msg.worldId,
+            proposalId: proposal.id,
+          });
         } catch {
           /* the snapshot below carries whatever state resulted */
         }
@@ -780,7 +883,13 @@ export class Coordinator {
           const at = new Date().toISOString();
           if (outcome.status === "accepted") {
             this.authoring?.release(msg.proposalId);
-            this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId: msg.proposalId, outcome: "accepted" });
+            this.emit({
+              at,
+              type: "proposal.resolved",
+              worldId: msg.worldId,
+              proposalId: msg.proposalId,
+              outcome: "accepted",
+            });
           } else {
             this.emit({
               at,
@@ -904,7 +1013,13 @@ export class Coordinator {
       }
       case "genesis-chat": {
         const failed = (detail: string) =>
-          this.emit({ at: new Date().toISOString(), type: "genesis.status", genesisId: msg.genesisId, status: "failed", detail });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "genesis.status",
+            genesisId: msg.genesisId,
+            status: "failed",
+            detail,
+          });
         if (!this.genesis || !this.opts.provider.genesisDir) {
           failed("authoring is not configured");
           return;
@@ -947,7 +1062,8 @@ export class Coordinator {
         if (!store) return;
         // Fire and watch: the result arrives as one canon.answer event, refusals included.
         void (async () => {
-          const worldQueryUrl = this.askService && this.opts.adapter ? await this.worldQuery.start() : undefined;
+          const worldQueryUrl =
+            this.askService && this.opts.adapter ? await this.worldQuery.start() : undefined;
           const fallback: import("@arke-studio/contracts").AskResult = {
             outcome: "unavailable",
             reason: "authoring is not configured",
@@ -1011,7 +1127,12 @@ export class Coordinator {
             title: msg.title,
             statement: msg.statement,
           });
-          this.emit({ at: new Date().toISOString(), type: "proposal.staged", worldId: msg.worldId, proposalId: proposal.id });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.staged",
+            worldId: msg.worldId,
+            proposalId: proposal.id,
+          });
         } catch {
           /* the refreshed snapshot carries whatever resulted */
         }
@@ -1022,7 +1143,9 @@ export class Coordinator {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
         if (!gate || !store) return;
-        await stageCanonAmendment(store, gate, { entryId: msg.entryId, statement: msg.statement }).catch(() => {});
+        await stageCanonAmendment(store, gate, { entryId: msg.entryId, statement: msg.statement }).catch(
+          () => {},
+        );
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -1183,7 +1306,11 @@ export class Coordinator {
         try {
           await this.credentials.set(msg.provider, msg.key);
           this.providerService.setConfigured(msg.provider, true);
-          this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "provider.status",
+            providers: this.providerService.list(),
+          });
         } catch (err) {
           void this.appLog?.append({
             kind: "credential.store-failed",
@@ -1197,21 +1324,41 @@ export class Coordinator {
         if (!this.credentials) return;
         await this.credentials.clear(msg.provider).catch(() => {});
         this.providerService.setConfigured(msg.provider, false);
-        this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
+        this.emit({
+          at: new Date().toISOString(),
+          type: "provider.status",
+          providers: this.providerService.list(),
+        });
         return;
       }
       case "validate-provider": {
         // Probes per capability (R-3): the emitted statuses carry what the key unlocks.
-        this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
+        this.emit({
+          at: new Date().toISOString(),
+          type: "provider.status",
+          providers: this.providerService.list(),
+        });
         await this.providerService.validate(msg.provider);
-        this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
+        this.emit({
+          at: new Date().toISOString(),
+          type: "provider.status",
+          providers: this.providerService.list(),
+        });
         return;
       }
       case "set-routing-default": {
         if (!this.appSettings || !this.opts.manifest) return;
-        const result = await this.appSettings.setRoutingDefault(msg.capability, msg.modelId, this.opts.manifest);
+        const result = await this.appSettings.setRoutingDefault(
+          msg.capability,
+          msg.modelId,
+          this.opts.manifest,
+        );
         if (!result.ok) {
-          void this.appLog?.append({ kind: "routing.refused", capability: msg.capability, reason: result.reason });
+          void this.appLog?.append({
+            kind: "routing.refused",
+            capability: msg.capability,
+            reason: result.reason,
+          });
         }
         const settings = await this.appSettings.load();
         this.emit({
@@ -1281,18 +1428,31 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!gate || !store) return;
         try {
-          const draft = await draftSceneSkeleton(store, gate, { productionId: msg.productionId, brief: msg.brief });
-          this.emit({ at: new Date().toISOString(), type: "proposal.staged", worldId: msg.worldId, proposalId: draft.proposalId });
+          const draft = await draftSceneSkeleton(store, gate, {
+            productionId: msg.productionId,
+            brief: msg.brief,
+          });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.staged",
+            worldId: msg.worldId,
+            proposalId: draft.proposalId,
+          });
           await this.refreshWorldSnapshot(msg.worldId);
           if (this.authoring && this.opts.adapter?.readiness().ready) {
             const worldQueryUrl = await this.worldQuery.start();
             void this.authoring
-              .run(store, gate, {
-                worldId: msg.worldId,
-                proposalId: draft.proposalId,
-                purpose: "authoring",
-                instruction: draft.instruction,
-              }, worldQueryUrl)
+              .run(
+                store,
+                gate,
+                {
+                  worldId: msg.worldId,
+                  proposalId: draft.proposalId,
+                  purpose: "authoring",
+                  instruction: draft.instruction,
+                },
+                worldQueryUrl,
+              )
               .then(() => this.refreshWorldSnapshot(msg.worldId));
           }
         } catch {
@@ -1343,16 +1503,31 @@ export class Coordinator {
         if (!gate || !store || !this.authoring || !this.opts.adapter?.readiness().ready) return;
         try {
           const path = `productions/${msg.productionId}/chapters/${msg.chapterFile}.md`;
-          const staged = await gate.stage({ kind: "chapter-draft", summary: `Draft: ${msg.chapterFile}`, source: "chat:studio", targets: [{ path }] });
-          this.emit({ at: new Date().toISOString(), type: "proposal.staged", worldId: msg.worldId, proposalId: staged.id });
+          const staged = await gate.stage({
+            kind: "chapter-draft",
+            summary: `Draft: ${msg.chapterFile}`,
+            source: "chat:studio",
+            targets: [{ path }],
+          });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.staged",
+            worldId: msg.worldId,
+            proposalId: staged.id,
+          });
           const worldQueryUrl = await this.worldQuery.start();
           void this.authoring
-            .run(store, gate, {
-              worldId: msg.worldId,
-              proposalId: staged.id,
-              purpose: "drafting",
-              instruction: `Draft the chapter prose in ${path}. ${msg.instruction}. Anything the prose implies about the world — a new name, a rule, a place — must NOT be written into world files; list such facts at the end of the chapter under a "## Surfaced facts" heading for separate proposal.`,
-            }, worldQueryUrl)
+            .run(
+              store,
+              gate,
+              {
+                worldId: msg.worldId,
+                proposalId: staged.id,
+                purpose: "drafting",
+                instruction: `Draft the chapter prose in ${path}. ${msg.instruction}. Anything the prose implies about the world — a new name, a rule, a place — must NOT be written into world files; list such facts at the end of the chapter under a "## Surfaced facts" heading for separate proposal.`,
+              },
+              worldQueryUrl,
+            )
             .then(() => this.refreshWorldSnapshot(msg.worldId));
         } catch {
           this.transport.broadcastSnapshot();
@@ -1384,7 +1559,9 @@ export class Coordinator {
         if (!store) return;
         const bundle = store.getBundle();
         const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
-        const scene = production?.scenes.find((s) => `${String(s.number).padStart(2, "0")}-${s.slug}` === msg.sceneFile);
+        const scene = production?.scenes.find(
+          (s) => `${String(s.number).padStart(2, "0")}-${s.slug}` === msg.sceneFile,
+        );
         if (!production || !scene) return;
         try {
           const png = await compileBoard(store, production, scene);
@@ -1405,12 +1582,20 @@ export class Coordinator {
       }
       case "dispatch-scene": {
         const store = this.opts.provider.openStore?.();
-        if (!store || !this.jobQueue || !this.opts.manifest) return;
+        if (!store || !this.opts.manifest) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The scene could not be prepared for Activity.");
+          return;
+        }
         const bundle = store.getBundle();
         const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
-        const scene = production?.scenes.find((s) => `${String(s.number).padStart(2, "0")}-${s.slug}` === msg.sceneFile);
+        const scene = production?.scenes.find(
+          (s) => `${String(s.number).padStart(2, "0")}-${s.slug}` === msg.sceneFile,
+        );
         const model = this.opts.manifest.models.find((m) => m.id === msg.modelId);
-        if (!production || !scene || !model) return;
+        if (!production || !scene || !model) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The scene or selected model is no longer available.");
+          return;
+        }
         // Recompute the plan server-side — the request the dialog showed is the one executed.
         const plan = planScene(
           {
@@ -1428,11 +1613,18 @@ export class Coordinator {
         );
         if (msg.mode === "whole-scene" && !plan.pack.ok) {
           void this.appLog?.append({ kind: "dispatch.refused", reason: "oversize shot", detail: plan.pack });
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "Whole-scene dispatch is unavailable because one shot exceeds the model limit.",
+          );
           return;
         }
-        for (const input of composeDispatches(msg.worldId, msg.productionId, scene, plan, model, bundle)) {
-          await this.jobQueue.enqueue(input).catch(() => {});
-        }
+        await this.enqueueBatch(
+          msg.requestId,
+          msg.kind,
+          composeDispatches(msg.worldId, msg.productionId, scene, plan, model, bundle),
+        );
         return;
       }
       case "accept-take": {
@@ -1441,8 +1633,18 @@ export class Coordinator {
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production) return;
         try {
-          const decision = await acceptTake(store, production, { takeId: msg.takeId, shotId: msg.shotId, by: "user" });
-          this.emit({ at: new Date().toISOString(), type: "review.recorded", worldId: msg.worldId, productionId: msg.productionId, review: decision });
+          const decision = await acceptTake(store, production, {
+            takeId: msg.takeId,
+            shotId: msg.shotId,
+            by: "user",
+          });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "review.recorded",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            review: decision,
+          });
           this.emit({
             at: new Date().toISOString(),
             type: "selection.changed",
@@ -1469,7 +1671,13 @@ export class Coordinator {
             by: "user",
             citation: msg.citation,
           });
-          this.emit({ at: new Date().toISOString(), type: "review.recorded", worldId: msg.worldId, productionId: msg.productionId, review: decision });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "review.recorded",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            review: decision,
+          });
           await this.refreshWorldSnapshot(msg.worldId);
         } catch {
           this.transport.broadcastSnapshot();
@@ -1513,12 +1721,21 @@ export class Coordinator {
             error,
           });
         if (!runner) {
-          emitProgress("ex_none", "failed", 0, null, "export needs ffmpeg — bundled in packaged builds (SPEC-016); set ARKE_FFMPEG to use one now");
+          emitProgress(
+            "ex_none",
+            "failed",
+            0,
+            null,
+            "export needs ffmpeg — bundled in packaged builds (SPEC-016); set ARKE_FFMPEG to use one now",
+          );
           return;
         }
         const cut = deriveCut(production);
         const plan = buildExportPlan(cut, msg.preset);
-        const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+        const stamp = new Date()
+          .toISOString()
+          .replace(/[-:TZ.]/g, "")
+          .slice(0, 14);
         const handle = runExport(
           store.dir,
           plan,
@@ -1543,20 +1760,38 @@ export class Coordinator {
       case "export-world": {
         const store = this.opts.provider.openStore?.();
         if (!store || !this.opts.appRoot) return;
-        const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+        const stamp = new Date()
+          .toISOString()
+          .replace(/[-:TZ.]/g, "")
+          .slice(0, 14);
         const target = join(this.opts.appRoot, "exports", `${store.getBundle().meta.slug}-${stamp}`);
         await exportWorld(store.dir, target).catch((err) => {
-          void this.appLog?.append({ kind: "world-export.failed", message: err instanceof Error ? err.message : String(err) });
+          void this.appLog?.append({
+            kind: "world-export.failed",
+            message: err instanceof Error ? err.message : String(err),
+          });
         });
         void this.appLog?.append({ kind: "world-export.done", target });
         return;
       }
       case "check-updates": {
         if (!this.opts.updates) {
-          this.emit({ at: new Date().toISOString(), type: "update.status", status: "none", version: null, detail: "updates are managed outside this build" });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "update.status",
+            status: "none",
+            version: null,
+            detail: "updates are managed outside this build",
+          });
           return;
         }
-        this.emit({ at: new Date().toISOString(), type: "update.status", status: "checking", version: null, detail: null });
+        this.emit({
+          at: new Date().toISOString(),
+          type: "update.status",
+          status: "checking",
+          version: null,
+          detail: null,
+        });
         try {
           const found = await this.opts.updates.check();
           this.emit({
@@ -1579,7 +1814,13 @@ export class Coordinator {
       }
       case "download-update": {
         if (!this.opts.updates) return;
-        this.emit({ at: new Date().toISOString(), type: "update.status", status: "downloading", version: null, detail: null });
+        this.emit({
+          at: new Date().toISOString(),
+          type: "update.status",
+          status: "downloading",
+          version: null,
+          detail: null,
+        });
         try {
           // Download only (R-13, D7): the world lock, the commit journal and running jobs are
           // never interrupted — installation waits for application exit, by construction.
@@ -1604,7 +1845,11 @@ export class Coordinator {
       }
       case "generate-diagnostics": {
         const bundle = await this.diagnostics();
-        this.emit({ at: new Date().toISOString(), type: "diagnostics.ready", bundle: JSON.stringify(bundle, null, 2) });
+        this.emit({
+          at: new Date().toISOString(),
+          type: "diagnostics.ready",
+          bundle: JSON.stringify(bundle, null, 2),
+        });
         return;
       }
       case "open-data-folder": {
@@ -1735,7 +1980,12 @@ export class Coordinator {
               artifact: artifact.file,
               reason: "extraction needs the authoring harness running — filing is complete either way",
             });
-            finished("unavailable", 0, 0, "reading needs the writing service running — the file is filed either way");
+            finished(
+              "unavailable",
+              0,
+              0,
+              "reading needs the writing service running — the file is filed either way",
+            );
             return;
           }
           const raw = await extractor(text, artifact.file, control.signal);
@@ -1819,10 +2069,16 @@ export class Coordinator {
       }
       case "voice-preview": {
         const store = this.opts.provider.openStore?.();
-        if (!store || !this.voiceService) return;
+        if (!store || !this.voiceService) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Voice preview is unavailable.");
+          return;
+        }
         const bundle = store.getBundle();
         const sheet = bundle.sheets.find((s) => s.id === msg.sheetId);
-        if (!sheet) return;
+        if (!sheet) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The character is no longer available.");
+          return;
+        }
         const line = previewLineFor(sheet, bundle.productions);
         if (msg.provider === "kokoro") {
           // Local: sidecar synthesis, no queue, no ledger, zero cost (R-2).
@@ -1851,6 +2107,7 @@ export class Coordinator {
               error: err instanceof Error ? err.message : String(err),
             });
           }
+          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
           return;
         }
         // Cloud: cache hit replays free; a miss dispatches through the queue (R-2, R-10).
@@ -1867,6 +2124,7 @@ export class Coordinator {
             file: cached,
             error: null,
           });
+          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
           return;
         } catch {
           /* miss → enqueue */
@@ -1874,9 +2132,19 @@ export class Coordinator {
         const model = this.opts.manifest?.models.find(
           (m) => m.provider === msg.provider && m.capability === "voice-tts",
         );
-        if (!model || !this.jobQueue) return;
-        const request = this.voiceService.cloudPreviewRequest(msg.worldId, sheet, msg.provider, msg.voiceId, line, model);
-        await this.jobQueue.enqueue(request.input).catch(() => {});
+        if (!model) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "No cloud voice model is available for this provider.");
+          return;
+        }
+        const request = this.voiceService.cloudPreviewRequest(
+          msg.worldId,
+          sheet,
+          msg.provider,
+          msg.voiceId,
+          line,
+          model,
+        );
+        await this.enqueueBatch(msg.requestId, msg.kind, [request.input]);
         return;
       }
       case "transcribe-dictation": {
@@ -1890,11 +2158,24 @@ export class Coordinator {
       }
       case "generate-world-image": {
         const store = this.opts.provider.openStore?.();
-        if (!store || !this.jobQueue || !this.opts.manifest) return;
-        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
+        if (!store || !this.opts.manifest) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "World key art is unavailable.");
+          return;
+        }
+        const model = imageModelFor(
+          this.appSettings ? await this.appSettings.load() : null,
+          this.opts.manifest,
+        );
         // The screen disables the button without a usable image model and says why; this is the
         // backstop for a frame that arrives anyway.
-        if (!model) return;
+        if (!model) {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "No image model is available. Check provider settings.",
+          );
+          return;
+        }
         const bundle = store.getBundle();
         // Ask the harness to write the prompt, and carry on without it if it cannot. A writing
         // model turns "a drowned god still sings" into light, material and lens; the plain
@@ -1920,19 +2201,17 @@ export class Coordinator {
           });
         }
         const request = worldImageRequest(bundle.meta, model, bundle.artDirection);
-        await this.jobQueue
-          .enqueue(
-            prompt
-              ? {
-                  ...request,
-                  params: {
-                    ...request.params,
-                    prompt: `${bundle.artDirection.description}. ${prompt}`,
-                  },
-                }
-              : request,
-          )
-          .catch(() => {});
+        await this.enqueueBatch(msg.requestId, msg.kind, [
+          prompt
+            ? {
+                ...request,
+                params: {
+                  ...request.params,
+                  prompt: `${bundle.artDirection.description}. ${prompt}`,
+                },
+              }
+            : request,
+        ]);
         return;
       }
       case "use-world-image": {
@@ -1955,23 +2234,45 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         await store
-          .gateOp(async () => rm(toExtendedLength(join(store.dir, WORLD_IMAGE_DIR, WORLD_IMAGE_CANDIDATE)), { force: true }))
+          .gateOp(async () =>
+            rm(toExtendedLength(join(store.dir, WORLD_IMAGE_DIR, WORLD_IMAGE_CANDIDATE)), { force: true }),
+          )
           .catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "establish-look": {
         const store = this.opts.provider.openStore?.();
-        if (!store || !this.jobQueue || !this.opts.manifest) return;
+        if (!store || !this.opts.manifest) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Reference generation is unavailable.");
+          return;
+        }
         const sheet = store.getBundle().sheets.find((s) => s.id === msg.sheetId);
-        if (!sheet) return;
-        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
-        if (!model) return;
+        if (!sheet) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The character is no longer available.");
+          return;
+        }
+        const model = imageModelFor(
+          this.appSettings ? await this.appSettings.load() : null,
+          this.opts.manifest,
+        );
+        if (!model) {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "No image model is available. Check provider settings.",
+          );
+          return;
+        }
         const kit = (await readKit(store, msg.sheetId))?.kit ?? null;
         const bundle = store.getBundle();
-        for (const request of establishRequests(bundle.meta, sheet, kit, model, msg.count, bundle.artDirection)) {
-          await this.jobQueue.enqueue(request.input).catch(() => {});
-        }
+        await this.enqueueBatch(
+          msg.requestId,
+          msg.kind,
+          establishRequests(bundle.meta, sheet, kit, model, msg.count, bundle.artDirection).map(
+            (request) => request.input,
+          ),
+        );
         return;
       }
       case "choose-anchor": {
@@ -1997,12 +2298,22 @@ export class Coordinator {
           });
         };
         if (!store || store.worldId !== msg.worldId) {
-          report("failed", true, "The main photo was not changed. Open this world and try again.", "candidate-validation");
+          report(
+            "failed",
+            true,
+            "The main photo was not changed. Open this world and try again.",
+            "candidate-validation",
+          );
           return;
         }
         const sheet = store.getBundle().sheets.find((s) => s.id === msg.sheetId);
         if (!sheet) {
-          report("failed", true, "The main photo was not changed because the character is unavailable.", "candidate-validation");
+          report(
+            "failed",
+            true,
+            "The main photo was not changed because the character is unavailable.",
+            "candidate-validation",
+          );
           return;
         }
         let bundle = store.getBundle();
@@ -2011,20 +2322,25 @@ export class Coordinator {
         if (selection.source === "take") {
           const takeId = selection.takeId;
           const take = bundle.referenceTakes.find((candidate) => candidate.id === takeId);
-          const job = take?.jobId ? this.jobQueue?.listJobs().find((candidate) => candidate.id === take.jobId) : undefined;
+          const job = take?.jobId
+            ? this.jobQueue?.listJobs().find((candidate) => candidate.id === take.jobId)
+            : undefined;
           sourceCandidatePath =
             (typeof take?.params["sourceCandidate"] === "string" ? take.params["sourceCandidate"] : null) ??
             job?.landedFiles?.find((path) => path.startsWith(`references/${msg.sheetId}/candidates/`)) ??
             null;
         } else {
           const candidatePath = `references/${msg.sheetId}/candidates/${selection.file}`;
-          const job = this.jobQueue?.listJobs().find(
-            (candidate) =>
-              candidate.status === "succeeded" &&
-              (candidate.target.kind === "main-photo-candidate" || candidate.target.kind === "establish-candidate") &&
-              candidate.target.id?.startsWith(`${msg.sheetId}/`) === true &&
-              candidate.landedFiles?.includes(candidatePath),
-          );
+          const job = this.jobQueue
+            ?.listJobs()
+            .find(
+              (candidate) =>
+                candidate.status === "succeeded" &&
+                (candidate.target.kind === "main-photo-candidate" ||
+                  candidate.target.kind === "establish-candidate") &&
+                candidate.target.id?.startsWith(`${msg.sheetId}/`) === true &&
+                candidate.landedFiles?.includes(candidatePath),
+            );
           if (job) {
             source = "generated";
             const recovered = await recordReferenceTake(store, job).catch(() => null);
@@ -2076,40 +2392,71 @@ export class Coordinator {
       }
       case "generate-main-photo": {
         const store = this.opts.provider.openStore?.();
-        if (!store || !this.jobQueue || !this.opts.manifest) return;
+        if (!store || !this.opts.manifest) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Main-photo generation is unavailable.");
+          return;
+        }
         const bundle = store.getBundle();
         const sheet = bundle.sheets.find((candidate) => candidate.id === msg.sheetId);
         const kit = (await readKit(store, msg.sheetId))?.kit ?? null;
-        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
-        if (!sheet || !model) return;
+        const model = imageModelFor(
+          this.appSettings ? await this.appSettings.load() : null,
+          this.opts.manifest,
+        );
+        if (!sheet || !model) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The character or image model is no longer available.");
+          return;
+        }
         const requests = mainPhotoRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
           prompt: msg.prompt,
           count: msg.count,
           identityReferences: msg.identityReferences,
           generationKey: Date.now().toString(36),
         });
-        for (const request of requests) await this.jobQueue.enqueue(request.input).catch(() => {});
+        await this.enqueueBatch(
+          msg.requestId,
+          msg.kind,
+          requests.map((request) => request.input),
+        );
         return;
       }
       case "generate-character-sheet": {
         const store = this.opts.provider.openStore?.();
-        if (!store || !this.jobQueue || !this.opts.manifest) return;
+        if (!store || !this.opts.manifest) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Character-sheet generation is unavailable.");
+          return;
+        }
         const bundle = store.getBundle();
         const sheet = bundle.sheets.find((candidate) => candidate.id === msg.sheetId);
         const kit = (await readKit(store, msg.sheetId))?.kit;
-        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
-        if (!sheet || !kit || !model) return;
-        const generationKey = Date.now().toString(36);
-        const request = characterSheetRequest(
-          bundle.meta,
-          bundle.artDirection,
-          sheet,
-          kit,
-          model,
-          generationKey,
-          msg.styleOverride,
+        const model = imageModelFor(
+          this.appSettings ? await this.appSettings.load() : null,
+          this.opts.manifest,
         );
-        await this.jobQueue.enqueue(request.input).catch(() => {});
+        if (!sheet || !kit || !model) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "An accepted main photo and image model are required.");
+          return;
+        }
+        let request;
+        try {
+          request = characterSheetRequest(
+            bundle.meta,
+            bundle.artDirection,
+            sheet,
+            kit,
+            model,
+            Date.now().toString(36),
+            msg.styleOverride,
+          );
+        } catch {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "An accepted main photo is required before generating a character sheet.",
+          );
+          return;
+        }
+        await this.enqueueBatch(msg.requestId, msg.kind, [request.input]);
         return;
       }
       case "accept-character-sheet": {
@@ -2126,7 +2473,11 @@ export class Coordinator {
         );
         if (!sheet || !take?.media) return;
         const media = `references/${msg.sheetId}/takes/${take.id}/${take.media}`;
-        if (basename(take.media) !== take.media || !(await stat(toExtendedLength(join(store.dir, media))).catch(() => null))) return;
+        if (
+          basename(take.media) !== take.media ||
+          !(await stat(toExtendedLength(join(store.dir, media))).catch(() => null))
+        )
+          return;
         const review = referenceReviewDecision(store.now(), take, "accept");
         await acceptCharacterSheet(store, sheet, {
           file: `takes/${take.id}/${take.media}`,
@@ -2139,20 +2490,43 @@ export class Coordinator {
       }
       case "generate-character-looks": {
         const store = this.opts.provider.openStore?.();
-        if (!store || !this.jobQueue || !this.opts.manifest) return;
+        if (!store || !this.opts.manifest) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Character-look generation is unavailable.");
+          return;
+        }
         const bundle = store.getBundle();
         const sheet = bundle.sheets.find((candidate) => candidate.id === msg.sheetId);
         const kit = (await readKit(store, msg.sheetId))?.kit;
-        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
-        if (!sheet || !kit || !model) return;
-        const requests = characterLookRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
-          kind: msg.lookKind,
-          mode: msg.mode,
-          prompt: msg.prompt,
-          count: msg.count,
-          generationKey: Date.now().toString(36),
-        });
-        for (const request of requests) await this.jobQueue.enqueue(request.input).catch(() => {});
+        const model = imageModelFor(
+          this.appSettings ? await this.appSettings.load() : null,
+          this.opts.manifest,
+        );
+        if (!sheet || !kit || !model) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "An accepted main photo and image model are required.");
+          return;
+        }
+        let requests;
+        try {
+          requests = characterLookRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
+            kind: msg.lookKind,
+            mode: msg.mode,
+            prompt: msg.prompt,
+            count: msg.count,
+            generationKey: Date.now().toString(36),
+          });
+        } catch {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "An accepted main photo is required before generating character looks.",
+          );
+          return;
+        }
+        await this.enqueueBatch(
+          msg.requestId,
+          msg.kind,
+          requests.map((request) => request.input),
+        );
         return;
       }
       case "accept-character-look": {
@@ -2176,9 +2550,14 @@ export class Coordinator {
           (lookKind !== "costume" && lookKind !== "pose-expression" && lookKind !== "condition-age") ||
           typeof lookPrompt !== "string" ||
           lookPrompt.trim().length === 0
-        ) return;
+        )
+          return;
         const media = `references/${msg.sheetId}/takes/${take.id}/${take.media}`;
-        if (basename(take.media) !== take.media || !(await stat(toExtendedLength(join(store.dir, media))).catch(() => null))) return;
+        if (
+          basename(take.media) !== take.media ||
+          !(await stat(toExtendedLength(join(store.dir, media))).catch(() => null))
+        )
+          return;
         const review = referenceReviewDecision(store.now(), take, "accept");
         await acceptCharacterLook(store, msg.sheetId, {
           id: take.id,
@@ -2231,11 +2610,27 @@ export class Coordinator {
       case "generate-missing-tiles":
       case "regenerate-tile": {
         const store = this.opts.provider.openStore?.();
-        if (!store || !this.jobQueue || !this.opts.manifest) return;
+        if (!store || !this.opts.manifest) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Reference generation is unavailable.");
+          return;
+        }
         const sheet = store.getBundle().sheets.find((s) => s.id === msg.sheetId);
-        if (!sheet) return;
-        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
-        if (!model) return;
+        if (!sheet) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The character is no longer available.");
+          return;
+        }
+        const model = imageModelFor(
+          this.appSettings ? await this.appSettings.load() : null,
+          this.opts.manifest,
+        );
+        if (!model) {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "No image model is available. Check provider settings.",
+          );
+          return;
+        }
         const kit = (await readKit(store, msg.sheetId))?.kit ?? null;
         let angles;
         if (msg.kind === "regenerate-tile") {
@@ -2245,15 +2640,21 @@ export class Coordinator {
           if (!missing.ok) {
             // The gate states what is outstanding (R-7, D5) — surfaced via the app log and a
             // no-op; the client shows the same gate from the shared helper before sending.
-            void this.appLog?.append({ kind: "kit.gate-refused", sheetId: msg.sheetId, reason: missing.reason });
+            void this.appLog?.append({
+              kind: "kit.gate-refused",
+              sheetId: msg.sheetId,
+              reason: missing.reason,
+            });
+            this.rejectEnqueue(msg.requestId, msg.kind, missing.reason);
             return;
           }
           angles = missing.angles;
         }
-        for (const angle of angles) {
-          const request = tileRequest(store.getBundle().meta, sheet, kit, model, angle);
-          await this.jobQueue.enqueue(request.input).catch(() => {});
-        }
+        await this.enqueueBatch(
+          msg.requestId,
+          msg.kind,
+          angles.map((angle) => tileRequest(store.getBundle().meta, sheet, kit, model, angle).input),
+        );
         return;
       }
       case "compile-grid": {
