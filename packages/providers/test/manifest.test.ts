@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  characterImageOutput,
+  estimateCharacterImageMicroUsd,
   estimateMicroUsd,
   formatMicroUsd,
   gateLocalRuntimes,
   ModelManifestSchema,
   modelCapabilityCopy,
+  modelForCapability,
   passesForDuration,
   reconcileStrategy,
   sumMicroUsd,
@@ -108,6 +111,31 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
     const expect = (mp: number) => Math.ceil((Math.round(mp * 1000) * perMp) / 1000);
     assert.equal(estimateMicroUsd(flux, { megapixels: 8.3 }), expect(8.3));
     assert.equal(estimateMicroUsd(flux, { megapixels: 0.001 }), expect(0.001), "never down to nothing");
+    assert.equal(estimateMicroUsd(flux, { images: 4, megapixels: 1 }), perMp * 4);
+  });
+
+  it("prices explicit character outputs, including model resolution overrides", () => {
+    const flux = model("flux-2-pro");
+    assert.ok(estimateCharacterImageMicroUsd(flux, "main-photo") > 0);
+    assert.equal(
+      estimateCharacterImageMicroUsd(flux, "main-photo", 4),
+      estimateCharacterImageMicroUsd(flux, "main-photo") * 4,
+    );
+    const fourKOnly = {
+      ...model("soul-2.0"),
+      limits: { ...model("soul-2.0").limits, resolutions: ["4k"] },
+    };
+    assert.equal(characterImageOutput(fourKOnly, "character-sheet").resolution, "4k");
+    assert.equal(estimateCharacterImageMicroUsd(fourKOnly, "character-sheet"), 120000);
+  });
+
+  it("selects a capability-valid routed model with the same fallback everywhere", () => {
+    const flux = model("flux-2-pro");
+    const video = model("seedance-2.0");
+    const manifest = { ...SHIPPED_MANIFEST, models: [video, flux] };
+    assert.equal(modelForCapability(manifest, { image: flux.id }, "image")?.id, flux.id);
+    assert.equal(modelForCapability(manifest, { image: video.id }, "image")?.id, flux.id);
+    assert.equal(modelForCapability(manifest, { image: "missing" }, "image")?.id, flux.id);
   });
 
   it("per character", () => {

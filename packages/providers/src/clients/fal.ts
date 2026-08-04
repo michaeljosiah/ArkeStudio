@@ -71,10 +71,23 @@ export class FalClient implements ProviderClient {
 
   async submit(key: string, request: SubmitRequest): Promise<SubmitResult> {
     const endpoint = this.endpointFor(request.model);
+    const { output, ...params } = request.params;
+    const size = output as { width?: unknown; height?: unknown; aspect?: unknown; resolution?: unknown } | undefined;
+    const imageOutput =
+      request.capability === "image" &&
+      typeof size?.width === "number" &&
+      typeof size.height === "number"
+        ? request.model.startsWith("nano-banana-")
+          ? {
+              ...(typeof size.aspect === "string" ? { aspect_ratio: size.aspect } : {}),
+              ...(typeof size.resolution === "string" ? { resolution: size.resolution } : {}),
+            }
+          : { image_size: { width: size.width, height: size.height } }
+        : {};
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/${endpoint}`, {
       method: "POST",
       headers: this.headers(key),
-      body: JSON.stringify(request.params),
+      body: JSON.stringify({ ...params, ...imageOutput }),
     });
     const requestId = (body as { request_id?: string } | null)?.request_id;
     if (status >= 400 || !requestId) throw new Error(`fal: submit failed (HTTP ${status})`);

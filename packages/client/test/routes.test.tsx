@@ -115,6 +115,51 @@ describe("screen inventory", () => {
     assert.ok(looks.includes("Explorations do not automatically join the identity package."));
   });
 
+  it("shows the routed image model and the same non-zero batch estimate on every character dialog", () => {
+    const first = {
+      id: "first-image",
+      provider: "openai" as const,
+      capability: "image" as const,
+      displayName: "First Image",
+      accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
+      limits: {},
+      pricing: { kind: "perImage" as const, microUsdPerImage: 1 },
+    };
+    const routed = {
+      id: "routed-flux",
+      provider: "fal" as const,
+      capability: "image" as const,
+      displayName: "Routed Flux",
+      accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
+      limits: { resolutions: ["1MP"] },
+      pricing: { kind: "perMegapixel" as const, microUsdPerMegapixel: 30000 },
+    };
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        manifest: { ...FIXTURE_STATE.app.manifest!, models: [first, routed, ...FIXTURE_STATE.app.manifest!.models] },
+        routing: { ...FIXTURE_STATE.app.routing, defaults: { ...FIXTURE_STATE.app.routing.defaults, image: routed.id } },
+      },
+    });
+    try {
+      const base = `/w/${FIXTURE_STATE.world!.meta.worldId}/cast/maren-kest`;
+      const sheet = renderAt(`${base}/model-sheet`).replace(/<!-- -->/g, "");
+      const main = renderAt(`${base}/main-photo`).replace(/<!-- -->/g, "");
+      const looks = renderAt(`${base}/looks`).replace(/<!-- -->/g, "");
+      for (const html of [sheet, main, looks]) {
+        assert.ok(html.includes("FAL · Routed Flux · refs ×4"));
+        assert.ok(!html.includes("First Image"));
+        assert.doesNotMatch(html, /\$0\.00/);
+      }
+      assert.ok(main.includes("$0.16"), "four portrait previews show four times the per-image estimate");
+      assert.ok(looks.includes("$0.16"), "four looks show the same batch estimate");
+      assert.ok(sheet.includes("$0.05"), "one landscape sheet shows its one-image estimate");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
   it("grounds the main-photo prompt in the active character rather than the fixture lead", () => {
     const world = FIXTURE_STATE.world!;
     const other = {

@@ -1,7 +1,10 @@
 import {
-  estimateMicroUsd,
+  characterImageEstimateIsUsable,
+  characterImageOutput,
+  estimateCharacterImageMicroUsd,
   headGate,
   lockedTiles,
+  modelForCapability,
   type AppSettings,
   type ManifestModel,
   type ModelManifest,
@@ -74,7 +77,7 @@ export function tileRequest(
       references.push(`references/${sheet.id}/${tile.file}`);
     }
   }
-  const estimated = estimateMicroUsd(model, { images: 1 });
+  const estimated = pricedCharacterImage(model, "reference-tile");
   return {
     angle,
     estimatedMicroUsd: estimated,
@@ -87,6 +90,7 @@ export function tileRequest(
       params: {
         prompt: `${styleLine(world, kit)}. ${sheet.name} — ${sheetDescription(sheet)}. ${ANGLE_PROMPT[angle]}, character reference sheet tile.`,
         references,
+        output: characterImageOutput(model, "reference-tile"),
       },
       estimatedMicroUsd: estimated,
       // Named by angle. Without a name every job lands the provider's own "image-1.png" into
@@ -106,7 +110,7 @@ export function establishRequests(
   count: number,
   direction?: ResolvedArtDirection,
 ): TileRequest[] {
-  const estimated = estimateMicroUsd(model, { images: 1 });
+  const estimated = pricedCharacterImage(model, "reference-tile");
   const style = kit?.styleOverride ?? direction?.description ?? styleLine(world, kit);
   return Array.from({ length: count }, (_, i) => ({
     angle: "head-front" as const,
@@ -120,6 +124,7 @@ export function establishRequests(
       params: {
         prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${ANGLE_PROMPT["head-front"]}, character reference, candidate ${i + 1} of ${count}, distinct interpretation.`,
         references: [],
+        output: characterImageOutput(model, "reference-tile"),
         ...(direction
           ? {
               artDirection: {
@@ -142,6 +147,17 @@ export function establishRequests(
 export interface CharacterGenerationRequest {
   input: EnqueueInput;
   estimatedMicroUsd: number;
+}
+
+function pricedCharacterImage(
+  model: ManifestModel,
+  workflow: "main-photo" | "character-sheet" | "character-look" | "reference-tile",
+): number {
+  const estimate = estimateCharacterImageMicroUsd(model, workflow);
+  if (!characterImageEstimateIsUsable(model, estimate)) {
+    throw new Error(`${model.displayName} could not be priced for the selected output size`);
+  }
+  return estimate;
 }
 
 function generationProvenance(
@@ -167,7 +183,7 @@ export function mainPhotoRequests(
   input: { prompt: string; count: number; identityReferences: string[]; generationKey: string },
 ): CharacterGenerationRequest[] {
   const style = kit?.styleOverride ?? direction.description;
-  const estimatedMicroUsd = estimateMicroUsd(model, { images: 1 });
+  const estimatedMicroUsd = pricedCharacterImage(model, "main-photo");
   const identityReferences = input.identityReferences.slice(0, model.accepts.referenceImages);
   return Array.from({ length: input.count }, (_, index) => ({
     estimatedMicroUsd,
@@ -181,6 +197,7 @@ export function mainPhotoRequests(
         prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}. Head-and-shoulders identity portrait, face and physical identity clear, restrained neutral expression, no text or montage.`,
         references: identityReferences,
         referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
+        output: characterImageOutput(model, "main-photo"),
         artDirection: {
           version: direction.version,
           source: kit?.styleOverride ? "sheet" : "world",
@@ -209,7 +226,7 @@ export function characterSheetRequest(
   const photo = kit.mainPhoto?.file ?? kit.anchor;
   if (!photo) throw new Error("character sheet generation needs an accepted main photo");
   const style = styleOverride ?? kit.styleOverride ?? direction.description;
-  const estimatedMicroUsd = estimateMicroUsd(model, { images: 1 });
+  const estimatedMicroUsd = pricedCharacterImage(model, "character-sheet");
   const identityReferences = model.accepts.referenceImages > 0 ? [`references/${sheet.id}/${photo}`] : [];
   return {
     estimatedMicroUsd,
@@ -223,6 +240,7 @@ export function characterSheetRequest(
         prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. One composite character sheet on a clean neutral field: front, three-quarter, profile and back turnaround; expression studies; costume and prop details; clear relative proportions. Preserve the supplied identity exactly.`,
         references: identityReferences,
         referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
+        output: characterImageOutput(model, "character-sheet"),
         artDirection: {
           version: direction.version,
           source: styleOverride ? "generation" : kit.styleOverride ? "sheet" : "world",
@@ -257,7 +275,7 @@ export function characterLookRequests(
   const photo = kit.mainPhoto?.file ?? kit.anchor;
   if (!photo) throw new Error("looks need an accepted main photo");
   const style = kit.styleOverride ?? direction.description;
-  const estimatedMicroUsd = estimateMicroUsd(model, { images: 1 });
+  const estimatedMicroUsd = pricedCharacterImage(model, "character-look");
   const identityReferences = model.accepts.referenceImages > 0 ? [`references/${sheet.id}/${photo}`] : [];
   return Array.from({ length: input.count }, (_, index) => ({
     estimatedMicroUsd,
@@ -271,6 +289,7 @@ export function characterLookRequests(
         prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}. ${input.mode === "stay-close" ? "Stay close to the accepted identity and proportions." : "Push the styling while preserving the accepted identity."} Optional ${input.kind.replace("-", " ")} exploration; do not redefine identity.`,
         references: identityReferences,
         referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
+        output: characterImageOutput(model, "character-look"),
         lookKind: input.kind,
         lookPrompt: input.prompt,
         artDirection: {
@@ -334,10 +353,5 @@ export function missingTileAngles(
 
 /** The routed image model for kit work: routing default, else the manifest's first image model. */
 export function imageModelFor(settings: AppSettings | null, manifest: ModelManifest): ManifestModel | null {
-  const routed = settings?.routing["image"];
-  if (routed !== undefined) {
-    const model = manifest.models.find((m) => m.id === routed);
-    if (model) return model;
-  }
-  return manifest.models.find((m) => m.capability === "image") ?? null;
+  return modelForCapability(manifest, settings?.routing, "image");
 }

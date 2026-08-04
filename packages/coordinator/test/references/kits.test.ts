@@ -67,6 +67,13 @@ const MODEL: ManifestModel = {
   pricing: { kind: "perImage", microUsdPerImage: 40000 },
 };
 
+const PER_MEGAPIXEL_MODEL: ManifestModel = {
+  ...MODEL,
+  id: "flux-2-pro",
+  displayName: "Flux 2 Pro",
+  pricing: { kind: "perMegapixel", microUsdPerMegapixel: 30000 },
+};
+
 function kitOf(tiles: ReferenceKit["tiles"], extra: Partial<ReferenceKit> = {}): ReferenceKit {
   return { sheetId: "maren-kest", tiles, compilations: [], ...extra };
 }
@@ -142,6 +149,51 @@ describe("the reference loop (R-6, D1, D3, §3.2)", () => {
     assert.equal(mainRequests.length, 2);
     assert.deepEqual(mainRequests[0]!.input.params["references"], []);
     assert.equal((mainRequests[0]!.input.params["artDirection"] as { transport: string }).transport, "text");
+  });
+
+  it("uses explicit output sizes and non-zero estimates for every character image workflow", () => {
+    const kit = kitOf([], {
+      anchor: "main-photo.png",
+      mainPhoto: { file: "main-photo.png", source: "generated", sheetVersion: 4 },
+    });
+    const main = mainPhotoRequests(WORLD_META, DIRECTION, SHEET, kit, PER_MEGAPIXEL_MODEL, {
+      prompt: "A clear portrait.",
+      count: 4,
+      identityReferences: [],
+      generationKey: "priced-main",
+    });
+    const sheet = characterSheetRequest(WORLD_META, DIRECTION, SHEET, kit, PER_MEGAPIXEL_MODEL, "priced-sheet");
+    const looks = characterLookRequests(WORLD_META, DIRECTION, SHEET, kit, PER_MEGAPIXEL_MODEL, {
+      kind: "costume",
+      mode: "stay-close",
+      prompt: "Council coat",
+      count: 4,
+      generationKey: "priced-looks",
+    });
+    for (const request of [...main, sheet, ...looks]) {
+      assert.ok(request.estimatedMicroUsd > 0);
+      assert.deepEqual(request.input.estimatedMicroUsd, request.estimatedMicroUsd);
+      assert.ok(request.input.params["output"]);
+    }
+    assert.equal(main.reduce((total, request) => total + request.estimatedMicroUsd, 0), main[0]!.estimatedMicroUsd * 4);
+    assert.equal(looks.reduce((total, request) => total + request.estimatedMicroUsd, 0), looks[0]!.estimatedMicroUsd * 4);
+  });
+
+  it("refuses positively priced character work when the selected parameters cannot be estimated", () => {
+    const unpriceable: ManifestModel = {
+      ...MODEL,
+      pricing: { kind: "perSecond", microUsdPerSecond: 10000 },
+    };
+    assert.throws(
+      () =>
+        mainPhotoRequests(WORLD_META, DIRECTION, SHEET, null, unpriceable, {
+          prompt: "A clear portrait.",
+          count: 1,
+          identityReferences: [],
+          generationKey: "unpriceable",
+        }),
+      /could not be priced/,
+    );
   });
 
   it("the anchor rides first; locked tiles follow; unlocked and superseded never ride", () => {

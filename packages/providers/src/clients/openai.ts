@@ -67,6 +67,7 @@ export class OpenAiClient implements ProviderClient {
   async submit(key: string, request: SubmitRequest): Promise<SubmitResult> {
     const remoteId = `openai-${++this.counter}-${Date.now()}`;
     if (request.capability === "image") {
+      const output = request.params["output"] as { width?: unknown; height?: unknown } | undefined;
       // Only what this endpoint accepts. Our job params are provider-neutral and carry things
       // OpenAI has never heard of — `references` is a FAL concept — and it answers an unknown
       // field with a flat 400, which reads to the user as "the image failed" rather than "we
@@ -84,6 +85,9 @@ export class OpenAiClient implements ProviderClient {
         "moderation",
       ]);
       const params = Object.fromEntries(Object.entries(request.params).filter(([k]) => accepted.has(k)));
+      if (typeof output?.width === "number" && typeof output.height === "number") {
+        params["size"] = `${output.width}x${output.height}`;
+      }
       const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/images/generations`, {
         method: "POST",
         headers: this.headers(key),

@@ -53,10 +53,19 @@ export class HiggsfieldClient implements ProviderClient {
   }
 
   async submit(key: string, request: SubmitRequest): Promise<SubmitResult> {
+    const { output, ...params } = request.params;
+    const size = output as { aspect?: unknown; resolution?: unknown } | undefined;
+    const imageOutput =
+      request.capability === "image"
+        ? {
+            ...(typeof size?.aspect === "string" ? { aspect_ratio: size.aspect } : {}),
+            ...(typeof size?.resolution === "string" ? { resolution: size.resolution } : {}),
+          }
+        : {};
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/generate`, {
       method: "POST",
       headers: this.headers(key),
-      body: JSON.stringify({ model: request.model, ...request.params }),
+      body: JSON.stringify({ model: request.model, ...params, ...imageOutput }),
     });
     const jobId = (body as { id?: string } | null)?.id;
     if (status >= 400 || !jobId) throw new Error(`higgsfield: submit failed (HTTP ${status})`);

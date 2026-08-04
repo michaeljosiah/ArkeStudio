@@ -119,26 +119,58 @@ describe("openai image submission", () => {
     await client.submit("k", {
       model: "gpt-image-2",
       capability: "image",
-      params: { prompt: "a drowned harbour", references: [], size: "1024x1024" },
+      params: {
+        prompt: "a drowned harbour",
+        references: [],
+        output: { width: 1024, height: 1536, aspect: "2:3", resolution: "1024" },
+      },
     });
     assert.equal(sent["prompt"], "a drowned harbour");
-    assert.equal(sent["size"], "1024x1024");
+    assert.equal(sent["size"], "1024x1536");
     assert.equal(sent["model"], "gpt-image-2");
     assert.ok(!("references" in sent), "the field OpenAI has never heard of does not go");
+  });
+});
+
+describe("higgsfield image submission", () => {
+  it("translates neutral output intent and never forwards the neutral field", async () => {
+    let sent: Record<string, unknown> = {};
+    const client = new HiggsfieldClient(async (_url, init) => {
+      sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ id: "job-1" }), { status: 200 });
+    });
+    await client.submit("k", {
+      model: "soul-2.0",
+      capability: "image",
+      params: { prompt: "x", output: { width: 1024, height: 1024, aspect: "1:1", resolution: "1080p" } },
+    });
+    assert.equal(sent["aspect_ratio"], "1:1");
+    assert.equal(sent["resolution"], "1080p");
+    assert.ok(!("output" in sent));
   });
 });
 
 describe("fal submit/poll round-trip carries the endpoint in the remote id", () => {
   it("polls the endpoint-scoped status url", async () => {
     const seen: string[] = [];
-    const fetchImpl: FetchLike = async (url) => {
+    let sent: Record<string, unknown> = {};
+    const fetchImpl: FetchLike = async (url, init) => {
       seen.push(url);
       if (url.endsWith("/status")) return new Response(JSON.stringify({ status: "IN_PROGRESS" }), { status: 200 });
+      sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       return new Response(JSON.stringify({ request_id: "req-9" }), { status: 200 });
     };
     const client = new FalClient(fetchImpl);
-    const submitted = await client.submit("k", { model: "flux-2-pro", capability: "image", params: { prompt: "x" } });
+    const submitted = await client.submit("k", {
+      model: "flux-2-pro",
+      capability: "image",
+      params: { prompt: "x", output: { width: 1024, height: 1280, aspect: "4:5", resolution: "1MP" } },
+    });
     assert.equal(submitted.remoteId, "fal-ai/flux-2-pro::req-9");
+    assert.deepEqual(sent["image_size"], { width: 1024, height: 1280 });
+    assert.ok(!("aspect_ratio" in sent));
+    assert.ok(!("resolution" in sent));
+    assert.ok(!("output" in sent));
     const poll = await client.poll("k", submitted.remoteId);
     assert.equal(poll.state, "running");
     assert.match(seen[1]!, /fal-ai\/flux-2-pro\/requests\/req-9\/status/);

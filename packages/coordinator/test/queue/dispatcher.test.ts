@@ -120,6 +120,8 @@ describe("the happy path writes exactly one ledger entry and lands artifacts ato
     assert.equal(landed.length, pngBytes().length);
     assert.equal(h.ledger.entries.length, 1);
     assert.equal(h.ledger.entries[0]!.actualSource, "manifest-derived", "no cost reported → derived (R-17)");
+    assert.equal(h.ledger.entries[0]!.actualMicroUsd, INPUT.estimatedMicroUsd);
+    assert.ok(h.ledger.entries[0]!.actualMicroUsd! > 0);
     h.queue.dispose();
   });
 });
