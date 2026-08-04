@@ -16,7 +16,7 @@ import {
 import { DegradedBanner, EmptyState, PageHeader, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
 import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
-import { ChevronRight, Play, Plus, Search } from "../components/icons.js";
+import { ChevronRight, Play, Plus, Search, X } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
 import { characterPortraitPath, Portrait, sheetPortraitPath } from "../components/portrait.js";
@@ -93,6 +93,15 @@ import {
 } from "../lib/store.js";
 
 /** World screens (§2.9): the world is the home, productions are lenses over it. */
+
+const FEATURE_COPY_LIMIT = 180;
+
+function limitedFeatureCopy(copy: string): string {
+  const characters = Array.from(copy);
+  return characters.length > FEATURE_COPY_LIMIT
+    ? `${characters.slice(0, FEATURE_COPY_LIMIT - 1).join("").trimEnd()}…`
+    : copy;
+}
 
 export function WorldLayout() {
   const { worldId } = useParams();
@@ -508,6 +517,9 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
+  const portraitDialog = useRef<HTMLDialogElement>(null);
+  const portraitTrigger = useRef<HTMLButtonElement>(null);
+  const [featuredPortraitAvailable, setFeaturedPortraitAvailable] = useState(false);
   const sheetRefs = useSheetRefs();
   const sheets = world?.sheets.filter((s) => s.type === kind && s.retired !== true) ?? [];
   const retired = world?.sheets.filter((s) => s.type === kind && s.retired === true).length ?? 0;
@@ -535,6 +547,10 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
     if (!worldId) return;
     for (const sheet of sheets) requestSheetRefs(worldId, sheet.id);
   }, [worldId, sheets.map((sheet) => sheet.id).join("|")]);
+  useEffect(() => {
+    setFeaturedPortraitAvailable(false);
+  }, [featured?.id, slug]);
+  const closePortraitDialog = () => portraitDialog.current?.close();
   return (
     <div data-screen={screenId}>
       <div className="fy-corner">
@@ -552,19 +568,39 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
             <div className="fy-split__side">
               <div className="fy-feature">
                 <div className="fy-feature__frame">
-                  <Portrait
-                    worldSlug={slug}
-                    path={kind === "character" ? characterPortraitPath(world, featured.id) : sheetPortraitPath(featured.id)}
-                    label={featured.name}
-                    radius={9}
-                  />
+                  {kind === "character" ? (
+                    <button
+                      ref={portraitTrigger}
+                      type="button"
+                      className="fy-feature__portrait-button"
+                      aria-label={`View larger portrait of ${featured.name}`}
+                      aria-haspopup="dialog"
+                      disabled={!featuredPortraitAvailable}
+                      onClick={() => portraitDialog.current?.showModal()}
+                    >
+                      <Portrait
+                        worldSlug={slug}
+                        path={characterPortraitPath(world, featured.id)}
+                        label={featured.name}
+                        radius={9}
+                        onAvailabilityChange={setFeaturedPortraitAvailable}
+                      />
+                    </button>
+                  ) : (
+                    <Portrait
+                      worldSlug={slug}
+                      path={sheetPortraitPath(featured.id)}
+                      label={featured.name}
+                      radius={9}
+                    />
+                  )}
                 </div>
                 <div className="fy-feature__title">
                   {featured.name}
                   <span className={cx("fy-dot", featured.status === "locked" ? "fy-dot--ok" : "fy-dot--sketch")} />
                   <span className="fy-feature__note">{featured.status === "locked" ? "canon locked" : "sketch"}</span>
                 </div>
-                <div className="fy-feature__sub">{featureCopy(featured)}</div>
+                <div className="fy-feature__sub">{limitedFeatureCopy(featureCopy(featured))}</div>
                 <div className="fy-feature__actions">
                   <Button variant="primary" size="sm" onClick={() => navigate(detailPath(featured.id))}>Open sheet</Button>
                   {kind === "character" && (
@@ -574,6 +610,34 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
                   )}
                 </div>
               </div>
+              {kind === "character" && (
+                <dialog
+                  ref={portraitDialog}
+                  className="fy-portrait-dialog"
+                  aria-labelledby={`portrait-dialog-title-${featured.id}`}
+                  onClose={() => portraitTrigger.current?.focus()}
+                  onClick={(event) => {
+                    if (event.target === event.currentTarget) closePortraitDialog();
+                  }}
+                >
+                  <div className="fy-portrait-dialog__panel">
+                    <div className="fy-portrait-dialog__head">
+                      <h2 id={`portrait-dialog-title-${featured.id}`}>{featured.name}</h2>
+                      <button type="button" className="fy-portrait-dialog__close" aria-label="Close portrait" onClick={closePortraitDialog}>
+                        <X size={18} />
+                      </button>
+                    </div>
+                    <div className="fy-portrait-dialog__image">
+                      <Portrait
+                        worldSlug={slug}
+                        path={characterPortraitPath(world, featured.id)}
+                        label={`${featured.name} portrait`}
+                        radius={9}
+                      />
+                    </div>
+                  </div>
+                </dialog>
+              )}
             </div>
           )}
           <div className="fy-split__main">
