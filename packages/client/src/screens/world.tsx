@@ -1357,7 +1357,8 @@ export function ReferenceKitScreen() {
   const gate = headGate(kit ?? { sheetId: sheetId ?? "x", tiles: [], compilations: [] });
   const hasAnchor = kit?.anchor !== undefined;
   const staleTiles = sheet && kit ? kit.tiles.filter((t) => tileIsStale(t, sheet.version)) : [];
-  // Establish candidates land as job artifacts; list them off succeeded candidate jobs (R-5).
+  // Establish candidates become immutable takes on arrival; selection addresses that record,
+  // never a provider filename that another generation may share.
   const candidates =
     state?.app.jobs
       .filter(
@@ -1366,7 +1367,17 @@ export function ReferenceKitScreen() {
           j.target.kind === "establish-candidate" &&
           j.target.id?.startsWith(`${sheetId}/`) === true,
       )
-      .flatMap((j) => j.landedFiles ?? []) ?? [];
+      .flatMap((job) => {
+        const take = world?.referenceTakes.find(
+          (candidate) =>
+            candidate.jobId === job.id &&
+            candidate.kind === "main-photo" &&
+            candidate.reference?.sheetId === sheetId,
+        );
+        return take?.media
+          ? [{ takeId: take.id, file: `references/${sheetId}/takes/${take.id}/${take.media}` }]
+          : [];
+      }) ?? [];
   const [style, setStyle] = useState<string | null>(null);
   const styleValue = style ?? kit?.styleOverride ?? "";
   const compilation = [...(kit?.compilations ?? [])].reverse().find((c) => c.accepted) ?? null;
@@ -1438,14 +1449,14 @@ export function ReferenceKitScreen() {
               </div>
               {candidates.length > 0 && (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-                  {candidates.map((file) => (
+                  {candidates.map((candidate) => (
                     <Button
-                      key={file}
+                      key={candidate.takeId}
                       onClick={() => {
-                        if (worldId && sheetId) chooseAnchorMsg(worldId, sheetId, file.replace(`references/${sheetId}/`, ""));
+                        if (worldId && sheetId) chooseAnchorMsg(worldId, sheetId, { source: "take", takeId: candidate.takeId });
                       }}
                     >
-                      Choose {file.split("/").pop()}
+                      Choose {candidate.file.split("/").pop()}
                     </Button>
                   ))}
                 </div>

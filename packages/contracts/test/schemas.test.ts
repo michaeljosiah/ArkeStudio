@@ -520,6 +520,38 @@ describe("domain events and frames", () => {
   it("validates client messages", () => {
     assert.doesNotThrow(() => ClientMessageSchema.parse({ kind: "hello", lastSeq: 12 }));
     assert.doesNotThrow(() => ClientMessageSchema.parse({ kind: "open-world", worldId: WORLD_ID }));
+    assert.doesNotThrow(() =>
+      ClientMessageSchema.parse({
+        kind: "accept-character-sheet",
+        worldId: WORLD_ID,
+        sheetId: "maren-kest",
+        takeId: "tk_01J8A0000000000000000000R1",
+      }),
+    );
+    assert.doesNotThrow(() =>
+      ClientMessageSchema.parse({
+        kind: "choose-anchor",
+        worldId: WORLD_ID,
+        sheetId: "maren-kest",
+        selection: { source: "candidate", file: "upload-test.webp" },
+      }),
+    );
+    assert.throws(() =>
+      ClientMessageSchema.parse({
+        kind: "choose-anchor",
+        worldId: WORLD_ID,
+        sheetId: "maren-kest",
+        selection: { source: "candidate", file: "../world.json" },
+      }),
+    );
+    assert.throws(() =>
+      ClientMessageSchema.parse({
+        kind: "accept-character-sheet",
+        worldId: WORLD_ID,
+        sheetId: "maren-kest",
+        file: "references/maren-kest/takes/tk_x/sheet.png",
+      }),
+    );
     assert.throws(() => ClientMessageSchema.parse({ kind: "open-world", worldId: "the-undersong" }));
   });
 

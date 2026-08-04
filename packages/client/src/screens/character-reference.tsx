@@ -106,14 +106,14 @@ export function CharacterReferenceScreen() {
   const photo = kit ? mainPhotoFor(kit) : null;
   const compilation = kit ? designatedCompilation(kit) : null;
   const stale = kit && compilation ? compilationIsStale(kit, compilation, sheet.version) : false;
-  const pendingSheetTake = [...world.referenceTakes]
-    .reverse()
-    .find(
+  const pendingSheetTakes = world.referenceTakes
+    .filter(
       (take) =>
         take.kind === "sheet" &&
         take.reference?.sheetId === sheetId &&
         !world.referenceReviews.some((review) => review.takeId === take.id),
-    );
+    )
+    .sort((a, b) => (b.completedAt ?? b.dispatchedAt).localeCompare(a.completedAt ?? a.dispatchedAt));
   const runningSheet = (state?.app.jobs ?? []).some(
     (job) =>
       job.target.kind === "character-sheet" &&
@@ -175,27 +175,18 @@ export function CharacterReferenceScreen() {
               {compilation ? "Regenerate" : "Generate"}
             </Button>
           </div>
-          {pendingSheetTake && (
+          {pendingSheetTakes.length > 0 && (
             <div className="fy-reference-candidates">
-              <span>One new composite is ready for review.</span>
-              <Button
-                variant="primary"
-                onClick={() =>
-                  acceptCharacterSheet(
-                    world.meta.worldId,
-                    sheetId,
-                    `references/${sheetId}/takes/${pendingSheetTake.id}/${pendingSheetTake.media}`,
-                  )
-                }
-              >
-                Accept character sheet
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={() => rejectReferenceTake(world.meta.worldId, pendingSheetTake.id, "identity")}
-              >
-                Reject
-              </Button>
+              <span>{pendingSheetTakes.length} new composite{pendingSheetTakes.length === 1 ? " is" : "s are"} ready for review.</span>
+              {pendingSheetTakes.map((take) => (
+                <div key={take.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span className="fy-mono">{take.id} · {new Date(take.completedAt ?? take.dispatchedAt).toLocaleString()}</span>
+                  <Button variant="primary" onClick={() => acceptCharacterSheet(world.meta.worldId, sheetId, take.id)}>
+                    Accept this sheet
+                  </Button>
+                  <Button variant="ghost" onClick={() => rejectReferenceTake(world.meta.worldId, take.id, "identity")}>Reject</Button>
+                </div>
+              ))}
             </div>
           )}
           <div className="fy-reference-card__dispatch">
@@ -364,10 +355,27 @@ export function ReplaceMainPhotoScreen() {
         take.reference?.sheetId === sheetId &&
         !world.referenceReviews.some((review) => review.takeId === take.id),
     )
-    .map((take) => `references/${sheetId}/takes/${take.id}/${take.media}`);
-  const candidates = [...(world.referenceCandidates[sheetId] ?? []), ...generatedCandidates].filter(
-    (file, index, all) => all.indexOf(file) === index,
+    .sort((a, b) => (a.completedAt ?? a.dispatchedAt).localeCompare(b.completedAt ?? b.dispatchedAt))
+    .map((take) => ({
+      key: `take:${take.id}`,
+      path: `references/${sheetId}/takes/${take.id}/${take.media}`,
+      selection: { source: "take" as const, takeId: take.id },
+    }));
+  const uploadedCandidates = (world.referenceCandidates[sheetId] ?? []).map((path) => ({
+    key: `candidate:${path}`,
+    path,
+    selection: { source: "candidate" as const, file: path.slice(path.lastIndexOf("/") + 1) },
+  }));
+  const generatedSourcePaths = new Set(
+    world.referenceTakes
+      .filter((take) => take.kind === "main-photo" && take.reference?.sheetId === sheetId && take.jobId)
+      .flatMap((take) => state?.app.jobs.find((job) => job.id === take.jobId)?.landedFiles ?? []),
   );
+  const candidates = [
+    ...uploadedCandidates.filter((candidate) => !generatedSourcePaths.has(candidate.path)),
+    ...generatedCandidates,
+  ];
+  const selectedCandidate = candidates.find((candidate) => candidate.key === selected) ?? null;
   const model = state?.app.manifest?.models.find((candidate) => candidate.capability === "image");
   const canImport = typeof window !== "undefined" && window.arke !== undefined;
   const refs = uploaded && photo ? [`references/${sheetId}/${photo.file}`] : [];
@@ -473,20 +481,20 @@ export function ReplaceMainPhotoScreen() {
             </div>
           ) : (
             <div className="fy-mainphoto-dialog__grid">
-              {candidates.slice(-4).map((file, index) => (
+              {candidates.slice(-4).map((candidate, index) => (
                 <button
                   type="button"
-                  key={file}
-                  className={selected === file ? "is-selected" : ""}
-                  onClick={() => setSelected(file)}
+                  key={candidate.key}
+                  className={selected === candidate.key ? "is-selected" : ""}
+                  onClick={() => setSelected(candidate.key)}
                 >
                   <Portrait
                     worldSlug={world.meta.slug}
-                    path={file}
+                    path={candidate.path}
                     label={`Candidate ${index + 1}`}
                     radius={12}
                   />
-                  <span>{selected === file ? "SELECTED" : `0${index + 1}`}</span>
+                  <span>{selected === candidate.key ? "SELECTED" : `0${index + 1}`}</span>
                 </button>
               ))}
             </div>
@@ -495,10 +503,9 @@ export function ReplaceMainPhotoScreen() {
             <span>Replacing the main photo makes the current character sheet stale.</span>
             <Button
               variant="primary"
-              disabled={!selected}
+              disabled={!selectedCandidate}
               onClick={() => {
-                if (selected)
-                  chooseAnchor(world.meta.worldId, sheetId, selected.replace(`references/${sheetId}/`, ""));
+                if (selectedCandidate) chooseAnchor(world.meta.worldId, sheetId, selectedCandidate.selection);
                 navigate(`/w/${worldId}/cast/${sheetId}/kit`);
               }}
             >
@@ -529,9 +536,24 @@ export function CharacterLooksScreen() {
       take.reference?.sheetId === sheetId &&
       !world.referenceReviews.some((review) => review.takeId === take.id),
   );
-  const pending = pendingLooks.map((take) => `references/${sheetId}/takes/${take.id}/${take.media}`);
-  const images = [...(kit?.looks ?? []).map((look) => `references/${sheetId}/${look.file}`), ...pending];
-  const selectedLook = kit?.looks?.find((look) => `references/${sheetId}/${look.file}` === selected);
+  const sortedPendingLooks = [...pendingLooks].sort((a, b) =>
+    (a.completedAt ?? a.dispatchedAt).localeCompare(b.completedAt ?? b.dispatchedAt),
+  );
+  const images = [
+    ...(kit?.looks ?? []).map((look) => ({
+      key: `look:${look.id}`,
+      path: `references/${sheetId}/${look.file}`,
+      look,
+    })),
+    ...sortedPendingLooks.map((take) => ({
+      key: `take:${take.id}`,
+      path: `references/${sheetId}/takes/${take.id}/${take.media}`,
+      take,
+    })),
+  ];
+  const selectedImage = images.find((image) => image.key === selected);
+  const selectedLook = selectedImage && "look" in selectedImage ? selectedImage.look : undefined;
+  const selectedTake = selectedImage && "take" in selectedImage ? selectedImage.take : undefined;
   return (
     <div data-screen="character-looks">
       <CharacterHeader active="looks" />
@@ -599,14 +621,14 @@ export function CharacterLooksScreen() {
             </div>
           ) : (
             <div className="fy-looks-results__grid">
-              {images.slice(-5).map((file, index) => (
+              {images.slice(-5).map((image, index) => (
                 <button
                   type="button"
-                  key={file}
-                  className={selected === file ? "is-selected" : ""}
-                  onClick={() => setSelected(file)}
+                  key={image.key}
+                  className={selected === image.key ? "is-selected" : ""}
+                  onClick={() => setSelected(image.key)}
                 >
-                  <Portrait worldSlug={world.meta.slug} path={file} label={`Look ${index + 1}`} radius={12} />
+                  <Portrait worldSlug={world.meta.slug} path={image.path} label={`Look ${index + 1}`} radius={12} />
                   <span>
                     {
                       [
@@ -623,11 +645,9 @@ export function CharacterLooksScreen() {
             </div>
           )}
           <footer>
-            <span>{pending.length ? "new variations ready" : "Looks never carry by default"}</span>
-            {selected && !selectedLook && (
-              <Button
-                onClick={() => acceptCharacterLook(world.meta.worldId, sheetId, selected, kind, prompt)}
-              >
+            <span>{sortedPendingLooks.length ? "new variations ready" : "Looks never carry by default"}</span>
+            {selectedTake && (
+              <Button onClick={() => acceptCharacterLook(world.meta.worldId, sheetId, selectedTake.id)}>
                 Accept look
               </Button>
             )}

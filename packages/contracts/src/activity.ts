@@ -45,6 +45,8 @@ export interface NeedsYouEntry {
   /** For closed-world counts: the as-of label the honesty rule requires (R-7, D4). */
   asOf?: string;
   ref?: string;
+  /** Exact in-app review destination when the derived item owns one. */
+  reviewPath?: string;
 }
 
 export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
@@ -108,6 +110,11 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
         worldId: world.meta.worldId,
         actions: ["review"],
         ref: take.id,
+        ...(take.reference?.sheetId
+          ? {
+              reviewPath: `/w/${world.meta.worldId}/cast/${take.reference.sheetId}/${take.kind === "look" ? "looks" : take.kind === "main-photo" ? "main-photo" : "kit"}`,
+            }
+          : {}),
       });
     }
     for (const production of world.productions) {

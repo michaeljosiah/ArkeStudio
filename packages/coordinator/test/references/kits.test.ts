@@ -14,6 +14,7 @@ import {
   type ManifestModel,
   type ReferenceKit,
   type Sheet,
+  type Take,
 } from "@arke-studio/contracts";
 import {
   characterLookRequests,
@@ -40,7 +41,12 @@ import {
 } from "../../src/references/kit.js";
 import { decodePng, encodePng, solidImage } from "../../src/references/png.js";
 import { WorldStore } from "../../src/world/store.js";
-import { recordReferenceReview, recordReferenceTake, referenceReviewDecision } from "../../src/references/takes.js";
+import {
+  pendingReferenceTake,
+  recordReferenceReview,
+  recordReferenceTake,
+  referenceReviewDecision,
+} from "../../src/references/takes.js";
 import { makeTempWorld } from "../world/helpers.js";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
@@ -478,6 +484,34 @@ describe("staleness, attachment and designation (R-13, R-14, D8, D10)", () => {
 });
 
 describe("kit mutations through the one commit primitive", () => {
+  it("resolves pending reference takes by id when media basenames collide", () => {
+    const first = {
+      id: "tk_01J8A0000000000000000000R1",
+      kind: "sheet",
+      reference: { sheetId: "maren-kest" },
+      media: "character-sheet.png",
+    } as Take;
+    const second = {
+      id: "tk_01J8A0000000000000000000R2",
+      kind: "sheet",
+      reference: { sheetId: "maren-kest" },
+      media: "character-sheet.png",
+    } as Take;
+    assert.equal(pendingReferenceTake([first, second], [], second.id, "maren-kest", "sheet")?.id, second.id);
+    assert.equal(pendingReferenceTake([first, second], [], second.id, "the-chorister", "sheet"), null);
+    assert.equal(pendingReferenceTake([first, second], [], second.id, "maren-kest", "look"), null);
+    assert.equal(
+      pendingReferenceTake(
+        [first, second],
+        [{ ts: CLOCK(), takeId: second.id, decision: "reject", by: "user" }],
+        second.id,
+        "maren-kest",
+        "sheet",
+      ),
+      null,
+    );
+  });
+
   it("supersession keeps the old row; chooseAnchor locks head-front and sets the anchor (R-4, D2, D11)", async () => {
     const { store } = await open();
     await chooseAnchor(store, "maren-kest", { file: "candidates/pick-2.png", sheetVersion: 4 });
@@ -586,6 +620,7 @@ describe("kit mutations through the one commit primitive", () => {
     } as const;
     const take = await recordReferenceTake(store, job as never);
     assert.ok(take);
+    assert.deepEqual(take.params, job.params, "the immutable take keeps what acceptance needs after the queue is gone");
     const takePath = join(dir, "references", "maren-kest", "takes", take.id, "take.json");
     const before = await readFile(takePath);
 

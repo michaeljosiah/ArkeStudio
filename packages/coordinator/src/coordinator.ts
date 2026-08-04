@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import {
   DomainEventSchema,
@@ -21,6 +21,7 @@ import {
   type ModelManifest,
   type ProviderId,
   type RuntimeProbes,
+  type Take,
   type VoiceCandidate,
 } from "@arke-studio/contracts";
 import { AppLog } from "./app-log.js";
@@ -82,6 +83,7 @@ import {
   supersedeTile,
 } from "./references/kit.js";
 import {
+  pendingReferenceTake,
   recordReferenceReview,
   recordReferenceTake,
   recordUploadedReferenceTake,
@@ -1971,37 +1973,47 @@ export class Coordinator {
       }
       case "choose-anchor": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) return;
         const sheet = store.getBundle().sheets.find((s) => s.id === msg.sheetId);
         if (!sheet) return;
-        const candidatePath = `references/${msg.sheetId}/${msg.file}`;
-        const job = this.jobQueue
-          ?.listJobs()
-          .find((candidate) => candidate.status === "succeeded" && candidate.landedFiles?.some((file) => file.endsWith(msg.file)));
-        const existingTake = store
-          .getBundle()
-          .referenceTakes.find(
-            (take) => take.reference?.sheetId === msg.sheetId && take.media === basename(msg.file),
+        const bundle = store.getBundle();
+        let take: Take | null | undefined;
+        let candidatePath: string | null = null;
+        if (msg.selection.source === "take") {
+          const takeId = msg.selection.takeId;
+          take = pendingReferenceTake(
+            bundle.referenceTakes,
+            bundle.referenceReviews,
+            takeId,
+            msg.sheetId,
+            "main-photo",
           );
-        const take =
-          existingTake ??
-          (!job && msg.file.startsWith("candidates/")
-            ? await recordUploadedReferenceTake(store, msg.sheetId, candidatePath).catch(() => null)
-            : null);
-        const producingJob = job ?? (take?.jobId ? this.jobQueue?.listJobs().find((candidate) => candidate.id === take.jobId) : undefined);
-        const review = take ? referenceReviewDecision(store.now(), take, "accept") : undefined;
-        const acceptedFile = take ? `takes/${take.id}/${take.media}` : msg.file;
-        await chooseAnchor(store, msg.sheetId, {
-          file: acceptedFile,
-          ...(producingJob ? { jobId: producingJob.id } : {}),
-          ...(take ? { takeId: take.id } : {}),
-          sheetVersion: sheet.version,
-          artDirectionVersion: take?.provenance.artDirectionVersion ?? store.getBundle().artDirection.version,
-          source: take?.provider === "user" ? "upload" : "generated",
-          acceptedAt: store.now(),
-          ...(review ? { review } : {}),
-        }).catch(() => {});
-        if (msg.file.startsWith("candidates/")) {
+          if (!take?.media) return;
+          const media = `references/${msg.sheetId}/takes/${take.id}/${take.media}`;
+          if (basename(take.media) !== take.media || !(await stat(toExtendedLength(join(store.dir, media))).catch(() => null))) return;
+        } else {
+          candidatePath = `references/${msg.sheetId}/candidates/${msg.selection.file}`;
+          if (!(bundle.referenceCandidates[msg.sheetId] ?? []).includes(candidatePath)) return;
+          take = await recordUploadedReferenceTake(store, msg.sheetId, candidatePath).catch(() => null);
+          if (!take) return;
+        }
+        const review = referenceReviewDecision(store.now(), take, "accept");
+        const acceptedFile = `takes/${take.id}/${take.media}`;
+        try {
+          await chooseAnchor(store, msg.sheetId, {
+            file: acceptedFile,
+            ...(take.jobId ? { jobId: take.jobId } : {}),
+            takeId: take.id,
+            sheetVersion: sheet.version,
+            artDirectionVersion: take.provenance.artDirectionVersion ?? bundle.artDirection.version,
+            source: take.provider === "user" ? "upload" : "generated",
+            acceptedAt: store.now(),
+            review,
+          });
+        } catch {
+          return;
+        }
+        if (candidatePath) {
           await rm(toExtendedLength(join(store.dir, candidatePath)), { force: true }).catch(() => {});
         }
         await this.refreshWorldSnapshot(msg.worldId);
@@ -2070,15 +2082,19 @@ export class Coordinator {
       }
       case "accept-character-sheet": {
         const store = this.opts.provider.openStore?.();
-        if (!store || !this.jobQueue) return;
-        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
-        const take = store
-          .getBundle()
-          .referenceTakes.find(
-            (candidate) => candidate.kind === "sheet" && candidate.reference?.sheetId === msg.sheetId && candidate.media === basename(msg.file),
-          );
-        const job = take?.jobId ? this.jobQueue.listJobs().find((candidate) => candidate.id === take.jobId) : undefined;
-        if (!sheet || !job || !take) return;
+        if (!store || store.worldId !== msg.worldId) return;
+        const bundle = store.getBundle();
+        const sheet = bundle.sheets.find((candidate) => candidate.id === msg.sheetId);
+        const take = pendingReferenceTake(
+          bundle.referenceTakes,
+          bundle.referenceReviews,
+          msg.takeId,
+          msg.sheetId,
+          "sheet",
+        );
+        if (!sheet || !take?.media) return;
+        const media = `references/${msg.sheetId}/takes/${take.id}/${take.media}`;
+        if (basename(take.media) !== take.media || !(await stat(toExtendedLength(join(store.dir, media))).catch(() => null))) return;
         const review = referenceReviewDecision(store.now(), take, "accept");
         await acceptCharacterSheet(store, sheet, {
           file: `takes/${take.id}/${take.media}`,
@@ -2109,21 +2125,35 @@ export class Coordinator {
       }
       case "accept-character-look": {
         const store = this.opts.provider.openStore?.();
-        if (!store || !this.jobQueue) return;
-        const take = store
-          .getBundle()
-          .referenceTakes.find(
-            (candidate) => candidate.kind === "look" && candidate.reference?.sheetId === msg.sheetId && candidate.media === basename(msg.file),
-          );
-        const job = take?.jobId ? this.jobQueue.listJobs().find((candidate) => candidate.id === take.jobId) : undefined;
-        if (!job || !take) return;
+        if (!store || store.worldId !== msg.worldId) return;
+        const bundle = store.getBundle();
+        const take = pendingReferenceTake(
+          bundle.referenceTakes,
+          bundle.referenceReviews,
+          msg.takeId,
+          msg.sheetId,
+          "look",
+        );
+        if (!take?.media) return;
+        const producingJob = take.jobId
+          ? this.jobQueue?.listJobs().find((candidate) => candidate.id === take.jobId)
+          : undefined;
+        const lookKind = take.params["lookKind"] ?? producingJob?.params["lookKind"];
+        const lookPrompt = take.params["lookPrompt"] ?? producingJob?.params["lookPrompt"];
+        if (
+          (lookKind !== "costume" && lookKind !== "pose-expression" && lookKind !== "condition-age") ||
+          typeof lookPrompt !== "string" ||
+          lookPrompt.trim().length === 0
+        ) return;
+        const media = `references/${msg.sheetId}/takes/${take.id}/${take.media}`;
+        if (basename(take.media) !== take.media || !(await stat(toExtendedLength(join(store.dir, media))).catch(() => null))) return;
         const review = referenceReviewDecision(store.now(), take, "accept");
         await acceptCharacterLook(store, msg.sheetId, {
-          id: job.target.id?.split("/").slice(1).join("-") ?? job.id,
+          id: take.id,
           file: `takes/${take.id}/${take.media}`,
-          kind: msg.lookKind,
-          prompt: msg.prompt,
-          jobId: job.id,
+          kind: lookKind,
+          prompt: lookPrompt.trim(),
+          ...(take.jobId ? { jobId: take.jobId } : {}),
           takeId: take.id,
           artDirectionVersion: take.provenance.artDirectionVersion ?? store.getBundle().artDirection.version,
           review,
