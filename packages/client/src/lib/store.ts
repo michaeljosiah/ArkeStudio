@@ -8,9 +8,11 @@ import {
   type ClientState,
   type DomainEvent,
   type ProviderId,
+  type QueueCommand,
   type RankedVoice,
   type ReconcileAction,
   type ReferenceAngle,
+  ulid,
 } from "@arke-studio/contracts";
 import type { ArkeBridge, AttachTarget } from "../arke-bridge.js";
 
@@ -30,12 +32,7 @@ export type ConnectionStatus = "connecting" | "open" | "closed";
 /** The last blocked-accept notice per proposal (SPEC-004): why it did not land, and what to offer. */
 export interface GateNotice {
   reason:
-    | "stale"
-    | "needs-reconfirm"
-    | "no-op"
-    | "pending-review"
-    | "unresolved-conflicts"
-    | "target-retired";
+    "stale" | "needs-reconfirm" | "no-op" | "pending-review" | "unresolved-conflicts" | "target-retired";
   detail?: string;
   authoritativeSignature?: string;
 }
@@ -146,7 +143,11 @@ interface StoreState {
     nativeIndexOk: boolean;
     nativeIndexDetail: string | null;
   } | null;
-  updateStatus: { status: "checking" | "available" | "none" | "downloading" | "downloaded" | "error"; version: string | null; detail: string | null } | null;
+  updateStatus: {
+    status: "checking" | "available" | "none" | "downloading" | "downloaded" | "error";
+    version: string | null;
+    detail: string | null;
+  } | null;
   diagnosticsBundle: string | null;
 }
 
@@ -186,6 +187,21 @@ let current: StoreState = {
   updateStatus: null,
   diagnosticsBundle: null,
 };
+
+export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-result" }>;
+const pendingQueueRequests = new Map<string, QueueCommand>();
+const queueResultListeners = new Set<(result: QueueEnqueueResult) => void>();
+
+export function subscribeQueueResults(listener: (result: QueueEnqueueResult) => void): () => void {
+  queueResultListeners.add(listener);
+  return () => queueResultListeners.delete(listener);
+}
+
+function queueRequest(command: QueueCommand): string {
+  const requestId = ulid();
+  if (current.connection === "open") pendingQueueRequests.set(requestId, command);
+  return requestId;
+}
 const listeners = new Set<() => void>();
 let bridge: ArkeBridge | null = null;
 let lastSeq = 0;
@@ -295,6 +311,13 @@ function handleFrame(json: string): void {
     let setupStatus = current.setupStatus;
     let permissions = current.permissions;
     const event = frame.event;
+    if (event.type === "queue.enqueue-result") {
+      const expected = pendingQueueRequests.get(event.requestId);
+      if (expected === event.command) {
+        pendingQueueRequests.delete(event.requestId);
+        for (const listener of queueResultListeners) listener(event);
+      }
+    }
     if (event.type === "proposal.blocked") {
       gateNotices = {
         ...gateNotices,
@@ -320,7 +343,10 @@ function handleFrame(json: string): void {
     } else if (event.type === "authoring.turn") {
       transcripts = {
         ...transcripts,
-        [event.proposalId]: [...(transcripts[event.proposalId] ?? []), { role: event.role, text: event.text, at: event.at }],
+        [event.proposalId]: [
+          ...(transcripts[event.proposalId] ?? []),
+          { role: event.role, text: event.text, at: event.at },
+        ],
       };
     } else if (event.type === "setup.status") {
       setupStatus = event.setup;
@@ -328,7 +354,10 @@ function handleFrame(json: string): void {
       const g = genesis[event.genesisId] ?? emptyGenesis();
       genesis = {
         ...genesis,
-        [event.genesisId]: { ...g, turns: [...g.turns, { role: event.role, text: event.text, at: event.at }] },
+        [event.genesisId]: {
+          ...g,
+          turns: [...g.turns, { role: event.role, text: event.text, at: event.at }],
+        },
       };
     } else if (event.type === "genesis.draft") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
@@ -337,7 +366,11 @@ function handleFrame(json: string): void {
       const g = genesis[event.genesisId] ?? emptyGenesis();
       genesis = {
         ...genesis,
-        [event.genesisId]: { ...g, status: event.status, ...(event.detail !== undefined ? { detail: event.detail } : {}) },
+        [event.genesisId]: {
+          ...g,
+          status: event.status,
+          ...(event.detail !== undefined ? { detail: event.detail } : {}),
+        },
       };
     } else if (event.type === "genesis.attachment") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
@@ -348,9 +381,18 @@ function handleFrame(json: string): void {
             ? {
                 ...g,
                 // The sandbox de-collides names, so a name is an identity here.
-                attachments: [...g.attachments.filter((a) => a.name !== event.name), { name: event.name, kind: event.kind }],
+                attachments: [
+                  ...g.attachments.filter((a) => a.name !== event.name),
+                  { name: event.name, kind: event.kind },
+                ],
               }
-            : { ...g, refusals: [...g.refusals.slice(-2), { name: event.name, reason: event.reason ?? "it would not go in" }] },
+            : {
+                ...g,
+                refusals: [
+                  ...g.refusals.slice(-2),
+                  { name: event.name, reason: event.reason ?? "it would not go in" },
+                ],
+              },
       };
     } else if (event.type === "world.archived") {
       archiveNote = {
@@ -361,7 +403,10 @@ function handleFrame(json: string): void {
     } else if (event.type === "world.archive-refused") {
       archiveNote = { worldId: event.worldId, text: event.reason, refused: true };
     } else if (event.type === "extraction.started") {
-      reading = { ...reading, [event.artifactId]: { file: event.file, state: "reading", found: 0, dropped: 0 } };
+      reading = {
+        ...reading,
+        [event.artifactId]: { file: event.file, state: "reading", found: 0, dropped: 0 },
+      };
     } else if (event.type === "extraction.finished") {
       reading = {
         ...reading,
@@ -453,7 +498,12 @@ function handleFrame(json: string): void {
     } else if (event.type === "artifact.notice") {
       artifactNotices = [
         ...artifactNotices.slice(-9),
-        { sourcePath: event.sourcePath, outcome: event.outcome, reason: event.reason, sizeBytes: event.sizeBytes },
+        {
+          sourcePath: event.sourcePath,
+          outcome: event.outcome,
+          reason: event.reason,
+          sizeBytes: event.sizeBytes,
+        },
       ];
     }
     let envCheck = current.envCheck;
@@ -544,6 +594,7 @@ function handleFrame(json: string): void {
 }
 
 function handleStatus(status: ConnectionStatus): void {
+  if (status !== "open") pendingQueueRequests.clear();
   emitChange({ ...current, connection: status });
   if (status === "open") {
     reconnectAttempts = 0;
@@ -706,7 +757,7 @@ export function genesisAttachFiles(genesisId: string): void {
  * before it runs, in the ledger, cancellable from Activity like anything else that spends.
  */
 export function generateWorldImage(worldId: string): void {
-  send({ kind: "generate-world-image", worldId });
+  send({ kind: "generate-world-image", worldId, requestId: queueRequest("generate-world-image") });
 }
 
 export function useWorldImage(worldId: string): void {
@@ -801,7 +852,14 @@ export function draftWithStudio(worldId: string, path: string, instruction: stri
 
 /** Continue a proposal's conversation — same session, same agent context (SPEC-005). */
 export function continueStudio(worldId: string, path: string, proposalId: string, instruction: string): void {
-  send({ kind: "draft-with-studio", worldId, path, instruction, summary: "Continue the conversation", proposalId });
+  send({
+    kind: "draft-with-studio",
+    worldId,
+    path,
+    instruction,
+    summary: "Continue the conversation",
+    proposalId,
+  });
 }
 
 export function useTranscripts(): Record<string, Array<{ role: "user" | "gate"; text: string; at: string }>> {
@@ -929,7 +987,14 @@ export function createSheetFromSentence(
   /** Settle it as drafted, without asking — see the frame. Beginning a world sets this. */
   settle = false,
 ): void {
-  send({ kind: "create-sheet-from-sentence", worldId, sheetType, name, sentence, ...(settle ? { settle } : {}) });
+  send({
+    kind: "create-sheet-from-sentence",
+    worldId,
+    sheetType,
+    name,
+    sentence,
+    ...(settle ? { settle } : {}),
+  });
 }
 
 export function duplicateSheet(worldId: string, path: string, newName: string): void {
@@ -1020,7 +1085,7 @@ export function useReconcileReport(): ReconcileAction[] | null {
 // ---- SPEC-010: reference kits ----------------------------------------------
 
 export function establishLook(worldId: string, sheetId: string, count: number): void {
-  send({ kind: "establish-look", worldId, sheetId, count });
+  send({ kind: "establish-look", worldId, sheetId, count, requestId: queueRequest("establish-look") });
 }
 
 export function chooseAnchor(
@@ -1059,7 +1124,15 @@ export function generateMainPhoto(
   count: number,
   identityReferences: string[],
 ): void {
-  send({ kind: "generate-main-photo", worldId, sheetId, prompt, count, identityReferences });
+  send({
+    kind: "generate-main-photo",
+    worldId,
+    sheetId,
+    prompt,
+    count,
+    identityReferences,
+    requestId: queueRequest("generate-main-photo"),
+  });
 }
 
 export function generateCharacterSheet(worldId: string, sheetId: string, styleOverride?: string): void {
@@ -1067,6 +1140,7 @@ export function generateCharacterSheet(worldId: string, sheetId: string, styleOv
     kind: "generate-character-sheet",
     worldId,
     sheetId,
+    requestId: queueRequest("generate-character-sheet"),
     ...(styleOverride ? { styleOverride } : {}),
   });
 }
@@ -1083,14 +1157,19 @@ export function generateCharacterLooks(
   prompt: string,
   count: number,
 ): void {
-  send({ kind: "generate-character-looks", worldId, sheetId, lookKind, mode, prompt, count });
+  send({
+    kind: "generate-character-looks",
+    worldId,
+    sheetId,
+    lookKind,
+    mode,
+    prompt,
+    count,
+    requestId: queueRequest("generate-character-looks"),
+  });
 }
 
-export function acceptCharacterLook(
-  worldId: string,
-  sheetId: string,
-  takeId: string,
-): void {
+export function acceptCharacterLook(worldId: string, sheetId: string, takeId: string): void {
   send({ kind: "accept-character-look", worldId, sheetId, takeId });
 }
 
@@ -1125,11 +1204,17 @@ export function lockTile(worldId: string, sheetId: string, angle: ReferenceAngle
 }
 
 export function generateMissingTiles(worldId: string, sheetId: string, group: "head" | "body"): void {
-  send({ kind: "generate-missing-tiles", worldId, sheetId, group });
+  send({
+    kind: "generate-missing-tiles",
+    worldId,
+    sheetId,
+    group,
+    requestId: queueRequest("generate-missing-tiles"),
+  });
 }
 
 export function regenerateTile(worldId: string, sheetId: string, angle: ReferenceAngle): void {
-  send({ kind: "regenerate-tile", worldId, sheetId, angle });
+  send({ kind: "regenerate-tile", worldId, sheetId, angle, requestId: queueRequest("regenerate-tile") });
 }
 
 export function compileGrid(worldId: string, sheetId: string): void {
@@ -1151,8 +1236,20 @@ export function requestVoiceCandidates(worldId: string, sheetId: string): void {
 }
 
 /** The client shows the stated cloud cost before this is sent (R-10). */
-export function requestVoicePreview(worldId: string, sheetId: string, provider: string, voiceId: string): void {
-  send({ kind: "voice-preview", worldId, sheetId, provider, voiceId });
+export function requestVoicePreview(
+  worldId: string,
+  sheetId: string,
+  provider: string,
+  voiceId: string,
+): void {
+  send({
+    kind: "voice-preview",
+    worldId,
+    sheetId,
+    provider,
+    voiceId,
+    requestId: queueRequest("voice-preview"),
+  });
 }
 
 export function transcribeDictation(requestId: string, audioBase64: string, contentType: string): void {
@@ -1173,7 +1270,12 @@ export function useDictation(): Record<string, { text: string | null; error: str
 
 // ---- SPEC-012: productions, scenes, boards, dispatch -----------------------
 
-export function createProduction(worldId: string, title: string, format: "story" | "video" | "stills", logline?: string): void {
+export function createProduction(
+  worldId: string,
+  title: string,
+  format: "story" | "video" | "stills",
+  logline?: string,
+): void {
   send({ kind: "create-production", worldId, title, format, ...(logline !== undefined ? { logline } : {}) });
 }
 
@@ -1181,7 +1283,13 @@ export function draftScene(worldId: string, productionId: string, brief: string)
   send({ kind: "draft-scene", worldId, productionId, brief });
 }
 
-export function stageSceneEdit(worldId: string, productionId: string, sceneFile: string, summary: string, scene: unknown): void {
+export function stageSceneEdit(
+  worldId: string,
+  productionId: string,
+  sceneFile: string,
+  summary: string,
+  scene: unknown,
+): void {
   send({ kind: "stage-scene-edit", worldId, productionId, sceneFile, summary, scene });
 }
 
@@ -1193,7 +1301,12 @@ export function saveChapter(worldId: string, productionId: string, chapterFile: 
   send({ kind: "save-chapter", worldId, productionId, chapterFile, body });
 }
 
-export function draftChapter(worldId: string, productionId: string, chapterFile: string, instruction: string): void {
+export function draftChapter(
+  worldId: string,
+  productionId: string,
+  chapterFile: string,
+  instruction: string,
+): void {
   send({ kind: "draft-chapter", worldId, productionId, chapterFile, instruction });
 }
 
@@ -1201,7 +1314,13 @@ export function reorderChapters(worldId: string, productionId: string, orderedFi
   send({ kind: "reorder-chapters", worldId, productionId, orderedFiles });
 }
 
-export function setPromptOverride(worldId: string, productionId: string, sceneFile: string, shotId: string, text: string | null): void {
+export function setPromptOverride(
+  worldId: string,
+  productionId: string,
+  sceneFile: string,
+  shotId: string,
+  text: string | null,
+): void {
   send({ kind: "set-prompt-override", worldId, productionId, sceneFile, shotId, text });
 }
 
@@ -1221,7 +1340,16 @@ export function dispatchScene(
   modelId: string,
   resolution?: string,
 ): void {
-  send({ kind: "dispatch-scene", worldId, productionId, sceneFile, mode, modelId, ...(resolution !== undefined ? { resolution } : {}) });
+  send({
+    kind: "dispatch-scene",
+    worldId,
+    productionId,
+    sceneFile,
+    mode,
+    modelId,
+    requestId: queueRequest("dispatch-scene"),
+    ...(resolution !== undefined ? { resolution } : {}),
+  });
 }
 
 // ---- SPEC-013: takes, the cut, exports -------------------------------------
@@ -1238,14 +1366,25 @@ export function rejectTake(
   citation: { sheet: string; field: string; note?: string },
   shotId?: string,
 ): void {
-  send({ kind: "reject-take", worldId, productionId, takeId, citation, ...(shotId !== undefined ? { shotId } : {}) });
+  send({
+    kind: "reject-take",
+    worldId,
+    productionId,
+    takeId,
+    citation,
+    ...(shotId !== undefined ? { shotId } : {}),
+  });
 }
 
 export function saveAudioTracks(worldId: string, productionId: string, cut: unknown): void {
   send({ kind: "save-audio-tracks", worldId, productionId, cut });
 }
 
-export function exportCut(worldId: string, productionId: string, preset: "review-cut" | "master" | "social-excerpt"): void {
+export function exportCut(
+  worldId: string,
+  productionId: string,
+  preset: "review-cut" | "master" | "social-excerpt",
+): void {
   send({ kind: "export-cut", worldId, productionId, preset });
 }
 
@@ -1296,7 +1435,12 @@ export function useReading(): StoreState["reading"] {
   return useStore().reading;
 }
 
-export function resolveExtraction(worldId: string, artifactId: string, candidateHash: string, decision: "accept" | "reject"): void {
+export function resolveExtraction(
+  worldId: string,
+  artifactId: string,
+  candidateHash: string,
+  decision: "accept" | "reject",
+): void {
   send({ kind: "resolve-extraction", worldId, artifactId, candidateHash, decision });
 }
 
@@ -1311,7 +1455,12 @@ export function useImportReport(): ImportReportState | null {
   return useStore().importReport;
 }
 
-export function useArtifactNotices(): Array<{ sourcePath: string; outcome: string; reason: string; sizeBytes: number | null }> {
+export function useArtifactNotices(): Array<{
+  sourcePath: string;
+  outcome: string;
+  reason: string;
+  sizeBytes: number | null;
+}> {
   return useStore().artifactNotices;
 }
 
@@ -1411,9 +1560,9 @@ export function __setStateForTest(state: ClientState): void {
     state,
     gateNotices: {},
     authoring: {},
-  transcripts: {},
-  genesis: {},
-  setupStatus: null,
+    transcripts: {},
+    genesis: {},
+    setupStatus: null,
     reading: {},
     archiveNote: null,
     permissions: {},
@@ -1444,4 +1593,12 @@ export function __applyEventForTest(event: DomainEvent): void {
 
 export function __mainPhotoAcceptanceForTest() {
   return current.mainPhotoAcceptance;
+}
+
+export function __pendingQueueRequestsForTest(): string[] {
+  return [...pendingQueueRequests.keys()];
+}
+
+export function __connectionStatusForTest(status: ConnectionStatus): void {
+  handleStatus(status);
 }

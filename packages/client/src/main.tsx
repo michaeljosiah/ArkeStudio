@@ -16,6 +16,7 @@ import "./theme/globals.css";
 // import the component graph without a CSS loader.
 import "./components/ui.css";
 import "./components/layout.css";
+import "./components/toast.css";
 import "./domain/domain.css";
 import "./screens/screens.css";
 import "./screens/fidelity.css";

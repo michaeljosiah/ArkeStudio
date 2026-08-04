@@ -47,7 +47,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * and genre become one image job through the ordinary queue — estimated before it runs,
    * recorded in the ledger, cancellable like anything else that spends.
    */
-  z.object({ kind: z.literal("generate-world-image"), worldId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("generate-world-image"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   /** Keep the candidate that came back — it becomes world-art.png. */
   z.object({ kind: z.literal("use-world-image"), worldId: UlidSchema }).strict(),
   /** Or do not: the candidate is deleted and the world keeps the image it had. */
@@ -89,8 +89,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       confirmRipples: z.string().optional(),
     })
     .strict(),
-  z.object({ kind: z.literal("proposal-discard"), worldId: UlidSchema, proposalId: z.string().min(1) }).strict(),
-  z.object({ kind: z.literal("proposal-rebase"), worldId: UlidSchema, proposalId: z.string().min(1) }).strict(),
+  z
+    .object({ kind: z.literal("proposal-discard"), worldId: UlidSchema, proposalId: z.string().min(1) })
+    .strict(),
+  z
+    .object({ kind: z.literal("proposal-rebase"), worldId: UlidSchema, proposalId: z.string().min(1) })
+    .strict(),
   z
     .object({
       kind: z.literal("proposal-resolve-conflict"),
@@ -278,14 +282,22 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * and the plaintext exists in the main process for the write alone (R-8).
    */
   z
-    .object({ kind: z.literal("set-credential"), provider: ProviderIdSchema, key: z.string().min(1).max(4096) })
+    .object({
+      kind: z.literal("set-credential"),
+      provider: ProviderIdSchema,
+      key: z.string().min(1).max(4096),
+    })
     .strict(),
   z.object({ kind: z.literal("clear-credential"), provider: ProviderIdSchema }).strict(),
   /** SPEC-008 R-3: probe per capability; the answer is what the key unlocks, not that it authenticates. */
   z.object({ kind: z.literal("validate-provider"), provider: ProviderIdSchema }).strict(),
   /** SPEC-008 R-20: a routing default is a concrete model, displayed as its provider (D1). */
   z
-    .object({ kind: z.literal("set-routing-default"), capability: CapabilitySchema, modelId: z.string().min(1) })
+    .object({
+      kind: z.literal("set-routing-default"),
+      capability: CapabilitySchema,
+      modelId: z.string().min(1),
+    })
     .strict(),
   /**
    * Configure one agent: which model runs it, and what it is for. Clearing a field returns
@@ -332,6 +344,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("establish-look"),
+      requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
       count: z.number().int().min(1).max(8),
@@ -355,10 +368,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** Ask the trusted host picker for an image; it lands as a candidate, never straight as identity. */
-  z.object({ kind: z.literal("import-main-photo-candidate"), worldId: UlidSchema, sheetId: SlugSchema }).strict(),
+  z
+    .object({ kind: z.literal("import-main-photo-candidate"), worldId: UlidSchema, sheetId: SlugSchema })
+    .strict(),
   z
     .object({
       kind: z.literal("generate-main-photo"),
+      requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
       prompt: z.string().trim().min(1).max(2000),
@@ -370,6 +386,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("generate-character-sheet"),
+      requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
       styleOverride: z.string().trim().min(1).max(4000).optional(),
@@ -387,6 +404,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("generate-character-looks"),
+      requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
       lookKind: z.enum(["costume", "pose-expression", "condition-age"]),
@@ -429,7 +447,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       scope: z
         .discriminatedUnion("kind", [
           z.object({ kind: z.literal("production"), productionId: SlugSchema }).strict(),
-          z.object({ kind: z.literal("scene"), productionId: SlugSchema, sceneId: z.string().min(1) }).strict(),
+          z
+            .object({ kind: z.literal("scene"), productionId: SlugSchema, sceneId: z.string().min(1) })
+            .strict(),
         ])
         .nullable(),
     })
@@ -448,6 +468,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("generate-missing-tiles"),
+      requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
       group: z.enum(["head", "body"]),
@@ -457,6 +478,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("regenerate-tile"),
+      requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
       angle: ReferenceAngleSchema,
@@ -491,6 +513,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("voice-preview"),
+      requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
       provider: z.string().min(1),
@@ -587,16 +610,27 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** SPEC-012 R-11/R-12: compile the board — local, free, scene-version stamped. */
   z
-    .object({ kind: z.literal("compile-scene-board"), worldId: UlidSchema, productionId: SlugSchema, sceneFile: z.string().min(1) })
+    .object({
+      kind: z.literal("compile-scene-board"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneFile: z.string().min(1),
+    })
     .strict(),
   /** SPEC-012 R-13: export files exactly one artifact; recompiling files none. */
   z
-    .object({ kind: z.literal("export-scene-board"), worldId: UlidSchema, productionId: SlugSchema, sceneFile: z.string().min(1) })
+    .object({
+      kind: z.literal("export-scene-board"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneFile: z.string().min(1),
+    })
     .strict(),
   /** SPEC-012 R-17..R-20: dispatch what the dialog planned — per shot or whole scene. */
   z
     .object({
       kind: z.literal("dispatch-scene"),
+      requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,
       sceneFile: z.string().min(1),
@@ -638,7 +672,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       takeId: z.string().min(1),
       shotId: ShotIdSchema.optional(),
-      citation: z.object({ sheet: SlugSchema, field: z.string().min(1), note: z.string().optional() }).strict(),
+      citation: z
+        .object({ sheet: SlugSchema, field: z.string().min(1), note: z.string().optional() })
+        .strict(),
     })
     .strict(),
   /** SPEC-013 R-16/R-17: cut.json holds audio tracks and placement only. */
@@ -693,9 +729,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   /** SPEC-015 R-9..R-11: stage one — file everything, exclude system files, report all of it. */
   z.object({ kind: z.literal("import-folder"), worldId: UlidSchema, sourcePath: z.string().min(1) }).strict(),
   /** SPEC-015 R-12..R-14: stage two — grounded extraction into a pending batch. */
-  z.object({ kind: z.literal("extract-artifact"), worldId: UlidSchema, artifactId: z.string().min(1) }).strict(),
+  z
+    .object({ kind: z.literal("extract-artifact"), worldId: UlidSchema, artifactId: z.string().min(1) })
+    .strict(),
   /** Stop reading it. The turn is interrupted and the file stays filed, unread. */
-  z.object({ kind: z.literal("stop-extraction"), worldId: UlidSchema, artifactId: z.string().min(1) }).strict(),
+  z
+    .object({ kind: z.literal("stop-extraction"), worldId: UlidSchema, artifactId: z.string().min(1) })
+    .strict(),
   /** SPEC-015 R-15: per-candidate resolution; accepts commit individually, rejects leave no trace. */
   z
     .object({

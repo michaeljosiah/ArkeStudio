@@ -4,8 +4,12 @@ import type { Sheet } from "@arke-studio/contracts";
 import { mainPhotoPromptFor } from "../src/screens/character-reference.js";
 import {
   __applyEventForTest,
+  __connectionStatusForTest,
   __mainPhotoAcceptanceForTest,
+  __pendingQueueRequestsForTest,
   __setStateForTest,
+  generateWorldImage,
+  subscribeQueueResults,
   chooseAnchor,
 } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -41,6 +45,50 @@ describe("main-photo prompt", () => {
     assert.match(prompt, /The Witness/);
     assert.match(prompt, /established physical identity/);
     assert.doesNotMatch(prompt, /\b(?:he|she|his|her)\b/i);
+  });
+});
+
+describe("queue acknowledgement correlation", () => {
+  it("notifies once only for a locally pending live request", () => {
+    __setStateForTest(FIXTURE_STATE);
+    const seen: string[] = [];
+    const unsubscribe = subscribeQueueResults((result) => seen.push(result.requestId));
+    generateWorldImage(FIXTURE_STATE.world!.meta.worldId);
+    const [requestId] = __pendingQueueRequestsForTest();
+    assert.ok(requestId);
+    const event = {
+      at: "2026-08-04T09:00:00Z",
+      type: "queue.enqueue-result" as const,
+      requestId,
+      command: "generate-world-image" as const,
+      disposition: "accepted" as const,
+      requestedCount: 1,
+      acceptedJobIds: ["jb_01J8E0000000000000000000J1"],
+      failures: [],
+    };
+    __applyEventForTest({ ...event, command: "generate-main-photo" as const });
+    assert.deepEqual(seen, [], "the wrong command cannot consume this request id");
+    __applyEventForTest(event);
+    __applyEventForTest(event);
+    __applyEventForTest({ ...event, requestId: "01J8F3K2QW9VZX4N7M0RTYB6XX" });
+    assert.deepEqual(seen, [requestId]);
+    unsubscribe();
+  });
+
+  it("snapshot hydration alone produces no acknowledgement", () => {
+    const seen: string[] = [];
+    const unsubscribe = subscribeQueueResults((result) => seen.push(result.requestId));
+    __setStateForTest(FIXTURE_STATE);
+    assert.deepEqual(seen, []);
+    unsubscribe();
+  });
+
+  it("drops pending correlation when the connection closes", () => {
+    __setStateForTest(FIXTURE_STATE);
+    generateWorldImage(FIXTURE_STATE.world!.meta.worldId);
+    assert.equal(__pendingQueueRequestsForTest().length, 1);
+    __connectionStatusForTest("closed");
+    assert.deepEqual(__pendingQueueRequestsForTest(), []);
   });
 });
 

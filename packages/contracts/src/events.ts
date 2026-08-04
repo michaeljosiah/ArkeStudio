@@ -2,7 +2,14 @@ import { z } from "zod";
 import { ArtifactKindSchema } from "./artifact.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
 import { ChangeRecordSchema } from "./change.js";
-import { IsoDateTimeSchema, ProposalIdSchema, ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
+import {
+  IsoDateTimeSchema,
+  JobIdSchema,
+  ProposalIdSchema,
+  ShotIdSchema,
+  SlugSchema,
+  UlidSchema,
+} from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema, ReconcileActionSchema } from "./job.js";
 import { ProviderStatusSchema } from "./provider.js";
 import { ShotSelectionSchema } from "./scene.js";
@@ -30,6 +37,19 @@ export const HealthStatusSchema = z.enum(["starting", "healthy", "unhealthy", "u
 export type HealthStatus = z.infer<typeof HealthStatusSchema>;
 
 const base = { at: IsoDateTimeSchema };
+
+export const QueueCommandSchema = z.enum([
+  "dispatch-scene",
+  "voice-preview",
+  "generate-world-image",
+  "establish-look",
+  "generate-main-photo",
+  "generate-character-sheet",
+  "generate-character-looks",
+  "generate-missing-tiles",
+  "regenerate-tile",
+]);
+export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 
 /**
  * The genesis draft as the world-author agent maintains it in the sandbox's draft.json.
@@ -67,7 +87,12 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
 
   /** The world canon revision advanced (accepting any canon change increments once, §2.4). */
   z
-    .object({ ...base, type: z.literal("canon.revision.advanced"), worldId: UlidSchema, revision: z.number().int() })
+    .object({
+      ...base,
+      type: z.literal("canon.revision.advanced"),
+      worldId: UlidSchema,
+      revision: z.number().int(),
+    })
     .strict(),
 
   z
@@ -95,7 +120,14 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("proposal.blocked"),
       worldId: UlidSchema,
       proposalId: ProposalIdSchema,
-      reason: z.enum(["stale", "needs-reconfirm", "no-op", "pending-review", "unresolved-conflicts", "target-retired"]),
+      reason: z.enum([
+        "stale",
+        "needs-reconfirm",
+        "no-op",
+        "pending-review",
+        "unresolved-conflicts",
+        "target-retired",
+      ]),
       detail: z.string().optional(),
       /** On needs-reconfirm: the authoritative set and its signature to echo back (R-10). */
       authoritativeSignature: z.string().optional(),
@@ -104,6 +136,20 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
 
   /** Full row on every transition — jobs are small and the client never patches by hand. */
   z.object({ ...base, type: z.literal("job.updated"), job: JobSchema }).strict(),
+
+  /** One correlated acknowledgement after all durable enqueue attempts for a user action. */
+  z
+    .object({
+      ...base,
+      type: z.literal("queue.enqueue-result"),
+      requestId: UlidSchema,
+      command: QueueCommandSchema,
+      disposition: z.enum(["accepted", "partial", "rejected", "not-queued"]),
+      requestedCount: z.number().int().min(0),
+      acceptedJobIds: z.array(JobIdSchema),
+      failures: z.array(z.object({ index: z.number().int().min(0), reason: z.string().min(1) }).strict()),
+    })
+    .strict(),
 
   /** Result of the deliberate main-photo acceptance action (SPEC-017 R-12, issue #71). */
   z
@@ -132,9 +178,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       sheetId: SlugSchema,
       extracted: z.array(z.string()),
       ranked: z.array(RankedVoiceSchema),
-      previewLine: z
-        .object({ text: z.string(), source: z.enum(["own-line", "drafted", "stock"]) })
-        .strict(),
+      previewLine: z.object({ text: z.string(), source: z.enum(["own-line", "drafted", "stock"]) }).strict(),
       /** Stated before any preview that will incur a charge (R-10); null when no cloud model. */
       cloudPreviewMicroUsd: z.number().int().min(0).nullable(),
     })
@@ -220,7 +264,12 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
   /** Archiving refused, and why — a world with work still running is not tidied away. */
   z
-    .object({ ...base, type: z.literal("world.archive-refused"), worldId: UlidSchema, reason: z.string().min(1) })
+    .object({
+      ...base,
+      type: z.literal("world.archive-refused"),
+      worldId: UlidSchema,
+      reason: z.string().min(1),
+    })
     .strict(),
 
   /**
@@ -357,7 +406,9 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("ledger.appended"), entry: LedgerEntrySchema }).strict(),
 
   /** Provider configuration or validation changed — the full set, never a patch (SPEC-008 R-2, R-3). */
-  z.object({ ...base, type: z.literal("provider.status"), providers: z.array(ProviderStatusSchema) }).strict(),
+  z
+    .object({ ...base, type: z.literal("provider.status"), providers: z.array(ProviderStatusSchema) })
+    .strict(),
   /** Routing defaults or their faults changed (SPEC-008 R-20, §2.7). */
   z
     .object({
@@ -478,12 +529,16 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("canon.refs"),
       worldId: UlidSchema,
       entryId: z.string().min(1),
-      citedBy: z.object({
-        sheets: z.array(z.object({ id: z.string(), atVersion: z.number().nullable() }).strict()),
-        entries: z.array(z.string()),
-        productions: z.array(z.string()),
-      }).strict(),
-      ripples: z.array(z.object({ kind: z.string(), summary: z.string(), targets: z.array(z.string()) }).strict()),
+      citedBy: z
+        .object({
+          sheets: z.array(z.object({ id: z.string(), atVersion: z.number().nullable() }).strict()),
+          entries: z.array(z.string()),
+          productions: z.array(z.string()),
+        })
+        .strict(),
+      ripples: z.array(
+        z.object({ kind: z.string(), summary: z.string(), targets: z.array(z.string()) }).strict(),
+      ),
     })
     .strict(),
 

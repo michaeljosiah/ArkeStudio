@@ -45,6 +45,15 @@ const WITHOUT_CONTROLS = new Set(["launch"]);
 const WITHOUT_CHROME = new Set(["art-direction-proposal", "replace-main-photo", "model-sheet-generate"]);
 
 describe("app chrome", () => {
+  it("mounts one app-level queue toaster", () => {
+    const app = readFileSync(join(here, "../src/App.tsx"), "utf8");
+    assert.equal(
+      count(app, "<QueueToaster"),
+      1,
+      "Sonner portals on the client, but its root is mounted once here",
+    );
+  });
+
   for (const screen of SCREENS) {
     it(`${screen.id} carries exactly one wordmark, centred`, () => {
       const html = renderAt(screen.samplePath);
@@ -57,7 +66,10 @@ describe("app chrome", () => {
         1,
         `${screen.samplePath} should draw the chrome once — no screen without it, none with two`,
       );
-      assert.ok(html.includes(">Arke</span>") && html.includes(">Studio</span>"), "the full lockup, not an initial");
+      assert.ok(
+        html.includes(">Arke</span>") && html.includes(">Studio</span>"),
+        "the full lockup, not an initial",
+      );
     });
 
     it(`${screen.id} puts activity and settings on the right, in that order`, () => {
@@ -67,7 +79,10 @@ describe("app chrome", () => {
         return;
       }
       if (WITHOUT_CONTROLS.has(screen.id)) {
-        assert.ok(!html.includes('aria-label="Settings"'), `${screen.id} is the exception and has no controls`);
+        assert.ok(
+          !html.includes('aria-label="Settings"'),
+          `${screen.id} is the exception and has no controls`,
+        );
         return;
       }
       const right = html.indexOf("fy-titlebar__side--right");
