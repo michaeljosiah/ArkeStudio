@@ -7,6 +7,7 @@ import {
   type ClientMessage,
   type ClientState,
   type DomainEvent,
+  type ProviderCallRecord,
   type ProviderId,
   type QueueCommand,
   type RankedVoice,
@@ -150,6 +151,7 @@ interface StoreState {
     detail: string | null;
   } | null;
   diagnosticsBundle: string | null;
+  providerCallsByJob: Record<string, ProviderCallRecord[]>;
 }
 
 export interface VoiceCandidatesState {
@@ -188,6 +190,7 @@ let current: StoreState = {
   envCheck: null,
   updateStatus: null,
   diagnosticsBundle: null,
+  providerCallsByJob: {},
 };
 
 export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-result" }>;
@@ -560,6 +563,7 @@ function handleFrame(json: string): void {
     let envCheck = current.envCheck;
     let updateStatus = current.updateStatus;
     let diagnosticsBundle = current.diagnosticsBundle;
+    let providerCallsByJob = current.providerCallsByJob;
     if (event.type === "env.check") {
       envCheck = {
         pathBudgetOk: event.pathBudgetOk,
@@ -572,6 +576,8 @@ function handleFrame(json: string): void {
       updateStatus = { status: event.status, version: event.version, detail: event.detail };
     } else if (event.type === "diagnostics.ready") {
       diagnosticsBundle = event.bundle;
+    } else if (event.type === "provider-calls.ready") {
+      providerCallsByJob = { ...providerCallsByJob, [event.jobId ?? "all"]: event.calls };
     }
     let exportsState = current.exportsState;
     if (event.type === "export.progress") {
@@ -641,6 +647,7 @@ function handleFrame(json: string): void {
       envCheck,
       updateStatus,
       diagnosticsBundle,
+      providerCallsByJob,
     });
   }
 }
@@ -1558,6 +1565,14 @@ export function generateDiagnostics(): void {
   send({ kind: "generate-diagnostics" });
 }
 
+export function listProviderCalls(jobId: string | null): void {
+  send({ kind: "list-provider-calls", jobId });
+}
+
+export function useProviderCalls(jobId: string | null): ProviderCallRecord[] | null {
+  return useStore().providerCallsByJob[jobId ?? "all"] ?? null;
+}
+
 export function openDataFolder(): void {
   send({ kind: "open-data-folder" });
 }
@@ -1664,6 +1679,7 @@ export function __setStateForTest(state: ClientState): void {
     envCheck: null,
     updateStatus: null,
     diagnosticsBundle: null,
+    providerCallsByJob: {},
   });
 }
 

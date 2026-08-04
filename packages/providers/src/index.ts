@@ -12,6 +12,7 @@ export { OpenAiClient } from "./clients/openai.js";
 export { jsonRequest, tryProbe } from "./clients/http.js";
 export { requireModel, SHIPPED_MANIFEST } from "./manifest-data.js";
 export { createProviderClients, PROVIDER_DECLARATIONS } from "./registry.js";
+export { captureProviderClient } from "./capture.js";
 export { probeRuntime, type ProbeDeps } from "./runtime-detect.js";
 export { gateLocalRuntimes } from "@arke-studio/contracts";
 export {
@@ -21,6 +22,9 @@ export {
   type FetchLike,
   type PollResult,
   type ProviderClient,
+  type ProviderCallCapture,
+  type ProviderCallContext,
+  type VoiceCatalogueClient,
   type SubmitRequest,
   type SubmitResult,
 } from "./types.js";

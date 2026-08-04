@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { GenesisIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, UlidSchema } from "./ids.js";
+import { GenesisIdSchema, JobIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, UlidSchema } from "./ids.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
 import { BackgroundNotificationPreferenceSchema, ThemePreferenceSchema } from "./settings.js";
@@ -350,6 +350,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** SPEC-009 R-14: cancel a job in any non-terminal state; remote cancel attempted where supported. */
   z.object({ kind: z.literal("cancel-job"), jobId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("list-provider-calls"), jobId: JobIdSchema.nullable() }).strict(),
   z.object({ kind: z.literal("retry-job-finalization"), jobId: z.string().min(1) }).strict(),
   /**
    * SPEC-009 R-4/D4: resolve a job held as needs-reconciliation. "resubmit" accepts the stated

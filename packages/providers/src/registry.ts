@@ -5,21 +5,22 @@ import { FalClient } from "./clients/fal.js";
 import { HiggsfieldClient } from "./clients/higgsfield.js";
 import { OllamaClient } from "./clients/ollama.js";
 import { OpenAiClient } from "./clients/openai.js";
-import type { FetchLike, ProviderClient } from "./types.js";
+import { captureProviderClient } from "./capture.js";
+import type { FetchLike, ProviderCallCapture, ProviderClient } from "./types.js";
 
 /**
  * The client registry (T-9): one instance per provider, declarations included. Kokoro and
  * whisper.cpp run inside the Voxa sidecar (SPEC-011) and have no HTTP client here — their
  * manifest entries are gated by runtime detection, not by a credential.
  */
-export function createProviderClients(fetchImpl: FetchLike): Partial<Record<ProviderId, ProviderClient>> {
+export function createProviderClients(fetchImpl: FetchLike, capture?: ProviderCallCapture): Partial<Record<ProviderId, ProviderClient>> {
   return {
-    fal: new FalClient(fetchImpl),
-    higgsfield: new HiggsfieldClient(fetchImpl),
-    openai: new OpenAiClient(fetchImpl),
-    anthropic: new AnthropicClient(fetchImpl),
-    elevenlabs: new ElevenLabsClient(fetchImpl),
-    ollama: new OllamaClient(fetchImpl),
+    fal: captureProviderClient("fal", (fetch) => new FalClient(fetch), fetchImpl, capture),
+    higgsfield: captureProviderClient("higgsfield", (fetch) => new HiggsfieldClient(fetch), fetchImpl, capture),
+    openai: captureProviderClient("openai", (fetch) => new OpenAiClient(fetch), fetchImpl, capture),
+    anthropic: captureProviderClient("anthropic", (fetch) => new AnthropicClient(fetch), fetchImpl, capture),
+    elevenlabs: captureProviderClient("elevenlabs", (fetch) => new ElevenLabsClient(fetch), fetchImpl, capture),
+    ollama: captureProviderClient("ollama", (fetch) => new OllamaClient(fetch), fetchImpl, capture),
   };
 }
 

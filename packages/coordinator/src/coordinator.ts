@@ -44,6 +44,7 @@ import {
   setPromptOverride,
 } from "./productions/ops.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
+import { ProviderCallStore } from "./providers/call-store.js";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "./queue/dispatcher.js";
 import { enqueueInputs } from "./queue/acknowledge.js";
 import {
@@ -173,6 +174,9 @@ export interface CoordinatorOptions {
   };
   /** SPEC-008: credential cipher (Electron safeStorage in the desktop; a fake in tests). */
   cipher?: Cipher;
+  /** Shared with provider-call capture so known credentials are scrubbed from owner-visible payloads. */
+  secretRegistry?: SecretRegistry;
+  providerCalls?: ProviderCallStore;
   /** SPEC-008: per-provider key validators, injected from @arke-studio/providers. */
   validators?: Partial<Record<ProviderId, KeyValidator>>;
   /** SPEC-008: the shipped model manifest. */
@@ -252,7 +256,7 @@ export class Coordinator {
   private appearanceWrite = Promise.resolve();
   private started = false;
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
-  private readonly secrets = new SecretRegistry();
+  private readonly secrets: SecretRegistry;
   private readonly appLog: AppLog | null;
   private readonly credentials: CredentialStore | null;
   private readonly providerService: ProviderService;
@@ -266,6 +270,7 @@ export class Coordinator {
   private readonly exports = new Map<string, ExportHandle>();
 
   constructor(private readonly opts: CoordinatorOptions) {
+    this.secrets = opts.secretRegistry ?? new SecretRegistry();
     this.readModel = new ReadModel(opts.appVersion);
     this.changeLog = new ChangeLog(opts.changeLogPath);
     this.appLog = opts.appRoot ? new AppLog(join(opts.appRoot, "logs", "app.jsonl"), this.secrets) : null;
@@ -1972,6 +1977,22 @@ export class Coordinator {
         });
         return;
       }
+      case "list-provider-calls": {
+        const calls =
+          (await (msg.jobId === null
+            ? this.opts.providerCalls?.listRecent()
+            : this.opts.providerCalls?.listForJob(msg.jobId))) ?? [];
+        // Full payloads are transient: never duplicate them into coordinator.jsonl or support diagnostics.
+        this.transport.broadcast(
+          DomainEventSchema.parse({
+            at: new Date().toISOString(),
+            type: "provider-calls.ready",
+            jobId: msg.jobId,
+            calls,
+          }),
+        );
+        return;
+      }
       case "open-data-folder": {
         if (this.opts.appRoot) this.opts.openPath?.(this.opts.appRoot);
         return;
@@ -3165,6 +3186,7 @@ export class Coordinator {
     await this.worldQuery.stop();
     await this.transport.stop();
     await this.opts.provider.close?.();
+    await this.opts.providerCalls?.drain();
     await this.changeLog.drain();
   }
 }

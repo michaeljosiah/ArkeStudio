@@ -49,17 +49,19 @@ export interface DispatchClient {
       imageReferences?: DispatchImageReference[];
       idempotencyKey?: string;
     },
+    context?: { jobId?: string; attempt?: number; model?: string },
   ): Promise<{ remoteId: string; artifacts?: DispatchArtifact[] }>;
   poll(
     key: string,
     remoteId: string,
+    context?: { jobId?: string; attempt?: number; model?: string },
   ): Promise<{ state: "queued" | "running" | "succeeded" | "failed" | "cancelled"; costMicroUsd?: number; error?: string }>;
-  fetchArtifacts(key: string, remoteId: string): Promise<DispatchArtifact[]>;
-  cancel(key: string, remoteId: string): Promise<void>;
+  fetchArtifacts(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<DispatchArtifact[]>;
+  cancel(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<void>;
   /** Reconciliation strategy A (SPEC-008 declarations): found → adopt; null → provably absent. */
-  lookupByKey?(key: string, idempotencyKey: string): Promise<{ remoteId: string } | null>;
+  lookupByKey?(key: string, idempotencyKey: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<{ remoteId: string } | null>;
   /** Reconciliation strategy B: recent jobs, newest first, carrying the caller's key. */
-  listRecent?(key: string): Promise<Array<{ remoteId: string; idempotencyKey?: string; createdAt: string }>>;
+  listRecent?(key: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<Array<{ remoteId: string; idempotencyKey?: string; createdAt: string }>>;
 }
 
 export interface EnqueueInput {
@@ -408,17 +410,21 @@ export class JobQueue {
 
     try {
       // ③ the point of uncertainty.
-      const accepted = await client.submit(key, {
-        model: job.model,
-        capability: job.capability,
-        params: job.params,
-        ...(imageReferences ? { imageReferences } : {}),
-        ...(client.declarations.supportsIdempotencyKey ? { idempotencyKey: job.idempotencyKey } : {}),
-      });
+      const accepted = await client.submit(
+        key,
+        {
+          model: job.model,
+          capability: job.capability,
+          params: job.params,
+          ...(imageReferences ? { imageReferences } : {}),
+          ...(client.declarations.supportsIdempotencyKey ? { idempotencyKey: job.idempotencyKey } : {}),
+        },
+        { jobId: job.id, attempt: submitting.attempt, model: job.model },
+      );
       if (this.disposed) return; // killed between accept and the record landing → reconciliation
       if (this.jobs.get(job.id)?.status === "cancelled") {
         // Cancelled while the submit was in flight: cancel remotely, never resurrect (§2.10).
-        await client.cancel(key, accepted.remoteId).catch(() => {});
+        await client.cancel(key, accepted.remoteId, { jobId: job.id, attempt: submitting.attempt, model: job.model }).catch(() => {});
         return;
       }
       if (accepted.artifacts) {
@@ -501,7 +507,7 @@ export class JobQueue {
       if (cancelled) return; // cancel() already terminalized; discard whatever arrives (§2.10)
       let poll;
       try {
-        poll = await client.poll(key, current.providerJobId!);
+        poll = await client.poll(key, current.providerJobId!, { jobId: job.id, attempt: job.attempt, model: job.model });
       } catch (err) {
         if (this.disposed) return;
         const klass = classifyError(err);
@@ -544,7 +550,7 @@ export class JobQueue {
     if (job.landing) {
       let artifacts: DispatchArtifact[];
       try {
-        artifacts = suppliedArtifacts ?? (await client.fetchArtifacts(key, job.providerJobId!));
+        artifacts = suppliedArtifacts ?? (await client.fetchArtifacts(key, job.providerJobId!, { jobId: job.id, attempt: job.attempt, model: job.model }));
       } catch (err) {
         if (this.disposed) return;
         // An interrupted download restarts the fetch (R-12); nothing partial exists yet.
@@ -709,7 +715,7 @@ export class JobQueue {
     if (job.providerJobId) {
       const client = this.opts.clients[job.provider];
       const key = await this.keyFor(job.provider);
-      if (client && key) await client.cancel(key, job.providerJobId).catch(() => {});
+      if (client && key) await client.cancel(key, job.providerJobId, { jobId: job.id, attempt: job.attempt, model: job.model }).catch(() => {});
     }
     // A cancelled job still writes a ledger entry (R-15, D10).
     await this.terminalize(job, "cancelled", null);
@@ -810,7 +816,7 @@ export class JobQueue {
     if (client.declarations.supportsIdempotencyKey && client.declarations.supportsLookupByKey && client.lookupByKey) {
       let found;
       try {
-        found = await client.lookupByKey(key, job.idempotencyKey);
+        found = await client.lookupByKey(key, job.idempotencyKey, { jobId: job.id, attempt: job.attempt, model: job.model });
       } catch {
         return this.holdForUser(job);
       }
@@ -826,7 +832,7 @@ export class JobQueue {
 
     // Strategy B — conclusive on a match; bounded by how far the listing reaches.
     if (client.declarations.supportsIdempotencyKey && client.declarations.supportsListRecent && client.listRecent) {
-      const recent = await client.listRecent(key).catch(() => null);
+      const recent = await client.listRecent(key, { jobId: job.id, attempt: job.attempt, model: job.model }).catch(() => null);
       if (recent) {
         const match = recent.find((r) => r.idempotencyKey === job.idempotencyKey);
         if (match) {

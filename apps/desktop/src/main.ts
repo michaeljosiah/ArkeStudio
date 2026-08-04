@@ -10,6 +10,8 @@ import {
   Coordinator,
   defaultAppRoot,
   FsWorldProvider,
+  ProviderCallStore,
+  SecretRegistry,
   nodeSetupDeps,
   harnessTrace,
   spoolBytes,
@@ -28,9 +30,9 @@ import {
 } from "@arke-studio/adapter-opencode";
 import {
   createProviderClients,
-  ElevenLabsClient,
   probeRuntime,
   SHIPPED_MANIFEST,
+  type VoiceCatalogueClient,
 } from "@arke-studio/providers";
 import {
   compatibleSidecarHealth,
@@ -244,7 +246,9 @@ async function start(): Promise<void> {
   };
 
   // One client set serves validation (SPEC-008) and dispatch (SPEC-009).
-  const providerClients = createProviderClients((url, init) => fetch(url, init));
+  const providerSecrets = new SecretRegistry();
+  const providerCalls = new ProviderCallStore(join(appRoot, "provider-calls", "calls.jsonl"), providerSecrets);
+  const providerClients = createProviderClients((url, init) => fetch(url, init), providerCalls);
 
   // The Voxa sidecar (SPEC-011): supervised like the harness; local inference only (D1).
   // The client resolves the supervisor's port lazily so restarts keep working.
@@ -303,6 +307,8 @@ async function start(): Promise<void> {
     appRoot,
     authoring: { buildConfig: buildSessionConfig, agentForPurpose, roster: ROSTER },
     cipher,
+    secretRegistry: providerSecrets,
+    providerCalls,
     validators: providerClients,
     manifest: SHIPPED_MANIFEST,
     probeRuntime: () => probeRuntime(appRoot),
@@ -394,7 +400,7 @@ async function start(): Promise<void> {
       cloudSources: [
         {
           provider: "elevenlabs",
-          list: (key: string) => new ElevenLabsClient((url, init) => fetch(url, init)).listVoicesCatalog(key),
+          list: (key: string) => (providerClients.elevenlabs as VoiceCatalogueClient).listVoicesCatalog(key),
         },
       ],
     },
