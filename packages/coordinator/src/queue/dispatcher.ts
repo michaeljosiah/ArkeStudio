@@ -135,6 +135,7 @@ export class JobQueue {
   private readonly baseIntervalMs: number;
   private disposed = false;
   private accepting = false;
+  private readonly resolvingHeld = new Set<string>();
 
   constructor(private readonly opts: JobQueueOptions) {
     this.journal = new JobJournal(opts.journalPath);
@@ -335,11 +336,14 @@ export class JobQueue {
       this.pauseLane(job.provider, "credential", "no credential stored for this provider");
       return;
     }
+    if (this.jobs.get(job.id)?.status !== "queued") return;
 
-    // ② durable intent-to-submit — the record that makes the uncertainty window detectable (D1).
-    const submitting: Job = { ...job, status: "submitting", updatedAt: this.clock() };
+    // Persist the physical call before I/O. A crash may overcount one authorized call, but the
+    // journal can never undercount requests that may have reached a paid provider.
+    const submitting: Job = { ...job, status: "submitting", attempt: job.attempt + 1, updatedAt: this.clock() };
     await this.transition(submitting);
     if (this.disposed) return;
+    if (this.jobs.get(job.id)?.status !== "submitting") return;
 
     try {
       // ③ the point of uncertainty.
@@ -363,14 +367,20 @@ export class JobQueue {
     } catch (err) {
       if (this.disposed) return;
       if (this.jobs.get(job.id)?.status === "cancelled") return; // already terminal by the user
-      await this.handleSubmitError(submitting, err);
+      await this.handleSubmitError(submitting, client, err);
     }
   }
 
-  private async handleSubmitError(job: Job, err: unknown): Promise<void> {
+  private async handleSubmitError(job: Job, client: DispatchClient, err: unknown): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     const klass: FailureClass = classifyError(err);
     if (isRateLimit(err)) this.noteRateLimit(job.provider);
+    const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
+    if (!local && !client.declarations.supportsIdempotencyKey) {
+      await this.holdForUser(job);
+      if (klass === "provider-fault") this.pauseLane(job.provider, "fault", message);
+      return;
+    }
     switch (klass) {
       case "provider-fault": {
         // The job was never wrong — the credential was (R-8). Back to queued, lane paused.
@@ -380,26 +390,28 @@ export class JobQueue {
         return;
       }
       case "offline": {
-        // Nothing about the job is wrong and no attempt is burned (R-17).
+        if (job.attempt >= this.maxAttempts) {
+          await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`);
+          return;
+        }
         await this.transition({ ...job, status: "queued", updatedAt: this.clock() });
         this.lane(job.provider).fifo.unshift(job.id);
         this.pauseLane(job.provider, "offline", "offline — jobs stay queued and resume with connectivity");
         return;
       }
       case "transient": {
-        const attempt = job.attempt + 1;
-        if (attempt >= this.maxAttempts) {
-          await this.terminalize({ ...job, attempt }, "failed", `gave up after ${attempt} attempts: ${message}`);
+        if (job.attempt >= this.maxAttempts) {
+          await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`);
           return;
         }
-        await this.transition({ ...job, status: "queued", attempt, updatedAt: this.clock() });
+        await this.transition({ ...job, status: "queued", updatedAt: this.clock() });
         const lane = this.lane(job.provider);
         lane.fifo.push(job.id);
-        this.schedule(lane, backoffMs(attempt, this.backoffBaseMs, this.backoffCapMs, this.rng));
+        this.schedule(lane, backoffMs(job.attempt, this.backoffBaseMs, this.backoffCapMs, this.rng));
         return;
       }
       case "terminal": {
-        await this.terminalize({ ...job, attempt: job.attempt + 1 }, "failed", message);
+        await this.terminalize(job, "failed", message);
         return;
       }
     }
@@ -612,7 +624,13 @@ export class JobQueue {
   // ---- reconciliation (§2.5) and start-up (R-18) ---------------------------
 
   async start(): Promise<ReconcileAction[]> {
-    const folded = await this.journal.readFolded();
+    const history = await this.journal.readHistory();
+    const byId = new Map<string, Job>();
+    for (const row of history) byId.set(row.id, row);
+    const folded = [...byId.values()].map((job) => ({
+      ...job,
+      attempt: Math.max(job.attempt, history.filter((row) => row.id === job.id && row.status === "submitting").length),
+    }));
     for (const job of folded) this.jobs.set(job.id, job);
     const report: ReconcileAction[] = [];
 
@@ -630,6 +648,16 @@ export class JobQueue {
         continue;
       }
       if (job.status === "queued") {
+        const client = this.opts.clients[job.provider];
+        const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
+        const rows = history.filter((row) => row.id === job.id);
+        const prior = rows.length > 1 ? rows[rows.length - 2] : undefined;
+        if (!local && !client?.declarations.supportsIdempotencyKey && prior?.status === "submitting") {
+          const attempts = rows.filter((row) => row.status === "submitting").length;
+          const action = await this.holdForUser({ ...job, attempt: Math.max(job.attempt, attempts) });
+          report.push(action);
+          continue;
+        }
         this.lane(job.provider).fifo.push(job.id);
         report.push({ jobId: job.id, action: "requeued" });
         continue;
@@ -672,8 +700,13 @@ export class JobQueue {
     }
 
     // Strategy A — definite in both directions.
-    if (client.declarations.supportsLookupByKey && client.lookupByKey) {
-      const found = await client.lookupByKey(key, job.idempotencyKey).catch(() => null);
+    if (client.declarations.supportsIdempotencyKey && client.declarations.supportsLookupByKey && client.lookupByKey) {
+      let found;
+      try {
+        found = await client.lookupByKey(key, job.idempotencyKey);
+      } catch {
+        return this.holdForUser(job);
+      }
       if (found) {
         const running: Job = { ...job, status: "running", providerJobId: found.remoteId, updatedAt: this.clock() };
         await this.transition(running);
@@ -685,7 +718,7 @@ export class JobQueue {
     }
 
     // Strategy B — conclusive on a match; bounded by how far the listing reaches.
-    if (client.declarations.supportsListRecent && client.listRecent) {
+    if (client.declarations.supportsIdempotencyKey && client.declarations.supportsListRecent && client.listRecent) {
       const recent = await client.listRecent(key).catch(() => null);
       if (recent) {
         const match = recent.find((r) => r.idempotencyKey === job.idempotencyKey);
@@ -718,10 +751,14 @@ export class JobQueue {
   }
 
   private async holdForUser(job: Job): Promise<ReconcileAction> {
+    const duplicateCost =
+      job.estimatedMicroUsd > 0
+        ? `may charge about ${formatMicroUsd(job.estimatedMicroUsd)} again`
+        : "may create another charge of unknown size";
     const held: Job = {
       ...job,
       status: "needs-reconciliation",
-      error: `The submission's outcome was not witnessed and ${job.provider} cannot say what happened. Resubmitting may charge twice — a duplicate would cost about ${formatMicroUsd(job.estimatedMicroUsd)}.`,
+      error: `Arke did not witness the submission result. ${job.provider} may have accepted and charged it, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}; the prior actual cost is unknown.`,
       updatedAt: this.clock(),
     };
     await this.transition(held);
@@ -731,18 +768,24 @@ export class JobQueue {
 
   /** The user's answer to strategy C (D4): resubmit with eyes open, or abandon honestly. */
   async resolveHeld(jobId: string, decision: "resubmit" | "discard"): Promise<void> {
-    const job = this.jobs.get(jobId);
-    if (!job || job.status !== "needs-reconciliation") return;
-    if (decision === "resubmit") {
-      await this.transition({ ...job, status: "queued", error: null, updatedAt: this.clock() });
-      this.lane(job.provider).fifo.push(job.id);
+    if (this.resolvingHeld.has(jobId)) return;
+    this.resolvingHeld.add(jobId);
+    try {
+      const job = this.jobs.get(jobId);
+      if (!job || job.status !== "needs-reconciliation") return;
+      if (decision === "resubmit") {
+        await this.transition({ ...job, status: "queued", error: null, updatedAt: this.clock() });
+        this.lane(job.provider).fifo.push(job.id);
+        this.emitQueueStatus(job.provider);
+        this.pump(job.provider);
+        return;
+      }
+      // Abandoned — but the ledger still records it (R-15): the charge is unknown, not zero.
+      await this.terminalize(job, "cancelled", "abandoned after an unwitnessed submission");
       this.emitQueueStatus(job.provider);
-      this.pump(job.provider);
-      return;
+    } finally {
+      this.resolvingHeld.delete(jobId);
     }
-    // Abandoned — but the ledger still records it (R-15): the charge is unknown, not zero.
-    await this.terminalize(job, "cancelled", "abandoned after an unwitnessed submission");
-    this.emitQueueStatus(job.provider);
   }
 
   // ---- adaptive rate (§2.8) ------------------------------------------------

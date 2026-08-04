@@ -45,6 +45,14 @@ export class JobJournal {
 
   /** Fold to current state: the latest record per job id, in first-seen (FIFO) order. */
   async readFolded(): Promise<Job[]> {
+    const history = await this.readHistory();
+    const byId = new Map<string, Job>();
+    for (const job of history) byId.set(job.id, job);
+    return [...byId.values()];
+  }
+
+  /** Every valid durable row, for conservative migration of unsafe legacy retry histories. */
+  async readHistory(): Promise<Job[]> {
     await this.queue.enqueue(() => this.repairTail());
     let raw: string;
     try {
@@ -52,18 +60,18 @@ export class JobJournal {
     } catch {
       return [];
     }
-    const byId = new Map<string, Job>();
+    const history: Job[] = [];
     for (const line of raw.split("\n")) {
       const t = line.trim();
       if (!t) continue;
       try {
         const parsed = JobSchema.safeParse(JSON.parse(t));
-        if (parsed.success) byId.set(parsed.data.id, parsed.data);
+        if (parsed.success) history.push(parsed.data);
       } catch {
         /* foreign or torn line — skipped, never fatal */
       }
     }
-    return [...byId.values()];
+    return history;
   }
 
   drain(): Promise<void> {
