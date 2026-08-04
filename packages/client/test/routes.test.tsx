@@ -115,6 +115,31 @@ describe("screen inventory", () => {
     assert.ok(looks.includes("Explorations do not automatically join the identity package."));
   });
 
+  it("grounds the main-photo prompt in the active character rather than the fixture lead", () => {
+    const world = FIXTURE_STATE.world!;
+    const other = {
+      ...world.sheets.find((sheet) => sheet.id === "maren-kest")!,
+      id: "iona-vale",
+      name: "Iona Vale",
+      role: "Lockkeeper",
+      sections: [
+        { heading: "Essence", body: "Keeps the western locks through winter." },
+        { heading: "Appearance", body: "Cropped copper hair, a brass lock badge, and an ink-dark coat." },
+      ],
+    };
+    __setStateForTest({ ...FIXTURE_STATE, world: { ...world, sheets: [...world.sheets, other] } });
+    try {
+      const html = renderAt(`/w/${world.meta.worldId}/cast/iona-vale/main-photo`);
+      assert.ok(html.includes("Iona Vale"));
+      assert.ok(html.includes("Cropped copper hair"));
+      assert.ok(html.includes("Reset from character sheet"));
+      assert.ok(!html.includes("Maren Kest"));
+      assert.ok(!html.includes("Refine with AI"));
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
   it("names the inherited world look on the remaining visual generation surfaces", () => {
     const worldId = FIXTURE_STATE.world!.meta.worldId;
     const workspace = renderAt(`/w/${worldId}/p/saltlight/generate`);

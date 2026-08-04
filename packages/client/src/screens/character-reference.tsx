@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { compilationIsStale, designatedCompilation, mainPhotoFor } from "@arke-studio/contracts";
+import { compilationIsStale, designatedCompilation, mainPhotoFor, type Sheet } from "@arke-studio/contracts";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Button, cx } from "../components/ui.js";
 import { formatMicroUsd } from "@arke-studio/contracts";
@@ -79,6 +79,20 @@ function CharacterHeader({ active }: { active: "reference" | "looks" }) {
       </nav>
     </header>
   );
+}
+
+export function mainPhotoPromptFor(sheet: Sheet | null | undefined): string {
+  if (!sheet) return "";
+  const appearance = sheet.sections.find((section) => section.heading.toLowerCase() === "appearance")?.body.trim();
+  const role = sheet.role?.trim();
+  return [
+    `A clear, grounded head-and-shoulders identity portrait of ${sheet.name}.`,
+    role ? `Role: ${role}.` : null,
+    appearance ? `Preserve these visible traits: ${appearance}` : "Use the character sheet's established physical identity.",
+    "Restrained neutral expression, no text or montage.",
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" ");
 }
 
 export function CharacterReferenceScreen() {
@@ -330,13 +344,16 @@ export function ReplaceMainPhotoScreen() {
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);
   const { state } = useStore();
-  const [prompt, setPrompt] = useState(
-    "A clear, grounded portrait that preserves her salt-worn face, pale grey eyes and wet braids.",
-  );
+  const [prompt, setPrompt] = useState(() => mainPhotoPromptFor(sheet));
   const [count, setCount] = useState(4);
   const [uploaded, setUploaded] = useState(false);
   const [worldRef, setWorldRef] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPrompt(mainPhotoPromptFor(sheet));
+  }, [sheet?.id]);
+
   if (!world || !sheet || !sheetId) return null;
   const current = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = current ? mainPhotoFor(current) : null;
@@ -370,14 +387,10 @@ export function ReplaceMainPhotoScreen() {
             <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
             <button
               type="button"
-              title="Refine with AI"
-              onClick={() =>
-                setPrompt(
-                  "A clear, grounded head-and-shoulders identity portrait of Maren Kest. Preserve her pale grey eyes, salt-worn skin, wet dark braids and weathered storm coat; restrained neutral expression, soft fog depth and one warm practical light; no text or montage.",
-                )
-              }
+              title="Reset from character sheet"
+              onClick={() => setPrompt(mainPhotoPromptFor(sheet))}
             >
-              ✦
+              Reset
             </button>
           </div>
           <div className="fy-mainphoto-dialog__refbuttons">
