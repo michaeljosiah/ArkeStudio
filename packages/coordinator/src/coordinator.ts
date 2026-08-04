@@ -21,7 +21,6 @@ import {
   type ModelManifest,
   type ProviderId,
   type RuntimeProbes,
-  type Take,
   type VoiceCandidate,
 } from "@arke-studio/contracts";
 import { AppLog } from "./app-log.js";
@@ -72,7 +71,6 @@ import {
   acceptCharacterLook,
   acceptCharacterSheet,
   attachCharacterLook,
-  chooseAnchor,
   compileGrid,
   designate,
   landGrid,
@@ -86,9 +84,14 @@ import {
   pendingReferenceTake,
   recordReferenceReview,
   recordReferenceTake,
-  recordUploadedReferenceTake,
   referenceReviewDecision,
 } from "./references/takes.js";
+import {
+  acceptMainPhoto,
+  mainPhotoFailureReason,
+  mainPhotoLogRecord,
+  type MainPhotoAcceptanceStage,
+} from "./references/main-photo.js";
 import { SecretRegistry } from "./redact.js";
 import { detectDrift, evaluateSpend } from "./spend/analytics.js";
 import { LedgerFile } from "./spend/ledger.js";
@@ -1973,50 +1976,79 @@ export class Coordinator {
       }
       case "choose-anchor": {
         const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const sheet = store.getBundle().sheets.find((s) => s.id === msg.sheetId);
-        if (!sheet) return;
-        const bundle = store.getBundle();
-        let take: Take | null | undefined;
-        let candidatePath: string | null = null;
-        if (msg.selection.source === "take") {
-          const takeId = msg.selection.takeId;
-          take = pendingReferenceTake(
-            bundle.referenceTakes,
-            bundle.referenceReviews,
-            takeId,
-            msg.sheetId,
-            "main-photo",
-          );
-          if (!take?.media) return;
-          const media = `references/${msg.sheetId}/takes/${take.id}/${take.media}`;
-          if (basename(take.media) !== take.media || !(await stat(toExtendedLength(join(store.dir, media))).catch(() => null))) return;
-        } else {
-          candidatePath = `references/${msg.sheetId}/candidates/${msg.selection.file}`;
-          if (!(bundle.referenceCandidates[msg.sheetId] ?? []).includes(candidatePath)) return;
-          take = await recordUploadedReferenceTake(store, msg.sheetId, candidatePath).catch(() => null);
-          if (!take) return;
-        }
-        const review = referenceReviewDecision(store.now(), take, "accept");
-        const acceptedFile = `takes/${take.id}/${take.media}`;
-        try {
-          await chooseAnchor(store, msg.sheetId, {
-            file: acceptedFile,
-            ...(take.jobId ? { jobId: take.jobId } : {}),
-            takeId: take.id,
-            sheetVersion: sheet.version,
-            artDirectionVersion: take.provenance.artDirectionVersion ?? bundle.artDirection.version,
-            source: take.provider === "user" ? "upload" : "generated",
-            acceptedAt: store.now(),
-            review,
+        let source: "upload" | "generated" = msg.selection.source === "candidate" ? "upload" : "generated";
+        const report = (
+          status: "accepted" | "failed",
+          candidateRetained: boolean,
+          reason?: string,
+          stage?: MainPhotoAcceptanceStage,
+        ) => {
+          if (stage) {
+            void this.appLog?.append(mainPhotoLogRecord(msg.worldId, msg.sheetId, stage, source));
+          }
+          this.emit({
+            at: new Date().toISOString(),
+            type: "main-photo.acceptance",
+            worldId: msg.worldId,
+            sheetId: msg.sheetId,
+            status,
+            ...(reason ? { reason } : {}),
+            candidateRetained,
           });
-        } catch {
+        };
+        if (!store || store.worldId !== msg.worldId) {
+          report("failed", true, "The main photo was not changed. Open this world and try again.", "candidate-validation");
           return;
         }
-        if (candidatePath) {
-          await rm(toExtendedLength(join(store.dir, candidatePath)), { force: true }).catch(() => {});
+        const sheet = store.getBundle().sheets.find((s) => s.id === msg.sheetId);
+        if (!sheet) {
+          report("failed", true, "The main photo was not changed because the character is unavailable.", "candidate-validation");
+          return;
         }
+        let bundle = store.getBundle();
+        let selection = msg.selection;
+        let sourceCandidatePath: string | null = null;
+        if (selection.source === "take") {
+          const takeId = selection.takeId;
+          const take = bundle.referenceTakes.find((candidate) => candidate.id === takeId);
+          const job = take?.jobId ? this.jobQueue?.listJobs().find((candidate) => candidate.id === take.jobId) : undefined;
+          sourceCandidatePath =
+            (typeof take?.params["sourceCandidate"] === "string" ? take.params["sourceCandidate"] : null) ??
+            job?.landedFiles?.find((path) => path.startsWith(`references/${msg.sheetId}/candidates/`)) ??
+            null;
+        } else {
+          const candidatePath = `references/${msg.sheetId}/candidates/${selection.file}`;
+          const job = this.jobQueue?.listJobs().find(
+            (candidate) =>
+              candidate.status === "succeeded" &&
+              (candidate.target.kind === "main-photo-candidate" || candidate.target.kind === "establish-candidate") &&
+              candidate.target.id?.startsWith(`${msg.sheetId}/`) === true &&
+              candidate.landedFiles?.includes(candidatePath),
+          );
+          if (job) {
+            source = "generated";
+            const recovered = await recordReferenceTake(store, job).catch(() => null);
+            if (!recovered) {
+              await this.refreshWorldSnapshot(msg.worldId);
+              report("failed", true, mainPhotoFailureReason("take-recording"), "take-recording");
+              return;
+            }
+            bundle = store.getBundle();
+            selection = { source: "take", takeId: recovered.id };
+            sourceCandidatePath = candidatePath;
+          }
+        }
+        const result = await acceptMainPhoto(store, sheet, bundle, selection, sourceCandidatePath);
         await this.refreshWorldSnapshot(msg.worldId);
+        if (result.status === "failed") {
+          report("failed", result.candidateRetained, mainPhotoFailureReason(result.stage), result.stage);
+          return;
+        }
+        if (result.cleanupError) {
+          report("accepted", true, undefined, "candidate-cleanup");
+          return;
+        }
+        report("accepted", false);
         return;
       }
       case "import-main-photo-candidate": {

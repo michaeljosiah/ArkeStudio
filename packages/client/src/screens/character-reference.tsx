@@ -10,12 +10,14 @@ import {
   acceptCharacterSheet,
   attachCharacterLook,
   chooseAnchor,
+  clearMainPhotoAcceptance,
   generateCharacterLooks,
   generateCharacterSheet,
   generateMainPhoto,
   importMainPhotoCandidate,
   promoteCharacterLook,
   rejectReferenceTake,
+  useMainPhotoAcceptance,
   useStore,
 } from "../lib/store.js";
 
@@ -335,6 +337,7 @@ export function ReplaceMainPhotoScreen() {
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);
   const { state } = useStore();
+  const acceptance = useMainPhotoAcceptance()[sheetId ?? ""];
   const [prompt, setPrompt] = useState(() => mainPhotoPromptFor(sheet));
   const [count, setCount] = useState(4);
   const [uploaded, setUploaded] = useState(false);
@@ -344,6 +347,13 @@ export function ReplaceMainPhotoScreen() {
   useEffect(() => {
     setPrompt(mainPhotoPromptFor(sheet));
   }, [sheet?.id]);
+
+  useEffect(() => {
+    if (acceptance?.status === "accepted" && sheetId) {
+      clearMainPhotoAcceptance(sheetId);
+      navigate(`/w/${worldId}/cast/${sheetId}/kit`);
+    }
+  }, [acceptance?.status, navigate, sheetId, worldId]);
 
   if (!world || !sheet || !sheetId) return null;
   const current = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
@@ -366,15 +376,7 @@ export function ReplaceMainPhotoScreen() {
     path,
     selection: { source: "candidate" as const, file: path.slice(path.lastIndexOf("/") + 1) },
   }));
-  const generatedSourcePaths = new Set(
-    world.referenceTakes
-      .filter((take) => take.kind === "main-photo" && take.reference?.sheetId === sheetId && take.jobId)
-      .flatMap((take) => state?.app.jobs.find((job) => job.id === take.jobId)?.landedFiles ?? []),
-  );
-  const candidates = [
-    ...uploadedCandidates.filter((candidate) => !generatedSourcePaths.has(candidate.path)),
-    ...generatedCandidates,
-  ];
+  const candidates = [...uploadedCandidates, ...generatedCandidates];
   const selectedCandidate = candidates.find((candidate) => candidate.key === selected) ?? null;
   const model = state?.app.manifest?.models.find((candidate) => candidate.capability === "image");
   const canImport = typeof window !== "undefined" && window.arke !== undefined;
@@ -500,16 +502,19 @@ export function ReplaceMainPhotoScreen() {
             </div>
           )}
           <div className="fy-mainphoto-dialog__commit">
-            <span>Replacing the main photo makes the current character sheet stale.</span>
+            <span>
+              {acceptance?.status === "failed"
+                ? acceptance.reason
+                : "Replacing the main photo makes the current character sheet stale."}
+            </span>
             <Button
               variant="primary"
-              disabled={!selectedCandidate}
+              disabled={!selectedCandidate || acceptance?.status === null}
               onClick={() => {
                 if (selectedCandidate) chooseAnchor(world.meta.worldId, sheetId, selectedCandidate.selection);
-                navigate(`/w/${worldId}/cast/${sheetId}/kit`);
               }}
             >
-              Use as main photo
+              {acceptance?.status === null ? "Using as main photo…" : "Use as main photo"}
             </Button>
           </div>
         </section>

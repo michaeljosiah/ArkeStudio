@@ -40,7 +40,12 @@ export async function recordReferenceTake(store: WorldStore, job: Job): Promise<
     },
     ...(typeof job.params["prompt"] === "string" ? { prompt: job.params["prompt"] as string } : {}),
     references: (job.params["references"] as string[] | undefined) ?? [],
-    params: job.params,
+    params: {
+      ...job.params,
+      ...(kind === "main-photo" && landed.startsWith(`references/${sheetId}/candidates/`)
+        ? { sourceCandidate: landed }
+        : {}),
+    },
     cost: { estimatedMicroUsd: job.estimatedMicroUsd, actualMicroUsd: null },
     dispatchedAt: job.createdAt,
     completedAt: store.now(),
@@ -75,6 +80,16 @@ export async function recordUploadedReferenceTake(
   sheetId: string,
   candidatePath: string,
 ): Promise<Take> {
+  const existing = store
+    .getBundle()
+    .referenceTakes.find(
+      (take) =>
+        take.kind === "main-photo" &&
+        take.reference?.sheetId === sheetId &&
+        take.provider === "user" &&
+        take.params["uploadedCandidate"] === candidatePath,
+    );
+  if (existing) return existing;
   const sheet = store.getBundle().sheets.find((candidate) => candidate.id === sheetId);
   if (!sheet) throw new Error(`no sheet ${sheetId}`);
   const id = `tk_${ulid()}` as Take["id"];
@@ -93,7 +108,7 @@ export async function recordUploadedReferenceTake(
       artDirectionVersion: store.getBundle().artDirection.version,
     },
     references: [],
-    params: {},
+    params: { uploadedCandidate: candidatePath },
     cost: { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "local-zero" },
     dispatchedAt: now,
     completedAt: now,

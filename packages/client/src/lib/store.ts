@@ -121,6 +121,11 @@ interface StoreState {
   /** SPEC-011: dictation results by requestId — inserted as editable text, never submitted. */
   dictation: Record<string, { text: string | null; error: string | null }>;
   voiceSidecar: { state: "not-started" | "downloading" | "unavailable" | "ready"; detail: string } | null;
+  /** Last main-photo accept result by sheet; null status means the command is in flight. */
+  mainPhotoAcceptance: Record<
+    string,
+    { status: "accepted" | "failed" | null; reason?: string; candidateRetained: boolean }
+  >;
   /** SPEC-013: export lifecycle by exportId. */
   exportsState: Record<string, ExportState>;
   /** SPEC-015: the last import report and filing notices — transient. */
@@ -172,6 +177,7 @@ let current: StoreState = {
   voicePreviews: {},
   dictation: {},
   voiceSidecar: null,
+  mainPhotoAcceptance: {},
   exportsState: {},
   importReport: null,
   artifactNotices: [],
@@ -398,6 +404,7 @@ function handleFrame(json: string): void {
     let voicePreviews = current.voicePreviews;
     let dictation = current.dictation;
     let voiceSidecar = current.voiceSidecar;
+    let mainPhotoAcceptance = current.mainPhotoAcceptance;
     if (event.type === "voice.candidates") {
       voiceCandidates = {
         ...voiceCandidates,
@@ -417,6 +424,15 @@ function handleFrame(json: string): void {
       dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
     } else if (event.type === "voice.sidecar") {
       voiceSidecar = { state: event.state, detail: event.detail };
+    } else if (event.type === "main-photo.acceptance") {
+      mainPhotoAcceptance = {
+        ...mainPhotoAcceptance,
+        [event.sheetId]: {
+          status: event.status,
+          ...(event.reason ? { reason: event.reason } : {}),
+          candidateRetained: event.candidateRetained,
+        },
+      };
     }
     let importReport = current.importReport;
     let artifactNotices = current.artifactNotices;
@@ -515,6 +531,7 @@ function handleFrame(json: string): void {
       voicePreviews,
       dictation,
       voiceSidecar,
+      mainPhotoAcceptance,
       exportsState,
       importReport,
       artifactNotices,
@@ -1011,7 +1028,24 @@ export function chooseAnchor(
   sheetId: string,
   selection: { source: "take"; takeId: string } | { source: "candidate"; file: string },
 ): void {
+  emitChange({
+    ...current,
+    mainPhotoAcceptance: {
+      ...current.mainPhotoAcceptance,
+      [sheetId]: { status: null, candidateRetained: true },
+    },
+  });
   send({ kind: "choose-anchor", worldId, sheetId, selection });
+}
+
+export function useMainPhotoAcceptance() {
+  return useStore().mainPhotoAcceptance;
+}
+
+export function clearMainPhotoAcceptance(sheetId: string): void {
+  const mainPhotoAcceptance = { ...current.mainPhotoAcceptance };
+  delete mainPhotoAcceptance[sheetId];
+  emitChange({ ...current, mainPhotoAcceptance });
 }
 
 export function importMainPhotoCandidate(worldId: string, sheetId: string): void {
@@ -1392,6 +1426,7 @@ export function __setStateForTest(state: ClientState): void {
     voicePreviews: {},
     dictation: {},
     voiceSidecar: null,
+    mainPhotoAcceptance: {},
     exportsState: {},
     importReport: null,
     artifactNotices: [],
@@ -1400,4 +1435,13 @@ export function __setStateForTest(state: ClientState): void {
     updateStatus: null,
     diagnosticsBundle: null,
   });
+}
+
+/** Test hook: apply a validated domain event through the same frame fold as the transport. */
+export function __applyEventForTest(event: DomainEvent): void {
+  handleFrame(JSON.stringify({ kind: "event", seq: lastSeq + 1, event }));
+}
+
+export function __mainPhotoAcceptanceForTest() {
+  return current.mainPhotoAcceptance;
 }
