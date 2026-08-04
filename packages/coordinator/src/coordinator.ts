@@ -59,6 +59,7 @@ import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./
 import { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
 import { previewCacheFile, VoiceService, type CloudVoiceSource, type SidecarLike } from "./voice/service.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
+import { readContainedImageReferences } from "./world/reference-files.js";
 import {
   characterLookRequests,
   characterSheetRequest,
@@ -289,6 +290,16 @@ export class Coordinator {
               } catch {
                 return false;
               }
+            },
+            readImageReferences: async (worldId, paths) => {
+              if (this.opts.provider.withWorldStore) {
+                return this.opts.provider.withWorldStore(worldId, (store) =>
+                  readContainedImageReferences(store.dir, paths),
+                );
+              }
+              const store = this.opts.provider.openStore?.();
+              if (!store || store.worldId !== worldId) throw new Error("the owning world is unavailable");
+              return readContainedImageReferences(store.dir, paths);
             },
             onProviderFault: (provider, message) => this.reportProviderFault(provider as ProviderId, message),
             onTerminal: (job) => this.onJobTerminal(job),

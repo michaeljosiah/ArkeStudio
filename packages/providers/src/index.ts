@@ -16,6 +16,7 @@ export { probeRuntime, type ProbeDeps } from "./runtime-detect.js";
 export { gateLocalRuntimes } from "@arke-studio/contracts";
 export {
   ProviderAuthError,
+  ProviderRequestRejectedError,
   type FetchedArtifact,
   type FetchLike,
   type PollResult,

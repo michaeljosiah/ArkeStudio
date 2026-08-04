@@ -4,7 +4,7 @@ import { appendFile, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, Job, LedgerEntry } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
-import { JobQueue, type EnqueueInput } from "../../src/queue/dispatcher.js";
+import { JobQueue, type EnqueueInput, type JobQueueOptions } from "../../src/queue/dispatcher.js";
 import { FakeProvider, jpegBytes, pngBytes, truncatedPngBytes, webpBytes } from "./fake-provider.js";
 
 /**
@@ -34,6 +34,7 @@ async function makeHarness(
     baseConcurrency?: number;
     landInWorld?: (worldId: string, fn: (worldDir: string) => Promise<void>) => Promise<boolean>;
     onTerminal?: (job: Job) => void | Promise<void>;
+    readImageReferences?: JobQueueOptions["readImageReferences"];
   } = {},
 ): Promise<Harness> {
   const dir = await tempDir("arke-queue-");
@@ -50,6 +51,7 @@ function build(
     baseConcurrency?: number;
     landInWorld?: (worldId: string, fn: (worldDir: string) => Promise<void>) => Promise<boolean>;
     onTerminal?: (job: Job) => void | Promise<void>;
+    readImageReferences?: JobQueueOptions["readImageReferences"];
   },
 ): Harness {
   const events: DomainEvent[] = [];
@@ -75,6 +77,7 @@ function build(
       }),
     onProviderFault: (provider, message) => faults.push({ provider, message }),
     ...(opts.onTerminal ? { onTerminal: opts.onTerminal } : {}),
+    ...(opts.readImageReferences ? { readImageReferences: opts.readImageReferences } : {}),
     maxAttempts: 3,
     backoffBaseMs: 5,
     backoffCapMs: 20,
@@ -138,6 +141,78 @@ describe("the happy path writes exactly one ledger entry and lands artifacts ato
     assert.equal(h.ledger.entries[0]!.actualSource, "manifest-derived", "no cost reported → derived (R-17)");
     assert.equal(h.ledger.entries[0]!.actualMicroUsd, INPUT.estimatedMicroUsd);
     assert.ok(h.ledger.entries[0]!.actualMicroUsd! > 0);
+    h.queue.dispose();
+  });
+});
+
+describe("ephemeral provider image references", () => {
+  it("resolves bytes before submit, never journals them, and lands synchronous output without polling", async () => {
+    const fake = new FakeProvider({});
+    fake.inlineArtifacts = [{ name: "image.png", contentType: "image/png", data: pngBytes() }];
+    const secret = Uint8Array.from([9, 8, 7, 6]);
+    let resolutions = 0;
+    const h = await makeHarness(
+      { fake },
+      {
+        readImageReferences: async (_worldId, paths) => {
+          resolutions += 1;
+          assert.deepEqual(paths, ["references/maren-kest/main.png"]);
+          return [{ name: "reference-01.png", contentType: "image/png", data: secret }];
+        },
+      },
+    );
+    await h.queue.start();
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      capability: "image",
+      target: { kind: "character-sheet", id: "maren-kest/refs" },
+      params: { prompt: "preserve identity", references: ["references/maren-kest/main.png"] },
+      landing: { dir: "references/maren-kest/incoming", name: "sheet.png" },
+    });
+    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    assert.equal(resolutions, 1);
+    assert.equal(fake.submitCount, 1);
+    assert.equal(fake.pollCount, 0, "synchronous image output lands directly");
+    assert.deepEqual(fake.submittedReferenceBytes, [secret]);
+    const journal = await readFile(h.journalPath, "utf8");
+    assert.ok(journal.includes("references/maren-kest/main.png"));
+    assert.ok(!journal.includes("data:image"));
+    assert.ok(!journal.includes(Buffer.from(secret).toString("base64")));
+    h.queue.dispose();
+  });
+
+  it("fails unsafe reference preparation before attempt or provider I/O", async () => {
+    const fake = new FakeProvider({});
+    const h = await makeHarness(
+      { fake },
+      { readImageReferences: async () => { throw new Error("image reference path is invalid"); } },
+    );
+    await h.queue.start();
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      capability: "image",
+      params: { references: ["../outside.png"] },
+    });
+    await until(() => foldedJob(h, job.id)?.status === "failed");
+    assert.equal(fake.submitCount, 0);
+    assert.equal(foldedJob(h, job.id)?.attempt, 0);
+    assert.match(foldedJob(h, job.id)?.error ?? "", /invalid/);
+    h.queue.dispose();
+  });
+
+  it("refuses incomplete reference preparation before attempt or provider I/O", async () => {
+    const fake = new FakeProvider({});
+    const h = await makeHarness({ fake }, { readImageReferences: async () => [] });
+    await h.queue.start();
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      capability: "image",
+      params: { references: ["references/maren-kest/main.png"] },
+    });
+    await until(() => foldedJob(h, job.id)?.status === "failed");
+    assert.equal(fake.submitCount, 0);
+    assert.equal(foldedJob(h, job.id)?.attempt, 0);
+    assert.match(foldedJob(h, job.id)?.error ?? "", /not every image reference/);
     h.queue.dispose();
   });
 });
@@ -525,6 +600,20 @@ describe("provider faults pause the queue (R-8, D6, D7)", () => {
 });
 
 describe("retry classification (R-7, R-9, D5)", () => {
+  it("a witnessed non-idempotent provider rejection fails without reconciliation", async () => {
+    const fake = new FakeProvider({});
+    fake.submitError = new Error("openai: image generation failed (HTTP 400)");
+    fake.submissionRejected = true;
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "failed");
+    assert.equal(fake.submitCount, 1);
+    assert.equal(foldedJob(h, job.id)?.attempt, 1);
+    assert.doesNotMatch(foldedJob(h, job.id)?.error ?? "", /outcome was not witnessed/);
+    h.queue.dispose();
+  });
+
   it("a content-policy rejection is not retried and the reason surfaces", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("HTTP 400 content policy violation: depicts a real person");

@@ -11,13 +11,23 @@ export interface SubmitRequest {
   capability: Capability;
   /** Coordinator-neutral parameters; each client must validate and map its provider boundary. */
   params: Record<string, unknown>;
+  /** Ephemeral verified bytes, resolved immediately before submission and never journalled. */
+  imageReferences?: PreparedImageReference[];
   /** Attached when the provider honours it (declared via supportsIdempotencyKey). */
   idempotencyKey?: string;
+}
+
+export interface PreparedImageReference {
+  name: string;
+  contentType: "image/png" | "image/jpeg" | "image/webp";
+  data: Uint8Array;
 }
 
 export interface SubmitResult {
   remoteId: string;
   acceptedAt: string;
+  /** Synchronous providers can return final artifacts without an in-memory poll cache. */
+  artifacts?: FetchedArtifact[];
 }
 
 export interface PollResult {
@@ -44,6 +54,16 @@ export class ProviderAuthError extends Error {
   ) {
     super(message);
     this.name = "ProviderAuthError";
+  }
+}
+
+/** The provider returned a response proving the paid operation was rejected, not accepted. */
+export class ProviderRequestRejectedError extends Error {
+  readonly submissionRejected = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ProviderRequestRejectedError";
   }
 }
 

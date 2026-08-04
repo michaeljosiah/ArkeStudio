@@ -105,6 +105,7 @@ describe("routing (R-2, D1, §3.2): local never touches the queue; cloud always 
         await fn(worldDir);
         return true;
       },
+      readImageReferences: async () => [],
       pollIntervalMs: 5,
       baseIntervalMs: 1,
     });

@@ -31,7 +31,7 @@ export function worldImagePrompt(meta: WorldMeta, direction?: ResolvedArtDirecti
 
 /** The job, shaped like every other image job so the queue treats it like every other one. */
 export function worldImageRequest(meta: WorldMeta, model: ManifestModel, direction?: ResolvedArtDirection) {
-  const estimatedMicroUsd = estimateMicroUsd(model, { images: 1, megapixels: 1 });
+  const estimatedMicroUsd = estimateMicroUsd(model, { images: 1, megapixels: 1, referenceImages: 0 });
   return {
     worldId: meta.worldId,
     target: { kind: "world-image", id: meta.worldId },

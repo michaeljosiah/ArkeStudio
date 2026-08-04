@@ -27,6 +27,8 @@ export const PricingSchema = z.discriminatedUnion("kind", [
       kind: z.literal("perImage"),
       microUsdPerImage: z.number().int().min(0),
       byResolution: z.record(z.string(), z.number().int().min(0)).optional(),
+      /** Conservative allowance for billed reference-image input tokens. */
+      microUsdPerReferenceImage: z.number().int().min(0).optional(),
     })
     .strict(),
   z.object({ kind: z.literal("perMegapixel"), microUsdPerMegapixel: z.number().int().min(0) }).strict(),
@@ -123,6 +125,8 @@ export interface EstimateInput {
   resolution?: string;
   /** Images: how many. Defaults to 1. */
   images?: number;
+  /** Reference images billed as model input. Defaults to 0. */
+  referenceImages?: number;
   /** Upscales: output megapixels. */
   megapixels?: number;
   /** TTS: characters of input text. */
@@ -149,7 +153,7 @@ export function estimateMicroUsd(model: ManifestModel, input: EstimateInput): nu
     }
     case "perImage": {
       const rate = (input.resolution !== undefined ? p.byResolution?.[input.resolution] : undefined) ?? p.microUsdPerImage;
-      return (input.images ?? 1) * rate;
+      return (input.images ?? 1) * rate + (input.referenceImages ?? 0) * (p.microUsdPerReferenceImage ?? 0);
     }
     case "perMegapixel":
       return Math.ceil((milli(input.megapixels ?? 0) * (input.images ?? 1) * p.microUsdPerMegapixel) / 1000);
@@ -218,10 +222,12 @@ export function estimateCharacterImageMicroUsd(
   model: ManifestModel,
   workflow: CharacterImageWorkflow,
   images = 1,
+  referenceImages = 0,
 ): number {
   const output = characterImageOutput(model, workflow);
   return estimateMicroUsd(model, {
     images,
+    referenceImages,
     megapixels: (output.width * output.height) / 1_000_000,
     resolution: output.resolution,
   });
@@ -236,7 +242,9 @@ export function characterImageEstimateIsUsable(model: ManifestModel, estimate: n
     pricing.kind === "perSecond"
       ? pricing.microUsdPerSecond > 0 || Object.values(pricing.byResolution ?? {}).some((rate) => rate > 0)
       : pricing.kind === "perImage"
-        ? pricing.microUsdPerImage > 0 || Object.values(pricing.byResolution ?? {}).some((rate) => rate > 0)
+        ? pricing.microUsdPerImage > 0 ||
+          (pricing.microUsdPerReferenceImage ?? 0) > 0 ||
+          Object.values(pricing.byResolution ?? {}).some((rate) => rate > 0)
         : pricing.kind === "perMegapixel"
           ? pricing.microUsdPerMegapixel > 0
           : pricing.kind === "perCharacter"
