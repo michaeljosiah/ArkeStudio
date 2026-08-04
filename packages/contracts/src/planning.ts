@@ -367,6 +367,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           })
         : estimateMicroUsd(model, {
             images: 1,
+            referenceImages: references.filter((reference) => reference.file !== null).length,
             ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
           });
     return {

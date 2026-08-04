@@ -32,12 +32,24 @@ export interface DispatchArtifact {
   data: Uint8Array;
 }
 
+export interface DispatchImageReference {
+  name: string;
+  contentType: "image/png" | "image/jpeg" | "image/webp";
+  data: Uint8Array;
+}
+
 export interface DispatchClient {
   readonly declarations: ClientDeclarations;
   submit(
     key: string,
-    request: { model: string; capability: Capability; params: Record<string, unknown>; idempotencyKey?: string },
-  ): Promise<{ remoteId: string }>;
+    request: {
+      model: string;
+      capability: Capability;
+      params: Record<string, unknown>;
+      imageReferences?: DispatchImageReference[];
+      idempotencyKey?: string;
+    },
+  ): Promise<{ remoteId: string; artifacts?: DispatchArtifact[] }>;
   poll(
     key: string,
     remoteId: string,
@@ -74,6 +86,8 @@ export interface JobQueueOptions {
    * unavailable; provider success stays running and retries locally without another submit.
    */
   landInWorld: (worldId: string, fn: (worldDir: string) => Promise<void>) => Promise<boolean>;
+  /** Resolve durable portable paths into ephemeral verified bytes before paid provider I/O. */
+  readImageReferences?: (worldId: string, paths: readonly string[]) => Promise<DispatchImageReference[]>;
   /** A provider fault surfaced once, in provider terms (SPEC-008 R-4). */
   onProviderFault?: (provider: string, message: string) => void;
   /** Fired after a job reaches terminal state and its ledger entry landed (SPEC-010 tile flows). */
@@ -347,6 +361,34 @@ export class JobQueue {
     }
     if (this.jobs.get(job.id)?.status !== "queued") return;
 
+    let imageReferences: DispatchImageReference[] | undefined;
+    const referencePaths = job.params["references"];
+    if (Array.isArray(referencePaths) && referencePaths.length > 0) {
+      if (!referencePaths.every((path): path is string => typeof path === "string")) {
+        await this.terminalize(job, "failed", "image reference paths are invalid");
+        return;
+      }
+      if (!this.opts.readImageReferences) {
+        await this.terminalize(job, "failed", "image reference transport is not configured");
+        return;
+      }
+      try {
+        imageReferences = await this.opts.readImageReferences(job.worldId, referencePaths);
+      } catch (error) {
+        await this.terminalize(
+          job,
+          "failed",
+          error instanceof Error ? error.message : "image references could not be prepared",
+        );
+        return;
+      }
+      if (imageReferences.length !== referencePaths.length || imageReferences.length > 16) {
+        await this.terminalize(job, "failed", "not every image reference could be prepared safely");
+        return;
+      }
+    }
+    if (this.jobs.get(job.id)?.status !== "queued") return;
+
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
     // journal can never undercount requests that may have reached a paid provider.
     const submitting: Job = { ...job, status: "submitting", attempt: job.attempt + 1, updatedAt: this.clock() };
@@ -360,12 +402,23 @@ export class JobQueue {
         model: job.model,
         capability: job.capability,
         params: job.params,
+        ...(imageReferences ? { imageReferences } : {}),
         ...(client.declarations.supportsIdempotencyKey ? { idempotencyKey: job.idempotencyKey } : {}),
       });
       if (this.disposed) return; // killed between accept and the record landing → reconciliation
       if (this.jobs.get(job.id)?.status === "cancelled") {
         // Cancelled while the submit was in flight: cancel remotely, never resurrect (§2.10).
         await client.cancel(key, accepted.remoteId).catch(() => {});
+        return;
+      }
+      if (accepted.artifacts) {
+        await this.landAndSucceed(
+          { ...submitting, providerJobId: accepted.remoteId },
+          client,
+          key,
+          undefined,
+          accepted.artifacts,
+        );
         return;
       }
       // ④ the uncertainty closes.
@@ -385,6 +438,10 @@ export class JobQueue {
     const klass: FailureClass = classifyError(err);
     if (isRateLimit(err)) this.noteRateLimit(job.provider);
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
+    if (typeof err === "object" && err !== null && "submissionRejected" in err) {
+      await this.terminalize(job, "failed", message);
+      return;
+    }
     if (!local && !client.declarations.supportsIdempotencyKey) {
       await this.holdForUser(job);
       if (klass === "provider-fault") this.pauseLane(job.provider, "fault", message);
@@ -471,12 +528,13 @@ export class JobQueue {
     client: DispatchClient,
     key: string,
     costMicroUsd: number | undefined,
+    suppliedArtifacts?: DispatchArtifact[],
   ): Promise<void> {
     let landed: string[] = [];
     if (job.landing) {
       let artifacts: DispatchArtifact[];
       try {
-        artifacts = await client.fetchArtifacts(key, job.providerJobId!);
+        artifacts = suppliedArtifacts ?? (await client.fetchArtifacts(key, job.providerJobId!));
       } catch (err) {
         if (this.disposed) return;
         // An interrupted download restarts the fetch (R-12); nothing partial exists yet.
@@ -485,7 +543,7 @@ export class JobQueue {
           await this.terminalize(job, "failed", `artifact fetch failed: ${err instanceof Error ? err.message : String(err)}`);
         } else {
           await this.sleep(this.pollIntervalMs);
-          if (!this.disposed) await this.landAndSucceed(job, client, key, costMicroUsd);
+          if (!this.disposed) await this.landAndSucceed(job, client, key, costMicroUsd, suppliedArtifacts);
         }
         return;
       }
@@ -539,7 +597,7 @@ export class JobQueue {
         };
         await this.transition(waiting);
         await this.sleep(this.pollIntervalMs);
-        if (!this.disposed) await this.landAndSucceed(waiting, client, key, costMicroUsd);
+        if (!this.disposed) await this.landAndSucceed(waiting, client, key, costMicroUsd, artifacts);
         return;
       }
     }

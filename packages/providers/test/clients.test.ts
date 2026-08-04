@@ -130,6 +130,81 @@ describe("openai image submission", () => {
     assert.equal(sent["model"], "gpt-image-2");
     assert.ok(!("references" in sent), "the field OpenAI has never heard of does not go");
   });
+
+  it("uses the edits endpoint with ordered binary references and no internal paths", async () => {
+    let url = "";
+    let form: FormData | null = null;
+    const client = new OpenAiClient(async (requestUrl, init) => {
+      url = requestUrl;
+      form = init?.body as FormData;
+      return new Response(
+        JSON.stringify({
+          output_format: "webp",
+          data: [{ b64_json: Buffer.from("webp-result").toString("base64") }],
+        }),
+        { status: 200 },
+      );
+    });
+    const result = await client.submit("k", {
+      model: "gpt-image-2",
+      capability: "image",
+      params: {
+        prompt: "preserve this identity",
+        references: ["references/a.png", "references/b.jpg"],
+        provenance: { canonRevision: 4 },
+        output: { width: 1024, height: 1536 },
+      },
+      imageReferences: [
+        { name: "reference-01.png", contentType: "image/png", data: Uint8Array.from([1, 2, 3]) },
+        { name: "reference-02.jpg", contentType: "image/jpeg", data: Uint8Array.from([4, 5]) },
+      ],
+    });
+    assert.match(url, /\/v1\/images\/edits$/);
+    assert.ok(form);
+    assert.equal(form.get("model"), "gpt-image-2");
+    assert.equal(form.get("quality"), "medium");
+    assert.equal(form.get("size"), "1024x1536");
+    assert.equal(form.get("input_fidelity"), null);
+    const images = form.getAll("image[]") as File[];
+    assert.deepEqual(images.map((image) => [image.name, image.type]), [
+      ["reference-01.png", "image/png"],
+      ["reference-02.jpg", "image/jpeg"],
+    ]);
+    assert.deepEqual([...new Uint8Array(await images[0]!.arrayBuffer())], [1, 2, 3]);
+    const formText = [...form.entries()].filter(([, value]) => typeof value === "string").map(([, value]) => value).join(" ");
+    assert.ok(!formText.includes("references/"));
+    assert.ok(!formText.includes("canonRevision"));
+    assert.equal(result.artifacts?.[0]?.name, "image-1.webp");
+    assert.equal(result.artifacts?.[0]?.contentType, "image/webp");
+  });
+
+  it("accepts sixteen references and rejects seventeen before fetch", async () => {
+    let fetches = 0;
+    const client = new OpenAiClient(async () => {
+      fetches += 1;
+      return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from("png").toString("base64") }] }), {
+        status: 200,
+      });
+    });
+    const reference = { name: "reference.png", contentType: "image/png" as const, data: Uint8Array.from([1]) };
+    await client.submit("k", {
+      model: "gpt-image-2",
+      capability: "image",
+      params: { prompt: "x" },
+      imageReferences: Array.from({ length: 16 }, (_, index) => ({ ...reference, name: `reference-${index}.png` })),
+    });
+    assert.equal(fetches, 1);
+    await assert.rejects(
+      client.submit("k", {
+        model: "gpt-image-2",
+        capability: "image",
+        params: { prompt: "x" },
+        imageReferences: Array.from({ length: 17 }, () => reference),
+      }),
+      /at most 16/,
+    );
+    assert.equal(fetches, 1);
+  });
 });
 
 describe("higgsfield image submission", () => {

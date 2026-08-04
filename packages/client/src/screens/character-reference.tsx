@@ -114,10 +114,15 @@ function routedImageModel(state: ReturnType<typeof useStore>["state"]): Manifest
     : null;
 }
 
-function modelSummary(model: ManifestModel | null, workflow: "main-photo" | "character-sheet" | "character-look", count = 1) {
+function modelSummary(
+  model: ManifestModel | null,
+  workflow: "main-photo" | "character-sheet" | "character-look",
+  count = 1,
+  referenceImages = 0,
+) {
   if (!model) return "Image model · cost unavailable";
   const fallback = model.accepts.referenceImages === 0 ? " · identity conditioning unavailable" : "";
-  return `${PROVIDERS[model.provider].displayName} · ${model.displayName} · ${modelCapabilityCopy(model)}${fallback} · ${formatMicroUsd(estimateCharacterImageMicroUsd(model, workflow, count))}`;
+  return `${PROVIDERS[model.provider].displayName} · ${model.displayName} · ${modelCapabilityCopy(model)}${fallback} · ${formatMicroUsd(estimateCharacterImageMicroUsd(model, workflow, count, referenceImages * count))}`;
 }
 
 function modelCanDispatch(
@@ -349,7 +354,7 @@ export function GenerateCharacterSheetScreen() {
         </div>
         <footer>
           <span>
-            {modelSummary(model, "character-sheet")}
+            {modelSummary(model, "character-sheet", 1, 1)}
           </span>
           <span>completes {sheet.name}'s reference set</span>
           <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}>
@@ -499,7 +504,7 @@ export function ReplaceMainPhotoScreen() {
           </div>
           <div className="fy-mainphoto-dialog__generate">
             <span>
-              {modelSummary(model, "main-photo", count)}
+              {modelSummary(model, "main-photo", count, refs.length)}
             </span>
             <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}>
               Cancel
@@ -650,7 +655,7 @@ export function CharacterLooksScreen() {
           <label>Describe the look</label>
           <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
           <div className="fy-looks-composer__foot">
-            <span>4 variations · {modelSummary(model, "character-look", 4)}</span>
+            <span>4 variations · {modelSummary(model, "character-look", 4, 1)}</span>
             <Button
               variant="primary"
               disabled={!prompt.trim() || !photo || !modelCanDispatch(model, "character-look", true)}

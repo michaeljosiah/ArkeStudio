@@ -13,8 +13,8 @@ import { FAL_MODELS } from "./fal-catalogue.generated.js";
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 10,
-  generated: "2026-08-02",
+  manifestVersion: 11,
+  generated: "2026-08-04",
   models: [
     // ---- fal: generated from the live catalogue ---------------------------
     ...FAL_MODELS.map((model) => ({
@@ -46,9 +46,12 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       provider: "openai",
       capability: "image",
       displayName: "GPT Image 2",
-      accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
+      accepts: { referenceImages: 16, referenceRoles: false, startFrame: false, endFrame: false },
       limits: { resolutions: ["1024", "2048"], aspects: ["1:1", "3:2", "2:3"] },
-      pricing: { kind: "perImage", microUsdPerImage: 40000 },
+      // Medium output is documented up to $0.053. The $0.10/reference allowance deliberately
+      // errs high because OpenAI bills mandatory high-fidelity input tokens but does not publish
+      // a GPT Image 2 input-token formula.
+      pricing: { kind: "perImage", microUsdPerImage: 53000, microUsdPerReferenceImage: 100000 },
     },
     // ---- llm (direct, non-authoring — authoring routes through the harness) -
     {

@@ -34,7 +34,7 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     const refused = requireModel(SHIPPED_MANIFEST, "sora-9000");
     assert.equal(refused.ok, false);
     assert.ok(!refused.ok && /not in the model manifest/.test(refused.reason));
-    assert.ok(!refused.ok && refused.reason.includes("v10"));
+    assert.ok(!refused.ok && refused.reason.includes("v11"));
     assert.equal(requireModel(SHIPPED_MANIFEST, "seedance-2.0").ok, true);
   });
 
@@ -59,16 +59,13 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     assert.equal(modelCapabilityCopy(model("halcyon-1.5")), "no refs · frames · 12s");
   });
 
-  it("declares role support and does not advertise references OpenAI drops", () => {
+  it("declares implemented GPT Image 2 reference support without invented role slots", () => {
     for (const imageModel of SHIPPED_MANIFEST.models.filter((candidate) => candidate.capability === "image")) {
       assert.equal(typeof imageModel.accepts.referenceRoles, "boolean", `${imageModel.id} declares role support`);
     }
-    assert.equal(model("gpt-image-2").accepts.referenceImages, 0);
+    assert.equal(model("gpt-image-2").accepts.referenceImages, 16);
     assert.equal(model("gpt-image-2").accepts.referenceRoles, false);
-    assert.ok(
-      SHIPPED_MANIFEST.models.every((candidate) => candidate.accepts.referenceImages === 0),
-      "no model advertises references until its client implements provider-ready transport",
-    );
+    assert.equal(modelCapabilityCopy(model("gpt-image-2")), "refs ×16");
   });
 
   it("pass packing computes from the duration cap (§2.5)", () => {
@@ -102,6 +99,15 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
     assert.equal(estimateMicroUsd(banana, {}), each);
     assert.equal(estimateMicroUsd(banana, { images: 4 }), each * 4);
     assert.equal(estimateMicroUsd(model("soul-2.0"), { images: 2, resolution: "4k" }), 240000);
+  });
+
+  it("prices GPT Image 2 reference input conservatively", () => {
+    const image = model("gpt-image-2");
+    assert.equal(image.pricing.kind, "perImage");
+    if (image.pricing.kind !== "perImage") return;
+    assert.equal(estimateMicroUsd(image, { images: 1 }), 53000);
+    assert.equal(estimateMicroUsd(image, { images: 1, referenceImages: 1 }), 153000);
+    assert.equal(estimateMicroUsd(image, { images: 4, referenceImages: 4 }), 612000);
   });
 
   it("per megapixel rounds up, once", () => {

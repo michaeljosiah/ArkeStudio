@@ -77,7 +77,7 @@ export function tileRequest(
       references.push(`references/${sheet.id}/${tile.file}`);
     }
   }
-  const estimated = pricedCharacterImage(model, "reference-tile");
+  const estimated = pricedCharacterImage(model, "reference-tile", references.length);
   return {
     angle,
     estimatedMicroUsd: estimated,
@@ -153,8 +153,9 @@ export interface CharacterGenerationRequest {
 function pricedCharacterImage(
   model: ManifestModel,
   workflow: "main-photo" | "character-sheet" | "character-look" | "reference-tile",
+  referenceImages = 0,
 ): number {
-  const estimate = estimateCharacterImageMicroUsd(model, workflow);
+  const estimate = estimateCharacterImageMicroUsd(model, workflow, 1, referenceImages);
   if (!characterImageEstimateIsUsable(model, estimate)) {
     throw new Error(`${model.displayName} could not be priced for the selected output size`);
   }
@@ -187,8 +188,8 @@ export function mainPhotoRequests(
     throw new Error(`${model.displayName} cannot receive identity reference images`);
   }
   const style = kit?.styleOverride ?? direction.description;
-  const estimatedMicroUsd = pricedCharacterImage(model, "main-photo");
   const identityReferences = input.identityReferences.slice(0, model.accepts.referenceImages);
+  const estimatedMicroUsd = pricedCharacterImage(model, "main-photo", identityReferences.length);
   return Array.from({ length: input.count }, (_, index) => ({
     estimatedMicroUsd,
     input: {
@@ -233,8 +234,8 @@ export function characterSheetRequest(
   const photo = kit.mainPhoto?.file ?? kit.anchor;
   if (!photo) throw new Error("character sheet generation needs an accepted main photo");
   const style = styleOverride ?? kit.styleOverride ?? direction.description;
-  const estimatedMicroUsd = pricedCharacterImage(model, "character-sheet");
   const identityReferences = model.accepts.referenceImages > 0 ? [`references/${sheet.id}/${photo}`] : [];
+  const estimatedMicroUsd = pricedCharacterImage(model, "character-sheet", identityReferences.length);
   return {
     estimatedMicroUsd,
     input: {
@@ -285,8 +286,8 @@ export function characterLookRequests(
   const photo = kit.mainPhoto?.file ?? kit.anchor;
   if (!photo) throw new Error("looks need an accepted main photo");
   const style = kit.styleOverride ?? direction.description;
-  const estimatedMicroUsd = pricedCharacterImage(model, "character-look");
   const identityReferences = model.accepts.referenceImages > 0 ? [`references/${sheet.id}/${photo}`] : [];
+  const estimatedMicroUsd = pricedCharacterImage(model, "character-look", identityReferences.length);
   return Array.from({ length: input.count }, (_, index) => ({
     estimatedMicroUsd,
     input: {

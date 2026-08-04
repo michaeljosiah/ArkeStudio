@@ -1,10 +1,19 @@
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
 import { jsonRequest, tryProbe } from "./http.js";
-import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
+import {
+  ProviderAuthError,
+  ProviderRequestRejectedError,
+  type FetchedArtifact,
+  type FetchLike,
+  type PollResult,
+  type ProviderClient,
+  type SubmitRequest,
+  type SubmitResult,
+} from "../types.js";
 
 /**
- * OpenAI — direct provider for llm and image. Both APIs answer synchronously, so submit runs
- * the request and caches the result; poll/fetch read the cache. Declarations (T-9): no
+ * OpenAI — direct provider for llm and image. Both APIs answer synchronously. Image artifacts
+ * return directly from submit; LLM completions retain the small in-memory poll seam. Declarations: no
  * idempotency keys on completions or images, no job listing; token usage comes back but never
  * a dollar figure → actuals are manifest-derived (R-17).
  */
@@ -68,42 +77,84 @@ export class OpenAiClient implements ProviderClient {
     const remoteId = `openai-${++this.counter}-${Date.now()}`;
     if (request.capability === "image") {
       const output = request.params["output"] as { width?: unknown; height?: unknown } | undefined;
-      // Only what this endpoint accepts. Our job params are provider-neutral and carry things
-      // OpenAI has never heard of — `references` is a FAL concept — and it answers an unknown
-      // field with a flat 400, which reads to the user as "the image failed" rather than "we
-      // sent a word it does not know". Reference conditioning is not wired for OpenAI at all;
-      // dropping the field is honest about that, where sending it just breaks the request.
-      const accepted = new Set([
-        "prompt",
-        "n",
-        "size",
-        "quality",
-        "style",
-        "background",
-        "output_format",
-        "response_format",
-        "moderation",
-      ]);
-      const params = Object.fromEntries(Object.entries(request.params).filter(([k]) => accepted.has(k)));
-      if (typeof output?.width === "number" && typeof output.height === "number") {
-        params["size"] = `${output.width}x${output.height}`;
+      const prompt = request.params["prompt"];
+      if (typeof prompt !== "string" || prompt.trim().length === 0) throw new Error("openai: image prompt is required");
+      const size =
+        typeof output?.width === "number" && typeof output.height === "number"
+          ? `${output.width}x${output.height}`
+          : undefined;
+      const references = request.imageReferences ?? [];
+      const durableReferences = request.params["references"];
+      if (
+        Array.isArray(durableReferences) &&
+        durableReferences.length > 0 &&
+        durableReferences.length !== references.length
+      ) {
+        throw new Error("openai: not every image reference was prepared");
       }
-      const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/images/generations`, {
-        method: "POST",
-        headers: this.headers(key),
-        body: JSON.stringify({ model: request.model, ...params }),
-      });
-      if (status >= 400) throw new Error(`openai: image generation failed (HTTP ${status})`);
-      const images = (body as { data?: Array<{ b64_json?: string }> } | null)?.data ?? [];
-      const artifacts: FetchedArtifact[] = images
-        .filter((img) => typeof img.b64_json === "string")
-        .map((img, i) => ({
-          name: `image-${i + 1}.png`,
-          contentType: "image/png",
+      if (references.length > 16) throw new Error("openai: gpt-image-2 accepts at most 16 reference images");
+      let status: number;
+      let body: unknown;
+      if (references.length > 0) {
+        const form = new FormData();
+        form.append("model", request.model);
+        form.append("prompt", prompt);
+        form.append("n", "1");
+        form.append("quality", "medium");
+        form.append("output_format", "png");
+        form.append("background", "opaque");
+        form.append("moderation", "auto");
+        if (size) form.append("size", size);
+        for (const reference of references) {
+          form.append("image[]", new Blob([reference.data], { type: reference.contentType }), reference.name);
+        }
+        const response = await this.fetchImpl(`${this.baseUrl}/v1/images/edits`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${key}` },
+          body: form,
+        });
+        status = response.status;
+        if (status === 401 || status === 403) {
+          throw new ProviderAuthError("openai", `openai: the credential was rejected (HTTP ${status})`);
+        }
+        const text = await response.text();
+        try {
+          body = text ? JSON.parse(text) : null;
+        } catch {
+          body = text;
+        }
+      } else {
+        const response = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/images/generations`, {
+          method: "POST",
+          headers: this.headers(key),
+          body: JSON.stringify({
+            model: request.model,
+            prompt,
+            n: 1,
+            quality: "medium",
+            output_format: "png",
+            background: "opaque",
+            moderation: "auto",
+            ...(size ? { size } : {}),
+          }),
+        });
+        status = response.status;
+        body = response.body;
+      }
+      if (status >= 400) throw new ProviderRequestRejectedError(`openai: image generation failed (HTTP ${status})`);
+      const response = body as { data?: Array<{ b64_json?: string }>; output_format?: string } | null;
+      const images = response?.data ?? [];
+      if (images.length === 0 || images.some((image) => typeof image.b64_json !== "string")) {
+        throw new Error("openai: image response contained no usable image data");
+      }
+      const format = response?.output_format === "jpeg" ? "jpeg" : response?.output_format === "webp" ? "webp" : "png";
+      const extension = format === "jpeg" ? "jpg" : format;
+      const artifacts: FetchedArtifact[] = images.map((img, i) => ({
+          name: `image-${i + 1}.${extension}`,
+          contentType: `image/${format}`,
           data: Uint8Array.from(Buffer.from(img.b64_json!, "base64")),
         }));
-      this.completed.set(remoteId, { artifacts });
-      return { remoteId, acceptedAt: new Date().toISOString() };
+      return { remoteId, acceptedAt: new Date().toISOString(), artifacts };
     }
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/chat/completions`, {
       method: "POST",

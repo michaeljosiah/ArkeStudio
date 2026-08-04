@@ -52,6 +52,8 @@ export class FakeProvider implements DispatchClient {
   inFlightNow = 0;
   maxObservedConcurrent = 0;
   readonly submittedKeys: Array<string | undefined> = [];
+  submittedReferenceBytes: Uint8Array[] = [];
+  inlineArtifacts: DispatchArtifact[] | null = null;
 
   /** Scripting hooks. */
   submitError: Error | null = null;
@@ -67,6 +69,7 @@ export class FakeProvider implements DispatchClient {
   listingCarriesKeys = true;
   listingWindowFloor: string | null = null;
   lookupError: Error | null = null;
+  submissionRejected = false;
 
   private counter = 0;
 
@@ -82,10 +85,16 @@ export class FakeProvider implements DispatchClient {
 
   async submit(
     _key: string,
-    request: { model: string; params: Record<string, unknown>; idempotencyKey?: string },
-  ): Promise<{ remoteId: string }> {
+    request: {
+      model: string;
+      params: Record<string, unknown>;
+      imageReferences?: Array<{ data: Uint8Array }>;
+      idempotencyKey?: string;
+    },
+  ): Promise<{ remoteId: string; artifacts?: DispatchArtifact[] }> {
     this.submitCount += 1;
     this.submittedKeys.push(request.idempotencyKey);
+    this.submittedReferenceBytes = (request.imageReferences ?? []).map((reference) => reference.data);
     this.inFlightNow += 1;
     this.maxObservedConcurrent = Math.max(this.maxObservedConcurrent, this.inFlightNow);
     try {
@@ -93,6 +102,9 @@ export class FakeProvider implements DispatchClient {
       if (this.submitHangs) await new Promise<never>(() => {});
       if (this.submitError && this.submitErrorTimes > 0) {
         this.submitErrorTimes -= 1;
+        if (this.submissionRejected) {
+          Object.assign(this.submitError, { submissionRejected: true });
+        }
         throw this.submitError;
       }
       const remoteId = `rm_${++this.counter}`;
@@ -104,7 +116,7 @@ export class FakeProvider implements DispatchClient {
         ...(this.costMicroUsd !== undefined ? { costMicroUsd: this.costMicroUsd } : {}),
       });
       this.onSubmitAccepted?.(remoteId);
-      return { remoteId };
+      return { remoteId, ...(this.inlineArtifacts ? { artifacts: this.inlineArtifacts } : {}) };
     } finally {
       this.inFlightNow -= 1;
     }
