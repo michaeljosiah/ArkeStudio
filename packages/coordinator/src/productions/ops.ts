@@ -360,7 +360,11 @@ export function composeDispatches(
   if (!plan.pack.ok) return [];
   return plan.pack.passes.map((pass) => {
     const shotsInPass = pass.plan.map((p) => plan.shots.find((s) => s.shot.id === p.shotId)!);
-    const references = [...new Set(shotsInPass.flatMap((s) => s.references.filter((r) => r.file !== null).map((r) => r.file!)))];
+    const passReferencePlan = plan.passReferences.find((candidate) => candidate.passIndex === pass.index)!;
+    const references = passReferencePlan.references.filter((reference) => reference.file !== null).map((reference) => reference.file!);
+    if (references.length > model.accepts.referenceImages) {
+      throw new Error(`scene pass ${pass.index} exceeds ${model.displayName}'s reference limit`);
+    }
     return {
       worldId,
       productionId,
@@ -376,7 +380,7 @@ export function composeDispatches(
         durationSec: pass.durationSec,
         // The explicit plan (R-19, D11): SPEC-013 segments from these, never guesses.
         shotPlan: pass.plan,
-        provenance: provenanceFor(shotsInPass.flatMap((s) => s.budget.carried.map((c) => c.sheetId))),
+        provenance: provenanceFor(passReferencePlan.budget.carried.map((candidate) => candidate.sheetId)),
       },
       estimatedMicroUsd: estimateMicroUsd(model, { durationSec: pass.durationSec }),
       landing: { dir: `productions/${productionId}/incoming/${scene.id}-pass-${pass.index}` },
