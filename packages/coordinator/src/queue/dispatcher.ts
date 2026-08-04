@@ -132,6 +132,7 @@ const REFERENCE_FINALIZATION_TARGETS = new Set([
   "character-sheet",
   "character-look",
 ]);
+const REPLAYABLE_FINALIZATION_TARGETS = new Set([...REFERENCE_FINALIZATION_TARGETS, "voice-preview"]);
 const FOLLOW_ON_TARGETS = new Set([
   ...REFERENCE_FINALIZATION_TARGETS,
   "reference-tile",
@@ -738,7 +739,7 @@ export class JobQueue {
         if (
           job.status === "succeeded" &&
           (await this.opts.ledger.has(job.id)) &&
-          this.needsReferenceFinalization(job) &&
+          this.needsReplayableFinalization(job) &&
           job.finalization?.status !== "complete"
         ) {
           await this.retryFinalization(job.id);
@@ -876,6 +877,10 @@ export class JobQueue {
     return REFERENCE_FINALIZATION_TARGETS.has(job.target.kind) && job.landedFiles?.[0] !== undefined;
   }
 
+  private needsReplayableFinalization(job: Job): boolean {
+    return REPLAYABLE_FINALIZATION_TARGETS.has(job.target.kind) && job.landedFiles?.[0] !== undefined;
+  }
+
   private async completeFinalization(job: Job): Promise<void> {
     const completed: Job = {
       ...job,
@@ -908,7 +913,7 @@ export class JobQueue {
     this.finalizing.add(jobId);
     try {
       const job = this.jobs.get(jobId);
-      if (!job || job.status !== "succeeded" || !this.needsReferenceFinalization(job)) return;
+      if (!job || job.status !== "succeeded" || !this.needsReplayableFinalization(job)) return;
       const pending: Job = {
         ...job,
         finalization: { status: "pending", error: null, updatedAt: this.clock() },
@@ -931,7 +936,7 @@ export class JobQueue {
       (job) =>
         job.worldId === worldId &&
         job.status === "succeeded" &&
-        this.needsReferenceFinalization(job) &&
+        this.needsReplayableFinalization(job) &&
         job.finalization?.status !== "complete",
     );
     for (const job of jobs) await this.retryFinalization(job.id);

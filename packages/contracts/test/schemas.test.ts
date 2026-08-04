@@ -589,6 +589,21 @@ describe("domain events and frames", () => {
       assert.throws(() => ClientMessageSchema.parse(message), `${message.kind} requires request correlation`);
       assert.doesNotThrow(() => ClientMessageSchema.parse({ ...message, requestId: WORLD_ID }));
     }
+    assert.doesNotThrow(() => ClientMessageSchema.parse({
+      kind: "read-sheet-section",
+      requestId: WORLD_ID,
+      worldId: WORLD_ID,
+      sheetId: "maren-kest",
+      sectionHeading: "Essence",
+    }));
+    assert.throws(() => ClientMessageSchema.parse({
+      kind: "read-sheet-section",
+      requestId: WORLD_ID,
+      worldId: WORLD_ID,
+      sheetId: "maren-kest",
+      sectionHeading: "Appearance",
+      text: "renderer prose must not travel",
+    }));
     assert.doesNotThrow(() =>
       ClientMessageSchema.parse({
         kind: "accept-character-sheet",

@@ -50,10 +50,53 @@ export interface VoiceServiceDeps {
 }
 
 const PREVIEW_CACHE_DIR = ".cache/voice-previews";
+const SPEECH_SETTINGS_VERSION = 1;
+
+export function normalizeSpeechText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+export function authoritativeSheetSpeech(sheet: Sheet, heading: string): {
+  text: string;
+  provider: "kokoro" | "elevenlabs";
+  voiceId: string;
+} {
+  if (sheet.type !== "character") throw new Error("Only character sections can be read aloud.");
+  if (heading !== "Essence") throw new Error("This section is not available for read aloud.");
+  const text = normalizeSpeechText(sheet.sections.find((section) => section.heading === heading)?.body ?? "");
+  if (!text) throw new Error("Nothing to read yet.");
+  if (!sheet.voice || (sheet.voice.provider !== "kokoro" && sheet.voice.provider !== "elevenlabs")) {
+    throw new Error("Choose a supported voice again before reading aloud.");
+  }
+  return { text, provider: sheet.voice.provider, voiceId: sheet.voice.voiceId };
+}
+
+export interface SpeechSpec {
+  provider: "kokoro" | "elevenlabs";
+  model: string;
+  voiceId: string;
+  text: string;
+  format: "wav" | "mp3";
+  language?: string;
+  params?: Record<string, number>;
+}
+
+export function speechCacheFile(spec: SpeechSpec): string {
+  const key = createHash("sha256")
+    .update(JSON.stringify({ ...spec, text: normalizeSpeechText(spec.text), settingsVersion: SPEECH_SETTINGS_VERSION }))
+    .digest("hex")
+    .slice(0, 24);
+  return `${PREVIEW_CACHE_DIR}/${key}.${spec.format}`;
+}
 
 export function previewCacheFile(provider: string, voiceId: string, line: string, ext: string): string {
-  const key = createHash("sha256").update(`${provider}\n${voiceId}\n${line}`).digest("hex").slice(0, 24);
-  return `${PREVIEW_CACHE_DIR}/${key}.${ext}`;
+  return speechCacheFile({
+    provider: provider === "kokoro" ? "kokoro" : "elevenlabs",
+    model: provider === "kokoro" ? "kokoro-82m" : "eleven-v3",
+    voiceId,
+    text: line,
+    format: ext === "wav" ? "wav" : "mp3",
+  });
 }
 
 export class VoiceService {
@@ -112,21 +155,35 @@ export class VoiceService {
    * A local preview (R-2): sidecar synthesis into the world's preview cache — no queue, no
    * ledger. Returns the cache path; a hit never re-synthesises (R-10).
    */
-  async localPreview(store: WorldStore, sheet: Sheet, voiceId: string, line: PreviewLine): Promise<string> {
-    const rel = previewCacheFile("kokoro", voiceId, line.text, "wav");
+  async localSpeech(
+    store: WorldStore,
+    voiceId: string,
+    text: string,
+  ): Promise<{ file: string; cached: boolean }> {
+    const normalized = normalizeSpeechText(text);
+    if (normalized.length === 0) throw new Error("Nothing to read yet.");
+    if (normalized.length > 10_000) throw new Error("This text is too long to read aloud in one request.");
+    const rel = speechCacheFile({ provider: "kokoro", model: "kokoro-82m", voiceId, text: normalized, format: "wav" });
     const abs = join(store.dir, rel);
     try {
-      await readFile(toExtendedLength(abs));
-      return rel; // cached: replays without a provider call — or any call at all
+      const bytes = await readFile(toExtendedLength(abs));
+      if (bytes.length >= 12 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WAVE") {
+        return { file: rel, cached: true };
+      }
     } catch {
       /* miss → synthesise */
     }
     if (!this.deps.sidecar) throw new Error("Voxa is not running — local voice is off; cloud voice still works");
-    const audio = await this.deps.sidecar.synthesize({ voiceId, text: line.text });
+    const audio = await this.deps.sidecar.synthesize({ voiceId, text: normalized });
+    if (audio.length < 12 || Buffer.from(audio).toString("ascii", 0, 4) !== "RIFF") throw new Error("Voxa returned invalid audio.");
     await store.gateOp(async () => {
       await atomicWriteFile(abs, audio);
     });
-    return rel;
+    return { file: rel, cached: false };
+  }
+
+  async localPreview(store: WorldStore, _sheet: Sheet, voiceId: string, line: PreviewLine): Promise<string> {
+    return (await this.localSpeech(store, voiceId, line.text)).file;
   }
 
   /** The cloud-preview dispatch (R-2): through the queue, idempotency-protected, ledgered. */
@@ -138,7 +195,8 @@ export class VoiceService {
     line: PreviewLine,
     model: ManifestModel,
   ): { input: EnqueueInput; cacheFile: string } {
-    const cacheFile = previewCacheFile(provider, voiceId, line.text, "mp3");
+    const normalized = normalizeSpeechText(line.text);
+    const cacheFile = speechCacheFile({ provider: "elevenlabs", voiceId, text: normalized, model: model.id, format: "mp3" });
     const name = cacheFile.slice(PREVIEW_CACHE_DIR.length + 1);
     return {
       cacheFile,
@@ -148,8 +206,8 @@ export class VoiceService {
         capability: "voice-tts",
         provider,
         model: model.id,
-        params: { voiceId, text: line.text },
-        estimatedMicroUsd: estimateMicroUsd(model, { characters: line.text.length }),
+        params: { voiceId, text: normalized },
+        estimatedMicroUsd: estimateMicroUsd(model, { characters: normalized.length }),
         // Landed under its cache key, so reopening the picker replays without a call (R-10).
         landing: { dir: PREVIEW_CACHE_DIR, name },
       },

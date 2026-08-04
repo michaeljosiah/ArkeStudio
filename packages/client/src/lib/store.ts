@@ -115,6 +115,7 @@ interface StoreState {
   voiceCandidates: Record<string, VoiceCandidatesState>;
   /** SPEC-011: audition results keyed provider/voiceId — cached files replay free. */
   voicePreviews: Record<string, { file: string | null; error: string | null }>;
+  voiceAudio: Record<string, Extract<DomainEvent, { type: "voice.audio" }>>;
   /** SPEC-011: dictation results by requestId — inserted as editable text, never submitted. */
   dictation: Record<string, { text: string | null; error: string | null }>;
   voiceSidecar: { state: "not-started" | "downloading" | "unavailable" | "ready"; detail: string } | null;
@@ -176,6 +177,7 @@ let current: StoreState = {
   reconcileReport: null,
   voiceCandidates: {},
   voicePreviews: {},
+  voiceAudio: {},
   dictation: {},
   voiceSidecar: null,
   mainPhotoAcceptance: {},
@@ -307,7 +309,44 @@ function handleFrame(json: string): void {
       Object.entries(current.gateNotices).filter(([id]) => openIds.has(id)),
     );
     const changedWorld = current.state?.world?.meta.worldId !== frame.state.world?.meta.worldId;
-    emitChange({ ...current, state: frame.state, gateNotices, sheetRefs: changedWorld ? {} : current.sheetRefs });
+    const durableVoiceAudio: StoreState["voiceAudio"] = {};
+    for (const job of frame.state.app.jobs) {
+      if (job.target.kind !== "voice-preview" || typeof job.params["requestId"] !== "string") continue;
+          const requestId = job.params["requestId"] as string;
+          if (job.status !== "succeeded" || !job.landedFiles?.[0]) {
+            if (job.status !== "failed" && job.status !== "cancelled" && job.status !== "needs-reconciliation") continue;
+            durableVoiceAudio[requestId] = {
+              at: job.updatedAt, type: "voice.audio" as const, requestId, worldId: job.worldId,
+              sheetId: String(job.params["sheetId"]), sheetVersion: Number(job.params["sheetVersion"]),
+              purpose: job.params["purpose"] === "sheet-section" ? "sheet-section" as const : "candidate-preview" as const,
+              ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
+              provider: "elevenlabs" as const, model: job.model, voiceId: String(job.params["voiceId"]),
+              status: "failed" as const, file: null, cached: false,
+              characterCount: Number(job.params["characterCount"] ?? 0), estimatedMicroUsd: job.estimatedMicroUsd,
+              error: "Voice synthesis needs attention in Activity.",
+            };
+            continue;
+          }
+          durableVoiceAudio[requestId] = {
+            at: job.updatedAt, type: "voice.audio" as const, requestId,
+            worldId: job.worldId, sheetId: String(job.params["sheetId"]),
+            sheetVersion: Number(job.params["sheetVersion"]),
+            purpose: job.params["purpose"] === "sheet-section" ? "sheet-section" as const : "candidate-preview" as const,
+            ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
+            provider: "elevenlabs" as const, model: job.model, voiceId: String(job.params["voiceId"]),
+            status: "ready" as const, file: job.landedFiles[0], cached: true,
+            characterCount: Number(job.params["characterCount"] ?? 0), estimatedMicroUsd: job.estimatedMicroUsd,
+          };
+    }
+    emitChange({
+      ...current,
+      state: frame.state,
+      gateNotices,
+      sheetRefs: changedWorld ? {} : current.sheetRefs,
+      voiceCandidates: changedWorld ? {} : current.voiceCandidates,
+      voicePreviews: changedWorld ? {} : current.voicePreviews,
+      voiceAudio: { ...(changedWorld ? {} : current.voiceAudio), ...durableVoiceAudio },
+    });
   } else if (current.state) {
     let gateNotices = current.gateNotices;
     let authoring = current.authoring;
@@ -454,6 +493,7 @@ function handleFrame(json: string): void {
     }
     let voiceCandidates = current.voiceCandidates;
     let voicePreviews = current.voicePreviews;
+    let voiceAudio = current.voiceAudio;
     let dictation = current.dictation;
     let voiceSidecar = current.voiceSidecar;
     let mainPhotoAcceptance = current.mainPhotoAcceptance;
@@ -472,6 +512,8 @@ function handleFrame(json: string): void {
         ...voicePreviews,
         [`${event.provider}/${event.voiceId}`]: { file: event.file, error: event.error },
       };
+    } else if (event.type === "voice.audio") {
+      voiceAudio = { ...voiceAudio, [event.requestId]: event };
     } else if (event.type === "dictation.result") {
       dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
     } else if (event.type === "voice.sidecar") {
@@ -586,6 +628,7 @@ function handleFrame(json: string): void {
       reconcileReport,
       voiceCandidates,
       voicePreviews,
+      voiceAudio,
       dictation,
       voiceSidecar,
       mainPhotoAcceptance,
@@ -1019,7 +1062,7 @@ export function renameSheet(worldId: string, path: string, name: string): void {
 export function assignVoice(
   worldId: string,
   path: string,
-  voice: { provider: string; voiceId: string; label?: string } | null,
+  voice: { provider: "kokoro" | "elevenlabs"; voiceId: string; label?: string } | null,
 ): void {
   send({ kind: "assign-voice", worldId, path, voice });
 }
@@ -1256,18 +1299,32 @@ export function requestVoiceCandidates(worldId: string, sheetId: string): void {
 export function requestVoicePreview(
   worldId: string,
   sheetId: string,
-  provider: string,
+  provider: "kokoro" | "elevenlabs",
   voiceId: string,
-): void {
+): string {
+  const requestId = queueRequest("voice-preview");
   send({
     kind: "voice-preview",
     worldId,
     sheetId,
     provider,
     voiceId,
-    requestId: queueRequest("voice-preview"),
+    requestId,
   });
+  return requestId;
 }
+
+export function readSheetSection(
+  worldId: string,
+  sheetId: string,
+  sectionHeading: "Essence",
+  requestId = queueRequest("read-sheet-section"),
+  confirmationToken?: string,
+): string {
+  send({ kind: "read-sheet-section", worldId, sheetId, sectionHeading, requestId, ...(confirmationToken ? { confirmationToken } : {}) });
+  return requestId;
+}
+
 
 export function transcribeDictation(requestId: string, audioBase64: string, contentType: string): void {
   send({ kind: "transcribe-dictation", requestId, audioBase64, contentType });
@@ -1279,6 +1336,10 @@ export function useVoiceCandidates(): Record<string, VoiceCandidatesState> {
 
 export function useVoicePreviews(): Record<string, { file: string | null; error: string | null }> {
   return useStore().voicePreviews;
+}
+
+export function useVoiceAudio(): Record<string, Extract<DomainEvent, { type: "voice.audio" }>> {
+  return useStore().voiceAudio;
 }
 
 export function useDictation(): Record<string, { text: string | null; error: string | null }> {
@@ -1590,6 +1651,7 @@ export function __setStateForTest(state: ClientState): void {
     reconcileReport: null,
     voiceCandidates: {},
     voicePreviews: {},
+    voiceAudio: {},
     dictation: {},
     voiceSidecar: null,
     mainPhotoAcceptance: {},
