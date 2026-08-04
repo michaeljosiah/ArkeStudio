@@ -7,6 +7,7 @@ import {
   formatMicroUsd,
   headGate,
   mainPhotoFor,
+  modelForCapability,
   PROVIDERS,
   tileIsStale,
   type CanonEntry,
@@ -232,11 +233,10 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
   const world = state?.world;
   const [dismissed, setDismissed] = useState<readonly string[]>([]);
   const configured = new Set((state?.app.providers ?? []).filter((p) => p.configured).map((p) => p.id));
-  const routed = state?.app.routing.defaults["image"];
-  const model =
-    state?.app.manifest?.models.find((m) => m.id === routed && m.capability === "image") ??
-    state?.app.manifest?.models.find((m) => m.capability === "image");
-  const usable = model !== undefined && (configured.has(model.provider) || PROVIDERS[model.provider].local === true);
+  const model = state?.app.manifest
+    ? modelForCapability(state.app.manifest, state.app.routing.defaults, "image")
+    : null;
+  const usable = model !== null && (configured.has(model.provider) || PROVIDERS[model.provider].local === true);
 
   const mine = (state?.app.jobs ?? []).filter((j) => j.worldId === worldId && j.target.kind === "world-image");
   const running = mine.find((j) => j.status !== "succeeded" && j.status !== "failed" && j.status !== "cancelled");

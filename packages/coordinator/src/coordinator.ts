@@ -2266,13 +2266,18 @@ export class Coordinator {
         }
         const kit = (await readKit(store, msg.sheetId))?.kit ?? null;
         const bundle = store.getBundle();
-        await this.enqueueBatch(
-          msg.requestId,
-          msg.kind,
-          establishRequests(bundle.meta, sheet, kit, model, msg.count, bundle.artDirection).map(
-            (request) => request.input,
-          ),
-        );
+        let requests;
+        try {
+          requests = establishRequests(bundle.meta, sheet, kit, model, msg.count, bundle.artDirection);
+        } catch {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "This image model could not be priced for the selected output size. Nothing was queued.",
+          );
+          return;
+        }
+        await this.enqueueBatch(msg.requestId, msg.kind, requests.map((request) => request.input));
         return;
       }
       case "choose-anchor": {
@@ -2407,12 +2412,22 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "The character or image model is no longer available.");
           return;
         }
-        const requests = mainPhotoRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
-          prompt: msg.prompt,
-          count: msg.count,
-          identityReferences: msg.identityReferences,
-          generationKey: Date.now().toString(36),
-        });
+        let requests;
+        try {
+          requests = mainPhotoRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
+            prompt: msg.prompt,
+            count: msg.count,
+            identityReferences: msg.identityReferences,
+            generationKey: Date.now().toString(36),
+          });
+        } catch {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "This image model could not be priced for the selected output size. Nothing was queued.",
+          );
+          return;
+        }
         await this.enqueueBatch(
           msg.requestId,
           msg.kind,
@@ -2448,11 +2463,13 @@ export class Coordinator {
             Date.now().toString(36),
             msg.styleOverride,
           );
-        } catch {
+        } catch (error) {
           this.rejectEnqueue(
             msg.requestId,
             msg.kind,
-            "An accepted main photo is required before generating a character sheet.",
+            error instanceof Error && error.message.includes("could not be priced")
+              ? "This image model could not be priced for the selected output size. Nothing was queued."
+              : "An accepted main photo is required before generating a character sheet.",
           );
           return;
         }
@@ -2521,11 +2538,13 @@ export class Coordinator {
             count: msg.count,
             generationKey: Date.now().toString(36),
           });
-        } catch {
+        } catch (error) {
           this.rejectEnqueue(
             msg.requestId,
             msg.kind,
-            "An accepted main photo is required before generating character looks.",
+            error instanceof Error && error.message.includes("could not be priced")
+              ? "This image model could not be priced for the selected output size. Nothing was queued."
+              : "An accepted main photo is required before generating character looks.",
           );
           return;
         }
@@ -2657,11 +2676,18 @@ export class Coordinator {
           }
           angles = missing.angles;
         }
-        await this.enqueueBatch(
-          msg.requestId,
-          msg.kind,
-          angles.map((angle) => tileRequest(store.getBundle().meta, sheet, kit, model, angle).input),
-        );
+        let requests;
+        try {
+          requests = angles.map((angle) => tileRequest(store.getBundle().meta, sheet, kit, model, angle).input);
+        } catch {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "This image model could not be priced for the selected output size. Nothing was queued.",
+          );
+          return;
+        }
+        await this.enqueueBatch(msg.requestId, msg.kind, requests);
         return;
       }
       case "compile-grid": {

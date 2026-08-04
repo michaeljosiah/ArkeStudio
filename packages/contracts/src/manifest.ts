@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { IsoDateSchema } from "./ids.js";
-import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
+import { CapabilitySchema, ProviderIdSchema, type Capability } from "./provider.js";
+import type { RoutingDefaults } from "./settings.js";
 
 /**
  * The model manifest (SPEC-008 §2.5): hand-maintained, shipped with the app, the one file the
@@ -96,6 +97,20 @@ export const ModelManifestSchema = z
   .strict();
 export type ModelManifest = z.infer<typeof ModelManifestSchema>;
 
+/** Select a routed model, validating its capability before falling back to the manifest order. */
+export function modelForCapability(
+  manifest: ModelManifest,
+  routing: RoutingDefaults | null | undefined,
+  capability: Capability,
+): ManifestModel | null {
+  const routed = routing?.[capability];
+  if (routed !== undefined) {
+    const model = manifest.models.find((candidate) => candidate.id === routed && candidate.capability === capability);
+    if (model) return model;
+  }
+  return manifest.models.find((candidate) => candidate.capability === capability) ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Estimation (R-15): manifest in, micro-dollars out, no provider round-trip
 // ---------------------------------------------------------------------------
@@ -137,7 +152,7 @@ export function estimateMicroUsd(model: ManifestModel, input: EstimateInput): nu
       return (input.images ?? 1) * rate;
     }
     case "perMegapixel":
-      return Math.ceil((milli(input.megapixels ?? 0) * p.microUsdPerMegapixel) / 1000);
+      return Math.ceil((milli(input.megapixels ?? 0) * (input.images ?? 1) * p.microUsdPerMegapixel) / 1000);
     case "perCharacter":
       return (input.characters ?? 0) * p.microUsdPerCharacter;
     case "perToken": {
@@ -148,6 +163,86 @@ export function estimateMicroUsd(model: ManifestModel, input: EstimateInput): nu
     case "unmetered":
       return 0;
   }
+}
+
+export type CharacterImageWorkflow = "main-photo" | "character-sheet" | "character-look" | "reference-tile";
+
+export interface ImageOutputSpec {
+  width: number;
+  height: number;
+  aspect: string;
+  /** The model's selected resolution label, when its API exposes one. */
+  resolution?: string;
+}
+
+/** Explicit output intent shared by character UI, estimation, durable jobs, and providers. */
+export function characterImageOutput(model: ManifestModel, workflow: CharacterImageWorkflow): ImageOutputSpec {
+  const landscape = workflow === "character-sheet";
+  const dimensions =
+    model.provider === "openai"
+      ? landscape
+        ? { width: 1536, height: 1024 }
+        : { width: 1024, height: 1536 }
+      : model.provider === "fal" && model.pricing.kind === "perImage"
+        ? landscape
+          ? { width: 1536, height: 864 }
+          : { width: 1024, height: 1820 }
+      : model.provider === "higgsfield"
+        ? landscape
+          ? { width: 1920, height: 1080 }
+          : { width: 1024, height: 1024 }
+      : landscape
+        ? { width: 1536, height: 1024 }
+        : { width: 1024, height: 1280 };
+  const aspect =
+    model.provider === "openai"
+      ? landscape
+        ? "3:2"
+        : "2:3"
+      : model.provider === "fal" && model.pricing.kind === "perImage"
+        ? landscape
+          ? "16:9"
+          : "9:16"
+        : model.provider === "higgsfield"
+          ? landscape
+            ? "16:9"
+            : "1:1"
+          : landscape
+            ? "3:2"
+            : "4:5";
+  const resolution = model.limits.resolutions?.[0];
+  return { ...dimensions, aspect, ...(resolution ? { resolution } : {}) };
+}
+
+export function estimateCharacterImageMicroUsd(
+  model: ManifestModel,
+  workflow: CharacterImageWorkflow,
+  images = 1,
+): number {
+  const output = characterImageOutput(model, workflow);
+  return estimateMicroUsd(model, {
+    images,
+    megapixels: (output.width * output.height) / 1_000_000,
+    resolution: output.resolution,
+  });
+}
+
+/** Paid work must never silently enter the queue with an unusable zero estimate. */
+export function characterImageEstimateIsUsable(model: ManifestModel, estimate: number): boolean {
+  if (!Number.isInteger(estimate) || estimate < 0) return false;
+  const pricing = model.pricing;
+  if (pricing.kind === "unmetered") return estimate === 0;
+  const hasPositiveRate =
+    pricing.kind === "perSecond"
+      ? pricing.microUsdPerSecond > 0 || Object.values(pricing.byResolution ?? {}).some((rate) => rate > 0)
+      : pricing.kind === "perImage"
+        ? pricing.microUsdPerImage > 0 || Object.values(pricing.byResolution ?? {}).some((rate) => rate > 0)
+        : pricing.kind === "perMegapixel"
+          ? pricing.microUsdPerMegapixel > 0
+          : pricing.kind === "perCharacter"
+            ? pricing.microUsdPerCharacter > 0
+            : pricing.microUsdPerMillionInput > 0 || pricing.microUsdPerMillionOutput > 0;
+  return !hasPositiveRate || estimate > 0;
 }
 
 /** The one-line capability copy the picker shows, truthfully, from the manifest (R-10). */

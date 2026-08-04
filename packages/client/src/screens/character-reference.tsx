@@ -1,9 +1,20 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { compilationIsStale, designatedCompilation, mainPhotoFor, type Sheet } from "@arke-studio/contracts";
+import {
+  compilationIsStale,
+  characterImageEstimateIsUsable,
+  designatedCompilation,
+  estimateCharacterImageMicroUsd,
+  formatMicroUsd,
+  mainPhotoFor,
+  modelCapabilityCopy,
+  modelForCapability,
+  PROVIDERS,
+  type ManifestModel,
+  type Sheet,
+} from "@arke-studio/contracts";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Button, cx } from "../components/ui.js";
-import { formatMicroUsd } from "@arke-studio/contracts";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
   acceptCharacterLook,
@@ -95,6 +106,23 @@ export function mainPhotoPromptFor(sheet: Sheet | null | undefined): string {
   ]
     .filter((part): part is string => part !== null)
     .join(" ");
+}
+
+function routedImageModel(state: ReturnType<typeof useStore>["state"]): ManifestModel | null {
+  return state?.app.manifest
+    ? modelForCapability(state.app.manifest, state.app.routing.defaults, "image")
+    : null;
+}
+
+function modelSummary(model: ManifestModel | null, workflow: "main-photo" | "character-sheet" | "character-look", count = 1) {
+  if (!model) return "Image model · cost unavailable";
+  const fallback = model.accepts.referenceImages === 0 ? " · identity by prompt" : "";
+  return `${PROVIDERS[model.provider].displayName} · ${model.displayName} · ${modelCapabilityCopy(model)}${fallback} · ${formatMicroUsd(estimateCharacterImageMicroUsd(model, workflow, count))}`;
+}
+
+function modelCanDispatch(model: ManifestModel | null, workflow: "main-photo" | "character-sheet" | "character-look") {
+  if (!model) return false;
+  return characterImageEstimateIsUsable(model, estimateCharacterImageMicroUsd(model, workflow));
 }
 
 export function CharacterReferenceScreen() {
@@ -215,11 +243,8 @@ export function GenerateCharacterSheetScreen() {
   if (!world || !sheet || !sheetId) return null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = kit ? mainPhotoFor(kit) : null;
-  const model = state?.app.manifest?.models.find((candidate) => candidate.capability === "image");
+  const model = routedImageModel(state);
   const referencesAsText = (model?.accepts.referenceImages ?? 0) === 0;
-  const estimate = model
-    ? formatMicroUsd(model.pricing.kind === "perImage" ? model.pricing.microUsdPerImage : 0)
-    : "cost unavailable";
   return (
     <div className="fy-generation-scrim" data-screen="model-sheet-generate">
       <div className="fy-sheet-dialog">
@@ -297,15 +322,15 @@ export function GenerateCharacterSheetScreen() {
             </div>
             {referencesAsText && (
               <p className="fy-reference-fallback">
-                {model?.displayName ?? "This model"} accepts no reference images. The world look and main-photo
-                identity are translated into the prompt before generation.
+                {model?.displayName ?? "This model"} accepts no reference images. The main photo cannot be sent;
+                identity relies on the character traits carried in the prompt.
               </p>
             )}
           </section>
         </div>
         <footer>
           <span>
-            {model?.displayName ?? "Image model"} · {estimate}
+            {modelSummary(model, "character-sheet")}
           </span>
           <span>completes {sheet.name}'s reference set</span>
           <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}>
@@ -313,7 +338,7 @@ export function GenerateCharacterSheetScreen() {
           </Button>
           <Button
             variant="primary"
-            disabled={!photo}
+            disabled={!photo || !modelCanDispatch(model, "character-sheet")}
             onClick={() => {
               generateCharacterSheet(
                 world.meta.worldId,
@@ -378,7 +403,7 @@ export function ReplaceMainPhotoScreen() {
   }));
   const candidates = [...uploadedCandidates, ...generatedCandidates];
   const selectedCandidate = candidates.find((candidate) => candidate.key === selected) ?? null;
-  const model = state?.app.manifest?.models.find((candidate) => candidate.capability === "image");
+  const model = routedImageModel(state);
   const canImport = typeof window !== "undefined" && window.arke !== undefined;
   const refs = uploaded && photo ? [`references/${sheetId}/${photo.file}`] : [];
   return (
@@ -455,16 +480,14 @@ export function ReplaceMainPhotoScreen() {
           </div>
           <div className="fy-mainphoto-dialog__generate">
             <span>
-              {(model?.accepts.referenceImages ?? 0) === 0
-                ? `${model?.displayName ?? "Model"} · look carries as text`
-                : "up to 4 previews"}
+              {modelSummary(model, "main-photo", count)}
             </span>
             <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}>
               Cancel
             </Button>
             <Button
               variant="primary"
-              disabled={!prompt.trim()}
+              disabled={!prompt.trim() || !modelCanDispatch(model, "main-photo")}
               onClick={() => generateMainPhoto(world.meta.worldId, sheetId, prompt.trim(), count, refs)}
             >
               Generate previews
@@ -527,6 +550,7 @@ export function CharacterLooksScreen() {
   const { worldId, sheetId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);
+  const { state } = useStore();
   const [kind, setKind] = useState<"costume" | "pose-expression" | "condition-age">("costume");
   const [mode, setMode] = useState<"stay-close" | "push-it">("stay-close");
   const [prompt, setPrompt] = useState(
@@ -535,6 +559,8 @@ export function CharacterLooksScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   if (!world || !sheet || !sheetId) return null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
+  const photo = kit ? mainPhotoFor(kit) : null;
+  const model = routedImageModel(state);
   const pendingLooks = world.referenceTakes.filter(
     (take) =>
       take.kind === "look" &&
@@ -605,10 +631,10 @@ export function CharacterLooksScreen() {
           <label>Describe the look</label>
           <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
           <div className="fy-looks-composer__foot">
-            <span>4 variations · ~4 credits</span>
+            <span>4 variations · {modelSummary(model, "character-look", 4)}</span>
             <Button
               variant="primary"
-              disabled={!prompt.trim()}
+              disabled={!prompt.trim() || !photo || !modelCanDispatch(model, "character-look")}
               onClick={() =>
                 generateCharacterLooks(world.meta.worldId, sheetId, kind, mode, prompt.trim(), 4)
               }
