@@ -285,6 +285,7 @@ export class Coordinator {
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
             emit: (event) => this.emit(event),
             ledger: {
+              readJobIds: () => this.ledger!.readJobIds(),
               has: async (jobId) => (await this.ledger!.readAll()).some((e) => e.jobId === jobId),
               append: (entry) => this.recordLedger(entry),
             },
@@ -3160,6 +3161,7 @@ export class Coordinator {
 
   async stop(): Promise<void> {
     this.setup?.dispose();
+    this.jobQueue?.dispose();
     await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
     await this.opts.adapter?.dispose?.().catch(() => {});
     await this.worldQuery.stop();

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { appendFile, readdir, readFile } from "node:fs/promises";
+import { appendFile, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, Job, LedgerEntry } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
-import { JobQueue, type EnqueueInput, type JobQueueOptions } from "../../src/queue/dispatcher.js";
+import { foldJobHistory, JobQueue, type EnqueueInput, type JobQueueOptions } from "../../src/queue/dispatcher.js";
 import { FakeProvider, jpegBytes, pngBytes, truncatedPngBytes, webpBytes } from "./fake-provider.js";
 
 /**
@@ -20,7 +20,12 @@ const WORLD = "01J8F3K2QW9VZX4N7M0RTYB6HC";
 interface Harness {
   queue: JobQueue;
   events: DomainEvent[];
-  ledger: { entries: LedgerEntry[]; onAppend: ((e: LedgerEntry) => void) | null };
+  ledger: {
+    entries: LedgerEntry[];
+    onAppend: ((e: LedgerEntry) => void) | null;
+    readJobIdsCount: number;
+    hasCount: number;
+  };
   faults: Array<{ provider: string; message: string }>;
   journalPath: string;
   worldDir: string;
@@ -55,7 +60,7 @@ function build(
   },
 ): Harness {
   const events: DomainEvent[] = [];
-  const ledger: Harness["ledger"] = { entries: [], onAppend: null };
+  const ledger: Harness["ledger"] = { entries: [], onAppend: null, readJobIdsCount: 0, hasCount: 0 };
   const faults: Harness["faults"] = [];
   const queue = new JobQueue({
     journalPath,
@@ -63,7 +68,14 @@ function build(
     getKey: opts.getKey ?? (async () => "test-key"),
     emit: (e) => events.push(e),
     ledger: {
-      has: async (jobId) => ledger.entries.some((e) => e.jobId === jobId),
+      readJobIds: async () => {
+        ledger.readJobIdsCount += 1;
+        return new Set(ledger.entries.map((entry) => entry.jobId));
+      },
+      has: async (jobId) => {
+        ledger.hasCount += 1;
+        return ledger.entries.some((e) => e.jobId === jobId);
+      },
       append: async (entry) => {
         ledger.onAppend?.(entry);
         ledger.entries.push(entry);
@@ -125,6 +137,72 @@ function foldedJob(h: Harness, id: string): Job | undefined {
   return h.queue.listJobs().find((j) => j.id === id);
 }
 
+describe("startup reconciliation scaling", () => {
+  it("folds 1,000 terminal jobs in one history pass and reads the ledger once", async () => {
+    const jobs: Job[] = Array.from({ length: 1_000 }, (_, index) => ({
+      ...INPUT,
+      id: `jb_${String(index).padStart(26, "0")}`,
+      idempotencyKey: String(index + 1_000).padStart(26, "0"),
+      status: "succeeded",
+      providerJobId: `remote-${index}`,
+      attempt: 1,
+      error: null,
+      createdAt: "2026-08-04T12:00:00.000Z",
+      updatedAt: "2026-08-04T12:01:00.000Z",
+    }));
+    const history: Job[] = [];
+    for (const job of jobs) {
+      history.push(
+        { ...job, status: "queued", providerJobId: null, attempt: 0 },
+        { ...job, status: "submitting", providerJobId: null, attempt: 1 },
+        { ...job, status: "submitting", providerJobId: null, attempt: 1 },
+        job,
+      );
+    }
+
+    let iterations = 0;
+    let rowsVisited = 0;
+    const singlePassHistory: Iterable<Job> = {
+      *[Symbol.iterator]() {
+        iterations += 1;
+        for (const row of history) {
+          rowsVisited += 1;
+          yield row;
+        }
+      },
+    };
+    const folded = foldJobHistory(singlePassHistory);
+    assert.equal(iterations, 1);
+    assert.equal(rowsVisited, history.length);
+    assert.equal(folded.length, jobs.length);
+    assert.ok(folded.every(({ job }) => job.attempt === 2));
+
+    const h = await makeHarness({});
+    await writeFile(h.journalPath, history.map((row) => JSON.stringify(row)).join("\n") + "\n", "utf8");
+    h.ledger.entries.push(
+      ...jobs.map((job) => ({
+        ts: job.updatedAt,
+        worldId: job.worldId,
+        productionId: job.productionId!,
+        jobId: job.id,
+        provider: job.provider,
+        model: job.model,
+        outcome: "succeeded" as const,
+        estimatedMicroUsd: job.estimatedMicroUsd,
+        actualMicroUsd: job.estimatedMicroUsd,
+        actualSource: "manifest-derived" as const,
+      })),
+    );
+
+    await h.queue.start();
+    assert.equal(h.queue.listJobs().length, jobs.length);
+    assert.equal(h.ledger.readJobIdsCount, 1, "startup takes one batch ledger snapshot");
+    assert.equal(h.ledger.hasCount, 0, "terminal jobs use the snapshot rather than per-job reads");
+    assert.equal(h.ledger.entries.length, jobs.length, "reconciliation does not duplicate entries");
+    h.queue.dispose();
+  });
+});
+
 describe("the happy path writes exactly one ledger entry and lands artifacts atomically", () => {
   it("queued → submitting → running → succeeded, with landing", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
@@ -141,6 +219,7 @@ describe("the happy path writes exactly one ledger entry and lands artifacts ato
     assert.equal(h.ledger.entries[0]!.actualSource, "manifest-derived", "no cost reported → derived (R-17)");
     assert.equal(h.ledger.entries[0]!.actualMicroUsd, INPUT.estimatedMicroUsd);
     assert.ok(h.ledger.entries[0]!.actualMicroUsd! > 0);
+    assert.ok(h.ledger.hasCount > 0, "live terminalization still checks the current ledger");
     h.queue.dispose();
   });
 });
@@ -682,6 +761,8 @@ describe("kill during download and after terminal (§3.2)", () => {
     const report = await h2.queue.start();
     assert.equal(report.find((r) => r.jobId === job.id)?.action, "ledger-completed");
     assert.equal(h2.ledger.entries.length, 1, "exactly one, written by recovery");
+    assert.equal(h2.ledger.readJobIdsCount, 1);
+    assert.equal(h2.ledger.hasCount, 0, "startup updates its snapshot after recovery append");
     const h3 = h2.revive();
     h2.queue.dispose();
     const again = await h3.queue.start();

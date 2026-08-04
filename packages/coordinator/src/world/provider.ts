@@ -100,13 +100,16 @@ export class FsWorldProvider implements WorldProvider {
   }
 
   /**
-   * List worlds. Once the registry is seeded, the picker renders from it without opening or
-   * scanning any world (SPEC-003 R-6, D3); the first call seeds it with one folder pass.
+   * List worlds. Once seeded, cached summaries serve known worlds while a folder pass discovers
+   * additions; only newly discovered worlds have their summary scanned (SPEC-003 R-6, D3).
    */
   async listWorlds(): Promise<WorldSummary[]> {
     await this.ensureAppRoot();
     if (this.appIndex?.seeded) {
-      return this.appIndex.listWorlds(this.worldsDir());
+      const cached = this.appIndex.listWorlds(this.worldsDir());
+      const additions = await this.scanAllSummaries(new Set(cached.map((world) => world.slug)));
+      for (const summary of additions) this.appIndex.upsertWorld(summary);
+      return [...cached, ...additions].sort((a, b) => b.updated.localeCompare(a.updated));
     }
     const summaries = await this.scanAllSummaries();
     if (this.appIndex) {
@@ -116,7 +119,7 @@ export class FsWorldProvider implements WorldProvider {
     return summaries;
   }
 
-  private async scanAllSummaries(): Promise<WorldSummary[]> {
+  private async scanAllSummaries(skipSlugs: ReadonlySet<string> = new Set()): Promise<WorldSummary[]> {
     const out: WorldSummary[] = [];
     let entries: string[];
     try {
@@ -125,6 +128,7 @@ export class FsWorldProvider implements WorldProvider {
       return out;
     }
     for (const slug of entries) {
+      if (skipSlugs.has(slug)) continue;
       const dir = join(this.worldsDir(), slug);
       try {
         if (!(await stat(toExtendedLength(dir))).isDirectory()) continue;

@@ -5,6 +5,7 @@ import { EmptyState } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
 import { Archive, Plus, X } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
+import type { StartupState } from "../arke-bridge.js";
 import { Loading } from "../components/loading.js";
 import { Portrait } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
@@ -152,6 +153,10 @@ export function LaunchScreen() {
   const env = useEnvCheck();
   const setup = useSetup();
   const downloading = setup?.running === true;
+  const [startup, setStartup] = useState<StartupState | null>(() =>
+    typeof window === "undefined" ? null : window.arke?.startupState?.() ?? null,
+  );
+  useEffect(() => window.arke?.onStartupState?.(setStartup), []);
 
   // Setup never walks off on its own — the user continues when they're ready (no worlds →
   // first run; otherwise the picker, R-8).
@@ -223,7 +228,7 @@ export function LaunchScreen() {
             The progress bar, the byte counts and the reassurance about where worlds live were
             all answers to "what is it doing" — a question nobody is asking any more.
           */}
-          {settled ? (
+          {settled && startup?.status !== "failed" ? (
             <div className="fy-launch__done">
               <Button
                 variant="primary"
@@ -251,7 +256,16 @@ export function LaunchScreen() {
             <span style={{ flex: 1 }} />
             <span className="fy-mono">{remaining !== null ? aboutLeft(remaining) : ""}</span>
           </div>
-          {connection === "closed" && (
+          {startup?.status === "failed" ? (
+            <Callout tone="danger" title="The studio could not start">
+              <div>{startup.detail}</div>
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <Button variant="primary" onClick={() => window.arke?.retryStartup?.()}>Retry</Button>
+                <Button variant="secondary" onClick={() => window.arke?.openDataFolder?.()}>Open data folder</Button>
+                <Button variant="ghost" onClick={() => window.arke?.quit?.()}>Quit</Button>
+              </div>
+            </Callout>
+          ) : connection === "closed" && startup?.status !== "initializing" && (
             <Callout tone="warning" title="Waiting for the coordinator">
               The app keeps retrying on its own. If this is a dev browser session, start it with
               `npm run dev:coordinator`.

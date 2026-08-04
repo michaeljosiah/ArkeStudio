@@ -42,6 +42,7 @@ import {
   type SidecarHealth,
 } from "@arke-studio/voice";
 import { BackgroundNotificationController } from "./background-notifications.js";
+import { launchDesktop, StartupController, type StartupState } from "./startup.js";
 import { resolveTheme, themePalette, type ResolvedTheme } from "./theme.js";
 import type { ThemePreference } from "@arke-studio/contracts";
 
@@ -127,6 +128,8 @@ let resolvedTheme: ResolvedTheme = "light";
 let rendererThemeReady = false;
 let windowReady = false;
 let windowShowFallback: ReturnType<typeof setTimeout> | null = null;
+let startupController: StartupController | null = null;
+let startupProvider: FsWorldProvider | null = null;
 
 function showWindowWhenThemed(): void {
   if (!windowReady || !rendererThemeReady || !window || window.isDestroyed()) return;
@@ -185,13 +188,143 @@ const backgroundNotifications = new BackgroundNotificationController({
   },
 });
 
-async function start(): Promise<void> {
+function publishStartup(state: StartupState): void {
+  traceDesktop(
+    `startup.${state.status}`,
+    state.status === "ready"
+      ? { port: state.port }
+      : state.status === "failed"
+        ? { detail: state.detail }
+        : {},
+  );
+  if (window && !window.isDestroyed()) window.webContents.send("arke:startup-state", state);
+}
+
+function registerHostIpc(): void {
+  ipcMain.handle("arke:spool", async (event, input: { name?: unknown; bytes?: unknown }) => {
+    if (!window || event.sender !== window.webContents) return { reason: "that window cannot attach" };
+    const raw = input?.bytes;
+    const bytes = raw instanceof Uint8Array ? raw : raw instanceof ArrayBuffer ? new Uint8Array(raw) : null;
+    if (!bytes) return { reason: "the clipboard gave us nothing we could write" };
+    const name = typeof input?.name === "string" ? input.name : "pasted";
+    return await spoolBytes(appRoot, name, bytes).catch((err: unknown) => ({ reason: String(err) }));
+  });
+  ipcMain.on("arke:activity-activation-ready", (event) => {
+    if (!window || event.sender !== window.webContents) return;
+    activityActivationReady = true;
+    if (pendingActivityActivation) {
+      pendingActivityActivation = false;
+      window.webContents.send("arke:activate-activity");
+    }
+  });
+  ipcMain.on("arke:set-host-theme", (event, preference: unknown) => {
+    if (!window || event.sender !== window.webContents) return;
+    if (preference === "system" || preference === "light" || preference === "dark") {
+      applyHostTheme(preference);
+    }
+  });
+  ipcMain.on("arke:theme-ready", (event) => {
+    if (!window || event.sender !== window.webContents) return;
+    rendererThemeReady = true;
+    traceDesktop("window.theme-ready");
+    showWindowWhenThemed();
+  });
+  ipcMain.on("arke:retry-startup", (event) => {
+    if (!window || event.sender !== window.webContents) return;
+    void startupController?.run();
+  });
+  ipcMain.on("arke:open-data-folder", (event) => {
+    if (!window || event.sender !== window.webContents) return;
+    void shell.openPath(appRoot);
+  });
+  ipcMain.on("arke:quit", (event) => {
+    if (!window || event.sender !== window.webContents) return;
+    app.quit();
+  });
+}
+
+async function createWindow(): Promise<void> {
+  const palette = themePalette(resolvedTheme);
+  window = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    minWidth: 1024,
+    minHeight: 640,
+    show: false,
+    backgroundColor: palette.background,
+    titleBarStyle: "hidden",
+    titleBarOverlay: { color: palette.overlay, symbolColor: palette.symbols, height: 44 },
+    webPreferences: {
+      preload: join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      additionalArguments: [
+        `--arke-app-version=${__APP_VERSION__}`,
+        `--arke-theme-preference=${themePreference}`,
+        `--arke-resolved-theme=${resolvedTheme}`,
+      ],
+    },
+  });
+  traceDesktop("window.created", { themePreference, resolvedTheme });
+  windowShowFallback = setTimeout(() => {
+    if (!window || window.isDestroyed()) return;
+    traceDesktop("window.shown", {
+      reason: "readiness-timeout",
+      windowReady,
+      rendererThemeReady,
+      loading: window.webContents.isLoading(),
+      visible: window.isVisible(),
+    });
+    window.show();
+  }, 5_000);
+  window.once("ready-to-show", () => {
+    windowReady = true;
+    traceDesktop("window.ready-to-show");
+    showWindowWhenThemed();
+  });
+  window.webContents.on("did-finish-load", () => traceDesktop("window.did-finish-load"));
+  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (isMainFrame) traceDesktop("window.did-fail-load", { errorCode, errorDescription, validatedURL });
+  });
+  window.webContents.on("preload-error", (_event, preloadPath, error) => {
+    traceDesktop("window.preload-error", { preloadPath, error: String(error) });
+  });
+  window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) {
+      activityActivationReady = false;
+      rendererThemeReady = false;
+      if (window?.isVisible()) window.hide();
+    }
+  });
+  window.webContents.on("render-process-gone", (_event, details) => {
+    activityActivationReady = false;
+    traceDesktop("window.render-process-gone", { reason: details.reason, exitCode: details.exitCode });
+  });
+  window.on("closed", () => {
+    if (windowShowFallback) clearTimeout(windowShowFallback);
+    windowShowFallback = null;
+    window = null;
+    activityActivationReady = false;
+    pendingActivityActivation = false;
+    rendererThemeReady = false;
+    windowReady = false;
+  });
+
+  const devServer = process.env.ARKE_DEV_SERVER_URL;
+  if (devServer) await window.loadURL(devServer);
+  else await window.loadFile(clientIndex);
+  if (!window.isVisible()) await new Promise<void>((resolve) => window?.once("show", resolve));
+}
+
+async function initialize(): Promise<{ port: number }> {
   // Updater posture (SPEC-016 D7): never auto-download, always install at exit.
   electronUpdater.autoUpdater.autoDownload = false;
   electronUpdater.autoUpdater.autoInstallOnAppQuit = true;
 
   const sqlite = loadElectronSqlite();
   const provider = new FsWorldProvider(appRoot, sqlite ? { sqlite } : {});
+  startupProvider = provider;
   await provider.ensureAppRoot();
 
   // A force-killed previous run leaves its children behind (no exit hook fires under
@@ -206,7 +339,7 @@ async function start(): Promise<void> {
 
   // OpenCode discovery (SPEC-005 R-1): configured path → PATH → bundled, reported with its
   // version. Absent → authoring degrades with the reason stated (R-4).
-  const discovered = discoverOpenCode({
+  const discovered = await discoverOpenCode({
     ...(process.env["ARKE_OPENCODE_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE_CMD"] } : {}),
     ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode", "opencode.exe") } : {}),
   });
@@ -254,14 +387,22 @@ async function start(): Promise<void> {
   let voxaHealth: SidecarHealth | null = null;
   const voxaArgs = bundledVoxa
     ? [
-        "--host", "127.0.0.1",
-        "--port", "{port}",
-        "--kokoro-model", join(appRoot, "models", "kokoro-82m", "model_quantized.onnx"),
-        "--kokoro-config", join(appRoot, "models", "kokoro-82m", "config.json"),
-        "--kokoro-voices", join(appRoot, "models", "kokoro-82m", "voices"),
-        "--whisper-model", join(appRoot, "models", "whisper-base-en", "ggml-base.en.bin"),
-        "--espeak", join(process.resourcesPath, "espeak-ng", "espeak-ng.exe"),
-        "--espeak-data", join(process.resourcesPath, "espeak-ng", "share", "espeak-ng-data"),
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "{port}",
+        "--kokoro-model",
+        join(appRoot, "models", "kokoro-82m", "model_quantized.onnx"),
+        "--kokoro-config",
+        join(appRoot, "models", "kokoro-82m", "config.json"),
+        "--kokoro-voices",
+        join(appRoot, "models", "kokoro-82m", "voices"),
+        "--whisper-model",
+        join(appRoot, "models", "whisper-base-en", "ggml-base.en.bin"),
+        "--espeak",
+        join(process.resourcesPath, "espeak-ng", "espeak-ng.exe"),
+        "--espeak-data",
+        join(process.resourcesPath, "espeak-ng", "share", "espeak-ng-data"),
       ]
     : voxaSpec.args;
   const voxaSupervisor = new ChildSupervisor(
@@ -371,25 +512,25 @@ async function start(): Promise<void> {
         },
     voice: {
       sidecar: voxaSidecar,
-    sidecarHealth: async () => {
-      const health = await voxaAt().health();
-      voxaHealth = health;
-      const status = sidecarState(health);
-      return {
-        ...status,
-        runtime:
-          voxaHealth && bundledVoxa
-            ? {
-                source: "bundled" as const,
-                version: voxaHealth.version,
-                protocolVersion: voxaHealth.protocolVersion,
-                architecture: voxaHealth.architecture,
-                engines: voxaHealth.engines,
-                engineStatus: voxaHealth.engineStatus,
-              }
-            : null,
-      };
-    },
+      sidecarHealth: async () => {
+        const health = await voxaAt().health();
+        voxaHealth = health;
+        const status = sidecarState(health);
+        return {
+          ...status,
+          runtime:
+            voxaHealth && bundledVoxa
+              ? {
+                  source: "bundled" as const,
+                  version: voxaHealth.version,
+                  protocolVersion: voxaHealth.protocolVersion,
+                  architecture: voxaHealth.architecture,
+                  engines: voxaHealth.engines,
+                  engineStatus: voxaHealth.engineStatus,
+                }
+              : null,
+        };
+      },
       localPresets: localCandidates(KOKORO_PRESETS),
       cloudSources: [
         {
@@ -403,6 +544,7 @@ async function start(): Promise<void> {
       if (event.type === "appearance.changed") applyHostTheme(event.preference);
     },
   });
+  startupProvider = null;
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
   // and the affected features carry a stated reason (R-6).
@@ -419,111 +561,6 @@ async function start(): Promise<void> {
   // file-artifact frame (SPEC-001 R-9). Last run's couriers are swept first; nothing in there
   // outlives the process that wrote it.
   await sweepSpool(appRoot);
-  ipcMain.handle("arke:spool", async (event, input: { name?: unknown; bytes?: unknown }) => {
-    if (!window || event.sender !== window.webContents) return { reason: "that window cannot attach" };
-    const raw = input?.bytes;
-    const bytes = raw instanceof Uint8Array ? raw : raw instanceof ArrayBuffer ? new Uint8Array(raw) : null;
-    if (!bytes) return { reason: "the clipboard gave us nothing we could write" };
-    const name = typeof input?.name === "string" ? input.name : "pasted";
-    return await spoolBytes(appRoot, name, bytes).catch((err: unknown) => ({ reason: String(err) }));
-  });
-  ipcMain.on("arke:activity-activation-ready", (event) => {
-    if (!window || event.sender !== window.webContents) return;
-    activityActivationReady = true;
-    if (pendingActivityActivation) {
-      pendingActivityActivation = false;
-      window.webContents.send("arke:activate-activity");
-    }
-  });
-  ipcMain.on("arke:set-host-theme", (event, preference: unknown) => {
-    if (!window || event.sender !== window.webContents) return;
-    if (preference === "system" || preference === "light" || preference === "dark") {
-      applyHostTheme(preference);
-    }
-  });
-  ipcMain.on("arke:theme-ready", (event) => {
-    if (!window || event.sender !== window.webContents) return;
-    rendererThemeReady = true;
-    traceDesktop("window.theme-ready");
-    showWindowWhenThemed();
-  });
-
-  const palette = themePalette(resolvedTheme);
-
-  window = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 1024,
-    minHeight: 640,
-    show: false,
-    backgroundColor: palette.background,
-    // The native frame is hidden; overlay controls sit inside the app's own 44px titlebars.
-    titleBarStyle: "hidden",
-    titleBarOverlay: { color: palette.overlay, symbolColor: palette.symbols, height: 44 },
-    webPreferences: {
-      preload: join(__dirname, "preload.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      additionalArguments: [
-        `--arke-ws-port=${port}`,
-        `--arke-app-version=${__APP_VERSION__}`,
-        `--arke-theme-preference=${themePreference}`,
-        `--arke-resolved-theme=${resolvedTheme}`,
-      ],
-    },
-  });
-  traceDesktop("window.created", { themePreference, resolvedTheme });
-  windowShowFallback = setTimeout(() => {
-    if (!window || window.isDestroyed()) return;
-    traceDesktop("window.shown", {
-      reason: "readiness-timeout",
-      windowReady,
-      rendererThemeReady,
-      loading: window.webContents.isLoading(),
-      visible: window.isVisible(),
-    });
-    window.show();
-  }, 5_000);
-  window.once("ready-to-show", () => {
-    windowReady = true;
-    traceDesktop("window.ready-to-show");
-    showWindowWhenThemed();
-  });
-  window.webContents.on("did-finish-load", () => traceDesktop("window.did-finish-load"));
-  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
-    if (isMainFrame) traceDesktop("window.did-fail-load", { errorCode, errorDescription, validatedURL });
-  });
-  window.webContents.on("preload-error", (_event, preloadPath, error) => {
-    traceDesktop("window.preload-error", { preloadPath, error: String(error) });
-  });
-  window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) {
-      activityActivationReady = false;
-      rendererThemeReady = false;
-      if (window?.isVisible()) window.hide();
-    }
-  });
-  window.webContents.on("render-process-gone", (_event, details) => {
-    activityActivationReady = false;
-    traceDesktop("window.render-process-gone", { reason: details.reason, exitCode: details.exitCode });
-  });
-  window.on("closed", () => {
-    if (windowShowFallback) clearTimeout(windowShowFallback);
-    windowShowFallback = null;
-    window = null;
-    activityActivationReady = false;
-    pendingActivityActivation = false;
-    rendererThemeReady = false;
-    windowReady = false;
-  });
-
-  const devServer = process.env.ARKE_DEV_SERVER_URL;
-  if (devServer) {
-    await window.loadURL(devServer);
-  } else {
-    await window.loadFile(clientIndex);
-  }
 
   // Updater wiring only — the real update flow is SPEC-016. Never in dev.
   if (app.isPackaged) {
@@ -533,13 +570,14 @@ async function start(): Promise<void> {
         /* updates unavailable is not an error the user can act on here */
       });
   }
+  return { port };
 }
 
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   backgroundNotifications.stop();
-  const stop = coordinator?.stop() ?? Promise.resolve();
+  const stop = coordinator?.stop() ?? startupProvider?.close() ?? Promise.resolve();
   // A child that will not die must not hold the app open forever.
   await Promise.race([stop, new Promise((r) => setTimeout(r, 5_000))]);
 }
@@ -555,9 +593,32 @@ if (!gotLock) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     if (process.platform === "win32") app.setAppUserModelId("studio.arke.app");
-    void start();
+    registerHostIpc();
+    startupController = new StartupController({
+      initialize,
+      cleanup: async () => {
+        const started = coordinator;
+        const provider = startupProvider;
+        coordinator = null;
+        startupProvider = null;
+        if (started) await started.stop();
+        else await provider?.close();
+      },
+      publish: publishStartup,
+      report: (error) => {
+        console.error("[arke] startup failed:", error);
+        traceDesktop("startup.error", { error: String(error) });
+      },
+    });
+    try {
+      await launchDesktop(createWindow, startupController);
+    } catch (error) {
+      console.error("[arke] launch window failed:", error);
+      traceDesktop("window.startup-error", { error: String(error) });
+      app.quit();
+    }
   });
 
   app.on("window-all-closed", () => {

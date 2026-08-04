@@ -60,7 +60,7 @@ if (swept.reaped.length > 0) {
 }
 
 // Real authoring in dev when OpenCode is installed; honest degradation when it is not.
-const discovered = discoverOpenCode();
+const discovered = await discoverOpenCode();
 const opencodeSupervisor = new ChildSupervisor(
   {
     id: "opencode",

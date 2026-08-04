@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 
 /**
@@ -16,45 +16,63 @@ export interface DiscoveredOpenCode {
   version: string | null;
 }
 
-function versionOf(command: string): string | null {
-  try {
-    const result = spawnSync(command, ["--version"], {
-      timeout: 10_000,
-      encoding: "utf8",
-      shell: process.platform === "win32", // .cmd shims need the shell
-      windowsHide: true,
-    });
-    if (result.status !== 0) return null;
-    const line = (result.stdout || "").trim().split("\n")[0] ?? "";
-    const match = /(\d+\.\d+\.\d+[^\s]*)/.exec(line);
-    return match ? match[1]! : line || null;
-  } catch {
-    return null;
-  }
+interface CommandResult {
+  status: number | null;
+  stdout: string;
+}
+
+type CommandRunner = (command: string, args: string[], timeoutMs: number) => Promise<CommandResult>;
+
+const runCommand: CommandRunner = (command, args, timeoutMs) =>
+  new Promise((resolve) => {
+    execFile(
+      command,
+      args,
+      {
+        timeout: timeoutMs,
+        encoding: "utf8",
+        // Windows cannot execute npm's .cmd/.bat shims without cmd.exe.
+        shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(command),
+        windowsHide: true,
+      },
+      (error, stdout) => {
+        const code =
+          error && typeof (error as { code?: unknown }).code === "number"
+            ? (error as { code: number }).code
+            : error
+              ? null
+              : 0;
+        resolve({ status: code, stdout: stdout || "" });
+      },
+    );
+  });
+
+async function versionOf(command: string, run: CommandRunner): Promise<string | null> {
+  const result = await run(command, ["--version"], 10_000).catch(() => null);
+  if (!result || result.status !== 0) return null;
+  const line = result.stdout.trim().split("\n")[0] ?? "";
+  const match = /(\d+\.\d+\.\d+[^\s]*)/.exec(line);
+  return match ? match[1]! : line || null;
 }
 
 /**
  * Resolve a PATH command to a spawnable absolute path. On Windows, `where` returns every
  * match; the extension-bearing entry (.cmd/.exe) is the one child_process can start.
  */
-function resolveOnPath(command: string): string | null {
+async function resolveOnPath(command: string, run: CommandRunner): Promise<string | null> {
   const probe = process.platform === "win32" ? "where" : "which";
-  try {
-    const result = spawnSync(probe, [command], { timeout: 5_000, encoding: "utf8", windowsHide: true });
-    if (result.status !== 0) return null;
-    const lines = (result.stdout || "")
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    if (lines.length === 0) return null;
-    if (process.platform === "win32") {
-      const executable = lines.find((l) => /\.(exe|cmd|bat)$/i.test(l));
-      return executable ?? lines[0]!;
-    }
-    return lines[0]!;
-  } catch {
-    return null;
+  const result = await run(probe, [command], 5_000).catch(() => null);
+  if (!result || result.status !== 0) return null;
+  const lines = result.stdout
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return null;
+  if (process.platform === "win32") {
+    const executable = lines.find((l) => /\.(exe|cmd|bat)$/i.test(l));
+    return executable ?? lines[0]!;
   }
+  return lines[0]!;
 }
 
 export interface DiscoveryOptions {
@@ -62,20 +80,23 @@ export interface DiscoveryOptions {
   configuredPath?: string;
   /** Where the packaged app ships its bundled copy (SPEC-016). */
   bundledPath?: string;
+  /** Process seam for deterministic timeout/non-blocking tests. */
+  runCommand?: CommandRunner;
 }
 
 /** Resolve the OpenCode to use, or null with the honest reason. */
-export function discoverOpenCode(opts: DiscoveryOptions = {}): DiscoveredOpenCode | null {
+export async function discoverOpenCode(opts: DiscoveryOptions = {}): Promise<DiscoveredOpenCode | null> {
+  const run = opts.runCommand ?? runCommand;
   if (opts.configuredPath && existsSync(opts.configuredPath)) {
-    const version = versionOf(opts.configuredPath);
+    const version = await versionOf(opts.configuredPath, run);
     if (version !== null) return { command: opts.configuredPath, source: "configured", version };
   }
-  const fromPath = resolveOnPath("opencode");
+  const fromPath = await resolveOnPath("opencode", run);
   if (fromPath) {
-    return { command: fromPath, source: "path", version: versionOf(fromPath) };
+    return { command: fromPath, source: "path", version: await versionOf(fromPath, run) };
   }
   if (opts.bundledPath && existsSync(opts.bundledPath)) {
-    return { command: opts.bundledPath, source: "bundled", version: versionOf(opts.bundledPath) };
+    return { command: opts.bundledPath, source: "bundled", version: await versionOf(opts.bundledPath, run) };
   }
   return null;
 }

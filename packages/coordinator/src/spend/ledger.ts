@@ -68,6 +68,10 @@ export class LedgerFile {
     return out;
   }
 
+  async readJobIds(): Promise<Set<string>> {
+    return new Set((await this.readAll()).map((entry) => entry.jobId));
+  }
+
   drain(): Promise<void> {
     return this.queue.drain();
   }

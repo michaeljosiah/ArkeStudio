@@ -5,10 +5,7 @@
  */
 
 function httpBase(): string {
-  const fromBridge =
-    typeof window === "undefined"
-      ? undefined
-      : (window.arke as { httpBase?: string | null } | undefined)?.httpBase;
+  const fromBridge = typeof window === "undefined" ? undefined : window.arke?.coordinatorHttpBase?.();
   if (fromBridge) return fromBridge;
   const devUrl = (import.meta.env?.VITE_ARKE_WS as string | undefined) ?? "ws://127.0.0.1:8791";
   return devUrl.replace(/^ws/, "http");
