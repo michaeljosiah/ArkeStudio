@@ -200,6 +200,7 @@ export class ReadModel {
       case "proposal.staged":
       case "proposal.resolved":
       case "proposal.blocked":
+      case "main-photo.acceptance":
       case "authoring.progress":
       case "authoring.status":
       case "permission.pending":

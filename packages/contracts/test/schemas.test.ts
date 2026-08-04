@@ -514,6 +514,17 @@ describe("domain events and frames", () => {
     assert.doesNotThrow(() => ClientStateSchema.parse(state));
     assert.doesNotThrow(() => FrameSchema.parse({ kind: "snapshot", seq: 1, state }));
     assert.doesNotThrow(() => FrameSchema.parse({ kind: "event", seq: 2, event }));
+    assert.doesNotThrow(() =>
+      DomainEventSchema.parse({
+        at: "2026-08-04T08:00:00Z",
+        type: "main-photo.acceptance",
+        worldId: WORLD_ID,
+        sheetId: "maren-kest",
+        status: "failed",
+        reason: "The main photo was not changed.",
+        candidateRetained: true,
+      }),
+    );
     assert.throws(() => FrameSchema.parse({ kind: "event", seq: 0, event }));
   });
 

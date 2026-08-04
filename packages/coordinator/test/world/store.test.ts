@@ -43,6 +43,40 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await store.close();
   });
 
+  it("suppresses a generated source candidate when its immutable take exists", async () => {
+    const dir = await makeTempWorld();
+    const candidateDir = join(dir, "references", "maren-kest", "candidates");
+    const takeDir = join(dir, "references", "maren-kest", "takes", "tk_01J8A0000000000000000000R1");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(candidateDir, { recursive: true });
+    await mkdir(takeDir, { recursive: true });
+    await writeFile(join(candidateDir, "generated.png"), "duplicate");
+    await writeFile(join(takeDir, "generated.png"), "immutable");
+    await writeFile(
+      join(takeDir, "take.json"),
+      JSON.stringify({
+        id: "tk_01J8A0000000000000000000R1",
+        jobId: "jb_01J8E0000000000000000000J1",
+        coversShots: [],
+        kind: "main-photo",
+        reference: { sheetId: "maren-kest" },
+        provider: "fal",
+        model: "flux",
+        provenance: { canonRevision: 42, sheets: { "maren-kest": 4 } },
+        references: [],
+        params: { sourceCandidate: "references/maren-kest/candidates/generated.png" },
+        cost: { estimatedMicroUsd: 40000, actualMicroUsd: null },
+        dispatchedAt: CLOCK(),
+        completedAt: CLOCK(),
+        media: "generated.png",
+      }),
+    );
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    assert.deepEqual(store.getBundle().referenceCandidates["maren-kest"], undefined);
+    assert.equal(store.getBundle().referenceTakes.length, 1);
+    await store.close();
+  });
+
   it("enforces single-process ownership and reclaims stale locks (R-3)", async () => {
     const dir = await makeTempWorld();
     const first = await WorldStore.open(dir, { clock: CLOCK });

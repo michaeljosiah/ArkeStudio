@@ -168,16 +168,36 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     }
     const candidates = (await listDir(join(dir, "references", sheetId, "candidates")))
       .filter((file) => /\.(png|jpe?g|webp)$/i.test(file))
-      .sort()
-      .map((file) => `references/${sheetId}/candidates/${file}`);
-    if (candidates.length > 0) referenceCandidates[sheetId] = candidates;
+      .sort();
+    const sheetTakes = [];
     for (const takeDir of await listDir(join(dir, "references", sheetId, "takes"))) {
       if (!(await exists(join(dir, "references", sheetId, "takes", takeDir, "take.json")))) continue;
       const take = await tryParse(`references/${sheetId}/takes/${takeDir}/take.json`, (raw) =>
         TakeSchema.parse(JSON.parse(raw)),
       );
-      if (take) referenceTakes.push(take);
+      if (take) {
+        referenceTakes.push(take);
+        sheetTakes.push(take);
+      }
     }
+    // Generated media is copied into its immutable take. The source candidate is staging, not
+    // a second creative result, and must not reappear after restart if queue state is absent.
+    const generatedSources = new Set(
+      sheetTakes
+        .filter((take) => take.kind === "main-photo" && take.jobId !== undefined)
+        .map((take) =>
+          typeof take.params["sourceCandidate"] === "string"
+            ? take.params["sourceCandidate"]
+            : take.media
+              ? `references/${sheetId}/candidates/${take.media}`
+              : undefined,
+        )
+        .filter((path): path is string => typeof path === "string"),
+    );
+    const visibleCandidates = candidates
+      .map((file) => `references/${sheetId}/candidates/${file}`)
+      .filter((path) => !generatedSources.has(path));
+    if (visibleCandidates.length > 0) referenceCandidates[sheetId] = visibleCandidates;
   }
 
   const artifacts = [];

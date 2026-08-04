@@ -620,7 +620,11 @@ describe("kit mutations through the one commit primitive", () => {
     } as const;
     const take = await recordReferenceTake(store, job as never);
     assert.ok(take);
-    assert.deepEqual(take.params, job.params, "the immutable take keeps what acceptance needs after the queue is gone");
+    assert.deepEqual(
+      take.params,
+      job.params,
+      "non-main-photo takes keep what acceptance needs after the queue is gone",
+    );
     const takePath = join(dir, "references", "maren-kest", "takes", take.id, "take.json");
     const before = await readFile(takePath);
 

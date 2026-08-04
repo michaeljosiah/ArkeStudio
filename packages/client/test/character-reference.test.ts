@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Sheet } from "@arke-studio/contracts";
 import { mainPhotoPromptFor } from "../src/screens/character-reference.js";
+import {
+  __applyEventForTest,
+  __mainPhotoAcceptanceForTest,
+  __setStateForTest,
+  chooseAnchor,
+} from "../src/lib/store.js";
+import { FIXTURE_STATE } from "./fixture-state.js";
 
 function character(overrides: Partial<Sheet> = {}): Sheet {
   return {
@@ -34,5 +41,29 @@ describe("main-photo prompt", () => {
     assert.match(prompt, /The Witness/);
     assert.match(prompt, /established physical identity/);
     assert.doesNotMatch(prompt, /\b(?:he|she|his|her)\b/i);
+  });
+});
+
+describe("main-photo acceptance feedback", () => {
+  it("moves from pending to a safe retryable failure", () => {
+    __setStateForTest(FIXTURE_STATE);
+    chooseAnchor(FIXTURE_STATE.world!.meta.worldId, "maren-kest", {
+      source: "candidate",
+      file: "upload-test.png",
+    });
+    assert.equal(__mainPhotoAcceptanceForTest()["maren-kest"]?.status, null);
+    __applyEventForTest({
+      at: "2026-08-04T08:00:00Z",
+      type: "main-photo.acceptance",
+      worldId: FIXTURE_STATE.world!.meta.worldId,
+      sheetId: "maren-kest",
+      status: "failed",
+      reason: "The main photo was not changed. The candidate is still here; try again.",
+      candidateRetained: true,
+    });
+    const result = __mainPhotoAcceptanceForTest()["maren-kest"];
+    assert.equal(result?.status, "failed");
+    assert.equal(result?.candidateRetained, true);
+    assert.match(result?.reason ?? "", /try again/);
   });
 });

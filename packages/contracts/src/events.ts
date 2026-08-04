@@ -105,6 +105,19 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   /** Full row on every transition — jobs are small and the client never patches by hand. */
   z.object({ ...base, type: z.literal("job.updated"), job: JobSchema }).strict(),
 
+  /** Result of the deliberate main-photo acceptance action (SPEC-017 R-12, issue #71). */
+  z
+    .object({
+      ...base,
+      type: z.literal("main-photo.acceptance"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      status: z.enum(["accepted", "failed"]),
+      reason: z.string().optional(),
+      candidateRetained: z.boolean(),
+    })
+    .strict(),
+
   /** A provider queue paused, resumed, or its held count moved (SPEC-009 R-8, R-11). */
   z.object({ ...base, type: z.literal("queue.status"), queue: QueueStatusSchema }).strict(),
   /** What start-up reconciliation resolved, reported once (SPEC-009 R-18). */
