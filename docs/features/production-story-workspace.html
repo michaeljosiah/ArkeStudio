@@ -1,0 +1,3121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="A visual feature brief for production-scoped conversation, micro-drama profiles, episode boards, and progressive story graphs in Arke Studio."
+    />
+    <title>Arke Studio - Production Story Workspace</title>
+    <style>
+      :root {
+        --paper: #f4f1ea;
+        --paper-deep: #e8e1d6;
+        --ink: #171715;
+        --ink-soft: #5f5b53;
+        --ink-faint: #6f6a61;
+        --line: rgba(23, 23, 21, 0.14);
+        --line-strong: rgba(23, 23, 21, 0.28);
+        --card: rgba(255, 255, 255, 0.78);
+        --card-solid: #fffefa;
+        --night: #11161a;
+        --night-soft: #1c2429;
+        --coral: #ec6a4a;
+        --coral-soft: #f6c4b6;
+        --teal: #2d7b7a;
+        --teal-soft: #a8d3ce;
+        --amber: #c88d32;
+        --red: #b9483d;
+        --green: #3e7455;
+        --sans: "Segoe UI Variable Text", "Aptos", "Segoe UI", system-ui, sans-serif;
+        --display: "Segoe UI Variable Display", "Aptos Display", "Segoe UI", system-ui, sans-serif;
+        --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+        --shadow: 0 24px 70px rgba(28, 24, 18, 0.12);
+        --shadow-small: 0 10px 30px rgba(28, 24, 18, 0.09);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 18% 0%, rgba(236, 106, 74, 0.12), transparent 27rem),
+          radial-gradient(circle at 86% 11%, rgba(45, 123, 122, 0.13), transparent 30rem), var(--paper);
+        font-family: var(--sans);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      img {
+        display: block;
+        max-width: 100%;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .shell {
+        width: min(1440px, calc(100% - 40px));
+        margin: 0 auto;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        min-height: 58px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(244, 241, 234, 0.9);
+        backdrop-filter: blur(18px);
+      }
+
+      .brand {
+        display: flex;
+        align-items: baseline;
+        gap: 7px;
+        white-space: nowrap;
+      }
+
+      .brand strong {
+        font-size: 16px;
+        letter-spacing: -0.02em;
+      }
+
+      .brand span,
+      .topmeta {
+        color: var(--ink-soft);
+        font-size: 12px;
+      }
+
+      .topmeta {
+        margin-left: auto;
+        font-family: var(--mono);
+      }
+
+      .toc {
+        display: flex;
+        gap: 4px;
+        overflow: auto;
+        scrollbar-width: none;
+      }
+
+      .toc a {
+        padding: 7px 10px;
+        border-radius: 999px;
+        color: var(--ink-soft);
+        font-size: 12px;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .toc a:hover {
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .hero {
+        position: relative;
+        min-height: 790px;
+        margin-top: 24px;
+        overflow: hidden;
+        border-radius: 28px;
+        background: var(--night);
+        box-shadow: var(--shadow);
+        color: white;
+      }
+
+      .hero__image {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        opacity: 0.58;
+      }
+
+      .hero::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(
+            90deg,
+            rgba(9, 13, 16, 0.96) 0%,
+            rgba(9, 13, 16, 0.75) 44%,
+            rgba(9, 13, 16, 0.18) 78%
+          ),
+          linear-gradient(0deg, rgba(9, 13, 16, 0.9), transparent 50%);
+      }
+
+      .hero__copy {
+        position: relative;
+        z-index: 2;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        min-height: 790px;
+        max-width: 800px;
+        padding: 72px;
+      }
+
+      .eyebrow {
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+      }
+
+      .hero .eyebrow {
+        color: rgba(255, 255, 255, 0.62);
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        max-width: 760px;
+        margin: 18px 0 20px;
+        font-family: var(--display);
+        font-size: clamp(54px, 7vw, 104px);
+        font-weight: 500;
+        letter-spacing: -0.055em;
+        line-height: 0.94;
+      }
+
+      .hero__lede {
+        max-width: 680px;
+        margin-bottom: 28px;
+        color: rgba(255, 255, 255, 0.74);
+        font-size: clamp(17px, 2vw, 22px);
+        line-height: 1.55;
+      }
+
+      .hero__rule {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 1px;
+        width: min(760px, 100%);
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.13);
+      }
+
+      .hero__rule div {
+        padding: 14px 16px;
+        background: rgba(12, 17, 20, 0.7);
+      }
+
+      .hero__rule b {
+        display: block;
+        margin-bottom: 3px;
+        font-size: 13px;
+      }
+
+      .hero__rule span {
+        color: rgba(255, 255, 255, 0.56);
+        font-size: 11px;
+      }
+
+      .section {
+        padding: 112px 0 0;
+      }
+
+      .section__head {
+        display: grid;
+        grid-template-columns: minmax(0, 0.75fr) minmax(320px, 1.25fr);
+        gap: 60px;
+        align-items: end;
+        padding-bottom: 28px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .section__head h2 {
+        margin: 8px 0 0;
+        font-family: var(--display);
+        font-size: clamp(38px, 5vw, 68px);
+        font-weight: 500;
+        letter-spacing: -0.045em;
+        line-height: 1;
+      }
+
+      .section__head p {
+        margin: 0;
+        color: var(--ink-soft);
+        font-size: 17px;
+      }
+
+      .thesis {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin-top: 28px;
+      }
+
+      .thesis__card {
+        min-height: 245px;
+        padding: 26px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--card);
+        box-shadow: var(--shadow-small);
+      }
+
+      .thesis__card:nth-child(2) {
+        background: var(--night);
+        color: white;
+      }
+
+      .thesis__card:nth-child(3) {
+        background: #d9e8e4;
+      }
+
+      .number {
+        font: 600 11px var(--mono);
+        color: var(--ink-faint);
+      }
+
+      .thesis__card:nth-child(2) .number {
+        color: rgba(255, 255, 255, 0.5);
+      }
+
+      .thesis__card h3 {
+        margin: 48px 0 10px;
+        font-family: var(--display);
+        font-size: 30px;
+        font-weight: 500;
+        letter-spacing: -0.03em;
+      }
+
+      .thesis__card p {
+        margin: 0;
+        color: var(--ink-soft);
+      }
+
+      .thesis__card:nth-child(2) p {
+        color: rgba(255, 255, 255, 0.66);
+      }
+
+      .flowmap {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(120px, 1fr));
+        align-items: center;
+        gap: 8px;
+        margin-top: 28px;
+        padding: 28px;
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        background: var(--card-solid);
+      }
+
+      .flowstep {
+        position: relative;
+        min-width: 130px;
+        min-height: 146px;
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: white;
+      }
+
+      .flowstep::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: calc(100% + 8px);
+        width: 8px;
+        height: 1px;
+        background: var(--line-strong);
+      }
+
+      .flowstep:last-child::after {
+        display: none;
+      }
+
+      .flowstep b {
+        display: block;
+        margin: 28px 0 6px;
+        font-size: 14px;
+      }
+
+      .flowstep span {
+        color: var(--ink-soft);
+        font-size: 11px;
+      }
+
+      .flowstep--accent {
+        border-color: var(--coral);
+        background: #fff5ef;
+      }
+
+      .scope-stack {
+        display: grid;
+        grid-template-columns: 1fr 80px 1fr 80px 1fr 80px 1fr;
+        align-items: center;
+        gap: 10px;
+        margin-top: 30px;
+      }
+
+      .scope-card {
+        min-height: 280px;
+        padding: 24px;
+        border-radius: 18px;
+        color: white;
+        box-shadow: var(--shadow-small);
+      }
+
+      .scope-card:nth-of-type(1) {
+        background: #1d323b;
+      }
+
+      .scope-card:nth-of-type(2) {
+        background: #7d3f30;
+      }
+
+      .scope-card:nth-of-type(3) {
+        background: #315e58;
+      }
+
+      .scope-card:nth-of-type(4) {
+        background: #353333;
+      }
+
+      .scope-card h3 {
+        margin: 54px 0 10px;
+        font-family: var(--display);
+        font-size: 29px;
+        font-weight: 500;
+      }
+
+      .scope-card p,
+      .scope-card li {
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 13px;
+      }
+
+      .scope-card ul {
+        padding-left: 18px;
+      }
+
+      .arrow {
+        color: var(--ink-faint);
+        font: 400 34px var(--display);
+        text-align: center;
+      }
+
+      .visual {
+        margin-top: 30px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: var(--card-solid);
+        box-shadow: var(--shadow);
+      }
+
+      .visual__bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 46px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.7);
+      }
+
+      .visual__bar .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--line-strong);
+      }
+
+      .visual__bar span:last-child {
+        margin-left: 8px;
+        color: var(--ink-faint);
+        font: 500 10px var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .create-screen {
+        display: grid;
+        grid-template-columns: 0.9fr 1.1fr;
+        min-height: 620px;
+      }
+
+      .create-screen__art {
+        position: relative;
+        min-height: 620px;
+        overflow: hidden;
+        background: var(--night);
+      }
+
+      .create-screen__art img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        opacity: 0.75;
+      }
+
+      .create-screen__art::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(0deg, rgba(9, 13, 16, 0.86), transparent 65%);
+      }
+
+      .create-screen__caption {
+        position: absolute;
+        z-index: 2;
+        right: 28px;
+        bottom: 28px;
+        left: 28px;
+        color: white;
+      }
+
+      .create-screen__caption h3 {
+        margin: 0 0 5px;
+        font-family: var(--display);
+        font-size: 36px;
+        font-weight: 500;
+      }
+
+      .create-screen__caption p {
+        margin: 0;
+        color: rgba(255, 255, 255, 0.66);
+      }
+
+      .create-form {
+        padding: 44px;
+      }
+
+      .create-form h3 {
+        margin: 6px 0 8px;
+        font-family: var(--display);
+        font-size: 38px;
+        font-weight: 500;
+        letter-spacing: -0.04em;
+      }
+
+      .create-form > p {
+        color: var(--ink-soft);
+      }
+
+      .choice-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        margin: 24px 0 28px;
+      }
+
+      .choice {
+        min-height: 112px;
+        padding: 15px;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        background: white;
+      }
+
+      .choice.active {
+        border-color: var(--ink);
+        box-shadow: inset 0 0 0 1px var(--ink);
+      }
+
+      .choice b,
+      .choice span {
+        display: block;
+      }
+
+      .choice span {
+        margin-top: 5px;
+        color: var(--ink-soft);
+        font-size: 11px;
+      }
+
+      .field {
+        margin-top: 16px;
+      }
+
+      .field label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .field-label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .input,
+      .textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: white;
+        color: var(--ink);
+        box-shadow: 0 3px 10px rgba(20, 18, 15, 0.04);
+      }
+
+      .input {
+        min-height: 42px;
+        padding: 10px 13px;
+      }
+
+      .textarea {
+        min-height: 92px;
+        padding: 12px 13px;
+        color: var(--ink-soft);
+        font-size: 13px;
+      }
+
+      .profile-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin-top: 10px;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.75);
+        color: var(--ink-soft);
+        font-size: 11px;
+      }
+
+      .chip.active {
+        border-color: var(--coral);
+        background: #fff2ec;
+        color: #8d3926;
+      }
+
+      .defaults {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      .default {
+        padding: 10px;
+        border-radius: 10px;
+        background: rgba(45, 123, 122, 0.08);
+      }
+
+      .default b,
+      .default span {
+        display: block;
+      }
+
+      .default b {
+        font-size: 11px;
+      }
+
+      .default span {
+        margin-top: 2px;
+        color: var(--ink-soft);
+        font: 400 10px var(--mono);
+      }
+
+      .screen-note {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 20px;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 38px;
+        padding: 0 16px;
+        border: 1px solid var(--ink);
+        border-radius: 10px;
+        background: var(--ink);
+        color: white;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .btn.secondary {
+        border-color: var(--line);
+        background: white;
+        color: var(--ink);
+      }
+
+      .screen-note small {
+        color: var(--ink-faint);
+      }
+
+      .dayone {
+        display: grid;
+        grid-template-columns: 210px 1fr;
+        min-height: 680px;
+      }
+
+      .rail {
+        padding: 18px 12px;
+        border-right: 1px solid var(--line);
+        background: rgba(244, 241, 234, 0.58);
+      }
+
+      .rail__title {
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: white;
+      }
+
+      .rail__title b,
+      .rail__title span {
+        display: block;
+      }
+
+      .rail__title span {
+        color: var(--ink-faint);
+        font: 400 9px var(--mono);
+      }
+
+      .rail nav {
+        margin-top: 18px;
+      }
+
+      .rail nav div {
+        display: flex;
+        padding: 7px 9px;
+        border-radius: 7px;
+        color: var(--ink-soft);
+        font-size: 12px;
+      }
+
+      .rail nav div.active {
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.82);
+        font-weight: 600;
+      }
+
+      .dayone__main {
+        padding: 42px;
+      }
+
+      .dayone__main h3 {
+        margin: 0;
+        font-family: var(--display);
+        font-size: 40px;
+        font-weight: 500;
+        letter-spacing: -0.04em;
+      }
+
+      .dayone__main > p {
+        max-width: 650px;
+        color: var(--ink-soft);
+      }
+
+      .cta-row {
+        display: flex;
+        gap: 10px;
+        margin: 22px 0;
+      }
+
+      .inherit-card {
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 20px;
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 15px;
+        background: rgba(255, 255, 255, 0.68);
+      }
+
+      .faces {
+        display: flex;
+        gap: 7px;
+      }
+
+      .faces img {
+        width: 44px;
+        height: 54px;
+        border: 1px solid rgba(255, 255, 255, 0.7);
+        border-radius: 7px;
+        object-fit: cover;
+      }
+
+      .inherit-card__facts {
+        display: flex;
+        flex-wrap: wrap;
+        align-content: flex-start;
+        gap: 6px;
+      }
+
+      .seed-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        margin-top: 20px;
+      }
+
+      .seed {
+        min-height: 142px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        background: white;
+      }
+
+      .seed .eyebrow {
+        color: var(--ink-faint);
+        font-size: 9px;
+      }
+
+      .seed b {
+        display: block;
+        margin-top: 15px;
+        font-family: var(--display);
+        font-size: 19px;
+        font-weight: 500;
+      }
+
+      .seed p {
+        margin: 6px 0 0;
+        color: var(--ink-soft);
+        font-size: 11px;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: 0.95fr 1.05fr;
+        min-height: 760px;
+      }
+
+      .chat {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        border-right: 1px solid var(--line);
+      }
+
+      .chat__head,
+      .railhead {
+        padding: 22px 24px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .chat__head h3,
+      .railhead h3 {
+        margin: 4px 0 0;
+        font-family: var(--display);
+        font-size: 27px;
+        font-weight: 500;
+      }
+
+      .chatlog {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        gap: 12px;
+        padding: 24px;
+        background:
+          linear-gradient(rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.72)),
+          radial-gradient(circle at 20% 20%, var(--coral-soft), transparent 24rem);
+      }
+
+      .bubble {
+        max-width: 78%;
+        padding: 12px 14px;
+        border-radius: 14px;
+        font-size: 13px;
+      }
+
+      .bubble.user {
+        align-self: flex-end;
+        border-bottom-right-radius: 4px;
+        background: var(--ink);
+        color: white;
+      }
+
+      .bubble.studio {
+        align-self: flex-start;
+        border-bottom-left-radius: 4px;
+        background: white;
+        box-shadow: var(--shadow-small);
+      }
+
+      .receipt {
+        margin-top: 8px;
+        color: var(--ink-faint);
+        font: 400 9px/1.5 var(--mono);
+      }
+
+      .composer {
+        margin: 0 20px 20px;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: white;
+        box-shadow: var(--shadow-small);
+        color: var(--ink-faint);
+        font-size: 12px;
+      }
+
+      .storyrail {
+        min-width: 0;
+        background: rgba(244, 241, 234, 0.52);
+      }
+
+      .rail-tabs {
+        display: flex;
+        gap: 5px;
+        margin-top: 12px;
+      }
+
+      .rail-tabs span {
+        padding: 5px 10px;
+        border-radius: 999px;
+        color: var(--ink-faint);
+        font-size: 10px;
+      }
+
+      .rail-tabs .active {
+        background: var(--ink);
+        color: white;
+      }
+
+      .episode-board {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        padding: 20px;
+      }
+
+      .episode {
+        position: relative;
+        min-height: 198px;
+        padding: 15px;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        background: white;
+        box-shadow: 0 8px 24px rgba(30, 25, 18, 0.06);
+      }
+
+      .episode.active {
+        border-color: var(--coral);
+        box-shadow: inset 0 0 0 1px var(--coral);
+      }
+
+      .episode__top {
+        display: flex;
+        justify-content: space-between;
+        color: var(--ink-faint);
+        font: 600 9px var(--mono);
+      }
+
+      .episode h4 {
+        margin: 14px 0 6px;
+        font-family: var(--display);
+        font-size: 21px;
+        font-weight: 500;
+      }
+
+      .episode p {
+        color: var(--ink-soft);
+        font-size: 10.5px;
+      }
+
+      .beat {
+        margin-top: 8px;
+        padding: 7px 8px;
+        border-left: 2px solid var(--teal);
+        background: rgba(45, 123, 122, 0.07);
+        font-size: 10px;
+      }
+
+      .beat.cliff {
+        border-color: var(--coral);
+        background: rgba(236, 106, 74, 0.08);
+      }
+
+      .episode-health {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        padding: 0 20px 20px;
+      }
+
+      .proposal-strip {
+        margin: 0 20px 20px;
+        padding: 13px 14px;
+        border: 1px solid var(--coral);
+        border-radius: 12px;
+        background: #fff5ef;
+      }
+
+      .proposal-strip__head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .proposal-strip__head span {
+        margin-left: auto;
+        color: #8d3926;
+        font: 500 9px var(--mono);
+      }
+
+      .proposal-strip ul {
+        margin: 8px 0 10px;
+        padding-left: 18px;
+        color: var(--ink-soft);
+        font-size: 10.5px;
+      }
+
+      .proposal-strip__actions {
+        display: flex;
+        gap: 7px;
+      }
+
+      .mini-btn {
+        display: inline-flex;
+        align-items: center;
+        min-height: 29px;
+        padding: 0 10px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: white;
+        font-size: 10px;
+        font-weight: 600;
+      }
+
+      .mini-btn.primary {
+        border-color: var(--ink);
+        background: var(--ink);
+        color: white;
+      }
+
+      .metric {
+        padding: 10px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .metric b,
+      .metric span {
+        display: block;
+      }
+
+      .metric b {
+        font-size: 18px;
+      }
+
+      .metric span {
+        color: var(--ink-faint);
+        font: 400 8.5px var(--mono);
+        text-transform: uppercase;
+      }
+
+      .hierarchy {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 30px;
+      }
+
+      .hierarchy-card {
+        position: relative;
+        min-height: 220px;
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: var(--card-solid);
+        box-shadow: var(--shadow-small);
+      }
+
+      .hierarchy-card::after {
+        content: ">";
+        position: absolute;
+        top: 50%;
+        left: calc(100% + 3px);
+        z-index: 2;
+        color: var(--ink-faint);
+        font: 500 20px var(--mono);
+        transform: translateY(-50%);
+      }
+
+      .hierarchy-card:last-child::after {
+        display: none;
+      }
+
+      .hierarchy-card.active {
+        border-color: var(--coral);
+        background: #fff5ef;
+      }
+
+      .hierarchy-card h3 {
+        margin: 38px 0 8px;
+        font-family: var(--display);
+        font-size: 25px;
+        font-weight: 540;
+        letter-spacing: -0.025em;
+      }
+
+      .hierarchy-card p {
+        margin: 0;
+        color: var(--ink-soft);
+        font-size: 12px;
+      }
+
+      .hierarchy-card ul {
+        margin: 12px 0 0;
+        padding-left: 17px;
+        color: var(--ink-soft);
+        font-size: 10.5px;
+      }
+
+      .arc-grid {
+        margin-top: 20px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: white;
+      }
+
+      .arc-grid table {
+        margin: 0;
+        table-layout: fixed;
+      }
+
+      .arc-grid td:first-child {
+        font-weight: 700;
+      }
+
+      .arc-grid .setup {
+        background: rgba(45, 123, 122, 0.08);
+      }
+
+      .arc-grid .turn {
+        background: rgba(200, 141, 50, 0.1);
+      }
+
+      .arc-grid .payoff {
+        background: rgba(236, 106, 74, 0.11);
+      }
+
+      .scene-workspace {
+        display: grid;
+        grid-template-columns: 0.85fr 1.15fr;
+        min-height: 690px;
+      }
+
+      .script-pane {
+        padding: 26px;
+        border-right: 1px solid var(--line);
+        background: #f9f7f1;
+      }
+
+      .script-pane h3,
+      .coverage-pane h3 {
+        margin: 6px 0 5px;
+        font-family: var(--display);
+        font-size: 28px;
+        font-weight: 540;
+      }
+
+      .script-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 12px 0 18px;
+      }
+
+      .script-page {
+        min-height: 485px;
+        padding: 28px 34px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background: white;
+        box-shadow: var(--shadow-small);
+        font: 400 12px/1.65 var(--mono);
+      }
+
+      .script-page .slugline {
+        font-weight: 700;
+      }
+
+      .script-page .character {
+        margin: 18px 0 0 34%;
+        font-weight: 700;
+      }
+
+      .script-page .dialogue {
+        width: 58%;
+        margin: 2px auto 0;
+      }
+
+      .script-block {
+        margin: 10px -8px 0;
+        padding: 4px 8px;
+        border-radius: 5px;
+      }
+
+      .script-block.covered {
+        background: rgba(45, 123, 122, 0.08);
+      }
+
+      .coverage-pane {
+        min-width: 0;
+        padding: 26px;
+      }
+
+      .coverage-tabs {
+        display: flex;
+        gap: 5px;
+        margin: 14px 0;
+      }
+
+      .coverage-tabs span {
+        padding: 5px 10px;
+        border-radius: 999px;
+        color: var(--ink-faint);
+        font-size: 10px;
+      }
+
+      .coverage-tabs .active {
+        background: var(--ink);
+        color: white;
+      }
+
+      .shot-strip {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(150px, 1fr));
+        gap: 10px;
+        overflow-x: auto;
+      }
+
+      .shot-card {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: white;
+      }
+
+      .shot-frame {
+        height: 128px;
+        background: #d9d4ca;
+      }
+
+      .shot-frame img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .shot-card__body {
+        padding: 11px;
+      }
+
+      .shot-card__body b {
+        display: block;
+        font-size: 11px;
+      }
+
+      .shot-card__body p {
+        margin: 5px 0 0;
+        color: var(--ink-soft);
+        font-size: 9.5px;
+      }
+
+      .shot-card__body span {
+        display: block;
+        margin-top: 8px;
+        color: var(--ink-faint);
+        font: 400 8.5px var(--mono);
+      }
+
+      .coverage-check {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      .coverage-check div {
+        padding: 10px;
+        border-radius: 10px;
+        background: rgba(45, 123, 122, 0.07);
+        font-size: 10px;
+      }
+
+      .pass-planner {
+        display: grid;
+        grid-template-columns: 0.58fr 1.42fr;
+        min-height: 680px;
+      }
+
+      .model-panel {
+        padding: 26px;
+        border-right: 1px solid var(--line);
+        background: #f7f4ee;
+      }
+
+      .model-card {
+        margin-top: 14px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: white;
+      }
+
+      .model-card.active {
+        border-color: var(--ink);
+        box-shadow: inset 0 0 0 1px var(--ink);
+      }
+
+      .model-card b,
+      .model-card span {
+        display: block;
+      }
+
+      .model-card span {
+        margin-top: 4px;
+        color: var(--ink-soft);
+        font: 400 9.5px/1.5 var(--mono);
+      }
+
+      .policy {
+        margin-top: 16px;
+        padding: 13px;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        background: rgba(255, 255, 255, 0.7);
+      }
+
+      .policy b {
+        display: block;
+        font-size: 11px;
+      }
+
+      .policy p {
+        margin: 4px 0 0;
+        color: var(--ink-soft);
+        font-size: 10px;
+      }
+
+      .passes {
+        min-width: 0;
+        padding: 26px;
+      }
+
+      .pass-summary {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+
+      .pass-summary h3 {
+        margin: 0;
+        font-family: var(--display);
+        font-size: 28px;
+        font-weight: 540;
+      }
+
+      .pass-summary span {
+        color: var(--ink-faint);
+        font: 400 10px var(--mono);
+      }
+
+      .pass-card {
+        margin-top: 14px;
+        padding: 15px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: white;
+        box-shadow: var(--shadow-small);
+      }
+
+      .pass-card__head {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+
+      .pass-card__head b {
+        font-size: 12px;
+      }
+
+      .pass-card__head span {
+        margin-left: auto;
+        color: var(--ink-faint);
+        font: 400 9px var(--mono);
+      }
+
+      .pass-panels {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(110px, 1fr));
+        gap: 7px;
+        margin-top: 11px;
+      }
+
+      .pass-panel {
+        min-height: 82px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #eee9e0;
+      }
+
+      .pass-panel img {
+        width: 100%;
+        height: 58px;
+        object-fit: cover;
+      }
+
+      .pass-panel span {
+        display: block;
+        padding: 4px 6px;
+        font: 500 8px var(--mono);
+      }
+
+      .pass-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 10px;
+      }
+
+      .pass-meta span {
+        padding: 3px 7px;
+        border-radius: 999px;
+        background: rgba(45, 123, 122, 0.07);
+        color: var(--ink-soft);
+        font-size: 9px;
+      }
+
+      .graph-wrap {
+        position: relative;
+        min-height: 680px;
+        margin-top: 30px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background:
+          radial-gradient(circle, rgba(23, 23, 21, 0.14) 1px, transparent 1px), rgba(255, 255, 255, 0.72);
+        background-size: 22px 22px;
+        box-shadow: var(--shadow);
+      }
+
+      .graph__legend {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        z-index: 4;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .graph__legend span {
+        padding: 5px 8px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.9);
+        color: var(--ink-soft);
+        font-size: 9px;
+      }
+
+      .graph {
+        position: relative;
+        width: 1050px;
+        min-width: 820px;
+        height: 620px;
+        margin: 36px auto 0;
+      }
+
+      .graph svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      .node {
+        position: absolute;
+        width: 166px;
+        min-height: 80px;
+        padding: 11px 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: 11px;
+        background: white;
+        box-shadow: var(--shadow-small);
+      }
+
+      .node.choice {
+        width: 150px;
+        min-height: 54px;
+        border-radius: 999px;
+      }
+
+      .node.ending {
+        background: var(--night);
+        color: white;
+      }
+
+      .node.broken {
+        border-color: var(--red);
+        border-style: dashed;
+      }
+
+      .node small {
+        color: var(--ink-faint);
+        font: 600 8.5px var(--mono);
+        text-transform: uppercase;
+      }
+
+      .node.ending small {
+        color: rgba(255, 255, 255, 0.55);
+      }
+
+      .node b {
+        display: block;
+        margin-top: 4px;
+        font-size: 12px;
+      }
+
+      .node p {
+        margin: 3px 0 0;
+        color: var(--ink-soft);
+        font-size: 9px;
+      }
+
+      .node.ending p {
+        color: rgba(255, 255, 255, 0.58);
+      }
+
+      .n1 {
+        top: 42px;
+        left: 442px;
+      }
+
+      .n2 {
+        top: 155px;
+        left: 442px;
+      }
+
+      .n3 {
+        top: 268px;
+        left: 450px;
+      }
+
+      .n4 {
+        top: 376px;
+        left: 205px;
+      }
+
+      .n5 {
+        top: 376px;
+        right: 205px;
+      }
+
+      .n6 {
+        bottom: 56px;
+        left: 205px;
+      }
+
+      .n7 {
+        bottom: 56px;
+        right: 205px;
+      }
+
+      .implementation {
+        display: grid;
+        grid-template-columns: 0.9fr 1.1fr;
+        gap: 26px;
+        margin-top: 30px;
+      }
+
+      .source-table,
+      .roadmap {
+        padding: 26px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--card);
+      }
+
+      .source-table h3,
+      .roadmap h3 {
+        margin: 0 0 14px;
+        font-family: var(--display);
+        font-size: 29px;
+        font-weight: 500;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+
+      th,
+      td {
+        padding: 10px 8px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        color: var(--ink-faint);
+        font: 600 9px var(--mono);
+        text-transform: uppercase;
+      }
+
+      .roadmap ol {
+        margin: 0;
+        padding-left: 22px;
+      }
+
+      .roadmap li {
+        margin: 0 0 14px;
+        padding-left: 8px;
+      }
+
+      .roadmap b {
+        display: block;
+        margin-bottom: 2px;
+      }
+
+      .roadmap span {
+        color: var(--ink-soft);
+        font-size: 12px;
+      }
+
+      .callout {
+        display: grid;
+        grid-template-columns: 0.35fr 1fr;
+        gap: 34px;
+        margin-top: 30px;
+        padding: 34px;
+        border-radius: 20px;
+        background: var(--night);
+        color: white;
+      }
+
+      .callout strong {
+        font-family: var(--display);
+        font-size: 34px;
+        font-weight: 500;
+        line-height: 1.08;
+      }
+
+      .callout p {
+        margin: 0;
+        color: rgba(255, 255, 255, 0.68);
+        font-size: 16px;
+      }
+
+      .reference {
+        display: grid;
+        grid-template-columns: 1fr 0.62fr;
+        gap: 16px;
+        margin-top: 30px;
+      }
+
+      .reference figure {
+        margin: 0;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: white;
+      }
+
+      .reference img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .reference figcaption {
+        padding: 12px 15px;
+        border-top: 1px solid var(--line);
+        color: var(--ink-soft);
+        font-size: 11px;
+      }
+
+      .graph-summary {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      .footer {
+        margin-top: 112px;
+        padding: 28px 0 70px;
+        border-top: 1px solid var(--line);
+        color: var(--ink-faint);
+        font-size: 12px;
+      }
+
+      .fade {
+        animation: rise 0.7s ease both;
+      }
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(12px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (max-width: 1100px) {
+        .hero__rule,
+        .thesis,
+        .defaults,
+        .episode-health {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .scope-stack {
+          grid-template-columns: 1fr 38px 1fr;
+        }
+
+        .scope-card:nth-of-type(3),
+        .scope-card:nth-of-type(4) {
+          margin-top: 12px;
+        }
+
+        .create-screen,
+        .workspace,
+        .implementation,
+        .reference {
+          grid-template-columns: 1fr;
+        }
+
+        .create-screen__art {
+          min-height: 430px;
+        }
+
+        .chat {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .graph-wrap {
+          overflow-x: auto;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .shell {
+          width: min(100% - 22px, 1440px);
+        }
+
+        .topbar {
+          align-items: flex-start;
+          flex-wrap: wrap;
+        }
+
+        .topmeta {
+          display: none;
+        }
+
+        .toc {
+          order: 3;
+          width: 100%;
+        }
+
+        .hero,
+        .hero__copy {
+          min-height: 680px;
+        }
+
+        .hero__copy {
+          padding: 32px 24px;
+        }
+
+        h1 {
+          font-size: 52px;
+        }
+
+        .hero__rule,
+        .thesis,
+        .section__head,
+        .scope-stack,
+        .hierarchy,
+        .choice-grid,
+        .defaults,
+        .dayone,
+        .inherit-card,
+        .seed-grid,
+        .episode-board,
+        .episode-health,
+        .scene-workspace,
+        .pass-planner,
+        .coverage-check,
+        .callout {
+          grid-template-columns: 1fr;
+        }
+
+        .arrow {
+          transform: rotate(90deg);
+        }
+
+        .section {
+          padding-top: 78px;
+        }
+
+        .section__head {
+          gap: 18px;
+        }
+
+        .section__head h2 {
+          font-size: 42px;
+        }
+
+        .create-form,
+        .dayone__main {
+          padding: 24px;
+        }
+
+        .rail {
+          display: none;
+        }
+
+        .episode-board {
+          padding: 14px;
+        }
+
+        .hierarchy-card::after {
+          top: calc(100% + 2px);
+          left: 50%;
+          transform: translateX(-50%) rotate(90deg);
+        }
+
+        .script-pane {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .shot-strip,
+        .pass-panels {
+          grid-template-columns: repeat(4, minmax(150px, 1fr));
+        }
+
+        .model-panel {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .graph-wrap {
+          overflow-x: auto;
+        }
+
+        .callout {
+          gap: 14px;
+        }
+      }
+
+      @media print {
+        body {
+          background: white;
+        }
+
+        .topbar {
+          position: static;
+        }
+
+        .hero,
+        .visual,
+        .graph-wrap {
+          break-inside: avoid;
+          box-shadow: none;
+        }
+
+        .section {
+          break-before: page;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar shell">
+      <div class="brand"><strong>Arke</strong><span>Studio</span></div>
+      <nav class="toc" aria-label="On this page">
+        <a href="#grounding">Grounding</a>
+        <a href="#journey">Journey</a>
+        <a href="#create">Create</a>
+        <a href="#day-one">Day one</a>
+        <a href="#hierarchy">Series to episode</a>
+        <a href="#workspace">Story workspace</a>
+        <a href="#scene-pipeline">Scene to video</a>
+        <a href="#graph">Graph</a>
+        <a href="#architecture">Architecture</a>
+      </nav>
+      <div class="topmeta">feature brief / production story workspace / 2026-08-04</div>
+    </header>
+
+    <main class="shell">
+      <section class="hero fade" id="top">
+        <img
+          class="hero__image"
+          src="../../design-system/assets/banner-video.png"
+          alt="A film camera on a storm-dark pier"
+        />
+        <div class="hero__copy">
+          <div class="eyebrow">A production-scoped creative workspace</div>
+          <h1>Build the world. Then direct the story.</h1>
+          <p class="hero__lede">
+            World Chat explores what may belong in the world; explicit review and the accept gate decide what
+            becomes true. The production Story workspace explores what this film, series, or micro-drama does
+            with accepted world truth. Conversation stays close to the work without becoming another source of
+            truth.
+          </p>
+          <div class="hero__rule" aria-label="Core source-of-truth hierarchy">
+            <div><b>World</b><span>Canon, sheets, art direction</span></div>
+            <div><b>Series / Season</b><span>Engine, arcs, episode map</span></div>
+            <div><b>Scene</b><span>Script, shots, boards, passes</span></div>
+            <div><b>Generate</b><span>Jobs, takes, review, selections</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="grounding">
+        <div class="section__head">
+          <div>
+            <div class="eyebrow">Grounded in what Arke already says</div>
+            <h2>Not a new product. A missing bridge.</h2>
+          </div>
+          <p>
+            The design prototype already establishes the flow: create a production, land on Day One, shape the
+            story in a conversation beside a structured draft, then draft scenes through chat. The current
+            application implements the shells, but the authoring bridge is incomplete. This feature connects
+            those approved ideas and extends them carefully for serial video and micro-drama work.
+          </p>
+        </div>
+
+        <div class="thesis">
+          <article class="thesis__card">
+            <span class="number">01 / CURRENT CODE</span>
+            <h3>Day One already exists.</h3>
+            <p>
+              The production dashboard already inherits cast, Canon, and tone, and offers a first-scene path.
+              Creation simply does not navigate there yet, and the Story composer is still visual scaffolding.
+            </p>
+          </article>
+          <article class="thesis__card">
+            <span class="number">02 / APPROVED PROTOTYPE</span>
+            <h3>Story is already conversational.</h3>
+            <p>
+              Prototype frame 10b puts "Find the spine together" beside an Overview draft. Frame 9a does the
+              same for scenes. The proposal holds staged work; accepted production files become authoritative
+              only after a separate review and Accept action.
+            </p>
+          </article>
+          <article class="thesis__card">
+            <span class="number">03 / AGREED EXTENSION</span>
+            <h3>Series, seasons, and progressive detail.</h3>
+            <p>
+              Micro-drama remains a Video profile. One Series can hold several Season productions; users begin
+              with Season 1 and see only the episode board until later seasons or genuine branches make deeper
+              structure useful.
+            </p>
+          </article>
+        </div>
+
+        <div class="callout">
+          <strong>The distinction that keeps the experience coherent.</strong>
+          <p>
+            World Chat asks, "What belongs to this world?" The Story workspace can move between Series,
+            Season, and Episode scope. Scene chat asks, "What happens in this moment, and how should it be
+            covered?" Generate permits shot-local prompt overrides and explicit dispatch, but it cannot mutate
+            Canon, the season architecture, or scene script. The interfaces may share a conversation
+            framework, but their scopes and candidate types are different.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="journey">
+        <div class="section__head">
+          <div>
+            <div class="eyebrow">The whole journey</div>
+            <h2>One creative line, several clear scopes.</h2>
+          </div>
+          <p>
+            The creator should never wonder which chat they are in or what it is allowed to change. The
+            selected world, production, episode, and scene are always visible. World-level discoveries can
+            surface from production work, but they cross into the world only as separately reviewed
+            candidates.
+          </p>
+        </div>
+
+        <div class="flowmap" aria-label="Arke production journey">
+          <div class="flowstep">
+            <span class="number">WORLD</span><b>Build shared truth</b
+            ><span>Characters, places, Canon, look</span>
+          </div>
+          <div class="flowstep">
+            <span class="number">CREATE</span><b>Choose output</b><span>Video + micro-drama profile</span>
+          </div>
+          <div class="flowstep flowstep--accent">
+            <span class="number">DAY ONE</span><b>Inherit the world</b
+            ><span>Seeds, cast, tone, first move</span>
+          </div>
+          <div class="flowstep flowstep--accent">
+            <span class="number">STORY</span><b>Shape the season</b><span>Engine, arcs, episode cards</span>
+          </div>
+          <div class="flowstep">
+            <span class="number">EPISODE</span><b>Break the episode</b
+            ><span>Hook, turn, cliffhanger, beats</span>
+          </div>
+          <div class="flowstep">
+            <span class="number">SCENE</span><b>Script and cover</b
+            ><span>Script, shots, editorial board</span>
+          </div>
+          <div class="flowstep">
+            <span class="number">GENERATE</span><b>Pack and execute</b
+            ><span>Pass storyboards, takes, cut</span>
+          </div>
+        </div>
+
+        <div class="scope-stack">
+          <article class="scope-card">
+            <span class="eyebrow">World scope</span>
+            <h3>World Chat</h3>
+            <p>Explores and proposes:</p>
+            <ul>
+              <li>Canon and open questions</li>
+              <li>Characters, locations, factions</li>
+              <li>Canon, sheet, and media opportunities defined by issue #70</li>
+            </ul>
+          </article>
+          <div class="arrow">&rarr;</div>
+          <article class="scope-card">
+            <span class="eyebrow">Production scope</span>
+            <h3>Series / Season story</h3>
+            <p>Explores and proposes:</p>
+            <ul>
+              <li>Series engine and recurring continuity</li>
+              <li>Season premise, arcs, ending, episode map</li>
+              <li>Production-only continuity</li>
+            </ul>
+          </article>
+          <div class="arrow">&rarr;</div>
+          <article class="scope-card">
+            <span class="eyebrow">Scene scope</span>
+            <h3>Episode / Scene thread</h3>
+            <p>Explores and proposes:</p>
+            <ul>
+              <li>Episode cards, beats, outline, scene script</li>
+              <li>Shot coverage and editorial storyboard</li>
+              <li>Camera and audio direction</li>
+              <li>Dialogue and timing</li>
+            </ul>
+          </article>
+          <div class="arrow">&rarr;</div>
+          <article class="scope-card">
+            <span class="eyebrow">Operational scope</span>
+            <h3>Generate</h3>
+            <p>Packs and executes:</p>
+            <ul>
+              <li>Assembled or explicitly overridden shot prompt</li>
+              <li>Model-aware scene passes and generation storyboards</li>
+              <li>Explicit warnings, estimate, durable jobs, takes, and review</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="create">
+        <div class="section__head">
+          <div>
+            <div class="eyebrow">Step one</div>
+            <h2>Create the right kind of production.</h2>
+          </div>
+          <p>
+            Format remains the major output family. Profile sits beneath it and tunes defaults without
+            creating parallel models. A micro-drama is still Video: it uses the same scenes, shots, takes,
+            queue, and cut as a short film.
+          </p>
+        </div>
+
+        <div class="visual">
+          <div class="visual__bar">
+            <i class="dot"></i><i class="dot"></i><i class="dot"></i
+            ><span>Concept screen - final SpecOne product frame still requires design approval</span>
+          </div>
+          <div class="create-screen">
+            <div class="create-screen__art">
+              <img
+                src="../../design-system/assets/banner-video.png"
+                alt="Storm-lit film production imagery"
+              />
+              <div class="create-screen__caption">
+                <h3>Video</h3>
+                <p>Boards and shots, generated with the same cast, Canon, and look the world already owns.</p>
+              </div>
+            </div>
+            <div class="create-form">
+              <div class="eyebrow">New production / step 2 of 2</div>
+              <h3>What kind of video?</h3>
+              <p>
+                Profiles set useful defaults. The values below are proposed product decisions, not current
+                persisted fields.
+              </p>
+              <div class="choice-grid">
+                <div class="choice"><b>Short film</b><span>One linear work, scenes into a cut.</span></div>
+                <div class="choice">
+                  <b>Music video</b><span>Music-led timing, visual motifs, performance.</span>
+                </div>
+                <div class="choice active">
+                  <b>Micro-drama series</b
+                  ><span>Creates the Series foundation and a Season 1 Video production together.</span>
+                </div>
+              </div>
+              <div class="field">
+                <div class="field-label" id="title-label">Series title</div>
+                <div class="input" role="textbox" aria-labelledby="title-label">Wrong Era</div>
+              </div>
+              <div class="field">
+                <div class="field-label" id="idea-label">Tell Arke the idea as you would tell a friend</div>
+                <div class="textarea" role="textbox" aria-labelledby="idea-label">
+                  A time traveller keeps getting sent to the wrong era because her new dispatcher cheated
+                  through academy. Seven short episodes. Every mistake should force her deeper into the place
+                  she was told not to touch.
+                </div>
+              </div>
+              <div class="profile-row">
+                <span class="chip active">9:16 vertical</span>
+                <span class="chip active">7 episodes</span>
+                <span class="chip active">45-75s each</span>
+                <span class="chip active">hook in 3s</span>
+                <span class="chip active">cliffhanger required</span>
+              </div>
+              <div class="defaults">
+                <div class="default"><b>Recurring cast</b><span>small / reusable</span></div>
+                <div class="default"><b>Locations</b><span>reuse before expand</span></div>
+                <div class="default"><b>Export</b><span>shorts + tiktok</span></div>
+                <div class="default"><b>Story view</b><span>episode board first</span></div>
+              </div>
+              <div class="screen-note">
+                <span class="btn">Create Series + Season 1</span
+                ><small>Opens Season 1 Day One. Nothing generates yet.</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="day-one">
+        <div class="section__head">
+          <div>
+            <div class="eyebrow">Step two</div>
+            <h2>Day One is still home.</h2>
+          </div>
+          <p>
+            This is directly grounded in prototype frame 33a and the current dashboard. A new production
+            should open here, not return to the productions list and not drop the creator into an empty graph.
+            The world arrives first; the profile adds production-specific next actions.
+          </p>
+        </div>
+
+        <div class="visual">
+          <div class="visual__bar">
+            <i class="dot"></i><i class="dot"></i><i class="dot"></i
+            ><span>Concept screen built from prototype 33a Day One</span>
+          </div>
+          <div class="dayone">
+            <aside class="rail">
+              <div class="rail__title"><b>Wrong Era</b><span>video / micro-drama / day one</span></div>
+              <nav>
+                <div class="active">Dashboard</div>
+                <div>Story <span style="margin-left: auto">-</span></div>
+                <div>Scenes <span style="margin-left: auto">0</span></div>
+                <div>Generate <span style="margin-left: auto">0</span></div>
+                <div>Cut <span style="margin-left: auto">0:00</span></div>
+                <div>Audio <span style="margin-left: auto">0</span></div>
+                <div>Exports <span style="margin-left: auto">0</span></div>
+              </nav>
+            </aside>
+            <div class="dayone__main">
+              <div class="eyebrow">Wrong Era / Season 1 / the first creative decision</div>
+              <h3>Day one. The world walked in with you.</h3>
+              <p>
+                Nothing has been generated. The world is already here, and the micro-drama profile knows what
+                a useful first conversation looks like.
+              </p>
+              <div class="cta-row">
+                <span class="btn">Shape Season 1</span><span class="btn secondary">Draft episode one</span>
+              </div>
+              <div class="inherit-card">
+                <div>
+                  <div class="eyebrow">Arrives with the world</div>
+                  <div class="faces" style="margin-top: 12px">
+                    <img src="../../design-system/assets/char-maren.png" alt="Character reference" />
+                    <img src="../../design-system/assets/char-odile.png" alt="Character reference" />
+                    <img src="../../design-system/assets/char-sereth.png" alt="Character reference" />
+                    <img src="../../design-system/assets/char-bray.png" alt="Character reference" />
+                  </div>
+                </div>
+                <div class="inherit-card__facts">
+                  <span class="chip">41 Canon entries</span><span class="chip">4 locations</span
+                  ><span class="chip">Tone / dry bureaucratic sci-fi</span
+                  ><span class="chip">Art direction v3</span>
+                </div>
+              </div>
+              <div class="seed-grid">
+                <article class="seed">
+                  <span class="eyebrow">Proposed profile prompt</span
+                  ><b>What is the fastest possible hook?</b>
+                  <p>A new micro-drama profile could add this production-scoped starting prompt.</p>
+                </article>
+                <article class="seed">
+                  <span class="eyebrow">World thread</span><b>Who governs temporal mistakes?</b>
+                  <p>A world fact if accepted; a production question until then.</p>
+                </article>
+                <article class="seed">
+                  <span class="eyebrow">From another production</span><b>The failed jump nobody followed</b>
+                  <p>Grounded in SPEC-012's uncovered-work seed source, not a duplicate planning document.</p>
+                </article>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="hierarchy">
+        <div class="section__head">
+          <div>
+            <div class="eyebrow">The simplified professional hierarchy</div>
+            <h2>Keep the depth. Reveal only the next useful level.</h2>
+          </div>
+          <p>
+            Arke stores the hierarchy that makes a long-running series coherent, but the user mainly moves
+            through three creative workspaces: Season board, Episode workspace, and Scene workspace. Creating
+            the first micro-drama creates the Series and Season 1 together. Series management becomes
+            prominent only when Season 2 exists.
+          </p>
+        </div>
+
+        <div class="hierarchy" aria-label="Series to shot hierarchy">
+          <article class="hierarchy-card">
+            <span class="number">SERIES</span>
+            <h3>Why it keeps going</h3>
+            <p>The durable foundation across seasons.</p>
+            <ul>
+              <li>premise and repeatable engine</li>
+              <li>recurring cast and continuity</li>
+              <li>long-range promise</li>
+            </ul>
+          </article>
+          <article class="hierarchy-card active">
+            <span class="number">SEASON 1 / PRODUCTION</span>
+            <h3>What changes this season</h3>
+            <p>The main production and Story workspace scope.</p>
+            <ul>
+              <li>season question and ending state</li>
+              <li>arc lanes and reversals</li>
+              <li>episode map and direction</li>
+            </ul>
+          </article>
+          <article class="hierarchy-card">
+            <span class="number">EPISODE</span>
+            <h3>One audience promise</h3>
+            <p>A meaningful card, never an empty slot.</p>
+            <ul>
+              <li>opening, turn, closing state</li>
+              <li>hook and cliffhanger</li>
+              <li>arcs, setups, payoffs</li>
+            </ul>
+          </article>
+          <article class="hierarchy-card">
+            <span class="number">SCENE</span>
+            <h3>What happens and is said</h3>
+            <p>Script first, coverage second.</p>
+            <ul>
+              <li>scene heading, action, dialogue</li>
+              <li>dramatic turn and exit state</li>
+              <li>accepted shot plan</li>
+            </ul>
+          </article>
+          <article class="hierarchy-card">
+            <span class="number">SHOT</span>
+            <h3>How it is filmed</h3>
+            <p>The review and generation unit.</p>
+            <ul>
+              <li>script coverage</li>
+              <li>camera, audio, duration</li>
+              <li>frame, takes, selection</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="callout">
+          <strong>The hierarchy is not a folder tree.</strong>
+          <p>
+            Character arcs, storylines, setups, and payoffs cross episode boundaries. Beats may be realized by
+            several scenes. In micro-drama, a release episode may even cut through one continuous production
+            scene. Arke stores stable links and derives views instead of forcing every creative idea into one
+            parent-child container.
+          </p>
+        </div>
+
+        <div class="arc-grid" aria-label="Season arc grid across episodes">
+          <table>
+            <thead>
+              <tr>
+                <th>Season lane</th>
+                <th>Episode 1</th>
+                <th>Episode 2</th>
+                <th>Episode 3</th>
+                <th>Episode 4</th>
+                <th>Episode 5</th>
+                <th>Episode 6</th>
+                <th>Episode 7 / Finale</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Lola gets home</td>
+                <td class="setup">first wrong jump</td>
+                <td>trapped in history</td>
+                <td>wrong retrieval</td>
+                <td class="turn">chooses to intervene</td>
+                <td>arena setback</td>
+                <td>route home opens</td>
+                <td class="payoff">returns changed</td>
+              </tr>
+              <tr>
+                <td>Eddie becomes capable</td>
+                <td class="setup">failure</td>
+                <td>spots a pattern</td>
+                <td>one small win</td>
+                <td class="turn">discovers sabotage</td>
+                <td>risk becomes personal</td>
+                <td>acts without the manual</td>
+                <td class="payoff">acts deliberately</td>
+              </tr>
+              <tr>
+                <td>The system is manipulated</td>
+                <td class="setup">odd console trace</td>
+                <td>second anomaly</td>
+                <td>signal splits</td>
+                <td class="turn">operator revealed</td>
+                <td>sabotage escalates</td>
+                <td>false resolution</td>
+                <td class="payoff">ending twist earned</td>
+              </tr>
+              <tr>
+                <td>Production pressure</td>
+                <td>launch bay</td>
+                <td>London street</td>
+                <td>launch bay reuse</td>
+                <td>one new era</td>
+                <td>arena + tiger</td>
+                <td>launch bay + inserts</td>
+                <td>shared sets + finale</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section" id="workspace">
+        <div class="section__head">
+          <div>
+            <div class="eyebrow">Step three</div>
+            <h2>The Story screen becomes the production workspace.</h2>
+          </div>
+          <p>
+            No separate floating "Director" product is required. The prototype's existing Story conversation
+            is the right home. It evolves from overview-only into a scoped workspace whose rail can show the
+            overview, production direction, episodes, and eventually the graph. Conversation proposes;
+            accepted production files govern.
+          </p>
+        </div>
+
+        <div class="visual">
+          <div class="visual__bar">
+            <i class="dot"></i><i class="dot"></i><i class="dot"></i
+            ><span>Concept screen built from prototype 10b Story overview</span>
+          </div>
+          <div class="workspace">
+            <div class="chat">
+              <div class="chat__head">
+                <div class="eyebrow">Story / Season 1 / micro-drama</div>
+                <h3>Find the season engine together.</h3>
+              </div>
+              <div class="chatlog">
+                <div class="bubble user">
+                  Seven episodes. Lola should land in a different era every time, but each mistake must make
+                  the next one worse. At the end Eddie learns the failures were deliberate.
+                </div>
+                <div class="bubble studio">
+                  That gives the series a clean repeatable engine and Season 1 a distinct arc. The ending
+                  twist needs earlier traces so it feels earned. I have drafted seven episode cards and three
+                  season lanes, but episode one needs context before London can work as episode two.
+                  <div class="receipt">
+                    checked: Series foundation / Lola + Eddie sheets / Season 1 ending / no world facts
+                    changed
+                  </div>
+                </div>
+                <div class="bubble user">
+                  Make episode one the dispatcher mistake. Push London to episode two. Keep the launch bay
+                  boring, like a parking garage, not glossy sci-fi.
+                </div>
+                <div class="bubble studio">
+                  I have updated the draft, not the live production: utilitarian, fluorescent, municipal.
+                  Episode one ends when the console flashes 1888. London is proposed as episode two; no scene
+                  file was overwritten.
+                  <div class="receipt">
+                    draft only: overview candidate / direction candidate / episode-order candidate / 2 scene
+                    placeholders
+                  </div>
+                </div>
+              </div>
+              <div class="composer">
+                Keep shaping Season 1... &nbsp; / &nbsp; scope: Series foundation + Season 1 + 7 episode cards
+              </div>
+            </div>
+            <aside class="storyrail">
+              <div class="railhead">
+                <div class="eyebrow">Structured season draft</div>
+                <h3>Wrong Era / Season 1</h3>
+                <div class="rail-tabs">
+                  <span>Season</span><span class="active">Episodes</span><span>Arcs</span
+                  ><span>Direction</span><span>Graph</span>
+                </div>
+              </div>
+              <div class="episode-board">
+                <article class="episode active">
+                  <div class="episode__top"><span>EP 01</span><span>58s / proposed</span></div>
+                  <h4>The manual</h4>
+                  <p>Eddie's first shift. Lola asks for two years. He enters two centuries.</p>
+                  <div class="beat">HOOK / "Wait, why are you here?"</div>
+                  <div class="beat cliff">CLIFF / 1888 flashes on the console</div>
+                </article>
+                <article class="episode">
+                  <div class="episode__top"><span>EP 02</span><span>64s / proposed</span></div>
+                  <h4>The peculiar jacket</h4>
+                  <p>Victorian London. H. G. Wells notices what no one else can explain.</p>
+                  <div class="beat">HOOK / wrong century, no communicator</div>
+                  <div class="beat cliff">CLIFF / the pickpocket steals it</div>
+                </article>
+                <article class="episode">
+                  <div class="episode__top"><span>EP 03</span><span>61s / needs payoff</span></div>
+                  <h4>The wrong return</h4>
+                  <p>Eddie finally locks a signal and brings back the pickpocket instead.</p>
+                  <div class="beat">HOOK / someone arrives in the bay</div>
+                  <div class="beat cliff">CLIFF / it is not Lola</div>
+                </article>
+                <article class="episode">
+                  <div class="episode__top"><span>EP 04</span><span>placeholder</span></div>
+                  <h4>The plague road</h4>
+                  <p>A route exists; scene intent is not yet accepted.</p>
+                </article>
+                <article class="episode">
+                  <div class="episode__top"><span>EP 05</span><span>placeholder</span></div>
+                  <h4>The arena</h4>
+                  <p>A gladiator seems impossible. Lola must engage rather than hide.</p>
+                </article>
+                <article class="episode">
+                  <div class="episode__top"><span>EP 06</span><span>placeholder</span></div>
+                  <h4>The route home</h4>
+                  <p>Eddie appears to solve the pattern, but the clean route is a trap.</p>
+                </article>
+                <article class="episode">
+                  <div class="episode__top"><span>EP 07</span><span>finale placeholder</span></div>
+                  <h4>The deliberate mistake</h4>
+                  <p>Lola returns changed; Eddie proves the failures were designed. Season 2 opens.</p>
+                  <div class="beat cliff">FINAL TURN / the real operator is still connected</div>
+                </article>
+              </div>
+              <div class="episode-health">
+                <div class="metric"><b>7</b><span>episodes</span></div>
+                <div class="metric"><b>5</b><span>hooks placed</span></div>
+                <div class="metric"><b>4</b><span>cliffhangers</span></div>
+                <div class="metric"><b>2</b><span>payoffs missing</span></div>
+              </div>
+              <div class="proposal-strip" aria-label="Detected production changes awaiting review">
+                <div class="proposal-strip__head">
+                  Detected season changes
+                  <span>profile settings accepted at creation; story changes are draft</span>
+                </div>
+                <ul>
+                  <li>Series foundation: preserve the repeatable wrong-era engine</li>
+                  <li>Season architecture: sabotage reveal, arc lanes, ending state</li>
+                  <li>Accepted profile context: vertical, 45-75 seconds, hook and cliffhanger checks</li>
+                  <li>Episode order: insert dispatcher mistake before London</li>
+                  <li>Direction: utilitarian municipal sci-fi, avoid glossy surfaces</li>
+                </ul>
+                <div class="proposal-strip__actions">
+                  <span class="mini-btn">Review fields</span><span class="mini-btn">Keep exploring</span
+                  ><span class="mini-btn primary">Stage season proposal</span>
+                </div>
+                <div class="receipt">
+                  next: review proposal diff and ripples, then Accept - staging alone changes no accepted
+                  story file
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+
+        <div class="callout">
+          <strong>Chat is the workshop, not the record.</strong>
+          <p>
+            The current accepted sources remain <code>production.json</code>, <code>story.json</code>,
+            optional treatment prose, and scene files. This brief proposes versioned production-direction and
+            graph entities; their final filenames and schemas must be specified before implementation. The
+            workspace may propose several production changes in one conversation, but none becomes
+            authoritative until staged and accepted.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="scene-pipeline">
+        <div class="section__head">
+          <div>
+            <div class="eyebrow">From episode to executable video</div>
+            <h2>Script, shots, board, then model-aware passes.</h2>
+          </div>
+          <p>
+            The episode workspace first breaks story into beats and an outline. The Scene workspace then owns
+            the script. Only after the script settles does Arke create shot coverage. The editorial scene
+            board is a free local view of those shots. At dispatch, the selected model's capabilities
+            determine how those same accepted shots are packed into one or more provider-ready generation
+            storyboards.
+          </p>
+        </div>
+
+        <div class="flowmap" aria-label="Episode to scene video pipeline">
+          <div class="flowstep">
+            <span class="number">EPISODE CARD</span><b>Story contract</b
+            ><span>opening, turn, cliffhanger, arcs</span>
+          </div>
+          <div class="flowstep">
+            <span class="number">BEAT / OUTLINE</span><b>What changes</b
+            ><span>ordered dramatic events and scene intent</span>
+          </div>
+          <div class="flowstep flowstep--accent">
+            <span class="number">SCENE SCRIPT</span><b>What happens</b
+            ><span>heading, action, dialogue, exit state</span>
+          </div>
+          <div class="flowstep flowstep--accent">
+            <span class="number">SHOT PLAN</span><b>How it is covered</b
+            ><span>script blocks, camera, audio, duration</span>
+          </div>
+          <div class="flowstep">
+            <span class="number">SCENE BOARD</span><b>How it reads visually</b
+            ><span>all shots, free and local</span>
+          </div>
+          <div class="flowstep">
+            <span class="number">PASS STORYBOARDS</span><b>What the model receives</b
+            ><span>packed by duration and transport limits</span>
+          </div>
+          <div class="flowstep">
+            <span class="number">TAKES / CUT</span><b>What came back</b
+            ><span>pass takes, shot ranges, review, selection</span>
+          </div>
+        </div>
+
+        <div class="visual">
+          <div class="visual__bar">
+            <i class="dot"></i><i class="dot"></i><i class="dot"></i
+            ><span>Concept Scene workspace - Script / Shots / Board / Takes</span>
+          </div>
+          <div class="scene-workspace">
+            <section class="script-pane">
+              <div class="eyebrow">Episode 2 / scene 3</div>
+              <h3>The peculiar jacket</h3>
+              <div class="script-meta">
+                <span class="chip">purpose / lose the communicator</span
+                ><span class="chip">enters / stranded</span><span class="chip">exits / forced to engage</span>
+              </div>
+              <div class="script-page" aria-label="Scene script with stable covered blocks">
+                <div class="slugline">EXT. WHITECHAPEL MARKET - NIGHT</div>
+                <div class="script-block covered">
+                  Lola pushes through the crowd, checking the dead communicator.
+                </div>
+                <div class="character">WELLS</div>
+                <div class="dialogue script-block covered">Your jacket is rather peculiar.</div>
+                <div class="script-block covered">She turns. A young H. G. Wells studies the seams.</div>
+                <div class="script-block covered">A BOY collides with her and disappears into the crowd.</div>
+                <div class="script-block">Lola reaches into her pocket.</div>
+                <div class="script-block">The communicator is gone.</div>
+              </div>
+            </section>
+            <section class="coverage-pane">
+              <div class="eyebrow">Accepted scene v3</div>
+              <h3>Coverage derived from the script</h3>
+              <div class="coverage-tabs">
+                <span>Script</span><span class="active">Shots</span><span>Board</span><span>Takes</span>
+              </div>
+              <div class="shot-strip">
+                <article class="shot-card">
+                  <div class="shot-frame">
+                    <img
+                      src="../../design-system/assets/drowned-quarter.png"
+                      alt="Wide market atmosphere reference"
+                    />
+                  </div>
+                  <div class="shot-card__body">
+                    <b>Shot 1 / Lola enters</b>
+                    <p>Wide tracking. Establish ordinary London before the anomaly.</p>
+                    <span>covers A01 / 4s / crowd ambience</span>
+                  </div>
+                </article>
+                <article class="shot-card">
+                  <div class="shot-frame">
+                    <img
+                      src="../../design-system/assets/char-maren.png"
+                      alt="Character close coverage reference"
+                    />
+                  </div>
+                  <div class="shot-card__body">
+                    <b>Shot 2 / Wells notices</b>
+                    <p>Medium two-shot. Hold the dialogue naturally.</p>
+                    <span>covers D01 + A02 / 6s / dialogue</span>
+                  </div>
+                </article>
+                <article class="shot-card">
+                  <div class="shot-frame">
+                    <img
+                      src="../../design-system/assets/board-scene4-a.png"
+                      alt="Action coverage reference"
+                    />
+                  </div>
+                  <div class="shot-card__body">
+                    <b>Shot 3 / collision</b>
+                    <p>Handheld lateral move. Boy crosses and clears frame.</p>
+                    <span>covers A03 / 3s / impact + crowd</span>
+                  </div>
+                </article>
+                <article class="shot-card">
+                  <div class="shot-frame">
+                    <img src="../../design-system/assets/scene4-shot14b.png" alt="Insert detail reference" />
+                  </div>
+                  <div class="shot-card__body">
+                    <b>Shot 4 / pocket empty</b>
+                    <p>Insert to Lola. Music drops before the realization.</p>
+                    <span>covers A04-A05 / 4s / cliffhanger</span>
+                  </div>
+                </article>
+              </div>
+              <div class="coverage-check">
+                <div><b>5 / 7 blocks covered</b><br />two ending blocks need explicit shot coverage</div>
+                <div><b>17s planned</b><br />one 15s model cannot own this scene in one request</div>
+                <div><b>Board stale</b><br />shot 4 changed after the last local compile</div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div class="callout">
+          <strong>One shot plan, two kinds of storyboard.</strong>
+          <p>
+            The editorial Scene board is the human view of every accepted shot and may contain placeholders. A
+            Generation storyboard is compiled for one provider request after a model is selected. It may be
+            text-only, a panel sheet, ordered frames, or native shot objects. Both are derived from the
+            accepted shot plan; neither becomes a second script.
+          </p>
+        </div>
+
+        <div class="visual">
+          <div class="visual__bar">
+            <i class="dot"></i><i class="dot"></i><i class="dot"></i
+            ><span>Concept dispatch - scene passes recompute from model capability</span>
+          </div>
+          <div class="pass-planner">
+            <aside class="model-panel">
+              <div class="eyebrow">Target model</div>
+              <div class="model-card active">
+                <b>15-second model example</b
+                ><span>illustrative capability: max 15s / ordered frames / 4 shots per request</span>
+              </div>
+              <div class="model-card">
+                <b>Future 30-second model</b
+                ><span>illustrative capability: max 30s / data-driven, not a hard-coded product branch</span>
+              </div>
+              <div class="policy">
+                <b>Continuity / boundary chained</b>
+                <p>
+                  Pass 2 waits for the reviewed final owned frame of pass 1. Slower, but the boundary is
+                  intentional.
+                </p>
+              </div>
+              <div class="policy">
+                <b>Alternative / independent</b>
+                <p>Run passes concurrently for speed. The cut may need stronger visual repair at the join.</p>
+              </div>
+              <div class="policy">
+                <b>Oversize shot</b>
+                <p>
+                  A shot longer than the cap must be shortened, split explicitly, or sent to a longer-cap
+                  model. Arke never splits it silently.
+                </p>
+              </div>
+            </aside>
+            <section class="passes">
+              <div class="pass-summary">
+                <h3>Scene passes / 2 requests</h3>
+                <span>17s owned / illustrative 15s cap / selected mode: ordered frames</span>
+              </div>
+              <article class="pass-card">
+                <div class="pass-card__head">
+                  <b>Pass 1 / shots 1-3 / 13s owned</b><span>est. $0.39</span>
+                </div>
+                <div class="pass-panels">
+                  <div class="pass-panel">
+                    <img
+                      src="../../design-system/assets/drowned-quarter.png"
+                      alt="Storyboard panel one"
+                    /><span>SH 1 / 4s</span>
+                  </div>
+                  <div class="pass-panel">
+                    <img src="../../design-system/assets/char-maren.png" alt="Storyboard panel two" /><span
+                      >SH 2 / 6s</span
+                    >
+                  </div>
+                  <div class="pass-panel">
+                    <img
+                      src="../../design-system/assets/board-scene4-a.png"
+                      alt="Storyboard panel three"
+                    /><span>SH 3 / 3s</span>
+                  </div>
+                  <div class="pass-panel">
+                    <img
+                      src="../../design-system/assets/scene4-shot14b.png"
+                      alt="Context-only boundary panel"
+                    /><span>TAIL CONTEXT</span>
+                  </div>
+                </div>
+                <div class="pass-meta">
+                  <span>owns 0-13s</span><span>1s tail handle</span><span>Lola + Wells refs</span
+                  ><span>final frame extracted at 13s</span>
+                </div>
+              </article>
+              <article class="pass-card">
+                <div class="pass-card__head">
+                  <b>Pass 2 / shot 4 / 4s owned</b><span>depends on pass 1</span>
+                </div>
+                <div class="pass-panels">
+                  <div class="pass-panel">
+                    <img
+                      src="../../design-system/assets/scene4-shot14b.png"
+                      alt="Boundary start frame"
+                    /><span>START / PASS 1</span>
+                  </div>
+                  <div class="pass-panel">
+                    <img src="../../design-system/assets/char-maren.png" alt="Storyboard final shot" /><span
+                      >SH 4 / 4s</span
+                    >
+                  </div>
+                </div>
+                <div class="pass-meta">
+                  <span>owns 13-17s</span><span>boundary chained</span><span>no duplicate audio</span
+                  ><span>reviewable if pass 1 succeeds alone</span>
+                </div>
+              </article>
+              <div class="policy">
+                <b>Chained authorization is durable and explicit</b>
+                <p>
+                  Review dispatch creates one scene-dispatch plan with pass dependencies and an aggregate
+                  maximum estimate. It may pre-authorize every dependent request, but Pass 2 is materialized
+                  and submitted only after Pass 1's boundary frame is durable. A review-gated policy stops
+                  after Pass 1 and requires another visible dispatch before later spend. Dependency,
+                  cancellation, and stale-boundary state belong to the durable queue plan, never an in-memory
+                  UI timer.
+                </p>
+              </div>
+              <div class="proposal-strip" style="margin: 14px 0 0">
+                <div class="proposal-strip__head">Switch to the 30s model <span>live recompute</span></div>
+                <ul>
+                  <li>One request can carry all 4 shots and 17s</li>
+                  <li>
+                    The provider transport still decides whether this is a panel sheet, ordered frames, or
+                    native shot plan
+                  </li>
+                  <li>Estimate, reference budget, and continuity policy recompute before enqueue</li>
+                </ul>
+                <div class="proposal-strip__actions">
+                  <span class="mini-btn">Preview one-pass storyboard</span
+                  ><span class="mini-btn primary">Review dispatch</span>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="graph">
+        <div class="section__head">
+          <div>
+            <div class="eyebrow">Progressive structure</div>
+            <h2>An episode board first. A real graph when needed.</h2>
+          </div>
+          <p>
+            The game prototype proves the graph language: scene, choice, outcome, merge, ending, placeholder,
+            state, and health. That should not be copied wholesale into a linear video on day one. Micro-drama
+            starts with a readable episode board. New graph-native seasons may reveal branches directly;
+            legacy productions require an explicit accepted migration before graph order replaces
+            <code>Scene.number</code>.
+          </p>
+        </div>
+
+        <div class="graph-wrap" aria-label="Progressive story graph illustration">
+          <p class="graph-summary">
+            Episode one, The manual, flows to episode two, The peculiar jacket, then to a turn called Who
+            returns. Route A reaches The wrong return and ends with Eddie opening the wrong gate. Route B is a
+            placeholder with no accepted destination scene and ends unresolved at The signal splits.
+          </p>
+          <div class="graph__legend">
+            <span>scene</span><span>episode boundary</span><span>choice</span><span>ending</span
+            ><span style="border-color: var(--red)">broken route</span>
+          </div>
+          <div class="graph">
+            <svg
+              viewBox="0 0 1050 620"
+              role="img"
+              aria-label="Story graph with linear episodes opening into two alternate routes"
+            >
+              <defs>
+                <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8 Z" fill="#918b80" />
+                </marker>
+              </defs>
+              <path d="M525 122 L525 155" stroke="#918b80" stroke-width="1.5" marker-end="url(#arrowhead)" />
+              <path d="M525 235 L525 268" stroke="#918b80" stroke-width="1.5" marker-end="url(#arrowhead)" />
+              <path
+                d="M485 322 C420 340 365 355 300 376"
+                stroke="#918b80"
+                stroke-width="1.5"
+                marker-end="url(#arrowhead)"
+              />
+              <path
+                d="M565 322 C630 340 685 355 750 376"
+                stroke="#918b80"
+                stroke-width="1.5"
+                marker-end="url(#arrowhead)"
+              />
+              <path d="M288 456 L288 484" stroke="#918b80" stroke-width="1.5" marker-end="url(#arrowhead)" />
+              <path
+                d="M762 456 L762 484"
+                stroke="#b9483d"
+                stroke-width="1.5"
+                stroke-dasharray="5 5"
+                marker-end="url(#arrowhead)"
+              />
+            </svg>
+            <div class="node n1">
+              <small>Episode 1 / scene</small><b>The manual</b>
+              <p>Accepted scene file, 4 shots</p>
+            </div>
+            <div class="node n2">
+              <small>Episode 2 / scene</small><b>The peculiar jacket</b>
+              <p>London, H. G. Wells, stolen communicator</p>
+            </div>
+            <div class="node choice n3"><small>Episode 3 / turn</small><b>Who returns?</b></div>
+            <div class="node n4">
+              <small>Route A / scene</small><b>The wrong return</b>
+              <p>Pickpocket arrives in the launch bay</p>
+            </div>
+            <div class="node n5 broken">
+              <small>Route B / placeholder</small><b>Lola reaches the signal</b>
+              <p>No destination scene accepted</p>
+            </div>
+            <div class="node ending n6">
+              <small>Ending / cliffhanger</small><b>Eddie opens the wrong gate</b>
+              <p>Episode four begins elsewhere</p>
+            </div>
+            <div class="node ending n7">
+              <small>Ending / unresolved</small><b>The signal splits</b>
+              <p>Broken until a scene is staged</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="thesis">
+          <article class="thesis__card">
+            <span class="number">LINEAR</span>
+            <h3>One route is still a graph.</h3>
+            <p>
+              Episode order, hooks, cliffhangers, and payoffs can be analyzed without showing nodes and edges
+              to the user.
+            </p>
+          </article>
+          <article class="thesis__card">
+            <span class="number">BRANCHING</span>
+            <h3>Complexity appears honestly.</h3>
+            <p>
+              Choices, conditions, merges, and endings become visible only when authored. The graph answers
+              what can happen, not what media is selected.
+            </p>
+          </article>
+          <article class="thesis__card">
+            <span class="number">HEALTH</span>
+            <h3>Structure, never taste.</h3>
+            <p>
+              Reachability, dead ends, missing payoffs, route coverage, duration, and budget are computed.
+              Arke never scores whether the story is good.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="architecture">
+        <div class="section__head">
+          <div>
+            <div class="eyebrow">Overall Arke architecture</div>
+            <h2>Eight questions, eight owners.</h2>
+          </div>
+          <p>
+            The feature works only if it refuses to collapse distinct records into one graph or one
+            conversation. This table is the implementation boundary: each question has one durable owner,
+            while dashboards, graphs, health, budgets, and cuts are derived views over those owners.
+          </p>
+        </div>
+
+        <div class="implementation">
+          <div class="source-table">
+            <h3>Source-of-truth map</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Question</th>
+                  <th>Durable owner</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>What is true everywhere?</td>
+                  <td>World Canon and sheets</td>
+                </tr>
+                <tr>
+                  <td>What makes this premise repeat across seasons?</td>
+                  <td>
+                    Proposed Series foundation entity; created with Season 1, mostly hidden until another
+                    season exists
+                  </td>
+                </tr>
+                <tr>
+                  <td>What changes in this season?</td>
+                  <td>
+                    One Season Production: current <code>production.json</code> + <code>story.json</code>;
+                    proposed season direction and episode cards
+                  </td>
+                </tr>
+                <tr>
+                  <td>What is each audience release unit?</td>
+                  <td>
+                    Proposed Episode cards and boundary map. They reference story/scene ranges rather than
+                    forcing every scene into one episode.
+                  </td>
+                </tr>
+                <tr>
+                  <td>What is written in this moment?</td>
+                  <td>Extended accepted Scene JSON: stable script blocks plus the existing shot plan</td>
+                </tr>
+                <tr>
+                  <td>How is the scene visualized and generated?</td>
+                  <td>
+                    Accepted shot plan plus an immutable dispatch/pass plan. The editorial Scene board and
+                    per-pass Generation storyboards are derived projections of those authorities.
+                  </td>
+                </tr>
+                <tr>
+                  <td>Which generated media is used?</td>
+                  <td><code>selections.json</code></td>
+                </tr>
+                <tr>
+                  <td>What can happen, and in what order?</td>
+                  <td>
+                    Legacy: <code>Scene.number</code>. Proposed graph-native season after explicit authority
+                    choice or migration.
+                  </td>
+                </tr>
+                <tr>
+                  <td>What work is running and what did it cost?</td>
+                  <td>Global queue journal and ledger</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="roadmap">
+            <h3>Build in this order</h3>
+            <ol>
+              <li>
+                <b>Settle existing story authority.</b
+                ><span
+                  >Make <code>story.json</code> the structured overview and treat <code>story.md</code> as
+                  optional treatment prose.</span
+                >
+              </li>
+              <li>
+                <b>Fix the creation handoff.</b
+                ><span
+                  >Return the production ID and navigate directly to Day One, matching the prototype.</span
+                >
+              </li>
+              <li>
+                <b>Specify production entities.</b
+                ><span
+                  >Define Series foundation, Season Production profile/direction, Episode cards, episode
+                  boundaries, graph, proposal materialization, rebase, and ripples before building candidate
+                  types.</span
+                >
+              </li>
+              <li>
+                <b>Add profile beneath format.</b
+                ><span
+                  >Micro-drama defaults tune aspect, duration, hook window, cliffhanger checks, and export
+                  presets.</span
+                >
+              </li>
+              <li>
+                <b>Add the missing Scene script layer.</b
+                ><span
+                  >Extend Scene with stable action/dialogue blocks, let shots cite covered blocks, and derive
+                  coverage/staleness before generation.</span
+                >
+              </li>
+              <li>
+                <b>Make Story, Episode, and Scene conversations real.</b
+                ><span
+                  >Persistent scoped threads with typed candidates against the now-defined production entities
+                  and ordinary proposal acceptance.</span
+                >
+              </li>
+              <li>
+                <b>Compile boards and model-aware passes.</b
+                ><span
+                  >Keep the editorial Scene board local; compile provider-ready Generation storyboards per
+                  pass from model duration, storyboard transport, frame, reference, audio, and shot-count
+                  capability.</span
+                >
+              </li>
+              <li>
+                <b>Add durable scene-dispatch plans.</b
+                ><span
+                  >Persist aggregate authorization, pass dependencies, late boundary-frame materialization,
+                  cancellation, retry, and review-gated versus pre-authorized downstream spend while
+                  preserving SPEC-009's durable-before-network rule.</span
+                >
+              </li>
+              <li>
+                <b>Migrate linear order deliberately.</b
+                ><span
+                  >Legacy productions continue to derive order from <code>Scene.number</code>. A graph-enabled
+                  production switches authority only through an accepted migration proposal; cuts then
+                  traverse the graph route rather than sort scene numbers.</span
+                >
+              </li>
+              <li>
+                <b>Add branching deliberately.</b
+                ><span
+                  >Choice, outcome, merge, ending, typed state, playtests, route health, and branch budget.
+                  Branching Video remains a future profile decision, not an implicit v1 format change.</span
+                >
+              </li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="reference">
+          <figure>
+            <img src="../../design-system/assets/site-loop2.png" alt="Arke production workflow visual" />
+            <figcaption>
+              Research translated into Arke's visual language: natural-language storyboarding,
+              hook/cliffhanger discipline, iterative casting and voice direction, and creator focus on taste
+              rather than technical tasks.
+            </figcaption>
+          </figure>
+          <figure>
+            <img
+              src="../../design-system/assets/board-scene4-a.png"
+              alt="Accepted Arke scene board imagery"
+            />
+            <figcaption>
+              Arke's existing production language: accepted shots compile into a local editorial board, then
+              repack into provider-specific generation storyboards without changing the scene script.
+            </figcaption>
+          </figure>
+        </div>
+
+        <div class="callout">
+          <strong>The collective product decision.</strong>
+          <p>
+            Do not make World Chat the universal front door. Do not create a second disconnected Director app.
+            Keep Day One as Season Production home, evolve Story into a scope-aware Series / Season / Episode
+            workspace, keep scene chat contextual, and reveal graph complexity progressively. Script answers
+            what happens; shots answer how it is filmed; the editorial board shows the complete shot plan;
+            model capability compiles one or more generation storyboards. The shared framework is conversation
+            + candidates + proposals; explicit dispatch remains the only spend boundary.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer shell">
+      Arke Studio feature brief. Grounded in the current production routes, SPEC-012, issue #70's consent
+      architecture, prototype frames 6a / 33a / 10b / 9a / 34e / 35c, and the micro-drama research transcript.
+      This document proposes the connective experience; it does not claim the Series, Season, Episode, Scene
+      script, profile, graph, or generation-storyboard models are implemented today.
+    </footer>
+  </body>
+</html>
