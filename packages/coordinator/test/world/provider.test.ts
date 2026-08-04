@@ -53,6 +53,26 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     await provider.close();
   });
 
+  it("opens a scoped locked store without changing the renderer's selected world", async () => {
+    const { root, worldDir } = await makeTempRoot();
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+    const selected = (await provider.listWorlds())[0]!;
+    await provider.loadWorld(selected.worldId);
+    const background = await provider.createWorld({ name: "Background World" });
+
+    await provider.withWorldStore(background.worldId, async (store) => {
+      await store.ownedWrite(() => writeFile(join(store.dir, "background-result.txt"), "landed", "utf8"));
+    });
+
+    assert.equal(provider.openStore()?.worldId, selected.worldId);
+    assert.equal(provider.openStore()?.dir, worldDir);
+    const worlds = await provider.listWorlds();
+    const backgroundSlug = worlds.find((world) => world.worldId === background.worldId)!.slug;
+    assert.equal(await readFile(join(root, "worlds", backgroundSlug, "background-result.txt"), "utf8"), "landed");
+    await assert.rejects(readFile(join(worldDir, "background-result.txt"), "utf8"));
+    await provider.close();
+  });
+
   it("serves preserved character image formats with matching MIME types", async () => {
     const { root } = await makeTempRoot();
     const mediaDir = join(root, "worlds", "the-undersong", "references", "maren-kest", "takes", "tk_formats");

@@ -127,6 +127,7 @@ import { ReadModel } from "./read-model.js";
 import { ChildSupervisor, type SupervisorStatus } from "./supervisor.js";
 import { Transport } from "./transport.js";
 import type { WorldProvider } from "./world-provider.js";
+import type { WorldStore } from "./world/store.js";
 
 /**
  * The coordinator: the application's domain layer, embedded in the Electron main process
@@ -273,19 +274,24 @@ export class Coordinator {
               has: async (jobId) => (await this.ledger!.readAll()).some((e) => e.jobId === jobId),
               append: (entry) => this.recordLedger(entry),
             },
-            worldDirFor: (worldId) => {
-              const store = this.opts.provider.openStore?.();
-              return store && store.worldId === worldId ? store.dir : null;
+            landInWorld: async (worldId, fn) => {
+              try {
+                if (this.opts.provider.withWorldStore) {
+                  await this.opts.provider.withWorldStore(worldId, (store) =>
+                    store.ownedWrite(() => fn(store.dir)),
+                  );
+                  return true;
+                }
+                const store = this.opts.provider.openStore?.();
+                if (!store || store.worldId !== worldId) return false;
+                await store.ownedWrite(() => fn(store.dir));
+                return true;
+              } catch {
+                return false;
+              }
             },
             onProviderFault: (provider, message) => this.reportProviderFault(provider as ProviderId, message),
             onTerminal: (job) => this.onJobTerminal(job),
-            aroundLand: async (worldId, fn) => {
-              // Our own landings never read as external edits (SPEC-011): the open world's
-              // suppression envelope wraps the writes and rescans after.
-              const store = this.opts.provider.openStore?.();
-              if (store && store.worldId === worldId) await store.gateOp(fn);
-              else await fn();
-            },
           })
         : null;
     this.voiceService = opts.voice
@@ -582,61 +588,70 @@ export class Coordinator {
    */
   private async onJobTerminal(job: Job): Promise<void> {
     if (job.status !== "succeeded") return;
-    const store = this.opts.provider.openStore?.();
-    if (!store || store.worldId !== job.worldId) return;
-    if (job.target.kind === "reference-tile" && job.landedFiles?.[0] !== undefined) {
-      const [sheetId, angle] = (job.target.id ?? "").split("/") as [string, never];
-      const sheet = store.getBundle().sheets.find((s) => s.id === sheetId);
-      if (!sheet || !angle) return;
-      const withinKit = job.landedFiles[0].replace(`references/${sheetId}/`, "");
-      await supersedeTile(store, sheetId, angle, { file: withinKit, sheetVersion: sheet.version }).catch(
-        () => {},
-      );
-    }
-    if (
-      ["main-photo-candidate", "establish-candidate", "character-sheet", "character-look"].includes(
-        job.target.kind,
-      )
-    ) {
-      await recordReferenceTake(store, job).catch(() => null);
-    }
-    if (
-      (job.target.kind === "shot" || job.target.kind === "scene-pass" || job.target.kind === "voice-line") &&
-      job.landedFiles?.[0] !== undefined &&
-      job.productionId !== undefined
-    ) {
-      // SPEC-013: the landed media becomes an immutable take (plus segments for a pass).
-      const ledgerEntry = this.ledger
-        ? (await this.ledger.readAll()).find((e) => e.jobId === job.id)
-        : undefined;
-      const takes = await recordTakesFromJob(store, job, ledgerEntry?.actualMicroUsd ?? null).catch(() => []);
-      for (const take of takes) {
-        this.emit({
-          at: new Date().toISOString(),
-          type: "take.recorded",
-          worldId: job.worldId,
-          productionId: job.productionId,
-          take,
-        });
+    const finalize = async (store: WorldStore) => {
+      if (job.target.kind === "reference-tile" && job.landedFiles?.[0] !== undefined) {
+        const [sheetId, angle] = (job.target.id ?? "").split("/") as [string, never];
+        const sheet = store.getBundle().sheets.find((s) => s.id === sheetId);
+        if (!sheet || !angle) return;
+        const withinKit = job.landedFiles[0].replace(`references/${sheetId}/`, "");
+        await supersedeTile(store, sheetId, angle, { file: withinKit, sheetVersion: sheet.version }).catch(
+          () => {},
+        );
       }
-    }
-    if (job.target.kind === "voice-preview" && job.landedFiles?.[0] !== undefined) {
-      // The audition is ready; the landed file IS the cache entry (R-10).
-      const [sheetId, provider, voiceId] = (job.target.id ?? "").split("/");
-      if (sheetId && provider && voiceId) {
-        this.emit({
-          at: new Date().toISOString(),
-          type: "voice.preview",
-          worldId: job.worldId,
-          sheetId,
-          provider,
-          voiceId,
-          file: job.landedFiles[0],
-          error: null,
-        });
+      if (
+        ["main-photo-candidate", "establish-candidate", "character-sheet", "character-look"].includes(
+          job.target.kind,
+        )
+      ) {
+        await recordReferenceTake(store, job).catch(() => null);
       }
+      if (
+        (job.target.kind === "shot" || job.target.kind === "scene-pass" || job.target.kind === "voice-line") &&
+        job.landedFiles?.[0] !== undefined &&
+        job.productionId !== undefined
+      ) {
+        // SPEC-013: the landed media becomes an immutable take (plus segments for a pass).
+        const ledgerEntry = this.ledger
+          ? (await this.ledger.readAll()).find((e) => e.jobId === job.id)
+          : undefined;
+        const takes = await recordTakesFromJob(store, job, ledgerEntry?.actualMicroUsd ?? null).catch(() => []);
+        for (const take of takes) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "take.recorded",
+            worldId: job.worldId,
+            productionId: job.productionId,
+            take,
+          });
+        }
+      }
+      if (job.target.kind === "voice-preview" && job.landedFiles?.[0] !== undefined) {
+        // The audition is ready; the landed file IS the cache entry (R-10).
+        const [sheetId, provider, voiceId] = (job.target.id ?? "").split("/");
+        if (sheetId && provider && voiceId) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.preview",
+            worldId: job.worldId,
+            sheetId,
+            provider,
+            voiceId,
+            file: job.landedFiles[0],
+            error: null,
+          });
+        }
+      }
+    };
+    if (this.opts.provider.withWorldStore) {
+      await this.opts.provider.withWorldStore(job.worldId, finalize);
+    } else {
+      const store = this.opts.provider.openStore?.();
+      if (!store || store.worldId !== job.worldId) return;
+      await finalize(store);
     }
-    await this.refreshWorldSnapshot(job.worldId).catch(() => {});
+    if (this.opts.provider.openStore?.()?.worldId === job.worldId) {
+      await this.refreshWorldSnapshot(job.worldId).catch(() => {});
+    }
   }
 
   /**

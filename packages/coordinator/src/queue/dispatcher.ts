@@ -69,17 +69,15 @@ export interface JobQueueOptions {
   emit: (event: DomainEvent) => void;
   /** The idempotency seam (R-16): `has` consults the real ledger, `append` writes it. */
   ledger: { has(jobId: string): Promise<boolean>; append(entry: LedgerEntry): Promise<void> };
-  /** Absolute world dir for landing, or null when the world is unknown (artifacts are skipped). */
-  worldDirFor: (worldId: string) => string | null;
+  /**
+   * Run landing under the owning world's lock. False means the destination is temporarily
+   * unavailable; provider success stays running and retries locally without another submit.
+   */
+  landInWorld: (worldId: string, fn: (worldDir: string) => Promise<void>) => Promise<boolean>;
   /** A provider fault surfaced once, in provider terms (SPEC-008 R-4). */
   onProviderFault?: (provider: string, message: string) => void;
   /** Fired after a job reaches terminal state and its ledger entry landed (SPEC-010 tile flows). */
   onTerminal?: (job: Job) => void | Promise<void>;
-  /**
-   * Wrap the landing writes (SPEC-011): the coordinator supplies the open world's suppression
-   * envelope so our own artifact writes never read as external edits. Default: run directly.
-   */
-  aroundLand?: (worldId: string, fn: () => Promise<void>) => Promise<void>;
   clock?: () => string;
   rng?: () => number;
   maxAttempts?: number;
@@ -455,11 +453,6 @@ export class JobQueue {
   ): Promise<void> {
     let landed: string[] = [];
     if (job.landing) {
-      const worldDir = this.opts.worldDirFor(job.worldId);
-      if (worldDir === null) {
-        await this.terminalize(job, "failed", "the world for this job is not available to land into");
-        return;
-      }
       let artifacts: DispatchArtifact[];
       try {
         artifacts = await client.fetchArtifacts(key, job.providerJobId!);
@@ -493,10 +486,10 @@ export class JobQueue {
       // Stage outside the visible dir, rename in (R-12) — the SPEC-002 discipline. The whole
       // landing runs inside the world's suppression envelope when one is supplied, so our own
       // writes never trip the external-edit watcher.
-      const stagingDir = join(worldDir, ".staging", job.id);
-      const targetDir = join(worldDir, job.landing.dir);
       const landing = job.landing;
-      const land = async (): Promise<void> => {
+      const available = await this.opts.landInWorld(job.worldId, async (worldDir) => {
+        const stagingDir = join(worldDir, ".staging", job.id);
+        const targetDir = join(worldDir, job.landing!.dir);
         try {
           await mkdir(toExtendedLength(stagingDir), { recursive: true });
           await mkdir(toExtendedLength(targetDir), { recursive: true });
@@ -515,9 +508,19 @@ export class JobQueue {
         } finally {
           await rm(toExtendedLength(stagingDir), { recursive: true, force: true }).catch(() => {});
         }
-      };
-      if (this.opts.aroundLand) await this.opts.aroundLand(job.worldId, land);
-      else await land();
+      });
+      if (!available) {
+        const waiting: Job = {
+          ...job,
+          status: "running",
+          error: "the provider completed; waiting for the owning world to become available for landing",
+          updatedAt: this.clock(),
+        };
+        await this.transition(waiting);
+        await this.sleep(this.pollIntervalMs);
+        if (!this.disposed) await this.landAndSucceed(waiting, client, key, costMicroUsd);
+        return;
+      }
     }
     if (this.disposed) return;
     await this.terminalize({ ...job, ...(landed.length > 0 ? { landedFiles: landed } : {}) }, "succeeded", null, costMicroUsd);
