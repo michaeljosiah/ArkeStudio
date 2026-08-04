@@ -160,8 +160,9 @@ if (localVoxa) {
 }
 
 const dotnetVersion = spawnSync("dotnet.exe", ["--version"], { encoding: "utf8", shell: false });
-if (dotnetVersion.status !== 0 || dotnetVersion.stdout.trim() !== metadata.dotnetSdk) {
-  throw new Error(`dotnet ${metadata.dotnetSdk} is required, got ${dotnetVersion.stdout.trim() || "unavailable"}`);
+const actualDotnetSdk = dotnetVersion.stdout.trim();
+if (dotnetVersion.status !== 0 || !actualDotnetSdk.startsWith(`${metadata.dotnetSdkFeatureBand}.`)) {
+  throw new Error(`dotnet ${metadata.dotnetSdkFeatureBand}.x is required, got ${actualDotnetSdk || "unavailable"}`);
 }
 const rid = `win-${arch}`;
 run(
@@ -223,6 +224,7 @@ writeManifest(voxaStage, "voxa", {
   version: metadata.voxa.version,
   protocolVersion: metadata.voxa.protocolVersion,
   sourceCommit: metadata.voxa.commit,
+  dotnetSdk: actualDotnetSdk,
 });
 
 const espeakArchive = join(work, basename(metadata.espeakNg.windowsX64Url));

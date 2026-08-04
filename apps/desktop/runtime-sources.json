@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "dotnetSdk": "10.0.201",
+  "dotnetSdkFeatureBand": "10.0",
   "voxa": {
     "repository": "https://github.com/michaeljosiah/voxa.git",
     "commit": "ae0d90aac0b8917d68e3404841b66cebc9154f33",
