@@ -26,8 +26,10 @@ export interface BackgroundNotificationDeps {
 
 function targetLabel(job: Job): string {
   switch (job.target.kind) {
-    case "character-sheet":
-      return "Character sheet";
+    case "character-sheet": {
+      const characterName = job.params["characterName"];
+      return typeof characterName === "string" ? `Character sheet for ${characterName}` : "Character sheet";
+    }
     case "character-look":
       return "Character look";
     case "main-photo-candidate":

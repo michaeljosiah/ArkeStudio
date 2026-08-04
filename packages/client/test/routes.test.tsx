@@ -336,6 +336,45 @@ describe("screen inventory", () => {
       assert.ok(text.includes("2 new composites are ready for review."));
       assert.ok(html.includes(older.id) && html.includes(newer.id));
       assert.ok(html.indexOf(newer.id) < html.indexOf(older.id), "newest completion is presented first");
+      assert.ok(
+        html.includes(`references/maren-kest/takes/${newer.id}/character-sheet.png`),
+        "the newest generated sheet is visible for review",
+      );
+      assert.match(html, /aria-label="View larger character sheet for Maren Kest"[^>]*aria-haspopup="dialog"/);
+      assert.ok(html.includes('aria-label="Close character sheet"'));
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  it("shows an in-place character sheet loader while generation is active", () => {
+    const world = FIXTURE_STATE.world!;
+    const running = {
+      id: "jb_01J8E0000000000000000000J6",
+      idempotencyKey: "01J8E1000000000000000000K6",
+      worldId: world.meta.worldId,
+      target: { kind: "character-sheet", id: "maren-kest/g1" },
+      capability: "image" as const,
+      provider: "fal",
+      model: "flux",
+      params: { characterName: "Maren Kest" },
+      estimatedMicroUsd: 40000,
+      status: "running" as const,
+      providerJobId: "remote-sheet-1",
+      attempt: 1,
+      error: null,
+      createdAt: "2026-08-04T09:00:00Z",
+      updatedAt: "2026-08-04T09:00:00Z",
+    };
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      app: { ...FIXTURE_STATE.app, jobs: [...FIXTURE_STATE.app.jobs, running] },
+    });
+    try {
+      const html = renderAt(`/w/${world.meta.worldId}/cast/maren-kest/kit`);
+      assert.ok(html.includes("Generating character sheet for Maren Kest"));
+      assert.ok(html.includes("You can leave this page"));
+      assert.ok(html.includes("GENERATING"));
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }

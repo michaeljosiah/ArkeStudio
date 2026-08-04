@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   compilationIsStale,
@@ -15,6 +15,8 @@ import {
 } from "@arke-studio/contracts";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Button, cx } from "../components/ui.js";
+import { Loading } from "../components/loading.js";
+import { X } from "../components/icons.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
   acceptCharacterLook,
@@ -28,9 +30,61 @@ import {
   importMainPhotoCandidate,
   promoteCharacterLook,
   rejectReferenceTake,
+  subscribeQueueResults,
   useMainPhotoAcceptance,
   useStore,
 } from "../lib/store.js";
+
+function CharacterSheetPreview({
+  worldSlug,
+  path,
+  characterName,
+}: {
+  worldSlug: string;
+  path: string;
+  characterName: string;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
+  const close = () => dialog.current?.close();
+
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        className="fy-character-sheet-preview"
+        aria-label={`View larger character sheet for ${characterName}`}
+        aria-haspopup="dialog"
+        onClick={() => dialog.current?.showModal()}
+      >
+        <Portrait worldSlug={worldSlug} path={path} label={`${characterName} character sheet`} radius={0} />
+      </button>
+      <dialog
+        ref={dialog}
+        className="fy-portrait-dialog fy-character-sheet-dialog"
+        aria-labelledby={titleId}
+        onClose={() => trigger.current?.focus()}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) close();
+        }}
+      >
+        <div className="fy-portrait-dialog__panel">
+          <div className="fy-portrait-dialog__head">
+            <h2 id={titleId}>{characterName} · character sheet</h2>
+            <button type="button" className="fy-portrait-dialog__close" aria-label="Close character sheet" onClick={close}>
+              <X size={18} />
+            </button>
+          </div>
+          <div className="fy-portrait-dialog__image">
+            <Portrait worldSlug={worldSlug} path={path} label={`${characterName} character sheet`} radius={9} />
+          </div>
+        </div>
+      </dialog>
+    </>
+  );
+}
 
 function CharacterHeader({ active }: { active: "reference" | "looks" }) {
   const { worldId, sheetId } = useParams();
@@ -154,19 +208,24 @@ export function CharacterReferenceScreen() {
         !world.referenceReviews.some((review) => review.takeId === take.id),
     )
     .sort((a, b) => (b.completedAt ?? b.dispatchedAt).localeCompare(a.completedAt ?? a.dispatchedAt));
-  const runningSheet = (state?.app.jobs ?? []).some(
-    (job) =>
-      job.target.kind === "character-sheet" &&
-      job.target.id?.startsWith(`${sheetId}/`) &&
-      !["succeeded", "failed", "cancelled"].includes(job.status),
-  );
-  const sheetFinalization = (state?.app.jobs ?? []).find(
-    (job) =>
-      job.target.kind === "character-sheet" &&
-      job.target.id?.startsWith(`${sheetId}/`) === true &&
-      job.finalization?.status !== undefined &&
-      job.finalization.status !== "complete",
-  )?.finalization;
+  const latestSheetJob = [...(state?.app.jobs ?? [])]
+    .filter(
+      (job) =>
+        job.target.kind === "character-sheet" &&
+        job.target.id?.startsWith(`${sheetId}/`),
+    )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const sheetFinalization = latestSheetJob?.finalization?.status !== "complete" ? latestSheetJob?.finalization : undefined;
+  const runningSheet = latestSheetJob
+    ? !["succeeded", "failed", "cancelled"].includes(latestSheetJob.status) ||
+      latestSheetJob.finalization?.status === "pending"
+    : false;
+  const reviewTake = pendingSheetTakes[0] ?? null;
+  const sheetPath = reviewTake
+    ? `references/${sheetId}/takes/${reviewTake.id}/${reviewTake.media}`
+    : compilation
+      ? `references/${sheetId}/${compilation.file}`
+      : null;
   return (
     <div data-screen="reference-kit">
       <CharacterHeader active="reference" />
@@ -195,15 +254,21 @@ export function CharacterReferenceScreen() {
         </section>
         <section className="fy-reference-card">
           <div className="fy-reference-card__image fy-reference-card__image--sheet">
-            <Portrait
-              worldSlug={world.meta.slug}
-              path={compilation ? `references/${sheetId}/${compilation.file}` : ""}
-              label={compilation ? `${sheet.name} character sheet` : "Character sheet outstanding"}
-              radius={0}
-            />
-            <span className={cx("fy-reference-card__status", stale && "fy-reference-card__status--warn")}>
+            {runningSheet ? (
+              <div className="fy-reference-card__generating">
+                <Loading label={`Generating character sheet for ${sheet.name}`} size={48} />
+                <p>You can leave this page. We’ll notify you when it is ready.</p>
+              </div>
+            ) : sheetPath ? (
+              <CharacterSheetPreview worldSlug={world.meta.slug} path={sheetPath} characterName={sheet.name} />
+            ) : (
+              <Portrait worldSlug={world.meta.slug} path="" label="Character sheet outstanding" radius={0} />
+            )}
+            <span className={cx("fy-reference-card__status", stale && !reviewTake && "fy-reference-card__status--warn")}>
               {runningSheet
-                ? "QUEUED"
+                ? "GENERATING"
+                : reviewTake
+                  ? "READY FOR REVIEW"
                 : stale
                   ? "MAIN PHOTO CHANGED · REGENERATE"
                   : compilation
@@ -218,8 +283,8 @@ export function CharacterReferenceScreen() {
               <h2>Character sheet</h2>
               <p>multiple views · one composite image</p>
             </div>
-            <Button disabled={!photo} onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/model-sheet`)}>
-              {compilation ? "Regenerate" : "Generate"}
+            <Button disabled={!photo || runningSheet} onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/model-sheet`)}>
+              {runningSheet ? "Generating" : compilation ? "Regenerate" : "Generate"}
             </Button>
           </div>
           {pendingSheetTakes.length > 0 && (
@@ -264,11 +329,39 @@ export function GenerateCharacterSheetScreen() {
   const { state } = useStore();
   const [override, setOverride] = useState(false);
   const [style, setStyle] = useState("");
+  const [requested, setRequested] = useState(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const earlierTakeIds = useRef(new Set<string>());
+  const pendingRequestId = useRef<string | null>(null);
+  useEffect(
+    () =>
+      subscribeQueueResults((result) => {
+        if (result.requestId !== pendingRequestId.current || result.acceptedJobIds.length > 0) return;
+        setDispatchError(
+          result.failures.map((failure) => failure.reason).join(" ") || "The character sheet could not be queued.",
+        );
+      }),
+    [],
+  );
   if (!world || !sheet || !sheetId) return null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = kit ? mainPhotoFor(kit) : null;
   const model = routedImageModel(state);
   const referencesAsText = (model?.accepts.referenceImages ?? 0) === 0;
+  const pendingSheetTakes = world.referenceTakes
+    .filter(
+      (take) =>
+        take.kind === "sheet" &&
+        take.reference?.sheetId === sheetId &&
+        !world.referenceReviews.some((review) => review.takeId === take.id),
+    )
+    .sort((a, b) => (b.completedAt ?? b.dispatchedAt).localeCompare(a.completedAt ?? a.dispatchedAt));
+  const generatedTake = requested
+    ? pendingSheetTakes.find((take) => !earlierTakeIds.current.has(take.id)) ?? null
+    : null;
+  const generatedPath = generatedTake
+    ? `references/${sheetId}/takes/${generatedTake.id}/${generatedTake.media}`
+    : null;
   return (
     <div className="fy-generation-scrim" data-screen="model-sheet-generate">
       <div className="fy-sheet-dialog">
@@ -281,7 +374,53 @@ export function GenerateCharacterSheetScreen() {
             ×
           </button>
         </header>
-        <div className="fy-sheet-dialog__body">
+        {requested ? (
+          <div className="fy-sheet-dialog__result">
+            {dispatchError ? (
+              <div className="fy-sheet-dialog__result-message">
+                <strong>Couldn’t start generation</strong>
+                <p>{dispatchError}</p>
+                <Button variant="primary" onClick={() => setRequested(false)}>Back to generation settings</Button>
+              </div>
+            ) : generatedPath && generatedTake ? (
+              <>
+                <div className="fy-sheet-dialog__generated-image">
+                  <CharacterSheetPreview worldSlug={world.meta.slug} path={generatedPath} characterName={sheet.name} />
+                </div>
+                <div className="fy-sheet-dialog__result-actions">
+                  <div>
+                    <strong>Your character sheet is ready</strong>
+                    <p>Open it for a larger view, then accept it into {sheet.name}’s reference set.</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      rejectReferenceTake(world.meta.worldId, generatedTake.id, "identity");
+                      navigate(`/w/${worldId}/cast/${sheetId}/kit`);
+                    }}
+                  >
+                    Reject
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      acceptCharacterSheet(world.meta.worldId, sheetId, generatedTake.id);
+                      navigate(`/w/${worldId}/cast/${sheetId}/kit`);
+                    }}
+                  >
+                    Accept this sheet
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="fy-sheet-dialog__result-message">
+                <Loading label={`Generating character sheet for ${sheet.name}`} size={56} />
+                <p>You can wait here or leave this page. We’ll notify you when it is ready.</p>
+                <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}>Leave page</Button>
+              </div>
+            )}
+          </div>
+        ) : <div className="fy-sheet-dialog__body">
           <section className="fy-sheet-dialog__identity">
             <div>
               <Portrait
@@ -351,8 +490,8 @@ export function GenerateCharacterSheetScreen() {
               </p>
             )}
           </section>
-        </div>
-        <footer>
+        </div>}
+        {!requested && <footer>
           <span>
             {modelSummary(model, "character-sheet", 1, 1)}
           </span>
@@ -364,17 +503,26 @@ export function GenerateCharacterSheetScreen() {
             variant="primary"
             disabled={!photo || !modelCanDispatch(model, "character-sheet", true)}
             onClick={() => {
-              generateCharacterSheet(
+              earlierTakeIds.current = new Set(pendingSheetTakes.map((take) => take.id));
+              const requestId = generateCharacterSheet(
                 world.meta.worldId,
                 sheetId,
                 override && style.trim() ? style.trim() : undefined,
+                sheet.name,
               );
-              navigate(`/w/${worldId}/cast/${sheetId}/kit`);
+              if (requestId) {
+                pendingRequestId.current = requestId;
+                setDispatchError(null);
+                setRequested(true);
+              } else {
+                setDispatchError("The studio is disconnected. Reconnect and try again.");
+                setRequested(true);
+              }
             }}
           >
             Generate
           </Button>
-        </footer>
+        </footer>}
       </div>
     </div>
   );
