@@ -2,6 +2,15 @@ import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts
 import { jsonRequest, tryProbe } from "./http.js";
 import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
 
+function extensionFor(contentType: string): string {
+  const type = contentType.toLowerCase().split(";", 1)[0];
+  if (type === "image/jpeg") return "jpg";
+  if (type === "image/webp") return "webp";
+  if (type === "image/png") return "png";
+  if (type === "video/mp4") return "mp4";
+  return "bin";
+}
+
 /**
  * Higgsfield — gateway for image and video. Queue-shaped API. Declarations (T-9): nothing to
  * reconcile from — no idempotency keys, no lookup, no listing — so an interrupted submission
@@ -79,7 +88,7 @@ export class HiggsfieldClient implements ProviderClient {
     for (const [i, o] of urls.entries()) {
       const res = await this.fetchImpl(o.url);
       const contentType = o.content_type ?? "application/octet-stream";
-      const ext = contentType.startsWith("video") ? "mp4" : "png";
+      const ext = extensionFor(contentType);
       out.push({ name: `output-${i + 1}.${ext}`, contentType, data: new Uint8Array(await res.arrayBuffer()) });
     }
     return out;

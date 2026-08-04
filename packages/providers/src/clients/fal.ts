@@ -6,6 +6,15 @@ import { jsonRequest, tryProbe } from "./http.js";
 import { FAL_ENDPOINTS as ENDPOINTS } from "../fal-catalogue.generated.js";
 import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
 
+function extensionFor(contentType: string): string {
+  const type = contentType.toLowerCase().split(";", 1)[0];
+  if (type === "image/jpeg") return "jpg";
+  if (type === "image/webp") return "webp";
+  if (type === "image/png") return "png";
+  if (type === "video/mp4") return "mp4";
+  return "bin";
+}
+
 /**
  * FAL — gateway: many models, one key (R-1). Queue API: submit to a model endpoint, poll the
  * request id under that endpoint, fetch the completed payload.
@@ -107,13 +116,13 @@ export class FalClient implements ProviderClient {
     const payload = body as { images?: Array<{ url?: string; content_type?: string }>; video?: { url?: string } } | null;
     const urls: Array<{ url: string; contentType: string }> = [];
     for (const img of payload?.images ?? []) {
-      if (img.url) urls.push({ url: img.url, contentType: img.content_type ?? "image/png" });
+      if (img.url) urls.push({ url: img.url, contentType: img.content_type ?? "application/octet-stream" });
     }
     if (payload?.video?.url) urls.push({ url: payload.video.url, contentType: "video/mp4" });
     for (const [i, item] of urls.entries()) {
       const res = await this.fetchImpl(item.url);
       const data = new Uint8Array(await res.arrayBuffer());
-      const ext = item.contentType.startsWith("video") ? "mp4" : "png";
+      const ext = extensionFor(item.contentType);
       out.push({ name: `output-${i + 1}.${ext}`, contentType: item.contentType, data });
     }
     return out;

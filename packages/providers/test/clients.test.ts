@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ElevenLabsClient } from "../src/clients/elevenlabs.js";
 import { FalClient } from "../src/clients/fal.js";
+import { HiggsfieldClient } from "../src/clients/higgsfield.js";
 import { OllamaClient } from "../src/clients/ollama.js";
 import { OpenAiClient } from "../src/clients/openai.js";
 import type { FetchLike } from "../src/types.js";
@@ -141,5 +142,41 @@ describe("fal submit/poll round-trip carries the endpoint in the remote id", () 
     const poll = await client.poll("k", submitted.remoteId);
     assert.equal(poll.state, "running");
     assert.match(seen[1]!, /fal-ai\/flux-2-pro\/requests\/req-9\/status/);
+  });
+});
+
+describe("provider artifact filenames match their declared image format", () => {
+  it("fal preserves JPEG and WebP extensions", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const fetchImpl: FetchLike = async (url) => {
+      if (url.endsWith("/requests/req-1")) {
+        return new Response(JSON.stringify({
+          images: [
+            { url: "https://assets.test/a", content_type: "image/jpeg" },
+            { url: "https://assets.test/b", content_type: "image/webp" },
+          ],
+        }), { status: 200 });
+      }
+      return new Response(bytes, { status: 200 });
+    };
+    const artifacts = await new FalClient(fetchImpl).fetchArtifacts("k", "fal-ai/flux-2-pro::req-1");
+    assert.deepEqual(artifacts.map((artifact) => artifact.name), ["output-1.jpg", "output-2.webp"]);
+  });
+
+  it("higgsfield preserves JPEG and WebP extensions", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const fetchImpl: FetchLike = async (url) => {
+      if (url.endsWith("/v1/jobs/job-1")) {
+        return new Response(JSON.stringify({
+          outputs: [
+            { url: "https://assets.test/a", content_type: "image/jpeg" },
+            { url: "https://assets.test/b", content_type: "image/webp" },
+          ],
+        }), { status: 200 });
+      }
+      return new Response(bytes, { status: 200 });
+    };
+    const artifacts = await new HiggsfieldClient(fetchImpl).fetchArtifacts("k", "job-1");
+    assert.deepEqual(artifacts.map((artifact) => artifact.name), ["output-1.jpg", "output-2.webp"]);
   });
 });

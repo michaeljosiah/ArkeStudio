@@ -1,5 +1,5 @@
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import {
   formatMicroUsd,
   PROVIDERS,
@@ -16,7 +16,7 @@ import {
 import { toExtendedLength } from "../world/paths.js";
 import { backoffMs, classifyError, isRateLimit, type FailureClass } from "./classify.js";
 import { JobJournal } from "./journal.js";
-import { verifyArtifact } from "./verify.js";
+import { imageFormatOf, verifyArtifact } from "./verify.js";
 
 /**
  * The dispatch engine (SPEC-009): durable before the network, and never trust silence. Every
@@ -105,6 +105,22 @@ interface Lane {
 }
 
 const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
+const FORMAT_PRESERVING_IMAGE_TARGETS = new Set([
+  "main-photo-candidate",
+  "establish-candidate",
+  "character-sheet",
+  "character-look",
+  "reference-tile",
+]);
+
+function landedName(job: Job, artifact: DispatchArtifact, index: number): string {
+  const requested = index === 0 && job.landing?.name !== undefined ? job.landing.name : artifact.name;
+  if (!FORMAT_PRESERVING_IMAGE_TARGETS.has(job.target.kind)) return requested;
+  const format = imageFormatOf(artifact.data);
+  if (format === null) return requested;
+  const extension = extname(requested);
+  return `${extension.length > 0 ? requested.slice(0, -extension.length) : requested}${format.extension}`;
+}
 
 export class JobQueue {
   private readonly journal: JobJournal;
@@ -463,7 +479,12 @@ export class JobQueue {
       if (this.jobs.get(job.id)?.status === "cancelled") return; // discard on arrival (§2.10)
       // Verify everything before anything lands (R-13): all-or-nothing.
       for (const artifact of artifacts) {
-        const problem = verifyArtifact(artifact);
+        const verified = verifyArtifact(artifact);
+        const problem =
+          verified ??
+          (job.capability === "image" && imageFormatOf(artifact.data) === null
+            ? "not a supported PNG, JPEG, or WebP image"
+            : null);
         if (problem !== null) {
           await this.terminalize(job, "failed", `artifact "${artifact.name}" failed verification: ${problem}`);
           return;
@@ -481,7 +502,7 @@ export class JobQueue {
           await mkdir(toExtendedLength(targetDir), { recursive: true });
           const staged: Array<{ from: string; to: string; rel: string }> = [];
           for (const [index, artifact] of artifacts.entries()) {
-            const name = index === 0 && landing.name !== undefined ? landing.name : artifact.name;
+            const name = landedName(job, artifact, index);
             const from = join(stagingDir, name);
             await writeFile(toExtendedLength(from), artifact.data);
             staged.push({ from, to: join(targetDir, name), rel: `${landing.dir}/${name}` });
