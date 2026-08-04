@@ -13,7 +13,7 @@ import { FAL_MODELS } from "./fal-catalogue.generated.js";
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 9,
+  manifestVersion: 10,
   generated: "2026-08-02",
   models: [
     // ---- fal: generated from the live catalogue ---------------------------
@@ -37,7 +37,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       provider: "higgsfield",
       capability: "image",
       displayName: "Soul 2.0",
-      accepts: { referenceImages: 3, referenceRoles: false, startFrame: false, endFrame: false },
+      accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
       limits: { resolutions: ["1080p", "4k"], aspects: ["16:9", "1:1"] },
       pricing: { kind: "perImage", microUsdPerImage: 60000, byResolution: { "4k": 120000 } },
     },

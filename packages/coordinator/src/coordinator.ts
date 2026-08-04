@@ -2496,9 +2496,11 @@ export class Coordinator {
           this.rejectEnqueue(
             msg.requestId,
             msg.kind,
-            error instanceof Error && error.message.includes("could not be priced")
-              ? "This image model could not be priced for the selected output size. Nothing was queued."
-              : "An accepted main photo is required before generating a character sheet.",
+            error instanceof Error && error.message.includes("cannot receive")
+              ? `${model.displayName} cannot receive the accepted main photo. Choose a reference-capable image model before generating a character sheet. Nothing was queued.`
+              : error instanceof Error && error.message.includes("could not be priced")
+                ? "This image model could not be priced for the selected output size. Nothing was queued."
+                : "An accepted main photo is required before generating a character sheet.",
           );
           return;
         }
@@ -2571,9 +2573,11 @@ export class Coordinator {
           this.rejectEnqueue(
             msg.requestId,
             msg.kind,
-            error instanceof Error && error.message.includes("could not be priced")
-              ? "This image model could not be priced for the selected output size. Nothing was queued."
-              : "An accepted main photo is required before generating character looks.",
+            error instanceof Error && error.message.includes("cannot receive")
+              ? `${model.displayName} cannot receive the accepted main photo. Choose a reference-capable image model before generating character looks. Nothing was queued.`
+              : error instanceof Error && error.message.includes("could not be priced")
+                ? "This image model could not be priced for the selected output size. Nothing was queued."
+                : "An accepted main photo is required before generating character looks.",
           );
           return;
         }

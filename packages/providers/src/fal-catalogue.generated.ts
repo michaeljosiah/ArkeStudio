@@ -12,7 +12,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "capability": "image",
     "displayName": "Flux 2 Pro",
     "accepts": {
-      "referenceImages": 4,
+      "referenceImages": 0,
       "startFrame": false,
       "endFrame": false
     },
@@ -40,7 +40,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "capability": "image",
     "displayName": "Nano Banana 2",
     "accepts": {
-      "referenceImages": 6,
+      "referenceImages": 0,
       "startFrame": false,
       "endFrame": false
     },
@@ -67,7 +67,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "capability": "image",
     "displayName": "Nano Banana Pro",
     "accepts": {
-      "referenceImages": 6,
+      "referenceImages": 0,
       "startFrame": false,
       "endFrame": false
     },
@@ -94,7 +94,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "capability": "video",
     "displayName": "Seedance 2.0 Text to Video API",
     "accepts": {
-      "referenceImages": 4,
+      "referenceImages": 0,
       "startFrame": true,
       "endFrame": true
     },
@@ -124,7 +124,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "capability": "video",
     "displayName": "Seedance 2.0 Fast Text to Video",
     "accepts": {
-      "referenceImages": 4,
+      "referenceImages": 0,
       "startFrame": true,
       "endFrame": true
     },
@@ -150,7 +150,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "capability": "video",
     "displayName": "Veo 3.1",
     "accepts": {
-      "referenceImages": 3,
+      "referenceImages": 0,
       "startFrame": true,
       "endFrame": true
     },
@@ -176,7 +176,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "capability": "video",
     "displayName": "Veo 3.1 Fast",
     "accepts": {
-      "referenceImages": 3,
+      "referenceImages": 0,
       "startFrame": true,
       "endFrame": false
     },
@@ -201,7 +201,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "capability": "video",
     "displayName": "Kling Video v3 Text to Video [Pro]",
     "accepts": {
-      "referenceImages": 1,
+      "referenceImages": 0,
       "startFrame": true,
       "endFrame": true
     },
@@ -227,7 +227,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "capability": "video",
     "displayName": "Kling Video v3 Text to Video [Standard]",
     "accepts": {
-      "referenceImages": 1,
+      "referenceImages": 0,
       "startFrame": true,
       "endFrame": false
     },

@@ -142,11 +142,35 @@ describe("higgsfield image submission", () => {
     await client.submit("k", {
       model: "soul-2.0",
       capability: "image",
-      params: { prompt: "x", output: { width: 1024, height: 1024, aspect: "1:1", resolution: "1080p" } },
+      params: {
+        prompt: "x",
+        references: [],
+        provenance: { canonRevision: 1 },
+        output: { width: 1024, height: 1024, aspect: "1:1", resolution: "1080p" },
+      },
     });
     assert.equal(sent["aspect_ratio"], "1:1");
     assert.equal(sent["resolution"], "1080p");
     assert.ok(!("output" in sent));
+    assert.ok(!("references" in sent));
+    assert.ok(!("provenance" in sent));
+  });
+
+  it("refuses local references before network submission", async () => {
+    let fetches = 0;
+    const client = new HiggsfieldClient(async () => {
+      fetches += 1;
+      return new Response(JSON.stringify({ id: "job-1" }), { status: 200 });
+    });
+    await assert.rejects(
+      client.submit("k", {
+        model: "soul-2.0",
+        capability: "image",
+        params: { prompt: "x", references: ["references/maren-kest/main.png"] },
+      }),
+      /no implemented reference-image transport/,
+    );
+    assert.equal(fetches, 0);
   });
 });
 
@@ -164,16 +188,42 @@ describe("fal submit/poll round-trip carries the endpoint in the remote id", () 
     const submitted = await client.submit("k", {
       model: "flux-2-pro",
       capability: "image",
-      params: { prompt: "x", output: { width: 1024, height: 1280, aspect: "4:5", resolution: "1MP" } },
+      params: {
+        prompt: "x",
+        references: [],
+        referenceRoles: [],
+        artDirection: { version: 1 },
+        output: { width: 1024, height: 1280, aspect: "4:5", resolution: "1MP" },
+      },
     });
     assert.equal(submitted.remoteId, "fal-ai/flux-2-pro::req-9");
     assert.deepEqual(sent["image_size"], { width: 1024, height: 1280 });
     assert.ok(!("aspect_ratio" in sent));
     assert.ok(!("resolution" in sent));
     assert.ok(!("output" in sent));
+    assert.ok(!("references" in sent));
+    assert.ok(!("referenceRoles" in sent));
+    assert.ok(!("artDirection" in sent));
     const poll = await client.poll("k", submitted.remoteId);
     assert.equal(poll.state, "running");
     assert.match(seen[1]!, /fal-ai\/flux-2-pro\/requests\/req-9\/status/);
+  });
+
+  it("refuses local references before network submission", async () => {
+    let fetches = 0;
+    const client = new FalClient(async () => {
+      fetches += 1;
+      return new Response(JSON.stringify({ request_id: "req" }), { status: 200 });
+    });
+    await assert.rejects(
+      client.submit("k", {
+        model: "flux-2-pro",
+        capability: "image",
+        params: { prompt: "x", references: ["references/maren-kest/main.png"] },
+      }),
+      /no implemented reference-image transport/,
+    );
+    assert.equal(fetches, 0);
   });
 });
 

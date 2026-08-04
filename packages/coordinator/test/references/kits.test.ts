@@ -133,11 +133,20 @@ describe("the reference loop (R-6, D1, D3, §3.2)", () => {
     assert.match(String(sheetRequest.input.params["prompt"]), /Painterly, tidal, restrained/);
 
     const textOnly = { ...MODEL, accepts: { ...MODEL.accepts, referenceImages: 0 } };
-    const fallback = characterSheetRequest(WORLD_META, DIRECTION, SHEET, kit, textOnly, "g0");
-    assert.deepEqual(fallback.input.params["references"], []);
-    assert.equal(
-      (fallback.input.params["artDirection"] as { identityTransport: string }).identityTransport,
-      "text",
+    assert.throws(
+      () => characterSheetRequest(WORLD_META, DIRECTION, SHEET, kit, textOnly, "g0"),
+      /cannot receive the accepted main photo/,
+    );
+    assert.throws(
+      () =>
+        characterLookRequests(WORLD_META, DIRECTION, SHEET, kit, textOnly, {
+          kind: "costume",
+          mode: "stay-close",
+          prompt: "Council coat",
+          count: 1,
+          generationKey: "g0",
+        }),
+      /cannot receive the accepted main photo/,
     );
 
     const mainRequests = mainPhotoRequests(WORLD_META, DIRECTION, SHEET, null, MODEL, {
@@ -411,13 +420,13 @@ describe("the reference budget (R-15, D9, §3.2) — the silent-truncation suite
     assert.deepEqual(wider.dropped.map((c) => c.sheetId), ["the-ebb-council"], "the notice follows the model");
   });
 
-  it("within budget: no notice at all; zero-reference models state identity rides in the prompt", () => {
+  it("within budget: no notice at all; zero-reference models state images are omitted", () => {
     const roomy: ManifestModel = { ...MODEL, accepts: { ...MODEL.accepts, referenceImages: 4 } };
     assert.equal(referenceBudget(candidates, roomy).notice, null);
     const none: ManifestModel = { ...MODEL, accepts: { ...MODEL.accepts, referenceImages: 0 } };
     const result = referenceBudget(candidates, none);
     assert.deepEqual(result.carried, []);
-    assert.match(result.notice!, /accepts no reference images — identity rides in the prompt/);
+    assert.match(result.notice!, /accepts no reference images — those images are omitted/);
   });
 });
 

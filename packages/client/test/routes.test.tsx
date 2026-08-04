@@ -160,6 +160,38 @@ describe("screen inventory", () => {
     }
   });
 
+  it("blocks identity-dependent generation when the routed model cannot receive the main photo", () => {
+    const model = {
+      id: "text-only-image",
+      provider: "openai" as const,
+      capability: "image" as const,
+      displayName: "Text Only Image",
+      accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
+      limits: {},
+      pricing: { kind: "perImage" as const, microUsdPerImage: 40000 },
+    };
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        manifest: { ...FIXTURE_STATE.app.manifest!, models: [model, ...FIXTURE_STATE.app.manifest!.models] },
+        routing: { ...FIXTURE_STATE.app.routing, defaults: { ...FIXTURE_STATE.app.routing.defaults, image: model.id } },
+      },
+    });
+    try {
+      const base = `/w/${FIXTURE_STATE.world!.meta.worldId}/cast/maren-kest`;
+      const sheet = renderAt(`${base}/model-sheet`).replace(/<!-- -->/g, "");
+      const looks = renderAt(`${base}/looks`).replace(/<!-- -->/g, "");
+      assert.ok(sheet.includes("main photo cannot be sent"));
+      assert.ok(sheet.includes("identity conditioning unavailable"));
+      assert.match(sheet, /<button[^>]*disabled=""[^>]*>Generate<\/button>/);
+      assert.match(looks, /<button[^>]*disabled=""[^>]*>Explore<\/button>/);
+      assert.ok(!sheet.includes("translated into the prompt"));
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
   it("grounds the main-photo prompt in the active character rather than the fixture lead", () => {
     const world = FIXTURE_STATE.world!;
     const other = {

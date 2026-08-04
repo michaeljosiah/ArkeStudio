@@ -1119,7 +1119,7 @@ export function DispatchDialogScreen() {
         {world && model && (
           <Callout title={`World look · v${world.artDirection.version}`}>
             Inherited from this world and carried in the prompt. {model.accepts.referenceImages === 0
-              ? `${model.displayName} accepts no reference images, so identity and style are translated into prose before commit.`
+              ? `${model.displayName} accepts no reference images. Those images are omitted; only existing sheet descriptions and art-direction text remain.`
               : "Identity references remain distinct from the world's style treatment."}
           </Callout>
         )}
