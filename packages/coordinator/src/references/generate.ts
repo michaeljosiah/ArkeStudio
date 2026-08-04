@@ -144,6 +144,20 @@ export interface CharacterGenerationRequest {
   estimatedMicroUsd: number;
 }
 
+function generationProvenance(
+  world: WorldMeta,
+  direction: ResolvedArtDirection,
+  sheet: Sheet,
+  anchorFile?: string,
+) {
+  return {
+    canonRevision: world.canonRevision,
+    sheets: { [sheet.id]: sheet.version },
+    artDirectionVersion: direction.version,
+    ...(anchorFile ? { anchorFile } : {}),
+  };
+}
+
 export function mainPhotoRequests(
   world: WorldMeta,
   direction: ResolvedArtDirection,
@@ -172,6 +186,7 @@ export function mainPhotoRequests(
           source: kit?.styleOverride ? "sheet" : "world",
           transport: "text",
         },
+        provenance: generationProvenance(world, direction, sheet),
       },
       estimatedMicroUsd,
       landing: {
@@ -214,6 +229,7 @@ export function characterSheetRequest(
           transport: "text",
           identityTransport: identityReferences.length > 0 ? "image" : "text",
         },
+        provenance: generationProvenance(world, direction, sheet, photo),
       },
       estimatedMicroUsd,
       landing: {
@@ -263,6 +279,7 @@ export function characterLookRequests(
           transport: "text",
           identityTransport: identityReferences.length > 0 ? "image" : "text",
         },
+        provenance: generationProvenance(world, direction, sheet, photo),
       },
       estimatedMicroUsd,
       landing: {

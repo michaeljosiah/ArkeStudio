@@ -2479,9 +2479,16 @@ export class Coordinator {
         )
           return;
         const review = referenceReviewDecision(store.now(), take, "accept");
+        const frozen = take.params["provenance"] as
+          | { sheets?: Record<string, number>; anchorFile?: string }
+          | undefined;
+        const sheetVersion = frozen?.sheets?.[msg.sheetId] ?? take.provenance.sheets[msg.sheetId];
+        if (sheetVersion === undefined || !frozen?.anchorFile) return;
         await acceptCharacterSheet(store, sheet, {
           file: `takes/${take.id}/${take.media}`,
           takeId: take.id,
+          sheetVersion,
+          anchorFile: frozen.anchorFile,
           artDirectionVersion: take.provenance.artDirectionVersion ?? store.getBundle().artDirection.version,
           review,
         }).catch(() => {});

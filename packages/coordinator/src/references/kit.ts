@@ -208,20 +208,25 @@ export async function chooseAnchor(
 export async function acceptCharacterSheet(
   store: WorldStore,
   sheet: Sheet,
-  input: { file: string; takeId: Take["id"]; artDirectionVersion: number; review?: ReviewDecision },
+  input: {
+    file: string;
+    takeId: Take["id"];
+    sheetVersion: number;
+    anchorFile: string;
+    artDirectionVersion: number;
+    review?: ReviewDecision;
+  },
 ): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheet.id);
-  const photo = kit.mainPhoto?.file ?? kit.anchor;
-  if (!photo) throw new Error("accepting a character sheet needs an accepted main photo");
   const compilation: Compilation = {
     file: input.file,
     format: "character-sheet",
-    sheetVersion: sheet.version,
+    sheetVersion: input.sheetVersion,
     tiles: [],
     compiledAt: store.now(),
     source: input.takeId,
     accepted: true,
-    anchorFile: photo,
+    anchorFile: input.anchorFile,
     artDirectionVersion: input.artDirectionVersion,
   };
   const others = kit.compilations.filter((candidate) => candidate.file !== input.file);
