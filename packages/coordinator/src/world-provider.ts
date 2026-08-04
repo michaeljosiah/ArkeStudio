@@ -27,6 +27,11 @@ export interface WorldProvider {
   /** The open store itself (SPEC-005: the world-query tool reads through it). */
   openStore?(): WorldStore | null;
   /**
+   * Run against a world's locked store without changing which world the renderer has open.
+   * Used by durable background jobs whose owner may not be the selected world.
+   */
+  withWorldStore?<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T>;
+  /**
    * Resolve a world-relative media file for the renderer (design-fidelity pass): read-only,
    * traversal-guarded, media extensions only. Null when the file is not servable.
    */

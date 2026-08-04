@@ -29,7 +29,11 @@ interface Harness {
 
 async function makeHarness(
   clients: Record<string, FakeProvider>,
-  opts: { getKey?: (p: string) => Promise<string | null>; baseConcurrency?: number } = {},
+  opts: {
+    getKey?: (p: string) => Promise<string | null>;
+    baseConcurrency?: number;
+    landInWorld?: (worldId: string, fn: (worldDir: string) => Promise<void>) => Promise<boolean>;
+  } = {},
 ): Promise<Harness> {
   const dir = await tempDir("arke-queue-");
   const worldDir = await tempDir("arke-qworld-");
@@ -40,7 +44,11 @@ function build(
   journalPath: string,
   worldDir: string,
   clients: Record<string, FakeProvider>,
-  opts: { getKey?: (p: string) => Promise<string | null>; baseConcurrency?: number },
+  opts: {
+    getKey?: (p: string) => Promise<string | null>;
+    baseConcurrency?: number;
+    landInWorld?: (worldId: string, fn: (worldDir: string) => Promise<void>) => Promise<boolean>;
+  },
 ): Harness {
   const events: DomainEvent[] = [];
   const ledger: Harness["ledger"] = { entries: [], onAppend: null };
@@ -57,7 +65,12 @@ function build(
         ledger.entries.push(entry);
       },
     },
-    worldDirFor: () => worldDir,
+    landInWorld:
+      opts.landInWorld ??
+      (async (_worldId, fn) => {
+        await fn(worldDir);
+        return true;
+      }),
     onProviderFault: (provider, message) => faults.push({ provider, message }),
     maxAttempts: 3,
     backoffBaseMs: 5,
@@ -122,6 +135,41 @@ describe("the happy path writes exactly one ledger entry and lands artifacts ato
     assert.equal(h.ledger.entries[0]!.actualSource, "manifest-derived", "no cost reported → derived (R-17)");
     assert.equal(h.ledger.entries[0]!.actualMicroUsd, INPUT.estimatedMicroUsd);
     assert.ok(h.ledger.entries[0]!.actualMicroUsd! > 0);
+    h.queue.dispose();
+  });
+});
+
+describe("provider completion while the owning world is unavailable", () => {
+  it("waits for the destination and lands without another submission", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.artifacts = [{ name: "portrait.png", contentType: "image/png", data: pngBytes() }];
+    let available = false;
+    let destination = "";
+    const h = await makeHarness(
+      { fake },
+      {
+        landInWorld: async (_worldId, fn) => {
+          if (!available) return false;
+          await fn(destination);
+          return true;
+        },
+      },
+    );
+    destination = h.worldDir;
+    await h.queue.start();
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      capability: "image",
+      target: { kind: "character-sheet", id: "maren-kest/g1" },
+      landing: { dir: "references/maren-kest/incoming", name: "character-sheet.png" },
+    });
+    await until(() => foldedJob(h, job.id)?.error?.includes("waiting for the owning world") === true);
+    assert.equal(fake.submitCount, 1);
+    assert.equal(foldedJob(h, job.id)?.status, "running");
+    available = true;
+    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    assert.equal(fake.submitCount, 1, "destination recovery never resubmits paid provider work");
+    assert.ok(await readFile(join(h.worldDir, "references/maren-kest/incoming/character-sheet.png")));
     h.queue.dispose();
   });
 });

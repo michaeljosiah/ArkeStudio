@@ -294,6 +294,21 @@ export class FsWorldProvider implements WorldProvider {
     return this.store;
   }
 
+  async withWorldStore<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T> {
+    if (this.store?.worldId === worldId) return fn(this.store);
+    const dir = await this.findWorldDir(worldId);
+    const scoped = await WorldStore.open(dir, {
+      clock: this.clock,
+      ...(this.sqlite ? { sqlite: this.sqlite } : {}),
+    });
+    try {
+      return await fn(scoped);
+    } finally {
+      this.refreshRegistry(scoped.getBundle());
+      await scoped.close();
+    }
+  }
+
   /**
    * Archive a world: it leaves the library without leaving the disk.
    *
