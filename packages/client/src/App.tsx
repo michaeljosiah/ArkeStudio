@@ -1,4 +1,4 @@
-import { Route, Routes, useNavigate } from "react-router";
+import { Route, Routes, useLocation, useNavigate } from "react-router";
 import { useEffect } from "react";
 import {
   ActivityScreen,
@@ -62,11 +62,14 @@ import {
 import { Navigate } from "react-router";
 import { QueueToaster } from "./components/queue-toaster.js";
 import { useThemePreference } from "./lib/theme.js";
+import { stopAudio } from "./lib/audio.js";
 
 export function App() {
   const navigate = useNavigate();
+  const location = useLocation();
   useThemePreference();
   useEffect(() => window.arke?.onActivateActivity?.(() => navigate("/activity")), [navigate]);
+  useEffect(() => stopAudio, [location.pathname]);
   return (
     <>
       {/* The window has no native title bar to grab, so the top 44px is the app's own chrome

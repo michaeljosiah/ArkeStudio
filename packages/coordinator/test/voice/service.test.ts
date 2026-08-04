@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { DomainEvent, LedgerEntry, ManifestModel, Sheet, WorldBundle } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { JobQueue } from "../../src/queue/dispatcher.js";
-import { previewCacheFile, VoiceService, voiceLineRequest } from "../../src/voice/service.js";
+import { authoritativeSheetSpeech, normalizeSpeechText, previewCacheFile, speechCacheFile, VoiceService, voiceLineRequest } from "../../src/voice/service.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { FakeProvider } from "../queue/fake-provider.js";
@@ -269,5 +269,28 @@ describe("the preview cache key", () => {
     assert.equal(a, previewCacheFile("elevenlabs", "v1", "line one", "mp3"));
     assert.notEqual(a, previewCacheFile("elevenlabs", "v2", "line one", "mp3"));
     assert.notEqual(a, previewCacheFile("elevenlabs", "v1", "line two", "mp3"));
+  });
+  it("includes model, format, settings and normalized text", () => {
+    const base = { provider: "kokoro" as const, model: "kokoro-82m", voiceId: "af_bella", text: "hello   harbour", format: "wav" as const };
+    assert.equal(normalizeSpeechText(base.text), "hello harbour");
+    assert.equal(speechCacheFile(base), speechCacheFile({ ...base, text: " hello harbour " }));
+    assert.notEqual(speechCacheFile(base), speechCacheFile({ ...base, model: "kokoro-82m-v2" }));
+    assert.notEqual(speechCacheFile(base), speechCacheFile({ ...base, format: "mp3" }));
+  });
+});
+
+describe("authoritative sheet speech", () => {
+  it("reads exact normalized Essence from a supported assignment", () => {
+    assert.deepEqual(authoritativeSheetSpeech(SHEET, "Essence"), {
+      text: "Tide-caller",
+      provider: "elevenlabs",
+      voiceId: "v_8Kq2",
+    });
+  });
+
+  it("rejects unknown headings, empty text, and legacy assignments", () => {
+    assert.throws(() => authoritativeSheetSpeech(SHEET, "Appearance"), /not available/);
+    assert.throws(() => authoritativeSheetSpeech({ ...SHEET, voice: { ...SHEET.voice!, provider: "openai" } } as Sheet, "Essence"), /supported voice/);
+    assert.throws(() => authoritativeSheetSpeech({ ...SHEET, sections: [{ heading: "Essence", body: "  " }] } as Sheet, "Essence"), /Nothing to read/);
   });
 });

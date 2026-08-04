@@ -43,6 +43,7 @@ const base = { at: IsoDateTimeSchema };
 export const QueueCommandSchema = z.enum([
   "dispatch-scene",
   "voice-preview",
+  "read-sheet-section",
   "generate-world-image",
   "establish-look",
   "generate-main-photo",
@@ -185,6 +186,29 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       previewLine: z.object({ text: z.string(), source: z.enum(["own-line", "drafted", "stock"]) }).strict(),
       /** Stated before any preview that will incur a charge (R-10); null when no cloud model. */
       cloudPreviewMicroUsd: z.number().int().min(0).nullable(),
+    })
+    .strict(),
+  /** Correlated synthesis result for candidate previews and authoritative sheet reads. */
+  z
+    .object({
+      ...base,
+      type: z.literal("voice.audio"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      sheetVersion: z.number().int().min(1),
+      purpose: z.enum(["candidate-preview", "sheet-section"]),
+      sectionHeading: z.string().min(1).optional(),
+      provider: z.enum(["kokoro", "elevenlabs"]),
+      model: z.string().min(1),
+      voiceId: z.string().min(1),
+      status: z.enum(["confirmation-required", "ready", "failed"]),
+      file: z.string().nullable(),
+      cached: z.boolean(),
+      characterCount: z.number().int().min(0),
+      estimatedMicroUsd: z.number().int().min(0),
+      confirmationToken: z.string().min(1).optional(),
+      error: z.string().optional(),
     })
     .strict(),
   /** A preview is ready (or failed): the cached file replays without a provider call (R-10). */

@@ -38,6 +38,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       genesisId: GenesisIdSchema.optional(),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("read-sheet-section"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      sectionHeading: z.literal("Essence"),
+      confirmationToken: z.string().min(1).optional(),
+    })
+    .strict(),
   /**
    * Archive a world: out of the library, still on the disk. The folder moves to `archive/`
    * whole, so what comes next — recovery, or deleting it for good — is a decision taken later
@@ -530,7 +540,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
-      provider: z.string().min(1),
+      provider: z.enum(["kokoro", "elevenlabs"]),
       voiceId: z.string().min(1),
     })
     .strict(),
