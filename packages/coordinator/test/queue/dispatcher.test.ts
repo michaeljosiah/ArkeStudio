@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readdir, readFile } from "node:fs/promises";
+import { appendFile, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, Job, LedgerEntry } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
@@ -220,6 +220,23 @@ describe("kill at every step (§3.2) — strategy A: lookup by idempotency key",
     assert.equal(h2.ledger.entries.length, 1);
     h2.queue.dispose();
   });
+
+  it("a failed lookup is unknown and never treated as proof the paid request is absent", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true, supportsLookupByKey: true });
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    fake.onSubmitAccepted = () => h.queue.dispose();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => fake.submitCount === 1);
+    await h.queue.drain();
+    fake.onSubmitAccepted = null;
+    fake.lookupError = new Error("fetch failed during lookup");
+    const h2 = h.revive();
+    const report = await h2.queue.start();
+    assert.equal(report.find((row) => row.jobId === job.id)?.action, "held-for-user");
+    assert.equal(fake.submitCount, 1);
+    h2.queue.dispose();
+  });
 });
 
 describe("kill mid-submit — strategy B: list recent", () => {
@@ -285,7 +302,7 @@ describe("kill mid-submit — strategy C: neither, so the user is asked (D4)", (
     assert.equal(report.find((r) => r.jobId === job.id)?.action, "held-for-user");
     const held = foldedJob(h2, job.id)!;
     assert.equal(held.status, "needs-reconciliation");
-    assert.match(held.error!, /may charge twice/);
+    assert.match(held.error!, /may have accepted and charged/);
     assert.match(held.error!, /\$0\.13/, "the duplicate cost is stated in dollars");
     assert.equal(fake.submitCount, 1, "nothing sent while the user has not answered");
 
@@ -295,6 +312,21 @@ describe("kill mid-submit — strategy C: neither, so the user is asked (D4)", (
     assert.equal(fake.submitCount, 2);
     assert.equal(h2.ledger.entries.length, 1);
     h2.queue.dispose();
+
+    const fake3 = new FakeProvider({});
+    const r = await makeHarness({ fake: fake3 });
+    await r.queue.start();
+    fake3.submitError = new Error("fetch failed after receipt");
+    const job3 = await r.queue.enqueue(INPUT);
+    await until(() => foldedJob(r, job3.id)?.status === "needs-reconciliation");
+    fake3.submitError = null;
+    await Promise.all([
+      r.queue.resolveHeld(job3.id, "resubmit"),
+      r.queue.resolveHeld(job3.id, "resubmit"),
+    ]);
+    await until(() => foldedJob(r, job3.id)?.status === "succeeded");
+    assert.equal(fake3.submitCount, 2, "concurrent decisions authorize only one additional call");
+    r.queue.dispose();
 
     // A second held job, discarded: cancelled with a ledger entry, actual unknown (R-15).
     const fake2 = new FakeProvider({});
@@ -375,7 +407,7 @@ describe("kill during download and after terminal (§3.2)", () => {
 
 describe("provider faults pause the queue (R-8, D6, D7)", () => {
   it("a 401 with forty queued jobs: paused, told once, zero failed, others keep running", async () => {
-    const bad = new FakeProvider({});
+    const bad = new FakeProvider({ supportsIdempotencyKey: true });
     bad.submitError = new Error("HTTP 401 the credential was rejected");
     const good = new FakeProvider({});
     const h = await makeHarness({ bad, good }, { baseConcurrency: 1 });
@@ -407,7 +439,7 @@ describe("provider faults pause the queue (R-8, D6, D7)", () => {
 
 describe("retry classification (R-7, R-9, D5)", () => {
   it("a content-policy rejection is not retried and the reason surfaces", async () => {
-    const fake = new FakeProvider({});
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("HTTP 400 content policy violation: depicts a real person");
     const h = await makeHarness({ fake });
     await h.queue.start();
@@ -420,7 +452,7 @@ describe("retry classification (R-7, R-9, D5)", () => {
   });
 
   it("an ambiguous error is terminal, not retried (D5)", async () => {
-    const fake = new FakeProvider({});
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("something inscrutable happened");
     const h = await makeHarness({ fake });
     await h.queue.start();
@@ -431,7 +463,7 @@ describe("retry classification (R-7, R-9, D5)", () => {
   });
 
   it("transient failures retry with bounded attempts then give up", async () => {
-    const fake = new FakeProvider({});
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("HTTP 503 unavailable");
     fake.submitErrorTimes = 2; // two failures, then healthy
     const h = await makeHarness({ fake });
@@ -439,7 +471,8 @@ describe("retry classification (R-7, R-9, D5)", () => {
     const job = await h.queue.enqueue(INPUT);
     await until(() => foldedJob(h, job.id)?.status === "succeeded");
     assert.equal(fake.submitCount, 3);
-    assert.equal(foldedJob(h, job.id)?.attempt, 2);
+    assert.equal(foldedJob(h, job.id)?.attempt, 3);
+    assert.deepEqual(new Set(fake.submittedKeys).size, 1, "every safe retry carries the same persisted key");
     h.queue.dispose();
   });
 });
@@ -457,7 +490,7 @@ describe("rate and concurrency (R-10, D8)", () => {
   });
 
   it("queue position is observable while waiting (R-11)", async () => {
-    const fake = new FakeProvider({});
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("HTTP 401 nope");
     const h = await makeHarness({ fake });
     await h.queue.start();
@@ -473,21 +506,69 @@ describe("rate and concurrency (R-10, D8)", () => {
 });
 
 describe("offline holds rather than fails (R-17, D13)", () => {
-  it("network unreachable: queued, no attempt burned, resumes by itself", async () => {
+  it("a non-idempotent paid request is held after one ambiguous submission", async () => {
     const fake = new FakeProvider({});
     fake.submitError = new Error("fetch failed: ENOTFOUND queue.fal.run");
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => h.queue.queueStatus("fake").paused);
-    assert.match(h.queue.queueStatus("fake").reason!, /offline/);
-    assert.equal(foldedJob(h, job.id)?.status, "queued", "not a failure — nothing about it is wrong");
-    assert.equal(foldedJob(h, job.id)?.attempt, 0, "offline never burns an attempt");
+    await until(() => foldedJob(h, job.id)?.status === "needs-reconciliation");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(fake.submitCount, 1, "offline auto-resume cannot repeat a paid non-idempotent call");
+    assert.equal(foldedJob(h, job.id)?.attempt, 1);
     assert.equal(h.faults.length, 0, "offline is not a provider fault");
+    assert.equal(h.ledger.entries.length, 0, "unknown work is not claimed as zero-cost completion");
+    h.queue.dispose();
+  });
 
-    fake.submitError = null; // connectivity returns; the offline timer resumes the lane
+  it("contains a legacy submitting-to-queued loop on the first patched restart", async () => {
+    const fake = new FakeProvider({});
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    h.queue.dispose();
+    const now = "2026-08-04T12:00:00.000Z";
+    const base: Job = {
+      id: "jb_01J8E000000000000000000J93",
+      idempotencyKey: "01J8E100000000000000000J93",
+      worldId: WORLD,
+      target: { kind: "character-sheet", id: "maren-kest/legacy" },
+      capability: "image",
+      provider: "fake",
+      model: "gpt-image-2",
+      params: {},
+      estimatedMicroUsd: 40000,
+      status: "queued",
+      providerJobId: null,
+      attempt: 0,
+      error: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await appendFile(
+      h.journalPath,
+      `${JSON.stringify({ ...base, status: "submitting" })}\n${JSON.stringify(base)}\n`,
+      "utf8",
+    );
+    const h2 = h.revive();
+    const report = await h2.queue.start();
+    assert.equal(report.find((row) => row.jobId === base.id)?.action, "held-for-user");
+    assert.equal(foldedJob(h2, base.id)?.status, "needs-reconciliation");
+    assert.equal(foldedJob(h2, base.id)?.attempt, 1);
+    assert.equal(fake.submitCount, 0);
+    h2.queue.dispose();
+  });
+
+  it("a guaranteed-idempotent offline submission retries with one key and a hard ceiling", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = new Error("fetch failed: ENOTFOUND queue.fal.run");
+    fake.submitErrorTimes = 2;
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
     await until(() => foldedJob(h, job.id)?.status === "succeeded");
-    assert.equal(h.ledger.entries.length, 1);
+    assert.equal(fake.submitCount, 3);
+    assert.equal(foldedJob(h, job.id)?.attempt, 3);
+    assert.equal(new Set(fake.submittedKeys).size, 1);
     h.queue.dispose();
   });
 });

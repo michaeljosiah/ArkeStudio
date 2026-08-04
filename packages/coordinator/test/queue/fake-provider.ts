@@ -51,6 +51,7 @@ export class FakeProvider implements DispatchClient {
   cancelCount = 0;
   inFlightNow = 0;
   maxObservedConcurrent = 0;
+  readonly submittedKeys: Array<string | undefined> = [];
 
   /** Scripting hooks. */
   submitError: Error | null = null;
@@ -65,6 +66,7 @@ export class FakeProvider implements DispatchClient {
   /** Listing behaviour for strategy B: whether entries carry idempotency keys. */
   listingCarriesKeys = true;
   listingWindowFloor: string | null = null;
+  lookupError: Error | null = null;
 
   private counter = 0;
 
@@ -83,6 +85,7 @@ export class FakeProvider implements DispatchClient {
     request: { model: string; params: Record<string, unknown>; idempotencyKey?: string },
   ): Promise<{ remoteId: string }> {
     this.submitCount += 1;
+    this.submittedKeys.push(request.idempotencyKey);
     this.inFlightNow += 1;
     this.maxObservedConcurrent = Math.max(this.maxObservedConcurrent, this.inFlightNow);
     try {
@@ -130,6 +133,7 @@ export class FakeProvider implements DispatchClient {
   }
 
   async lookupByKey(_key: string, idempotencyKey: string): Promise<{ remoteId: string } | null> {
+    if (this.lookupError) throw this.lookupError;
     for (const job of this.remote.values()) {
       if (job.idempotencyKey === idempotencyKey) return { remoteId: job.remoteId };
     }

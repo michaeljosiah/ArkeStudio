@@ -50,7 +50,7 @@ export const JobSchema = z
     status: JobStatusSchema,
     /** The provider's own job id, recorded before the state moves to running. */
     providerJobId: z.string().nullable().default(null),
-    /** Submission attempts consumed (SPEC-009 R-9). Offline holds never burn one (R-17). */
+    /** Physical submission calls authorized, persisted before provider I/O (SPEC-009 R-9). */
     attempt: z.number().int().min(0).default(0),
     /** Where artifacts land, world-relative — the caller's meaning, not this spec's (§1.2). */
     landing: z

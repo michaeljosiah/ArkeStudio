@@ -1560,9 +1560,9 @@ export function ActivityScreen() {
                     <div style={{ display: "flex", gap: "var(--space-2)", marginTop: 8, flexWrap: "wrap" }}>
                       {entry.actions.includes("resolve") && entry.ref && (
                         <>
-                          <Button onClick={() => resolveHeldJob(entry.ref!, "resubmit")}>Resubmit anyway</Button>
+                          <Button onClick={() => resolveHeldJob(entry.ref!, "resubmit")}>Resubmit · may charge again</Button>
                           <Button variant="ghost" onClick={() => resolveHeldJob(entry.ref!, "discard")}>
-                            Abandon
+                            Abandon · prior cost unknown
                           </Button>
                         </>
                       )}
