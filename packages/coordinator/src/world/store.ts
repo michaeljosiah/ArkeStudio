@@ -117,6 +117,23 @@ export class WorldStore {
     });
   }
 
+  /**
+   * One app-owned filesystem write outside the commit/proposal machinery. Kept separate from
+   * gateOp so callers do not imply proposal semantics, but uses the same serialization,
+   * watcher ownership and post-write rescan (issue #87).
+   */
+  async ownedWrite<T>(fn: () => Promise<T>): Promise<T> {
+    return this.serialise(async () => {
+      this.watcher?.suppress();
+      try {
+        return await fn();
+      } finally {
+        await this.rescan().catch(() => {});
+        this.watcher?.unsuppress();
+      }
+    });
+  }
+
   /** The committer's clock — gate records share the world's notion of now. */
   now(): string {
     return this.clockFn();
