@@ -138,6 +138,7 @@ import type { WorldStore } from "./world/store.js";
 
 export interface CoordinatorOptions {
   provider: WorldProvider;
+  observeEvent?: (event: DomainEvent) => void;
   adapter: HarnessAdapter | null;
   changeLogPath: string;
   appVersion: string;
@@ -390,6 +391,11 @@ export class Coordinator {
       void this.changeLog.append({ kind: "event", event: parsed });
     }
     this.transport.broadcast(parsed);
+    try {
+      this.opts.observeEvent?.(parsed);
+    } catch {
+      /* host observers cannot interrupt domain event delivery */
+    }
   }
 
   /** Attach a supervised child and mirror its lifecycle into component health (R-6). */
@@ -580,6 +586,7 @@ export class Coordinator {
         ? { routing: { defaults: settings.routing, faults: routingFaults(settings, manifest) } }
         : {}),
       ...(settings ? { spend: evaluateSpend(entries, settings.spend, new Date()) } : {}),
+      ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
       ...(manifest ? { drift: detectDrift(entries, manifest) } : {}),
     });
   }
@@ -613,11 +620,9 @@ export class Coordinator {
       if (job.target.kind === "reference-tile" && job.landedFiles?.[0] !== undefined) {
         const [sheetId, angle] = (job.target.id ?? "").split("/") as [string, never];
         const sheet = store.getBundle().sheets.find((s) => s.id === sheetId);
-        if (!sheet || !angle) return;
+        if (!sheet || !angle) throw new Error("reference tile finalization target is unavailable");
         const withinKit = job.landedFiles[0].replace(`references/${sheetId}/`, "");
-        await supersedeTile(store, sheetId, angle, { file: withinKit, sheetVersion: sheet.version }).catch(
-          () => {},
-        );
+        await supersedeTile(store, sheetId, angle, { file: withinKit, sheetVersion: sheet.version });
       }
       if (
         ["main-photo-candidate", "establish-candidate", "character-sheet", "character-look"].includes(
@@ -639,7 +644,8 @@ export class Coordinator {
         const ledgerEntry = this.ledger
           ? (await this.ledger.readAll()).find((e) => e.jobId === job.id)
           : undefined;
-        const takes = await recordTakesFromJob(store, job, ledgerEntry?.actualMicroUsd ?? null).catch(() => []);
+        const takes = await recordTakesFromJob(store, job, ledgerEntry?.actualMicroUsd ?? null);
+        if (takes.length === 0) throw new Error("production take finalization produced no take");
         for (const take of takes) {
           this.emit({
             at: new Date().toISOString(),
@@ -653,18 +659,17 @@ export class Coordinator {
       if (job.target.kind === "voice-preview" && job.landedFiles?.[0] !== undefined) {
         // The audition is ready; the landed file IS the cache entry (R-10).
         const [sheetId, provider, voiceId] = (job.target.id ?? "").split("/");
-        if (sheetId && provider && voiceId) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "voice.preview",
-            worldId: job.worldId,
-            sheetId,
-            provider,
-            voiceId,
-            file: job.landedFiles[0],
-            error: null,
-          });
-        }
+        if (!sheetId || !provider || !voiceId) throw new Error("voice preview finalization target is unavailable");
+        this.emit({
+          at: new Date().toISOString(),
+          type: "voice.preview",
+          worldId: job.worldId,
+          sheetId,
+          provider,
+          voiceId,
+          file: job.landedFiles[0],
+          error: null,
+        });
       }
     };
     if (this.opts.provider.withWorldStore) {
@@ -1445,6 +1450,16 @@ export class Coordinator {
           at: new Date().toISOString(),
           type: "spend.status",
           spend: evaluateSpend(entries, settings.spend, new Date()),
+        });
+        return;
+      }
+      case "set-background-notifications": {
+        if (!this.appSettings) return;
+        const settings = await this.appSettings.setBackgroundNotifications(msg.preference);
+        this.emit({
+          at: new Date().toISOString(),
+          type: "background-notifications.changed",
+          preference: settings.backgroundNotifications,
         });
         return;
       }

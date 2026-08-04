@@ -240,6 +240,7 @@ describe("reference finalization after provider success", () => {
       landing: { dir: "references/maren-kest/incoming", name: "sheet.png" },
     });
     await until(() => foldedJob(h, job.id)?.finalization?.status === "failed");
+    assert.equal(h.events.some((event) => event.type === "job.ready"), false);
     assert.equal(fake.submitCount, 1);
     assert.equal(h.ledger.entries.length, 1);
     assert.match(foldedJob(h, job.id)?.finalization?.error ?? "", /will not contact the provider or charge again/);
@@ -247,6 +248,11 @@ describe("reference finalization after provider success", () => {
     fail = false;
     await Promise.all([h.queue.retryFinalization(job.id), h.queue.retryFinalization(job.id)]);
     assert.equal(foldedJob(h, job.id)?.finalization?.status, "complete");
+    const completedIndex = h.events.findIndex(
+      (event) => event.type === "job.updated" && event.job.finalization?.status === "complete",
+    );
+    const readyIndex = h.events.findIndex((event) => event.type === "job.ready");
+    assert.ok(completedIndex >= 0 && readyIndex > completedIndex, "ready follows durable completion");
     assert.equal(finalizations, 2, "one live attempt and one single-flight retry");
     assert.equal(fake.submitCount, 1);
     assert.equal(h.ledger.entries.length, 1);
@@ -297,6 +303,92 @@ describe("reference finalization after provider success", () => {
     assert.equal(finalizations, 1);
     assert.equal(fake.submitCount, 0);
     assert.equal(h2.ledger.entries.length, 1);
+    h2.queue.dispose();
+  });
+
+  it("does not replay legacy production or reference-tile follow-ons without a finalization marker", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    let finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => void (finalizations += 1) });
+    await h.queue.start();
+    h.queue.dispose();
+    for (const [suffix, target] of [
+      ["S77", { kind: "shot", id: "sh_14" }],
+      ["T77", { kind: "reference-tile", id: "maren-kest/head-front" }],
+    ] as const) {
+      const terminal: Job = {
+        ...INPUT,
+        id: `jb_01J8E000000000000000000${suffix}`,
+        idempotencyKey: `01J8E100000000000000000${suffix}`,
+        status: "succeeded",
+        providerJobId: `remote-${suffix}`,
+        attempt: 1,
+        target,
+        landedFiles: [`incoming/${suffix}.png`],
+        error: null,
+        createdAt: "2026-08-04T12:00:00.000Z",
+        updatedAt: "2026-08-04T12:01:00.000Z",
+      };
+      await appendFile(h.journalPath, `${JSON.stringify(terminal)}\n`, "utf8");
+      h.ledger.entries.push({
+        ts: terminal.updatedAt,
+        worldId: terminal.worldId,
+        productionId: terminal.productionId!,
+        jobId: terminal.id,
+        provider: terminal.provider,
+        model: terminal.model,
+        outcome: "succeeded",
+        estimatedMicroUsd: terminal.estimatedMicroUsd,
+        actualMicroUsd: terminal.estimatedMicroUsd,
+        actualSource: "manifest-derived",
+      });
+    }
+    const h2 = h.revive();
+    await h2.queue.start();
+    await h2.queue.retryFinalizationsForWorld(INPUT.worldId);
+    assert.equal(finalizations, 0);
+    assert.equal(fake.submitCount, 0);
+    h2.queue.dispose();
+  });
+
+  it("surfaces interrupted non-reference follow-ons without replaying them", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    let finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => void (finalizations += 1) });
+    await h.queue.start();
+    h.queue.dispose();
+    const terminal: Job = {
+      ...INPUT,
+      id: "jb_01J8E000000000000000000S88",
+      idempotencyKey: "01J8E100000000000000000S88",
+      status: "succeeded",
+      providerJobId: "remote-s88",
+      attempt: 1,
+      target: { kind: "shot", id: "sh_14" },
+      landedFiles: ["incoming/S88.mp4"],
+      finalization: { status: "pending", error: null, updatedAt: "2026-08-04T12:01:00.000Z" },
+      error: null,
+      createdAt: "2026-08-04T12:00:00.000Z",
+      updatedAt: "2026-08-04T12:01:00.000Z",
+    };
+    await appendFile(h.journalPath, `${JSON.stringify(terminal)}\n`, "utf8");
+    h.ledger.entries.push({
+      ts: terminal.updatedAt,
+      worldId: terminal.worldId,
+      productionId: terminal.productionId!,
+      jobId: terminal.id,
+      provider: terminal.provider,
+      model: terminal.model,
+      outcome: "succeeded",
+      estimatedMicroUsd: terminal.estimatedMicroUsd,
+      actualMicroUsd: terminal.estimatedMicroUsd,
+      actualSource: "manifest-derived",
+    });
+    const h2 = h.revive();
+    await h2.queue.start();
+    assert.equal(foldedJob(h2, terminal.id)?.finalization?.status, "failed");
+    assert.equal(finalizations, 0);
+    assert.equal(fake.submitCount, 0);
     h2.queue.dispose();
   });
 });

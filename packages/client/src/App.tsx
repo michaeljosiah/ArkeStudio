@@ -1,4 +1,5 @@
-import { Route, Routes } from "react-router";
+import { Route, Routes, useNavigate } from "react-router";
+import { useEffect } from "react";
 import {
   ActivityScreen,
   FirstRunScreen,
@@ -7,6 +8,7 @@ import {
   SettingsAboutScreen,
   SettingsLayout,
   SettingsLocalRuntimeScreen,
+  SettingsNotificationsScreen,
   SettingsProvidersScreen,
   SettingsWhoDoesWhatScreen,
   ShellChrome,
@@ -60,6 +62,8 @@ import { Navigate } from "react-router";
 import { QueueToaster } from "./components/queue-toaster.js";
 
 export function App() {
+  const navigate = useNavigate();
+  useEffect(() => window.arke?.onActivateActivity?.(() => navigate("/activity")), [navigate]);
   return (
     <>
       {/* The window has no native title bar to grab, so the top 44px is the app's own chrome
@@ -77,6 +81,7 @@ export function App() {
           <Route path="/settings" element={<SettingsLayout />}>
             <Route index element={<Navigate to="providers" replace />} />
             <Route path="providers" element={<SettingsProvidersScreen />} />
+            <Route path="notifications" element={<SettingsNotificationsScreen />} />
             <Route path="local-runtime" element={<SettingsLocalRuntimeScreen />} />
             <Route path="agents" element={<SettingsAgentsScreen />} />
             <Route path="who-does-what" element={<SettingsWhoDoesWhatScreen />} />

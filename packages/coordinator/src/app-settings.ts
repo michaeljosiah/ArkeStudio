@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import {
   AppSettingsSchema,
   type AppSettings,
+  type BackgroundNotificationPreference,
   type Capability,
   type ModelManifest,
   type RoutingFault,
@@ -82,6 +83,13 @@ export class AppSettingsFile {
   async setSpend(thresholdMicroUsd: number, periodDays: number): Promise<AppSettings> {
     const current = await this.load();
     const next: AppSettings = { ...current, spend: { thresholdMicroUsd, periodDays } };
+    await this.persist(next);
+    return next;
+  }
+
+  async setBackgroundNotifications(preference: BackgroundNotificationPreference): Promise<AppSettings> {
+    const current = await this.load();
+    const next: AppSettings = { ...current, backgroundNotifications: preference };
     await this.persist(next);
     return next;
   }

@@ -93,6 +93,7 @@ const state: ClientState = {
       rollingMicroUsd: 128400,
       alerted: false,
     },
+    backgroundNotifications: "issues-only",
     runtime: null,
     drift: [],
     agents: [],

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { QueueEnqueueResult } from "../src/lib/store.js";
 import { queueToastCopy } from "../src/components/queue-toaster.js";
 
@@ -16,6 +19,15 @@ const result = (overrides: Partial<QueueEnqueueResult> = {}): QueueEnqueueResult
 });
 
 describe("queue toast copy", () => {
+  it("mounts one top-center toaster clear of the desktop title bar", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const app = readFileSync(resolve(here, "../src/App.tsx"), "utf8");
+    const toaster = readFileSync(resolve(here, "../src/components/queue-toaster.tsx"), "utf8");
+    assert.equal(app.match(/<QueueToaster\s*\/>/g)?.length, 1);
+    assert.match(toaster, /position="top-center"/);
+    assert.match(toaster, /44px/);
+  });
+
   it("describes queueing rather than completion", () => {
     assert.deepEqual(queueToastCopy(result()), { kind: "success", title: "Added to Activity" });
     assert.deepEqual(

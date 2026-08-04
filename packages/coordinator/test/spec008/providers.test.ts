@@ -142,3 +142,15 @@ describe("routing defaults resolve to concrete models (R-20, R-21 posture, D1)",
     assert.match(faults[0]!.reason, /no longer in the manifest/);
   });
 });
+
+describe("background notification settings", () => {
+  it("defaults conservatively and persists each explicit preference", async () => {
+    const dir = await tempDir("arke-settings-");
+    const settings = new AppSettingsFile(join(dir, "settings.json"));
+    assert.equal((await settings.load()).backgroundNotifications, "issues-only");
+    await settings.setBackgroundNotifications("background-results-and-issues");
+    assert.equal((await settings.load()).backgroundNotifications, "background-results-and-issues");
+    await settings.setBackgroundNotifications("off");
+    assert.equal((await settings.load()).backgroundNotifications, "off");
+  });
+});

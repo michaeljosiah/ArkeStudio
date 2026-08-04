@@ -8,6 +8,7 @@ export interface ArkeBridge {
     onFrame: (frameJson: string) => void,
     onStatus: (status: "connecting" | "open" | "closed") => void,
   ): void;
+  onActivateActivity?(listener: () => void): () => void;
   /**
    * Desktop only, and optional for that reason: a browser session has no host to resolve a
    * dropped file's path, so the composer simply does not offer the affordance there.

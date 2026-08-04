@@ -10,6 +10,7 @@ import { ProposalSchema, RipplePreviewSchema } from "./proposal.js";
 import { ProviderStatusSchema } from "./provider.js";
 import {
   LocalRuntimeStatusSchema,
+  BackgroundNotificationPreferenceSchema,
   ManifestDriftSchema,
   RoutingDefaultsSchema,
   RoutingFaultSchema,
@@ -212,6 +213,7 @@ export const ClientStateSchema = z
           )
           .default([]),
         spend: SpendStatusSchema.nullable().default(null),
+        backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
         runtime: LocalRuntimeStatusSchema.nullable().default(null),
         drift: z.array(ManifestDriftSchema).default([]),
         /** Per-provider queue state: pauses with reasons, held counts (SPEC-009 R-8, R-11). */

@@ -33,6 +33,7 @@ import {
   retryJobFinalization,
   resumeQueue,
   setCredential,
+  setBackgroundNotifications,
   setRoutingDefault,
   setSpendThreshold,
   useArchiveNote,
@@ -905,6 +906,7 @@ export function SettingsLayout() {
                 {(
                   [
                     ["providers", "Providers"],
+                    ["notifications", "Notifications"],
                     ["local-runtime", "Local runtime"],
                     ["agents", "Agents"],
                     ["who-does-what", "Who does what"],
@@ -1153,6 +1155,38 @@ export function SettingsProvidersScreen() {
         </div>
       </div>
       <div className="fy-set__note">alerts on a rolling window, across all worlds · never blocks</div>
+    </div>
+  );
+}
+
+export function SettingsNotificationsScreen() {
+  const { state } = useStore();
+  const preference = state?.app.backgroundNotifications ?? "issues-only";
+  return (
+    <div data-screen="settings-notifications" className="fy-set">
+      <div className="fy-set__eyebrow">BACKGROUND NOTIFICATIONS</div>
+      <div className="fy-set__row">
+        <div className="fy-set__name fy-set__name--wide">
+          <div className="fy-set__title">When Arke Studio is in the background</div>
+          <div className="fy-set__caps">Windows notifications open Activity when clicked</div>
+        </div>
+        <select
+          className="fy-set__select"
+          aria-label="Background notifications"
+          value={preference}
+          onChange={(event) =>
+            setBackgroundNotifications(event.target.value as typeof preference)
+          }
+        >
+          <option value="background-results-and-issues">Results and issues</option>
+          <option value="issues-only">Issues only</option>
+          <option value="off">Off</option>
+        </select>
+      </div>
+      <div className="fy-set__note">
+        issues include failed or uncertain generations, result preparation, and paused providers ·
+        result notifications contain no world or character names
+      </div>
     </div>
   );
 }

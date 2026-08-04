@@ -67,7 +67,8 @@ export function QueueToaster() {
 
   return (
     <Toaster
-      position="bottom-right"
+      position="top-center"
+      offset={{ top: "calc(44px + var(--space-3))" }}
       closeButton
       hotkey={["altKey", "KeyT"]}
       toastOptions={{

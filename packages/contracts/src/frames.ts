@@ -4,6 +4,7 @@ import { DomainEventSchema } from "./events.js";
 import { GenesisIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, UlidSchema } from "./ids.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
+import { BackgroundNotificationPreferenceSchema } from "./settings.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then `event` frames, sequence
@@ -325,6 +326,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** SPEC-008 R-22: re-run local runtime detection on demand. */
   z.object({ kind: z.literal("detect-runtimes") }).strict(),
+  z
+    .object({
+      kind: z.literal("set-background-notifications"),
+      preference: BackgroundNotificationPreferenceSchema,
+    })
+    .strict(),
   /** SPEC-009 R-14: cancel a job in any non-terminal state; remote cancel attempted where supported. */
   z.object({ kind: z.literal("cancel-job"), jobId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("retry-job-finalization"), jobId: z.string().min(1) }).strict(),

@@ -86,6 +86,7 @@ export const QueueStatusSchema = z
   .object({
     provider: z.string().min(1),
     paused: z.boolean(),
+    pauseKind: z.enum(["fault", "offline", "credential"]).optional(),
     /** Why: "FAL rejected the key (HTTP 401)", "offline", "no credential stored" … */
     reason: z.string().optional(),
     /** Non-terminal jobs currently held behind the pause or awaiting the user. */

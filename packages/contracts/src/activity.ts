@@ -57,14 +57,17 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
   // Class 1 — unresolved spend: only the user can decide (D3). Global and precise (R-6).
   for (const job of state.app.jobs) {
     if (job.finalization?.status === "failed") {
+      const retryable = ["main-photo-candidate", "establish-candidate", "character-sheet", "character-look"].includes(
+        job.target.kind,
+      );
       entries.push({
         urgency: 1,
         kind: "job-finalization-failed",
-        title: `${job.model} output needs review-take repair`,
-        detail: job.finalization.error ?? "generation completed, but its review take is missing",
+        title: `${job.model} output needs attention`,
+        detail: job.finalization.error ?? "generation completed, but its result is not ready",
         at: job.finalization.updatedAt,
         worldId: job.worldId,
-        actions: ["retry-finalization"],
+        actions: retryable ? ["retry-finalization"] : [],
         ref: job.id,
       });
       continue;
@@ -237,7 +240,7 @@ export function computeRunning(
     entries.push({
       kind: "job",
       title: `${job.model} · ${job.target.kind}${job.target.id !== undefined ? ` ${job.target.id}` : ""}`,
-      detail: finalizing ? `${job.provider} · generated · preparing review take` : `${job.provider} · ${job.status}`,
+      detail: finalizing ? `${job.provider} · generated · preparing result` : `${job.provider} · ${job.status}`,
       percent: null,
       ref: job.id,
       worldId: job.worldId,

@@ -30,6 +30,7 @@ export class ReadModel {
         manifest: null,
         routing: { defaults: {}, faults: [] },
         spend: null,
+        backgroundNotifications: "issues-only",
         runtime: null,
         drift: [],
         agents: [],
@@ -46,7 +47,7 @@ export class ReadModel {
   /** Seed the app-config slice at start-up (SPEC-008): manifest, providers, routing, spend. */
   seedAppConfig(
     config: Partial<
-      Pick<ClientState["app"], "manifest" | "providers" | "routing" | "spend" | "runtime" | "drift">
+      Pick<ClientState["app"], "manifest" | "providers" | "routing" | "spend" | "backgroundNotifications" | "runtime" | "drift">
     >,
   ): void {
     this.state = { ...this.state, app: { ...this.state.app, ...config } };
@@ -136,6 +137,10 @@ export class ReadModel {
       }
       case "spend.status": {
         this.state = { ...this.state, app: { ...this.state.app, spend: event.spend } };
+        return;
+      }
+      case "background-notifications.changed": {
+        this.state = { ...this.state, app: { ...this.state.app, backgroundNotifications: event.preference } };
         return;
       }
       case "runtime.status": {
