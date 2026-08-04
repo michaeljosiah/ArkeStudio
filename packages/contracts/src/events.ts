@@ -12,6 +12,7 @@ import {
 } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema, ReconcileActionSchema } from "./job.js";
 import { ProviderStatusSchema } from "./provider.js";
+import { ProviderCallRecordSchema } from "./provider-call.js";
 import { ShotSelectionSchema } from "./scene.js";
 import {
   LocalRuntimeStatusSchema,
@@ -82,6 +83,14 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   /** A world was opened into the coordinator; the follow-up snapshot carries its bundle. */
   z.object({ ...base, type: z.literal("world.opened"), worldId: UlidSchema }).strict(),
   z.object({ ...base, type: z.literal("world.closed"), worldId: UlidSchema }).strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("provider-calls.ready"),
+      jobId: JobIdSchema.nullable(),
+      calls: z.array(ProviderCallRecordSchema),
+    })
+    .strict(),
 
   /** Mirror of a changes.jsonl append — an accepted mutation to a world entity (§2.5). */
   z
@@ -95,6 +104,17 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("canon.revision.advanced"),
       worldId: UlidSchema,
       revision: z.number().int(),
+    })
+    .strict(),
+  /** Transient Settings test result. Audio is never written to the change log or diagnostics. */
+  z
+    .object({
+      ...base,
+      type: z.literal("voice.runtime-test"),
+      requestId: UlidSchema,
+      status: z.enum(["testing", "ready", "failed"]),
+      detail: z.string(),
+      audioBase64: z.string().nullable(),
     })
     .strict(),
 

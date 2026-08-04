@@ -22,17 +22,50 @@ export const VoiceCandidateSchema = z
   .strict();
 export type VoiceCandidate = z.infer<typeof VoiceCandidateSchema>;
 
+export const VoiceRuntimeSourceSchema = z.enum(["environment", "configured", "bundled", "absent"]);
+export type VoiceRuntimeSource = z.infer<typeof VoiceRuntimeSourceSchema>;
+
+export const VoiceRuntimeFailureSchema = z.enum([
+  "runtime-missing",
+  "launch-failed",
+  "architecture-mismatch",
+  "incompatible-health",
+  "kokoro-model-missing",
+  "whisper-model-missing",
+  "model-verification-failed",
+  "phonemizer-unavailable",
+]);
+export type VoiceRuntimeFailure = z.infer<typeof VoiceRuntimeFailureSchema>;
+
+const VoiceEngineStatusSchema = z
+  .object({
+    state: z.enum(["unknown", "missing", "downloading", "verification-failed", "unavailable", "ready"]),
+    detail: z.string().optional(),
+  })
+  .strict();
+
 export const VoiceRuntimeStatusSchema = z
   .object({
-    source: z.literal("bundled"),
-    version: z.string().min(1),
-    protocolVersion: z.literal(1),
-    architecture: z.enum(["x64", "arm64"]),
+    source: VoiceRuntimeSourceSchema,
+    configured: z.boolean(),
+    bundledAvailable: z.boolean(),
+    /** A basename only. Absolute executable paths never cross into renderer state. */
+    executableName: z.string().min(1).nullable(),
+    version: z.string().min(1).nullable(),
+    protocolVersion: z.literal(1).nullable(),
+    architecture: z.enum(["x64", "arm64"]).nullable(),
+    expectedArchitecture: z.enum(["x64", "arm64"]).nullable(),
+    processState: z.enum(["unconfigured", "starting", "healthy", "unhealthy", "stopped", "failed"]),
+    endpointCompatible: z.boolean(),
+    failureCategory: VoiceRuntimeFailureSchema.nullable(),
+    detail: z.string().min(1),
+    configurationWarning: z.string().min(1).nullable(),
     engines: z.array(z.enum(["kokoro", "whisper"])),
     engineStatus: z
       .object({
-        kokoro: z.object({ ready: z.boolean(), reason: z.string().optional() }).strict(),
-        whisper: z.object({ ready: z.boolean(), reason: z.string().optional() }).strict(),
+        kokoro: VoiceEngineStatusSchema,
+        whisper: VoiceEngineStatusSchema,
+        phonemizer: VoiceEngineStatusSchema,
       })
       .strict(),
   })

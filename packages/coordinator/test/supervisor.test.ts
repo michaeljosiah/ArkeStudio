@@ -113,6 +113,21 @@ describe("ChildSupervisor", () => {
     assert.match(sup.reason ?? "", /did not become healthy/);
   });
 
+  it("reports a typed protocol failure instead of generic absence", async () => {
+    const sup = new ChildSupervisor({
+      id: "voxa",
+      command: process.execPath,
+      args: [CHILD],
+      env: { MODE: "healthy", PROTOCOL_VERSION: "2" },
+      validateHealth: async () => ({ ok: false, reason: "voxa health contract is incompatible" }),
+      readyTimeoutMs: 500,
+      probeIntervalMs: 50,
+    });
+    await sup.start();
+    assert.equal(sup.status, "failed");
+    assert.equal(sup.reason, "voxa health contract is incompatible");
+  });
+
   it("declares failure with a stated reason when a child never becomes healthy, and kills it (R-5)", async () => {
     const sup = new ChildSupervisor({
       id: "voxa",

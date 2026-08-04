@@ -1373,7 +1373,7 @@ export function DictationButton({ onText }: { onText: (text: string) => void }) 
   }, [result?.text]);
   const unavailable =
     sidecar !== null && sidecar.state !== "ready"
-      ? state?.app.health.voice.status !== "healthy" || state?.app.voiceRuntime?.engineStatus.whisper.ready !== true
+      ? state?.app.health.voice.status !== "healthy" || state?.app.voiceRuntime?.engineStatus.whisper.state !== "ready"
       : false;
   const start = async () => {
     try {

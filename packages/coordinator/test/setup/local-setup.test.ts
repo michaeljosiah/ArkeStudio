@@ -364,6 +364,29 @@ describe("fetching the local runtimes at setup", () => {
     assert.equal(last(events).components[0]!.state, "ready");
   });
 
+  it("repair removes a present model before downloading it again", async () => {
+    const appRoot = await root();
+    const events: DomainEvent[] = [];
+    const voiceCatalogue = catalogue().filter((entry) => entry.id === "weights");
+    const target = join(appRoot, "models", "whisper", "ggml.bin");
+    await mkdir(join(appRoot, "models", "whisper"), { recursive: true });
+    await writeFile(target, bytes(2048));
+    const d = deps();
+    const svc = new LocalSetupService(d, (event) => events.push(event), {
+      appRoot,
+      catalogue: voiceCatalogue,
+      throttleMs: 0,
+    });
+
+    await svc.detect();
+    assert.equal(last(events).components[0]?.state, "present");
+    await svc.repair("weights");
+    await assert.rejects(readFile(target));
+    assert.equal(last(events).components[0]?.state, "queued");
+    await svc.run();
+    assert.equal((await readFile(target)).byteLength, 2048);
+  });
+
   it("the model waits for its runtime, and says what it is waiting on", async () => {
     const appRoot = await root();
     const events: DomainEvent[] = [];

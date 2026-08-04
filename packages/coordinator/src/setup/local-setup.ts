@@ -49,7 +49,7 @@ const DEFAULT_HEADROOM_MB = 2000;
 
 export class LocalSetupService {
   private readonly components = new Map<string, Live>();
-  private readonly abort = new AbortController();
+  private abort = new AbortController();
   private diskFreeMb: number | null = null;
   private running = false;
   private disposed = false;
@@ -165,6 +165,7 @@ export class LocalSetupService {
   async run(): Promise<void> {
     if (this.disposed) return;
     if (this.inFlight !== null) return this.inFlight;
+    if (this.abort.signal.aborted) this.abort = new AbortController();
     this.inFlight = this.runOnce().finally(() => {
       this.inFlight = null;
     });
@@ -372,6 +373,15 @@ export class LocalSetupService {
     this.set(componentId, { state: "queued", bytesDone: 0, bytesPerSecond: null, detail: undefined });
     this.publish();
     if (!this.running) void this.run();
+  }
+
+  /** Remove Arke-managed model files so a repair re-download cannot trust corrupt presence. */
+  async repair(componentId: string): Promise<void> {
+    const c = this.components.get(componentId);
+    if (!c || c.entry.spec.kind !== "files") return;
+    await rm(toExtendedLength(join(this.modelsDir(), c.entry.spec.dir)), { recursive: true, force: true });
+    this.set(componentId, { state: "queued", bytesDone: 0, bytesPerSecond: null, detail: undefined });
+    this.publish();
   }
 
   /** Stop everything in flight. Whatever finished stays; nothing half-written survives. */
