@@ -34,10 +34,24 @@ function stubWatch() {
   const change = (filename: string) => {
     if (!watcher.closed) listener?.("rename", filename);
   };
-  return { open, watcher, change };
+  const anonymousChange = () => {
+    if (!watcher.closed) listener?.("rename", null as unknown as string);
+  };
+  return { open, watcher, change, anonymousChange };
 }
 
 describe("the external-edit watcher (R-23)", () => {
+  it("treats a missing filename as a dirty signal", async () => {
+    const { open, anonymousChange } = stubWatch();
+    let reported = 0;
+    const w = new WorldWatcher("/world", () => reported++, { watch: open });
+    w.start();
+    closeOnCleanup(() => w.stop());
+    anonymousChange();
+    await delay(PAST_DEBOUNCE_MS);
+    assert.equal(reported, 1);
+  });
+
   it("a directory that vanished mid-walk is not an external edit, and never a crash", async () => {
     const { open, watcher, change } = stubWatch();
     let reported = 0;

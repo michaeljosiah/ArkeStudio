@@ -11,8 +11,88 @@ import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { FIXTURE_WORLD, makeTempWorld } from "./helpers.js";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
+  it("verifies watched bytes before marking the world stale", async () => {
+    const dir = await makeTempWorld();
+    let reports = 0;
+    const store = await WorldStore.open(dir, { clock: CLOCK, events: { onStale: () => reports++ } });
+    const path = join(dir, "characters", "maren-kest.md");
+    const bytes = await readFile(path);
+
+    // Editors and sync tools often rewrite the same bytes or touch metadata. The final world is
+    // unchanged, so the OS event is only a dirty signal and must not become a warning.
+    await writeFile(path, bytes);
+    await delay(1000);
+    assert.equal(reports, 0);
+    assert.equal(store.getBundle().stale, false);
+
+    await writeFile(path, Buffer.concat([bytes, Buffer.from("\nexternal change\n")]));
+    await delay(1000);
+    assert.equal(reports, 1);
+    assert.equal(store.getBundle().stale, true);
+    await store.close();
+  });
+
+  it("keeps the accepted baseline until reload, then advances it", async () => {
+    const dir = await makeTempWorld();
+    let reports = 0;
+    const store = await WorldStore.open(dir, { clock: CLOCK, events: { onStale: () => reports++ } });
+    const scanStatePath = join(dir, ".index", "scan-state.json");
+    const baseline = await readFile(scanStatePath, "utf8");
+    const path = join(dir, "characters", "maren-kest.md");
+    await writeFile(path, `${await readFile(path, "utf8")}\nexternal change\n`);
+    await delay(1000);
+    assert.equal(reports, 1);
+    assert.equal(await readFile(scanStatePath, "utf8"), baseline, "speculative verification never adopts bytes");
+
+    await store.reload();
+    assert.equal(store.getBundle().stale, false);
+    assert.notEqual(await readFile(scanStatePath, "utf8"), baseline);
+    await store.close();
+  });
+
+  it("detects malformed bytes for a recognized entity", async () => {
+    const dir = await makeTempWorld();
+    let reports = 0;
+    const store = await WorldStore.open(dir, { clock: CLOCK, events: { onStale: () => reports++ } });
+    await writeFile(join(dir, "characters", "maren-kest.md"), "not valid frontmatter");
+    await delay(1000);
+    assert.equal(reports, 1);
+    await store.reload();
+    assert.ok(store.getBundle().problems.some((problem) => problem.path === "characters/maren-kest.md"));
+    await store.close();
+  });
+
+  it("detects creation and deletion of monitored files", async () => {
+    for (const action of ["create", "delete"] as const) {
+      const dir = await makeTempWorld();
+      let reports = 0;
+      const store = await WorldStore.open(dir, { clock: CLOCK, events: { onStale: () => reports++ } });
+      if (action === "create") {
+        await writeFile(join(dir, "characters", "new-malformed.md"), "not valid frontmatter");
+      } else {
+        await rm(join(dir, "characters", "maren-kest.md"));
+      }
+      await delay(1000);
+      assert.equal(reports, 1, `${action} is a verified manifest difference`);
+      await store.close();
+    }
+  });
+
+  it("does not mark derived export output as a world-input change", async () => {
+    const dir = await makeTempWorld();
+    let reports = 0;
+    const store = await WorldStore.open(dir, { clock: CLOCK, events: { onStale: () => reports++ } });
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(dir, "exports"), { recursive: true });
+    await writeFile(join(dir, "exports", "review.mp4"), "derived output");
+    await delay(1000);
+    assert.equal(reports, 0);
+    assert.equal(store.getBundle().stale, false);
+    await store.close();
+  });
   it("resolves a missing art-direction file as a visible, non-blank derived v1", async () => {
     const dir = await makeTempWorld();
     await rm(join(dir, "art-direction"), { recursive: true, force: true });

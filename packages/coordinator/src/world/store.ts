@@ -45,6 +45,9 @@ export class WorldStore {
   private watcher: WorldWatcher | null = null;
   private mutex: Promise<unknown> = Promise.resolve();
   private index: WorldIndex | null = null;
+  private verifying = false;
+  private verifyAgain = false;
+  private closed = false;
 
   static async open(
     dir: string,
@@ -282,6 +285,7 @@ export class WorldStore {
   }
 
   async close(): Promise<void> {
+    this.closed = true;
     this.watcher?.stop();
     this.watcher = null;
     try {
@@ -340,13 +344,48 @@ export class WorldStore {
   }
 
   private startWatcher(): void {
-    this.watcher = new WorldWatcher(this.dir, () => {
-      if (this.stale) return;
-      this.stale = true;
-      this.events.onStale?.();
-    });
+    this.watcher = new WorldWatcher(this.dir, () => this.verifyExternalChange());
     this.watcher.start();
   }
+
+  private verifyExternalChange(): void {
+    if (this.stale || this.closed) return;
+    if (this.verifying) {
+      this.verifyAgain = true;
+      return;
+    }
+    this.verifying = true;
+    void this.serialise(async () => {
+      do {
+        this.verifyAgain = false;
+        let changed = false;
+        try {
+          const current = await scanWorld(this.dir);
+          changed = !sameManifest(this.scan.manifest, current.manifest);
+        } catch {
+          // A malformed or missing world.json is itself a verified byte-level change.
+          changed = true;
+        }
+        if (this.closed || this.stale) return;
+        if (changed) {
+          this.stale = true;
+          this.events.onStale?.();
+          return;
+        }
+      } while (this.verifyAgain);
+    }).finally(() => {
+      const rerun = this.verifyAgain;
+      this.verifying = false;
+      if (rerun) this.verifyExternalChange();
+    });
+  }
+}
+
+function sameManifest(a: Record<string, string>, b: Record<string, string>): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((key) => a[key] === b[key]);
 }
 
 /**
