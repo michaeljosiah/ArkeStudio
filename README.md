@@ -32,9 +32,10 @@ everything it feeds.
 
 Everything else is surface.
 
-**1. Nothing enters the record without an accept.** Sheet edits, canon entries, scene
-drafts and takes all arrive as *proposals*. Each is checked against canon, each shows what
-it would ripple into, and each waits. The screen is the gate.
+**1. Authored facts enter through an accept.** Sheet edits, canon entries and scene drafts
+arrive as *proposals*. Each is checked against canon, each shows what it would ripple into,
+and each waits. Generated takes and operational records land as work happens; acceptance
+controls what the authored work cites and uses.
 
 **2. Canon refuses rather than guesses.** The world answers only from what is written, with
 a citation per claim. Asked something it cannot support, it says so, cites the closest
@@ -71,9 +72,8 @@ and what it would ripple into (*"14 reference images predate this change; scene 
 re-renders its cast block; 3 productions pick it up on their next dispatch"*), and then
 waits.
 
-**Nothing becomes real without an accept.** Not a canon entry, not a sheet edit, not a
-render. That rule is not a safety feature bolted on the side; it is the shape of the
-application.
+**Nothing enters the authored record without an accept.** Jobs, reviews and generated takes
+exist as operational records; the gate controls authored facts and what the work cites.
 
 ## What you can make
 
@@ -90,7 +90,7 @@ A change to a character lands in all of them.
 
 ## Get it
 
-Signed Windows installers are on the [releases page](https://github.com/michaeljosiah/ArkeStudio/releases/latest).
+Currently unsigned Windows installers are on the [releases page](https://github.com/michaeljosiah/ArkeStudio/releases/latest).
 Windows 11, x64 and ARM64. Free.
 
 First run downloads the local runtimes it needs (Ollama for local text, Kokoro for speech,
@@ -122,6 +122,9 @@ capability specs, each with its requirements, its design reasoning and its decis
 Where a spec and the code disagree, that is a bug in one of them, and the specs say plainly
 what is designed but not yet built.
 
+The code-backed list of what each operation creates, replaces, appends, moves or removes is
+[`docs/filesystem-operations.md`](docs/filesystem-operations.md).
+
 | | |
 |---|---|
 | `packages/contracts` | Zod schemas and the pure judgements the client and coordinator share |
@@ -136,7 +139,7 @@ what is designed but not yet built.
 ## Status
 
 **Early, and running.** World genesis, canon, cast, identity kits, world art direction and
-productions are built, and signed Windows installers ship from the releases page.
+productions are built, and currently unsigned Windows installers ship from the releases page.
 
 In build: voice mode, so a world can be spoken into existence rather than typed. Designed
 and not yet written: the narrative-game graph, and recovery from the archive.
