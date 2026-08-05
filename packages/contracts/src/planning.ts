@@ -470,9 +470,15 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       longestSec: entry.choice.longest,
     }));
   const warnings: DispatchWarnings = {
-    shotsWithoutFrame: scene.shots
-      .filter((s) => !(selections[s.id]?.startFrameTakeId ?? null))
-      .map((s) => ({ shotId: s.id, number: s.number })),
+    // Only where a frame would actually travel. Warning that a shot has no accepted frame, on a
+    // model that cannot take one, tells the user to go and fix something that would change
+    // nothing about the dispatch (#154). It returns of its own accord the day a model declares
+    // it takes a start frame and the dispatch carries it.
+    shotsWithoutFrame: model.accepts.startFrame
+      ? scene.shots
+          .filter((s) => !(selections[s.id]?.startFrameTakeId ?? null))
+          .map((s) => ({ shotId: s.id, number: s.number }))
+      : [],
     sketchCitations: resolved.cast.filter((c) => c.sheet.status === "sketch").map((c) => c.sheet.name),
     droppedReferences,
     staleModelSheets: resolved.cast

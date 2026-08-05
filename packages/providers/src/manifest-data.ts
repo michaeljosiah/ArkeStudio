@@ -13,7 +13,7 @@ import { FAL_MODELS } from "./fal-catalogue.generated.js";
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 12,
+  manifestVersion: 13,
   generated: "2026-08-05",
   models: [
     // ---- fal: generated from the live catalogue ---------------------------

@@ -152,8 +152,8 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "displayName": "Seedance 2.0 Text to Video API",
     "accepts": {
       "referenceImages": 0,
-      "startFrame": true,
-      "endFrame": true
+      "startFrame": false,
+      "endFrame": false
     },
     "limits": {
       "maxDurationSec": 15,
@@ -196,8 +196,8 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "displayName": "Seedance 2.0 Fast Text to Video",
     "accepts": {
       "referenceImages": 0,
-      "startFrame": true,
-      "endFrame": true
+      "startFrame": false,
+      "endFrame": false
     },
     "limits": {
       "maxDurationSec": 15,
@@ -235,8 +235,8 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "displayName": "Veo 3.1",
     "accepts": {
       "referenceImages": 0,
-      "startFrame": true,
-      "endFrame": true
+      "startFrame": false,
+      "endFrame": false
     },
     "limits": {
       "maxDurationSec": 8,
@@ -266,7 +266,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "displayName": "Veo 3.1 Fast",
     "accepts": {
       "referenceImages": 0,
-      "startFrame": true,
+      "startFrame": false,
       "endFrame": false
     },
     "limits": {
@@ -296,8 +296,8 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "displayName": "Kling Video v3 Text to Video [Pro]",
     "accepts": {
       "referenceImages": 0,
-      "startFrame": true,
-      "endFrame": true
+      "startFrame": false,
+      "endFrame": false
     },
     "limits": {
       "maxDurationSec": 15,
@@ -334,7 +334,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "displayName": "Kling Video v3 Text to Video [Standard]",
     "accepts": {
       "referenceImages": 0,
-      "startFrame": true,
+      "startFrame": false,
       "endFrame": false
     },
     "limits": {
