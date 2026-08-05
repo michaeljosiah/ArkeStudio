@@ -400,7 +400,14 @@ export function imageModelFor(
     if (settings?.models.disabled.includes(requestedId)) return null;
     return requested;
   }
-  return modelForCapability(manifest, settings?.routing, "image");
+  // With no explicit choice the routed default answers — but only if it is still switched on.
+  // Callers that never pass an id (world key art, establish looks, a missing tile) went straight
+  // to routing, so a model switched off in Providers still took paid work. Refused rather than
+  // replaced: picking a substitute would spend money on a model nobody chose, and the fault is
+  // already shown in Who does what with the two repairs named.
+  const routed = modelForCapability(manifest, settings?.routing, "image");
+  if (routed && settings?.models.disabled.includes(routed.id)) return null;
+  return routed;
 }
 
 /**

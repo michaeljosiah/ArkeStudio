@@ -324,7 +324,10 @@ describe("screen inventory", () => {
   it("blocks identity-dependent generation when the routed model cannot receive the main photo", () => {
     const model = {
       id: "text-only-image",
-      provider: "openai" as const,
+      // fal, because that is the provider the fixture has a working key for. Routed to a
+      // provider with no key this would be blocked for a different reason — no key — and the
+      // test would pass while proving nothing about reference support.
+      provider: "fal" as const,
       capability: "image" as const,
       displayName: "Text Only Image",
       accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },

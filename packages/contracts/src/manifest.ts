@@ -301,7 +301,27 @@ export function characterImageOutput(
             : "4:5";
   const resolution =
     (tier !== undefined ? nativeResolution(model, tier) : undefined) ?? model.limits.resolutions?.[0];
-  return { ...dimensions, aspect, ...(resolution ? { resolution } : {}) };
+  // The tier has to reach the dimensions too, not just the label. Several clients submit
+  // width/height and ignore `resolution` entirely — OpenAI, and every fal route that is not a
+  // nano-banana — so a tier that only set the label left those requests at the old size while
+  // the picker said 4K. Per-megapixel estimates read these dimensions as well, so the figure
+  // would have been wrong in the same direction.
+  const scaled = tier !== undefined ? scaleToTier(dimensions, tier) : dimensions;
+  return { ...scaled, aspect, ...(resolution ? { resolution } : {}) };
+}
+
+/** Long edge per tier, the aspect kept. 1K is the size these defaults were already written at. */
+const TIER_LONG_EDGE: Record<SizeTier, number> = { "1K": 1536, "2K": 2048, "4K": 4096 };
+
+function scaleToTier(dimensions: { width: number; height: number }, tier: SizeTier): { width: number; height: number } {
+  const longest = Math.max(dimensions.width, dimensions.height);
+  const target = TIER_LONG_EDGE[tier];
+  if (longest === target) return dimensions;
+  // Even numbers: encoders and several providers reject odd dimensions, and rounding here is
+  // cheaper than discovering it at submission.
+  const even = (value: number): number => Math.max(2, Math.round(value / 2) * 2);
+  const factor = target / longest;
+  return { width: even(dimensions.width * factor), height: even(dimensions.height * factor) };
 }
 
 export function estimateCharacterImageMicroUsd(

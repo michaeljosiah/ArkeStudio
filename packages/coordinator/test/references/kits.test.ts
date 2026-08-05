@@ -841,4 +841,17 @@ describe("a per-generation model and size (SPEC-008, design turn 39)", () => {
     assert.equal(imageModelFor(off, MANIFEST, "nano-banana-2"), null, "switched off is not a fallback");
     assert.equal(imageModelFor(SETTINGS, MANIFEST)?.id, MODEL.id, "no override means the routed default");
   });
+
+  it("refuses a routed default that was switched off, for callers that pass no model at all", () => {
+    // World key art, establish looks and missing tiles never pass an id — they went straight to
+    // routing, so a model switched off in Providers kept taking paid work. Refused, not
+    // replaced: choosing the substitute is the user's, and the fault is already named in
+    // Who does what with both repairs.
+    const off = {
+      ...SETTINGS,
+      models: { disabled: [MODEL.id] },
+    } as unknown as AppSettings;
+    assert.equal(imageModelFor(off, MANIFEST), null);
+    assert.equal(imageModelFor(SETTINGS, MANIFEST)?.id, MODEL.id, "and is unaffected when it is on");
+  });
 });

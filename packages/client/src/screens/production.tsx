@@ -4,18 +4,20 @@ import {
   assemblePrompt,
   deriveCut,
   modelCapabilityCopy,
+  nativeResolution,
   overrideStaleAgainst,
   planScene,
   PRESETS,
   promptFor,
   type Scene,
   type Shot,
+  type SizeTier,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen } from "../components/layout.js";
 import { Badge, Button, Callout, Textarea, cx } from "../components/ui.js";
 import { ChevronLeft, ChevronRight, Play, Plus } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
-import { DispatchBar } from "../components/dispatch-bar.js";
+import { DispatchBar, usableModels } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { CanonEntryRow } from "../domain/domain.js";
 import { seconds, usd } from "../lib/format.js";
@@ -1043,14 +1045,22 @@ export function DispatchDialogScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const { state } = useStore();
   const navigate = useNavigate();
-  const manifest = state?.app.manifest ?? null;
   const routing = state?.app.routing.defaults ?? {};
   const capability = production?.meta.format === "stills" ? "image" : "video";
-  const models = (manifest?.models ?? []).filter((m) => m.capability === capability);
+  // The same roster the picker offers, so what is planned and dispatched is what was on screen.
+  // Choosing from every manifest row meant a model switched off in Providers — or one behind a
+  // key nobody has — could still be planned and enqueued from here, absent from the picker but
+  // reached anyway by falling back to the routed default or to the first row in the file.
+  const models = usableModels(state, capability);
   const [sceneIdx, setSceneIdx] = useState(0);
-  const [choice, setChoice] = useState<{ modelId?: string; resolution?: string }>({});
+  const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier; resolution?: string }>({});
   const scene = production?.scenes[sceneIdx] ?? null;
   const model = models.find((m) => m.id === (choice.modelId ?? routing[capability])) ?? models[0] ?? null;
+  // Stills are priced and dispatched by the same `resolution` the video path uses, so the tier
+  // the bar emits has to be translated into this model's own word for it. Without this the
+  // control moved and nothing else did.
+  const resolution =
+    choice.resolution ?? (model && choice.tier !== undefined ? nativeResolution(model, choice.tier) : undefined);
 
   // The whole plan, computed live from the world — the same function the coordinator executes.
   const plans = useMemo(() => {
@@ -1064,10 +1074,10 @@ export function DispatchDialogScreen() {
       scene,
       selections: production.selections,
       model,
-      ...(choice.resolution !== undefined ? { resolution: choice.resolution } : {}),
+      ...(resolution !== undefined ? { resolution } : {}),
     };
     return { perShot: planScene(input, "per-shot"), wholeScene: planScene(input, "whole-scene") };
-  }, [world, production, scene, model, choice.resolution]);
+  }, [world, production, scene, model, resolution]);
 
   const sceneFile = scene ? sceneFileOf(scene) : null;
   const warnings = plans?.perShot.warnings ?? null;
@@ -1159,7 +1169,7 @@ export function DispatchDialogScreen() {
                   variant="primary"
                   onClick={() => {
                     if (worldId && prodId && sceneFile && model) {
-                      dispatchScene(worldId, prodId, sceneFile, "per-shot", model.id, choice.resolution);
+                      dispatchScene(worldId, prodId, sceneFile, "per-shot", model.id, resolution);
                       navigate(`/w/${worldId}/p/${prodId}/generate`);
                     }
                   }}
@@ -1187,7 +1197,7 @@ export function DispatchDialogScreen() {
                       variant="primary"
                       onClick={() => {
                         if (worldId && prodId && sceneFile && model) {
-                          dispatchScene(worldId, prodId, sceneFile, "whole-scene", model.id, choice.resolution);
+                          dispatchScene(worldId, prodId, sceneFile, "whole-scene", model.id, resolution);
                           navigate(`/w/${worldId}/p/${prodId}/generate`);
                         }
                       }}

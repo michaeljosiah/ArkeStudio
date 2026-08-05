@@ -9,7 +9,6 @@ import {
   headGate,
   mainPhotoFor,
   modelForCapability,
-  PROVIDERS,
   tileIsStale,
   type CanonEntry,
   type Sheet,
@@ -19,7 +18,7 @@ import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components
 import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
 import { ChevronRight, Play, Plus, Search, X } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
-import { DispatchBar } from "../components/dispatch-bar.js";
+import { DispatchBar, usableModels } from "../components/dispatch-bar.js";
 import { Loading } from "../components/loading.js";
 import { characterPortraitPath, Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
@@ -249,11 +248,23 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
   const world = state?.world;
   const [dismissed, setDismissed] = useState<readonly string[]>([]);
   const [choice, setChoice] = useState<{ modelId?: string }>({});
-  const configured = new Set((state?.app.providers ?? []).filter((p) => p.configured).map((p) => p.id));
-  const model = state?.app.manifest
+  // What can actually run, asked once and shared with the bar — the button's enabled state and
+  // the picker's list have to be the same question. Judging it by the routed default alone meant
+  // a usable model could be picked here while Generate stayed greyed out, and the only way
+  // through was to go and change the global routing default first.
+  const offered = usableModels(state, "image");
+  const routed = state?.app.manifest
     ? modelForCapability(state.app.manifest, state.app.routing.defaults, "image")
     : null;
-  const usable = model !== null && (configured.has(model.provider) || PROVIDERS[model.provider].local === true);
+  // With no explicit choice the request carries no model id and the coordinator uses the routed
+  // default, so the button must be judged on exactly that model — not on "some model exists".
+  const model =
+    choice.modelId !== undefined
+      ? (offered.find((m) => m.id === choice.modelId) ?? null)
+      : routed !== null && offered.some((m) => m.id === routed.id)
+        ? routed
+        : null;
+  const usable = model !== null;
 
   const mine = (state?.app.jobs ?? []).filter((j) => j.worldId === worldId && j.target.kind === "world-image");
   const running = mine.find((j) => j.status !== "succeeded" && j.status !== "failed" && j.status !== "cancelled");
@@ -333,7 +344,9 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
   const reason = !hasLogline
     ? "Give the world a logline first — it is what the image is made from"
     : !usable
-      ? "Frames & stills has no provider with a key — set one in Settings"
+      ? offered.length > 0
+        ? "The default image model is switched off — pick another one here"
+        : "Frames & stills has no provider with a key — set one in Settings"
       : undefined;
   return (
     <div className="fy-keyart">
@@ -350,7 +363,7 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
       </Button>
       {/* Model only: this request carries no output spec, so the provider's own size is what
           runs, and a size control that changed nothing would be worse than none. */}
-      <DispatchBar variant="controls" workflow="main-photo" choice={choice} onChoice={setChoice} />
+      <DispatchBar variant="controls" size={false} workflow="main-photo" choice={choice} onChoice={setChoice} />
       <span className="fy-keyart__note">
         {reason ?? `World look v${world?.artDirection.version ?? 1} carries as text · comes back for a yes`}
       </span>

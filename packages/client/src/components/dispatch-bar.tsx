@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  deriveCapabilityAvailability,
   estimateCharacterImageMicroUsd,
   formatMicroUsd,
   modelForCapability,
@@ -44,7 +45,15 @@ export interface DispatchChoice {
 
 const TIERS: SizeTier[] = ["1K", "2K", "4K"];
 
-/** The models this studio offers for a capability: in the manifest, keyed, and switched on. */
+/**
+ * The models this studio offers for a capability: in the manifest, switched on, and behind a key
+ * that actually unlocks this capability.
+ *
+ * The provider half comes from deriveCapabilityAvailability rather than a `configured` check of
+ * its own. A key that was tested and rejected stays `configured: true` — it is still stored — so
+ * a plain `configured` filter offered every model behind a key the app already knows is dead,
+ * and Settings said the capability was unavailable on the same screen.
+ */
 export function usableModels(
   state: ReturnType<typeof useStore>["state"],
   capability: "image" | "video",
@@ -52,13 +61,27 @@ export function usableModels(
   const manifest = state?.app.manifest;
   if (!manifest) return [];
   const disabled = new Set(state?.app.models.disabled ?? []);
-  const configured = new Set((state?.app.providers ?? []).filter((p) => p.configured).map((p) => p.id));
+  const unlocked = new Set(
+    deriveCapabilityAvailability(state?.app.providers ?? []).find((a) => a.capability === capability)?.via ?? [],
+  );
   return manifest.models.filter(
     (model) =>
       model.capability === capability &&
       !disabled.has(model.id) &&
-      (configured.has(model.provider) || PROVIDERS[model.provider].local === true),
+      (unlocked.has(model.provider) || PROVIDERS[model.provider].local === true),
   );
+}
+
+/**
+ * Why a model cannot run, in the words of its repair. Switched off and no key are both
+ * "unavailable" and are fixed in different places, so saying one when the other is true sends
+ * the user to the wrong screen — the same distinction Who does what makes.
+ */
+function strandReason(state: ReturnType<typeof useStore>["state"], model: ManifestModel): string {
+  if ((state?.app.models.disabled ?? []).includes(model.id)) return "turned off in Providers";
+  const status = (state?.app.providers ?? []).find((p) => p.id === model.provider);
+  if (status?.configured !== true) return `no ${PROVIDERS[model.provider].displayName} key`;
+  return `the ${PROVIDERS[model.provider].displayName} key does not unlock this`;
 }
 
 /** What the chosen model will carry, said once the choice is made rather than argued in the list. */
@@ -87,6 +110,7 @@ export function DispatchBar({
   onPrimary,
   primaryDisabled = false,
   variant = "full",
+  size = true,
 }: {
   workflow: CharacterImageWorkflow;
   capability?: "image" | "video";
@@ -107,6 +131,12 @@ export function DispatchBar({
    * either would put two numbers on one screen that could disagree.
    */
   variant?: "full" | "controls";
+  /**
+   * False where the host's request carries no output spec — world key art sends a model id and
+   * nothing else. Offering a size there set a value nobody read: the picker said 4K and the
+   * provider's default ran. A control that cannot reach the request has no business being drawn.
+   */
+  size?: boolean;
 }) {
   const { state } = useStore();
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -117,12 +147,18 @@ export function DispatchBar({
     : null;
 
   const chosen = models.find((m) => m.id === choice.modelId) ?? null;
-  // A model can be chosen and then switched off in Providers. Keep showing it and say it cannot
-  // run, rather than quietly moving the job to something else.
-  const stranded =
+  // A model can be chosen and then switched off in Providers — or routed to and then switched
+  // off, which is the same problem arriving without anyone touching this screen. Both keep
+  // showing the model and say it cannot run, rather than quietly moving the job to something
+  // else. The routed case matters most: it is the one nobody chose, so submitting it would be a
+  // dispatch the coordinator refuses after the estimate was read and accepted.
+  const strandedChoice =
     choice.modelId !== undefined && chosen === null
       ? (state?.app.manifest?.models.find((m) => m.id === choice.modelId) ?? null)
       : null;
+  const strandedRoute =
+    choice.modelId === undefined && routed !== null && !models.some((m) => m.id === routed.id) ? routed : null;
+  const stranded = strandedChoice ?? strandedRoute;
   const model = chosen ?? stranded ?? routed;
   // No model at all — no key, or nothing of this capability in the manifest. The bar stays,
   // because vanishing would take Cancel and the explanation with it and leave a dialog with no
@@ -159,7 +195,9 @@ export function DispatchBar({
         ? choice.resolution
         : videoSizes[0])
     : (choice.tier !== undefined && reachable.includes(choice.tier) ? choice.tier : reachable[0]);
-  const tier = isVideo ? undefined : (active as SizeTier | undefined);
+  // No size control means no size travels: the estimate and the detail line say provider default
+  // because that is what will run, rather than pricing a tier the request cannot carry.
+  const tier = isVideo || !size ? undefined : (active as SizeTier | undefined);
   const images = count ?? 1;
   const carried = model.unverified === true ? 0 : Math.min(referenceImages, model.accepts.referenceImages);
   const estimate = estimateCharacterImageMicroUsd(model, workflow, images, carried * images, tier);
@@ -230,6 +268,7 @@ export function DispatchBar({
           </span>
         )}
 
+        {size && (
         <span className="fy-dispatchbar__seg">
           <span className="fy-dispatchbar__eyebrow">SIZE</span>
           {sizeOptions.length === 0 ? (
@@ -259,6 +298,7 @@ export function DispatchBar({
             </span>
           )}
         </span>
+        )}
 
         {variant === "full" && onCancel && primaryLabel && onPrimary && (
           <span className="fy-dispatchbar__group">
@@ -284,9 +324,7 @@ export function DispatchBar({
         )}
       </div>
       <div className="fy-dispatchbar__detail">
-        {stranded
-          ? `${model.displayName} · unavailable, turned off in Providers`
-          : modelDetail(model, tier, isDefault)}
+        {stranded ? `${model.displayName} · unavailable, ${strandReason(state, stranded)}` : modelDetail(model, tier, isDefault)}
       </div>
     </div>
   );

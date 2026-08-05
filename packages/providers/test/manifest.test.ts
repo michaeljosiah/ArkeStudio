@@ -176,6 +176,24 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
     assert.equal(estimateMicroUsd(flux, { images: 4, megapixels: 1 }), perMp * 4);
   });
 
+  it("a tier changes the dimensions, not only the label", () => {
+    // Several clients submit width/height and ignore `resolution` — OpenAI, and every fal route
+    // that is not a nano-banana. A tier that moved only the label left those requests at 1K
+    // while the picker said 4K, and per-megapixel estimates read the same stale dimensions.
+    const flux = model("flux-2-pro");
+    const oneK = characterImageOutput(flux, "main-photo", "1K");
+    const fourK = characterImageOutput(flux, "main-photo", "4K");
+    assert.ok(Math.max(fourK.width, fourK.height) > Math.max(oneK.width, oneK.height), "4K is bigger");
+    assert.equal(fourK.aspect, oneK.aspect, "the aspect is what the workflow chose, not the tier");
+    assert.equal(fourK.width % 2, 0);
+    assert.equal(fourK.height % 2, 0);
+    // And the money follows the pixels for a per-megapixel model.
+    assert.ok(
+      estimateCharacterImageMicroUsd(flux, "main-photo", 1, 0, "4K") >
+        estimateCharacterImageMicroUsd(flux, "main-photo", 1, 0, "1K"),
+    );
+  });
+
   it("prices explicit character outputs, including model resolution overrides", () => {
     const flux = model("flux-2-pro");
     assert.ok(estimateCharacterImageMicroUsd(flux, "main-photo") > 0);
