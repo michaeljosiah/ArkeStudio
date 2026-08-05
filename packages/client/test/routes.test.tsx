@@ -88,6 +88,45 @@ describe("screen inventory", () => {
     assert.ok(canon.includes("Tide-calling"));
   });
 
+  it("keeps a downloaded update actionable after snapshot hydration", () => {
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        update: {
+          status: "ready",
+          targetVersion: "0.2.8",
+          progressPercent: 100,
+          flow: null,
+          detail: null,
+        },
+      },
+    });
+    const ready = renderAt("/settings/about");
+    assert.ok(ready.includes("Arke Studio v0.2.8 is ready to install."));
+    assert.ok(ready.includes("Install and restart"));
+    assert.ok(ready.includes("Install when I close"));
+
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        update: {
+          status: "shutting-down",
+          targetVersion: "0.2.8",
+          progressPercent: 100,
+          flow: "restart",
+          detail: null,
+        },
+      },
+    });
+    const shuttingDown = renderAt("/settings/about");
+    assert.ok(shuttingDown.includes("Finishing local work..."));
+    assert.ok(shuttingDown.includes("install the update and"));
+    assert.ok(shuttingDown.includes("reopen"));
+    __setStateForTest(FIXTURE_STATE);
+  });
+
   it("uses the accepted immutable main photo on World overview and Cast", () => {
     const world = FIXTURE_STATE.world!;
     const nested = "takes/tk_01J8A0000000000000000000P9/new-main.webp";

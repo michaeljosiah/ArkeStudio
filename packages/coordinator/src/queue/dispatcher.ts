@@ -197,6 +197,7 @@ export class JobQueue {
   private accepting = false;
   private readonly resolvingHeld = new Set<string>();
   private readonly finalizing = new Set<string>();
+  private readonly activeRuns = new Set<Promise<void>>();
 
   constructor(private readonly opts: JobQueueOptions) {
     this.journal = new JobJournal(opts.journalPath);
@@ -322,10 +323,12 @@ export class JobQueue {
       if (!job || job.status !== "queued") continue;
       lane.inFlight.add(jobId);
       lane.nextAllowedAt = Date.now() + lane.minIntervalMs;
-      void this.runJob(job).finally(() => {
+      const run = this.runJob(job).finally(() => {
         lane.inFlight.delete(jobId);
         this.pump(provider);
+        this.activeRuns.delete(run);
       });
+      this.activeRuns.add(run);
       if (Date.now() < lane.nextAllowedAt) {
         this.schedule(lane, lane.nextAllowedAt - Date.now());
         break;
@@ -340,6 +343,11 @@ export class JobQueue {
       this.pump(lane.provider);
     }, Math.max(1, delayMs));
     lane.timer.unref?.();
+  }
+
+  private trackRun(work: Promise<void>): void {
+    this.activeRuns.add(work);
+    void work.finally(() => this.activeRuns.delete(work)).catch(() => {});
   }
 
   private pauseLane(provider: string, kind: "fault" | "offline" | "credential", reason: string): void {
@@ -807,7 +815,7 @@ export class JobQueue {
       if (job.status === "running") {
         // R-5: a recorded remote id resumes by polling, never by resubmitting.
         report.push({ jobId: job.id, action: "resumed-polling" });
-        void this.resumePolling(job);
+        this.trackRun(this.resumePolling(job));
         continue;
       }
       if (job.status === "submitting") {
@@ -858,7 +866,7 @@ export class JobQueue {
       if (found) {
         const running: Job = { ...job, status: "running", providerJobId: found.remoteId, updatedAt: this.clock() };
         await this.transition(running);
-        void this.pollToTerminal(running, client, key);
+        this.trackRun(this.pollToTerminal(running, client, key));
         return { jobId: job.id, action: "adopted", detail: found.remoteId };
       }
       await this.requeueSafely(job);
@@ -873,7 +881,7 @@ export class JobQueue {
         if (match) {
           const running: Job = { ...job, status: "running", providerJobId: match.remoteId, updatedAt: this.clock() };
           await this.transition(running);
-          void this.pollToTerminal(running, client, key);
+          this.trackRun(this.pollToTerminal(running, client, key));
           return { jobId: job.id, action: "adopted", detail: match.remoteId };
         }
         // Absence only means anything if the listing would have shown our key at all.
@@ -1052,7 +1060,11 @@ export class JobQueue {
     }
   }
 
-  async drain(): Promise<void> {
-    await this.journal.drain();
+  async waitForIdle(): Promise<void> {
+    await Promise.allSettled(this.activeRuns);
+  }
+
+  drain(): Promise<void> {
+    return this.journal.drain();
   }
 }

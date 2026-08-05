@@ -33,6 +33,8 @@ export interface FsWorldProviderOptions {
 
 export class FsWorldProvider implements WorldProvider {
   private store: WorldStore | null = null;
+  private closing = false;
+  private readonly scopedOperations = new Set<Promise<unknown>>();
   private onStaleCb: ((worldId: string) => void) | null = null;
   private appIndex: AppIndex | null = null;
   private appIndexReady = false;
@@ -321,17 +323,26 @@ export class FsWorldProvider implements WorldProvider {
   }
 
   async withWorldStore<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T> {
-    if (this.store?.worldId === worldId) return fn(this.store);
-    const dir = await this.findWorldDir(worldId);
-    const scoped = await WorldStore.open(dir, {
-      clock: this.clock,
-      ...(this.sqlite ? { sqlite: this.sqlite } : {}),
-    });
+    if (this.closing) throw new Error("the world provider is closing");
+    const operation = (async () => {
+      if (this.store?.worldId === worldId) return fn(this.store);
+      const dir = await this.findWorldDir(worldId);
+      const scoped = await WorldStore.open(dir, {
+        clock: this.clock,
+        ...(this.sqlite ? { sqlite: this.sqlite } : {}),
+      });
+      try {
+        return await fn(scoped);
+      } finally {
+        this.refreshRegistry(scoped.getBundle());
+        await scoped.close();
+      }
+    })();
+    this.scopedOperations.add(operation);
     try {
-      return await fn(scoped);
+      return await operation;
     } finally {
-      this.refreshRegistry(scoped.getBundle());
-      await scoped.close();
+      this.scopedOperations.delete(operation);
     }
   }
 
@@ -427,14 +438,21 @@ export class FsWorldProvider implements WorldProvider {
   }
 
   async close(): Promise<void> {
-    await this.closeStore();
+    this.closing = true;
     try {
-      this.appIndex?.close();
-    } catch {
-      /* cache */
+      await Promise.all(this.scopedOperations);
+      await this.closeStore();
+      try {
+        this.appIndex?.close();
+      } catch {
+        /* cache */
+      }
+      this.appIndex = null;
+      this.appIndexReady = false;
+    } catch (error) {
+      this.closing = false;
+      throw error;
     }
-    this.appIndex = null;
-    this.appIndexReady = false;
   }
 
   /** Read-only scan of an arbitrary world directory — the corpus/tests entry point. */

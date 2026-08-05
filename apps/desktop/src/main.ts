@@ -46,6 +46,7 @@ import {
 import { BackgroundNotificationController } from "./background-notifications.js";
 import { launchDesktop, StartupController, type StartupState } from "./startup.js";
 import { resolveTheme, themePalette, type ResolvedTheme } from "./theme.js";
+import { fileUpdateMarker, UpdateController } from "./updates.js";
 import {
   environmentVoxaArgs,
   safeVoxaExtraArgs,
@@ -128,6 +129,10 @@ function bundledVoxaPath(): string | null {
 let coordinator: Coordinator | null = null;
 let window: BrowserWindow | null = null;
 let shuttingDown = false;
+let allowQuit = false;
+let closeForUpdate: Promise<void> | null = null;
+let normalShutdown: Promise<void> | null = null;
+let updateController: UpdateController | null = null;
 let activityActivationReady = false;
 let pendingActivityActivation = false;
 let themePreference: ThemePreference = "system";
@@ -322,6 +327,15 @@ async function createWindow(): Promise<void> {
     activityActivationReady = false;
     traceDesktop("window.render-process-gone", { reason: details.reason, exitCode: details.exitCode });
   });
+  window.on("close", (event) => {
+    if (allowQuit || !updateController?.shouldKeepWindowVisible()) return;
+    event.preventDefault();
+    if (!updateController.isInstallOnCloseArmed() || closeForUpdate) return;
+    closeForUpdate = updateController.prepareInstallOnClose().then((ready) => {
+      closeForUpdate = null;
+      if (ready) app.quit();
+    });
+  });
   window.on("closed", () => {
     if (windowShowFallback) clearTimeout(windowShowFallback);
     windowShowFallback = null;
@@ -339,10 +353,6 @@ async function createWindow(): Promise<void> {
 }
 
 async function initialize(): Promise<{ port: number }> {
-  // Updater posture (SPEC-016 D7): never auto-download, always install at exit.
-  electronUpdater.autoUpdater.autoDownload = false;
-  electronUpdater.autoUpdater.autoInstallOnAppQuit = true;
-
   const sqlite = loadElectronSqlite();
   const provider = new FsWorldProvider(appRoot, sqlite ? { sqlite } : {});
   startupProvider = provider;
@@ -594,6 +604,29 @@ async function initialize(): Promise<{ port: number }> {
     if (coordinator) void publishRuntimeStatus();
   });
 
+  updateController = new UpdateController({
+    updater: electronUpdater.autoUpdater,
+    packaged: app.isPackaged,
+    currentVersion: () => app.getVersion(),
+    marker: fileUpdateMarker(join(appRoot, "update", "pending.json")),
+    publish: (update) => {
+      coordinator?.emit({ at: new Date().toISOString(), type: "update.status", update });
+    },
+    shutdown: () => shutdownConfirmed(),
+    beforeInstallerHandoff: () => {
+      allowQuit = true;
+      shuttingDown = true;
+      return () => {
+        allowQuit = false;
+        shuttingDown = false;
+      };
+    },
+    onShutdownFailure: () => {
+      allowQuit = false;
+      shuttingDown = false;
+    },
+  });
+
   coordinator = new Coordinator({
     provider,
     adapter,
@@ -632,20 +665,12 @@ async function initialize(): Promise<{ port: number }> {
           },
         }
       : {}),
-    // Updates (SPEC-016 R-12, R-13): check and download only. autoInstallOnAppQuit is the
-    // whole deferral mechanism — the world lock, the commit journal and running jobs are never
-    // interrupted, because nothing installs until the user quits.
     updates: {
-      check: async () => {
-        if (!app.isPackaged) return null;
-        const result = await electronUpdater.autoUpdater.checkForUpdates();
-        return result && result.updateInfo.version !== app.getVersion()
-          ? { version: result.updateInfo.version }
-          : null;
-      },
-      download: async () => {
-        await electronUpdater.autoUpdater.downloadUpdate();
-      },
+      check: () => updateController!.check(),
+      download: () => updateController!.download(),
+      installAndRestart: () => updateController!.installAndRestart(),
+      installOnClose: () => updateController!.installOnClose(),
+      acknowledge: () => updateController!.acknowledge(),
     },
     // Attaching files. The dialog is the host's business and so is the path it hands back — the
     // renderer never sees either, it only sees artifacts appear (SPEC-001 R-9).
@@ -735,6 +760,7 @@ async function initialize(): Promise<{ port: number }> {
   coordinator.superviseAs("voice", voxaSupervisor);
 
   const { port } = await coordinator.start(0);
+  void updateController.initialize();
   backgroundNotifications.arm(coordinator.getState());
   applyHostTheme(coordinator.getState().app.appearance.theme, false);
 
@@ -744,25 +770,26 @@ async function initialize(): Promise<{ port: number }> {
   // file-artifact frame (SPEC-001 R-9). Last run's couriers are swept first; nothing in there
   // outlives the process that wrote it.
   await sweepSpool(appRoot);
-
-  // Updater wiring only — the real update flow is SPEC-016. Never in dev.
-  if (app.isPackaged) {
-    import("electron-updater")
-      .then(({ autoUpdater }) => autoUpdater.checkForUpdatesAndNotify())
-      .catch(() => {
-        /* updates unavailable is not an error the user can act on here */
-      });
-  }
   return { port };
 }
 
-async function shutdown(): Promise<void> {
-  if (shuttingDown) return;
+async function shutdownConfirmed(): Promise<void> {
+  if (shuttingDown) throw new Error("shutdown is already in progress");
   shuttingDown = true;
   backgroundNotifications.stop();
   const stop = coordinator?.stop() ?? startupProvider?.close() ?? Promise.resolve();
-  // A child that will not die must not hold the app open forever.
-  await Promise.race([stop, new Promise((r) => setTimeout(r, 5_000))]);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    await Promise.race([
+      stop,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("local shutdown did not finish safely")), 15_000);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    shuttingDown = false;
+  }
 }
 
 const gotLock = app.requestSingleInstanceLock();
@@ -809,8 +836,35 @@ if (!gotLock) {
   });
 
   app.on("before-quit", (event) => {
-    if (shuttingDown) return;
+    if (allowQuit) return;
     event.preventDefault();
-    void shutdown().then(() => app.quit());
+    if (updateController?.isInstallOnCloseArmed()) {
+      if (!closeForUpdate) {
+        closeForUpdate = updateController.prepareInstallOnClose().then((ready) => {
+          closeForUpdate = null;
+          if (ready) app.quit();
+        });
+      }
+      return;
+    }
+    if (normalShutdown) return;
+    updateController?.beginShutdown();
+    normalShutdown = shutdownConfirmed()
+      .then(() => {
+        allowQuit = true;
+        app.quit();
+      })
+      .catch(async () => {
+        normalShutdown = null;
+        updateController?.failShutdown();
+        if (window && !window.isDestroyed()) {
+          await dialog.showMessageBox(window, {
+            type: "warning",
+            title: "Arke could not close safely",
+            message: "Local work is still shutting down.",
+            detail: "Wait a moment and close Arke Studio again. No update was installed.",
+          });
+        }
+      });
   });
 }

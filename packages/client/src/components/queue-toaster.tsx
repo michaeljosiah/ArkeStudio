@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router";
 import { toast, Toaster } from "sonner";
 import type { Job } from "@arke-studio/contracts";
-import { subscribeJobReady, subscribeQueueResults, type QueueEnqueueResult } from "../lib/store.js";
+import { acknowledgeUpdate, subscribeJobReady, subscribeQueueResults, type QueueEnqueueResult, useUpdateStatus } from "../lib/store.js";
 
 export interface QueueToastCopy {
   kind: "success" | "error" | "none";
@@ -67,6 +67,13 @@ export function jobReadyToastCopy(job: Job): QueueToastCopy {
 
 export function QueueToaster() {
   const navigate = useNavigate();
+  const update = useUpdateStatus();
+
+  useEffect(() => {
+    if (update?.status !== "updated" || !update.targetVersion) return;
+    toast.success(`Arke Studio updated to v${update.targetVersion}`, { id: `update:${update.targetVersion}` });
+    acknowledgeUpdate();
+  }, [update]);
 
   useEffect(
     () =>

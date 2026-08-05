@@ -178,13 +178,11 @@ describe("the licence gate (R-9, D5, §3.2)", () => {
   });
 });
 
-describe("updates never interrupt (R-13, D7)", () => {
-  it("the update seam has no install surface at all — only check and download", async () => {
-    // The deferral is structural: the coordinator's seam types expose check() and download();
-    // installation belongs to app-quit alone. Asserted against the source, like the
-    // no-polling rule: no quitAndInstall call exists anywhere in the coordinator.
+describe("updates never cross the host boundary (R-13, D7)", () => {
+  it("the coordinator requests installation without importing Electron", async () => {
     const source = await readFile(resolve(here, "../../src/coordinator.ts"), "utf8");
     assert.ok(!source.includes("quitAndInstall"), "nothing in the domain layer can install an update");
-    assert.match(source, /download only \(R-13, D7\)|installation waits for application exit|installs when you quit/i);
+    assert.ok(!source.includes("electron-updater"), "the updater remains desktop-owned");
+    assert.match(source, /installAndRestart/);
   });
 });

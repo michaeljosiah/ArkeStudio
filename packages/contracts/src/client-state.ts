@@ -22,6 +22,7 @@ import { ReferenceKitSchema } from "./reference.js";
 import { SceneSchema, SelectionsSchema } from "./scene.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
 import { VoiceRuntimeStatusSchema } from "./voice.js";
+import { IDLE_UPDATE_STATE, UpdateStateSchema } from "./update.js";
 import {
   CanonEntrySchema,
   ChapterSummarySchema,
@@ -224,6 +225,8 @@ export const ClientStateSchema = z
         queues: z.array(QueueStatusSchema).default([]),
         /** Local-runtime setup: what is being fetched onto this machine, and how far along. */
         setup: SetupStatusSchema.nullable().default(null),
+        /** Desktop-owned update lifecycle, retained so reloads cannot lose an install-ready update. */
+        update: UpdateStateSchema.default(IDLE_UPDATE_STATE),
         /**
          * First-run environment verification (SPEC-016 R-2). It lives in the snapshot, not only
          * in its event: the check runs once at start-up — before the window exists in a packaged

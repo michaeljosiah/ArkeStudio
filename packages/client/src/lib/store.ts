@@ -144,18 +144,13 @@ interface StoreState {
     file: string;
     kind: import("@arke-studio/contracts").ArtifactKind;
   }>;
-  /** SPEC-016: first-run environment verification, update lifecycle, diagnostics. */
+  /** SPEC-016: first-run environment verification and diagnostics. */
   envCheck: {
     pathBudgetOk: boolean;
     pathBudgetDetail: string | null;
     diskFreeMb: number | null;
     nativeIndexOk: boolean;
     nativeIndexDetail: string | null;
-  } | null;
-  updateStatus: {
-    status: "checking" | "available" | "none" | "downloading" | "downloaded" | "error";
-    version: string | null;
-    detail: string | null;
   } | null;
   diagnosticsBundle: string | null;
   providerCallsByJob: Record<string, ProviderCallRecord[]>;
@@ -196,7 +191,6 @@ let current: StoreState = {
   artifactNotices: [],
   attached: [],
   envCheck: null,
-  updateStatus: null,
   diagnosticsBundle: null,
   providerCallsByJob: {},
 };
@@ -286,6 +280,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       else queues[i] = event.queue;
       return { ...state, app: { ...state.app, queues } };
     }
+    case "update.status":
+      return { ...state, app: { ...state.app, update: event.update } };
     case "entity.changed":
       if (!state.world || state.world.meta.worldId !== event.worldId) return state;
       return { ...state, world: { ...state.world, changes: [...state.world.changes, event.change] } };
@@ -591,7 +587,6 @@ function handleFrame(json: string): void {
       ];
     }
     let envCheck = current.envCheck;
-    let updateStatus = current.updateStatus;
     let diagnosticsBundle = current.diagnosticsBundle;
     let providerCallsByJob = current.providerCallsByJob;
     if (event.type === "env.check") {
@@ -602,8 +597,6 @@ function handleFrame(json: string): void {
         nativeIndexOk: event.nativeIndexOk,
         nativeIndexDetail: event.nativeIndexDetail,
       };
-    } else if (event.type === "update.status") {
-      updateStatus = { status: event.status, version: event.version, detail: event.detail };
     } else if (event.type === "diagnostics.ready") {
       diagnosticsBundle = event.bundle;
     } else if (event.type === "provider-calls.ready") {
@@ -676,7 +669,6 @@ function handleFrame(json: string): void {
       artifactNotices,
       attached,
       envCheck,
-      updateStatus,
       diagnosticsBundle,
       providerCallsByJob,
     });
@@ -1633,6 +1625,18 @@ export function downloadUpdate(): void {
   send({ kind: "download-update" });
 }
 
+export function installUpdateAndRestart(): void {
+  send({ kind: "install-update-and-restart" });
+}
+
+export function installUpdateOnClose(): void {
+  send({ kind: "install-update-on-close" });
+}
+
+export function acknowledgeUpdate(): void {
+  send({ kind: "acknowledge-update" });
+}
+
 export function generateDiagnostics(): void {
   send({ kind: "generate-diagnostics" });
 }
@@ -1664,12 +1668,8 @@ export type StoreEnvCheck = {
   nativeIndexDetail: string | null;
 };
 
-export function useUpdateStatus(): {
-  status: "checking" | "available" | "none" | "downloading" | "downloaded" | "error";
-  version: string | null;
-  detail: string | null;
-} | null {
-  return useStore().updateStatus;
+export function useUpdateStatus(): ClientState["app"]["update"] | null {
+  return useStore().state?.app.update ?? null;
 }
 
 export function useDiagnosticsBundle(): string | null {
@@ -1754,7 +1754,6 @@ export function __setStateForTest(state: ClientState): void {
     artifactNotices: [],
     attached: [],
     envCheck: null,
-    updateStatus: null,
     diagnosticsBundle: null,
     providerCallsByJob: {},
   });

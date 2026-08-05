@@ -781,8 +781,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** SPEC-016 R-12: check for an update; nothing installs without the user. */
   z.object({ kind: z.literal("check-updates") }).strict(),
-  /** SPEC-016 R-13: download the update now; it installs at exit, interrupting nothing. */
+  /** SPEC-016 R-13: download the update now. */
   z.object({ kind: z.literal("download-update") }).strict(),
+  /** Shut local work down safely, then hand the downloaded update to the installer. */
+  z.object({ kind: z.literal("install-update-and-restart") }).strict(),
+  /** Arm the downloaded update for installation after the next confirmed clean close. */
+  z.object({ kind: z.literal("install-update-on-close") }).strict(),
+  /** Clear a one-time successful-update notification after the renderer presents it. */
+  z.object({ kind: z.literal("acknowledge-update") }).strict(),
   /** SPEC-016 R-15: a diagnostics bundle safe to paste publicly. */
   z.object({ kind: z.literal("generate-diagnostics") }).strict(),
   /** SPEC-016 R-17: open the data location in the file manager. */
