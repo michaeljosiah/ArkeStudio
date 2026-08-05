@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { writeFile } from "node:fs/promises";
+import { cp, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "../tmp.js";
@@ -44,6 +44,58 @@ describe("the app index (R-5, R-6, R-15, D2, D3)", () => {
     await rm(join(root, "worlds", "the-undersong"), { recursive: true, force: true });
     assert.deepEqual(await provider.listWorlds(), []);
     await provider.close();
+  });
+
+  it("discovers a world copied in while closed without rescanning known world contents", async () => {
+    const { root, worldDir } = await makeTempRoot();
+    const provider = new FsWorldProvider(root);
+    const [known] = await provider.listWorlds();
+    assert.ok(known);
+    assert.equal(known.counts.characters, 3);
+    await provider.close();
+
+    const copiedDir = join(root, "worlds", "the-restored-world");
+    await cp(worldDir, copiedDir, { recursive: true });
+    const copiedMetaPath = join(copiedDir, "world.json");
+    const copiedMeta = JSON.parse(await readFile(copiedMetaPath, "utf8"));
+    copiedMeta.worldId = "01J8F3K2QW9VZX4N7M0RTYB6HD";
+    copiedMeta.slug = "the-restored-world";
+    copiedMeta.name = "The Restored World";
+    copiedMeta.updated = "2026-08-02T00:00:00.000Z";
+    await writeFile(copiedMetaPath, JSON.stringify(copiedMeta, null, 2) + "\n", "utf8");
+
+    await writeFile(
+      join(worldDir, "characters", "added-while-closed.md"),
+      '---\nid: added-while-closed\ntype: character\nname: Added While Closed\nversion: 1\nstatus: sketch\ncanonRules: []\nlinks: []\ncreated: "2026-08-01"\nupdated: "2026-08-01"\n---\n\n## Essence\nX.\n',
+      "utf8",
+    );
+
+    const restarted = new FsWorldProvider(root);
+    const worlds = await restarted.listWorlds();
+    assert.equal(worlds.length, 2);
+    assert.equal(worlds.find((world) => world.worldId === known.worldId)?.counts.characters, 3);
+    assert.equal(worlds.find((world) => world.worldId === copiedMeta.worldId)?.name, "The Restored World");
+    await restarted.close();
+  });
+
+  it("replaces a cached row when a known folder now contains a different world", async () => {
+    const { root, worldDir } = await makeTempRoot();
+    const provider = new FsWorldProvider(root);
+    const [known] = await provider.listWorlds();
+    await provider.close();
+
+    const metaPath = join(worldDir, "world.json");
+    const meta = JSON.parse(await readFile(metaPath, "utf8"));
+    meta.worldId = "01J8F3K2QW9VZX4N7M0RTYB6HE";
+    meta.name = "Replacement World";
+    await writeFile(metaPath, JSON.stringify(meta, null, 2) + "\n", "utf8");
+
+    const restarted = new FsWorldProvider(root);
+    const worlds = await restarted.listWorlds();
+    assert.equal(worlds.length, 1);
+    assert.notEqual(worlds[0]!.worldId, known!.worldId);
+    assert.equal(worlds[0]!.name, "Replacement World");
+    await restarted.close();
   });
 
   it("rebuilds jobs and ledger from the append-only logs, and deleting it loses nothing (R-5)", async () => {

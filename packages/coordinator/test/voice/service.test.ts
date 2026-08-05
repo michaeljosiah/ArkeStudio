@@ -96,6 +96,7 @@ describe("routing (R-2, D1, §3.2): local never touches the queue; cloud always 
       getKey: async () => "xi-key",
       emit: () => {},
       ledger: {
+        readJobIds: async () => new Set(ledger.map((entry) => entry.jobId)),
         has: async (jobId) => ledger.some((e) => e.jobId === jobId),
         append: async (e) => {
           ledger.push(e);

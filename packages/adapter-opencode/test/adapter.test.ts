@@ -383,25 +383,41 @@ function stubOpenCode(t: TestContext, name: string, version: string): string {
 }
 
 describe("discovery (R-1)", () => {
-  it("prefers a configured path over PATH, and names the version", (t) => {
-    const found = discoverOpenCode({ configuredPath: stubOpenCode(t, "fake-opencode", "7.7.7") });
+  it("prefers a configured path over PATH, and names the version", async (t) => {
+    const found = await discoverOpenCode({ configuredPath: stubOpenCode(t, "fake-opencode", "7.7.7") });
     assert.equal(found?.source, "configured");
     assert.equal(found?.version, "7.7.7");
   });
 
-  it("falls back to PATH when nothing is configured", (t) => {
+  it("falls back to PATH when nothing is configured", async (t) => {
     // Put our own opencode first on PATH rather than trusting the machine to have one — a test
     // that passes because the developer happens to have it installed proves nothing on CI.
     const onPath = stubOpenCode(t, "opencode", "6.6.6");
     const original = process.env["PATH"];
     process.env["PATH"] = `${join(onPath, "..")}${delimiter}${original ?? ""}`;
     try {
-      const found = discoverOpenCode();
+      const found = await discoverOpenCode();
       assert.equal(found?.source, "path");
       assert.equal(found?.version, "6.6.6");
     } finally {
       process.env["PATH"] = original;
     }
+  });
+
+  it("does not block the event loop while a process probe is delayed", async () => {
+    let timerRan = false;
+    setTimeout(() => (timerRan = true), 0);
+    const command = process.platform === "win32" ? "C:\\fake\\opencode.cmd" : "/fake/opencode";
+    const found = await discoverOpenCode({
+      runCommand: async (_command, args) => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return args[0] === "opencode"
+          ? { status: 0, stdout: `${command}\n` }
+          : { status: 0, stdout: "9.8.7\n" };
+      },
+    });
+    assert.equal(timerRan, true);
+    assert.deepEqual(found, { command, source: "path", version: "9.8.7" });
   });
 });
 

@@ -295,6 +295,7 @@ export class Coordinator {
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
             emit: (event) => this.emit(event),
             ledger: {
+              readJobIds: () => this.ledger!.readJobIds(),
               has: async (jobId) => (await this.ledger!.readAll()).some((e) => e.jobId === jobId),
               append: (entry) => this.recordLedger(entry),
             },
@@ -3262,12 +3263,15 @@ export class Coordinator {
 
   async stop(): Promise<void> {
     this.setup?.dispose();
+    this.jobQueue?.dispose();
+    await this.jobQueue?.drain();
     await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
     await this.opts.adapter?.dispose?.().catch(() => {});
     await this.worldQuery.stop();
     await this.transport.stop();
     await this.opts.provider.close?.();
     await this.opts.providerCalls?.drain();
+    await this.ledger?.drain();
     await this.changeLog.drain();
   }
 }

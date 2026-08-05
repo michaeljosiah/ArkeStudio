@@ -12,7 +12,7 @@ function argValue(name: string): string | null {
   return hit ? hit.slice(prefix.length) : null;
 }
 
-const port = argValue("arke-ws-port");
+const initialPort = argValue("arke-ws-port");
 const appVersion = argValue("arke-app-version") ?? "0.0.0";
 type ThemePreference = "system" | "light" | "dark";
 type ResolvedTheme = "light" | "dark";
@@ -25,9 +25,11 @@ const startupTheme = {
   preference: themePreference,
   resolved: resolvedTheme,
 } satisfies { preference: ThemePreference; resolved: ResolvedTheme };
-const wsUrl = port ? `ws://127.0.0.1:${port}` : null;
-/** Read-only media base (design-fidelity pass): same server, plain GET. */
-const httpBase = port ? `http://127.0.0.1:${port}` : null;
+let wsUrl = initialPort ? `ws://127.0.0.1:${initialPort}` : null;
+let httpBase = initialPort ? `http://127.0.0.1:${initialPort}` : null;
+type StartupState = { status: "initializing" } | { status: "ready" } | { status: "failed"; detail: string };
+let startupState: StartupState = initialPort ? { status: "ready" } : { status: "initializing" };
+const startupListeners = new Set<(state: StartupState) => void>();
 
 /**
  * Where an attachment is going. The renderer names the destination, the host names the path —
@@ -43,6 +45,21 @@ let socket: WebSocket | null = null;
 const frameListeners = new Set<FrameListener>();
 const statusListeners = new Set<StatusListener>();
 
+ipcRenderer.on("arke:startup-state", (_event, state: StartupState & { port?: number }) => {
+  if (state.status === "ready" && typeof state.port === "number") {
+    wsUrl = `ws://127.0.0.1:${state.port}`;
+    httpBase = `http://127.0.0.1:${state.port}`;
+    startupState = { status: "ready" };
+    bridge.connect();
+  } else if (state.status === "failed") {
+    startupState = { status: "failed", detail: state.detail };
+  } else {
+    startupState = { status: "initializing" };
+  }
+  for (const listener of startupListeners) listener(startupState);
+});
+ipcRenderer.send("arke:startup-state-ready");
+
 function notifyStatus(status: "connecting" | "open" | "closed"): void {
   for (const l of statusListeners) l(status);
 }
@@ -50,8 +67,24 @@ function notifyStatus(status: "connecting" | "open" | "closed"): void {
 const bridge = {
   appVersion,
   platform: process.platform as string,
-  httpBase,
+  coordinatorHttpBase: () => httpBase,
   theme: startupTheme,
+
+  startupState: () => startupState,
+  onStartupState(listener: (state: StartupState) => void): () => void {
+    startupListeners.add(listener);
+    listener(startupState);
+    return () => startupListeners.delete(listener);
+  },
+  retryStartup(): void {
+    ipcRenderer.send("arke:retry-startup");
+  },
+  openDataFolder(): void {
+    ipcRenderer.send("arke:open-data-folder");
+  },
+  quit(): void {
+    ipcRenderer.send("arke:quit");
+  },
 
   /** (Re)establish the socket to the embedded coordinator. Loopback only. */
   connect(): void {

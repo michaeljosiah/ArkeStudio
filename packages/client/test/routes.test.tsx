@@ -53,6 +53,27 @@ describe("screen inventory", () => {
     }
   });
 
+  it("offers recovery actions when desktop startup fails", () => {
+    const previous = globalThis.window;
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        arke: {
+          startupState: () => ({ status: "failed", detail: "Startup failed safely." }),
+        },
+      },
+    });
+    try {
+      const html = renderAt("/");
+      assert.ok(html.includes("The studio could not start"));
+      assert.ok(html.includes("Startup failed safely."));
+      for (const action of ["Retry", "Open data folder", "Quit"]) assert.ok(html.includes(action));
+    } finally {
+      if (previous === undefined) delete (globalThis as { window?: Window }).window;
+      else Object.defineProperty(globalThis, "window", { configurable: true, value: previous });
+    }
+  });
+
   it("renders the degraded reasons when children are unavailable (R-6)", () => {
     const html = renderAt(SCREENS.find((s) => s.id === "character-edit")!.samplePath);
     assert.ok(html.includes("OpenCode is not configured"), "harness reason is stated, not silent");
@@ -231,8 +252,14 @@ describe("screen inventory", () => {
       ...FIXTURE_STATE,
       app: {
         ...FIXTURE_STATE.app,
-        manifest: { ...FIXTURE_STATE.app.manifest!, models: [first, routed, ...FIXTURE_STATE.app.manifest!.models] },
-        routing: { ...FIXTURE_STATE.app.routing, defaults: { ...FIXTURE_STATE.app.routing.defaults, image: routed.id } },
+        manifest: {
+          ...FIXTURE_STATE.app.manifest!,
+          models: [first, routed, ...FIXTURE_STATE.app.manifest!.models],
+        },
+        routing: {
+          ...FIXTURE_STATE.app.routing,
+          defaults: { ...FIXTURE_STATE.app.routing.defaults, image: routed.id },
+        },
       },
     });
     try {
@@ -268,7 +295,10 @@ describe("screen inventory", () => {
       app: {
         ...FIXTURE_STATE.app,
         manifest: { ...FIXTURE_STATE.app.manifest!, models: [model, ...FIXTURE_STATE.app.manifest!.models] },
-        routing: { ...FIXTURE_STATE.app.routing, defaults: { ...FIXTURE_STATE.app.routing.defaults, image: model.id } },
+        routing: {
+          ...FIXTURE_STATE.app.routing,
+          defaults: { ...FIXTURE_STATE.app.routing.defaults, image: model.id },
+        },
       },
     });
     try {

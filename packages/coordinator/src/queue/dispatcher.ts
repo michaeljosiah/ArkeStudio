@@ -81,8 +81,12 @@ export interface JobQueueOptions {
   clients: Record<string, DispatchClient>;
   getKey: (provider: string) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
-  /** The idempotency seam (R-16): `has` consults the real ledger, `append` writes it. */
-  ledger: { has(jobId: string): Promise<boolean>; append(entry: LedgerEntry): Promise<void> };
+  /** The idempotency seam (R-16): startup snapshots once; runtime checks the live ledger. */
+  ledger: {
+    readJobIds(): Promise<ReadonlySet<string>>;
+    has(jobId: string): Promise<boolean>;
+    append(entry: LedgerEntry): Promise<void>;
+  };
   /**
    * Run landing under the owning world's lock. False means the destination is temporarily
    * unavailable; provider success stays running and retries locally without another submit.
@@ -143,6 +147,29 @@ const FOLLOW_ON_TARGETS = new Set([
   "voice-line",
   "voice-preview",
 ]);
+
+/** Fold current state, prior state, and durable submission count in one history pass. */
+export function foldJobHistory(history: Iterable<Job>): Array<{ job: Job; prior: Job | undefined }> {
+  const byId = new Map<string, { latest: Job; prior: Job | undefined; submitting: number }>();
+  for (const row of history) {
+    const folded = byId.get(row.id);
+    if (folded) {
+      folded.prior = folded.latest;
+      folded.latest = row;
+      if (row.status === "submitting") folded.submitting += 1;
+    } else {
+      byId.set(row.id, {
+        latest: row,
+        prior: undefined,
+        submitting: row.status === "submitting" ? 1 : 0,
+      });
+    }
+  }
+  return [...byId.values()].map(({ latest, prior, submitting }) => ({
+    job: submitting > latest.attempt ? { ...latest, attempt: submitting } : latest,
+    prior,
+  }));
+}
 
 function landedName(job: Job, artifact: DispatchArtifact, index: number): string {
   const requested = index === 0 && job.landing?.name !== undefined ? job.landing.name : artifact.name;
@@ -660,17 +687,28 @@ export class JobQueue {
     }
   }
 
-  private async appendLedgerOnce(job: Job, costMicroUsd?: number): Promise<void> {
+  private async appendLedgerOnce(
+    job: Job,
+    costMicroUsd?: number,
+    startupJobIds?: Set<string>,
+  ): Promise<boolean> {
     try {
-      await this.appendLedgerOnceInner(job, costMicroUsd);
+      if (startupJobIds ? startupJobIds.has(job.id) : await this.opts.ledger.has(job.id)) return false;
+      await this.appendLedgerEntry(job, costMicroUsd);
+      startupJobIds?.add(job.id);
+      return true;
     } catch {
       // A failed ledger write is the ⑦ crash window: the terminal row is already durable, and
       // the next start-up completes the missing entry idempotently (R-16). Never crash a pump.
+      if (startupJobIds && (await this.opts.ledger.has(job.id).catch(() => false))) {
+        startupJobIds.add(job.id);
+        return true;
+      }
+      return false;
     }
   }
 
-  private async appendLedgerOnceInner(job: Job, costMicroUsd?: number): Promise<void> {
-    if (await this.opts.ledger.has(job.id)) return; // idempotent under crash recovery (R-16, D11)
+  private async appendLedgerEntry(job: Job, costMicroUsd?: number): Promise<void> {
     const outcome = job.status as "succeeded" | "failed" | "cancelled";
     const client = this.opts.clients[job.provider];
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
@@ -726,25 +764,19 @@ export class JobQueue {
 
   async start(): Promise<ReconcileAction[]> {
     const history = await this.journal.readHistory();
-    const byId = new Map<string, Job>();
-    for (const row of history) byId.set(row.id, row);
-    const folded = [...byId.values()].map((job) => ({
-      ...job,
-      attempt: Math.max(job.attempt, history.filter((row) => row.id === job.id && row.status === "submitting").length),
-    }));
-    for (const job of folded) this.jobs.set(job.id, job);
+    const folded = foldJobHistory(history);
+    const ledgerJobIds = new Set(await this.opts.ledger.readJobIds());
+    const missingLedger: Job[] = [];
+    for (const { job } of folded) this.jobs.set(job.id, job);
     const report: ReconcileAction[] = [];
 
-    for (const job of folded) {
+    for (const { job, prior } of folded) {
       if (TERMINAL.has(job.status)) {
         // Crash window ⑦: terminal without its ledger entry → append exactly one (R-16).
-        if (!(await this.opts.ledger.has(job.id))) {
-          await this.appendLedgerOnce(job);
-          if (await this.opts.ledger.has(job.id)) report.push({ jobId: job.id, action: "ledger-completed" });
-        }
+        if (!ledgerJobIds.has(job.id)) missingLedger.push(job);
         if (
           job.status === "succeeded" &&
-          (await this.opts.ledger.has(job.id)) &&
+          ledgerJobIds.has(job.id) &&
           this.needsReplayableFinalization(job) &&
           job.finalization?.status !== "complete"
         ) {
@@ -763,11 +795,8 @@ export class JobQueue {
       if (job.status === "queued") {
         const client = this.opts.clients[job.provider];
         const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
-        const rows = history.filter((row) => row.id === job.id);
-        const prior = rows.length > 1 ? rows[rows.length - 2] : undefined;
         if (!local && !client?.declarations.supportsIdempotencyKey && prior?.status === "submitting") {
-          const attempts = rows.filter((row) => row.status === "submitting").length;
-          const action = await this.holdForUser({ ...job, attempt: Math.max(job.attempt, attempts) });
+          const action = await this.holdForUser(job);
           report.push(action);
           continue;
         }
@@ -784,6 +813,12 @@ export class JobQueue {
       if (job.status === "submitting") {
         const action = await this.reconcileSubmitting(job);
         report.push(action);
+      }
+    }
+
+    for (const job of missingLedger) {
+      if (await this.appendLedgerOnce(job, undefined, ledgerJobIds)) {
+        report.push({ jobId: job.id, action: "ledger-completed" });
       }
     }
 
@@ -1017,7 +1052,7 @@ export class JobQueue {
     }
   }
 
-  drain(): Promise<void> {
-    return this.journal.drain();
+  async drain(): Promise<void> {
+    await this.journal.drain();
   }
 }

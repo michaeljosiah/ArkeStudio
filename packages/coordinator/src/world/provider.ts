@@ -100,13 +100,38 @@ export class FsWorldProvider implements WorldProvider {
   }
 
   /**
-   * List worlds. Once the registry is seeded, the picker renders from it without opening or
-   * scanning any world (SPEC-003 R-6, D3); the first call seeds it with one folder pass.
+   * List worlds. Once seeded, cached summaries serve known worlds while a folder pass discovers
+   * additions; only newly discovered worlds have their summary scanned (SPEC-003 R-6, D3).
    */
   async listWorlds(): Promise<WorldSummary[]> {
     await this.ensureAppRoot();
     if (this.appIndex?.seeded) {
-      return this.appIndex.listWorlds(this.worldsDir());
+      const cached = this.appIndex.listWorlds(this.worldsDir());
+      const cachedByFolder = new Map(cached.map((world) => [world.slug.toLowerCase(), world]));
+      const entries = await readdir(toExtendedLength(this.worldsDir())).catch(() => [] as string[]);
+      const additions: WorldSummary[] = [];
+      const scanFolder = async (folder: string): Promise<void> => {
+        additions.push(...(await this.scanAllSummaries(new Set(entries.filter((entry) => entry !== folder)))));
+      };
+      for (const folder of entries) {
+        const known = cachedByFolder.get(folder.toLowerCase());
+        if (!known) {
+          await scanFolder(folder);
+          continue;
+        }
+        try {
+          const meta = await readWorldMeta(join(this.worldsDir(), folder));
+          if (meta.worldId !== known.worldId || meta.slug !== known.slug) {
+            this.appIndex.removeWorld(known.worldId);
+            await scanFolder(folder);
+          }
+        } catch {
+          /* AppIndex.listWorlds already drops missing known rows; unreadable replacements stay absent. */
+        }
+      }
+      for (const summary of additions) this.appIndex.upsertWorld(summary);
+      const replaced = new Set(additions.map((world) => world.slug.toLowerCase()));
+      return [...cached.filter((world) => !replaced.has(world.slug.toLowerCase())), ...additions].sort((a, b) => b.updated.localeCompare(a.updated));
     }
     const summaries = await this.scanAllSummaries();
     if (this.appIndex) {
@@ -116,7 +141,7 @@ export class FsWorldProvider implements WorldProvider {
     return summaries;
   }
 
-  private async scanAllSummaries(): Promise<WorldSummary[]> {
+  private async scanAllSummaries(skipSlugs: ReadonlySet<string> = new Set()): Promise<WorldSummary[]> {
     const out: WorldSummary[] = [];
     let entries: string[];
     try {
@@ -125,6 +150,7 @@ export class FsWorldProvider implements WorldProvider {
       return out;
     }
     for (const slug of entries) {
+      if (skipSlugs.has(slug)) continue;
       const dir = join(this.worldsDir(), slug);
       try {
         if (!(await stat(toExtendedLength(dir))).isDirectory()) continue;

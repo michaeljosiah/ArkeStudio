@@ -39,6 +39,7 @@ describe("the ledger file (R-16, R-17, §3.2)", () => {
     assert.equal(lines.length, 50);
     for (const line of lines) JSON.parse(line); // every line is complete JSON
     assert.equal((await ledger.readAll()).length, 50);
+    assert.equal((await ledger.readJobIds()).size, 50);
   });
 
   it("a truncated final line is tolerated and repaired; complete records are never touched", async () => {
