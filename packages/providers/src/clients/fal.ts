@@ -3,7 +3,11 @@ import { jsonRequest, tryProbe } from "./http.js";
 // Generated beside the manifest rows, from the same fetch, so a model can never be offered
 // with no route behind it — the failure that used to read "no endpoint mapping" at dispatch,
 // long after the estimate had been shown and accepted.
-import { FAL_EDIT_ENDPOINTS as EDIT_ENDPOINTS, FAL_ENDPOINTS as ENDPOINTS } from "../fal-catalogue.generated.js";
+import {
+  FAL_EDIT_ENDPOINTS as EDIT_ENDPOINTS,
+  FAL_ENDPOINTS as ENDPOINTS,
+  FAL_MODELS,
+} from "../fal-catalogue.generated.js";
 import type {
   FetchedArtifact,
   FetchLike,
@@ -22,6 +26,32 @@ import type {
  * under this; anything over it is a sign something unintended got attached.
  */
 const MAX_INLINE_REFERENCE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Seconds → the word this route wants for that length, from the manifest rows generated beside
+ * the endpoints. Every fal video route takes `duration` as a string out of a fixed list, and the
+ * lists disagree: seedance and kling say "5", veo says "5s". We carried `durationSec` as a
+ * number and sent it under that name, which is a field none of them declares — so every video
+ * dispatch ran at the provider's default length while the estimate was computed from the seconds
+ * the scene had planned.
+ */
+const DURATIONS = new Map(
+  FAL_MODELS.filter((model) => model.limits.durations !== undefined).map((model) => [
+    model.id,
+    model.limits.durations!,
+  ]),
+);
+
+/** The duration field as this route wants it, or nothing when the row declares no lengths. */
+function durationParam(model: string, params: Record<string, unknown>): Record<string, string> {
+  const seconds = params["durationSec"];
+  if (typeof seconds !== "number") return {};
+  const wire = DURATIONS.get(model)?.[String(Math.round(seconds))];
+  // The coordinator snaps to a declared length before dispatch, so a miss here means the job was
+  // planned against a different manifest than the one shipped. Sending the raw number under a
+  // name the route does not know is what this replaced; sending nothing at least runs.
+  return wire === undefined ? {} : { duration: wire };
+}
 
 /** fal takes file inputs as URLs; a data URI is a URL that needs nobody's storage. */
 function dataUri(reference: PreparedImageReference): string {
@@ -131,6 +161,9 @@ export class FalClient implements ProviderClient {
       "lookKind",
       "lookPrompt",
       "shotPlan",
+      // Ours, not fal's: the length goes as `duration`, in this route's own vocabulary.
+      "durationSec",
+      // Ours, not fal's: the length goes as `duration`, in this route's own vocabulary.
     ]);
     const { output, ...params } = Object.fromEntries(
       Object.entries(request.params).filter(([key]) => !internal.has(key)),
@@ -152,6 +185,7 @@ export class FalClient implements ProviderClient {
       headers: this.headers(key),
       body: JSON.stringify({
         ...params,
+        ...durationParam(request.model, request.params),
         ...imageOutput,
         ...(imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
       }),

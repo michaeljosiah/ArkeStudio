@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  dispatchDuration,
   estimateMicroUsd,
   parseMentions,
   planScene,
@@ -388,7 +389,12 @@ export function composeDispatches(
       params: {
         prompt: entry.prompt.text,
         references: entry.references.filter((r) => r.file !== null).map((r) => r.file),
-        ...(entry.shot.durationSec !== undefined ? { durationSec: entry.shot.durationSec } : {}),
+        // The length the plan priced, which is the length the route can actually be asked for.
+        // Sending the raw shot seconds meant the job asked for something no route accepts, and
+        // the client then had nothing to translate.
+        ...(entry.shot.durationSec !== undefined
+          ? { durationSec: dispatchDuration(model, entry.shot.durationSec)?.seconds ?? entry.shot.durationSec }
+          : {}),
         ...sizeParams(model, plan),
         provenance: provenanceFor(entry.budget.carried.map((c) => c.sheetId)),
       },
@@ -416,17 +422,22 @@ export function composeDispatches(
           .map((s) => `[shot ${s.shot.number} · ${s.shot.durationSec ?? 4}s] ${s.prompt.text}`)
           .join("\n"),
         references,
-        durationSec: pass.durationSec,
+        durationSec: dispatchDuration(model, pass.durationSec)?.seconds ?? pass.durationSec,
         ...sizeParams(model, plan),
         // The explicit plan (R-19, D11): SPEC-013 segments from these, never guesses.
         shotPlan: pass.plan,
         provenance: provenanceFor(passReferencePlan.budget.carried.map((candidate) => candidate.sheetId)),
       },
-      // Priced at the same size the job runs at. This recomputed the estimate without the
-      // resolution, so a 1080p pass was queued carrying a 720p figure — and, for a stills
-      // production, priced a pass of images as if it were footage: no megapixels and no
-      // reference input, which on a per-megapixel model is a queued job estimated at zero.
-      estimatedMicroUsd: passEstimate(model, plan, pass.durationSec, references.length),
+      // Priced at the same size and the same length the job runs at. This recomputed the
+      // estimate without either: a 1080p pass was queued carrying a 720p figure, a pass of
+      // stills was priced as if it were footage, and the seconds were the ones planned rather
+      // than the ones the route can be asked for.
+      estimatedMicroUsd: passEstimate(
+        model,
+        plan,
+        dispatchDuration(model, pass.durationSec)?.seconds ?? pass.durationSec,
+        references.length,
+      ),
       landing: { dir: `productions/${productionId}/incoming/${scene.id}-pass-${pass.index}` },
     };
   });

@@ -95,6 +95,13 @@ export type SizeTier = z.infer<typeof SizeTierSchema>;
 export const ModelLimitsSchema = z
   .object({
     maxDurationSec: z.number().int().min(1).optional(),
+    /**
+     * Seconds → the provider's own word for that length. Video routes do not take a number of
+     * seconds: they take a string from a fixed list, and the lists disagree — seedance and kling
+     * say "5", veo says "5s", and none of them accepts 6.5. A model with no entry here has no
+     * length we can ask for, so the provider's default runs and the estimate must say so.
+     */
+    durations: z.record(z.string().regex(/^[0-9]+$/), z.string().min(1)).optional(),
     resolutions: z.array(z.string()).optional(),
     /**
      * Normalised tier → the provider's own word for it. The tier is what a user chooses; the
@@ -400,6 +407,34 @@ export function modelCapabilityCopy(model: ManifestModel): string {
   else if (model.accepts.startFrame) parts.push("start frame");
   if (model.limits.maxDurationSec !== undefined) parts.push(`${model.limits.maxDurationSec}s`);
   return parts.join(" · ");
+}
+
+/** The lengths this model can actually be asked for, in seconds, ascending. */
+export function durationOptions(model: ManifestModel): number[] {
+  return Object.keys(model.limits.durations ?? {})
+    .map((seconds) => Number.parseInt(seconds, 10))
+    .sort((a, b) => a - b);
+}
+
+/**
+ * The length a dispatch will actually ask for, and the word to ask in.
+ *
+ * A planned shot is any number of seconds; a route takes one of a fixed few. Rounding up is the
+ * safe direction twice over: the footage covers the shot rather than falling short of it, and
+ * the estimate — which is computed from this same number — can only overstate. Rounding down
+ * would bill for four seconds and deliver a shot that ends early.
+ *
+ * Null when the model declares no lengths. The provider's own default then runs, which is worth
+ * saying out loud rather than pretending a number was honoured.
+ */
+export function dispatchDuration(
+  model: ManifestModel,
+  requestedSec: number,
+): { seconds: number; wire: string } | null {
+  const options = durationOptions(model);
+  if (options.length === 0) return null;
+  const chosen = options.find((seconds) => seconds >= requestedSec) ?? options[options.length - 1]!;
+  return { seconds: chosen, wire: model.limits.durations![String(chosen)]! };
 }
 
 /**

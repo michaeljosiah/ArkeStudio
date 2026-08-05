@@ -1,7 +1,13 @@
 import { compilationIsStale, designatedCompilation, mainPhotoFor, type ReferenceKit } from "./reference.js";
 import type { ResolvedArtDirection } from "./art-direction.js";
 import { referenceBudget, type BudgetCandidate, type BudgetResult } from "./reference-budget.js";
-import { estimateMicroUsd, sceneImageOutput, type ManifestModel, type SizeTier } from "./manifest.js";
+import {
+  dispatchDuration,
+  estimateMicroUsd,
+  sceneImageOutput,
+  type ManifestModel,
+  type SizeTier,
+} from "./manifest.js";
 import type { Scene, Shot } from "./scene.js";
 import type { Selections } from "./scene.js";
 import type { Sheet, WorldMeta } from "./world.js";
@@ -368,7 +374,11 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
         { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id },
       ),
     );
-    const duration = shot.durationSec ?? DEFAULT_SHOT_SEC;
+    // The length that will actually be asked for. A route takes one of a fixed few lengths, so
+    // a 6.5s shot becomes a 7s dispatch — and the estimate has to be the 7, or the figure shown
+    // and the figure billed are for two different requests.
+    const duration = dispatchDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC)?.seconds
+      ?? shot.durationSec ?? DEFAULT_SHOT_SEC;
     const estimate =
       model.capability === "video"
         ? estimateMicroUsd(model, {
@@ -422,7 +432,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           (a, p) =>
             a +
             estimateMicroUsd(model, {
-              durationSec: p.durationSec,
+              durationSec: dispatchDuration(model, p.durationSec)?.seconds ?? p.durationSec,
               ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
             }),
           0,
