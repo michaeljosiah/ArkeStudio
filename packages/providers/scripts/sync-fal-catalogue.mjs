@@ -31,14 +31,34 @@ const CURATED = {
   "fal-ai/nano-banana-2": {
     id: "nano-banana-2",
     capability: "image",
-    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-    limits: { resolutions: ["1K", "2K", "4K"], aspects: ["16:9", "9:16", "1:1"] },
+    // Siblings, not separate models: the base route is text-only, `/edit` takes `image_urls`.
+    // Dispatch picks between them by whether the job carries references, so the studio offers
+    // one "Nano Banana 2" rather than two half-models.
+    //
+    // referenceImages: the edit schema declares `image_urls` with no maxItems, so there is no
+    // number to read. 3 is deliberately low — it matches Google's published guidance for
+    // subject images, and an under-promise costs a dropped reference while an over-promise
+    // costs a dispatch that dies after the estimate was accepted. Raise it from a live call,
+    // not from a guess.
+    editRoute: "fal-ai/nano-banana-2/edit",
+    accepts: { referenceImages: 3, startFrame: false, endFrame: false },
+    // The route also offers 0.5K and the extreme 8:1/1:8 ratios. Both are left out on purpose:
+    // resolutions[0] is what every job gets until the resolution picker exists, so 0.5K first
+    // would silently halve every image, and nothing in the studio dispatches a 8:1 frame.
+    limits: {
+      resolutions: ["1K", "2K", "4K"],
+      aspects: ["21:9", "16:9", "3:2", "4:3", "1:1", "4:5", "3:4", "2:3", "9:16"],
+    },
   },
   "fal-ai/nano-banana-pro": {
     id: "nano-banana-pro",
     capability: "image",
-    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-    limits: { resolutions: ["1K", "2K", "4K"], aspects: ["16:9", "9:16", "1:1"] },
+    editRoute: "fal-ai/nano-banana-pro/edit",
+    accepts: { referenceImages: 3, startFrame: false, endFrame: false },
+    limits: {
+      resolutions: ["1K", "2K", "4K"],
+      aspects: ["21:9", "16:9", "3:2", "4:3", "1:1", "4:5", "3:4", "2:3", "9:16"],
+    },
   },
   "bytedance/seedance-2.0/text-to-video": {
     id: "seedance-2.0",
@@ -130,6 +150,7 @@ console.log(`[fal] ${total} models in the catalogue; ${Object.keys(CURATED).leng
 
 const models = [];
 const endpoints = {};
+const editEndpoints = {};
 const skipped = [];
 for (const [route, curated] of Object.entries(CURATED)) {
   const live = byRoute.get(route);
@@ -152,6 +173,11 @@ for (const [route, curated] of Object.entries(CURATED)) {
     pricing,
   });
   endpoints[curated.id] = route;
+  // An edit route is only emitted when the model also declares it accepts references, so the
+  // two can never disagree: a model that says 0 has no reference route to dispatch into.
+  if (curated.editRoute && curated.accepts.referenceImages > 0) {
+    editEndpoints[curated.id] = curated.editRoute;
+  }
 }
 
 for (const line of skipped) console.warn(`[fal] skipped ${line}`);
@@ -169,6 +195,13 @@ export const FAL_MODELS: readonly ManifestModel[] = ${JSON.stringify(models, nul
 
 /** Model id → fal route. Dispatch needs this; a model without one cannot be submitted. */
 export const FAL_ENDPOINTS: Record<string, string> = ${JSON.stringify(endpoints, null, 2)};
+
+/**
+ * Model id → the route that accepts reference images. Present only for models whose manifest
+ * row declares \`accepts.referenceImages > 0\`; a job carrying references submits here instead
+ * of the text route above.
+ */
+export const FAL_EDIT_ENDPOINTS: Record<string, string> = ${JSON.stringify(editEndpoints, null, 2)};
 `;
 
 const out = new URL("../src/fal-catalogue.generated.ts", import.meta.url);

@@ -3,8 +3,30 @@ import { jsonRequest, tryProbe } from "./http.js";
 // Generated beside the manifest rows, from the same fetch, so a model can never be offered
 // with no route behind it — the failure that used to read "no endpoint mapping" at dispatch,
 // long after the estimate had been shown and accepted.
-import { FAL_ENDPOINTS as ENDPOINTS } from "../fal-catalogue.generated.js";
-import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
+import { FAL_EDIT_ENDPOINTS as EDIT_ENDPOINTS, FAL_ENDPOINTS as ENDPOINTS } from "../fal-catalogue.generated.js";
+import type {
+  FetchedArtifact,
+  FetchLike,
+  PollResult,
+  PreparedImageReference,
+  ProviderClient,
+  SubmitRequest,
+  SubmitResult,
+} from "../types.js";
+
+/**
+ * Our own ceiling, not fal's. fal accepts data URIs for any file input, which keeps a reference
+ * on the same request as the prompt and avoids depending on a second service to hold bytes we
+ * already hold. The cost is body size, so refuse early and legibly rather than let a several-
+ * megabyte request time out somewhere in the middle. Reference tiles and portraits sit far
+ * under this; anything over it is a sign something unintended got attached.
+ */
+const MAX_INLINE_REFERENCE_BYTES = 8 * 1024 * 1024;
+
+/** fal takes file inputs as URLs; a data URI is a URL that needs nobody's storage. */
+function dataUri(reference: PreparedImageReference): string {
+  return `data:${reference.contentType};base64,${Buffer.from(reference.data).toString("base64")}`;
+}
 
 function extensionFor(contentType: string): string {
   const type = contentType.toLowerCase().split(";", 1)[0];
@@ -63,18 +85,44 @@ export class FalClient implements ProviderClient {
     ];
   }
 
-  private endpointFor(model: string): string {
-    const endpoint = ENDPOINTS[model];
-    if (!endpoint) throw new Error(`fal: no endpoint mapping for model "${model}"`);
+  /**
+   * A model is one row in the manifest and two routes on fal: the text route, and — for models
+   * that declare they accept references — an `/edit` sibling that takes `image_urls`. Which one
+   * a job lands on is decided by whether it carries references, so the studio offers one model
+   * rather than two halves of one.
+   */
+  private endpointFor(model: string, withReferences: boolean): string {
+    const endpoint = withReferences ? EDIT_ENDPOINTS[model] : ENDPOINTS[model];
+    if (!endpoint) {
+      throw new Error(
+        withReferences
+          ? `fal: ${model} has no reference-image route`
+          : `fal: no endpoint mapping for model "${model}"`,
+      );
+    }
     return endpoint;
   }
 
   async submit(key: string, request: SubmitRequest): Promise<SubmitResult> {
-    const endpoint = this.endpointFor(request.model);
-    const references = request.params["references"];
-    if (Array.isArray(references) && references.length > 0) {
-      throw new Error(`fal: ${request.model} has no implemented reference-image transport`);
+    const durable = request.params["references"];
+    const withReferences = Array.isArray(durable) && durable.length > 0;
+    const prepared = request.imageReferences ?? [];
+    // Route first: a model with no `/edit` sibling cannot take references at all, and saying so
+    // is more use than complaining about the bytes for a request that could never have gone.
+    const endpoint = this.endpointFor(request.model, withReferences);
+    // The durable list is what the job promised; the prepared list is what actually resolved to
+    // bytes. A mismatch means a reference went missing between planning and dispatch, and
+    // submitting the remainder would quietly generate against a smaller set than was priced.
+    if (withReferences && prepared.length !== durable.length) {
+      throw new Error("fal: not every image reference was prepared");
     }
+    const inlineBytes = prepared.reduce((total, reference) => total + reference.data.byteLength, 0);
+    if (withReferences && inlineBytes > MAX_INLINE_REFERENCE_BYTES) {
+      throw new Error(
+        `fal: ${prepared.length} reference images total ${Math.round(inlineBytes / 1024 / 1024)}MB, over the inline limit`,
+      );
+    }
+    const imageUrls = withReferences ? prepared.map(dataUri) : [];
     const internal = new Set([
       "references",
       "referenceRoles",
@@ -102,7 +150,11 @@ export class FalClient implements ProviderClient {
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/${endpoint}`, {
       method: "POST",
       headers: this.headers(key),
-      body: JSON.stringify({ ...params, ...imageOutput }),
+      body: JSON.stringify({
+        ...params,
+        ...imageOutput,
+        ...(imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
+      }),
     });
     const requestId = (body as { request_id?: string } | null)?.request_id;
     if (status >= 400 || !requestId) throw new Error(`fal: submit failed (HTTP ${status})`);

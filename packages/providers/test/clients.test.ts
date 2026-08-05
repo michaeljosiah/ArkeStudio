@@ -284,7 +284,7 @@ describe("fal submit/poll round-trip carries the endpoint in the remote id", () 
     assert.match(seen[1]!, /fal-ai\/flux-2-pro\/requests\/req-9\/status/);
   });
 
-  it("refuses local references before network submission", async () => {
+  it("refuses references for a model with no edit route, before any network call", async () => {
     let fetches = 0;
     const client = new FalClient(async () => {
       fetches += 1;
@@ -296,7 +296,88 @@ describe("fal submit/poll round-trip carries the endpoint in the remote id", () 
         capability: "image",
         params: { prompt: "x", references: ["references/maren-kest/main.png"] },
       }),
-      /no implemented reference-image transport/,
+      /flux-2-pro has no reference-image route/,
+    );
+    assert.equal(fetches, 0);
+  });
+
+  it("a job carrying references lands on the edit route, inlined as data URIs", async () => {
+    const seen: string[] = [];
+    let sent: Record<string, unknown> = {};
+    const fetchImpl: FetchLike = async (url, init) => {
+      seen.push(url);
+      sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ request_id: "req-4" }), { status: 200 });
+    };
+    const submitted = await new FalClient(fetchImpl).submit("k", {
+      model: "nano-banana-2",
+      capability: "image",
+      params: {
+        prompt: "x",
+        references: ["references/maren-kest/main.png"],
+        output: { width: 1024, height: 1280, aspect: "4:5", resolution: "2K" },
+      },
+      imageReferences: [{ name: "main.png", contentType: "image/png", data: new Uint8Array([1, 2, 3]) }],
+    });
+    assert.match(seen[0]!, /fal-ai\/nano-banana-2\/edit$/);
+    assert.deepEqual(sent["image_urls"], ["data:image/png;base64,AQID"]);
+    assert.equal(sent["resolution"], "2K");
+    // The remote id carries the edit route, so polling and cancelling stay endpoint-scoped.
+    assert.equal(submitted.remoteId, "fal-ai/nano-banana-2/edit::req-4");
+    assert.ok(!("references" in sent));
+  });
+
+  it("the same model with no references stays on the text route", async () => {
+    const seen: string[] = [];
+    let sent: Record<string, unknown> = {};
+    const fetchImpl: FetchLike = async (url, init) => {
+      seen.push(url);
+      sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ request_id: "req-5" }), { status: 200 });
+    };
+    await new FalClient(fetchImpl).submit("k", {
+      model: "nano-banana-2",
+      capability: "image",
+      params: { prompt: "x", references: [], output: { width: 1024, height: 1280, aspect: "4:5", resolution: "1K" } },
+    });
+    assert.match(seen[0]!, /fal-ai\/nano-banana-2$/);
+    assert.ok(!("image_urls" in sent));
+  });
+
+  it("refuses to submit when a promised reference did not resolve to bytes", async () => {
+    let fetches = 0;
+    const client = new FalClient(async () => {
+      fetches += 1;
+      return new Response(JSON.stringify({ request_id: "req" }), { status: 200 });
+    });
+    await assert.rejects(
+      client.submit("k", {
+        model: "nano-banana-2",
+        capability: "image",
+        params: { prompt: "x", references: ["a.png", "b.png"] },
+        imageReferences: [{ name: "a.png", contentType: "image/png", data: new Uint8Array([1]) }],
+      }),
+      /not every image reference was prepared/,
+    );
+    assert.equal(fetches, 0);
+  });
+
+  it("refuses an inline payload too large to be a reference", async () => {
+    let fetches = 0;
+    const client = new FalClient(async () => {
+      fetches += 1;
+      return new Response(JSON.stringify({ request_id: "req" }), { status: 200 });
+    });
+    await assert.rejects(
+      client.submit("k", {
+        model: "nano-banana-2",
+        capability: "image",
+        params: { prompt: "x", references: ["huge.png"] },
+        imageReferences: [
+          { name: "huge.png", contentType: "image/png", data: new Uint8Array(9 * 1024 * 1024) },
+        ],
+      }),
+      /over the inline limit/,
     );
     assert.equal(fetches, 0);
   });
