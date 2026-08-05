@@ -241,6 +241,11 @@
 .dom-proposal__noticeactions {
   margin-top: var(--space-2);
 }
+/* A quieter second line: what to do about a notice that offers no button. */
+.dom-proposal__noticehint {
+  margin-top: var(--space-2);
+  color: var(--muted-foreground);
+}
 
 .dom-proposal__conflicts {
   display: grid;

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import {
+  CHARACTER_ROLE_MAX,
   compilationIsStale,
   deriveCut,
   designatedCompilation,
@@ -400,9 +401,13 @@ export function WorldOverviewScreen() {
                     <Portrait worldSlug={slug} path={characterPortraitPath(world, sheet.id)} label={sheet.name} />
                   </div>
                   <div className="fy-polaroid__name">{sheet.name}</div>
-                  <div className="fy-polaroid__role">
-                    {sheet.role ?? sheet.sections[0]?.body.split(/[.!?]/)[0] ?? ""}
-                  </div>
+                  {/*
+                    Role only — never a sentence lifted from the body. Both lines are clipped to
+                    one line in CSS so every card in the fan is the same height whatever the
+                    sheet says; an unset role leaves the line blank rather than filling it with
+                    essence prose, which used to make cards three lines tall and the fan ragged.
+                  */}
+                  <div className="fy-polaroid__role">{sheet.role ?? ""}</div>
                 </div>
               </div>
             </div>
@@ -647,11 +652,24 @@ export function CastScreen() {
   );
 }
 
-/** First sentence of a sheet's first section — the card sub-line. */
+/**
+ * First sentence of a sheet's first section — the card sub-line.
+ *
+ * Length is deliberately not this function's business. It used to hand back a 120-character
+ * slice, which cut mid-word with no ellipsis ("They tax what moves, pardon ") and still wrapped
+ * to a different number of lines per card. The card clamps to two lines in CSS instead, which
+ * ellipsises at the real line break; here we only pick the sentence and flatten the markdown's
+ * hard wrapping so it measures as one run of text.
+ */
 function sheetLede(sheet: { sections: Array<{ body: string }> }): string {
-  const body = sheet.sections[0]?.body ?? "";
-  const stop = body.indexOf(". ");
-  return stop > 0 && stop < 120 ? body.slice(0, stop + 1) : body.slice(0, 120);
+  return firstSentence(sheet.sections[0]?.body ?? "");
+}
+
+/** One sentence of prose on one line: markdown's hard wrapping flattened, the rest dropped. */
+function firstSentence(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  const stop = flat.indexOf(". ");
+  return stop > 0 ? flat.slice(0, stop + 1) : flat;
 }
 
 export function LocationsScreen() {
@@ -679,16 +697,16 @@ export function LocationsScreen() {
       </div>
       <div className="fy-cardgrid" style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(places.length, 2), 4)}, minmax(0, 1fr))` }}>
         {places.map((s) => (
-          <button key={s.id} type="button" className="fy-gridcard fy-gridcard--media" onClick={() => navigate(`/w/${worldId}/locations/${s.id}`)}>
+          <button key={s.id} type="button" className="fy-gridcard fy-gridcard--media fy-gridcard--fixed" onClick={() => navigate(`/w/${worldId}/locations/${s.id}`)}>
             <div className="fy-gridcard__frame" style={{ height: 270 }}>
               <Portrait worldSlug={world?.meta.slug} path={sheetPortraitPath(s.id)} label={`${s.name}: establishing view`} />
             </div>
             <div className="fy-gridcard__pad">
-              <div className="fy-gridcard__title" style={{ margin: "12px 0 0" }}>
-                {s.name}
+              <div className="fy-gridcard__title">
+                <span className="fy-gridcard__name">{s.name}</span>
                 <span className={`fy-dot fy-dot--${s.status === "locked" ? "ok" : "sketch"}`} style={{ width: 6, height: 6 }} />
               </div>
-              <div className="fy-gridcard__body" style={{ fontSize: 12, marginTop: 3 }}>{sheetLede(s)}</div>
+              <div className="fy-gridcard__body">{sheetLede(s)}</div>
               <div className="fy-gridcard__foot" style={{ marginTop: 9 }}>
                 {s.status === "locked" ? `locked · v${s.version}` : `sketch · v${s.version}`}
                 {s.canonRules.length > 0 ? ` · ${s.canonRules.join(", ")}` : ""}
@@ -727,40 +745,37 @@ export function FactionsScreen() {
           const wants = facet(s, "want");
           const fears = facet(s, "fear");
           return (
-            <button key={s.id} type="button" className="fy-gridcard fy-gridcard--media" onClick={() => navigate(`/w/${worldId}/factions/${s.id}`)}>
+            <button
+              key={s.id}
+              type="button"
+              className="fy-gridcard fy-gridcard--media fy-gridcard--fixed fy-gridcard--fixed-faction"
+              onClick={() => navigate(`/w/${worldId}/factions/${s.id}`)}
+            >
               <div className="fy-gridcard__frame" style={{ height: 210 }}>
                 <Portrait worldSlug={world?.meta.slug} path={sheetPortraitPath(s.id)} label={`${s.name}: emblem or scene`} />
               </div>
               <div className="fy-gridcard__pad" style={{ padding: "2px 8px 0" }}>
-                <div className="fy-gridcard__title" style={{ margin: "13px 0 0", fontSize: 16 }}>
-                  {s.name}
+                <div className="fy-gridcard__title">
+                  <span className="fy-gridcard__name">{s.name}</span>
                   <span className={`fy-dot fy-dot--${s.status === "locked" ? "ok" : "sketch"}`} style={{ width: 6, height: 6 }} />
                 </div>
-                <div className="fy-gridcard__body" style={{ marginTop: 4 }}>{sheetLede(s)}</div>
-                {(wants || fears) && (
-                  <div className="fy-wants">
-                    {wants && (
-                      <>
-                        <b>wants:</b> {wants.split(". ")[0]}
-                        <br />
-                      </>
-                    )}
-                    {fears && (
-                      <>
-                        <b>fears:</b> {fears.split(". ")[0]}
-                      </>
-                    )}
-                  </div>
-                )}
-                {s.links.length > 0 && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
-                    {s.links.slice(0, 3).map((l) => (
-                      <span key={l} className="fy-pill" style={{ padding: "2px 10px", fontSize: 11 }}>
-                        {l}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <div className="fy-gridcard__body">{sheetLede(s)}</div>
+                {/*
+                  Both lines render whichever facets the sheet has. A faction with no fears keeps
+                  a blank line rather than a shorter card, so a sketch sits level beside a written
+                  one — the rule the cast fan follows for an empty role.
+                */}
+                <div className="fy-wants">
+                  <div className="fy-wants__line">{wants && <><b>wants:</b> {firstSentence(wants)}</>}</div>
+                  <div className="fy-wants__line">{fears && <><b>fears:</b> {firstSentence(fears)}</>}</div>
+                </div>
+                <div className="fy-gridcard__links">
+                  {s.links.slice(0, 3).map((l) => (
+                    <span key={l} className="fy-pill" style={{ padding: "2px 10px", fontSize: 11 }}>
+                      {l}
+                    </span>
+                  ))}
+                </div>
                 <div className="fy-gridcard__foot" style={{ marginTop: 10 }}>
                   {s.status === "locked" ? "locked" : "sketch"} · v{s.version}
                 </div>
@@ -1141,12 +1156,21 @@ export function CharacterEditScreen() {
   const { state } = useStore();
   const harnessReady = state?.app.health.harness.status === "healthy";
 
+  // null while untouched, so an unedited sheet stages nothing for the field at all.
+  const [editedRole, setEditedRole] = useState<string | null>(null);
+
   const sections = (sheet?.sections ?? []).map((s) => ({
     heading: s.heading,
     body: edited[s.heading] ?? s.body,
   }));
-  const dirty = sections.some((s, i) => s.body !== sheet?.sections[i]?.body);
   const changed = sections.filter((s, i) => s.body !== sheet?.sections[i]?.body);
+  // Role is a character's short line on the world hub card, and the one frontmatter field this
+  // form edits. It is capped so the card can hold it on a single line (SPEC-007 §2.3.1).
+  const editsRole = sheet?.type === "character";
+  const role = editedRole ?? sheet?.role ?? "";
+  const roleChanged = editsRole && editedRole !== null && role.trim() !== (sheet?.role ?? "");
+  const changedCount = changed.length + (roleChanged ? 1 : 0);
+  const dirty = changed.length > 0 || roleChanged;
   const [mode, setMode] = useState<"form" | "chat">("form");
   const world = useOpenWorldGuard(worldId);
   const worldSlug = world?.meta.slug;
@@ -1202,18 +1226,40 @@ export function CharacterEditScreen() {
         </div>
         <div className="fy-gate__body" style={{ gap: 14 }}>
           {mode === "form" ? (
-            sections.map((s, i) => {
-              const isChanged = s.body !== sheet?.sections[i]?.body;
-              return (
-                <div key={s.heading}>
+            <>
+              {editsRole && (
+                <div>
                   <div className="fy-fieldlabel">
-                    {s.heading}
-                    {isChanged && <span className="fy-changedtag">· changed</span>}
+                    Role
+                    {roleChanged && <span className="fy-changedtag">· changed</span>}
+                    <span className="fy-fieldcount">
+                      {role.length} of {CHARACTER_ROLE_MAX}
+                    </span>
                   </div>
-                  <Textarea value={s.body} onChange={(e) => setEdited((prev) => ({ ...prev, [s.heading]: e.target.value }))} />
+                  <Input
+                    value={role}
+                    maxLength={CHARACTER_ROLE_MAX}
+                    placeholder="Tide-caller"
+                    onChange={(e) => setEditedRole(e.target.value)}
+                  />
+                  <span className="fy-mono" style={{ display: "block", marginTop: 6 }}>
+                    the one line under their name on the world hub — short enough to read at a glance
+                  </span>
                 </div>
-              );
-            })
+              )}
+              {sections.map((s, i) => {
+                const isChanged = s.body !== sheet?.sections[i]?.body;
+                return (
+                  <div key={s.heading}>
+                    <div className="fy-fieldlabel">
+                      {s.heading}
+                      {isChanged && <span className="fy-changedtag">· changed</span>}
+                    </div>
+                    <Textarea value={s.body} onChange={(e) => setEdited((prev) => ({ ...prev, [s.heading]: e.target.value }))} />
+                  </div>
+                );
+              })}
+            </>
           ) : (
             <>
               {transcript.length === 0 && (
@@ -1278,7 +1324,7 @@ export function CharacterEditScreen() {
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
           <div style={{ font: "600 15px var(--font-sans)" }}>Proposed sheet</div>
           <span className="fy-mono" style={{ color: dirty ? "var(--warning)" : undefined }}>
-            {sheet ? `v${sheet.version + 1} draft · ${changed.length} field${changed.length === 1 ? "" : "s"} changed` : ""}
+            {sheet ? `v${sheet.version + 1} draft · ${changedCount} field${changedCount === 1 ? "" : "s"} changed` : ""}
           </span>
         </div>
         <div className="fy-draftcard">
@@ -1289,10 +1335,27 @@ export function CharacterEditScreen() {
             <div>
               <div style={{ font: "600 15px var(--font-sans)" }}>{sheet?.name}</div>
               <div className="fy-mono" style={{ marginTop: 2 }}>
-                {sheet ? `v${sheet.version} → v${sheet.version + 1}${changed.length > 0 ? ` · ${changed.map((c) => c.heading.toLowerCase()).join(", ")}` : ""}` : ""}
+                {sheet
+                  ? `v${sheet.version} → v${sheet.version + 1}${
+                      changedCount > 0
+                        ? ` · ${[...(roleChanged ? ["role"] : []), ...changed.map((c) => c.heading.toLowerCase())].join(", ")}`
+                        : ""
+                    }`
+                  : ""}
               </div>
             </div>
           </div>
+          {roleChanged && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <span style={{ font: "600 12.5px var(--font-sans)" }}>Role</span>
+                <span className="fy-changedtag">changed</span>
+              </div>
+              <div style={{ font: "400 12px/1.6 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 3 }}>
+                {role.trim() === "" ? "cleared — the card shows no role" : role.trim()}
+              </div>
+            </div>
+          )}
           {changed.slice(0, 3).map((c) => (
             <div key={c.heading} style={{ marginTop: 12 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -1304,7 +1367,7 @@ export function CharacterEditScreen() {
               </div>
             </div>
           ))}
-          {changed.length === 0 && (
+          {changedCount === 0 && (
             <div className="fy-mono" style={{ marginTop: 12 }}>
               nothing changed yet — edits preview here before they stage
             </div>
@@ -1335,7 +1398,13 @@ export function CharacterEditScreen() {
             onClick={() => {
               if (!sheet || !worldId) return;
               const dir = sheet.type === "character" ? "characters" : `${sheet.type}s`;
-              stageSheetEdit(worldId, `${dir}/${sheet.id}.md`, `Edit ${sheet.name}`, sections);
+              stageSheetEdit(
+                worldId,
+                `${dir}/${sheet.id}.md`,
+                `Edit ${sheet.name}`,
+                sections,
+                roleChanged ? role.trim() : undefined,
+              );
               setStagedAt(Date.now());
               const base = sheet.type === "character" ? "cast" : `${sheet.type}s`;
               navigate(`/w/${worldId}/${base}/${sheet.id}`);
@@ -1343,7 +1412,14 @@ export function CharacterEditScreen() {
           >
             {stagedAt ? "Staging…" : `Stage proposal · the sheet becomes v${(sheet?.version ?? 0) + 1}`}
           </Button>
-          <Button variant="ghost" onClick={() => setEdited({})} disabled={!dirty}>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setEdited({});
+              setEditedRole(null);
+            }}
+            disabled={!dirty}
+          >
             Discard edits · v{sheet?.version ?? "…"} stands
           </Button>
         </div>

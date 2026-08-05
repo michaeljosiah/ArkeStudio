@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ArtDirectionRecordSchema,
+  CHARACTER_ROLE_MAX,
   newId,
   ProposalSchema,
   RipplePreviewSchema,
@@ -33,7 +34,8 @@ export type AcceptOutcome =
   | { status: "needs-reconfirm"; authoritative: RipplePreview; signature: string }
   | { status: "pending-review" }
   | { status: "unresolved-conflicts"; count: number }
-  | { status: "target-retired"; paths: string[] };
+  | { status: "target-retired"; paths: string[] }
+  | { status: "invalid"; problems: Array<{ path: string; message: string }> };
 
 export interface StageInput {
   kind: Proposal["kind"];
@@ -150,11 +152,25 @@ export class ProposalManager {
     summary: string,
     sections: Array<{ heading: string; body: string }>,
     source: string,
+    /** Characters only: the new `role`, or "" to clear it. Undefined leaves it untouched. */
+    role?: string,
   ): Promise<Proposal> {
     const live = await this.readLive(path);
     if (live === null) throw new Error(`${path} does not exist`);
     const doc = MarkdownFile.parse(live);
     doc.setBody(sections.map((s) => `## ${s.heading}\n${s.body.trim()}`).join("\n\n"));
+    if (role !== undefined) {
+      const trimmed = role.trim();
+      if (trimmed === "") {
+        // Cleared means absent, not empty. An empty frontmatter string reads back as a role of
+        // "" — truthy enough to suppress the card's "no role yet" state while showing nothing.
+        // setBody above has already marked the doc dirty, so dropping the key is enough.
+        const { role: _cleared, ...rest } = doc.data;
+        doc.data = rest;
+      } else {
+        doc.setData({ role: trimmed });
+      }
+    }
     return this.stage({
       kind: "sheet-edit",
       summary,
@@ -270,6 +286,9 @@ export class ProposalManager {
       }
       if (files.length === 0) return { status: "no-op" };
 
+      const problems = await this.checkAuthoredBounds(files);
+      if (problems.length > 0) return { status: "invalid", problems };
+
       // Authority: recompute ripples now, under the lock, after verification (R-9).
       const authoritative = this.computeRipples(proposal, files);
       const signature = rippleSignature(authoritative.items);
@@ -291,6 +310,38 @@ export class ProposalManager {
       await rm(toExtendedLength(this.proposalDir(proposalId)), { recursive: true, force: true });
       return { status: "accepted", result };
     });
+  }
+
+  /**
+   * Bounds the gate enforces on authored content (SPEC-007 R-18).
+   *
+   * The form editor caps `role` as you type and the staging frame refuses an over-long one, but
+   * a drafting agent reaches neither: it writes files straight into the proposal directory with
+   * its own tools. Without a check here the cap would constrain only the human, which is the
+   * worst of both — so the gate is where the rule is actually made true. The agent preamble
+   * states the same bound so this refusal is a backstop, not the normal path.
+   *
+   * Only a role this proposal *changes* is judged. A world may already hold a longer one — the
+   * read schema is deliberately permissive — and refusing to accept an unrelated edit to that
+   * sheet would strand it, uneditable, on a rule that postdates it.
+   */
+  private async checkAuthoredBounds(
+    files: CommitFileInput[],
+  ): Promise<Array<{ path: string; message: string }>> {
+    const problems: Array<{ path: string; message: string }> = [];
+    for (const file of files) {
+      // A delete carries no content and cannot introduce a role.
+      if (!file.path.startsWith("characters/") || file.content === undefined) continue;
+      const role = roleOf(file.content);
+      if (role === null || role.length <= CHARACTER_ROLE_MAX) continue;
+      const live = await this.readLive(file.path);
+      if (live !== null && roleOf(live) === role) continue; // carried through untouched
+      problems.push({
+        path: file.path,
+        message: `role is ${role.length} characters; the limit is ${CHARACTER_ROLE_MAX}`,
+      });
+    }
+    return problems;
   }
 
   // ---- rebase --------------------------------------------------------------
@@ -538,6 +589,16 @@ function readVersion(path: string, raw: string): number | null {
     return null;
   }
   return null;
+}
+
+/** A sheet's `role` frontmatter, or null when absent or the file will not parse. */
+function roleOf(raw: string): string | null {
+  try {
+    const role = MarkdownFile.parse(raw).data["role"];
+    return typeof role === "string" ? role.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 function isRetired(path: string, raw: string): boolean {

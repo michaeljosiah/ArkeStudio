@@ -311,11 +311,29 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-polaroid:hover { transform: rotate(0deg) translateY(-14px) !important; box-shadow: var(--shadow-xl); }
 .fy-polaroid__frame { width: 154px; height: 180px; }
-.fy-polaroid__name { font: 600 13px var(--font-sans); margin: 9px 3px 0; }
-.fy-polaroid__role { font: 400 11px var(--font-sans); color: var(--muted-foreground); margin: 1px 3px 0; }
+/*
+ * Both lines are single-line and clipped. The frame and the padding are already fixed, so
+ * pinning these two makes the card a constant 243px tall — the fan stays level no matter how
+ * long a name or a role is. The role keeps its 15px when empty so a character with no role
+ * yet does not shorten its card.
+ */
+.fy-polaroid__name,
+.fy-polaroid__role {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fy-polaroid__name { font: 600 13px/17px var(--font-sans); margin: 9px 3px 0; height: 17px; }
+.fy-polaroid__role { font: 400 11px/15px var(--font-sans); color: var(--muted-foreground); margin: 1px 3px 0; height: 15px; }
 
 .fy-worldcard {
   width: 280px;
+  /*
+   * One number for the real card and the dashed "New world" placeholder beside it, so the two
+   * cannot drift apart. It is the sum of the pinned bands below (frame, name, logline, meta and
+   * the padding), border-box — change a band and this moves with it.
+   */
+  height: var(--fy-worldcard-h);
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
@@ -327,18 +345,49 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   position: relative;
 }
 .fy-worldcard:hover { transform: rotate(0deg) translateY(-10px) !important; box-shadow: var(--shadow-xl); }
+/*
+ * Every band on a world card is pinned, so the card is a constant height and sits level with the
+ * dashed "New world" card beside it — which has always been a fixed 424px, sized against a
+ * two-line logline. Loglines run from a sentence to a paragraph, so without this the front door
+ * was the most ragged screen in the app: 528 / 508 / 450 against that fixed 424.
+ */
 .fy-worldcard__frame { width: 256px; height: 286px; }
-.fy-worldcard__name { margin: 14px 4px 0; font: 600 20px/1.2 var(--font-sans); letter-spacing: -0.015em; }
-.fy-worldcard__logline { margin: 5px 4px 0; font: 400 13px/1.5 var(--font-sans); color: var(--muted-foreground); }
+.fy-worldcard__name {
+  margin: 14px 4px 0;
+  font: 600 20px/24px var(--font-sans);
+  letter-spacing: -0.015em;
+  height: 24px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Two lines, clamped. A world with no logline keeps the box empty rather than a shorter card. */
+.fy-worldcard__logline {
+  margin: 5px 4px 0;
+  font: 400 13px/19.5px var(--font-sans);
+  color: var(--muted-foreground);
+  height: 39px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .fy-worldcard__meta {
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 14px 4px 0;
-  font-size: 12px;
+  font: 400 12px/15px var(--font-sans);
   color: var(--muted-foreground);
+  height: 15px;
 }
-.fy-worldcard__meta .mono { margin-left: auto; font: 400 11px var(--font-mono); color: var(--neutral-400); }
+/*
+ * The counts must be their own clipped element. Left as a bare text node they form an anonymous
+ * flex item, which wraps internally — that is what made this band 38px instead of 15px once the
+ * timestamp grew from "2h ago" to a full date.
+ */
+.fy-worldcard__counts { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-worldcard__meta .mono { margin-left: auto; flex: none; font: 400 11px var(--font-mono); color: var(--neutral-400); }
 
 /* ---- CTA rows ------------------------------------------------------------- */
 
@@ -573,7 +622,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 .fy-newworldcard {
   width: 280px;
-  height: 424px;
+  height: var(--fy-worldcard-h);
   border: 1.5px dashed var(--neutral-300);
   border-radius: var(--radius-card);
   display: flex;
@@ -592,7 +641,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 /* Home's own head is gone: the lockup and the two destinations it held now live in the one
    chrome every screen draws (.fy-titlebar), which is the whole point of there being one. */
 .fy-home-hero { padding: 34px 88px 0; animation: fy-fade-up 0.7s var(--ease-out) both; }
-.fy-home-cards { display: flex; gap: 32px; padding: 54px 64px; align-items: flex-start; flex-wrap: wrap; }
+/* align-items:flex-start means nothing stretches here — every card is its own height, so the
+   pinned bands are the only thing keeping the row level. --fy-worldcard-h is that height. */
+.fy-home-cards {
+  display: flex;
+  gap: 32px;
+  padding: 54px 64px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  --fy-worldcard-h: 426px;
+}
 
 /* ============================================================
    Production shell and screens (frames 11a/14a/11b/24a/25a/25b/
@@ -1852,8 +1910,46 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-gridcard__foot { font: 400 10.5px var(--font-mono); color: var(--neutral-400); margin-top: 12px; }
 .fy-gridcard__frame { width: 100%; }
 .fy-gridcard__pad { padding: 2px 6px 0; }
-.fy-wants { margin-top: 12px; font: 400 11px/1.8 var(--font-mono); color: var(--muted-foreground); }
+
+/*
+ * Cards whose height must not depend on their copy — locations and factions.
+ *
+ * Scoped to a modifier rather than applied to .fy-gridcard__title/__body directly, because the
+ * canon grid shares those classes and wants its entries to run as long as they run.
+ *
+ * The name takes one clipped line and the description a fixed two-line box. The description is
+ * derived copy (the first sentence of a section), so it is clamped by LINE and ellipsised at the
+ * real break — never sliced at a character count, which lands mid-word and reads as a bug. With
+ * the frame already fixed, the card becomes a constant height, and the meta line lands at the
+ * same place on every card. That alignment is the point: CSS grid equalises the boxes within a
+ * row on its own, which hides ragged content until the grid wraps to a second row.
+ */
+.fy-gridcard--fixed .fy-gridcard__title { height: 20px; margin: 12px 0 0; font: 600 15px/20px var(--font-sans); }
+.fy-gridcard--fixed .fy-gridcard__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-gridcard--fixed .fy-gridcard__body {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font: 400 12px/18px var(--font-sans);
+  height: 36px;
+  margin-top: 3px;
+}
+/* Factions run one step larger, and their card carries two more fixed bands. */
+.fy-gridcard--fixed-faction .fy-gridcard__title { height: 21px; margin: 13px 0 0; font-size: 16px; line-height: 21px; }
+.fy-gridcard--fixed-faction .fy-gridcard__body { font-size: 12.5px; line-height: 19px; height: 38px; margin-top: 4px; }
+
+.fy-wants { margin-top: 12px; font: 400 11px/20px var(--font-mono); color: var(--muted-foreground); height: 40px; }
 .fy-wants b { font-weight: 400; color: var(--neutral-400); }
+/* One line each, always rendered: a faction with no fears keeps the line, blank. */
+.fy-wants__line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* One row of links that never wraps — a fourth pill would otherwise add 20px to the card. */
+.fy-gridcard__links { display: flex; flex-wrap: nowrap; gap: 6px; margin-top: 12px; height: 20px; overflow: hidden; }
 .fy-doclines {
   height: 48px;
   border: 1px solid var(--border);
@@ -1883,6 +1979,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-fieldlabel { font: 500 10.5px var(--font-sans); letter-spacing: 0.14em; color: var(--muted-foreground); text-transform: uppercase; margin-bottom: 6px; display: flex; align-items: baseline; gap: 8px; }
 .fy-changedtag { font: 400 9.5px var(--font-mono); color: var(--warning); letter-spacing: normal; text-transform: none; }
+/* Sits at the right of a field label: how much of a capped field is spent. */
+.fy-fieldcount { margin-left: auto; font: 400 9.5px var(--font-mono); color: var(--neutral-400); letter-spacing: normal; text-transform: none; }
 .fy-ripplerow { display: flex; align-items: center; gap: 8px; font: 400 11px/1.5 var(--font-mono); color: var(--muted-foreground); }
 .fy-ripplerow .fy-dot { width: 5px; height: 5px; }
 

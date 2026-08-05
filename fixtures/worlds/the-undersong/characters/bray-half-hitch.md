@@ -2,7 +2,7 @@
 id: bray-half-hitch
 type: character
 name: Bray Half-Hitch
-role: Rigger and runner of quiet cargo
+role: Rigger, runs quiet cargo
 billing: support
 version: 2
 status: locked

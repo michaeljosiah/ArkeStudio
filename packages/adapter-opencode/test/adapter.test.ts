@@ -3,7 +3,7 @@ import { after, before, describe, it, type TestContext } from "node:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import type { HarnessEvent } from "@arke-studio/contracts";
+import { CHARACTER_ROLE_MAX, type HarnessEvent } from "@arke-studio/contracts";
 import { OpenCodeAdapter } from "../src/opencode-adapter.js";
 import { probeCapabilities } from "../src/capabilities.js";
 import { createNormalizeState, normalizeOpenCode, toolSummary } from "../src/normalize.js";
@@ -332,6 +332,12 @@ describe("per-agent settings", () => {
     assert.ok(edited.prompt.includes("Edit only files inside the working directory"));
     assert.ok(edited.prompt.includes("Do not touch the version or updated fields"));
     assert.ok(edited.prompt.startsWith("You are working inside an Arke Studio proposal directory"));
+    // The role cap belongs here for the same reason: the gate refuses an over-long one either
+    // way, so an agent that had been talked out of the rule would just fail at accept.
+    assert.ok(
+      edited.prompt.includes(`role frontmatter is at most ${CHARACTER_ROLE_MAX} characters`),
+      "the role bound survives an edited brief",
+    );
     // And the tool denials are not addressable from settings at all.
     assert.equal(edited.tools["bash"], false);
     assert.equal(edited.permission["websearch"], "deny");

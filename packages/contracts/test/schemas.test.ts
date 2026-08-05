@@ -6,6 +6,7 @@ import {
   AppSettingsSchema,
   CanonEntrySchema,
   ChangeRecordSchema,
+  CHARACTER_ROLE_MAX,
   ClientMessageSchema,
   ClientStateSchema,
   DomainEventSchema,
@@ -187,6 +188,47 @@ describe("sheets", () => {
 
   it("rejects canonRules that are not CANON ids — rules are owned by canon", () => {
     assert.throws(() => SheetSchema.parse({ ...maren, canonRules: ["tide-calling"] }));
+  });
+
+  describe("role is bounded when written, unbounded when read (R-18)", () => {
+    const overLong = "x".repeat(CHARACTER_ROLE_MAX + 1);
+    const edit = {
+      kind: "stage-sheet-edit" as const,
+      worldId: WORLD_ID,
+      path: "characters/maren-kest.md",
+      summary: "Edit Maren Kest",
+      sections: [{ heading: "Essence", body: "She hears the verse." }],
+    };
+
+    /** Parse and narrow off the discriminated union, so `.role` is reachable. */
+    function stageEdit(role?: string) {
+      const parsed = ClientMessageSchema.parse(role === undefined ? edit : { ...edit, role });
+      if (parsed.kind !== "stage-sheet-edit") throw new Error(`parsed as ${parsed.kind}`);
+      return parsed;
+    }
+
+    it("reads a sheet whose role already exceeds the cap", () => {
+      // The read path must stay permissive: scan.ts drops a sheet it cannot parse, so a max
+      // here would erase a character from a world that opened fine before the cap existed.
+      assert.equal(SheetSchema.parse({ ...maren, role: overLong }).role, overLong);
+    });
+
+    it("refuses to stage an edit whose role exceeds the cap", () => {
+      assert.throws(() => stageEdit(overLong));
+    });
+
+    it("stages an edit whose role is exactly the cap", () => {
+      const atCap = "x".repeat(CHARACTER_ROLE_MAX);
+      assert.equal(stageEdit(atCap).role, atCap);
+    });
+
+    it("trims before measuring, so padding does not spend the budget", () => {
+      assert.equal(stageEdit(` ${"x".repeat(CHARACTER_ROLE_MAX)} `).role, "x".repeat(CHARACTER_ROLE_MAX));
+    });
+
+    it("accepts an edit that omits role entirely — the field is left untouched", () => {
+      assert.equal(stageEdit().role, undefined);
+    });
   });
 });
 

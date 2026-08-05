@@ -458,13 +458,17 @@ export function WorldPickerScreen() {
                     </button>
                   )}
                   <div className="fy-worldcard__name">{w.name}</div>
-                  {w.logline && <div className="fy-worldcard__logline">{w.logline}</div>}
+                  {/* Always rendered: a world with no logline yet keeps the two-line box empty
+                      rather than making its card shorter than the ones beside it. */}
+                  <div className="fy-worldcard__logline">{w.logline ?? ""}</div>
                   <div className="fy-worldcard__meta">
                     <span
                       className={cx("fy-dot", (w.attention?.unreviewedTakes ?? 0) > 0 ? "fy-dot--warn" : "fy-dot--ok")}
                     />
-                    {w.counts.characters} character{w.counts.characters === 1 ? "" : "s"} · {w.counts.productions}{" "}
-                    production{w.counts.productions === 1 ? "" : "s"}
+                    <span className="fy-worldcard__counts">
+                      {w.counts.characters} character{w.counts.characters === 1 ? "" : "s"} · {w.counts.productions}{" "}
+                      production{w.counts.productions === 1 ? "" : "s"}
+                    </span>
                     <span className="mono">{shortDateTime(w.updated)}</span>
                   </div>
                 </div>
