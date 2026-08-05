@@ -417,24 +417,33 @@ export function durationOptions(model: ManifestModel): number[] {
 }
 
 /**
- * The length a dispatch will actually ask for, and the word to ask in.
+ * What a dispatch can ask for, in seconds and in the route's own word — or why it cannot.
  *
- * A planned shot is any number of seconds; a route takes one of a fixed few. Rounding up is the
- * safe direction twice over: the footage covers the shot rather than falling short of it, and
- * the estimate — which is computed from this same number — can only overstate. Rounding down
- * would bill for four seconds and deliver a shot that ends early.
- *
- * Null when the model declares no lengths. The provider's own default then runs, which is worth
- * saying out loud rather than pretending a number was honoured.
+ * Three outcomes, kept apart because they need different answers. A length the route offers is
+ * rounded **up** to: the footage covers the shot rather than ending early, and the estimate,
+ * computed from this same number, can only overstate. A model that declares no lengths runs at
+ * the provider's default, which is worth saying rather than pretending a number was honoured.
+ * And a shot longer than anything the route offers is refused: clamping a 22s shot to a 15s
+ * clip would spend real money on footage that cannot cover what was asked for.
  */
-export function dispatchDuration(
-  model: ManifestModel,
-  requestedSec: number,
-): { seconds: number; wire: string } | null {
+export type DurationChoice =
+  | { kind: "asked"; seconds: number; wire: string }
+  | { kind: "provider-default" }
+  | { kind: "over-cap"; longest: number };
+
+export function dispatchDuration(model: ManifestModel, requestedSec: number): DurationChoice {
   const options = durationOptions(model);
-  if (options.length === 0) return null;
-  const chosen = options.find((seconds) => seconds >= requestedSec) ?? options[options.length - 1]!;
-  return { seconds: chosen, wire: model.limits.durations![String(chosen)]! };
+  if (options.length === 0) return { kind: "provider-default" };
+  const longest = options[options.length - 1]!;
+  if (requestedSec > longest) return { kind: "over-cap", longest };
+  const chosen = options.find((seconds) => seconds >= requestedSec)!;
+  return { kind: "asked", seconds: chosen, wire: model.limits.durations![String(chosen)]! };
+}
+
+/** The seconds a dispatch will run for, for pricing — the request itself when we cannot ask. */
+export function pricedDuration(model: ManifestModel, requestedSec: number): number {
+  const choice = dispatchDuration(model, requestedSec);
+  return choice.kind === "asked" ? choice.seconds : requestedSec;
 }
 
 /**

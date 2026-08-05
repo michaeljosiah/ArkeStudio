@@ -1080,6 +1080,10 @@ export function DispatchDialogScreen() {
 
   const sceneFile = scene ? sceneFileOf(scene) : null;
   const warnings = plans?.perShot.warnings ?? null;
+  // A shot no route can cover blocks rather than warns: the dispatch would be refused anyway,
+  // and finding that out after pressing a priced button is the failure this dialog exists to
+  // prevent. Named per shot, with the length that would fit.
+  const overlong = plans?.perShot.warnings.overlongShots ?? [];
   const warningRows: Array<{ key: string; text: string }> = [];
   if (warnings) {
     for (const s of warnings.shotsWithoutFrame) warningRows.push({ key: `nf-${s.shotId}`, text: `shot ${s.number} has no accepted frame` });
@@ -1144,6 +1148,18 @@ export function DispatchDialogScreen() {
           choice={choice}
           onChoice={setChoice}
         />
+        {overlong.length > 0 && (
+          <Callout tone="warning" title="Too long for this model">
+            <ul style={{ margin: 0, paddingLeft: "1.2em" }}>
+              {overlong.map((shot) => (
+                <li key={shot.shotId}>
+                  shot {shot.number} runs {seconds(shot.durationSec)} — {model?.displayName ?? "this model"} makes at
+                  most {seconds(shot.longestSec)}. Shorten the shot, split it, or pick another model.
+                </li>
+              ))}
+            </ul>
+          </Callout>
+        )}
         {warningRows.length > 0 ? (
           <Callout tone="warning" title={`${warningRows.length} thing${warningRows.length === 1 ? "" : "s"} worth knowing — none blocks`}>
             <ul style={{ margin: 0, paddingLeft: "1.2em" }}>
@@ -1163,7 +1179,7 @@ export function DispatchDialogScreen() {
             nothing is re-routed for you.
           </Callout>
         )}
-        {plans && (
+        {plans && overlong.length === 0 && (
           <div style={{ display: "flex", gap: 14 }}>
             <div className="fy-boardcard" style={{ flex: 1 }}>
               <div className="fy-boardcard__head">Per shot</div>

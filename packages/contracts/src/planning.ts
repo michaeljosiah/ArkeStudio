@@ -4,6 +4,7 @@ import { referenceBudget, type BudgetCandidate, type BudgetResult } from "./refe
 import {
   dispatchDuration,
   estimateMicroUsd,
+  pricedDuration,
   sceneImageOutput,
   type ManifestModel,
   type SizeTier,
@@ -267,6 +268,11 @@ export interface DispatchWarnings {
     number: number;
     against: Array<{ sheetId: string; from: number; to: number }>;
   }>;
+  /**
+   * Shots longer than the longest clip this model can be asked for. Named rather than clamped:
+   * a 22s shot quietly dispatched as a 15s clip is paid-for footage that cannot cover it.
+   */
+  overlongShots: Array<{ shotId: string; number: number; durationSec: number; longestSec: number }>;
 }
 
 export interface ScenePlanInput {
@@ -376,9 +382,9 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     );
     // The length that will actually be asked for. A route takes one of a fixed few lengths, so
     // a 6.5s shot becomes a 7s dispatch — and the estimate has to be the 7, or the figure shown
-    // and the figure billed are for two different requests.
-    const duration = dispatchDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC)?.seconds
-      ?? shot.durationSec ?? DEFAULT_SHOT_SEC;
+    // and the figure billed are for two different requests. A shot longer than anything the
+    // route offers keeps its own seconds here and is refused by name in the warnings.
+    const duration = pricedDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC);
     const estimate =
       model.capability === "video"
         ? estimateMicroUsd(model, {
@@ -432,7 +438,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           (a, p) =>
             a +
             estimateMicroUsd(model, {
-              durationSec: dispatchDuration(model, p.durationSec)?.seconds ?? p.durationSec,
+              durationSec: pricedDuration(model, p.durationSec),
               ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
             }),
           0,
@@ -452,6 +458,17 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
               ) === index,
           )
       : sceneBudget.dropped;
+  const overlongShots = scene.shots
+    .map((shot) => ({ shot, choice: dispatchDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC) }))
+    .filter((entry): entry is { shot: Shot; choice: { kind: "over-cap"; longest: number } } =>
+      entry.choice.kind === "over-cap",
+    )
+    .map((entry) => ({
+      shotId: entry.shot.id,
+      number: entry.shot.number,
+      durationSec: entry.shot.durationSec ?? DEFAULT_SHOT_SEC,
+      longestSec: entry.choice.longest,
+    }));
   const warnings: DispatchWarnings = {
     shotsWithoutFrame: scene.shots
       .filter((s) => !(selections[s.id]?.startFrameTakeId ?? null))
@@ -463,6 +480,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       .filter((g): g is string => g !== null),
     retiredCitations: resolved.cast.filter((c) => c.retired).map((c) => c.sheet.name),
     unknownMentions: resolved.unknown,
+    overlongShots,
     overriddenStale: scene.shots
       .map((s) => ({ shotId: s.id, number: s.number, against: overrideStaleAgainst(s, sheets) }))
       .filter((s) => s.against.length > 0),
