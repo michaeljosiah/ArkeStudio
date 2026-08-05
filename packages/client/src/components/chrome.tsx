@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router";
-import { ActivityIcon, ChevronLeft, Sliders } from "./icons.js";
+import { ActivityIcon, ChevronLeft, Cog, Inbox } from "./icons.js";
 import { cx } from "./ui.js";
 import { useStore } from "../lib/store.js";
 
@@ -19,6 +19,10 @@ import { useStore } from "../lib/store.js";
  *   · activity and settings sit on the right, always, in that order, ahead of those controls.
  *   · the left is for where you are: a way back, and what you are looking at.
  *
+ * Proposals joined them later and went *before* activity rather than between the two, because
+ * that pair's order is the settlement above and splitting it would reopen it. It is the only one
+ * of the three that is world-scoped, so it is also the only one that can be absent.
+ *
  * This disagrees with the prototype on home, which drew the lockup left. Consistency across
  * forty-one screens is worth more than the one composition it came from.
  */
@@ -34,7 +38,7 @@ export function AppChrome({
   context?: { label: string; to?: string };
   /** Launch is the one screen without them: nothing is set up yet and nothing has happened. */
   controls?: boolean;
-  current?: "activity" | "settings";
+  current?: "proposals" | "activity" | "settings";
   divided?: boolean;
 }) {
   const navigate = useNavigate();
@@ -44,6 +48,10 @@ export function AppChrome({
   const attention =
     (state?.app.jobs.some((j) => j.status === "needs-reconciliation") ?? false) ||
     (state?.app.queues.some((q) => q.paused) ?? false);
+  // Proposals are world-scoped, so the icon only exists while a world is open — the same rule the
+  // world navigation follows. Its dot means the same thing as activity's: something wants you.
+  const openWorldId = state?.world?.meta.worldId;
+  const waiting = state?.world?.proposals.length ?? 0;
   return (
     <div className={cx("fy-titlebar", divided && "fy-titlebar--divided")}>
       <div className="fy-titlebar__side">
@@ -69,6 +77,25 @@ export function AppChrome({
       <div className="fy-titlebar__side fy-titlebar__side--right">
         {controls && (
           <>
+            {/* Proposals sits before activity: AppChrome's own settlement is that activity and
+                settings sit together, in that order, so a new icon prepends rather than splits. */}
+            {openWorldId && (
+              <button
+                type="button"
+                className={cx("fy-iconbtn", current === "proposals" && "fy-iconbtn--current")}
+                title={
+                  waiting > 0
+                    ? `Proposals — ${waiting} awaiting a decision`
+                    : "Proposals — nothing waiting"
+                }
+                aria-label="Proposals"
+                aria-current={current === "proposals" ? "page" : undefined}
+                onClick={() => navigate(`/w/${openWorldId}/proposals`)}
+              >
+                <Inbox size={13} />
+                {waiting > 0 && <span className="fy-iconbtn__dot" />}
+              </button>
+            )}
             <button
               type="button"
               className={cx("fy-iconbtn", current === "activity" && "fy-iconbtn--current")}
@@ -88,7 +115,7 @@ export function AppChrome({
               aria-current={current === "settings" ? "page" : undefined}
               onClick={() => navigate("/settings/providers")}
             >
-              <Sliders size={13} />
+              <Cog size={13} />
             </button>
           </>
         )}

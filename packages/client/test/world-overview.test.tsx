@@ -350,8 +350,18 @@ describe("the gate's over-limit refusal reaches the user (SPEC-007 R-18)", () =>
         reason: "invalid",
         detail: "characters/maren-kest.md: role is 34 characters; the limit is 28",
       });
-      const html = renderToString(
+      // The panels used to stack on the hub and the notice was read there. They have their own
+      // screen now, so this reads it where it renders — the requirement is that the refusal
+      // reaches the user, not that it reaches them on any particular screen.
+      const hub = renderToString(
         <MemoryRouter initialEntries={[`/w/${WORLD_ID}`]}>
+          <App />
+        </MemoryRouter>,
+      ).replace(/<!-- -->/g, "");
+      assert.match(hub, /waiting on you/, "the hub still says something is waiting, so the notice is findable");
+
+      const html = renderToString(
+        <MemoryRouter initialEntries={[`/w/${WORLD_ID}/proposals`]}>
           <App />
         </MemoryRouter>,
       ).replace(/<!-- -->/g, "");

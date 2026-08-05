@@ -15,10 +15,11 @@ import {
 import { DegradedBanner, EmptyState, PageHeader, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
 import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
-import { ChevronRight, Play, Plus, Search, X } from "../components/icons.js";
+import { ChevronRight, Play, Plus, Search } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { DispatchBar, resolveModel, usableModels } from "../components/dispatch-bar.js";
 import { Loading } from "../components/loading.js";
+import { ImageDialog } from "../components/image-dialog.js";
 import { characterPortraitPath, Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
 import { ExtractionOffer } from "../components/extraction-offer.js";
@@ -476,10 +477,25 @@ export function WorldOverviewScreen() {
       </div>
       {proposals.length > 0 && (
         <div style={{ padding: "0 96px" }}>
+          {/* The panels used to stack here in full. They have their own screen now, which has room
+              for the list beside them; this stays because the hub is where people look first. */}
           <Section title="Needs you" aside={<span>{proposals.length} awaiting a decision</span>}>
-            {proposals.map((p) => (
-              <ConnectedProposalPanel key={p.proposal.id} staged={p} />
-            ))}
+            <button
+              type="button"
+              className="fy-needsyou"
+              onClick={() => navigate(`/w/${worldId}/proposals`)}
+            >
+              <span className="fy-needsyou__lead">
+                {proposals.length === 1
+                  ? "One proposal is waiting on you."
+                  : `${proposals.length} proposals are waiting on you.`}
+              </span>
+              <span className="fy-needsyou__sub">
+                {proposals[0]!.proposal.summary}
+                {proposals.length > 1 ? `, and ${proposals.length - 1} more` : ""}
+              </span>
+              <ChevronRight size={15} />
+            </button>
           </Section>
         </div>
       )}
@@ -532,9 +548,6 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
-  const portraitDialog = useRef<HTMLDialogElement>(null);
-  const portraitTrigger = useRef<HTMLButtonElement>(null);
-  const [featuredPortraitAvailable, setFeaturedPortraitAvailable] = useState(false);
   const sheetRefs = useSheetRefs();
   const sheets = world?.sheets.filter((s) => s.type === kind && s.retired !== true) ?? [];
   const retired = world?.sheets.filter((s) => s.type === kind && s.retired === true).length ?? 0;
@@ -562,10 +575,6 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
     if (!worldId) return;
     for (const sheet of sheets) requestSheetRefs(worldId, sheet.id);
   }, [worldId, sheets.map((sheet) => sheet.id).join("|")]);
-  useEffect(() => {
-    setFeaturedPortraitAvailable(false);
-  }, [featured?.id, slug]);
-  const closePortraitDialog = () => portraitDialog.current?.close();
   return (
     <div data-screen={screenId}>
       <div className="fy-corner">
@@ -584,23 +593,16 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
               <div className="fy-feature">
                 <div className="fy-feature__frame">
                   {kind === "character" ? (
-                    <button
-                      ref={portraitTrigger}
-                      type="button"
-                      className="fy-feature__portrait-button"
-                      aria-label={`View larger portrait of ${featured.name}`}
-                      aria-haspopup="dialog"
-                      disabled={!featuredPortraitAvailable}
-                      onClick={() => portraitDialog.current?.showModal()}
-                    >
-                      <Portrait
-                        worldSlug={slug}
-                        path={characterPortraitPath(world, featured.id)}
-                        label={featured.name}
-                        radius={9}
-                        onAvailabilityChange={setFeaturedPortraitAvailable}
-                      />
-                    </button>
+                    <ImageDialog
+                      worldSlug={slug}
+                      path={characterPortraitPath(world, featured.id)}
+                      label={featured.name}
+                      dialogLabel={`${featured.name} portrait`}
+                      title={featured.name}
+                      triggerLabel={`View larger portrait of ${featured.name}`}
+                      closeLabel="Close portrait"
+                      triggerClassName="fy-feature__portrait-button"
+                    />
                   ) : (
                     <Portrait
                       worldSlug={slug}
@@ -625,34 +627,6 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
                   )}
                 </div>
               </div>
-              {kind === "character" && (
-                <dialog
-                  ref={portraitDialog}
-                  className="fy-portrait-dialog"
-                  aria-labelledby={`portrait-dialog-title-${featured.id}`}
-                  onClose={() => portraitTrigger.current?.focus()}
-                  onClick={(event) => {
-                    if (event.target === event.currentTarget) closePortraitDialog();
-                  }}
-                >
-                  <div className="fy-portrait-dialog__panel">
-                    <div className="fy-portrait-dialog__head">
-                      <h2 id={`portrait-dialog-title-${featured.id}`}>{featured.name}</h2>
-                      <button type="button" className="fy-portrait-dialog__close" aria-label="Close portrait" onClick={closePortraitDialog}>
-                        <X size={18} />
-                      </button>
-                    </div>
-                    <div className="fy-portrait-dialog__image">
-                      <Portrait
-                        worldSlug={slug}
-                        path={characterPortraitPath(world, featured.id)}
-                        label={`${featured.name} portrait`}
-                        radius={9}
-                      />
-                    </div>
-                  </div>
-                </dialog>
-              )}
             </div>
           )}
           <div className="fy-split__main">
@@ -910,11 +884,15 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           <div className="fy-fan__drift">
             <div className="fy-designcard">
               <div className="fy-designcard__frame">
-                <Portrait
+                <ImageDialog
                   worldSlug={slug}
                   path={mainPhoto ? `references/${sheet.id}/${mainPhoto.file}` : sheetPortraitPath(sheet.id)}
                   label={`${sheet.name}: main photo`}
-                  radius={8}
+                  title={`${sheet.name} · main photo`}
+                  triggerLabel={`View larger main photo of ${sheet.name}`}
+                  closeLabel="Close main photo"
+                  triggerClassName="fy-designcard__portrait-button"
+                  triggerRadius={8}
                 />
               </div>
               <div className="fy-designcard__caption">

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   compilationIsStale,
@@ -12,7 +12,7 @@ import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Button, Callout, cx } from "../components/ui.js";
 import { Loading } from "../components/loading.js";
-import { X } from "../components/icons.js";
+import { ImageDialog } from "../components/image-dialog.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
   acceptCharacterLook,
@@ -40,45 +40,18 @@ function CharacterSheetPreview({
   path: string;
   characterName: string;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const titleId = useId();
-  const close = () => dialog.current?.close();
-
   return (
-    <>
-      <button
-        ref={trigger}
-        type="button"
-        className="fy-character-sheet-preview"
-        aria-label={`View larger character sheet for ${characterName}`}
-        aria-haspopup="dialog"
-        onClick={() => dialog.current?.showModal()}
-      >
-        <Portrait worldSlug={worldSlug} path={path} label={`${characterName} character sheet`} radius={0} />
-      </button>
-      <dialog
-        ref={dialog}
-        className="fy-portrait-dialog fy-character-sheet-dialog"
-        aria-labelledby={titleId}
-        onClose={() => trigger.current?.focus()}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) close();
-        }}
-      >
-        <div className="fy-portrait-dialog__panel">
-          <div className="fy-portrait-dialog__head">
-            <h2 id={titleId}>{characterName} · character sheet</h2>
-            <button type="button" className="fy-portrait-dialog__close" aria-label="Close character sheet" onClick={close}>
-              <X size={18} />
-            </button>
-          </div>
-          <div className="fy-portrait-dialog__image">
-            <Portrait worldSlug={worldSlug} path={path} label={`${characterName} character sheet`} radius={9} />
-          </div>
-        </div>
-      </dialog>
-    </>
+    <ImageDialog
+      worldSlug={worldSlug}
+      path={path}
+      label={`${characterName} character sheet`}
+      title={`${characterName} · character sheet`}
+      triggerLabel={`View larger character sheet for ${characterName}`}
+      closeLabel="Close character sheet"
+      triggerClassName="fy-character-sheet-preview"
+      triggerRadius={0}
+      dialogClassName="fy-character-sheet-dialog"
+    />
   );
 }
 
@@ -219,11 +192,15 @@ export function CharacterReferenceScreen() {
       <main className="fy-reference-grid">
         <section className="fy-reference-card">
           <div className="fy-reference-card__image fy-reference-card__image--photo">
-            <Portrait
+            <ImageDialog
               worldSlug={world.meta.slug}
               path={photo ? `references/${sheetId}/${photo.file}` : ""}
               label={photo ? `${sheet.name} main photo` : "Main photo outstanding"}
-              radius={0}
+              title={`${sheet.name} · main photo`}
+              triggerLabel={`View larger main photo of ${sheet.name}`}
+              closeLabel="Close main photo"
+              triggerClassName="fy-reference-card__zoom"
+              triggerRadius={0}
             />
             <span className="fy-reference-card__status">
               {photo ? "ACCEPTED · IDENTITY ANCHOR" : "OUTSTANDING"}

@@ -23,9 +23,9 @@ function renderAt(path: string): string {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (48 screens)", () => {
-    assert.equal(SCREENS.length, 48);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 48, "screen ids are unique");
+  it("covers the full screen inventory (49 screens)", () => {
+    assert.equal(SCREENS.length, 49);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 49, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {
@@ -215,7 +215,11 @@ describe("screen inventory", () => {
     const html = renderAt(`/w/${world.meta.worldId}/cast`);
     assert.match(html, /<button[^>]*aria-label="View larger portrait of Maren Kest"[^>]*aria-haspopup="dialog"/);
     assert.ok(html.includes('<dialog class="fy-portrait-dialog"'));
-    assert.ok(html.includes('aria-labelledby="portrait-dialog-title-maren-kest"'));
+    // The id is generated, so assert the relationship rather than the string: whatever the
+    // dialog points aria-labelledby at, a heading with that id has to exist.
+    const labelledBy = /<dialog[^>]*aria-labelledby="([^"]+)"/.exec(html)?.[1];
+    assert.ok(labelledBy, "the dialog names its own heading");
+    assert.ok(html.includes(`id="${labelledBy}"`), "and that heading is in the document");
     assert.ok(html.includes('aria-label="Close portrait"'));
     assert.ok(html.includes('alt="Maren Kest portrait"'));
   });
