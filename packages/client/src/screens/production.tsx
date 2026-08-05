@@ -4,6 +4,7 @@ import {
   assemblePrompt,
   deriveCut,
   modelCapabilityCopy,
+  modelForCapability,
   nativeResolution,
   overrideStaleAgainst,
   planScene,
@@ -1045,7 +1046,6 @@ export function DispatchDialogScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const { state } = useStore();
   const navigate = useNavigate();
-  const routing = state?.app.routing.defaults ?? {};
   const capability = production?.meta.format === "stills" ? "image" : "video";
   // The same roster the picker offers, so what is planned and dispatched is what was on screen.
   // Choosing from every manifest row meant a model switched off in Providers — or one behind a
@@ -1058,7 +1058,13 @@ export function DispatchDialogScreen() {
   // No first-row fallback: if the model on screen cannot run, nothing runs. Falling through to
   // models[0] meant the bar said UNAVAILABLE while the mode buttons quietly dispatched a
   // different model — spending on one the user never chose and was never shown.
-  const wanted = choice.modelId ?? routing[capability];
+  // The same question the bar answers, asked the same way: routing[capability] is undefined on a
+  // fresh install, and reading it directly left the dialog showing a runnable model in the
+  // controls while both dispatch cards were replaced by "nothing to dispatch with".
+  const routed = state?.app.manifest
+    ? modelForCapability(state.app.manifest, state.app.routing.defaults, capability)
+    : null;
+  const wanted = choice.modelId ?? routed?.id;
   const model = models.find((m) => m.id === wanted) ?? null;
   // Video dispatch is sized by the provider's own word; stills by real dimensions, which the
   // plan derives from the tier. Both travel from here so the dialog and the job agree.

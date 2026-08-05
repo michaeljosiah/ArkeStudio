@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { ClientState, ManifestModel, ProviderStatus } from "@arke-studio/contracts";
+import { App } from "../src/App.js";
 import { choiceForModel, DispatchBar, usableModels } from "../src/components/dispatch-bar.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -176,5 +177,27 @@ describe("the size control", () => {
     assert.ok(withSize.includes("SIZE"));
     assert.ok(!without.includes("SIZE"), "a control nothing reads is worse than none");
     assert.ok(without.includes("provider default"), "and the detail line says what will run");
+  });
+});
+
+describe("the production dispatch dialog, with no routing default saved", () => {
+  it("dispatches with the model the bar is showing, rather than blocking", () => {
+    // A fresh install has routing.defaults = {}. Reading the default straight out of settings
+    // left the dialog showing a runnable model in the controls while both dispatch cards were
+    // replaced by "nothing to dispatch with" — the screen disagreeing with itself.
+    const state = stateWith({});
+    __setStateForTest({
+      ...state,
+      app: { ...state.app, routing: { defaults: {}, faults: [] } },
+    });
+    const world = FIXTURE_STATE.world!;
+    const production = world.productions[0]!;
+    const html = renderToString(
+      <MemoryRouter initialEntries={[`/w/${world.meta.worldId}/p/${production.meta.id}/generate/dispatch`]}>
+        <App />
+      </MemoryRouter>,
+    ).replace(/<!-- -->/g, "");
+    assert.ok(!html.includes("Nothing to dispatch with"), "a usable model is a usable model");
+    assert.ok(html.includes("Dispatch per shot"), "and the cards are there to press");
   });
 });
