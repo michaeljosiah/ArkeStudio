@@ -319,6 +319,43 @@ export async function exportBoard(
 // Dispatch composition (T-18): the plan becomes SPEC-009 requests, verbatim
 // ---------------------------------------------------------------------------
 
+/**
+ * How a chosen size travels to the provider, which is not one answer.
+ *
+ * Video routes read a top-level `resolution` word. Image routes size from `output.width/height`
+ * and ignore that word entirely — and fal forwards any top-level field it does not recognise, so
+ * sending `resolution: "4MP"` beside `image_size` would put a field in an image request that the
+ * character-image path never sends.
+ */
+function sizeParams(model: ManifestModel, plan: ScenePlan): Record<string, unknown> {
+  if (model.capability === "image") {
+    return plan.tier !== undefined ? { output: sceneImageOutput(model, plan.tier) } : {};
+  }
+  return plan.resolution !== undefined ? { resolution: plan.resolution } : {};
+}
+
+/** A whole-scene pass, priced the way its capability is actually billed. */
+function passEstimate(
+  model: ManifestModel,
+  plan: ScenePlan,
+  durationSec: number,
+  referenceImages: number,
+): number {
+  if (model.capability !== "image") {
+    return estimateMicroUsd(model, {
+      durationSec,
+      ...(plan.resolution !== undefined ? { resolution: plan.resolution } : {}),
+    });
+  }
+  const output = sceneImageOutput(model, plan.tier);
+  return estimateMicroUsd(model, {
+    images: 1,
+    referenceImages,
+    megapixels: (output.width * output.height) / 1_000_000,
+    ...(output.resolution !== undefined ? { resolution: output.resolution } : {}),
+  });
+}
+
 export function composeDispatches(
   worldId: string,
   productionId: string,
@@ -352,14 +389,7 @@ export function composeDispatches(
         prompt: entry.prompt.text,
         references: entry.references.filter((r) => r.file !== null).map((r) => r.file),
         ...(entry.shot.durationSec !== undefined ? { durationSec: entry.shot.durationSec } : {}),
-        // The size the plan priced, carried into the job that will be charged for it.
-        ...(plan.resolution !== undefined ? { resolution: plan.resolution } : {}),
-        // Stills: the image clients size a request from output.width/height and ignore a bare
-        // resolution string, so a chosen tier has to arrive as dimensions or it changes nothing.
-        // Only when a tier was chosen — without one this path sent no size and still should.
-        ...(model.capability === "image" && plan.tier !== undefined
-          ? { output: sceneImageOutput(model, plan.tier) }
-          : {}),
+        ...sizeParams(model, plan),
         provenance: provenanceFor(entry.budget.carried.map((c) => c.sheetId)),
       },
       estimatedMicroUsd: entry.estimatedMicroUsd,
@@ -387,17 +417,16 @@ export function composeDispatches(
           .join("\n"),
         references,
         durationSec: pass.durationSec,
-        ...(plan.resolution !== undefined ? { resolution: plan.resolution } : {}),
+        ...sizeParams(model, plan),
         // The explicit plan (R-19, D11): SPEC-013 segments from these, never guesses.
         shotPlan: pass.plan,
         provenance: provenanceFor(passReferencePlan.budget.carried.map((candidate) => candidate.sheetId)),
       },
       // Priced at the same size the job runs at. This recomputed the estimate without the
-      // resolution, so a 1080p pass was queued carrying a 720p figure.
-      estimatedMicroUsd: estimateMicroUsd(model, {
-        durationSec: pass.durationSec,
-        ...(plan.resolution !== undefined ? { resolution: plan.resolution } : {}),
-      }),
+      // resolution, so a 1080p pass was queued carrying a 720p figure — and, for a stills
+      // production, priced a pass of images as if it were footage: no megapixels and no
+      // reference input, which on a per-megapixel model is a queued job estimated at zero.
+      estimatedMicroUsd: passEstimate(model, plan, pass.durationSec, references.length),
       landing: { dir: `productions/${productionId}/incoming/${scene.id}-pass-${pass.index}` },
     };
   });

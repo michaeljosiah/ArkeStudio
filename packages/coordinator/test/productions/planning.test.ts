@@ -395,6 +395,16 @@ describe("whole-scene reference budgeting", () => {
       selections: {},
       model: stills,
     };
+    for (const mode of ["per-shot", "whole-scene"] as const) {
+      // Whole scene priced a pass of stills as if it were footage — no megapixels, no reference
+      // input — which on a per-megapixel model is a queued job estimated at zero.
+      const plan = planScene({ ...input, tier: "4K" as const }, mode);
+      const [request] = composeDispatches(bundle.meta.worldId, production.meta.id, scene, plan, stills, bundle);
+      assert.ok(request!.params["output"] !== undefined, `${mode} carries the frame`);
+      assert.ok(request!.estimatedMicroUsd > 0, `${mode} is priced`);
+      // And no bare size word beside it: the image clients ignore it and fal forwards it anyway.
+      assert.equal(request!.params["resolution"], undefined, `${mode} sends dimensions, not a word`);
+    }
     const oneK = planScene({ ...input, tier: "1K" as const }, "per-shot");
     const fourK = planScene({ ...input, tier: "4K" as const }, "per-shot");
     const [small] = composeDispatches(bundle.meta.worldId, production.meta.id, scene, oneK, stills, bundle);

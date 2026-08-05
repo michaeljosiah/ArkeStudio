@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { ClientState, ManifestModel, ProviderStatus } from "@arke-studio/contracts";
-import { DispatchBar, usableModels } from "../src/components/dispatch-bar.js";
+import { choiceForModel, DispatchBar, usableModels } from "../src/components/dispatch-bar.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -147,6 +147,24 @@ describe("with no model at all", () => {
     const html = bar({ variant: "controls", onCancel: undefined, primaryLabel: undefined, onPrimary: undefined });
     assert.ok(html.includes("add a provider key in Settings"), "the reason is still said");
     assert.ok(!html.includes("Cancel"), "a Cancel with no handler does nothing but confuse");
+  });
+});
+
+describe("switching model with a size already chosen", () => {
+  const fourKOnly: ManifestModel = { ...FAL_IMAGE, id: "soul-2.0", limits: { tiers: { "1K": "1k", "4K": "4k" } } };
+
+  it("drops a tier the new model cannot reach", () => {
+    // 2K on Nano Banana, then a model offering 1K and 4K only: the bar falls back to 1K on
+    // screen, so carrying 2K upward would plan and dispatch a size nothing was showing.
+    assert.deepEqual(choiceForModel(fourKOnly, { tier: "2K" }), { modelId: "soul-2.0" });
+  });
+
+  it("keeps a tier the new model does reach", () => {
+    assert.deepEqual(choiceForModel(fourKOnly, { tier: "4K" }), { modelId: "soul-2.0", tier: "4K" });
+  });
+
+  it("carries nothing when nothing was chosen", () => {
+    assert.deepEqual(choiceForModel(FAL_IMAGE, {}), { modelId: FAL_IMAGE.id });
   });
 });
 

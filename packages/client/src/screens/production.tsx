@@ -1055,10 +1055,13 @@ export function DispatchDialogScreen() {
   const [sceneIdx, setSceneIdx] = useState(0);
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier; resolution?: string }>({});
   const scene = production?.scenes[sceneIdx] ?? null;
-  const model = models.find((m) => m.id === (choice.modelId ?? routing[capability])) ?? models[0] ?? null;
-  // Stills are priced and dispatched by the same `resolution` the video path uses, so the tier
-  // the bar emits has to be translated into this model's own word for it. Without this the
-  // control moved and nothing else did.
+  // No first-row fallback: if the model on screen cannot run, nothing runs. Falling through to
+  // models[0] meant the bar said UNAVAILABLE while the mode buttons quietly dispatched a
+  // different model — spending on one the user never chose and was never shown.
+  const wanted = choice.modelId ?? routing[capability];
+  const model = models.find((m) => m.id === wanted) ?? null;
+  // Video dispatch is sized by the provider's own word; stills by real dimensions, which the
+  // plan derives from the tier. Both travel from here so the dialog and the job agree.
   const resolution =
     choice.resolution ?? (model && choice.tier !== undefined ? nativeResolution(model, choice.tier) : undefined);
 
@@ -1156,6 +1159,14 @@ export function DispatchDialogScreen() {
           </Callout>
         ) : (
           plans && <Callout title="Clean dispatch">Every cited sheet is locked and current; every reference rides.</Callout>
+        )}
+        {/* The bar says which model and why it cannot run; this says what that costs you here,
+            rather than leaving the two dispatch cards to vanish without explanation. */}
+        {!model && (
+          <Callout tone="warning" title="Nothing to dispatch with">
+            The model this production is set to cannot run. Pick one above, or fix it in Settings —
+            nothing is re-routed for you.
+          </Callout>
         )}
         {plans && (
           <div style={{ display: "flex", gap: 14 }}>

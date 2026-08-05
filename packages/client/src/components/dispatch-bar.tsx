@@ -84,6 +84,20 @@ function strandReason(state: ReturnType<typeof useStore>["state"], model: Manife
   return `the ${PROVIDERS[model.provider].displayName} key does not unlock this`;
 }
 
+/**
+ * The choice after picking a model from the list. A tier the new model cannot reach is dropped
+ * rather than carried: the bar falls back to that model's first size on screen, and a host that
+ * reads the tier out of its own state would otherwise plan and dispatch at a size nothing on the
+ * screen was showing.
+ */
+export function choiceForModel(
+  candidate: ManifestModel,
+  choice: { tier?: SizeTier },
+): { modelId: string; tier?: SizeTier } {
+  const keep = choice.tier !== undefined && tiersFor(candidate).includes(choice.tier);
+  return { modelId: candidate.id, ...(keep ? { tier: choice.tier } : {}) };
+}
+
 /** What the chosen model will carry, said once the choice is made rather than argued in the list. */
 export function modelDetail(model: ManifestModel, tier: SizeTier | undefined, isDefault: boolean): string {
   const references =
@@ -223,7 +237,7 @@ export function DispatchBar({
               aria-selected={candidate.id === model.id}
               className={candidate.id === model.id ? "is-selected" : ""}
               onClick={() => {
-                onChoice({ modelId: candidate.id, ...(choice.tier ? { tier: choice.tier } : {}) });
+                onChoice(choiceForModel(candidate, choice));
                 setPickerOpen(false);
               }}
             >
