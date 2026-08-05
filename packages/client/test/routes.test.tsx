@@ -307,8 +307,10 @@ describe("screen inventory", () => {
       const main = renderAt(`${base}/main-photo`).replace(/<!-- -->/g, "");
       const looks = renderAt(`${base}/looks`).replace(/<!-- -->/g, "");
       for (const html of [sheet, main, looks]) {
-        assert.ok(html.includes("FAL · Routed Flux · refs ×4"));
-        assert.ok(!html.includes("First Image"));
+        // The bar names the routed model and says what it carries, once the choice is made.
+        assert.ok(html.includes("Routed Flux"), "the routed model is named on every dialog");
+        assert.ok(html.includes("up to 4 references"), "and what it will carry is stated");
+        assert.ok(!html.includes("First Image"), "the manifest's first image model is not the default");
         assert.doesNotMatch(html, /\$0\.00/);
       }
       assert.ok(main.includes("$0.16"), "four portrait previews show four times the per-image estimate");
@@ -322,7 +324,10 @@ describe("screen inventory", () => {
   it("blocks identity-dependent generation when the routed model cannot receive the main photo", () => {
     const model = {
       id: "text-only-image",
-      provider: "openai" as const,
+      // fal, because that is the provider the fixture has a working key for. Routed to a
+      // provider with no key this would be blocked for a different reason — no key — and the
+      // test would pass while proving nothing about reference support.
+      provider: "fal" as const,
       capability: "image" as const,
       displayName: "Text Only Image",
       accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
@@ -345,7 +350,7 @@ describe("screen inventory", () => {
       const sheet = renderAt(`${base}/model-sheet`).replace(/<!-- -->/g, "");
       const looks = renderAt(`${base}/looks`).replace(/<!-- -->/g, "");
       assert.ok(sheet.includes("main photo cannot be sent"));
-      assert.ok(sheet.includes("identity conditioning unavailable"));
+      assert.ok(sheet.includes("no references"), "the bar states what the model will carry");
       assert.match(sheet, /<button[^>]*disabled=""[^>]*>Generate<\/button>/);
       assert.match(looks, /<button[^>]*disabled=""[^>]*>Explore<\/button>/);
       assert.ok(!sheet.includes("translated into the prompt"));
@@ -457,5 +462,73 @@ describe("screen inventory", () => {
     assert.ok(workspace.includes("carries as text"));
     assert.ok(dispatch.includes("World look · v"));
     assert.ok(dispatch.includes("carried in the prompt"));
+  });
+});
+
+describe("the dispatch bar (design-system turn 39)", () => {
+  const tiered = {
+    id: "tiered-image",
+    provider: "fal" as const,
+    capability: "image" as const,
+    displayName: "Tiered Image",
+    accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
+    limits: { resolutions: ["1K", "2K"], tiers: { "1K": "1K", "2K": "2K" } },
+    pricing: { kind: "perImage" as const, microUsdPerImage: 50000 },
+  };
+  const unverified = {
+    id: "unverified-image",
+    provider: "fal" as const,
+    capability: "image" as const,
+    displayName: "Unverified Image",
+    accepts: { referenceImages: 8, referenceRoles: false, startFrame: false, endFrame: false },
+    limits: {},
+    unverified: true,
+    pricing: { kind: "perImage" as const, microUsdPerImage: 40000 },
+  };
+
+  function withModels(models: unknown[], routed: string, disabled: string[] = []) {
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        manifest: { ...FIXTURE_STATE.app.manifest!, models: models as never },
+        models: { disabled },
+        routing: { ...FIXTURE_STATE.app.routing, defaults: { image: routed } },
+      },
+    });
+  }
+
+  it("offers only the tiers a model can reach, and disables the rest rather than hiding them", () => {
+    withModels([tiered], tiered.id);
+    try {
+      const html = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/cast/maren-kest/main-photo`);
+      assert.ok(html.includes(">1K<") && html.includes(">2K<"), "reachable tiers are offered");
+      assert.match(html, /<button[^>]*disabled=""[^>]*>4K<\/button>/, "4K is shown, and unusable");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  it("an unverified model carries nothing and says so, with no tier list to offer", () => {
+    withModels([unverified], unverified.id);
+    try {
+      const html = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/cast/maren-kest/main-photo`);
+      assert.ok(html.includes("UNVERIFIED"), "marked wherever it appears");
+      assert.ok(html.includes("provider default"), "it declares no tiers, so none are claimed");
+      assert.ok(html.includes("no references"), "the floor is stated, not the row's own claim of 8");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  it("a model switched off in Providers is not offered at all", () => {
+    withModels([tiered, unverified], tiered.id, [unverified.id]);
+    try {
+      const html = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/cast/maren-kest/main-photo`);
+      assert.ok(html.includes("Tiered Image"));
+      assert.ok(!html.includes("Unverified Image"), "switched off is not a choice");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
   });
 });

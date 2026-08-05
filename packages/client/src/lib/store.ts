@@ -10,6 +10,7 @@ import {
   type Job,
   type ProviderCallRecord,
   type ProviderId,
+  type SizeTier,
   type QueueCommand,
   type RankedVoice,
   type ReconcileAction,
@@ -265,6 +266,18 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, providers: event.providers } };
     case "routing.changed":
       return { ...state, app: { ...state.app, routing: { defaults: event.routing, faults: event.faults } } };
+    case "models.changed":
+      // Faults travel with availability because they are the same act: switching a model off can
+      // strand the default that points at it, and the two arriving separately would show a
+      // studio that briefly claims a routing it cannot honour.
+      return {
+        ...state,
+        app: {
+          ...state.app,
+          models: event.models,
+          routing: { ...state.app.routing, faults: event.faults },
+        },
+      };
     case "spend.status":
       return { ...state, app: { ...state.app, spend: event.spend } };
     case "background-notifications.changed":
@@ -751,6 +764,8 @@ export function createWorld(input: {
   logline?: string;
   tone?: string;
   genre?: string;
+  /** The look chosen at genesis, recorded as world look v1. Absent when it was deferred. */
+  artDirection?: string;
   /** Begun from a conversation: its attachments are filed into the world as it opens. */
   genesisId?: string;
 }): void {
@@ -846,8 +861,13 @@ export function genesisAttachFiles(genesisId: string): void {
  * The world's key image, from its own name, logline and tone. An ordinary image job: estimated
  * before it runs, in the ledger, cancellable from Activity like anything else that spends.
  */
-export function generateWorldImage(worldId: string): void {
-  send({ kind: "generate-world-image", worldId, requestId: queueRequest("generate-world-image") });
+export function generateWorldImage(worldId: string, modelId?: string): void {
+  send({
+    kind: "generate-world-image",
+    worldId,
+    requestId: queueRequest("generate-world-image"),
+    ...(modelId !== undefined ? { modelId } : {}),
+  });
 }
 
 export function useWorldImage(worldId: string): void {
@@ -1146,6 +1166,11 @@ export function setRoutingDefault(capability: Capability, modelId: string): void
   send({ kind: "set-routing-default", capability, modelId });
 }
 
+/** Offer a model, or stop offering it. Never edits routing — a stranded default is shown instead. */
+export function setModelEnabled(modelId: string, enabled: boolean): void {
+  send({ kind: "set-model-enabled", modelId, enabled });
+}
+
 export function setSpendThreshold(thresholdMicroUsd: number, periodDays: number): void {
   send({ kind: "set-spend-threshold", thresholdMicroUsd, periodDays });
 }
@@ -1253,9 +1278,12 @@ export function generateMainPhoto(
   prompt: string,
   count: number,
   identityReferences: string[],
+  choice: { modelId?: string; tier?: SizeTier } = {},
 ): void {
   send({
     kind: "generate-main-photo",
+    ...(choice.modelId !== undefined ? { modelId: choice.modelId } : {}),
+    ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
     worldId,
     sheetId,
     prompt,
@@ -1270,10 +1298,13 @@ export function generateCharacterSheet(
   sheetId: string,
   styleOverride?: string,
   characterName?: string,
+  choice: { modelId?: string; tier?: SizeTier } = {},
 ): string | null {
   const requestId = queueRequest("generate-character-sheet", characterName);
   const sent = send({
     kind: "generate-character-sheet",
+    ...(choice.modelId !== undefined ? { modelId: choice.modelId } : {}),
+    ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
     worldId,
     sheetId,
     requestId,
@@ -1297,9 +1328,12 @@ export function generateCharacterLooks(
   mode: "stay-close" | "push-it",
   prompt: string,
   count: number,
+  choice: { modelId?: string; tier?: SizeTier } = {},
 ): void {
   send({
     kind: "generate-character-looks",
+    ...(choice.modelId !== undefined ? { modelId: choice.modelId } : {}),
+    ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
     worldId,
     sheetId,
     lookKind,
@@ -1498,6 +1532,7 @@ export function dispatchScene(
   mode: "per-shot" | "whole-scene",
   modelId: string,
   resolution?: string,
+  tier?: SizeTier,
 ): void {
   send({
     kind: "dispatch-scene",
@@ -1508,6 +1543,7 @@ export function dispatchScene(
     modelId,
     requestId: queueRequest("dispatch-scene"),
     ...(resolution !== undefined ? { resolution } : {}),
+    ...(tier !== undefined ? { tier } : {}),
   });
 }
 

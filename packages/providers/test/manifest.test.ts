@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  characterImageEstimateIsUsable,
   characterImageOutput,
   estimateCharacterImageMicroUsd,
   estimateMicroUsd,
@@ -9,6 +10,7 @@ import {
   ModelManifestSchema,
   modelCapabilityCopy,
   modelForCapability,
+  modelPriceCopy,
   passesForDuration,
   reconcileStrategy,
   sumMicroUsd,
@@ -34,7 +36,7 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     const refused = requireModel(SHIPPED_MANIFEST, "sora-9000");
     assert.equal(refused.ok, false);
     assert.ok(!refused.ok && /not in the model manifest/.test(refused.reason));
-    assert.ok(!refused.ok && refused.reason.includes("v11"));
+    assert.ok(!refused.ok && refused.reason.includes(`v${SHIPPED_MANIFEST.manifestVersion}`));
     assert.equal(requireModel(SHIPPED_MANIFEST, "seedance-2.0").ok, true);
   });
 
@@ -57,6 +59,17 @@ describe("the shipped manifest (R-9, §3.2)", () => {
   it("capability copy matches the manifest for accepting and refusing models (R-10)", () => {
     assert.equal(modelCapabilityCopy(model("seedance-2.0")), "no refs · frames · 15s");
     assert.equal(modelCapabilityCopy(model("halcyon-1.5")), "no refs · frames · 12s");
+  });
+
+  it("prices every model in the unit it is billed in, never a bare figure", () => {
+    // The unit is the point: $0.30 beside a video model and $0.30 beside an image model look
+    // like the same money, and one of them is per second of footage.
+    assert.match(modelPriceCopy(model("seedance-2.0")), /\/ second$/);
+    assert.equal(modelPriceCopy(model("gpt-image-2")).includes("/"), false, "per image is a flat figure");
+    assert.match(modelPriceCopy(model("flux-2-pro")), /\/ megapixel$/);
+    for (const local of SHIPPED_MANIFEST.models.filter((m) => m.pricing.kind === "unmetered")) {
+      assert.match(modelPriceCopy(local), /unmetered/);
+    }
   });
 
   it("declares implemented GPT Image 2 reference support without invented role slots", () => {
@@ -110,6 +123,45 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
     assert.equal(estimateMicroUsd(image, { images: 4, referenceImages: 4 }), 612000);
   });
 
+  it("prices a token-billed image as a ceiling, and says so", () => {
+    const gpt = model("gpt-image-2-fal");
+    assert.equal(gpt.pricing.kind, "perImageToken");
+    if (gpt.pricing.kind !== "perImageToken") return;
+    const p = gpt.pricing;
+    const one =
+      (p.assumedImageOutputTokensPerImage * p.microUsdPerMillionImageOutput +
+        p.assumedTextInputTokens * p.microUsdPerMillionTextInput) /
+      1_000_000;
+    assert.equal(estimateMicroUsd(gpt, { images: 1 }), one);
+    assert.equal(estimateMicroUsd(gpt, { images: 3 }), one * 3);
+    // A reference costs image-input tokens, so it is added, not free.
+    assert.ok(
+      estimateMicroUsd(gpt, { images: 1, referenceImages: 2 }) > estimateMicroUsd(gpt, { images: 1 }),
+    );
+    // fal rounds a total up to the closest hundredth of a cent; the estimate rounds the same way,
+    // so it can never sit a fraction under what will be charged.
+    assert.equal(p.roundUpToMicroUsd, 100);
+    assert.equal(estimateMicroUsd(gpt, { images: 1 }) % 100, 0);
+    assert.match(modelPriceCopy(gpt), /at most$/);
+  });
+
+  it("refuses a token-billed row that does not state what the estimate assumes", () => {
+    // The sync script drops a price it cannot read. A token table with no assumption is exactly
+    // that: rates without a way to turn them into a figure before spending.
+    const bare = {
+      kind: "perImageToken" as const,
+      microUsdPerMillionTextInput: 5_000_000,
+      microUsdPerMillionImageInput: 8_000_000,
+      microUsdPerMillionImageOutput: 30_000_000,
+      assumedTextInputTokens: 0,
+      assumedImageInputTokensPerReference: 0,
+      assumedImageOutputTokensPerImage: 0,
+    };
+    const zeroed = { ...model("gpt-image-2-fal"), pricing: bare };
+    assert.equal(estimateMicroUsd(zeroed, { images: 1 }), 0);
+    assert.equal(characterImageEstimateIsUsable(zeroed, 0), false, "a free image is not believable here");
+  });
+
   it("per megapixel rounds up, once", () => {
     const flux = model("flux-2-pro");
     assert.equal(flux.pricing.kind, "perMegapixel");
@@ -122,6 +174,43 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
     assert.equal(estimateMicroUsd(flux, { megapixels: 8.3 }), expect(8.3));
     assert.equal(estimateMicroUsd(flux, { megapixels: 0.001 }), expect(0.001), "never down to nothing");
     assert.equal(estimateMicroUsd(flux, { images: 4, megapixels: 1 }), perMp * 4);
+  });
+
+  it("a tier changes the dimensions, not only the label", () => {
+    // Several clients submit width/height and ignore `resolution` — OpenAI, and every fal route
+    // that is not a nano-banana. A tier that moved only the label left those requests at 1K
+    // while the picker said 4K, and per-megapixel estimates read the same stale dimensions.
+    const flux = model("flux-2-pro");
+    const oneK = characterImageOutput(flux, "main-photo", "1K");
+    const fourK = characterImageOutput(flux, "main-photo", "4K");
+    assert.ok(Math.max(fourK.width, fourK.height) > Math.max(oneK.width, oneK.height), "4K is bigger");
+    assert.equal(fourK.aspect, oneK.aspect, "the aspect is what the workflow chose, not the tier");
+    assert.equal(fourK.width % 2, 0);
+    assert.equal(fourK.height % 2, 0);
+    // And the money follows the pixels for a per-megapixel model.
+    assert.ok(
+      estimateCharacterImageMicroUsd(flux, "main-photo", 1, 0, "4K") >
+        estimateCharacterImageMicroUsd(flux, "main-photo", 1, 0, "1K"),
+    );
+  });
+
+  it("hits the megapixel a model's tier actually names, not a long edge", () => {
+    // Flux calls 4K "4MP". A 4096px long edge at 3:2 is about 13MP — three times what was asked
+    // for, on a model billed by the megapixel, and the request carries only the dimensions.
+    const flux = model("flux-2-pro");
+    for (const [tier, expected] of [
+      ["1K", 1],
+      ["2K", 2],
+      ["4K", 4],
+    ] as const) {
+      const out = characterImageOutput(flux, "main-photo", tier);
+      const mp = (out.width * out.height) / 1_000_000;
+      assert.ok(Math.abs(mp - expected) < 0.05, `${tier} lands on ${expected}MP, got ${mp.toFixed(2)}`);
+    }
+    // A model whose tiers are plain size words keeps the long-edge scale.
+    const banana = model("nano-banana-2");
+    const fourK = characterImageOutput(banana, "main-photo", "4K");
+    assert.equal(Math.max(fourK.width, fourK.height), 4096);
   });
 
   it("prices explicit character outputs, including model resolution overrides", () => {

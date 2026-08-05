@@ -4,17 +4,20 @@ import {
   assemblePrompt,
   deriveCut,
   modelCapabilityCopy,
+  nativeResolution,
   overrideStaleAgainst,
   planScene,
   PRESETS,
   promptFor,
   type Scene,
   type Shot,
+  type SizeTier,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen } from "../components/layout.js";
 import { Badge, Button, Callout, Textarea, cx } from "../components/ui.js";
 import { ChevronLeft, ChevronRight, Play, Plus } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
+import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { CanonEntryRow } from "../domain/domain.js";
 import { seconds, usd } from "../lib/format.js";
@@ -1042,14 +1045,20 @@ export function DispatchDialogScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const { state } = useStore();
   const navigate = useNavigate();
-  const manifest = state?.app.manifest ?? null;
-  const routing = state?.app.routing.defaults ?? {};
   const capability = production?.meta.format === "stills" ? "image" : "video";
-  const models = (manifest?.models ?? []).filter((m) => m.capability === capability);
   const [sceneIdx, setSceneIdx] = useState(0);
-  const [modelId, setModelId] = useState<string | null>(null);
+  const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier; resolution?: string }>({});
   const scene = production?.scenes[sceneIdx] ?? null;
-  const model = models.find((m) => m.id === (modelId ?? routing[capability])) ?? models[0] ?? null;
+  // One resolver for the bar and its host, so the dialog cannot show one model and dispatch
+  // another. Planning from every manifest row let a switched-off model be enqueued from the mode
+  // buttons while the bar said UNAVAILABLE; stranded now means the cards stay away entirely,
+  // because spending on a model the user never chose is worse than not dispatching.
+  const resolved = resolveModel(state, capability, choice.modelId);
+  const model = resolved.stranded === null ? resolved.model : null;
+  // Video dispatch is sized by the provider's own word; stills by real dimensions, which the
+  // plan derives from the tier. Both travel from here so the dialog and the job agree.
+  const resolution =
+    choice.resolution ?? (model && choice.tier !== undefined ? nativeResolution(model, choice.tier) : undefined);
 
   // The whole plan, computed live from the world — the same function the coordinator executes.
   const plans = useMemo(() => {
@@ -1063,9 +1072,11 @@ export function DispatchDialogScreen() {
       scene,
       selections: production.selections,
       model,
+      ...(resolution !== undefined ? { resolution } : {}),
+      ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
     };
     return { perShot: planScene(input, "per-shot"), wholeScene: planScene(input, "whole-scene") };
-  }, [world, production, scene, model]);
+  }, [world, production, scene, model, resolution, choice.tier]);
 
   const sceneFile = scene ? sceneFileOf(scene) : null;
   const warnings = plans?.perShot.warnings ?? null;
@@ -1123,13 +1134,16 @@ export function DispatchDialogScreen() {
               : "Identity references remain distinct from the world's style treatment."}
           </Callout>
         )}
-        <div className="fy-choicerow">
-          {models.map((m) => (
-            <Button key={m.id} variant={m.id === model?.id ? "primary" : "ghost"} onClick={() => setModelId(m.id)}>
-              {m.displayName} · {modelCapabilityCopy(m)}
-            </Button>
-          ))}
-        </div>
+        {/* Controls only: the two mode cards below each carry their own estimate, computed from
+            the same plan the coordinator executes, and one figure up here could disagree with
+            them. Size speaks the video vocabulary — 720p is what this surface means. */}
+        <DispatchBar
+          variant="controls"
+          capability={capability}
+          workflow="main-photo"
+          choice={choice}
+          onChoice={setChoice}
+        />
         {warningRows.length > 0 ? (
           <Callout tone="warning" title={`${warningRows.length} thing${warningRows.length === 1 ? "" : "s"} worth knowing — none blocks`}>
             <ul style={{ margin: 0, paddingLeft: "1.2em" }}>
@@ -1140,6 +1154,14 @@ export function DispatchDialogScreen() {
           </Callout>
         ) : (
           plans && <Callout title="Clean dispatch">Every cited sheet is locked and current; every reference rides.</Callout>
+        )}
+        {/* The bar says which model and why it cannot run; this says what that costs you here,
+            rather than leaving the two dispatch cards to vanish without explanation. */}
+        {!model && (
+          <Callout tone="warning" title="Nothing to dispatch with">
+            The model this production is set to cannot run. Pick one above, or fix it in Settings —
+            nothing is re-routed for you.
+          </Callout>
         )}
         {plans && (
           <div style={{ display: "flex", gap: 14 }}>
@@ -1154,7 +1176,7 @@ export function DispatchDialogScreen() {
                   variant="primary"
                   onClick={() => {
                     if (worldId && prodId && sceneFile && model) {
-                      dispatchScene(worldId, prodId, sceneFile, "per-shot", model.id);
+                      dispatchScene(worldId, prodId, sceneFile, "per-shot", model.id, resolution, choice.tier);
                       navigate(`/w/${worldId}/p/${prodId}/generate`);
                     }
                   }}
@@ -1182,7 +1204,7 @@ export function DispatchDialogScreen() {
                       variant="primary"
                       onClick={() => {
                         if (worldId && prodId && sceneFile && model) {
-                          dispatchScene(worldId, prodId, sceneFile, "whole-scene", model.id);
+                          dispatchScene(worldId, prodId, sceneFile, "whole-scene", model.id, resolution, choice.tier);
                           navigate(`/w/${worldId}/p/${prodId}/generate`);
                         }
                       }}

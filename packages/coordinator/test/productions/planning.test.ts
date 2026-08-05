@@ -329,6 +329,94 @@ describe("whole-scene reference budgeting", () => {
     await store.close();
   });
 
+  it("dispatches at the size the plan priced, in both modes", async () => {
+    // The failure this prevents: the dialog prices 1080p, the queued job carries no resolution,
+    // and the provider runs its own default — the estimate and the request disagreeing about
+    // the same job, with the difference landing on the bill.
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const base = production.scenes[0]!;
+    const scene: Scene = {
+      ...base,
+      shots: [{ ...base.shots[0]!, id: "sh_94", number: 94, description: "@maren-kest", durationSec: 6 }],
+    };
+    const model: ManifestModel = {
+      ...VIDEO_MODEL,
+      pricing: { kind: "perSecond", microUsdPerSecond: 21667, byResolution: { "1080p": 43333 } },
+    };
+    const input = {
+      world: bundle.meta,
+      productionId: production.meta.id,
+      sheets: bundle.sheets,
+      kits: bundle.referenceKits,
+      scene,
+      selections: {},
+      model,
+      resolution: "1080p",
+    };
+    for (const mode of ["per-shot", "whole-scene"] as const) {
+      const plan = planScene(input, mode);
+      const [request] = composeDispatches(bundle.meta.worldId, production.meta.id, scene, plan, model, bundle);
+      assert.equal(request!.params["resolution"], "1080p", `${mode} carries the size`);
+      assert.equal(request!.estimatedMicroUsd, 43333 * 6, `${mode} is priced at that size`);
+    }
+    // And a plan with no chosen size carries none, rather than inventing one.
+    const bare = planScene({ ...input, resolution: undefined }, "per-shot");
+    const [plain] = composeDispatches(bundle.meta.worldId, production.meta.id, scene, bare, model, bundle);
+    assert.equal(plain!.params["resolution"], undefined);
+    await store.close();
+  });
+
+  it("a stills tier becomes real dimensions, because the clients ignore a bare size word", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const base = production.scenes[0]!;
+    const scene: Scene = {
+      ...base,
+      shots: [{ ...base.shots[0]!, id: "sh_95", number: 95, description: "@maren-kest" }],
+    };
+    const stills: ManifestModel = {
+      id: "flux-2-pro",
+      provider: "fal",
+      capability: "image",
+      displayName: "Flux 2 Pro",
+      accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
+      limits: { tiers: { "1K": "1MP", "4K": "4MP" } },
+      pricing: { kind: "perMegapixel", microUsdPerMegapixel: 30_000 },
+    };
+    const input = {
+      world: bundle.meta,
+      productionId: production.meta.id,
+      sheets: bundle.sheets,
+      kits: bundle.referenceKits,
+      scene,
+      selections: {},
+      model: stills,
+    };
+    for (const mode of ["per-shot", "whole-scene"] as const) {
+      // Whole scene priced a pass of stills as if it were footage — no megapixels, no reference
+      // input — which on a per-megapixel model is a queued job estimated at zero.
+      const plan = planScene({ ...input, tier: "4K" as const }, mode);
+      const [request] = composeDispatches(bundle.meta.worldId, production.meta.id, scene, plan, stills, bundle);
+      assert.ok(request!.params["output"] !== undefined, `${mode} carries the frame`);
+      assert.ok(request!.estimatedMicroUsd > 0, `${mode} is priced`);
+      // And no bare size word beside it: the image clients ignore it and fal forwards it anyway.
+      assert.equal(request!.params["resolution"], undefined, `${mode} sends dimensions, not a word`);
+    }
+    const oneK = planScene({ ...input, tier: "1K" as const }, "per-shot");
+    const fourK = planScene({ ...input, tier: "4K" as const }, "per-shot");
+    const [small] = composeDispatches(bundle.meta.worldId, production.meta.id, scene, oneK, stills, bundle);
+    const [large] = composeDispatches(bundle.meta.worldId, production.meta.id, scene, fourK, stills, bundle);
+    const size = (request: (typeof small)) => request!.params["output"] as { width: number; height: number };
+    assert.ok(size(large).width > size(small).width, "4K asks for more pixels than 1K");
+    // And the money follows: a per-megapixel model priced from no megapixels came out at zero.
+    assert.ok(oneK.totalEstimatedMicroUsd > 0, "an estimate, not a zero");
+    assert.ok(fourK.totalEstimatedMicroUsd > oneK.totalEstimatedMicroUsd);
+    await store.close();
+  });
+
   it("budgets every packed pass independently and honors zero-reference models", async () => {
     const { store } = await open();
     const bundle = store.getBundle();

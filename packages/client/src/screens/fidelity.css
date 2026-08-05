@@ -1587,7 +1587,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   color: var(--muted-foreground);
   margin-bottom: 2px;
 }
-.fy-set__eyebrow + .fy-set__eyebrow, .fy-set__row + .fy-set__eyebrow { margin-top: 20px; }
+.fy-set__eyebrow + .fy-set__eyebrow,
+.fy-set__row + .fy-set__eyebrow,
+.fy-set__note + .fy-set__eyebrow { margin-top: 20px; }
 .fy-set__row {
   display: flex;
   align-items: center;
@@ -1666,6 +1668,152 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-set__why span:last-child { font: 400 10.5px/1.5 var(--font-sans); color: var(--muted-foreground); }
 .fy-set__bar { height: 4px; border-radius: 999px; background: var(--muted); margin-top: 8px; overflow: hidden; }
 .fy-set__barfill { height: 4px; border-radius: 999px; background: var(--foreground); }
+/* The art-direction step of genesis, and the preset library it shares with the proposal screen
+   (design turn 38). Nine cards and a custom door, all the same size: writing your own look is a
+   choice of equal standing, not a link under the real options. */
+.fy-artstep {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 26px 34px 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 1080px;
+  width: 100%;
+  margin: 0 auto;
+}
+.fy-artstep__lede {
+  font: 400 13px/1.65 var(--font-sans);
+  color: var(--muted-foreground);
+  margin: 0;
+  max-width: 68ch;
+}
+.fy-artstep__foot { display: flex; align-items: center; gap: 12px; margin-top: auto; padding-top: 8px; }
+.fy-artstep__note { font: 400 10.5px/1.5 var(--font-mono); color: var(--neutral-400); }
+.fy-artstep__reaches { display: grid; gap: 5px; margin-top: 4px; }
+.fy-artstep__reaches > div { font: 400 11.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-styles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+  margin: 4px 0;
+}
+.fy-styles__card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--background);
+  cursor: pointer;
+}
+.fy-styles__card:hover { border-color: var(--neutral-400); }
+.fy-styles__card.is-selected { border-color: var(--foreground); box-shadow: inset 0 0 0 1px var(--foreground); }
+.fy-styles__card--custom { border-style: dashed; }
+.fy-styles__name { font: 600 12.5px var(--font-sans); }
+.fy-styles__blurb { font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); }
+.fy-styles__words { display: grid; gap: 6px; }
+.fy-styles__wordshead { display: flex; align-items: baseline; gap: 10px; }
+.fy-styles__wordshead > span:first-child { font: 600 12.5px var(--font-sans); }
+.fy-styles__seed { font: 500 9px var(--font-mono); letter-spacing: 0.12em; color: var(--neutral-400); }
+.fy-styles__note { font: 400 10px/1.6 var(--font-mono); color: var(--neutral-400); }
+.fy-artproposal__presets { display: grid; gap: 6px; margin-bottom: 4px; }
+.fy-artproposal__seedline { font: 400 10px var(--font-mono); color: var(--neutral-400); margin-top: 6px; }
+
+/* Providers, master and detail (design turn 40a): a rail of providers, and one provider's key
+   and models beside it. A flat list of every provider's every model was the alternative, and it
+   put nine unrelated switches under one heading with nothing saying which key reached which. */
+/* overflow:hidden is load-bearing: without it a long model list grows the pane past max-height
+   and the sections below are drawn over it. */
+.fy-prov { display: flex; min-height: 300px; max-height: 46vh; overflow: hidden; }
+.fy-prov__rail {
+  width: 178px;
+  flex: none;
+  border-right: 1px solid var(--border);
+  padding-right: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+}
+.fy-prov__railitem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: 400 12.5px var(--font-sans);
+  color: var(--muted-foreground);
+}
+.fy-prov__railitem:hover { background: var(--accent); }
+.fy-prov__railitem.is-current { background: var(--secondary); color: var(--foreground); font-weight: 500; }
+.fy-prov__count { font: 400 9.5px var(--font-mono); color: var(--neutral-400); letter-spacing: 0.06em; }
+.fy-prov__pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+}
+.fy-prov__head { display: flex; align-items: center; gap: 10px; padding-bottom: 13px; }
+.fy-prov__title { font: 650 17px var(--font-sans); letter-spacing: -0.02em; }
+.fy-prov__caps { font: 400 9px var(--font-mono); color: var(--neutral-400); letter-spacing: 0.1em; }
+.fy-prov__eyebrow { font: 500 10px var(--font-mono); letter-spacing: 0.14em; color: var(--neutral-400); }
+.fy-prov__keyline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.fy-prov__keyline .fy-set__field { flex: 1; min-width: 0; }
+.fy-prov__modelshead { display: flex; align-items: baseline; gap: 10px; margin-top: 15px; padding-bottom: 4px; }
+.fy-prov__models { flex: 1; min-height: 0; overflow-y: auto; }
+.fy-prov__model {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.fy-prov__model--off { opacity: 0.45; }
+.fy-prov__modelname { font: 400 12.5px var(--font-sans); color: var(--foreground); }
+.fy-prov__price { font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
+.fy-prov__unverified {
+  font: 500 8.5px var(--font-mono);
+  letter-spacing: 0.1em;
+  font-style: normal;
+  color: var(--warning);
+}
+/* The switch is the row's only control, so it carries the whole state: filled is on. */
+.fy-prov__switch {
+  width: 32px;
+  height: 19px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--neutral-200);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 2px;
+  flex: none;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.fy-prov__switch.is-on { background: var(--foreground); justify-content: flex-end; }
+.fy-prov__switch:disabled { cursor: default; }
+.fy-prov__switch > span { width: 15px; height: 15px; border-radius: 999px; background: var(--background); }
+
 /* Routing: the capability on the left, the model that answers for it in a pill on the right. */
 .fy-set__routelabel { font: 400 11px var(--font-mono); color: var(--muted-foreground); width: 118px; flex: none; }
 .fy-set__pill {
@@ -2399,3 +2547,64 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---- the dispatch bar (design-system turn 39) -----------------------------
+   The row wraps rather than overflowing: hosts run from a wide dialog to a
+   370px side panel, and the figure travels with the buttons in one group so it
+   is never orphaned at the left of a new line. */
+.fy-dispatchbar { position: relative; border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
+.fy-dispatchbar__row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; row-gap: 12px; }
+.fy-dispatchbar__eyebrow { font: 500 10px var(--font-mono); letter-spacing: .14em; color: var(--neutral-400); }
+.fy-dispatchbar__provider { font: 400 10px var(--font-mono); color: var(--neutral-400); }
+.fy-dispatchbar__pill {
+  display: flex; align-items: center; gap: 8px; flex: none; white-space: nowrap;
+  padding: 6px 12px; border: 1px solid var(--border); border-radius: 9px;
+  background: var(--background); cursor: pointer; font: 500 12.5px var(--font-sans); color: var(--foreground);
+}
+.fy-dispatchbar__pill:hover { background: var(--accent); }
+.fy-dispatchbar__pill strong,
+.fy-dispatchbar__picker strong {
+  padding: 2px 6px; border-radius: 999px; background: var(--secondary);
+  font: 500 8px var(--font-mono); color: var(--muted-foreground);
+}
+.fy-dispatchbar__pill em,
+.fy-dispatchbar__picker em {
+  padding: 2px 6px; border-radius: 999px; border: 1px solid var(--warning);
+  font: 500 8px var(--font-mono); color: var(--warning); font-style: normal;
+}
+.fy-dispatchbar__seg { display: flex; align-items: center; gap: 8px; flex: none; white-space: nowrap; }
+.fy-dispatchbar__seg > span:last-child { display: flex; gap: 2px; background: var(--secondary); border-radius: 8px; padding: 2px; }
+.fy-dispatchbar__seg button {
+  padding: 5px 10px; border: 0; border-radius: 6px; background: transparent;
+  font: 400 11.5px var(--font-mono); color: var(--muted-foreground); cursor: pointer;
+}
+.fy-dispatchbar__seg button.is-active { background: var(--background); box-shadow: var(--shadow-xs); font-weight: 500; color: var(--foreground); }
+/* Unreachable, not absent: the control says what this model cannot do. */
+.fy-dispatchbar__seg button:disabled { color: var(--neutral-300); cursor: not-allowed; }
+.fy-dispatchbar__fixed { font: 400 11px var(--font-mono); color: var(--neutral-400); }
+.fy-dispatchbar__group { display: flex; align-items: center; gap: 14px; margin-left: auto; }
+.fy-dispatchbar__estimate { font: 650 17px var(--font-sans); letter-spacing: -.02em; }
+.fy-dispatchbar__detail { font: 400 10px/1.5 var(--font-mono); color: var(--neutral-400); margin-top: 8px; }
+.fy-dispatchbar__picker {
+  position: absolute; left: 0; bottom: 100%; margin-bottom: 10px; z-index: 9;
+  width: 100%; max-width: 340px; padding: 7px;
+  background: var(--background); border: 1px solid var(--border); border-radius: 13px; box-shadow: var(--shadow-lg);
+}
+.fy-dispatchbar__picker > .fy-dispatchbar__eyebrow { display: block; padding: 7px 10px 8px; }
+.fy-dispatchbar__picker button {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 10px;
+  border: 0; border-radius: 8px; background: transparent; cursor: pointer;
+  font: 400 12.5px var(--font-sans); color: var(--foreground); text-align: left;
+}
+.fy-dispatchbar__picker button:hover { background: var(--accent); }
+.fy-dispatchbar__picker button.is-selected { background: var(--secondary); }
+.fy-dispatchbar__picker button .fy-dispatchbar__provider { width: 44px; flex: none; }
+.fy-dispatchbar__picker button strong { margin-left: auto; }
+.fy-dispatchbar__pickerfoot { border-top: 1px solid var(--border); margin-top: 7px; padding: 10px 10px 4px; }
+.fy-dispatchbar__pickerfoot span { display: block; font: 400 10.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-dispatchbar__pickerfoot span + span { font: 400 9.5px var(--font-mono); color: var(--neutral-400); margin-top: 4px; }
+/* A reference the chosen model cannot carry: shown struck through rather than removed, so the
+   downgrade from image identity to text description is something you see happen. */
+.fy-mainphoto-dialog__refs .is-dropped { opacity: .45; }
+.fy-mainphoto-dialog__refs .is-dropped span { text-decoration: line-through; }
+.fy-sheetgen__purpose { display: block; font: 400 10px var(--font-mono); color: var(--neutral-400); }

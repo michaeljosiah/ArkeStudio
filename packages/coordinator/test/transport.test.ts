@@ -17,6 +17,7 @@ const STATE: ClientState = {
     providers: [],
     manifest: null,
     routing: { defaults: {}, faults: [] },
+    models: { disabled: [] },
     spend: null,
     backgroundNotifications: "issues-only",
     appearance: { theme: "system" },

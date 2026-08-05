@@ -1,6 +1,6 @@
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { ulid, type WorldBundle, type WorldSummary } from "@arke-studio/contracts";
+import { ulid, type ArtDirectionRecord, type WorldBundle, type WorldSummary } from "@arke-studio/contracts";
 import { ProposalManager } from "../gate/proposals.js";
 import { AppIndex } from "../index-db/app-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
@@ -23,6 +23,8 @@ export interface CreateWorldInput {
   logline?: string;
   tone?: string;
   genre?: string;
+  /** The look chosen during genesis. Absent means none was chosen, not an empty one. */
+  artDirection?: string;
 }
 
 export interface FsWorldProviderOptions {
@@ -233,6 +235,23 @@ export class FsWorldProvider implements WorldProvider {
       updated: at,
     };
     await atomicWriteFile(join(dir, "world.json"), JSON.stringify(meta, null, 2) + "\n");
+    // A look chosen at genesis is v1, accepted, with nothing behind it — the same record any
+    // later change produces, so nothing downstream needs to know a world was born with one.
+    // Chosen is not derived: a world with no record still resolves a look from tone and genre,
+    // and says on the art-direction screen that this is where it came from.
+    if (input.artDirection) {
+      const record: ArtDirectionRecord = {
+        version: 1,
+        description: input.artDirection,
+        acceptedAt: at,
+        history: [],
+      };
+      await mkdir(toExtendedLength(join(dir, "art-direction")), { recursive: true });
+      await atomicWriteFile(
+        join(dir, "art-direction", "art-direction.json"),
+        JSON.stringify(record, null, 2) + "\n",
+      );
+    }
     await appendChanges(join(dir, "changes.jsonl"), [
       { ts: at, entity: "world", created: true, source: "form", canonRevisionAfter: 0 },
     ]);

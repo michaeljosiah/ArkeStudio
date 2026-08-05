@@ -2,19 +2,15 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   compilationIsStale,
-  characterImageEstimateIsUsable,
   designatedCompilation,
-  estimateCharacterImageMicroUsd,
-  formatMicroUsd,
   mainPhotoFor,
-  modelCapabilityCopy,
-  modelForCapability,
-  PROVIDERS,
   type ManifestModel,
+  type SizeTier,
   type Sheet,
 } from "@arke-studio/contracts";
+import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
-import { Button, cx } from "../components/ui.js";
+import { Button, Callout, cx } from "../components/ui.js";
 import { Loading } from "../components/loading.js";
 import { X } from "../components/icons.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
@@ -162,31 +158,22 @@ export function mainPhotoPromptFor(sheet: Sheet | null | undefined): string {
     .join(" ");
 }
 
-function routedImageModel(state: ReturnType<typeof useStore>["state"]): ManifestModel | null {
-  return state?.app.manifest
-    ? modelForCapability(state.app.manifest, state.app.routing.defaults, "image")
-    : null;
+/**
+ * The image model this screen is actually on — the bar's answer, not a second opinion. These
+ * hosts gate references and prompts on it, and resolving it differently from the bar meant the
+ * screen could compute "no references" against one model while submitting another.
+ */
+function shownImageModel(state: ReturnType<typeof useStore>["state"], chosenId?: string): ManifestModel | null {
+  return resolveModel(state, "image", chosenId).model;
 }
 
-function modelSummary(
-  model: ManifestModel | null,
-  workflow: "main-photo" | "character-sheet" | "character-look",
-  count = 1,
-  referenceImages = 0,
-) {
-  if (!model) return "Image model · cost unavailable";
-  const fallback = model.accepts.referenceImages === 0 ? " · identity conditioning unavailable" : "";
-  return `${PROVIDERS[model.provider].displayName} · ${model.displayName} · ${modelCapabilityCopy(model)}${fallback} · ${formatMicroUsd(estimateCharacterImageMicroUsd(model, workflow, count, referenceImages * count))}`;
-}
-
-function modelCanDispatch(
-  model: ManifestModel | null,
-  workflow: "main-photo" | "character-sheet" | "character-look",
-  needsIdentityReference = false,
-) {
-  if (!model) return false;
-  if (needsIdentityReference && model.accepts.referenceImages === 0) return false;
-  return characterImageEstimateIsUsable(model, estimateCharacterImageMicroUsd(model, workflow));
+/**
+ * What the chosen model carries on an identity-dependent surface. Read from the choice rather
+ * than the routed default, because the whole point of choosing is that the answer changes — and
+ * a model that carries nothing must be refused here, not discovered at dispatch.
+ */
+function carriesIdentity(model: ManifestModel | null): boolean {
+  return model !== null && model.unverified !== true && model.accepts.referenceImages > 0;
 }
 
 export function CharacterReferenceScreen() {
@@ -329,6 +316,7 @@ export function GenerateCharacterSheetScreen() {
   const { state } = useStore();
   const [override, setOverride] = useState(false);
   const [style, setStyle] = useState("");
+  const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier }>({});
   const [requested, setRequested] = useState(false);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const earlierTakeIds = useRef(new Set<string>());
@@ -346,8 +334,8 @@ export function GenerateCharacterSheetScreen() {
   if (!world || !sheet || !sheetId) return null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = kit ? mainPhotoFor(kit) : null;
-  const model = routedImageModel(state);
-  const referencesAsText = (model?.accepts.referenceImages ?? 0) === 0;
+  const chosenModel = shownImageModel(state, choice.modelId);
+  const referencesAsText = !carriesIdentity(chosenModel);
   const pendingSheetTakes = world.referenceTakes
     .filter(
       (take) =>
@@ -485,30 +473,33 @@ export function GenerateCharacterSheetScreen() {
             </div>
             {referencesAsText && (
               <p className="fy-reference-fallback">
-                {model?.displayName ?? "This model"} accepts no reference images. The main photo cannot be sent;
+                {chosenModel?.displayName ?? "This model"} accepts no reference images. The main photo cannot be sent;
                 identity relies on the character traits carried in the prompt.
               </p>
             )}
           </section>
         </div>}
         {!requested && <footer>
-          <span>
-            {modelSummary(model, "character-sheet", 1, 1)}
-          </span>
-          <span>completes {sheet.name}'s reference set</span>
-          <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            disabled={!photo || !modelCanDispatch(model, "character-sheet", true)}
-            onClick={() => {
+          <span className="fy-sheetgen__purpose">completes {sheet.name}&apos;s reference set</span>
+          <DispatchBar
+            workflow="character-sheet"
+            referenceImages={1}
+            choice={choice}
+            onChoice={setChoice}
+            onCancel={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}
+            primaryLabel="Generate"
+            primaryDisabled={!photo || !carriesIdentity(chosenModel)}
+            onPrimary={(chosen) => {
               earlierTakeIds.current = new Set(pendingSheetTakes.map((take) => take.id));
               const requestId = generateCharacterSheet(
                 world.meta.worldId,
                 sheetId,
                 override && style.trim() ? style.trim() : undefined,
                 sheet.name,
+                {
+                  modelId: chosen.model.id,
+                  ...(chosen.tier !== undefined ? { tier: chosen.tier } : {}),
+                },
               );
               if (requestId) {
                 pendingRequestId.current = requestId;
@@ -519,9 +510,7 @@ export function GenerateCharacterSheetScreen() {
                 setRequested(true);
               }
             }}
-          >
-            Generate
-          </Button>
+          />
         </footer>}
       </div>
     </div>
@@ -537,6 +526,7 @@ export function ReplaceMainPhotoScreen() {
   const acceptance = useMainPhotoAcceptance()[sheetId ?? ""];
   const [prompt, setPrompt] = useState(() => mainPhotoPromptFor(sheet));
   const [count, setCount] = useState(4);
+  const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier }>({});
   const [uploaded, setUploaded] = useState(false);
   const [worldRef, setWorldRef] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -575,9 +565,13 @@ export function ReplaceMainPhotoScreen() {
   }));
   const candidates = [...uploadedCandidates, ...generatedCandidates];
   const selectedCandidate = candidates.find((candidate) => candidate.key === selected) ?? null;
-  const model = routedImageModel(state);
+  // The chosen model decides what can travel, so it decides what this screen shows travelling.
+  // A silent downgrade from image identity to text description is the failure the bar exists to
+  // prevent, and it has to be visible where the references are, not only in the bar's own line.
+  const model = shownImageModel(state, choice.modelId);
+  const carriesReferences = model !== null && model.unverified !== true && model.accepts.referenceImages > 0;
   const canImport = typeof window !== "undefined" && window.arke !== undefined;
-  const refs = uploaded && photo ? [`references/${sheetId}/${photo.file}`] : [];
+  const refs = uploaded && photo && carriesReferences ? [`references/${sheetId}/${photo.file}`] : [];
   return (
     <div className="fy-mainphoto-scrim" data-screen="replace-main-photo">
       <div className="fy-mainphoto-dialog">
@@ -615,14 +609,14 @@ export function ReplaceMainPhotoScreen() {
           </div>
           <div className="fy-mainphoto-dialog__refs">
             {uploaded && photo && (
-              <div>
+              <div className={carriesReferences ? undefined : "is-dropped"}>
                 <Portrait
                   worldSlug={world.meta.slug}
                   path={`references/${sheetId}/${photo.file}`}
                   label="Identity reference"
                   radius={10}
                 />
-                <span>IDENTITY</span>
+                <span>{carriesReferences ? "IDENTITY" : "IDENTITY · DROPPED"}</span>
               </div>
             )}
             {worldRef && (
@@ -637,34 +631,29 @@ export function ReplaceMainPhotoScreen() {
               </div>
             )}
           </div>
-          <div className="fy-mainphoto-dialog__count">
-            <span>Previews</span>
-            {[1, 2, 3, 4].map((value) => (
-              <button
-                type="button"
-                className={count === value ? "is-active" : ""}
-                key={value}
-                onClick={() => setCount(value)}
-              >
-                {value}
-              </button>
-            ))}
-          </div>
-          <div className="fy-mainphoto-dialog__generate">
-            <span>
-              {modelSummary(model, "main-photo", count, refs.length)}
-            </span>
-            <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              disabled={!prompt.trim() || !modelCanDispatch(model, "main-photo")}
-              onClick={() => generateMainPhoto(world.meta.worldId, sheetId, prompt.trim(), count, refs)}
-            >
-              Generate previews
-            </Button>
-          </div>
+          {uploaded && !carriesReferences && model && (
+            <Callout tone="warning" title={`${model.displayName} accepts no reference images`}>
+              {sheet.name}&apos;s main photo will not ride along. The generation sees the written
+              description and the world look as text, and nothing of the face.
+            </Callout>
+          )}
+          <DispatchBar
+            workflow="main-photo"
+            count={count}
+            onCount={setCount}
+            referenceImages={refs.length}
+            choice={choice}
+            onChoice={setChoice}
+            onCancel={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}
+            primaryLabel="Generate previews"
+            primaryDisabled={!prompt.trim()}
+            onPrimary={(chosen) =>
+              generateMainPhoto(world.meta.worldId, sheetId, prompt.trim(), count, refs, {
+                modelId: chosen.model.id,
+                ...(chosen.tier !== undefined ? { tier: chosen.tier } : {}),
+              })
+            }
+          />
         </section>
         <section className="fy-mainphoto-dialog__results">
           <header>
@@ -728,11 +717,16 @@ export function CharacterLooksScreen() {
   const [prompt, setPrompt] = useState(
     "Formal Ebb Council coat, storm-dark wool, sea-glass clasp and salt at the hem.",
   );
+  const navigate = useNavigate();
+  const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier }>({});
+  // Four was hard-coded at the call site while the frame already carried a count — the estimate
+  // said four and there was no way to ask for fewer.
+  const [count, setCount] = useState(4);
   const [selected, setSelected] = useState<string | null>(null);
   if (!world || !sheet || !sheetId) return null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = kit ? mainPhotoFor(kit) : null;
-  const model = routedImageModel(state);
+  const chosenModel = shownImageModel(state, choice.modelId);
   const pendingLooks = world.referenceTakes.filter(
     (take) =>
       take.kind === "look" &&
@@ -802,18 +796,23 @@ export function CharacterLooksScreen() {
           </div>
           <label>Describe the look</label>
           <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
-          <div className="fy-looks-composer__foot">
-            <span>4 variations · {modelSummary(model, "character-look", 4, 1)}</span>
-            <Button
-              variant="primary"
-              disabled={!prompt.trim() || !photo || !modelCanDispatch(model, "character-look", true)}
-              onClick={() =>
-                generateCharacterLooks(world.meta.worldId, sheetId, kind, mode, prompt.trim(), 4)
-              }
-            >
-              Explore
-            </Button>
-          </div>
+          <DispatchBar
+            workflow="character-look"
+            count={count}
+            onCount={setCount}
+            referenceImages={1}
+            choice={choice}
+            onChoice={setChoice}
+            onCancel={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}
+            primaryLabel="Explore"
+            primaryDisabled={!prompt.trim() || !photo || !carriesIdentity(chosenModel)}
+            onPrimary={(chosen) =>
+              generateCharacterLooks(world.meta.worldId, sheetId, kind, mode, prompt.trim(), chosen.count ?? count, {
+                modelId: chosen.model.id,
+                ...(chosen.tier !== undefined ? { tier: chosen.tier } : {}),
+              })
+            }
+          />
           <p className="fy-looks-note">Explorations do not automatically join the identity package.</p>
         </section>
         <section className="fy-looks-results">

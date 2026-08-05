@@ -11,7 +11,9 @@ import {
   mainPhotoGate,
   referenceBudget,
   tileIsStale,
+  type AppSettings,
   type ManifestModel,
+  type ModelManifest,
   type ReferenceKit,
   type Sheet,
   type Take,
@@ -20,7 +22,10 @@ import {
   characterLookRequests,
   characterSheetRequest,
   establishRequests,
+  imageModelFor,
   mainPhotoRequests,
+  referenceBudgetFor,
+  tierFor,
   missingTileAngles,
   styleLine,
   tileRequest,
@@ -762,5 +767,91 @@ describe("kit mutations through the one commit primitive", () => {
       "rejection leaves accepted identity untouched",
     );
     await store.close();
+  });
+});
+
+describe("a per-generation model and size (SPEC-008, design turn 39)", () => {
+  const TIERED: ManifestModel = {
+    ...MODEL,
+    id: "nano-banana-2",
+    displayName: "Nano Banana 2",
+    limits: { resolutions: ["1K", "2K", "4K"], tiers: { "1K": "1K", "2K": "2K", "4K": "4K" } },
+    pricing: { kind: "perImage", microUsdPerImage: 80000, byResolution: { "4K": 160000 } },
+  };
+  const UNVERIFIED: ManifestModel = {
+    ...MODEL,
+    id: "seedream-4",
+    displayName: "Seedream 4",
+    accepts: { referenceImages: 8, startFrame: false, endFrame: false },
+    limits: {},
+    unverified: true,
+    pricing: { kind: "perImage", microUsdPerImage: 40000 },
+  };
+  const SETTINGS = { models: { disabled: [] } } as unknown as AppSettings;
+  const MANIFEST: ModelManifest = {
+    manifestVersion: 1,
+    generated: "2026-08-05",
+    models: [MODEL, TIERED, UNVERIFIED],
+  };
+
+  it("the chosen tier reaches the job as the provider's own word for it", () => {
+    const [request] = mainPhotoRequests(WORLD_META, DIRECTION, SHEET, null, TIERED, {
+      prompt: "a portrait",
+      count: 1,
+      identityReferences: [],
+      generationKey: "k",
+      tier: "4K",
+    });
+    const output = request!.input.params["output"] as { resolution?: string };
+    assert.equal(output.resolution, "4K");
+    assert.equal(request!.estimatedMicroUsd, 160000, "the estimate follows the tier, not the first one");
+  });
+
+  it("a tier the model cannot reach falls back rather than promising it", () => {
+    const [request] = mainPhotoRequests(WORLD_META, DIRECTION, SHEET, null, MODEL, {
+      prompt: "a portrait",
+      count: 1,
+      identityReferences: [],
+      generationKey: "k",
+      tier: "4K",
+    });
+    const output = request!.input.params["output"] as { resolution?: string };
+    assert.equal(output.resolution, undefined, "no tiers declared means no resolution claimed");
+  });
+
+  it("an unverified model runs at the floor: no references, no size", () => {
+    assert.equal(referenceBudgetFor(UNVERIFIED), 0, "what it accepts was never checked");
+    assert.equal(tierFor(UNVERIFIED, "2K"), undefined, "so the provider keeps its own default");
+    assert.throws(
+      () =>
+        mainPhotoRequests(WORLD_META, DIRECTION, SHEET, null, UNVERIFIED, {
+          prompt: "a portrait",
+          count: 1,
+          identityReferences: ["references/maren-kest/main.png"],
+          generationKey: "k",
+        }),
+      /cannot receive identity reference images/,
+    );
+  });
+
+  it("an override picks that model; an unavailable one is refused, never quietly swapped", () => {
+    assert.equal(imageModelFor(SETTINGS, MANIFEST, "nano-banana-2")?.id, "nano-banana-2");
+    assert.equal(imageModelFor(SETTINGS, MANIFEST, "no-such-model"), null);
+    const off = { models: { disabled: ["nano-banana-2"] } } as unknown as AppSettings;
+    assert.equal(imageModelFor(off, MANIFEST, "nano-banana-2"), null, "switched off is not a fallback");
+    assert.equal(imageModelFor(SETTINGS, MANIFEST)?.id, MODEL.id, "no override means the routed default");
+  });
+
+  it("refuses a routed default that was switched off, for callers that pass no model at all", () => {
+    // World key art, establish looks and missing tiles never pass an id — they went straight to
+    // routing, so a model switched off in Providers kept taking paid work. Refused, not
+    // replaced: choosing the substitute is the user's, and the fault is already named in
+    // Who does what with both repairs.
+    const off = {
+      ...SETTINGS,
+      models: { disabled: [MODEL.id] },
+    } as unknown as AppSettings;
+    assert.equal(imageModelFor(off, MANIFEST), null);
+    assert.equal(imageModelFor(SETTINGS, MANIFEST)?.id, MODEL.id, "and is unaffected when it is on");
   });
 });

@@ -14,6 +14,7 @@ import {
   BackgroundNotificationPreferenceSchema,
   ManifestDriftSchema,
   RoutingDefaultsSchema,
+  ModelAvailabilitySchema,
   RoutingFaultSchema,
   SpendStatusSchema,
 } from "./settings.js";
@@ -182,6 +183,11 @@ export const ClientStateSchema = z
           .object({ defaults: RoutingDefaultsSchema, faults: z.array(RoutingFaultSchema) })
           .strict()
           .default({ defaults: {}, faults: [] }),
+        /**
+         * Which models this studio offers. Stored as the exceptions, so an empty list means the
+         * whole manifest is on — the state a fresh install and an untouched settings file share.
+         */
+        models: ModelAvailabilitySchema.default({ disabled: [] }),
         /**
          * The agent roster as it will actually run: the shipped brief, the user's override if
          * there is one, and the model each will use. The screen never has to guess which of the

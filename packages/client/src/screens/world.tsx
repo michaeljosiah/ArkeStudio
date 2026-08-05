@@ -8,8 +8,6 @@ import {
   formatMicroUsd,
   headGate,
   mainPhotoFor,
-  modelForCapability,
-  PROVIDERS,
   tileIsStale,
   type CanonEntry,
   type Sheet,
@@ -19,6 +17,7 @@ import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components
 import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
 import { ChevronRight, Play, Plus, Search, X } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
+import { DispatchBar, resolveModel, usableModels } from "../components/dispatch-bar.js";
 import { Loading } from "../components/loading.js";
 import { characterPortraitPath, Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
@@ -247,11 +246,20 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
   const { state } = useStore();
   const world = state?.world;
   const [dismissed, setDismissed] = useState<readonly string[]>([]);
-  const configured = new Set((state?.app.providers ?? []).filter((p) => p.configured).map((p) => p.id));
-  const model = state?.app.manifest
-    ? modelForCapability(state.app.manifest, state.app.routing.defaults, "image")
-    : null;
-  const usable = model !== null && (configured.has(model.provider) || PROVIDERS[model.provider].local === true);
+  const [choice, setChoice] = useState<{ modelId?: string }>({});
+  // What can actually run, asked once and shared with the bar — the button's enabled state and
+  // the picker's list have to be the same question. Judging it by the routed default alone meant
+  // a usable model could be picked here while Generate stayed greyed out, and the only way
+  // through was to go and change the global routing default first.
+  // The same resolver the bar uses, so the button and the picker cannot disagree about which
+  // model this surface will send — and a stranded default blocks rather than quietly running.
+  // The id is sent explicitly even when nothing was picked: with no saved routing default the
+  // bar shows the first usable model, while the coordinator's own fallback would take the first
+  // row in the manifest — which can be a provider this machine has no key for.
+  const offered = usableModels(state, "image");
+  const resolved = resolveModel(state, "image", choice.modelId);
+  const model = resolved.stranded === null ? resolved.model : null;
+  const usable = model !== null;
 
   const mine = (state?.app.jobs ?? []).filter((j) => j.worldId === worldId && j.target.kind === "world-image");
   const running = mine.find((j) => j.status !== "succeeded" && j.status !== "failed" && j.status !== "cancelled");
@@ -282,7 +290,7 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
           variant="ghost"
           onClick={() => {
             setDismissed((prev) => [...prev, failed.id]);
-            generateWorldImage(worldId);
+            generateWorldImage(worldId, model?.id);
           }}
         >
           Try again
@@ -331,7 +339,9 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
   const reason = !hasLogline
     ? "Give the world a logline first — it is what the image is made from"
     : !usable
-      ? "Frames & stills has no provider with a key — set one in Settings"
+      ? offered.length > 0
+        ? "The default image model is switched off — pick another one here"
+        : "Frames & stills has no provider with a key — set one in Settings"
       : undefined;
   return (
     <div className="fy-keyart">
@@ -341,16 +351,16 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
         {...(reason ? { title: reason } : {})}
         onClick={() => {
           setAsking(true);
-          generateWorldImage(worldId);
+          generateWorldImage(worldId, model?.id);
         }}
       >
         {asking ? "Writing the prompt…" : running ? "Making the key art…" : "Generate key art from the logline"}
       </Button>
+      {/* Model only: this request carries no output spec, so the provider's own size is what
+          runs, and a size control that changed nothing would be worse than none. */}
+      <DispatchBar variant="controls" size={false} workflow="main-photo" choice={choice} onChoice={setChoice} />
       <span className="fy-keyart__note">
-        {reason ??
-          (model
-            ? `${PROVIDERS[model.provider].displayName} · ${model.displayName} · World look v${world?.artDirection.version ?? 1} carries as text · comes back for a yes`
-            : "")}
+        {reason ?? `World look v${world?.artDirection.version ?? 1} carries as text · comes back for a yes`}
       </span>
     </div>
   );

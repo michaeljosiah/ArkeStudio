@@ -647,6 +647,7 @@ export class Coordinator {
       ...(settings && manifest
         ? { routing: { defaults: settings.routing, faults: routingFaults(settings, manifest) } }
         : {}),
+      ...(settings ? { models: settings.models } : {}),
       ...(settings ? { spend: evaluateSpend(entries, settings.spend, new Date()) } : {}),
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
@@ -898,6 +899,7 @@ export class Coordinator {
             ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
             ...(msg.tone !== undefined ? { tone: msg.tone } : {}),
             ...(msg.genre !== undefined ? { genre: msg.genre } : {}),
+            ...(msg.artDirection !== undefined ? { artDirection: msg.artDirection } : {}),
           });
           this.readModel.setWorlds(await this.opts.provider.listWorlds());
           await this.openWorld(worldId);
@@ -1519,6 +1521,19 @@ export class Coordinator {
         });
         return;
       }
+      case "set-model-enabled": {
+        if (!this.appSettings || !this.opts.manifest) return;
+        const settings = await this.appSettings.setModelEnabled(msg.modelId, msg.enabled);
+        // Faults ride along: switching a model off can strand a default, and the client shows
+        // the two together rather than discovering the second on the next read.
+        this.emit({
+          at: new Date().toISOString(),
+          type: "models.changed",
+          models: settings.models,
+          faults: routingFaults(settings, this.opts.manifest),
+        });
+        return;
+      }
       case "set-agent-config": {
         if (!this.appSettings) return;
         const settings = await this.appSettings.setAgent(msg.agent, {
@@ -1840,6 +1855,7 @@ export class Coordinator {
             selections: production.selections,
             model,
             ...(msg.resolution !== undefined ? { resolution: msg.resolution } : {}),
+            ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
           },
           msg.mode,
         );
@@ -2495,6 +2511,7 @@ export class Coordinator {
         const model = imageModelFor(
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
+          "modelId" in msg ? msg.modelId : undefined,
         );
         // The screen disables the button without a usable image model and says why; this is the
         // backstop for a frame that arrives anyway.
@@ -2741,6 +2758,7 @@ export class Coordinator {
         const model = imageModelFor(
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
+          "modelId" in msg ? msg.modelId : undefined,
         );
         if (!sheet || !model) {
           this.rejectEnqueue(msg.requestId, msg.kind, "The character or image model is no longer available.");
@@ -2753,6 +2771,7 @@ export class Coordinator {
             count: msg.count,
             identityReferences: msg.identityReferences,
             generationKey: Date.now().toString(36),
+            ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
           });
         } catch {
           this.rejectEnqueue(
@@ -2781,6 +2800,7 @@ export class Coordinator {
         const model = imageModelFor(
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
+          "modelId" in msg ? msg.modelId : undefined,
         );
         if (!sheet || !kit || !model) {
           this.rejectEnqueue(msg.requestId, msg.kind, "An accepted main photo and image model are required.");
@@ -2796,6 +2816,7 @@ export class Coordinator {
             model,
             Date.now().toString(36),
             msg.styleOverride,
+            msg.tier,
           );
         } catch (error) {
           this.rejectEnqueue(
@@ -2859,6 +2880,7 @@ export class Coordinator {
         const model = imageModelFor(
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
+          "modelId" in msg ? msg.modelId : undefined,
         );
         if (!sheet || !kit || !model) {
           this.rejectEnqueue(msg.requestId, msg.kind, "An accepted main photo and image model are required.");
@@ -2872,6 +2894,7 @@ export class Coordinator {
             prompt: msg.prompt,
             count: msg.count,
             generationKey: Date.now().toString(36),
+            ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
           });
         } catch (error) {
           this.rejectEnqueue(

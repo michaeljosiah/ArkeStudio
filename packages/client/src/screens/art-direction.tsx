@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import type { ArtDirectionHistoryEntry, ResolvedArtDirection } from "@arke-studio/contracts";
+import { ArtStyleGrid } from "../components/art-style-picker.js";
+import { seedFrom } from "../lib/art-styles.js";
 import { Button } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
 import { shortDate } from "../lib/format.js";
@@ -182,6 +184,9 @@ export function ArtDirectionProposalScreen() {
   const navigate = useNavigate();
   const world = useWorld();
   const [description, setDescription] = useState(PROPOSED_DESCRIPTION);
+  // Null is "your own words", which is where this screen starts: the world already has a look,
+  // and the words in the box are a draft of the change, not a preset's.
+  const [presetId, setPresetId] = useState<string | null>(null);
   if (!world || world.meta.worldId !== worldId) return null;
 
   const direction = world.artDirection;
@@ -226,6 +231,20 @@ export function ArtDirectionProposalScreen() {
             </p>
           </div>
         </div>
+        {/* The same nine presets genesis offers (design turn 38c). A look chosen a year in should
+            be the same choice, worded the same way, as one chosen on the first screen. */}
+        {!staged && (
+          <div className="fy-artproposal__presets">
+            <div className="fy-artproposal__eyebrow">START FROM A LOOK</div>
+            <ArtStyleGrid
+              selectedId={presetId}
+              onSelect={(preset) => {
+                setPresetId(preset?.id ?? null);
+                setDescription(seedFrom(preset));
+              }}
+            />
+          </div>
+        )}
         <label className="fy-artproposal__label" htmlFor="art-direction-description">
           Style description
         </label>
@@ -239,6 +258,11 @@ export function ArtDirectionProposalScreen() {
           <button type="button" title="Flesh this out with AI" aria-label="Flesh this out with AI" disabled>
             <Sparkle />
           </button>
+        </div>
+        <div className="fy-artproposal__seedline">
+          {presetId === null
+            ? "your own words · nothing was seeded"
+            : "the preset seeded these words · your edits win"}
         </div>
         <div className="fy-artproposal__buttons">
           <Button variant="ghost" onClick={cancel}>

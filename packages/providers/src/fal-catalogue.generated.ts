@@ -22,6 +22,11 @@ export const FAL_MODELS: readonly ManifestModel[] = [
         "2MP",
         "4MP"
       ],
+      "tiers": {
+        "1K": "1MP",
+        "2K": "2MP",
+        "4K": "4MP"
+      },
       "aspects": [
         "16:9",
         "9:16",
@@ -50,6 +55,11 @@ export const FAL_MODELS: readonly ManifestModel[] = [
         "2K",
         "4K"
       ],
+      "tiers": {
+        "1K": "1K",
+        "2K": "2K",
+        "4K": "4K"
+      },
       "aspects": [
         "21:9",
         "16:9",
@@ -83,6 +93,11 @@ export const FAL_MODELS: readonly ManifestModel[] = [
         "2K",
         "4K"
       ],
+      "tiers": {
+        "1K": "1K",
+        "2K": "2K",
+        "4K": "4K"
+      },
       "aspects": [
         "21:9",
         "16:9",
@@ -98,6 +113,36 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "pricing": {
       "kind": "perImage",
       "microUsdPerImage": 150000
+    }
+  },
+  {
+    "id": "gpt-image-2-fal",
+    "provider": "fal",
+    "capability": "image",
+    "displayName": "GPT Image 2",
+    "accepts": {
+      "referenceImages": 16,
+      "startFrame": false,
+      "endFrame": false
+    },
+    "limits": {
+      "aspects": [
+        "16:9",
+        "3:2",
+        "1:1",
+        "2:3",
+        "9:16"
+      ]
+    },
+    "pricing": {
+      "kind": "perImageToken",
+      "microUsdPerMillionTextInput": 5000000,
+      "microUsdPerMillionImageInput": 8000000,
+      "microUsdPerMillionImageOutput": 30000000,
+      "assumedTextInputTokens": 500,
+      "assumedImageInputTokensPerReference": 1500,
+      "assumedImageOutputTokensPerImage": 6500,
+      "roundUpToMicroUsd": 100
     }
   },
   {
@@ -265,6 +310,7 @@ export const FAL_ENDPOINTS: Record<string, string> = {
   "flux-2-pro": "fal-ai/flux-2-pro",
   "nano-banana-2": "fal-ai/nano-banana-2",
   "nano-banana-pro": "fal-ai/nano-banana-pro",
+  "gpt-image-2-fal": "openai/gpt-image-2",
   "seedance-2.0": "bytedance/seedance-2.0/text-to-video",
   "seedance-2.0-fast": "bytedance/seedance-2.0/fast/text-to-video",
   "veo-3.1": "fal-ai/veo3.1",
@@ -280,5 +326,6 @@ export const FAL_ENDPOINTS: Record<string, string> = {
  */
 export const FAL_EDIT_ENDPOINTS: Record<string, string> = {
   "nano-banana-2": "fal-ai/nano-banana-2/edit",
-  "nano-banana-pro": "fal-ai/nano-banana-pro/edit"
+  "nano-banana-pro": "fal-ai/nano-banana-pro/edit",
+  "gpt-image-2-fal": "openai/gpt-image-2/edit"
 };

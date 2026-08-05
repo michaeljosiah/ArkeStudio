@@ -16,6 +16,7 @@ export interface WorldProvider {
     logline?: string;
     tone?: string;
     genre?: string;
+    artDirection?: string;
   }): Promise<{ worldId: string; slug: string }>;
   reloadWorld?(worldId: string): Promise<WorldBundle>;
   /** Move a world out of the library into `archive/`, whole. Returns where it went. */

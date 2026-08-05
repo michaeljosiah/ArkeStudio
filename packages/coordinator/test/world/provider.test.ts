@@ -53,6 +53,41 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     await provider.close();
   });
 
+  it("records a look chosen at genesis as world look v1, accepted, with no history", async () => {
+    const root = await tempDir("arke-create-look-");
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+    const { worldId } = await provider.createWorld({
+      name: "The Undersong",
+      tone: "quiet dread",
+      artDirection: "Weathered realism with visible brushwork.",
+    });
+    const bundle = await provider.loadWorld(worldId);
+    assert.equal(bundle.artDirection.version, 1);
+    assert.equal(bundle.artDirection.description, "Weathered realism with visible brushwork.");
+    // Chosen, not derived — the screen shows those differently, and a world born with a look
+    // must not claim its words came from tone and genre.
+    assert.equal(bundle.artDirection.derived, false);
+    assert.deepEqual(bundle.artDirection.history, []);
+    await provider.close();
+  });
+
+  it("leaves no record when the look was deferred, so it still resolves from tone and genre", async () => {
+    const root = await tempDir("arke-create-nolook-");
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+    const { worldId } = await provider.createWorld({ name: "The Undersong", tone: "quiet dread" });
+    const bundle = await provider.loadWorld(worldId);
+    assert.equal(bundle.artDirection.derived, true);
+    assert.equal(
+      await stat(join(root, "worlds", "the-undersong", "art-direction")).then(
+        () => true,
+        () => false,
+      ),
+      false,
+      "no folder at all — an empty one would read as a look that was set and then emptied",
+    );
+    await provider.close();
+  });
+
   it("opens a scoped locked store without changing the renderer's selected world", async () => {
     const { root, worldDir } = await makeTempRoot();
     const provider = new FsWorldProvider(root, { clock: CLOCK });

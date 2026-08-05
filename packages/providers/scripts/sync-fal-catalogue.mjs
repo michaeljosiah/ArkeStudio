@@ -26,7 +26,11 @@ const CURATED = {
     id: "flux-2-pro",
     capability: "image",
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-    limits: { resolutions: ["1MP", "2MP", "4MP"], aspects: ["16:9", "9:16", "1:1", "4:3"] },
+    limits: {
+      resolutions: ["1MP", "2MP", "4MP"],
+      tiers: { "1K": "1MP", "2K": "2MP", "4K": "4MP" },
+      aspects: ["16:9", "9:16", "1:1", "4:3"],
+    },
   },
   "fal-ai/nano-banana-2": {
     id: "nano-banana-2",
@@ -47,6 +51,7 @@ const CURATED = {
     // would silently halve every image, and nothing in the studio dispatches a 8:1 frame.
     limits: {
       resolutions: ["1K", "2K", "4K"],
+      tiers: { "1K": "1K", "2K": "2K", "4K": "4K" },
       aspects: ["21:9", "16:9", "3:2", "4:3", "1:1", "4:5", "3:4", "2:3", "9:16"],
     },
   },
@@ -57,7 +62,37 @@ const CURATED = {
     accepts: { referenceImages: 3, startFrame: false, endFrame: false },
     limits: {
       resolutions: ["1K", "2K", "4K"],
+      tiers: { "1K": "1K", "2K": "2K", "4K": "4K" },
       aspects: ["21:9", "16:9", "3:2", "4:3", "1:1", "4:5", "3:4", "2:3", "9:16"],
+    },
+  },
+  "openai/gpt-image-2": {
+    // The id is suffixed because manifest ids are unique across providers and `gpt-image-2` is
+    // the OpenAI-direct row. Both display as "GPT Image 2" behind their provider's name, so the
+    // suffix is visible only in code. This is the pattern for any model two gateways host.
+    id: "gpt-image-2-fal",
+    // fal titles the route "GPT Image 2 API". The API part is fal's, not the model's, and the
+    // picker already says which provider it is reached through.
+    displayName: "GPT Image 2",
+    capability: "image",
+    editRoute: "openai/gpt-image-2/edit",
+    // The edit schema declares `image_urls` with maxItems 16, matching the OpenAI direct route.
+    accepts: { referenceImages: 16, startFrame: false, endFrame: false },
+    // The base route takes a free width/height rather than a tier enum, so there are no native
+    // words to map 1K/2K/4K onto. Left without tiers on purpose: offering a size the request
+    // cannot carry would be a control that changes nothing.
+    limits: { aspects: ["16:9", "3:2", "1:1", "2:3", "9:16"] },
+    /**
+     * fal bills this in tokens, and the token count is not knowable before dispatch. These are
+     * the counts the estimate assumes, set above the largest published per-image figure we could
+     * find for this family (4,160 tokens for a 1024×1024 high-quality render) so the estimate is
+     * a ceiling. They are the one unverified number in this row: the first real invoice settles
+     * them, and manifest drift flags the row if the estimates keep missing what was billed.
+     */
+    tokenAssumption: {
+      assumedTextInputTokens: 500,
+      assumedImageInputTokensPerReference: 1500,
+      assumedImageOutputTokensPerImage: 6500,
     },
   },
   "bytedance/seedance-2.0/text-to-video": {
@@ -105,9 +140,35 @@ const money = String.raw`\*{0,2}\$([0-9]+(?:\.[0-9]+)?)\*{0,2}`;
  * from the API; anything that does not match returns null and the model is dropped rather than
  * guessed at.
  */
-function pricingFrom(text) {
+function pricingFrom(text, tokenAssumption) {
   const clean = (text ?? "").replace(/\s+/g, " ");
   const micro = (s) => Math.round(Number.parseFloat(s) * 1_000_000);
+
+  // "Text tokens (per 1M): **$5.00** input, **$1.25** cached, **$10.00** output. Image tokens
+  // (per 1M): **$8.00** input, **$2.00** cached, **$30.00** output."
+  //
+  // The rates are exact; the token counts are not knowable before dispatch, so a row priced this
+  // way must also state what the estimate assumes. Without that annotation the price is dropped
+  // rather than half-read — an estimate is the whole point of the manifest.
+  const tokenTable = clean.match(
+    new RegExp(
+      `Text tokens[^$]{0,20}${money}\\s*input[^$]{0,30}${money}\\s*cached[^$]{0,30}${money}\\s*output` +
+        `[\\s\\S]{0,60}?Image tokens[^$]{0,20}${money}\\s*input[^$]{0,30}${money}\\s*cached[^$]{0,30}${money}\\s*output`,
+      "i",
+    ),
+  );
+  if (tokenTable) {
+    if (!tokenAssumption) return null;
+    return {
+      kind: "perImageToken",
+      microUsdPerMillionTextInput: micro(tokenTable[1]),
+      microUsdPerMillionImageInput: micro(tokenTable[4]),
+      microUsdPerMillionImageOutput: micro(tokenTable[6]),
+      ...tokenAssumption,
+      // "Total cost is rounded up to the closest hundredth of a cent ($0.0001)" — fal's words.
+      roundUpToMicroUsd: /rounded up to the closest hundredth of a cent/i.test(clean) ? 100 : undefined,
+    };
+  }
 
   // "For every second of 720p video ... **$0.3034/second** and for 1080p ... **$0.682/second**"
   const perSecondByRes = clean.match(new RegExp(`${money}\\s*/?\\s*second[\\s\\S]{0,80}?1080p[^$]{0,40}${money}`, "i"));
@@ -158,7 +219,7 @@ for (const [route, curated] of Object.entries(CURATED)) {
     skipped.push(`${route} — no longer in the catalogue`);
     continue;
   }
-  const pricing = pricingFrom(live.pricingInfoOverride);
+  const pricing = pricingFrom(live.pricingInfoOverride, curated.tokenAssumption);
   if (!pricing) {
     skipped.push(`${route} — no price we could read from "${(live.pricingInfoOverride ?? "").slice(0, 60)}…"`);
     continue;
@@ -167,7 +228,7 @@ for (const [route, curated] of Object.entries(CURATED)) {
     id: curated.id,
     provider: "fal",
     capability: curated.capability,
-    displayName: live.title,
+    displayName: curated.displayName ?? live.title,
     accepts: curated.accepts,
     limits: curated.limits,
     pricing,
