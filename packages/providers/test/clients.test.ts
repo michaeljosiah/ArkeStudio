@@ -284,6 +284,36 @@ describe("fal submit/poll round-trip carries the endpoint in the remote id", () 
     assert.match(seen[1]!, /fal-ai\/flux-2-pro\/requests\/req-9\/status/);
   });
 
+  it("asks for a video length in the route's own word, never our field name", async () => {
+    // Read from the schemas: every fal video route declares `duration` as a string out of a
+    // fixed list, and the lists disagree. We sent `durationSec` as a number, a field none of
+    // them declares — so every video dispatch ran at the provider's default length while the
+    // estimate had been computed from the seconds the scene planned.
+    const bodyFor = async (model: string, durationSec: number): Promise<Record<string, unknown>> => {
+      let sent: Record<string, unknown> = {};
+      const client = new FalClient(async (_url, init) => {
+        sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return new Response(JSON.stringify({ request_id: "req-1" }), { status: 200 });
+      });
+      await client.submit("k", {
+        model,
+        capability: "video",
+        params: { prompt: "the harbour at dusk", references: [], durationSec },
+      });
+      return sent;
+    };
+
+    const seedance = await bodyFor("seedance-2.0", 6);
+    assert.equal(seedance["duration"], "6", "seedance counts in bare seconds");
+    assert.ok(!("durationSec" in seedance), "our own field name never reaches the wire");
+
+    const veo = await bodyFor("veo-3.1", 8);
+    assert.equal(veo["duration"], "8s", "veo wants the s");
+
+    const kling = await bodyFor("kling-3-pro", 5);
+    assert.equal(kling["duration"], "5");
+  });
+
   it("refuses references for a model with no edit route, before any network call", async () => {
     let fetches = 0;
     const client = new FalClient(async () => {

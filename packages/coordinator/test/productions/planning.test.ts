@@ -417,6 +417,85 @@ describe("whole-scene reference budgeting", () => {
     await store.close();
   });
 
+  it("stretches the shot plan to the clip that was actually asked for", async () => {
+    // A pass snapped from 5s to 6s used to send the longer clip with a 0–5s plan behind it:
+    // segmentation reads those boundaries, so the last second was in nobody's take and the
+    // per-shot charge split was prorated over the wrong total.
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const base = production.scenes[0]!;
+    const scene: Scene = {
+      ...base,
+      shots: [{ ...base.shots[0]!, id: "sh_96", number: 96, description: "@maren-kest", durationSec: 5 }],
+    };
+    // Veo takes 4s, 6s or 8s: a 5s pass is asked for as 6s.
+    const veo: ManifestModel = {
+      ...VIDEO_MODEL,
+      id: "veo-3.1",
+      displayName: "Veo 3.1",
+      accepts: { ...VIDEO_MODEL.accepts, referenceImages: 0 },
+      limits: { maxDurationSec: 8, durations: { "4": "4s", "6": "6s", "8": "8s" } },
+    };
+    const plan = planScene(
+      {
+        world: bundle.meta,
+        productionId: production.meta.id,
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene,
+        selections: {},
+        model: veo,
+      },
+      "whole-scene",
+    );
+    const [request] = composeDispatches(bundle.meta.worldId, production.meta.id, scene, plan, veo, bundle);
+    assert.equal(request!.params["durationSec"], 6, "the clip asked for");
+    const shotPlan = request!.params["shotPlan"] as Array<{ startSec: number; endSec: number }>;
+    assert.equal(shotPlan[shotPlan.length - 1]!.endSec, 6, "and the plan covers all of it");
+    await store.close();
+  });
+
+  it("refuses a shot longer than the model can make, rather than quietly shortening it", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const base = production.scenes[0]!;
+    const scene: Scene = {
+      ...base,
+      shots: [{ ...base.shots[0]!, id: "sh_97", number: 97, description: "@maren-kest", durationSec: 22 }],
+    };
+    const veo: ManifestModel = {
+      ...VIDEO_MODEL,
+      id: "veo-3.1",
+      displayName: "Veo 3.1",
+      limits: { maxDurationSec: 8, durations: { "4": "4s", "6": "6s", "8": "8s" } },
+    };
+    const plan = planScene(
+      {
+        world: bundle.meta,
+        productionId: production.meta.id,
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene,
+        selections: {},
+        model: veo,
+      },
+      "per-shot",
+    );
+    // Named before anyone presses...
+    assert.deepEqual(plan.warnings.overlongShots, [
+      { shotId: "sh_97", number: 97, durationSec: 22, longestSec: 8 },
+    ]);
+    // ...and refused if a frame arrives anyway. An 8s clip billed against a 22s shot is money
+    // spent on footage that cannot cover it.
+    assert.throws(
+      () => composeDispatches(bundle.meta.worldId, production.meta.id, scene, plan, veo, bundle),
+      /longer than the 8s Veo 3\.1 can make/,
+    );
+    await store.close();
+  });
+
   it("budgets every packed pass independently and honors zero-reference models", async () => {
     const { store } = await open();
     const bundle = store.getBundle();

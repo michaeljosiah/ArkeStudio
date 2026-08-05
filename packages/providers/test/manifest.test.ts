@@ -3,6 +3,9 @@ import { describe, it } from "node:test";
 import {
   characterImageEstimateIsUsable,
   characterImageOutput,
+  dispatchDuration,
+  durationOptions,
+  pricedDuration,
   estimateCharacterImageMicroUsd,
   estimateMicroUsd,
   formatMicroUsd,
@@ -79,6 +82,40 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     assert.equal(model("gpt-image-2").accepts.referenceImages, 16);
     assert.equal(model("gpt-image-2").accepts.referenceRoles, false);
     assert.equal(modelCapabilityCopy(model("gpt-image-2")), "refs ×16");
+  });
+
+  it("every video model declares the lengths it can be asked for", () => {
+    // The same shape as the route check above: a model offered with no declared length is one
+    // whose dispatch silently runs at the provider's default while the estimate says otherwise.
+    for (const video of SHIPPED_MANIFEST.models.filter((m) => m.capability === "video" && m.provider === "fal")) {
+      const options = durationOptions(video);
+      assert.ok(options.length > 0, `${video.id} declares its lengths`);
+      const cap = video.limits.maxDurationSec;
+      if (cap !== undefined) {
+        assert.ok(options[options.length - 1]! <= cap, `${video.id}'s longest option is within its own cap`);
+      }
+    }
+  });
+
+  it("snaps a planned length up to one the route accepts, never down", () => {
+    const veo = model("veo-3.1");
+    // Veo takes 4s, 6s or 8s and nothing between: a 5s shot becomes a 6s dispatch, because
+    // rounding down would bill for footage that ends before the shot does.
+    assert.deepEqual(dispatchDuration(veo, 5), { kind: "asked", seconds: 6, wire: "6s" });
+    assert.deepEqual(dispatchDuration(veo, 4), { kind: "asked", seconds: 4, wire: "4s" });
+    // Longer than anything the route offers is refused, not clamped: a 22s shot dispatched as
+    // a 15s clip is paid-for footage that cannot cover the shot.
+    assert.deepEqual(dispatchDuration(veo, 99), { kind: "over-cap", longest: 8 });
+    assert.equal(pricedDuration(veo, 99), 99, "and it is not priced as if it had been shortened");
+    // And the estimate follows the snap rather than the request.
+    assert.equal(
+      estimateMicroUsd(veo, { durationSec: 6 }) > estimateMicroUsd(veo, { durationSec: 5 }),
+      true,
+      "a 5s shot priced as 5s would understate the 6s that runs",
+    );
+    // A model with no declared lengths says so, rather than inventing one.
+    const bare = { ...veo, limits: { ...veo.limits, durations: undefined } };
+    assert.deepEqual(dispatchDuration(bare, 5), { kind: "provider-default" });
   });
 
   it("pass packing computes from the duration cap (§2.5)", () => {

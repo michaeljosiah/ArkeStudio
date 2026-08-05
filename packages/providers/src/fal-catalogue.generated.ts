@@ -157,6 +157,20 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     },
     "limits": {
       "maxDurationSec": 15,
+      "durations": {
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "10",
+        "11": "11",
+        "12": "12",
+        "13": "13",
+        "14": "14",
+        "15": "15"
+      },
       "resolutions": [
         "720p",
         "1080p"
@@ -187,9 +201,22 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     },
     "limits": {
       "maxDurationSec": 15,
+      "durations": {
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "10",
+        "11": "11",
+        "12": "12",
+        "13": "13",
+        "14": "14",
+        "15": "15"
+      },
       "resolutions": [
-        "720p",
-        "1080p"
+        "720p"
       ],
       "aspects": [
         "16:9",
@@ -213,6 +240,11 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     },
     "limits": {
       "maxDurationSec": 8,
+      "durations": {
+        "4": "4s",
+        "6": "6s",
+        "8": "8s"
+      },
       "resolutions": [
         "720p",
         "1080p"
@@ -239,6 +271,11 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     },
     "limits": {
       "maxDurationSec": 8,
+      "durations": {
+        "4": "4s",
+        "6": "6s",
+        "8": "8s"
+      },
       "resolutions": [
         "720p"
       ],
@@ -263,10 +300,22 @@ export const FAL_MODELS: readonly ManifestModel[] = [
       "endFrame": true
     },
     "limits": {
-      "maxDurationSec": 10,
-      "resolutions": [
-        "1080p"
-      ],
+      "maxDurationSec": 15,
+      "durations": {
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "10",
+        "11": "11",
+        "12": "12",
+        "13": "13",
+        "14": "14",
+        "15": "15"
+      },
       "aspects": [
         "16:9",
         "9:16",
@@ -289,10 +338,22 @@ export const FAL_MODELS: readonly ManifestModel[] = [
       "endFrame": false
     },
     "limits": {
-      "maxDurationSec": 10,
-      "resolutions": [
-        "720p"
-      ],
+      "maxDurationSec": 15,
+      "durations": {
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "10",
+        "11": "11",
+        "12": "12",
+        "13": "13",
+        "14": "14",
+        "15": "15"
+      },
       "aspects": [
         "16:9",
         "9:16"

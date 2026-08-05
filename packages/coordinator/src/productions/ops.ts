@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  dispatchDuration,
   estimateMicroUsd,
   parseMentions,
   planScene,
@@ -14,6 +15,7 @@ import {
   type Scene,
   type ScenePlan,
   type Shot,
+  type ShotPlanEntry,
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
@@ -356,6 +358,32 @@ function passEstimate(
   });
 }
 
+/**
+ * The seconds a video job may ask for. Refused rather than clamped when the request is longer
+ * than anything the route offers: a 22s shot dispatched as a 15s clip is paid-for footage that
+ * cannot cover what was asked for, and the dialog already names the shot before anyone presses.
+ */
+function askedSeconds(model: ManifestModel, requestedSec: number, what: string): number {
+  const choice = dispatchDuration(model, requestedSec);
+  if (choice.kind === "over-cap") {
+    throw new Error(
+      `${what} runs ${requestedSec}s — longer than the ${choice.longest}s ${model.displayName} can make`,
+    );
+  }
+  return choice.kind === "asked" ? choice.seconds : requestedSec;
+}
+
+/**
+ * The shot plan stretched to the clip that was actually asked for. Segmentation and the
+ * per-shot charge split both read these boundaries, so a plan that stops short of the clip
+ * hides the tail from review and prorates the money over the wrong total.
+ */
+function coverPlan(plan: ShotPlanEntry[], seconds: number): ShotPlanEntry[] {
+  const last = plan[plan.length - 1];
+  if (!last || last.endSec >= seconds) return plan;
+  return [...plan.slice(0, -1), { ...last, endSec: seconds }];
+}
+
 export function composeDispatches(
   worldId: string,
   productionId: string,
@@ -388,7 +416,12 @@ export function composeDispatches(
       params: {
         prompt: entry.prompt.text,
         references: entry.references.filter((r) => r.file !== null).map((r) => r.file),
-        ...(entry.shot.durationSec !== undefined ? { durationSec: entry.shot.durationSec } : {}),
+        // The length the plan priced, which is the length the route can actually be asked for.
+        // Sending the raw shot seconds meant the job asked for something no route accepts, and
+        // the client then had nothing to translate.
+        ...(entry.shot.durationSec !== undefined
+          ? { durationSec: askedSeconds(model, entry.shot.durationSec, `shot ${entry.shot.number}`) }
+          : {}),
         ...sizeParams(model, plan),
         provenance: provenanceFor(entry.budget.carried.map((c) => c.sheetId)),
       },
@@ -401,6 +434,7 @@ export function composeDispatches(
     const shotsInPass = pass.plan.map((p) => plan.shots.find((s) => s.shot.id === p.shotId)!);
     const passReferencePlan = plan.passReferences.find((candidate) => candidate.passIndex === pass.index)!;
     const references = passReferencePlan.references.filter((reference) => reference.file !== null).map((reference) => reference.file!);
+    const passSeconds = askedSeconds(model, pass.durationSec, `scene pass ${pass.index}`);
     if (references.length > model.accepts.referenceImages) {
       throw new Error(`scene pass ${pass.index} exceeds ${model.displayName}'s reference limit`);
     }
@@ -416,17 +450,18 @@ export function composeDispatches(
           .map((s) => `[shot ${s.shot.number} · ${s.shot.durationSec ?? 4}s] ${s.prompt.text}`)
           .join("\n"),
         references,
-        durationSec: pass.durationSec,
+        durationSec: passSeconds,
         ...sizeParams(model, plan),
-        // The explicit plan (R-19, D11): SPEC-013 segments from these, never guesses.
-        shotPlan: pass.plan,
+        // The explicit plan (R-19, D11): SPEC-013 segments from these, never guesses — which is
+        // why it has to describe the clip that was actually asked for. A pass snapped from 5s to
+        // 6s left a second nobody reviewed and nobody could cut from.
+        shotPlan: coverPlan(pass.plan, passSeconds),
         provenance: provenanceFor(passReferencePlan.budget.carried.map((candidate) => candidate.sheetId)),
       },
-      // Priced at the same size the job runs at. This recomputed the estimate without the
-      // resolution, so a 1080p pass was queued carrying a 720p figure — and, for a stills
-      // production, priced a pass of images as if it were footage: no megapixels and no
-      // reference input, which on a per-megapixel model is a queued job estimated at zero.
-      estimatedMicroUsd: passEstimate(model, plan, pass.durationSec, references.length),
+      // Priced at the same size and the same length the job runs at. Recomputing it without
+      // either queued a 1080p pass carrying a 720p figure, priced a pass of stills as if it
+      // were footage, and used the seconds planned rather than the seconds asked for.
+      estimatedMicroUsd: passEstimate(model, plan, passSeconds, references.length),
       landing: { dir: `productions/${productionId}/incoming/${scene.id}-pass-${pass.index}` },
     };
   });

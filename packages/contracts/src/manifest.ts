@@ -95,6 +95,13 @@ export type SizeTier = z.infer<typeof SizeTierSchema>;
 export const ModelLimitsSchema = z
   .object({
     maxDurationSec: z.number().int().min(1).optional(),
+    /**
+     * Seconds → the provider's own word for that length. Video routes do not take a number of
+     * seconds: they take a string from a fixed list, and the lists disagree — seedance and kling
+     * say "5", veo says "5s", and none of them accepts 6.5. A model with no entry here has no
+     * length we can ask for, so the provider's default runs and the estimate must say so.
+     */
+    durations: z.record(z.string().regex(/^[0-9]+$/), z.string().min(1)).optional(),
     resolutions: z.array(z.string()).optional(),
     /**
      * Normalised tier → the provider's own word for it. The tier is what a user chooses; the
@@ -400,6 +407,43 @@ export function modelCapabilityCopy(model: ManifestModel): string {
   else if (model.accepts.startFrame) parts.push("start frame");
   if (model.limits.maxDurationSec !== undefined) parts.push(`${model.limits.maxDurationSec}s`);
   return parts.join(" · ");
+}
+
+/** The lengths this model can actually be asked for, in seconds, ascending. */
+export function durationOptions(model: ManifestModel): number[] {
+  return Object.keys(model.limits.durations ?? {})
+    .map((seconds) => Number.parseInt(seconds, 10))
+    .sort((a, b) => a - b);
+}
+
+/**
+ * What a dispatch can ask for, in seconds and in the route's own word — or why it cannot.
+ *
+ * Three outcomes, kept apart because they need different answers. A length the route offers is
+ * rounded **up** to: the footage covers the shot rather than ending early, and the estimate,
+ * computed from this same number, can only overstate. A model that declares no lengths runs at
+ * the provider's default, which is worth saying rather than pretending a number was honoured.
+ * And a shot longer than anything the route offers is refused: clamping a 22s shot to a 15s
+ * clip would spend real money on footage that cannot cover what was asked for.
+ */
+export type DurationChoice =
+  | { kind: "asked"; seconds: number; wire: string }
+  | { kind: "provider-default" }
+  | { kind: "over-cap"; longest: number };
+
+export function dispatchDuration(model: ManifestModel, requestedSec: number): DurationChoice {
+  const options = durationOptions(model);
+  if (options.length === 0) return { kind: "provider-default" };
+  const longest = options[options.length - 1]!;
+  if (requestedSec > longest) return { kind: "over-cap", longest };
+  const chosen = options.find((seconds) => seconds >= requestedSec)!;
+  return { kind: "asked", seconds: chosen, wire: model.limits.durations![String(chosen)]! };
+}
+
+/** The seconds a dispatch will run for, for pricing — the request itself when we cannot ask. */
+export function pricedDuration(model: ManifestModel, requestedSec: number): number {
+  const choice = dispatchDuration(model, requestedSec);
+  return choice.kind === "asked" ? choice.seconds : requestedSec;
 }
 
 /**
