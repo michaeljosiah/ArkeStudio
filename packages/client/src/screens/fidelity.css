@@ -579,6 +579,21 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-designcard:hover { transform: rotate(0deg) translateY(-8px); box-shadow: var(--shadow-xl); }
 .fy-designcard__frame { width: 300px; height: 360px; }
+/* The main photo opens larger, the same way the featured portrait and the character sheet do. */
+.fy-designcard__portrait-button {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: zoom-in;
+  display: block;
+}
+.fy-designcard__portrait-button:disabled { cursor: default; }
+.fy-designcard__portrait-button:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.fy-designcard__portrait-button .fy-portrait { width: 100%; height: 100%; object-fit: cover; }
 .fy-designcard__caption { display: flex; align-items: center; gap: 8px; margin: 11px 4px 0; }
 .fy-designcard__title { font: 600 16px var(--font-sans); }
 .fy-designcard__note { margin-left: auto; font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
@@ -2358,9 +2373,17 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-reference-card__image--photo { height: 430px; flex: none; }
 .fy-reference-card__image--sheet { height: 390px; flex: none; }
 .fy-reference-card__image .fy-portrait { border-radius: 0; object-fit: cover; }
-.fy-character-sheet-preview { width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; display: block; }
-.fy-character-sheet-preview:focus-visible { outline: 2px solid var(--ring); outline-offset: -4px; }
-.fy-character-sheet-preview .fy-portrait { width: 100%; height: 100%; object-fit: cover; }
+/* Both panes of the reference page open larger; they share one shape. */
+.fy-character-sheet-preview,
+.fy-reference-card__zoom { width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; display: block; }
+.fy-character-sheet-preview:disabled,
+.fy-reference-card__zoom:disabled { cursor: default; }
+.fy-character-sheet-preview:focus-visible,
+.fy-reference-card__zoom:focus-visible { outline: 2px solid var(--ring); outline-offset: -4px; }
+.fy-character-sheet-preview .fy-portrait,
+.fy-reference-card__zoom .fy-portrait { width: 100%; height: 100%; object-fit: cover; }
+/* The fallback fills its frame too, so an outstanding photo still reads as the whole pane. */
+.fy-reference-card__zoom .fy-portrait--fallback { width: 100%; height: 100%; }
 .fy-reference-card__generating { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--neutral-700) 42%, transparent), transparent 48%), var(--neutral-950); color: var(--media-overlay-fg); text-align: center; }
 .fy-reference-card__generating .fy-loading { padding: 0; }
 .fy-reference-card__generating .fy-loading__mark { --foreground: var(--media-overlay-fg); --neutral-300: var(--neutral-600); }
@@ -2608,3 +2631,88 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-mainphoto-dialog__refs .is-dropped { opacity: .45; }
 .fy-mainphoto-dialog__refs .is-dropped span { text-decoration: line-through; }
 .fy-sheetgen__purpose { display: block; font: 400 10px var(--font-mono); color: var(--neutral-400); }
+
+/* ---- proposals (turn 41b): the list beside the one you are deciding on ---- */
+
+.fy-proposals { display: flex; flex-direction: column; min-height: 0; }
+.fy-proposals__head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 18px 44px 14px;
+  border-bottom: var(--border-1) solid var(--border);
+}
+.fy-proposals__count { font: 600 15px var(--font-sans); }
+.fy-proposals__meta { font: 400 12px var(--font-sans); color: var(--muted-foreground); }
+.fy-proposals__body { display: flex; align-items: stretch; flex: 1; min-height: 0; }
+/* 265px is the design's number: wide enough for a summary line, narrow enough that the
+   decision itself keeps the room. */
+.fy-proposals__list {
+  width: 265px;
+  box-sizing: border-box;
+  flex: none;
+  padding: 14px 0;
+  border-right: var(--border-1) solid var(--border);
+  background: var(--muted);
+  overflow-y: auto;
+}
+.fy-proposals__group + .fy-proposals__group { margin-top: 18px; }
+.fy-proposals__origin {
+  font: 500 10px var(--font-sans);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  padding: 0 16px;
+  margin-bottom: 8px;
+}
+.fy-proposals__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 16px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-proposals__item:hover { background: var(--background); }
+.fy-proposals__item--on { background: var(--background); border-left-color: var(--foreground); }
+.fy-proposals__item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.fy-proposals__summary { display: block; font: 500 12.5px/1.4 var(--font-sans); }
+.fy-proposals__sub {
+  display: block;
+  font: 400 11px var(--font-sans);
+  color: var(--neutral-400);
+  margin-top: 2px;
+}
+.fy-proposals__detail { flex: 1; min-width: 0; padding: 18px 26px; overflow-y: auto; }
+
+/* The hub's pointer at pending work — a summary, not the decision itself. */
+.fy-needsyou {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 14px 18px;
+  border: var(--border-1) solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  color: inherit;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-needsyou:hover { border-color: var(--neutral-400); }
+.fy-needsyou:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-needsyou__lead { font: 600 13px var(--font-sans); flex: none; }
+.fy-needsyou__sub {
+  flex: 1;
+  min-width: 0;
+  font: 400 12px var(--font-sans);
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
