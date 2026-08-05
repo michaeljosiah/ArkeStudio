@@ -124,4 +124,7 @@ export const IsoDateTimeSchema = z
 /** Frontmatter dates are date-only or date-time; both are accepted wherever a date is displayed. */
 export const IsoDateSchema = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)?$/, "expected an ISO date");
+  .regex(
+    /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)?$/,
+    "expected an ISO date",
+  );

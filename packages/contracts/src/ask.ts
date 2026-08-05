@@ -52,9 +52,7 @@ export const AskResultSchema = z.discriminatedUnion("outcome", [
     .object({
       outcome: z.literal("answer"),
       claims: z
-        .array(
-          z.object({ text: z.string(), entryId: CanonIdSchema, excerpt: z.string() }).strict(),
-        )
+        .array(z.object({ text: z.string(), entryId: CanonIdSchema, excerpt: z.string() }).strict())
         .min(1),
       searched: z.number().int().min(0),
     })

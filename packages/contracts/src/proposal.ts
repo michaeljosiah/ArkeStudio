@@ -21,8 +21,8 @@ export const ProposalKindSchema = z.enum([
   "scene-draft",
   "scene-edit",
   "extraction",
-    "restore",
-    "art-direction",
+  "restore",
+  "art-direction",
 ]);
 export type ProposalKind = z.infer<typeof ProposalKindSchema>;
 

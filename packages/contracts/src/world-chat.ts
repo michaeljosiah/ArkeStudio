@@ -743,6 +743,8 @@ export const WorldChatLoadedSchema = z
     updatedAt: IsoDateTimeSchema,
     entryContext: WorldChatContextSchema.optional(),
     seq: z.number().int().min(0),
+    /** Set when a sent-back proposal reopened this conversation. Survives checkpointing. */
+    reopened: z.boolean().optional(),
     messages: z.array(WorldChatMessageSchema),
     /** True when older messages exist before `messages[0]`. */
     hasMore: z.boolean(),

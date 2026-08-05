@@ -460,8 +460,9 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       : sceneBudget.dropped;
   const overlongShots = scene.shots
     .map((shot) => ({ shot, choice: dispatchDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC) }))
-    .filter((entry): entry is { shot: Shot; choice: { kind: "over-cap"; longest: number } } =>
-      entry.choice.kind === "over-cap",
+    .filter(
+      (entry): entry is { shot: Shot; choice: { kind: "over-cap"; longest: number } } =>
+        entry.choice.kind === "over-cap",
     )
     .map((entry) => ({
       shotId: entry.shot.id,

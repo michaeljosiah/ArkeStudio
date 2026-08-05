@@ -158,7 +158,11 @@ export function buildExportPlan(cut: DerivedCut, preset: ExportPreset): ExportPl
       };
     }
     // A black slate reading "SHOT 15 · 6.0s" beats a silent omission (R-20, D10).
-    return { type: "slate" as const, label: `${entry.label} · ${entry.durationSec.toFixed(1)}s`, durationSec: entry.durationSec };
+    return {
+      type: "slate" as const,
+      label: `${entry.label} · ${entry.durationSec.toFixed(1)}s`,
+      durationSec: entry.durationSec,
+    };
   });
   return { preset, items, totalSec: cut.totalSec };
 }
@@ -181,14 +185,31 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
         `[${inputIndex}:v]scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${p.fps}[v${inputIndex}]`,
       );
     } else {
-      args.push("-f", "lavfi", "-t", String(item.durationSec), "-i", `color=c=black:s=${p.width}x${p.height}:r=${p.fps}`);
+      args.push(
+        "-f",
+        "lavfi",
+        "-t",
+        String(item.durationSec),
+        "-i",
+        `color=c=black:s=${p.width}x${p.height}:r=${p.fps}`,
+      );
       const text = item.label.replace(/[':\\]/g, " ");
-      filters.push(`[${inputIndex}:v]drawtext=text='${text}':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v${inputIndex}]`);
+      filters.push(
+        `[${inputIndex}:v]drawtext=text='${text}':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v${inputIndex}]`,
+      );
     }
     inputIndex += 1;
   }
   const concatInputs = plan.items.map((_, i) => `[v${i}]`).join("");
   filters.push(`${concatInputs}concat=n=${plan.items.length}:v=1:a=0[out]`);
-  args.push("-filter_complex", filters.join(";"), "-map", "[out]", "-crf", String(PRESETS[plan.preset].crf), outFile);
+  args.push(
+    "-filter_complex",
+    filters.join(";"),
+    "-map",
+    "[out]",
+    "-crf",
+    String(PRESETS[plan.preset].crf),
+    outFile,
+  );
   return args;
 }

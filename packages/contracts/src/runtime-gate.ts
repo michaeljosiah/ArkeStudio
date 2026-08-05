@@ -12,7 +12,9 @@ const gb = (mb: number): string => `${Math.round(mb / 1024)} GB`;
 
 /** The one cloud alternative worth naming, when the same capability has a cloud model. */
 function cloudAlternative(manifest: ModelManifest, model: ManifestModel): string | undefined {
-  const cloud = manifest.models.find((m) => m.capability === model.capability && !PROVIDERS[m.provider].local);
+  const cloud = manifest.models.find(
+    (m) => m.capability === model.capability && !PROVIDERS[m.provider].local,
+  );
   if (!cloud) return undefined;
   return `Cloud ${model.capability} still works via ${PROVIDERS[cloud.provider].displayName}.`;
 }

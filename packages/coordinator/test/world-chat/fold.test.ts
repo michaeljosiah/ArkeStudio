@@ -205,8 +205,8 @@ describe("world chat fold", () => {
     const folded = foldConversation(CV, AT, events);
     assert.equal(folded.view.status, "open");
     assert.equal(folded.view.candidates[0]!.status, "live");
-    assert.equal(folded.reopened, true);
-    assert.equal(summarise(folded.view, folded.reopened).reopened, true);
+    assert.equal(folded.view.reopened, true);
+    assert.equal(summarise(folded.view).reopened, true);
   });
 
   it("counts only live propositions on the summary row", async () => {
@@ -225,7 +225,7 @@ describe("world chat fold", () => {
 
     const { events } = await s.read();
     const folded = foldConversation(CV, AT, events);
-    assert.equal(summarise(folded.view, false).pointCount, 1);
+    assert.equal(summarise(folded.view).pointCount, 1);
   });
 });
 

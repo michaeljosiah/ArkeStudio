@@ -99,7 +99,14 @@ export type QueueStatus = z.infer<typeof QueueStatusSchema>;
 export const ReconcileActionSchema = z
   .object({
     jobId: JobIdSchema,
-    action: z.enum(["adopted", "resubmitted", "held-for-user", "resumed-polling", "ledger-completed", "requeued"]),
+    action: z.enum([
+      "adopted",
+      "resubmitted",
+      "held-for-user",
+      "resumed-polling",
+      "ledger-completed",
+      "requeued",
+    ]),
     detail: z.string().optional(),
   })
   .strict();

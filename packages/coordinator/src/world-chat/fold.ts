@@ -35,8 +35,6 @@ export interface FoldResult {
    * before another run starts.
    */
   needsInterruptedRunRepair: boolean;
-  /** Set when a sent-back proposal reopened this conversation. Shown on the summary row. */
-  reopened: boolean;
 }
 
 const MAX_MESSAGES = 50;
@@ -243,6 +241,7 @@ export function foldConversation(
     updatedAt,
     ...(entryContext ? { entryContext } : {}),
     seq,
+    ...(reopened ? { reopened: true } : {}),
     messages: shown,
     hasMore: shown.length < windowed.length,
     candidates: [...candidates.values()],
@@ -253,13 +252,11 @@ export function foldConversation(
     proposalIds: [...proposalIds],
     problems,
   };
-  // Reopening is a fact about the summary row rather than the workspace — the restored
-  // propositions are already in `candidates` — so it is returned rather than embedded.
-  return { view, problems, tombstones: [...tombstones.values()], needsInterruptedRunRepair, reopened };
+  return { view, problems, tombstones: [...tombstones.values()], needsInterruptedRunRepair };
 }
 
 /** The row the world snapshot carries: enough to choose a conversation, and no history. */
-export function summarise(view: WorldChatLoaded, reopened: boolean): WorldChatSummary {
+export function summarise(view: WorldChatLoaded): WorldChatSummary {
   return {
     id: view.id,
     title: view.title,
@@ -268,6 +265,6 @@ export function summarise(view: WorldChatLoaded, reopened: boolean): WorldChatSu
     ...(view.entryContext ? { entryContext: view.entryContext } : {}),
     pointCount: view.candidates.filter((c) => c.status === "live").length,
     openProposalCount: view.proposalIds.length,
-    ...(reopened ? { reopened: true } : {}),
+    ...(view.reopened ? { reopened: true } : {}),
   };
 }

@@ -57,9 +57,12 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
   // Class 1 — unresolved spend: only the user can decide (D3). Global and precise (R-6).
   for (const job of state.app.jobs) {
     if (job.finalization?.status === "failed") {
-      const retryable = ["main-photo-candidate", "establish-candidate", "character-sheet", "character-look"].includes(
-        job.target.kind,
-      );
+      const retryable = [
+        "main-photo-candidate",
+        "establish-candidate",
+        "character-sheet",
+        "character-look",
+      ].includes(job.target.kind);
       entries.push({
         urgency: 1,
         kind: "job-finalization-failed",
@@ -107,7 +110,10 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
       urgency: 3,
       kind: "external-edits",
       title: `${world.meta.name} has ${world.externalEdits.length} external edit${world.externalEdits.length === 1 ? "" : "s"}`,
-      detail: world.externalEdits.map((e) => e.path).slice(0, 3).join(", "),
+      detail: world.externalEdits
+        .map((e) => e.path)
+        .slice(0, 3)
+        .join(", "),
       at: world.meta.updated,
       worldId: world.meta.worldId,
       actions: ["reconcile"],
@@ -190,8 +196,10 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
     const attention = summary.attention;
     if (!attention || (attention.unreviewedTakes === 0 && attention.openProposals === 0)) continue;
     const bits: string[] = [];
-    if (attention.unreviewedTakes > 0) bits.push(`${attention.unreviewedTakes} unreviewed take${attention.unreviewedTakes === 1 ? "" : "s"}`);
-    if (attention.openProposals > 0) bits.push(`${attention.openProposals} open proposal${attention.openProposals === 1 ? "" : "s"}`);
+    if (attention.unreviewedTakes > 0)
+      bits.push(`${attention.unreviewedTakes} unreviewed take${attention.unreviewedTakes === 1 ? "" : "s"}`);
+    if (attention.openProposals > 0)
+      bits.push(`${attention.openProposals} open proposal${attention.openProposals === 1 ? "" : "s"}`);
     entries.push({
       urgency: attention.unreviewedTakes > 0 ? 4 : 5,
       kind: "closed-world-attention",
@@ -240,7 +248,9 @@ export function computeRunning(
     entries.push({
       kind: "job",
       title: `${job.model} · ${job.target.kind}${job.target.id !== undefined ? ` ${job.target.id}` : ""}`,
-      detail: finalizing ? `${job.provider} · generated · preparing result` : `${job.provider} · ${job.status}`,
+      detail: finalizing
+        ? `${job.provider} · generated · preparing result`
+        : `${job.provider} · ${job.status}`,
       percent: null,
       ref: job.id,
       worldId: job.worldId,
@@ -319,7 +329,8 @@ export function spendSummary(ledger: LedgerEntry[], periodDays: number, now: Dat
   let derived = 0;
   let unmetered = 0;
   for (const entry of inWindow) {
-    const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[entry.provider]?.local === true;
+    const local =
+      (PROVIDERS as Record<string, { local: boolean } | undefined>)[entry.provider]?.local === true;
     if (entry.actualSource === "local-zero" || local) {
       unmetered += 1;
       const row = byProvider.get(entry.provider) ?? { microUsd: 0, entries: 0, unmetered: true };

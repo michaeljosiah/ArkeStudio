@@ -91,11 +91,62 @@ export type RankedVoice = z.infer<typeof RankedVoiceSchema>;
 // ---------------------------------------------------------------------------
 
 const STOPWORDS = new Set([
-  "a", "an", "and", "as", "at", "be", "before", "but", "by", "for", "from", "has", "he", "her",
-  "his", "in", "into", "is", "it", "its", "of", "on", "or", "she", "so", "than", "that", "the",
-  "their", "them", "then", "they", "to", "very", "when", "with", "would", "could", "she's",
-  "he's", "never", "always", "speaks", "speak", "talks", "voice", "sounds", "sound", "word",
-  "words", "people", "one", "she'll", "wastes", "keep", "keeps",
+  "a",
+  "an",
+  "and",
+  "as",
+  "at",
+  "be",
+  "before",
+  "but",
+  "by",
+  "for",
+  "from",
+  "has",
+  "he",
+  "her",
+  "his",
+  "in",
+  "into",
+  "is",
+  "it",
+  "its",
+  "of",
+  "on",
+  "or",
+  "she",
+  "so",
+  "than",
+  "that",
+  "the",
+  "their",
+  "them",
+  "then",
+  "they",
+  "to",
+  "very",
+  "when",
+  "with",
+  "would",
+  "could",
+  "she's",
+  "he's",
+  "never",
+  "always",
+  "speaks",
+  "speak",
+  "talks",
+  "voice",
+  "sounds",
+  "sound",
+  "word",
+  "words",
+  "people",
+  "one",
+  "she'll",
+  "wastes",
+  "keep",
+  "keeps",
 ]);
 
 /**
@@ -153,7 +204,8 @@ export function previewLineFor(sheet: Sheet, productions: ProductionBundle[]): P
   for (const production of productions) {
     for (const scene of production.scenes) {
       for (const shot of scene.shots) {
-        const line = shot.audio?.kind === "vo" && shot.audio.speaker === sheet.id ? shot.audio.line : undefined;
+        const line =
+          shot.audio?.kind === "vo" && shot.audio.speaker === sheet.id ? shot.audio.line : undefined;
         if (line !== undefined && line.trim().length > 0) {
           return { text: line, source: "own-line" };
         }
@@ -161,7 +213,10 @@ export function previewLineFor(sheet: Sheet, productions: ProductionBundle[]): P
     }
   }
   // 2 — drafted from the sheet's essence and written voice.
-  const essence = sheet.sections.find((s) => s.heading === "Essence")?.body.split(/[.!?]/)[0]?.trim();
+  const essence = sheet.sections
+    .find((s) => s.heading === "Essence")
+    ?.body.split(/[.!?]/)[0]
+    ?.trim();
   if (essence && essence.length > 0) {
     return { text: `${essence}. That is all I will say on it.`, source: "drafted" };
   }
@@ -191,9 +246,7 @@ const KOKORO_DELIVERY: Partial<Record<Delivery, Record<string, number>>> = {
   urgent: { speed: 1.15 },
 };
 
-export type DeliveryMapping =
-  | { ok: true; params: Record<string, number> }
-  | { ok: false; reason: string };
+export type DeliveryMapping = { ok: true; params: Record<string, number> } | { ok: false; reason: string };
 
 /**
  * Map a delivery to provider parameters, or state plainly that this voice's provider cannot
@@ -209,5 +262,8 @@ export function deliveryParams(provider: string, delivery: Delivery): DeliveryMa
       reason: `Kokoro cannot express "${delivery}" — local presets shape pace only; the read will be neutral`,
     };
   }
-  return { ok: false, reason: `${provider} has no declared delivery mapping — the read will use provider defaults` };
+  return {
+    ok: false,
+    reason: `${provider} has no declared delivery mapping — the read will use provider defaults`,
+  };
 }
