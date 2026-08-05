@@ -13,6 +13,9 @@ const IGNORED = [
   /^\.index([/\\]|$)/,
   /^\.history([/\\]|$)/,
   /^\.proposals([/\\]|$)/,
+  // Conversation writes are app-owned and frequent. Without this every message would raise
+  // "this world changed outside Arke Studio" against the app's own append.
+  /^\.conversations([/\\]|$)/,
   /^\.cache([/\\]|$)/,
   /^\.staging([/\\]|$)/,
   /^world\.lock$/,

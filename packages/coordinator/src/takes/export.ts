@@ -17,7 +17,9 @@ export interface FfmpegRunner {
 export interface ExportHandle {
   id: string;
   cancel(): void;
-  done: Promise<{ status: "done"; output: string } | { status: "cancelled" } | { status: "failed"; error: string }>;
+  done: Promise<
+    { status: "done"; output: string } | { status: "cancelled" } | { status: "failed"; error: string }
+  >;
 }
 
 /**
@@ -56,7 +58,16 @@ export function runExport(
 }
 
 /** What a world export leaves behind (D12): caches and locks; never the version record. */
-export const WORLD_EXPORT_EXCLUDED = [".index", ".commit", ".proposals", ".staging", ".cache", "world.lock"];
+export const WORLD_EXPORT_EXCLUDED = [
+  ".index",
+  ".commit",
+  ".proposals",
+  // Unfinished thinking, like .proposals. A world archive carries it; an export does not.
+  ".conversations",
+  ".staging",
+  ".cache",
+  "world.lock",
+];
 
 /**
  * Copy the world for another machine (R-22): `.history/` IS included — it is the version
