@@ -2399,3 +2399,64 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---- the dispatch bar (design-system turn 39) -----------------------------
+   The row wraps rather than overflowing: hosts run from a wide dialog to a
+   370px side panel, and the figure travels with the buttons in one group so it
+   is never orphaned at the left of a new line. */
+.fy-dispatchbar { position: relative; border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
+.fy-dispatchbar__row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; row-gap: 12px; }
+.fy-dispatchbar__eyebrow { font: 500 10px var(--font-mono); letter-spacing: .14em; color: var(--neutral-400); }
+.fy-dispatchbar__provider { font: 400 10px var(--font-mono); color: var(--neutral-400); }
+.fy-dispatchbar__pill {
+  display: flex; align-items: center; gap: 8px; flex: none; white-space: nowrap;
+  padding: 6px 12px; border: 1px solid var(--border); border-radius: 9px;
+  background: var(--background); cursor: pointer; font: 500 12.5px var(--font-sans); color: var(--foreground);
+}
+.fy-dispatchbar__pill:hover { background: var(--accent); }
+.fy-dispatchbar__pill strong,
+.fy-dispatchbar__picker strong {
+  padding: 2px 6px; border-radius: 999px; background: var(--secondary);
+  font: 500 8px var(--font-mono); color: var(--muted-foreground);
+}
+.fy-dispatchbar__pill em,
+.fy-dispatchbar__picker em {
+  padding: 2px 6px; border-radius: 999px; border: 1px solid var(--warning);
+  font: 500 8px var(--font-mono); color: var(--warning); font-style: normal;
+}
+.fy-dispatchbar__seg { display: flex; align-items: center; gap: 8px; flex: none; white-space: nowrap; }
+.fy-dispatchbar__seg > span:last-child { display: flex; gap: 2px; background: var(--secondary); border-radius: 8px; padding: 2px; }
+.fy-dispatchbar__seg button {
+  padding: 5px 10px; border: 0; border-radius: 6px; background: transparent;
+  font: 400 11.5px var(--font-mono); color: var(--muted-foreground); cursor: pointer;
+}
+.fy-dispatchbar__seg button.is-active { background: var(--background); box-shadow: var(--shadow-xs); font-weight: 500; color: var(--foreground); }
+/* Unreachable, not absent: the control says what this model cannot do. */
+.fy-dispatchbar__seg button:disabled { color: var(--neutral-300); cursor: not-allowed; }
+.fy-dispatchbar__fixed { font: 400 11px var(--font-mono); color: var(--neutral-400); }
+.fy-dispatchbar__group { display: flex; align-items: center; gap: 14px; margin-left: auto; }
+.fy-dispatchbar__estimate { font: 650 17px var(--font-sans); letter-spacing: -.02em; }
+.fy-dispatchbar__detail { font: 400 10px/1.5 var(--font-mono); color: var(--neutral-400); margin-top: 8px; }
+.fy-dispatchbar__picker {
+  position: absolute; left: 0; bottom: 100%; margin-bottom: 10px; z-index: 9;
+  width: 100%; max-width: 340px; padding: 7px;
+  background: var(--background); border: 1px solid var(--border); border-radius: 13px; box-shadow: var(--shadow-lg);
+}
+.fy-dispatchbar__picker > .fy-dispatchbar__eyebrow { display: block; padding: 7px 10px 8px; }
+.fy-dispatchbar__picker button {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 10px;
+  border: 0; border-radius: 8px; background: transparent; cursor: pointer;
+  font: 400 12.5px var(--font-sans); color: var(--foreground); text-align: left;
+}
+.fy-dispatchbar__picker button:hover { background: var(--accent); }
+.fy-dispatchbar__picker button.is-selected { background: var(--secondary); }
+.fy-dispatchbar__picker button .fy-dispatchbar__provider { width: 44px; flex: none; }
+.fy-dispatchbar__picker button strong { margin-left: auto; }
+.fy-dispatchbar__pickerfoot { border-top: 1px solid var(--border); margin-top: 7px; padding: 10px 10px 4px; }
+.fy-dispatchbar__pickerfoot span { display: block; font: 400 10.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-dispatchbar__pickerfoot span + span { font: 400 9.5px var(--font-mono); color: var(--neutral-400); margin-top: 4px; }
+/* A reference the chosen model cannot carry: shown struck through rather than removed, so the
+   downgrade from image identity to text description is something you see happen. */
+.fy-mainphoto-dialog__refs .is-dropped { opacity: .45; }
+.fy-mainphoto-dialog__refs .is-dropped span { text-decoration: line-through; }
+.fy-sheetgen__purpose { display: block; font: 400 10px var(--font-mono); color: var(--neutral-400); }

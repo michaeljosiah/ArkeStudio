@@ -10,6 +10,7 @@ import {
   type Job,
   type ProviderCallRecord,
   type ProviderId,
+  type SizeTier,
   type QueueCommand,
   type RankedVoice,
   type ReconcileAction,
@@ -846,8 +847,13 @@ export function genesisAttachFiles(genesisId: string): void {
  * The world's key image, from its own name, logline and tone. An ordinary image job: estimated
  * before it runs, in the ledger, cancellable from Activity like anything else that spends.
  */
-export function generateWorldImage(worldId: string): void {
-  send({ kind: "generate-world-image", worldId, requestId: queueRequest("generate-world-image") });
+export function generateWorldImage(worldId: string, modelId?: string): void {
+  send({
+    kind: "generate-world-image",
+    worldId,
+    requestId: queueRequest("generate-world-image"),
+    ...(modelId !== undefined ? { modelId } : {}),
+  });
 }
 
 export function useWorldImage(worldId: string): void {
@@ -1253,9 +1259,12 @@ export function generateMainPhoto(
   prompt: string,
   count: number,
   identityReferences: string[],
+  choice: { modelId?: string; tier?: SizeTier } = {},
 ): void {
   send({
     kind: "generate-main-photo",
+    ...(choice.modelId !== undefined ? { modelId: choice.modelId } : {}),
+    ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
     worldId,
     sheetId,
     prompt,
@@ -1270,10 +1279,13 @@ export function generateCharacterSheet(
   sheetId: string,
   styleOverride?: string,
   characterName?: string,
+  choice: { modelId?: string; tier?: SizeTier } = {},
 ): string | null {
   const requestId = queueRequest("generate-character-sheet", characterName);
   const sent = send({
     kind: "generate-character-sheet",
+    ...(choice.modelId !== undefined ? { modelId: choice.modelId } : {}),
+    ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
     worldId,
     sheetId,
     requestId,
@@ -1297,9 +1309,12 @@ export function generateCharacterLooks(
   mode: "stay-close" | "push-it",
   prompt: string,
   count: number,
+  choice: { modelId?: string; tier?: SizeTier } = {},
 ): void {
   send({
     kind: "generate-character-looks",
+    ...(choice.modelId !== undefined ? { modelId: choice.modelId } : {}),
+    ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
     worldId,
     sheetId,
     lookKind,
