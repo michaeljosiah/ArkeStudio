@@ -194,6 +194,25 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
     );
   });
 
+  it("hits the megapixel a model's tier actually names, not a long edge", () => {
+    // Flux calls 4K "4MP". A 4096px long edge at 3:2 is about 13MP — three times what was asked
+    // for, on a model billed by the megapixel, and the request carries only the dimensions.
+    const flux = model("flux-2-pro");
+    for (const [tier, expected] of [
+      ["1K", 1],
+      ["2K", 2],
+      ["4K", 4],
+    ] as const) {
+      const out = characterImageOutput(flux, "main-photo", tier);
+      const mp = (out.width * out.height) / 1_000_000;
+      assert.ok(Math.abs(mp - expected) < 0.05, `${tier} lands on ${expected}MP, got ${mp.toFixed(2)}`);
+    }
+    // A model whose tiers are plain size words keeps the long-edge scale.
+    const banana = model("nano-banana-2");
+    const fourK = characterImageOutput(banana, "main-photo", "4K");
+    assert.equal(Math.max(fourK.width, fourK.height), 4096);
+  });
+
   it("prices explicit character outputs, including model resolution overrides", () => {
     const flux = model("flux-2-pro");
     assert.ok(estimateCharacterImageMicroUsd(flux, "main-photo") > 0);

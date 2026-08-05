@@ -319,20 +319,36 @@ function imageOutput(model: ManifestModel, landscape: boolean, tier?: SizeTier):
   // nano-banana — so a tier that only set the label left those requests at the old size while
   // the picker said 4K. Per-megapixel estimates read these dimensions as well, so the figure
   // would have been wrong in the same direction.
-  const scaled = tier !== undefined ? scaleToTier(dimensions, tier) : dimensions;
+  const scaled = tier !== undefined ? scaleToTier(dimensions, tier, resolution) : dimensions;
   return { ...scaled, aspect, ...(resolution ? { resolution } : {}) };
 }
 
 /** Long edge per tier, the aspect kept. 1K is the size these defaults were already written at. */
 const TIER_LONG_EDGE: Record<SizeTier, number> = { "1K": 1536, "2K": 2048, "4K": 4096 };
 
-function scaleToTier(dimensions: { width: number; height: number }, tier: SizeTier): { width: number; height: number } {
-  const longest = Math.max(dimensions.width, dimensions.height);
-  const target = TIER_LONG_EDGE[tier];
-  if (longest === target) return dimensions;
+/**
+ * The tier as dimensions. Which axis to scale depends on what the model means by the tier: fal's
+ * flux rows call 4K "4MP", and a 4096px long edge at 3:2 is about 13MP — three times the size
+ * asked for, on a model billed by the megapixel. When the model's own word for the tier is a
+ * megapixel count, the area is the target; otherwise the long edge is.
+ */
+function scaleToTier(
+  dimensions: { width: number; height: number },
+  tier: SizeTier,
+  nativeWord?: string,
+): { width: number; height: number } {
   // Even numbers: encoders and several providers reject odd dimensions, and rounding here is
   // cheaper than discovering it at submission.
   const even = (value: number): number => Math.max(2, Math.round(value / 2) * 2);
+  const megapixels = /^([0-9]+(?:\.[0-9]+)?)\s*MP$/i.exec(nativeWord ?? "");
+  if (megapixels) {
+    const target = Number.parseFloat(megapixels[1]!) * 1_000_000;
+    const factor = Math.sqrt(target / (dimensions.width * dimensions.height));
+    return { width: even(dimensions.width * factor), height: even(dimensions.height * factor) };
+  }
+  const longest = Math.max(dimensions.width, dimensions.height);
+  const target = TIER_LONG_EDGE[tier];
+  if (longest === target) return dimensions;
   const factor = target / longest;
   return { width: even(dimensions.width * factor), height: even(dimensions.height * factor) };
 }

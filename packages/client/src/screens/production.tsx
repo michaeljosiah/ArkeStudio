@@ -4,7 +4,6 @@ import {
   assemblePrompt,
   deriveCut,
   modelCapabilityCopy,
-  modelForCapability,
   nativeResolution,
   overrideStaleAgainst,
   planScene,
@@ -18,7 +17,7 @@ import { DegradedBanner, EmptyState, Screen } from "../components/layout.js";
 import { Badge, Button, Callout, Textarea, cx } from "../components/ui.js";
 import { ChevronLeft, ChevronRight, Play, Plus } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
-import { DispatchBar, usableModels } from "../components/dispatch-bar.js";
+import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { CanonEntryRow } from "../domain/domain.js";
 import { seconds, usd } from "../lib/format.js";
@@ -1047,25 +1046,15 @@ export function DispatchDialogScreen() {
   const { state } = useStore();
   const navigate = useNavigate();
   const capability = production?.meta.format === "stills" ? "image" : "video";
-  // The same roster the picker offers, so what is planned and dispatched is what was on screen.
-  // Choosing from every manifest row meant a model switched off in Providers — or one behind a
-  // key nobody has — could still be planned and enqueued from here, absent from the picker but
-  // reached anyway by falling back to the routed default or to the first row in the file.
-  const models = usableModels(state, capability);
   const [sceneIdx, setSceneIdx] = useState(0);
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier; resolution?: string }>({});
   const scene = production?.scenes[sceneIdx] ?? null;
-  // No first-row fallback: if the model on screen cannot run, nothing runs. Falling through to
-  // models[0] meant the bar said UNAVAILABLE while the mode buttons quietly dispatched a
-  // different model — spending on one the user never chose and was never shown.
-  // The same question the bar answers, asked the same way: routing[capability] is undefined on a
-  // fresh install, and reading it directly left the dialog showing a runnable model in the
-  // controls while both dispatch cards were replaced by "nothing to dispatch with".
-  const routed = state?.app.manifest
-    ? modelForCapability(state.app.manifest, state.app.routing.defaults, capability)
-    : null;
-  const wanted = choice.modelId ?? routed?.id;
-  const model = models.find((m) => m.id === wanted) ?? null;
+  // One resolver for the bar and its host, so the dialog cannot show one model and dispatch
+  // another. Planning from every manifest row let a switched-off model be enqueued from the mode
+  // buttons while the bar said UNAVAILABLE; stranded now means the cards stay away entirely,
+  // because spending on a model the user never chose is worse than not dispatching.
+  const resolved = resolveModel(state, capability, choice.modelId);
+  const model = resolved.stranded === null ? resolved.model : null;
   // Video dispatch is sized by the provider's own word; stills by real dimensions, which the
   // plan derives from the tier. Both travel from here so the dialog and the job agree.
   const resolution =

@@ -97,6 +97,16 @@ describe("Settings · Providers, one provider at a time", () => {
     assert.ok(providers().includes("1 OF 2 ON"));
   });
 
+  it("does not call a keyless provider's models on, in the rail or the pane", () => {
+    // The switches below are disabled and the rail says "—"; a pane reading "2 OF 2 ON" two
+    // inches away describes models that cannot appear in any picker.
+    const base = stateWith({});
+    __setStateForTest({ ...base, app: { ...base.app, providers: [] } });
+    const html = providers();
+    assert.ok(!/\dOF|OF \d+ ON/.test(html.replace(/<[^>]+>/g, "")), "no on-count without a key");
+    assert.ok(html.includes("UNAVAILABLE"));
+  });
+
   it("says an em dash, not a count, for a provider with no key", () => {
     __setStateForTest(stateWith({}));
     const html = providers();

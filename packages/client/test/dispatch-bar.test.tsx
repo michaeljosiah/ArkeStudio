@@ -4,7 +4,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { ClientState, ManifestModel, ProviderStatus } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { choiceForModel, DispatchBar, usableModels } from "../src/components/dispatch-bar.js";
+import { choiceForModel, DispatchBar, resolveModel, usableModels } from "../src/components/dispatch-bar.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -127,6 +127,38 @@ describe("a routed default that cannot run", () => {
     const html = bar();
     assert.ok(!html.includes("UNAVAILABLE"));
     assert.match(html, /<button[^>]*>Generate<\/button>/);
+  });
+});
+
+describe("which model a surface will use", () => {
+  const noDefault = (patch: Parameters<typeof stateWith>[0] = {}): ClientState => {
+    const state = stateWith(patch);
+    return { ...state, app: { ...state.app, routing: { defaults: {}, faults: [] } } };
+  };
+
+  it("with no saved default, answers with the first model that can run", () => {
+    // The manifest's first image row is fal's. With only an OpenAI key, calling that a stranded
+    // route would block a surface on a decision nobody made — file order is not a setting.
+    const state = noDefault({ providers: [provider("openai")] });
+    const resolved = resolveModel(state, "image");
+    assert.equal(resolved.model?.id, OPENAI_IMAGE.id);
+    assert.equal(resolved.stranded, null, "nothing was routed, so nothing is stranded");
+  });
+
+  it("strands a saved default that cannot run, and only a saved one", () => {
+    const off = resolveModel(stateWith({ disabled: [FAL_IMAGE.id] }), "image");
+    assert.equal(off.stranded?.id, FAL_IMAGE.id, "a saved default is shown and flagged");
+    assert.equal(off.model?.id, FAL_IMAGE.id, "and still shown, never swapped");
+  });
+
+  it("an explicit choice outranks the default, and strands when it stops working", () => {
+    const state = stateWith({ disabled: [OPENAI_IMAGE.id] });
+    assert.equal(resolveModel(state, "image", OPENAI_IMAGE.id).stranded?.id, OPENAI_IMAGE.id);
+    assert.equal(resolveModel(state, "image", FAL_IMAGE.id).stranded, null);
+  });
+
+  it("answers null when nothing at all can run", () => {
+    assert.deepEqual(resolveModel(noDefault({ providers: [] }), "image"), { model: null, stranded: null });
   });
 });
 

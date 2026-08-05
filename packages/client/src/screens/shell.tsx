@@ -1256,7 +1256,13 @@ function ProviderPane({ id }: { id: ProviderId }) {
         <div className="fy-prov__eyebrow">MODELS</div>
         <span style={{ flex: 1 }} />
         <span className="fy-prov__count">
-          {models.length === 0 ? "NONE IN THE MANIFEST" : `${on} OF ${models.length} ON`}
+          {/* Without a key nothing here is on, whatever the switches say — the rail already uses
+              an em dash for this state and the pane must not contradict it two inches away. */}
+          {models.length === 0
+            ? "NONE IN THE MANIFEST"
+            : configured
+              ? `${on} OF ${models.length} ON`
+              : `${models.length} UNAVAILABLE`}
         </span>
       </div>
       <div className="fy-prov__models">

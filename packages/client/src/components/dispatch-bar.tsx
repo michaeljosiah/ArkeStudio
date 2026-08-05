@@ -3,7 +3,6 @@ import {
   deriveCapabilityAvailability,
   estimateCharacterImageMicroUsd,
   formatMicroUsd,
-  modelForCapability,
   PROVIDERS,
   tiersFor,
   type CharacterImageWorkflow,
@@ -70,6 +69,40 @@ export function usableModels(
       !disabled.has(model.id) &&
       (unlocked.has(model.provider) || PROVIDERS[model.provider].local === true),
   );
+}
+
+/**
+ * Which model a surface will actually use, and whether it is stranded — asked once, here,
+ * because every host that answered it for itself eventually disagreed with the bar beside it.
+ * A screen that shows one model and dispatches another is the worst failure in this area.
+ *
+ *   · An explicit choice wins. If it has since become unusable it is shown, flagged, and blocked
+ *     rather than swapped, because nobody re-routes on the user's behalf.
+ *   · A saved routing default is treated the same way: shown and flagged when it cannot run.
+ *   · With no saved default there is nothing to strand — the manifest's first row is an accident
+ *     of file order, not a decision — so the first usable model answers instead.
+ */
+export function resolveModel(
+  state: ReturnType<typeof useStore>["state"],
+  capability: "image" | "video",
+  chosenId?: string,
+): { model: ManifestModel | null; stranded: ManifestModel | null } {
+  const usable = usableModels(state, capability);
+  const all = state?.app.manifest?.models ?? [];
+  if (chosenId !== undefined) {
+    const chosen = usable.find((m) => m.id === chosenId);
+    if (chosen) return { model: chosen, stranded: null };
+    const known = all.find((m) => m.id === chosenId) ?? null;
+    return { model: known, stranded: known };
+  }
+  const savedId = state?.app.routing.defaults[capability];
+  if (savedId !== undefined) {
+    const saved = usable.find((m) => m.id === savedId);
+    if (saved) return { model: saved, stranded: null };
+    const known = all.find((m) => m.id === savedId) ?? null;
+    return { model: known, stranded: known };
+  }
+  return { model: usable[0] ?? null, stranded: null };
 }
 
 /**
@@ -156,24 +189,7 @@ export function DispatchBar({
   const [pickerOpen, setPickerOpen] = useState(false);
   const models = usableModels(state, capability);
   const routedId = state?.app.routing.defaults[capability];
-  const routed = state?.app.manifest
-    ? modelForCapability(state.app.manifest, state.app.routing.defaults, capability)
-    : null;
-
-  const chosen = models.find((m) => m.id === choice.modelId) ?? null;
-  // A model can be chosen and then switched off in Providers — or routed to and then switched
-  // off, which is the same problem arriving without anyone touching this screen. Both keep
-  // showing the model and say it cannot run, rather than quietly moving the job to something
-  // else. The routed case matters most: it is the one nobody chose, so submitting it would be a
-  // dispatch the coordinator refuses after the estimate was read and accepted.
-  const strandedChoice =
-    choice.modelId !== undefined && chosen === null
-      ? (state?.app.manifest?.models.find((m) => m.id === choice.modelId) ?? null)
-      : null;
-  const strandedRoute =
-    choice.modelId === undefined && routed !== null && !models.some((m) => m.id === routed.id) ? routed : null;
-  const stranded = strandedChoice ?? strandedRoute;
-  const model = chosen ?? stranded ?? routed;
+  const { model, stranded } = resolveModel(state, capability, choice.modelId);
   // No model at all — no key, or nothing of this capability in the manifest. The bar stays,
   // because vanishing would take Cancel and the explanation with it and leave a dialog with no
   // way out and no reason given.
@@ -220,7 +236,9 @@ export function DispatchBar({
   const images = count ?? 1;
   const carried = model.unverified === true ? 0 : Math.min(referenceImages, model.accepts.referenceImages);
   const estimate = estimateCharacterImageMicroUsd(model, workflow, images, carried * images, tier);
-  const isDefault = model.id === routedId || (routedId === undefined && model.id === routed?.id);
+  // DEFAULT means the saved routing default. With none saved nothing is the default — the model
+  // showing is simply the first that can run, and calling that a default would invent a setting.
+  const isDefault = model.id === routedId;
 
   return (
     <div className="fy-dispatchbar" data-testid="dispatch-bar">

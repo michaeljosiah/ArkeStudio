@@ -8,7 +8,6 @@ import {
   formatMicroUsd,
   headGate,
   mainPhotoFor,
-  modelForCapability,
   tileIsStale,
   type CanonEntry,
   type Sheet,
@@ -18,7 +17,7 @@ import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components
 import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
 import { ChevronRight, Play, Plus, Search, X } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
-import { DispatchBar, usableModels } from "../components/dispatch-bar.js";
+import { DispatchBar, resolveModel, usableModels } from "../components/dispatch-bar.js";
 import { Loading } from "../components/loading.js";
 import { characterPortraitPath, Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
@@ -252,18 +251,11 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
   // the picker's list have to be the same question. Judging it by the routed default alone meant
   // a usable model could be picked here while Generate stayed greyed out, and the only way
   // through was to go and change the global routing default first.
+  // The same resolver the bar uses, so the button and the picker cannot disagree about which
+  // model this surface will send — and a stranded default blocks rather than quietly running.
   const offered = usableModels(state, "image");
-  const routed = state?.app.manifest
-    ? modelForCapability(state.app.manifest, state.app.routing.defaults, "image")
-    : null;
-  // With no explicit choice the request carries no model id and the coordinator uses the routed
-  // default, so the button must be judged on exactly that model — not on "some model exists".
-  const model =
-    choice.modelId !== undefined
-      ? (offered.find((m) => m.id === choice.modelId) ?? null)
-      : routed !== null && offered.some((m) => m.id === routed.id)
-        ? routed
-        : null;
+  const resolved = resolveModel(state, "image", choice.modelId);
+  const model = resolved.stranded === null ? resolved.model : null;
   const usable = model !== null;
 
   const mine = (state?.app.jobs ?? []).filter((j) => j.worldId === worldId && j.target.kind === "world-image");
