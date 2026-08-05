@@ -3271,6 +3271,7 @@ export class Coordinator {
     await this.transport.stop();
     await this.opts.provider.close?.();
     await this.opts.providerCalls?.drain();
+    await this.ledger?.drain();
     await this.changeLog.drain();
   }
 }

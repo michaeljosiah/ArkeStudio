@@ -195,7 +195,6 @@ export class JobQueue {
   private readonly baseIntervalMs: number;
   private disposed = false;
   private accepting = false;
-  private readonly activeTasks = new Set<Promise<void>>();
   private readonly resolvingHeld = new Set<string>();
   private readonly finalizing = new Set<string>();
 
@@ -323,21 +322,15 @@ export class JobQueue {
       if (!job || job.status !== "queued") continue;
       lane.inFlight.add(jobId);
       lane.nextAllowedAt = Date.now() + lane.minIntervalMs;
-      const task = this.runJob(job).finally(() => {
+      void this.runJob(job).finally(() => {
         lane.inFlight.delete(jobId);
         this.pump(provider);
       });
-      this.track(task);
       if (Date.now() < lane.nextAllowedAt) {
         this.schedule(lane, lane.nextAllowedAt - Date.now());
         break;
       }
     }
-  }
-
-  private track(task: Promise<void>): void {
-    this.activeTasks.add(task);
-    void task.finally(() => this.activeTasks.delete(task));
   }
 
   private schedule(lane: Lane, delayMs: number): void {
@@ -814,7 +807,7 @@ export class JobQueue {
       if (job.status === "running") {
         // R-5: a recorded remote id resumes by polling, never by resubmitting.
         report.push({ jobId: job.id, action: "resumed-polling" });
-        this.track(this.resumePolling(job));
+        void this.resumePolling(job);
         continue;
       }
       if (job.status === "submitting") {
@@ -865,7 +858,7 @@ export class JobQueue {
       if (found) {
         const running: Job = { ...job, status: "running", providerJobId: found.remoteId, updatedAt: this.clock() };
         await this.transition(running);
-        this.track(this.pollToTerminal(running, client, key));
+        void this.pollToTerminal(running, client, key);
         return { jobId: job.id, action: "adopted", detail: found.remoteId };
       }
       await this.requeueSafely(job);
@@ -880,7 +873,7 @@ export class JobQueue {
         if (match) {
           const running: Job = { ...job, status: "running", providerJobId: match.remoteId, updatedAt: this.clock() };
           await this.transition(running);
-          this.track(this.pollToTerminal(running, client, key));
+          void this.pollToTerminal(running, client, key);
           return { jobId: job.id, action: "adopted", detail: match.remoteId };
         }
         // Absence only means anything if the listing would have shown our key at all.
@@ -1060,7 +1053,6 @@ export class JobQueue {
   }
 
   async drain(): Promise<void> {
-    await Promise.allSettled(this.activeTasks);
     await this.journal.drain();
   }
 }
