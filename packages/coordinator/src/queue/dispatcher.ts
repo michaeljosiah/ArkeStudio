@@ -1060,7 +1060,7 @@ export class JobQueue {
   }
 
   async drain(): Promise<void> {
-    await Promise.allSettled([...this.activeTasks]);
+    await Promise.allSettled(this.activeTasks);
     await this.journal.drain();
   }
 }

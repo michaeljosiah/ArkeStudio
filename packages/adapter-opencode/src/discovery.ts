@@ -26,9 +26,8 @@ type CommandRunner = (command: string, args: string[], timeoutMs: number) => Pro
 const runCommand: CommandRunner = (command, args, timeoutMs) =>
   new Promise((resolve) => {
     const shim = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
-    const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
     const executable = shim ? (process.env["ComSpec"] ?? "cmd.exe") : command;
-    const executableArgs = shim ? ["/d", "/s", "/c", [quote(command), ...args.map(quote)].join(" ")] : args;
+    const executableArgs = shim ? ["/d", "/c", "call", command, ...args] : args;
     let settled = false;
     const child = execFile(executable, executableArgs, { encoding: "utf8", windowsHide: true }, (error, stdout) => {
         if (settled) return;
