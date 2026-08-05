@@ -45,7 +45,7 @@ export function foldConversation(
   id: ConversationId,
   createdAt: string,
   events: WorldChatEventEnvelope[],
-  options: { messageLimit?: number; before?: number } = {},
+  options: { messageLimit?: number; /** Log sequence to page back from, exclusive. */ before?: number } = {},
 ): FoldResult {
   const problems: WorldChatProblem[] = [];
   const limit = options.messageLimit ?? MAX_MESSAGES;
@@ -58,6 +58,8 @@ export function foldConversation(
   let reopened = false;
 
   const messages: WorldChatMessage[] = [];
+  /** The log sequence each message arrived at, so paging can use a real cursor. */
+  const messageSeq = new Map<string, number>();
   const messageIds = new Set<string>();
   const candidates = new Map<string, WorldChangeCandidate>();
   const groups = new Map<string, CandidateGroup>();
@@ -112,7 +114,7 @@ export function foldConversation(
         resolvedProposals.add(e.proposalId);
         break;
       case "turn.started":
-        addMessage(e.message);
+        addMessage(e.message, envelope.seq);
         runs.set(e.run.id, e.run);
         break;
       case "run.retry-started":
@@ -127,7 +129,7 @@ export function foldConversation(
         runs.set(e.run.id, e.run);
         break;
       case "turn.completed":
-        addMessage(e.message);
+        addMessage(e.message, envelope.seq);
         runs.set(e.run.id, e.run);
         for (const c of e.candidates) applyCandidate(c, envelope.seq);
         for (const g of e.groups) groups.set(g.id, g);
@@ -201,7 +203,7 @@ export function foldConversation(
     }
   }
 
-  function addMessage(message: WorldChatMessage): void {
+  function addMessage(message: WorldChatMessage, atSeq: number): void {
     if (messageIds.has(message.id)) {
       problems.push({
         kind: "interior-corruption",
@@ -210,6 +212,7 @@ export function foldConversation(
       return;
     }
     messageIds.add(message.id);
+    messageSeq.set(message.id, atSeq);
     messages.push(message);
   }
 
@@ -224,10 +227,12 @@ export function foldConversation(
     }
   }
 
-  const ordered = messages;
-  const windowed = options.before
-    ? ordered.filter((m, i) => i < indexOfSeq(ordered, options.before!))
-    : ordered;
+  // `before` is a log sequence, not a position: messages are append-only, so a sequence stays
+  // meaningful even as the conversation grows underneath a client that is paging back.
+  const windowed =
+    options.before === undefined
+      ? messages
+      : messages.filter((m) => (messageSeq.get(m.id) ?? 0) < options.before!);
   const shown = windowed.slice(Math.max(0, windowed.length - limit));
 
   const view: WorldChatLoaded = {
@@ -251,11 +256,6 @@ export function foldConversation(
   // Reopening is a fact about the summary row rather than the workspace — the restored
   // propositions are already in `candidates` — so it is returned rather than embedded.
   return { view, problems, tombstones: [...tombstones.values()], needsInterruptedRunRepair, reopened };
-}
-
-/** Messages are appended in order, so a cursor is just a position. */
-function indexOfSeq(messages: WorldChatMessage[], before: number): number {
-  return Math.min(before, messages.length);
 }
 
 /** The row the world snapshot carries: enough to choose a conversation, and no history. */
