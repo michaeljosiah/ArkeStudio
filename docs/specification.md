@@ -7,7 +7,7 @@ owner: core-maintainers
 sourceOfTruth: filesystem
 platform: windows-first
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-03
 ---
 
 <!-- The master product specification. Capability specs (SPEC-001…) break out of §19. -->
@@ -26,9 +26,9 @@ sheet changes it everywhere that sheet is cited.
 
 Three mechanics carry the product. Everything else is surface.
 
-1. **The accept gate.** Nothing enters the record without a human accept. Sheet edits, canon
-   entries, scene drafts and takes all arrive as *proposals*, are ripple-checked against
-   canon, and only become real when accepted.
+1. **The accept gate.** Nothing enters the authored record without a human accept. Sheet edits,
+   canon entries and scene drafts arrive as *proposals* and are ripple-checked against canon.
+   Generated takes land as immutable operational records; acceptance controls which take is used.
 2. **Canon that refuses.** The world answers questions only from canon, with per-entry
    citations. When canon is silent it says so, cites the closest entries, and offers to open
    a thread. It never invents behind your back.
@@ -39,8 +39,8 @@ Three mechanics carry the product. Everything else is surface.
 ## 0.2 What v1 is
 
 A free, MIT-licensed, local-first desktop application. Worlds are folders of readable files
-on the user's own disk. Provider keys live in the OS credential store. Nothing leaves the
-machine except the dispatches the user approves.
+on the user's own disk. Provider keys live in an app-owned encrypted file protected by the OS
+key store and a user-only ACL (§14.2). Nothing leaves the machine except approved dispatches.
 
 ## 0.3 Scope
 
@@ -63,11 +63,12 @@ machine except the dispatches the user approves.
 - Any dependency on git. See §2.4 — versioning is explicit in the world folder.
 - Automated drift detection (§6.4), semantic canon search (§4.3), realtime conversational
   voice (§7.1). Each is designed for but deliberately deferred.
-- macOS and Linux builds. The code stays portable; only Windows is shipped and tested.
+- macOS and Linux builds. Only Windows is shipped; CI also tests Linux for portability.
 
 ## 0.4 Platform and distribution
 
-Windows 11 first (x64 and arm64), delivered as a signed NSIS installer. The application is
+Windows 11 first (x64 and arm64), currently delivered as an unsigned NSIS installer. Signing is
+required before v1. The application is
 an Electron shell embedding a Node coordinator, serving a React client, and supervising two
 child processes: the OpenCode harness and the Voxa voice sidecar.
 
@@ -110,8 +111,9 @@ architectural risk this specification exists to prevent:
 - **The media path** — images, video, voice — runs through Arke Studio's **own job queue**,
   calling FAL, Higgsfield, ElevenLabs and the Voxa sidecar directly.
 
-OpenCode never dispatches media. The job queue never edits world files. The accept gate is
-the only thing that writes to the live world, and it is the same gate for both paths.
+OpenCode never dispatches media. The job queue lands generated media and operational records but
+does not author canon, sheets or scenes. The accept gate protects authored facts; operational and
+generated writes follow the mutation matrix in §3.1.
 
 ## 1.2 Process topology
 
@@ -128,8 +130,8 @@ the only thing that writes to the live world, and it is the same gate for both p
 │  ┌─ OpenCode (child) ────────┐          ┌─ Voxa (child) ──────┐ │
 │  │  headless server          │          │  self-contained .NET│ │
 │  │  HTTP + SSE               │          │  HTTP + WS          │ │
-│  │  cwd = world, writes      │          │  Kokoro / Whisper   │ │
-│  │  confined to .proposals/  │          │  cloud TTS routing  │ │
+│  │  cwd = proposal, writes   │          │  Kokoro / Whisper   │ │
+│  │  confined to that folder │          │  local speech only  │ │
 │  └───────────────────────────┘          └─────────────────────┘ │
 └────────────────────────────────────────────────────────────────┘
                      │                                │
@@ -140,7 +142,7 @@ the only thing that writes to the live world, and it is the same gate for both p
 
 The coordinator runs **in the Electron main process**, not as a separate server. It is the
 same shape as Arke's `apps/desktop`, which embeds `@arke/coordinator` and serves the client
-as one signed app.
+as one packaged app.
 
 ## 1.3 Package map
 
@@ -182,7 +184,7 @@ packages once both products have stopped moving.
 
 ## 1.5 Data flow
 
-Every mutation follows one path, without exception:
+Authored mutations follow this path:
 
 ```
 intent → agent or form → proposal staged in .proposals/
@@ -209,6 +211,11 @@ intent → agent or form → proposal staged in .proposals/
    references an absolute path.
 
 ## 2.2 Folder layout
+
+This layout is illustrative. The implementation-backed operation ledger at
+[`filesystem-operations.md`](filesystem-operations.md) is the current reference
+for which operation creates, replaces, appends, moves or removes each path, including lazy
+directories and temporary files.
 
 ```
 %USERPROFILE%\ArkeStudio\
@@ -250,10 +257,10 @@ intent → agent or form → proposal staged in .proposals/
           takes\
             tk_01J8F.../take.json
             tk_01J8F.../clip.mp4
-          cut.json                ordered accepted takes, audio tracks, gaps
+          cut.json                audio tracks and placement only; picture comes from selections
           exports\
       .proposals\                 staged, not yet accepted (see §3.2)
-      .history\                   full snapshots of superseded versions (see §2.5)
+      .history\                   full snapshots of every committed version (see §2.5)
       .index\                     derived, deletable (see §2.6)
       changes.jsonl               append-only change log for this world
 ```
@@ -618,7 +625,7 @@ audit line — quietly defeating the gate for anyone with a text editor.
 On open, every entity file's hash is compared against the hash recorded at its last commit. A
 mismatch is an **external edit**, and it is reconciled, not absorbed:
 
-1. The world opens read-only, listing the externally-edited files.
+1. The world opens normally and lists the externally-edited files for explicit reconciliation.
 2. Each is validated against its schema. Files that no longer parse are reported and excluded;
    the user fixes or reverts them.
 3. The user accepts the external edits as a single reconciliation commit, or reverts them from
@@ -1233,8 +1240,8 @@ Every shot inherits the scene's location, sheets and tone, shown as chips on the
 ## 9.3 Boards
 
 A scene compiles a **board** — frames, order, timings and labels — kept in step with the shots.
-Recompiling is local and free. The board is exportable as PNG and lands in artifacts on every
-compile. In whole-scene dispatch the board rides along as the scene reference; in per-shot
+Recompiling is local and free. The current board stays in the production's board storage; an
+explicit export files an immutable artifact. In whole-scene dispatch the board rides along as the scene reference; in per-shot
 dispatch each frame is sent instead.
 
 **Requirements**
@@ -1242,8 +1249,8 @@ dispatch each frame is sent instead.
 - **R-SCENE-1** Accepting a scene SHALL create its shots and dispatch nothing.
 - **R-SCENE-2** `@` references in a shot description SHALL resolve to sheet ids, and SHALL be
   the source of that shot's cast for prompt assembly and reference attachment.
-- **R-SCENE-3** Board compilation SHALL be local, free, and repeatable, and SHALL file the
-  compiled board as an artifact.
+- **R-SCENE-3** Board compilation SHALL be local, free, and repeatable. Exporting a board SHALL
+  file an immutable artifact; recompiling alone SHALL NOT accumulate artifacts.
 
 ---
 
@@ -1802,8 +1809,9 @@ across restarts and are revocable, reusing Arke's `grant-store`.
   content and no keys.
 - **N-6 · Licence.** MIT. Third-party licences are enumerated in-app; the espeak-ng phonemizer
   Voxa uses is GPL and must remain a separate executable, never linked.
-- **N-7 · Installer.** Signed NSIS. The bundled OpenCode and self-contained Voxa put the
-  installer above 200 MB; models are downloaded on first use, not shipped.
+- **N-7 · Installer.** NSIS, currently unsigned; signing is required before v1. OpenCode and Voxa
+  are included only when their external build resources are staged; models are downloaded rather
+  than shipped.
 - **N-8 · Accessibility.** Full keyboard navigation, reduced-motion respected, and no
   information conveyed by colour alone — the design system is monochrome, so imagery carries
   colour and the UI must not depend on it.
