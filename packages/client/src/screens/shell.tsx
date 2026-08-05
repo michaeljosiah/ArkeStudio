@@ -29,6 +29,8 @@ import {
   hostCanAttach,
   detectRuntimes,
   downloadUpdate,
+  installUpdateAndRestart,
+  installUpdateOnClose,
   generateDiagnostics,
   listProviderCalls,
   openDataFolder,
@@ -1566,6 +1568,22 @@ export function SettingsAboutScreen() {
   const { state } = useStore();
   const update = useUpdateStatus();
   const diagnostics = useDiagnosticsBundle();
+  const updateCopy = (() => {
+    if (!update) return "Updates are ready when you choose to check.";
+    const version = update.targetVersion ? ` v${update.targetVersion}` : "";
+    if (update.status === "checking") return "Checking for updates...";
+    if (update.status === "available") return `Arke Studio${version} is available to download.`;
+    if (update.status === "downloading") return `Downloading${version}${update.progressPercent !== null ? ` - ${Math.round(update.progressPercent)}%` : ""}.`;
+    if (update.status === "ready") return `Arke Studio${version} is ready to install.`;
+    if (update.status === "install-on-close") return update.detail ?? "The update will install after a clean close. Arke will remain closed.";
+    if (update.status === "shutting-down") return "Finishing local work before installation...";
+    if (update.status === "installing") return "Installing the update and reopening Arke Studio...";
+    if (update.status === "updated") return `Arke Studio updated to${version}.`;
+    if (update.status === "install-failed" || update.status === "error") return update.detail ?? "The update needs attention.";
+    if (update.status === "externally-managed") return "Updates are managed outside this build.";
+    if (update.status === "none") return "Arke Studio is up to date.";
+    return "Check when you are ready. Nothing downloads without you.";
+  })();
   return (
     <div data-screen="settings-about" className="fy-set">
       <div className="fy-set__eyebrow">ABOUT</div>
@@ -1578,20 +1596,31 @@ export function SettingsAboutScreen() {
       <div className="fy-set__row" style={{ marginTop: 14 }}>
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">Updates</div>
-          <div className="fy-set__caps">
-            {update
-              ? `${update.status}${update.version ? ` · ${update.version}` : ""}${update.detail ? ` — ${update.detail}` : ""}`
-              : "checks are yours to run · nothing installs until you quit"}
-          </div>
+          <div className="fy-set__caps">{updateCopy}</div>
+          {(update?.status === "ready" || update?.status === "install-on-close") && (
+            <div className="fy-set__note">Install when I close will not reopen Arke Studio.</div>
+          )}
         </div>
         {update?.status === "available" && (
           <Button variant="primary" onClick={() => downloadUpdate()}>
             Download
           </Button>
         )}
-        <button type="button" className="fy-set__link" onClick={() => checkUpdates()}>
-          Check for updates
-        </button>
+        {update?.status === "ready" && (
+          <>
+            <Button variant="primary" onClick={() => installUpdateAndRestart()}>
+              Install and restart
+            </Button>
+            <button type="button" className="fy-set__link" onClick={() => installUpdateOnClose()}>
+              Install when I close
+            </button>
+          </>
+        )}
+        {update?.status !== "shutting-down" && update?.status !== "installing" && update?.status !== "ready" && update?.status !== "install-on-close" && (
+          <button type="button" className="fy-set__link" onClick={() => checkUpdates()}>
+            Check for updates
+          </button>
+        )}
       </div>
 
       <div className="fy-set__row">

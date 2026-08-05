@@ -27,6 +27,7 @@ const STATE: ClientState = {
     harnessModels: [],
     queues: [],
     setup: null,
+    update: { status: "idle", targetVersion: null, progressPercent: null, flow: null, detail: null },
     env: null,
   },
   worlds: [],

@@ -170,6 +170,26 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await second.close();
   });
 
+  it("does not release the world lock while an owned write is in flight", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    let finishWrite!: () => void;
+    const held = new Promise<void>((resolve) => { finishWrite = resolve; });
+    const write = store.ownedWrite(() => held);
+    let closed = false;
+    const close = store.close().then(() => { closed = true; });
+
+    await delay(20);
+    assert.equal(closed, false);
+    await assert.rejects(() => WorldStore.open(dir, { clock: CLOCK }), WorldLockedError);
+
+    finishWrite();
+    await write;
+    await close;
+    const reopened = await WorldStore.open(dir, { clock: CLOCK });
+    await reopened.close();
+  });
+
   it("opens a world with one malformed sheet, listing the failure (R-2)", async () => {
     const dir = await makeTempWorld();
     await writeFile(join(dir, "characters", "broken.md"), "no frontmatter at all", "utf8");

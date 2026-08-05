@@ -665,6 +665,29 @@ describe("domain events and frames", () => {
     assert.throws(() => ClientMessageSchema.parse({ kind: "open-world", worldId: "the-undersong" }));
   });
 
+  it("validates retained update states and install commands", () => {
+    const update = {
+      status: "ready",
+      targetVersion: "0.2.8",
+      progressPercent: 100,
+      flow: null,
+      detail: null,
+    } as const;
+    assert.doesNotThrow(() =>
+      DomainEventSchema.parse({ at: "2026-08-05T12:00:00Z", type: "update.status", update }),
+    );
+    assert.throws(() =>
+      DomainEventSchema.parse({
+        at: "2026-08-05T12:00:00Z",
+        type: "update.status",
+        update: { ...update, progressPercent: 101 },
+      }),
+    );
+    for (const kind of ["install-update-and-restart", "install-update-on-close", "acknowledge-update"]) {
+      assert.doesNotThrow(() => ClientMessageSchema.parse({ kind }));
+    }
+  });
+
   it("validates harness events", () => {
     assert.doesNotThrow(() =>
       HarnessEventSchema.parse({ type: "message.completed", sessionId: "s1", text: "done" }),

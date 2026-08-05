@@ -201,8 +201,14 @@ export interface CoordinatorOptions {
   ffmpeg?: FfmpegRunner;
   /** SPEC-015: the extraction model seam; every candidate is re-verified regardless (R-13). */
   extractor?: (text: string, artifactFile: string, signal?: AbortSignal) => Promise<RawCandidate[]>;
-  /** SPEC-016: update seam — check and download only; installation happens at exit (R-13). */
-  updates?: { check: () => Promise<{ version: string } | null>; download: () => Promise<void> };
+  /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */
+  updates?: {
+    check: () => Promise<void>;
+    download: () => Promise<void>;
+    installAndRestart: () => Promise<void>;
+    installOnClose: () => Promise<void>;
+    acknowledge: () => void;
+  };
   /** SPEC-016 R-17: open a path in the platform file manager, injected from the desktop. */
   openPath?: (path: string) => void;
   /** SPEC-016 R-2: whether the native index binding loaded, known only to the desktop shell. */
@@ -260,6 +266,10 @@ export class Coordinator {
   private appearanceWrite = Promise.resolve();
   private voiceModelsChanged = false;
   private started = false;
+  private stopping = false;
+  private stopPromise: Promise<void> | null = null;
+  private readonly activeMessages = new Set<Promise<void>>();
+  private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
   private readonly secrets: SecretRegistry;
   private readonly appLog: AppLog | null;
@@ -349,7 +359,11 @@ export class Coordinator {
       : null;
     this.transport = new Transport({
       getSnapshot: () => this.getState(),
-      onMessage: (msg) => void this.handleClientMessage(msg),
+      onMessage: (msg) => {
+        const updateCommand = msg.kind === "install-update-and-restart" || msg.kind === "install-update-on-close";
+        const handling = this.handleClientMessage(msg).finally(() => this.activeMessages.delete(handling));
+        if (!updateCommand) this.activeMessages.add(handling);
+      },
       // GET /media/<world-slug>/<world-relative-file> — read-only renderer media.
       serveFile: async (urlPath) => {
         const match = /^\/media\/([^/]+)\/(.+)$/.exec(urlPath);
@@ -419,6 +433,11 @@ export class Coordinator {
     return this.readModel.getState();
   }
 
+  private trackBackground<T>(work: Promise<T>): void {
+    this.backgroundWork.add(work);
+    void work.finally(() => this.backgroundWork.delete(work)).catch(() => {});
+  }
+
   /** Validate, fold, log, broadcast — the one path every event takes (R-3). */
   emit(event: DomainEvent): void {
     const parsed = DomainEventSchema.parse(event);
@@ -426,6 +445,7 @@ export class Coordinator {
     if (
       parsed.type !== "health.changed" &&
       parsed.type !== "appearance.changed" &&
+      parsed.type !== "update.status" &&
       parsed.type !== "voice.runtime-test"
     ) {
       // Health and application appearance are transient/user-interface state, not domain audit.
@@ -858,6 +878,7 @@ export class Coordinator {
   }
 
   private async handleClientMessage(msg: ClientMessage): Promise<void> {
+    if (this.stopping) return;
     switch (msg.kind) {
       case "hello":
         return; // handled inside the transport
@@ -1114,7 +1135,7 @@ export class Coordinator {
           }
           const worldQueryUrl = await this.worldQuery.start();
           // Fire and watch: progress and the final status arrive as events (R-13).
-          void this.authoring
+          this.trackBackground(this.authoring
             .run(
               store,
               gate,
@@ -1126,7 +1147,7 @@ export class Coordinator {
               },
               worldQueryUrl,
             )
-            .then(() => this.refreshWorldSnapshot(msg.worldId));
+            .then(() => this.refreshWorldSnapshot(msg.worldId)));
         } catch {
           this.transport.broadcastSnapshot();
         }
@@ -1148,7 +1169,7 @@ export class Coordinator {
         try {
           const dir = await this.opts.provider.genesisDir(msg.genesisId);
           // Fire and watch: turns, the draft and the final status arrive as events.
-          void this.genesis.run(dir, msg.genesisId, msg.text);
+          this.trackBackground(this.genesis.run(dir, msg.genesisId, msg.text));
         } catch (err) {
           failed(err instanceof Error ? err.message : String(err));
         }
@@ -1182,7 +1203,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         // Fire and watch: the result arrives as one canon.answer event, refusals included.
-        void (async () => {
+        this.trackBackground((async () => {
           const worldQueryUrl =
             this.askService && this.opts.adapter ? await this.worldQuery.start() : undefined;
           const fallback: import("@arke-studio/contracts").AskResult = {
@@ -1201,7 +1222,7 @@ export class Coordinator {
             askId: msg.askId,
             result,
           });
-        })();
+        })());
         return;
       }
       case "canon-search": {
@@ -1338,7 +1359,7 @@ export class Coordinator {
           // proposal; without it, the skeleton with the author's sentence still stands.
           if (this.authoring && this.opts.adapter?.readiness().ready) {
             const worldQueryUrl = await this.worldQuery.start();
-            void this.authoring
+            this.trackBackground(this.authoring
               .run(
                 store,
                 gate,
@@ -1353,7 +1374,7 @@ export class Coordinator {
               // Settled after the draft lands, so what is settled is the written sheet and not
               // the empty skeleton it started as.
               .then(() => settle())
-              .then(() => this.refreshWorldSnapshot(msg.worldId));
+              .then(() => this.refreshWorldSnapshot(msg.worldId)));
           } else {
             await settle();
           }
@@ -1648,7 +1669,7 @@ export class Coordinator {
           await this.refreshWorldSnapshot(msg.worldId);
           if (this.authoring && this.opts.adapter?.readiness().ready) {
             const worldQueryUrl = await this.worldQuery.start();
-            void this.authoring
+            this.trackBackground(this.authoring
               .run(
                 store,
                 gate,
@@ -1660,7 +1681,7 @@ export class Coordinator {
                 },
                 worldQueryUrl,
               )
-              .then(() => this.refreshWorldSnapshot(msg.worldId));
+              .then(() => this.refreshWorldSnapshot(msg.worldId)));
           }
         } catch {
           this.transport.broadcastSnapshot();
@@ -1723,7 +1744,7 @@ export class Coordinator {
             proposalId: staged.id,
           });
           const worldQueryUrl = await this.worldQuery.start();
-          void this.authoring
+          this.trackBackground(this.authoring
             .run(
               store,
               gate,
@@ -1735,7 +1756,7 @@ export class Coordinator {
               },
               worldQueryUrl,
             )
-            .then(() => this.refreshWorldSnapshot(msg.worldId));
+            .then(() => this.refreshWorldSnapshot(msg.worldId)));
         } catch {
           this.transport.broadcastSnapshot();
         }
@@ -1952,12 +1973,12 @@ export class Coordinator {
         );
         this.exports.set(handle.id, handle);
         emitProgress(handle.id, "running", 0, null, null);
-        void handle.done.then((result) => {
+        this.trackBackground(handle.done.then((result) => {
           this.exports.delete(handle.id);
           if (result.status === "done") emitProgress(handle.id, "done", 100, result.output, null);
           else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
           else emitProgress(handle.id, "failed", 0, null, result.error);
-        });
+        }));
         return;
       }
       case "cancel-export": {
@@ -1986,68 +2007,34 @@ export class Coordinator {
           this.emit({
             at: new Date().toISOString(),
             type: "update.status",
-            status: "none",
-            version: null,
-            detail: "updates are managed outside this build",
+            update: {
+              status: "externally-managed",
+              targetVersion: null,
+              progressPercent: null,
+              flow: null,
+              detail: "Updates are managed outside this build.",
+            },
           });
           return;
         }
-        this.emit({
-          at: new Date().toISOString(),
-          type: "update.status",
-          status: "checking",
-          version: null,
-          detail: null,
-        });
-        try {
-          const found = await this.opts.updates.check();
-          this.emit({
-            at: new Date().toISOString(),
-            type: "update.status",
-            status: found ? "available" : "none",
-            version: found?.version ?? null,
-            detail: found ? "downloading is your call; installing happens when you quit" : null,
-          });
-        } catch (err) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "update.status",
-            status: "error",
-            version: null,
-            detail: err instanceof Error ? err.message : String(err),
-          });
-        }
+        await this.opts.updates.check();
         return;
       }
       case "download-update": {
         if (!this.opts.updates) return;
-        this.emit({
-          at: new Date().toISOString(),
-          type: "update.status",
-          status: "downloading",
-          version: null,
-          detail: null,
-        });
-        try {
-          // Download only (R-13, D7): the world lock, the commit journal and running jobs are
-          // never interrupted — installation waits for application exit, by construction.
-          await this.opts.updates.download();
-          this.emit({
-            at: new Date().toISOString(),
-            type: "update.status",
-            status: "downloaded",
-            version: null,
-            detail: "installs when you quit — running work is never interrupted",
-          });
-        } catch (err) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "update.status",
-            status: "error",
-            version: null,
-            detail: err instanceof Error ? err.message : String(err),
-          });
-        }
+        await this.opts.updates.download();
+        return;
+      }
+      case "install-update-and-restart": {
+        await this.opts.updates?.installAndRestart();
+        return;
+      }
+      case "install-update-on-close": {
+        await this.opts.updates?.installOnClose();
+        return;
+      }
+      case "acknowledge-update": {
+        this.opts.updates?.acknowledge();
         return;
       }
       case "generate-diagnostics": {
@@ -3262,17 +3249,35 @@ export class Coordinator {
   }
 
   async stop(): Promise<void> {
-    this.setup?.dispose();
-    this.jobQueue?.dispose();
-    await this.jobQueue?.drain();
-    await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
-    await this.opts.adapter?.dispose?.().catch(() => {});
-    await this.worldQuery.stop();
-    await this.transport.stop();
-    await this.opts.provider.close?.();
-    await this.opts.providerCalls?.drain();
-    await this.ledger?.drain();
-    await this.changeLog.drain();
+    if (this.stopPromise) return this.stopPromise;
+    this.stopping = true;
+    this.stopPromise = (async () => {
+      this.setup?.dispose();
+      this.jobQueue?.dispose();
+      for (const controller of this.reading.values()) controller.abort();
+      for (const handle of this.exports.values()) handle.cancel();
+      await Promise.allSettled(this.activeMessages);
+      await Promise.allSettled(this.backgroundWork);
+      await Promise.allSettled(this.carrying.values());
+      await this.appearanceWrite;
+      await this.jobQueue?.waitForIdle();
+      await this.jobQueue?.drain();
+      await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
+      await this.opts.adapter?.dispose?.().catch(() => {});
+      await this.worldQuery.stop();
+      // Provider close is the critical gate: it saves pending state and releases the world lock.
+      await this.opts.provider.close?.();
+      await this.opts.providerCalls?.drain();
+      await this.ledger?.drain();
+      await this.changeLog.drain();
+    })();
+    try {
+      await this.stopPromise;
+    } catch (error) {
+      this.stopPromise = null;
+      this.stopping = false;
+      throw error;
+    }
   }
 }
 

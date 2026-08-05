@@ -1,4 +1,5 @@
 import {
+  IDLE_UPDATE_STATE,
   type AppHealth,
   type ClientState,
   type DomainEvent,
@@ -39,6 +40,7 @@ export class ReadModel {
         harnessModels: [],
         queues: [],
         setup: null,
+        update: IDLE_UPDATE_STATE,
         env: null,
       },
       worlds: [],
@@ -172,6 +174,10 @@ export class ReadModel {
       }
       case "voice.audio":
         return;
+      case "update.status": {
+        this.state = { ...this.state, app: { ...this.state.app, update: event.update } };
+        return;
+      }
       case "manifest.drift": {
         this.state = { ...this.state, app: { ...this.state.app, drift: event.reports } };
         return;
@@ -251,7 +257,6 @@ export class ReadModel {
       case "import.report":
       case "artifact.notice":
       case "env.check":
-      case "update.status":
       case "diagnostics.ready":
         // Signals only in SPEC-001: the bundle arrives via a fresh snapshot, and proposals
         // are static fixtures until the gate lands in SPEC-004.

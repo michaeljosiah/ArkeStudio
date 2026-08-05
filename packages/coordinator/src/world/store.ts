@@ -288,16 +288,18 @@ export class WorldStore {
     this.closed = true;
     this.watcher?.stop();
     this.watcher = null;
-    try {
-      this.index?.close();
-    } catch {
-      /* a cache that cannot close is a cache that gets rebuilt */
-    }
-    this.index = null;
-    if (this.lock) {
-      await this.saveScanState();
-      await this.lock.release();
-    }
+    await this.serialise(async () => {
+      try {
+        this.index?.close();
+      } catch {
+        /* a cache that cannot close is a cache that gets rebuilt */
+      }
+      this.index = null;
+      if (this.lock) {
+        await this.saveScanState();
+        await this.lock.release();
+      }
+    });
   }
 
   // ---- internals -----------------------------------------------------------

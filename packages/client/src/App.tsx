@@ -63,6 +63,21 @@ import { Navigate } from "react-router";
 import { QueueToaster } from "./components/queue-toaster.js";
 import { useThemePreference } from "./lib/theme.js";
 import { stopAudio } from "./lib/audio.js";
+import { useUpdateStatus } from "./lib/store.js";
+
+export function UpdateTransition() {
+  const update = useUpdateStatus();
+  if (update?.status !== "shutting-down" && update?.status !== "installing") return null;
+  return (
+    <div className="fy-update-transition" role="dialog" aria-modal="true" aria-labelledby="update-title">
+      <div className="fy-update-transition__panel">
+        <div className="fy-update-transition__pulse" aria-hidden="true" />
+        <h1 id="update-title">Finishing local work...</h1>
+        <p>Arke Studio will install the update and {update.flow === "restart" ? "reopen" : "remain closed"}.</p>
+      </div>
+    </div>
+  );
+}
 
 export function App() {
   const navigate = useNavigate();
@@ -77,6 +92,7 @@ export function App() {
           no clicks, contributes nothing but geometry. */}
       <div className="fy-dragstrip" aria-hidden="true" />
       <QueueToaster />
+      <UpdateTransition />
       <Routes>
         <Route path="/" element={<LaunchScreen />} />
 

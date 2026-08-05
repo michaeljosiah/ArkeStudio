@@ -26,6 +26,7 @@ import {
 import { SetupStatusSchema } from "./setup.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
 import { RankedVoiceSchema, VoiceRuntimeStatusSchema } from "./voice.js";
+import { UpdateStateSchema } from "./update.js";
 
 /**
  * The normalised domain-event union (SPEC-001 R-2, R-3). Everything the coordinator pushes to
@@ -399,14 +400,12 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       nativeIndexDetail: z.string().nullable(),
     })
     .strict(),
-  /** Update lifecycle (SPEC-016 R-12, R-13): check and download; install happens at exit. */
+  /** Desktop-owned update lifecycle (SPEC-016 R-12, R-13). */
   z
     .object({
       ...base,
       type: z.literal("update.status"),
-      status: z.enum(["checking", "available", "none", "downloading", "downloaded", "error"]),
-      version: z.string().nullable(),
-      detail: z.string().nullable(),
+      update: UpdateStateSchema,
     })
     .strict(),
   /** A diagnostics bundle, already through the redaction boundary (SPEC-016 R-15, D9). */
