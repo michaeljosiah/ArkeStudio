@@ -717,6 +717,9 @@ export function CharacterLooksScreen() {
   );
   const navigate = useNavigate();
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier }>({});
+  // Four was hard-coded at the call site while the frame already carried a count — the estimate
+  // said four and there was no way to ask for fewer.
+  const [count, setCount] = useState(4);
   const [selected, setSelected] = useState<string | null>(null);
   if (!world || !sheet || !sheetId) return null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
@@ -793,7 +796,8 @@ export function CharacterLooksScreen() {
           <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
           <DispatchBar
             workflow="character-look"
-            count={4}
+            count={count}
+            onCount={setCount}
             referenceImages={1}
             choice={choice}
             onChoice={setChoice}
@@ -801,7 +805,7 @@ export function CharacterLooksScreen() {
             primaryLabel="Explore"
             primaryDisabled={!prompt.trim() || !photo || !carriesIdentity(chosenModel)}
             onPrimary={(chosen) =>
-              generateCharacterLooks(world.meta.worldId, sheetId, kind, mode, prompt.trim(), 4, {
+              generateCharacterLooks(world.meta.worldId, sheetId, kind, mode, prompt.trim(), chosen.count ?? count, {
                 modelId: chosen.model.id,
                 ...(chosen.tier !== undefined ? { tier: chosen.tier } : {}),
               })
