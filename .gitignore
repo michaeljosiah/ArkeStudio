@@ -8,9 +8,16 @@ design-system/uploads/
 node_modules/
 dist/
 release/
+# electron-builder's configured output is `release/`, but a packaging run pointed anywhere else
+# lands beside it — `release-local/` is a local build, several hundred MB of win-unpacked.
+release-local/
 apps/desktop/build-resources/
 .runtime-work/
 *.tsbuildinfo
+
+# Git worktrees checked out inside the repo. Committing one would commit a nested checkout —
+# `.claude/worktrees/` is already excluded locally; this covers the hand-made ones.
+*-worktree/
 
 # Local dev scratch (dev coordinator change log, etc.)
 .dev/
