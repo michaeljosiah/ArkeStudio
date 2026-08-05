@@ -150,7 +150,10 @@ export function DispatchBar({
   const isVideo = capability === "video";
   const reachable = tiersFor(model);
   const videoSizes = model.limits.resolutions ?? [];
-  const sizeOptions: string[] = isVideo ? videoSizes : TIERS;
+  // Tiers are offered, with the unreachable ones disabled so the reason is visible — but only
+  // when the model reaches any at all. A model that takes a free width and height (fal's GPT
+  // Image 2) declares no tiers, and greying out all three would state a limit it does not have.
+  const sizeOptions: string[] = isVideo ? videoSizes : reachable.length > 0 ? TIERS : [];
   const active = isVideo
     ? (choice.resolution !== undefined && videoSizes.includes(choice.resolution)
         ? choice.resolution

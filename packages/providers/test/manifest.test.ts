@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  characterImageEstimateIsUsable,
   characterImageOutput,
   estimateCharacterImageMicroUsd,
   estimateMicroUsd,
@@ -35,7 +36,7 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     const refused = requireModel(SHIPPED_MANIFEST, "sora-9000");
     assert.equal(refused.ok, false);
     assert.ok(!refused.ok && /not in the model manifest/.test(refused.reason));
-    assert.ok(!refused.ok && refused.reason.includes("v11"));
+    assert.ok(!refused.ok && refused.reason.includes(`v${SHIPPED_MANIFEST.manifestVersion}`));
     assert.equal(requireModel(SHIPPED_MANIFEST, "seedance-2.0").ok, true);
   });
 
@@ -120,6 +121,45 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
     assert.equal(estimateMicroUsd(image, { images: 1 }), 53000);
     assert.equal(estimateMicroUsd(image, { images: 1, referenceImages: 1 }), 153000);
     assert.equal(estimateMicroUsd(image, { images: 4, referenceImages: 4 }), 612000);
+  });
+
+  it("prices a token-billed image as a ceiling, and says so", () => {
+    const gpt = model("gpt-image-2-fal");
+    assert.equal(gpt.pricing.kind, "perImageToken");
+    if (gpt.pricing.kind !== "perImageToken") return;
+    const p = gpt.pricing;
+    const one =
+      (p.assumedImageOutputTokensPerImage * p.microUsdPerMillionImageOutput +
+        p.assumedTextInputTokens * p.microUsdPerMillionTextInput) /
+      1_000_000;
+    assert.equal(estimateMicroUsd(gpt, { images: 1 }), one);
+    assert.equal(estimateMicroUsd(gpt, { images: 3 }), one * 3);
+    // A reference costs image-input tokens, so it is added, not free.
+    assert.ok(
+      estimateMicroUsd(gpt, { images: 1, referenceImages: 2 }) > estimateMicroUsd(gpt, { images: 1 }),
+    );
+    // fal rounds a total up to the closest hundredth of a cent; the estimate rounds the same way,
+    // so it can never sit a fraction under what will be charged.
+    assert.equal(p.roundUpToMicroUsd, 100);
+    assert.equal(estimateMicroUsd(gpt, { images: 1 }) % 100, 0);
+    assert.match(modelPriceCopy(gpt), /at most$/);
+  });
+
+  it("refuses a token-billed row that does not state what the estimate assumes", () => {
+    // The sync script drops a price it cannot read. A token table with no assumption is exactly
+    // that: rates without a way to turn them into a figure before spending.
+    const bare = {
+      kind: "perImageToken" as const,
+      microUsdPerMillionTextInput: 5_000_000,
+      microUsdPerMillionImageInput: 8_000_000,
+      microUsdPerMillionImageOutput: 30_000_000,
+      assumedTextInputTokens: 0,
+      assumedImageInputTokensPerReference: 0,
+      assumedImageOutputTokensPerImage: 0,
+    };
+    const zeroed = { ...model("gpt-image-2-fal"), pricing: bare };
+    assert.equal(estimateMicroUsd(zeroed, { images: 1 }), 0);
+    assert.equal(characterImageEstimateIsUsable(zeroed, 0), false, "a free image is not believable here");
   });
 
   it("per megapixel rounds up, once", () => {

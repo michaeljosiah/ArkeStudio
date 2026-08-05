@@ -41,6 +41,30 @@ export const PricingSchema = z.discriminatedUnion("kind", [
       microUsdPerMillionOutput: z.number().int().min(0),
     })
     .strict(),
+  /**
+   * Images billed in tokens, not in images (fal's route to GPT Image 2). The rates are exact and
+   * published; the token counts are not knowable before dispatch, because they depend on the
+   * prompt and on how the provider tokenises the reference images. So the row carries the counts
+   * the estimate assumes, chosen high, and the estimate is a stated ceiling rather than a guess
+   * at the middle: the contract is that a figure is shown and accepted before money is spent, and
+   * a figure that can come in under is honest where one that can come in over is not.
+   *
+   * Cached-input rates are published too and deliberately unused — assuming a cache hit would
+   * lower an estimate on a discount that may not apply.
+   */
+  z
+    .object({
+      kind: z.literal("perImageToken"),
+      microUsdPerMillionTextInput: z.number().int().min(0),
+      microUsdPerMillionImageInput: z.number().int().min(0),
+      microUsdPerMillionImageOutput: z.number().int().min(0),
+      assumedTextInputTokens: z.number().int().min(0),
+      assumedImageInputTokensPerReference: z.number().int().min(0),
+      assumedImageOutputTokensPerImage: z.number().int().min(0),
+      /** The provider rounds the total up to this; the estimate rounds the same way (fal: $0.0001). */
+      roundUpToMicroUsd: z.number().int().min(1).optional(),
+    })
+    .strict(),
   /** Local runtimes: recorded at zero and labelled unmetered (R-18). */
   z.object({ kind: z.literal("unmetered") }).strict(),
 ]);
@@ -200,6 +224,19 @@ export function estimateMicroUsd(model: ManifestModel, input: EstimateInput): nu
       const outCost = Math.ceil(((input.tokensOut ?? 0) * p.microUsdPerMillionOutput) / 1_000_000);
       return inCost + outCost;
     }
+    case "perImageToken": {
+      // The ceiling, not the middle. Every term uses the row's assumed token counts, so the same
+      // inputs always produce the same figure and the only way this estimate moves is by someone
+      // changing the assumption — which manifest drift will tell them to do (§2.5).
+      const images = input.images ?? 1;
+      const perImage =
+        p.assumedImageOutputTokensPerImage * p.microUsdPerMillionImageOutput +
+        p.assumedTextInputTokens * p.microUsdPerMillionTextInput;
+      const perReference = p.assumedImageInputTokensPerReference * p.microUsdPerMillionImageInput;
+      const total = Math.ceil((images * perImage + (input.referenceImages ?? 0) * perReference) / 1_000_000);
+      const step = p.roundUpToMicroUsd;
+      return step === undefined ? total : Math.ceil(total / step) * step;
+    }
     case "unmetered":
       return 0;
   }
@@ -299,7 +336,9 @@ export function characterImageEstimateIsUsable(model: ManifestModel, estimate: n
           ? pricing.microUsdPerMegapixel > 0
           : pricing.kind === "perCharacter"
             ? pricing.microUsdPerCharacter > 0
-            : pricing.microUsdPerMillionInput > 0 || pricing.microUsdPerMillionOutput > 0;
+            : pricing.kind === "perImageToken"
+              ? pricing.microUsdPerMillionImageOutput > 0
+              : pricing.microUsdPerMillionInput > 0 || pricing.microUsdPerMillionOutput > 0;
   return !hasPositiveRate || estimate > 0;
 }
 
@@ -337,6 +376,10 @@ export function modelPriceCopy(model: ManifestModel): string {
       return `${formatMicroUsd(pricing.microUsdPerMillionInput)} / ${formatMicroUsd(
         pricing.microUsdPerMillionOutput,
       )} per M tokens`;
+    case "perImageToken":
+      // Billed in tokens, so there is no true per-image price — the figure shown is the ceiling
+      // the estimator uses, said as such rather than as a price the provider quotes.
+      return `${formatMicroUsd(estimateMicroUsd(model, { images: 1 }))} per image at most`;
   }
 }
 
