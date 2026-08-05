@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { IsoDateSchema } from "./ids.js";
+import { formatMicroUsd } from "./money.js";
 import { CapabilitySchema, ProviderIdSchema, type Capability } from "./provider.js";
 import type { RoutingDefaults } from "./settings.js";
 
@@ -311,6 +312,32 @@ export function modelCapabilityCopy(model: ManifestModel): string {
   else if (model.accepts.startFrame) parts.push("start frame");
   if (model.limits.maxDurationSec !== undefined) parts.push(`${model.limits.maxDurationSec}s`);
   return parts.join(" · ");
+}
+
+/**
+ * What a model costs, in one line, in the unit the provider actually bills in. The unit is the
+ * point: "$0.30" beside a video model and "$0.30" beside an image model would look like the same
+ * money, and one of them is per second. A model listed with no readable price cannot be enabled
+ * at all, so there is no unpriced case here beyond the local runtimes, which say so.
+ */
+export function modelPriceCopy(model: ManifestModel): string {
+  const pricing = model.pricing;
+  switch (pricing.kind) {
+    case "unmetered":
+      return "on this machine · unmetered";
+    case "perSecond":
+      return `${formatMicroUsd(pricing.microUsdPerSecond)} / second`;
+    case "perImage":
+      return formatMicroUsd(pricing.microUsdPerImage);
+    case "perMegapixel":
+      return `${formatMicroUsd(pricing.microUsdPerMegapixel)} / megapixel`;
+    case "perCharacter":
+      return `${formatMicroUsd(pricing.microUsdPerCharacter)} / character`;
+    case "perToken":
+      return `${formatMicroUsd(pricing.microUsdPerMillionInput)} / ${formatMicroUsd(
+        pricing.microUsdPerMillionOutput,
+      )} per M tokens`;
+  }
 }
 
 /**

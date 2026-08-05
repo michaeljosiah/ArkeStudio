@@ -9,6 +9,7 @@ import {
   ModelManifestSchema,
   modelCapabilityCopy,
   modelForCapability,
+  modelPriceCopy,
   passesForDuration,
   reconcileStrategy,
   sumMicroUsd,
@@ -57,6 +58,17 @@ describe("the shipped manifest (R-9, §3.2)", () => {
   it("capability copy matches the manifest for accepting and refusing models (R-10)", () => {
     assert.equal(modelCapabilityCopy(model("seedance-2.0")), "no refs · frames · 15s");
     assert.equal(modelCapabilityCopy(model("halcyon-1.5")), "no refs · frames · 12s");
+  });
+
+  it("prices every model in the unit it is billed in, never a bare figure", () => {
+    // The unit is the point: $0.30 beside a video model and $0.30 beside an image model look
+    // like the same money, and one of them is per second of footage.
+    assert.match(modelPriceCopy(model("seedance-2.0")), /\/ second$/);
+    assert.equal(modelPriceCopy(model("gpt-image-2")).includes("/"), false, "per image is a flat figure");
+    assert.match(modelPriceCopy(model("flux-2-pro")), /\/ megapixel$/);
+    for (const local of SHIPPED_MANIFEST.models.filter((m) => m.pricing.kind === "unmetered")) {
+      assert.match(modelPriceCopy(local), /unmetered/);
+    }
   });
 
   it("declares implemented GPT Image 2 reference support without invented role slots", () => {

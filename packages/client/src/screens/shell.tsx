@@ -44,6 +44,7 @@ import {
   resumeQueue,
   setCredential,
   setBackgroundNotifications,
+  setModelEnabled,
   setRoutingDefault,
   setSpendThreshold,
   useArchiveNote,
@@ -73,10 +74,12 @@ import {
   formatMicroUsd,
   jobActions,
   modelCapabilityCopy,
+  modelPriceCopy,
   PROVIDERS as PROVIDER_TABLE,
   spendSummary,
   type Capability,
   type ComponentHealth,
+  type ManifestModel,
   type ProviderId,
   type ProviderCallRecord,
   type ProviderStatus,
@@ -970,12 +973,17 @@ export function SettingsLayout() {
   );
 }
 
-const KEYED_PROVIDERS: Array<{ id: ProviderId; note: string }> = [
-  { id: "fal", note: "images and video — one key, both route here" },
-  { id: "higgsfield", note: "images and video" },
-  { id: "elevenlabs", note: "cloud voice and voice clones" },
-  { id: "openai", note: "LLM and images" },
-  { id: "anthropic", note: "LLM" },
+/**
+ * The providers a key is entered for, in the rail's order. What each one does is no longer a
+ * hand-written note beside it: the pane reads the capabilities off the models that key reaches,
+ * so a manifest change cannot leave the description behind.
+ */
+const KEYED_PROVIDERS: Array<{ id: ProviderId }> = [
+  { id: "fal" },
+  { id: "higgsfield" },
+  { id: "elevenlabs" },
+  { id: "openai" },
+  { id: "anthropic" },
 ];
 
 /**
@@ -1010,14 +1018,18 @@ const CAPABILITY_LABEL: Record<Capability, string> = {
   "voice-stt": "Dictation",
 };
 
-function ProviderKeyRow({ id, note }: { id: ProviderId; note: string }) {
+/**
+ * One provider's key, on one line under its name (design turn 40a). The name is the pane's own
+ * heading here, so the row carries the label KEY and nothing else: a provider is a key and a list
+ * of models, and repeating the provider's name beside its key was the clutter the flat list had.
+ */
+function ProviderKeyLine({ id }: { id: ProviderId }) {
   const { state } = useStore();
   const [draft, setDraft] = useState("");
   const [replacing, setReplacing] = useState(false);
   const status = state?.app.providers.find((p) => p.id === id);
   const info = PROVIDER_TABLE[id];
   const stored = status?.configured === true;
-  const troubled = Boolean(status?.fault) || status?.validation === "invalid";
   const save = () => {
     if (draft.trim().length === 0) return;
     setCredential(id, draft.trim());
@@ -1026,11 +1038,8 @@ function ProviderKeyRow({ id, note }: { id: ProviderId; note: string }) {
   };
   return (
     <>
-      <div className="fy-set__row">
-        <div className="fy-set__name">
-          <div className="fy-set__title">{info.displayName}</div>
-          <div className="fy-set__caps">{note}</div>
-        </div>
+      <div className="fy-prov__keyline">
+        <div className="fy-prov__eyebrow">KEY</div>
         {stored && !replacing ? (
           <div className="fy-set__field">
             {/* No last-four: the key never comes back over the bridge, and inventing a tail
@@ -1086,10 +1095,6 @@ function ProviderKeyRow({ id, note }: { id: ProviderId; note: string }) {
             )}
           </div>
         )}
-        <span
-          className={cx("fy-set__dot", troubled ? "fy-set__dot--warn" : stored && "fy-set__dot--ok")}
-          title={troubled ? "this key was rejected" : stored ? "key stored" : "no key stored"}
-        />
       </div>
       {status?.fault && (
         <div className="fy-set__why">
@@ -1102,9 +1107,110 @@ function ProviderKeyRow({ id, note }: { id: ProviderId; note: string }) {
   );
 }
 
+/** A model this studio offers, or does not. The switch is the whole row's control. */
+function ProviderModelRow({
+  model,
+  enabled,
+  usable,
+}: {
+  model: ManifestModel;
+  enabled: boolean;
+  usable: boolean;
+}) {
+  return (
+    <div className={cx("fy-prov__model", !usable && "fy-prov__model--off")}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label={model.displayName}
+        disabled={!usable}
+        className={cx("fy-prov__switch", enabled && "is-on")}
+        onClick={() => setModelEnabled(model.id, !enabled)}
+      >
+        <span />
+      </button>
+      <span className="fy-prov__modelname">{model.displayName}</span>
+      {model.unverified === true && <em className="fy-prov__unverified">UNVERIFIED</em>}
+      <span style={{ flex: 1 }} />
+      <span className="fy-prov__price">
+        {model.capability} · {modelPriceCopy(model)}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * One provider: its key, then every model that key can reach, each with a switch (turn 40a).
+ * Availability is per provider, per model — a model switched off appears in no picker and cannot
+ * be a routing default — and the count says how many of how many, because "4 on" beside a
+ * provider is the only number that answers what this key currently offers.
+ */
+function ProviderPane({ id }: { id: ProviderId }) {
+  const { state } = useStore();
+  const info = PROVIDER_TABLE[id];
+  const status = state?.app.providers.find((p) => p.id === id);
+  const configured = status?.configured === true;
+  const troubled = Boolean(status?.fault) || status?.validation === "invalid";
+  const models = (state?.app.manifest?.models ?? []).filter((m) => m.provider === id);
+  const disabled = new Set(state?.app.models.disabled ?? []);
+  const on = models.filter((m) => !disabled.has(m.id)).length;
+  const capabilities = [...new Set(models.map((m) => m.capability))];
+  return (
+    <div className="fy-prov__pane">
+      <div className="fy-prov__head">
+        <span className="fy-prov__title">{info.displayName}</span>
+        <span className="fy-prov__caps">{capabilities.join(" · ").toUpperCase()}</span>
+        <span style={{ flex: 1 }} />
+        <span className={cx("fy-set__dot", troubled ? "fy-set__dot--warn" : configured && "fy-set__dot--ok")} />
+        <span className="fy-set__state">
+          {troubled ? "key rejected" : configured ? "connected" : "no key"}
+        </span>
+      </div>
+      <ProviderKeyLine id={id} />
+      <div className="fy-prov__modelshead">
+        <div className="fy-prov__eyebrow">MODELS</div>
+        <span style={{ flex: 1 }} />
+        <span className="fy-prov__count">
+          {models.length === 0 ? "NONE IN THE MANIFEST" : `${on} OF ${models.length} ON`}
+        </span>
+      </div>
+      <div className="fy-prov__models">
+        {models.map((model) => (
+          // Switchable only once the key is stored: a model this studio cannot reach is not a
+          // choice, and letting it be switched on would put it in pickers that must then refuse it.
+          <ProviderModelRow
+            key={model.id}
+            model={model}
+            enabled={!disabled.has(model.id)}
+            usable={configured}
+          />
+        ))}
+      </div>
+      <div className="fy-set__note">
+        {models.length === 0
+          ? `nothing in the shipped manifest routes to ${info.displayName} yet`
+          : configured
+            ? "a model switched off appears in no picker and cannot be a routing default · a default already pointing at one is flagged in Who does what, never re-routed for you"
+            : `add a key above — ${info.displayName}'s models become switchable once it is connected`}
+      </div>
+    </div>
+  );
+}
+
 export function SettingsProvidersScreen() {
   const { state } = useStore();
   const availability = deriveCapabilityAvailability(state?.app.providers ?? []);
+  const disabledModels = new Set(state?.app.models.disabled ?? []);
+  const manifestModels = state?.app.manifest?.models ?? [];
+  const providerStatus = state?.app.providers ?? [];
+  // First run has no key anywhere, so opening on the first provider is not a preference — it is
+  // the only pane there is. Once something is connected, that is the one worth landing on.
+  const firstConnected = KEYED_PROVIDERS.find((p) =>
+    providerStatus.some((s) => s.id === p.id && s.configured),
+  );
+  const [selected, setSelected] = useState<ProviderId | null>(null);
+  const current = selected ?? firstConnected?.id ?? KEYED_PROVIDERS[0]!.id;
   const spend = state?.app.spend ?? null;
   const [threshold, setThreshold] = useState<string | null>(null);
   const [period, setPeriod] = useState<string | null>(null);
@@ -1113,9 +1219,33 @@ export function SettingsProvidersScreen() {
   return (
     <div data-screen="settings-providers" className="fy-set">
       <div className="fy-set__eyebrow">CLOUD PROVIDERS</div>
-      {KEYED_PROVIDERS.map((p) => (
-        <ProviderKeyRow key={p.id} id={p.id} note={p.note} />
-      ))}
+      <div className="fy-prov">
+        <div className="fy-prov__rail" role="tablist" aria-label="Providers">
+          {KEYED_PROVIDERS.map((p) => {
+            const connected = providerStatus.some((s) => s.id === p.id && s.configured);
+            const models = manifestModels.filter((m) => m.provider === p.id);
+            const on = models.filter((m) => !disabledModels.has(m.id)).length;
+            return (
+              <button
+                type="button"
+                key={p.id}
+                role="tab"
+                aria-selected={p.id === current}
+                className={cx("fy-prov__railitem", p.id === current && "is-current")}
+                onClick={() => setSelected(p.id)}
+              >
+                <span className={cx("fy-set__dot", connected && "fy-set__dot--ok")} />
+                <span>{PROVIDER_TABLE[p.id].displayName}</span>
+                <span style={{ flex: 1 }} />
+                {/* An em dash, not "0 on": without a key the question of how many models are on
+                    does not arise, and a zero would read as a choice someone made. */}
+                <span className="fy-prov__count">{connected ? `${on} on` : "—"}</span>
+              </button>
+            );
+          })}
+        </div>
+        <ProviderPane id={current} />
+      </div>
       <div className="fy-set__note">
         a provider is entered once · its key covers every capability it lists · stored encrypted at
         OS level, outside every world, and no export can carry one
@@ -1486,26 +1616,35 @@ export function SettingsWhoDoesWhatScreen() {
   const manifest = state?.app.manifest ?? null;
   const configured = new Set((state?.app.providers ?? []).filter((p) => p.configured).map((p) => p.id));
   const routing = state?.app.routing ?? { defaults: {}, faults: [] };
+  const disabled = new Set(state?.app.models.disabled ?? []);
   const drift = state?.app.drift ?? [];
   return (
     <div data-screen="settings-who-does-what" className="fy-set">
       <div className="fy-set__eyebrow">WHO DOES WHAT</div>
+      {/* A default that cannot run is stated, never repaired (design turn 40d). It gets a callout
+          rather than a footnote because the next dispatch of that capability has nowhere to go. */}
       {routing.faults.map((f) => (
-        <div key={f.capability} className="fy-set__why">
-          <span className="fy-set__dot fy-set__dot--warn" />
-          <span>{f.reason}</span>
-        </div>
+        <Callout key={f.capability} tone="warning" title={`${CAPABILITY_LABEL[f.capability]} has nowhere to go.`}>
+          {f.reason}
+        </Callout>
       ))}
       {ROUTED_CAPABILITIES.map((capability) => {
         const options = (manifest?.models ?? []).filter((m) => m.capability === capability);
         const selected = routing.defaults[capability];
         const selectedModel = options.find((m) => m.id === selected);
-        // A model whose provider has no key cannot run. It stays listed, so the option is known
-        // to exist, and stays unselectable, so a dispatch cannot be routed into a dead end and
-        // fail after the estimate has been shown and accepted.
+        // A model whose provider has no key cannot run, and neither can one switched off in
+        // Providers. Both stay listed, so the option is known to exist, and stay unselectable, so
+        // a dispatch cannot be routed into a dead end and fail after the estimate was accepted.
         const usable = (m: (typeof options)[number]) =>
-          configured.has(m.provider) || PROVIDER_TABLE[m.provider].local === true;
+          !disabled.has(m.id) && (configured.has(m.provider) || PROVIDER_TABLE[m.provider].local === true);
         const stranded = selectedModel !== undefined && !usable(selectedModel);
+        // Two ways to be stranded, and they need different repairs: find a key, or turn it back on.
+        const strandReason =
+          selectedModel === undefined
+            ? ""
+            : disabled.has(selectedModel.id)
+              ? "turned off in Providers"
+              : `routed here, but ${PROVIDER_TABLE[selectedModel.provider].displayName} has no key`;
         return (
           <div key={capability} className="fy-set__row">
             <span className="fy-set__routelabel">{CAPABILITY_LABEL[capability]}</span>
@@ -1523,17 +1662,19 @@ export function SettingsWhoDoesWhatScreen() {
                 .map((m) => (
                   <option key={m.id} value={m.id} disabled={!usable(m)}>
                     {PROVIDER_TABLE[m.provider].displayName} · {m.displayName}
-                    {usable(m) ? "" : ` — needs a ${PROVIDER_TABLE[m.provider].displayName} key`}
+                    {/* Not on the selected one: the collapsed select is read beside the state
+                        text, which already says why, and twice on one row reads as two problems. */}
+                    {usable(m) || m.id === selected
+                      ? ""
+                      : disabled.has(m.id)
+                        ? " — turned off in Providers"
+                        : ` — needs a ${PROVIDER_TABLE[m.provider].displayName} key`}
                   </option>
                 ))}
             </select>
             {/* The capability copy is the manifest speaking (R-10): refs, frames, caps. */}
             {selectedModel && !stranded && <span className="fy-set__state">{modelCapabilityCopy(selectedModel)}</span>}
-            {stranded && (
-              <span className="fy-set__state">
-                routed here, but {PROVIDER_TABLE[selectedModel.provider].displayName} has no key
-              </span>
-            )}
+            {stranded && <span className="fy-set__state">{strandReason}</span>}
             <span className={cx("fy-set__dot", stranded ? "fy-set__dot--warn" : selectedModel && "fy-set__dot--ok")} />
           </div>
         );

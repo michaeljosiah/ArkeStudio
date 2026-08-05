@@ -266,6 +266,18 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, providers: event.providers } };
     case "routing.changed":
       return { ...state, app: { ...state.app, routing: { defaults: event.routing, faults: event.faults } } };
+    case "models.changed":
+      // Faults travel with availability because they are the same act: switching a model off can
+      // strand the default that points at it, and the two arriving separately would show a
+      // studio that briefly claims a routing it cannot honour.
+      return {
+        ...state,
+        app: {
+          ...state.app,
+          models: event.models,
+          routing: { ...state.app.routing, faults: event.faults },
+        },
+      };
     case "spend.status":
       return { ...state, app: { ...state.app, spend: event.spend } };
     case "background-notifications.changed":
@@ -1150,6 +1162,11 @@ export function listHarnessModels(): void {
 
 export function setRoutingDefault(capability: Capability, modelId: string): void {
   send({ kind: "set-routing-default", capability, modelId });
+}
+
+/** Offer a model, or stop offering it. Never edits routing — a stranded default is shown instead. */
+export function setModelEnabled(modelId: string, enabled: boolean): void {
+  send({ kind: "set-model-enabled", modelId, enabled });
 }
 
 export function setSpendThreshold(thresholdMicroUsd: number, periodDays: number): void {

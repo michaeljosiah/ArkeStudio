@@ -1587,7 +1587,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   color: var(--muted-foreground);
   margin-bottom: 2px;
 }
-.fy-set__eyebrow + .fy-set__eyebrow, .fy-set__row + .fy-set__eyebrow { margin-top: 20px; }
+.fy-set__eyebrow + .fy-set__eyebrow,
+.fy-set__row + .fy-set__eyebrow,
+.fy-set__note + .fy-set__eyebrow { margin-top: 20px; }
 .fy-set__row {
   display: flex;
   align-items: center;
@@ -1666,6 +1668,96 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-set__why span:last-child { font: 400 10.5px/1.5 var(--font-sans); color: var(--muted-foreground); }
 .fy-set__bar { height: 4px; border-radius: 999px; background: var(--muted); margin-top: 8px; overflow: hidden; }
 .fy-set__barfill { height: 4px; border-radius: 999px; background: var(--foreground); }
+/* Providers, master and detail (design turn 40a): a rail of providers, and one provider's key
+   and models beside it. A flat list of every provider's every model was the alternative, and it
+   put nine unrelated switches under one heading with nothing saying which key reached which. */
+/* overflow:hidden is load-bearing: without it a long model list grows the pane past max-height
+   and the sections below are drawn over it. */
+.fy-prov { display: flex; min-height: 300px; max-height: 46vh; overflow: hidden; }
+.fy-prov__rail {
+  width: 178px;
+  flex: none;
+  border-right: 1px solid var(--border);
+  padding-right: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+}
+.fy-prov__railitem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: 400 12.5px var(--font-sans);
+  color: var(--muted-foreground);
+}
+.fy-prov__railitem:hover { background: var(--accent); }
+.fy-prov__railitem.is-current { background: var(--secondary); color: var(--foreground); font-weight: 500; }
+.fy-prov__count { font: 400 9.5px var(--font-mono); color: var(--neutral-400); letter-spacing: 0.06em; }
+.fy-prov__pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+}
+.fy-prov__head { display: flex; align-items: center; gap: 10px; padding-bottom: 13px; }
+.fy-prov__title { font: 650 17px var(--font-sans); letter-spacing: -0.02em; }
+.fy-prov__caps { font: 400 9px var(--font-mono); color: var(--neutral-400); letter-spacing: 0.1em; }
+.fy-prov__eyebrow { font: 500 10px var(--font-mono); letter-spacing: 0.14em; color: var(--neutral-400); }
+.fy-prov__keyline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.fy-prov__keyline .fy-set__field { flex: 1; min-width: 0; }
+.fy-prov__modelshead { display: flex; align-items: baseline; gap: 10px; margin-top: 15px; padding-bottom: 4px; }
+.fy-prov__models { flex: 1; min-height: 0; overflow-y: auto; }
+.fy-prov__model {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.fy-prov__model--off { opacity: 0.45; }
+.fy-prov__modelname { font: 400 12.5px var(--font-sans); color: var(--foreground); }
+.fy-prov__price { font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
+.fy-prov__unverified {
+  font: 500 8.5px var(--font-mono);
+  letter-spacing: 0.1em;
+  font-style: normal;
+  color: var(--warning);
+}
+/* The switch is the row's only control, so it carries the whole state: filled is on. */
+.fy-prov__switch {
+  width: 32px;
+  height: 19px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--neutral-200);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 2px;
+  flex: none;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.fy-prov__switch.is-on { background: var(--foreground); justify-content: flex-end; }
+.fy-prov__switch:disabled { cursor: default; }
+.fy-prov__switch > span { width: 15px; height: 15px; border-radius: 999px; background: var(--background); }
+
 /* Routing: the capability on the left, the model that answers for it in a pill on the right. */
 .fy-set__routelabel { font: 400 11px var(--font-mono); color: var(--muted-foreground); width: 118px; flex: none; }
 .fy-set__pill {
