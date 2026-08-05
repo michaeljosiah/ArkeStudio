@@ -17,7 +17,7 @@ Path shorthand:
 |---|---|
 | Atomic file write | Creates the parent directory, writes a sibling `.tmp-<id>`, flushes it, then renames it over the target. A failed rename removes the temporary file. |
 | Journalled world commit | Uses `W\.commit\<commit-id>.json` and `W\.commit\staging\...`; writes history, lands live files, appends `changes.jsonl`, then removes that commit's journal and staging. Opening a world recovers interrupted commits. |
-| Append-only record | `W\changes.jsonl`, `R\queue\jobs.jsonl`, and `R\ledger.jsonl` gain lines. A torn final line is tolerated and repaired on the next append. |
+| Append-only record | `W\changes.jsonl`, `R\queue\jobs.jsonl`, `R\ledger.jsonl`, and `R\provider-calls\calls.jsonl` gain lines. A torn final line is tolerated and repaired on the next append. |
 | Media plus metadata | Some media is copied or moved before its JSON record is written. These pairs are not one filesystem transaction, so interruption can leave an orphan media file. |
 
 A new world does **not** start with empty `canon`, `characters`, `productions`, `artifacts`,
@@ -33,7 +33,9 @@ A new world does **not** start with empty `canon`, `characters`, `productions`, 
 | Remember or revoke permission | Creates or replaces `R\grants.json`. Revocation marks a grant revoked rather than deleting its history. |
 | Queue or update a job | Appends the complete job state to `R\queue\jobs.jsonl`. |
 | Finish a metered job | Appends one terminal charge record to `R\ledger.jsonl`, including applicable failures and cancellations. |
+| Record a provider call | Appends one redacted request and response record to `R\provider-calls\calls.jsonl`, then restricts it to the current user — `icacls` on Windows, mode `600` elsewhere. Past 2,000 records or 50 MiB the file is compacted by temporary-file rename, dropping the oldest. A filesystem without ACL support is tolerated. |
 | Run the application | Appends logs under `R\logs\` and replaces `R\run\children.json` as supervised children start and stop. |
+| Stage an application update | Creates or replaces the update receipt `R\update\pending.json` by temporary-file rename, recording the target version and whether it lands on restart or on close. The next start reads the receipt and removes it before reporting the outcome; the paths that abandon an install remove it too. |
 | Download local runtime | Streams to `R\models\<component>\<file>.partial`, validates it, then renames it to the real filename. Ollama's installer is staged at `R\models\.staging\OllamaSetup.exe` and removed after successful installation. |
 | Paste a file | Writes `R\.spool\<id>\<name>`. Filing copies it into a world; the next application start removes the spool. |
 
@@ -45,12 +47,16 @@ The creation primitive creates only:
 
 ```text
 R\worlds\<world-slug>\
-|-- world.json       id, slug, metadata, canonRevision 0, nextCanonId 1
-`-- changes.jsonl    one created line
+|-- world.json                          id, slug, metadata, canonRevision 0, nextCanonId 1
+|-- art-direction\art-direction.json    only when a look is chosen at creation
+`-- changes.jsonl                       one created line
 ```
 
-The slug is filesystem-safe and collision-suffixed. Creation is two writes: the directory and
-`world.json` can exist before the initial change line is appended.
+The slug is filesystem-safe and collision-suffixed. Creation is not one transaction: the
+directory and `world.json` can exist before the initial change line is appended.
+
+A look chosen at creation is written directly as an accepted v1 record. It does not go through
+a proposal or a world commit, so it has no `W\.history\art-direction\v1.json` behind it.
 
 The UI opens the world immediately after creating it, so a normal **Begin in this world** flow
 also creates the lock and derived index files described below.
@@ -74,11 +80,15 @@ Pressing **Begin in this world** has these effects:
 
 | Step | Creates, changes, or removes |
 |---|---|
-| Create and open | Creates `world.json` and `changes.jsonl`, then adds `world.lock` and `.index\...` while open. |
+| Create and open | Creates `world.json` and `changes.jsonl`, then adds `world.lock` and `.index\...` while open. A look chosen in the conversation also creates `art-direction\art-direction.json`. |
 | Carry attachments | Copies each attachment to `W\artifacts\<safe-name>` and creates `W\artifacts\<safe-name>.json`. |
-| Seed sheets | Stages up to four characters and four locations under `W\.proposals\`. After drafting, each is normally auto-accepted into `W\characters\` or `W\locations\`, with a v1 snapshot under `W\.history\`. Failure can leave the proposal for manual action. |
-| Seed threads | For up to four questions, increments `world.json`, creates and immediately accepts `W\canon\CANON-nnn.md`, creates its history snapshot, and appends change lines. |
 | Clean up | Removes `R\.genesis\<genesis-id>\` after carried attachments finish. |
+
+The characters, locations and threads the conversation gathered are held in `draft.json` and
+carried no further. Beginning a world does not stage them as proposals, write sheets under
+`W\characters\` or `W\locations\`, or open canon threads. The draft schema admits up to eight
+of each; they are read only to decide whether the draft has settled anything yet, and go with
+the sandbox when it is removed.
 
 ## Proposals, canon, sheets, and art direction
 
@@ -95,7 +105,7 @@ Pressing **Begin in this world** has these effects:
 | Edit, lock, rename, or assign voice | Replaces the same sheet file and writes its next history snapshot. Rename changes frontmatter only; the id and filename do not move. |
 | Retire sheet or canon | Replaces the existing file with `retired: true`. It is not moved or deleted. |
 | Restore version | Reads a file under `W\.history\` and commits that content as a new live version. Later history remains. |
-| Change art direction | First acceptance creates `W\art-direction\art-direction.json`; later accepts replace it. Each writes `W\.history\art-direction\v<n>.json`. |
+| Change art direction | Replaces `W\art-direction\art-direction.json`, or creates it when the world was not born with a look. Each accept writes `W\.history\art-direction\v<n>.json`. |
 
 ## Productions, chapters, scenes, and boards
 
@@ -163,10 +173,12 @@ The current API does not implement:
 - Renaming or moving world, production, scene, chapter, or sheet files.
 - Separate shot files; shots live inside scene JSON.
 - Atomic all-at-once copying of a whole-world export.
+- Seeding sheets or canon threads from a new-world conversation. Beginning a world creates the
+  world and carries its attachments; the draft's characters, locations and threads are dropped.
 
 ## Known cleanup gap
 
 Canon Q&A removes its temporary sandbox. Art-direction and extraction helper sandboxes under
 `R\.art\` and `R\.extract\` are not currently swept automatically.
 
-Verified against coordinator code and tests on 2026-08-03.
+Verified against coordinator, provider and desktop code on 2026-08-05.
