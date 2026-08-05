@@ -214,8 +214,20 @@ export interface ImageOutputSpec {
   resolution?: string;
 }
 
-/** Explicit output intent shared by character UI, estimation, durable jobs, and providers. */
-export function characterImageOutput(model: ManifestModel, workflow: CharacterImageWorkflow): ImageOutputSpec {
+/**
+ * Explicit output intent shared by character UI, estimation, durable jobs, and providers.
+ *
+ * The tier is the user's choice, translated here into the provider's own word for it. Absent —
+ * or unreachable for this model — it falls back to the model's first declared resolution, which
+ * is what every caller got before the size control existed. An unverified model declares no
+ * tiers at all, so it carries no resolution and the provider uses its own default: guessing one
+ * would be stating a capability nobody checked.
+ */
+export function characterImageOutput(
+  model: ManifestModel,
+  workflow: CharacterImageWorkflow,
+  tier?: SizeTier,
+): ImageOutputSpec {
   const landscape = workflow === "character-sheet";
   const dimensions =
     model.provider === "openai"
@@ -249,7 +261,8 @@ export function characterImageOutput(model: ManifestModel, workflow: CharacterIm
           : landscape
             ? "3:2"
             : "4:5";
-  const resolution = model.limits.resolutions?.[0];
+  const resolution =
+    (tier !== undefined ? nativeResolution(model, tier) : undefined) ?? model.limits.resolutions?.[0];
   return { ...dimensions, aspect, ...(resolution ? { resolution } : {}) };
 }
 
@@ -258,8 +271,9 @@ export function estimateCharacterImageMicroUsd(
   workflow: CharacterImageWorkflow,
   images = 1,
   referenceImages = 0,
+  tier?: SizeTier,
 ): number {
-  const output = characterImageOutput(model, workflow);
+  const output = characterImageOutput(model, workflow, tier);
   return estimateMicroUsd(model, {
     images,
     referenceImages,

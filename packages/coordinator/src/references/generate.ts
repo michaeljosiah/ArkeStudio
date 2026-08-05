@@ -5,12 +5,14 @@ import {
   headGate,
   lockedTiles,
   modelForCapability,
+  nativeResolution,
   type AppSettings,
   type ManifestModel,
   type ModelManifest,
   type ReferenceAngle,
   type ReferenceKit,
   type ResolvedArtDirection,
+  type SizeTier,
   type Sheet,
   type WorldMeta,
 } from "@arke-studio/contracts";
@@ -154,8 +156,9 @@ function pricedCharacterImage(
   model: ManifestModel,
   workflow: "main-photo" | "character-sheet" | "character-look" | "reference-tile",
   referenceImages = 0,
+  tier?: SizeTier,
 ): number {
-  const estimate = estimateCharacterImageMicroUsd(model, workflow, 1, referenceImages);
+  const estimate = estimateCharacterImageMicroUsd(model, workflow, 1, referenceImages, tier);
   if (!characterImageEstimateIsUsable(model, estimate)) {
     throw new Error(`${model.displayName} could not be priced for the selected output size`);
   }
@@ -182,14 +185,22 @@ export function mainPhotoRequests(
   sheet: Sheet,
   kit: ReferenceKit | null,
   model: ManifestModel,
-  input: { prompt: string; count: number; identityReferences: string[]; generationKey: string },
+  input: {
+    prompt: string;
+    count: number;
+    identityReferences: string[];
+    generationKey: string;
+    tier?: SizeTier;
+  },
 ): CharacterGenerationRequest[] {
-  if (input.identityReferences.length > 0 && model.accepts.referenceImages === 0) {
+  const budget = referenceBudgetFor(model);
+  if (input.identityReferences.length > 0 && budget === 0) {
     throw new Error(`${model.displayName} cannot receive identity reference images`);
   }
   const style = kit?.styleOverride ?? direction.description;
-  const identityReferences = input.identityReferences.slice(0, model.accepts.referenceImages);
-  const estimatedMicroUsd = pricedCharacterImage(model, "main-photo", identityReferences.length);
+  const identityReferences = input.identityReferences.slice(0, budget);
+  const tier = tierFor(model, input.tier);
+  const estimatedMicroUsd = pricedCharacterImage(model, "main-photo", identityReferences.length, tier);
   return Array.from({ length: input.count }, (_, index) => ({
     estimatedMicroUsd,
     input: {
@@ -202,7 +213,7 @@ export function mainPhotoRequests(
         prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}. Head-and-shoulders identity portrait, face and physical identity clear, restrained neutral expression, no text or montage.`,
         references: identityReferences,
         referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
-        output: characterImageOutput(model, "main-photo"),
+        output: characterImageOutput(model, "main-photo", tier),
         artDirection: {
           version: direction.version,
           source: kit?.styleOverride ? "sheet" : "world",
@@ -227,15 +238,17 @@ export function characterSheetRequest(
   model: ManifestModel,
   generationKey: string,
   styleOverride?: string,
+  requestedTier?: SizeTier,
 ): CharacterGenerationRequest {
-  if (model.accepts.referenceImages === 0) {
+  if (referenceBudgetFor(model) === 0) {
     throw new Error(`${model.displayName} cannot receive the accepted main photo`);
   }
   const photo = kit.mainPhoto?.file ?? kit.anchor;
   if (!photo) throw new Error("character sheet generation needs an accepted main photo");
   const style = styleOverride ?? kit.styleOverride ?? direction.description;
-  const identityReferences = model.accepts.referenceImages > 0 ? [`references/${sheet.id}/${photo}`] : [];
-  const estimatedMicroUsd = pricedCharacterImage(model, "character-sheet", identityReferences.length);
+  const identityReferences = referenceBudgetFor(model) > 0 ? [`references/${sheet.id}/${photo}`] : [];
+  const tier = tierFor(model, requestedTier);
+  const estimatedMicroUsd = pricedCharacterImage(model, "character-sheet", identityReferences.length, tier);
   return {
     estimatedMicroUsd,
     input: {
@@ -249,7 +262,7 @@ export function characterSheetRequest(
         prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. One composite character sheet on a clean neutral field: front, three-quarter, profile and back turnaround; expression studies; costume and prop details; clear relative proportions. Preserve the supplied identity exactly.`,
         references: identityReferences,
         referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
-        output: characterImageOutput(model, "character-sheet"),
+        output: characterImageOutput(model, "character-sheet", tier),
         artDirection: {
           version: direction.version,
           source: styleOverride ? "generation" : kit.styleOverride ? "sheet" : "world",
@@ -278,17 +291,19 @@ export function characterLookRequests(
     mode: "stay-close" | "push-it";
     prompt: string;
     count: number;
+    tier?: SizeTier;
     generationKey: string;
   },
 ): CharacterGenerationRequest[] {
-  if (model.accepts.referenceImages === 0) {
+  if (referenceBudgetFor(model) === 0) {
     throw new Error(`${model.displayName} cannot receive the accepted main photo`);
   }
   const photo = kit.mainPhoto?.file ?? kit.anchor;
   if (!photo) throw new Error("looks need an accepted main photo");
   const style = kit.styleOverride ?? direction.description;
-  const identityReferences = model.accepts.referenceImages > 0 ? [`references/${sheet.id}/${photo}`] : [];
-  const estimatedMicroUsd = pricedCharacterImage(model, "character-look", identityReferences.length);
+  const identityReferences = referenceBudgetFor(model) > 0 ? [`references/${sheet.id}/${photo}`] : [];
+  const tier = tierFor(model, input.tier);
+  const estimatedMicroUsd = pricedCharacterImage(model, "character-look", identityReferences.length, tier);
   return Array.from({ length: input.count }, (_, index) => ({
     estimatedMicroUsd,
     input: {
@@ -301,7 +316,7 @@ export function characterLookRequests(
         prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}. ${input.mode === "stay-close" ? "Stay close to the accepted identity and proportions." : "Push the styling while preserving the accepted identity."} Optional ${input.kind.replace("-", " ")} exploration; do not redefine identity.`,
         references: identityReferences,
         referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
-        output: characterImageOutput(model, "character-look"),
+        output: characterImageOutput(model, "character-look", tier),
         lookKind: input.kind,
         lookPrompt: input.prompt,
         artDirection: {
@@ -363,7 +378,38 @@ export function missingTileAngles(
   return { ok: true, angles: groupAngles.filter((a) => !present.has(a)) };
 }
 
-/** The routed image model for kit work: routing default, else the manifest's first image model. */
-export function imageModelFor(settings: AppSettings | null, manifest: ModelManifest): ManifestModel | null {
+/**
+ * The image model for one piece of kit work. A requested id overrides the routed default for
+ * this generation and nothing else; it is refused rather than quietly ignored when it is not an
+ * image model or has been switched off in Providers, because falling back silently would spend
+ * money on a model the user did not choose.
+ */
+export function imageModelFor(
+  settings: AppSettings | null,
+  manifest: ModelManifest,
+  requestedId?: string,
+): ManifestModel | null {
+  if (requestedId !== undefined) {
+    const requested = manifest.models.find((m) => m.id === requestedId && m.capability === "image");
+    if (!requested) return null;
+    if (settings?.models.disabled.includes(requestedId)) return null;
+    return requested;
+  }
   return modelForCapability(manifest, settings?.routing, "image");
+}
+
+/**
+ * What a model will actually carry. An unverified model was enabled from a provider's catalogue
+ * on the strength of a published price alone, so it runs at the floor: no reference images, and
+ * no size tier, leaving the provider its own default. Understating this costs a dropped
+ * reference; overstating it costs a dispatch that dies after the estimate was accepted.
+ */
+export function referenceBudgetFor(model: ManifestModel): number {
+  return model.unverified === true ? 0 : model.accepts.referenceImages;
+}
+
+/** The chosen tier, unless this model cannot reach it — then the model's own first size. */
+export function tierFor(model: ManifestModel, requested?: SizeTier): SizeTier | undefined {
+  if (model.unverified === true) return undefined;
+  return requested !== undefined && nativeResolution(model, requested) !== undefined ? requested : undefined;
 }

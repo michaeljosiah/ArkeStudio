@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
 import { GenesisIdSchema, JobIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, UlidSchema } from "./ids.js";
+import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
 import { BackgroundNotificationPreferenceSchema, ThemePreferenceSchema } from "./settings.js";
@@ -59,7 +60,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * and genre become one image job through the ordinary queue — estimated before it runs,
    * recorded in the ledger, cancellable like anything else that spends.
    */
-  z.object({ kind: z.literal("generate-world-image"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("generate-world-image"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      /** Override the routed model for this generation only. */
+      modelId: z.string().min(1).optional(),
+      // No size here: a world image carries no output spec at all today, so the provider's own
+      // default is what runs. Offering a control that changed nothing would be worse than not
+      // offering one.
+    })
+    .strict(),
   /** Keep the candidate that came back — it becomes world-art.png. */
   z.object({ kind: z.literal("use-world-image"), worldId: UlidSchema }).strict(),
   /** Or do not: the candidate is deleted and the world keeps the image it had. */
@@ -426,6 +438,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("generate-main-photo"),
+      /** Override the routed model for this generation only. */
+      modelId: z.string().min(1).optional(),
+      /** Output size, as the normalised tier the user picked. */
+      tier: SizeTierSchema.optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
@@ -438,6 +454,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("generate-character-sheet"),
+      /** Override the routed model for this generation only. */
+      modelId: z.string().min(1).optional(),
+      /** Output size, as the normalised tier the user picked. */
+      tier: SizeTierSchema.optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
@@ -456,6 +476,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("generate-character-looks"),
+      /** Override the routed model for this generation only. */
+      modelId: z.string().min(1).optional(),
+      /** Output size, as the normalised tier the user picked. */
+      tier: SizeTierSchema.optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,

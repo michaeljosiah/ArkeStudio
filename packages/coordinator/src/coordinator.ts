@@ -2509,6 +2509,7 @@ export class Coordinator {
         const model = imageModelFor(
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
+          "modelId" in msg ? msg.modelId : undefined,
         );
         // The screen disables the button without a usable image model and says why; this is the
         // backstop for a frame that arrives anyway.
@@ -2755,6 +2756,7 @@ export class Coordinator {
         const model = imageModelFor(
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
+          "modelId" in msg ? msg.modelId : undefined,
         );
         if (!sheet || !model) {
           this.rejectEnqueue(msg.requestId, msg.kind, "The character or image model is no longer available.");
@@ -2767,6 +2769,7 @@ export class Coordinator {
             count: msg.count,
             identityReferences: msg.identityReferences,
             generationKey: Date.now().toString(36),
+            ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
           });
         } catch {
           this.rejectEnqueue(
@@ -2795,6 +2798,7 @@ export class Coordinator {
         const model = imageModelFor(
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
+          "modelId" in msg ? msg.modelId : undefined,
         );
         if (!sheet || !kit || !model) {
           this.rejectEnqueue(msg.requestId, msg.kind, "An accepted main photo and image model are required.");
@@ -2810,6 +2814,7 @@ export class Coordinator {
             model,
             Date.now().toString(36),
             msg.styleOverride,
+            msg.tier,
           );
         } catch (error) {
           this.rejectEnqueue(
@@ -2873,6 +2878,7 @@ export class Coordinator {
         const model = imageModelFor(
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
+          "modelId" in msg ? msg.modelId : undefined,
         );
         if (!sheet || !kit || !model) {
           this.rejectEnqueue(msg.requestId, msg.kind, "An accepted main photo and image model are required.");
@@ -2886,6 +2892,7 @@ export class Coordinator {
             prompt: msg.prompt,
             count: msg.count,
             generationKey: Date.now().toString(36),
+            ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
           });
         } catch (error) {
           this.rejectEnqueue(
