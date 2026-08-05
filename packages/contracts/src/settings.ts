@@ -75,9 +75,21 @@ export const AgentSettingsSchema = z
   .strict();
 export type AgentSettings = z.infer<typeof AgentSettingsSchema>;
 
+/**
+ * Which of a provider's models this studio offers. Stored as the exceptions, not the roster:
+ * every model in the manifest is available until it is switched off, so a settings file written
+ * before this existed keeps behaving exactly as it did, and a manifest that grows does not need
+ * anyone to opt in to what it added.
+ */
+export const ModelAvailabilitySchema = z
+  .object({ disabled: z.array(z.string().min(1)).default([]) })
+  .strict();
+export type ModelAvailability = z.infer<typeof ModelAvailabilitySchema>;
+
 export const AppSettingsSchema = z
   .object({
     routing: RoutingDefaultsSchema.default({}),
+    models: ModelAvailabilitySchema.default({ disabled: [] }),
     spend: SpendSettingsSchema.default({ thresholdMicroUsd: 0, periodDays: 7 }),
     backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
     appearance: z

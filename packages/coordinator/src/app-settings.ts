@@ -50,8 +50,26 @@ export class AppSettingsFile {
       return { ok: false, reason: `${model.displayName} is a ${model.capability} model, not ${capability}` };
     }
     const current = await this.load();
+    if (current.models.disabled.includes(modelId)) {
+      return { ok: false, reason: `${model.displayName} is switched off in Providers` };
+    }
     await this.persist({ ...current, routing: { ...current.routing, [capability]: modelId } });
     return { ok: true };
+  }
+
+  /**
+   * Offer a model, or stop offering it. Switching one off never edits routing: a default left
+   * pointing at it becomes a named fault instead, because choosing the replacement is a decision
+   * and re-routing on someone's behalf makes it silently.
+   */
+  async setModelEnabled(modelId: string, enabled: boolean): Promise<AppSettings> {
+    const current = await this.load();
+    const disabled = new Set(current.models.disabled);
+    if (enabled) disabled.delete(modelId);
+    else disabled.add(modelId);
+    const next: AppSettings = { ...current, models: { disabled: [...disabled].sort() } };
+    await this.persist(next);
+    return next;
   }
 
   /**
@@ -111,17 +129,35 @@ export class AppSettingsFile {
   }
 }
 
-/** Defaults whose model has left the manifest — a Settings fault, named (§2.7). */
+/**
+ * Defaults that cannot run — the model left the manifest, or it is switched off in Providers.
+ * Both are stated rather than repaired: a default that cannot run is shown as a fault, never
+ * swapped for something else on the user's behalf (§2.7).
+ */
 export function routingFaults(settings: AppSettings, manifest: ModelManifest): RoutingFault[] {
   const faults: RoutingFault[] = [];
+  const disabled = new Set(settings.models.disabled);
   for (const [capability, modelId] of Object.entries(settings.routing) as Array<[Capability, string]>) {
-    if (!manifest.models.some((m) => m.id === modelId)) {
+    const model = manifest.models.find((m) => m.id === modelId);
+    if (!model) {
       faults.push({
         capability,
         modelId,
         reason: `the routed model "${modelId}" is no longer in the manifest (v${manifest.manifestVersion}) — pick a new default`,
       });
+    } else if (disabled.has(modelId)) {
+      faults.push({
+        capability,
+        modelId,
+        reason: `${model.displayName} is routed here but switched off in Providers — pick another model, or turn it back on`,
+      });
     }
   }
   return faults;
+}
+
+/** The models this studio currently offers: everything in the manifest bar the switched-off. */
+export function availableModels(settings: AppSettings, manifest: ModelManifest): ModelManifest["models"] {
+  const disabled = new Set(settings.models.disabled);
+  return manifest.models.filter((model) => !disabled.has(model.id));
 }

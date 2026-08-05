@@ -38,7 +38,11 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       capability: "image",
       displayName: "Soul 2.0",
       accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
-      limits: { resolutions: ["1080p", "4k"], aspects: ["16:9", "1:1"] },
+      limits: {
+        resolutions: ["1080p", "4k"],
+        tiers: { "1K": "1080p", "4K": "4k" },
+        aspects: ["16:9", "1:1"],
+      },
       pricing: { kind: "perImage", microUsdPerImage: 60000, byResolution: { "4k": 120000 } },
     },
     {
@@ -47,7 +51,11 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       capability: "image",
       displayName: "GPT Image 2",
       accepts: { referenceImages: 16, referenceRoles: false, startFrame: false, endFrame: false },
-      limits: { resolutions: ["1024", "2048"], aspects: ["1:1", "3:2", "2:3"] },
+      limits: {
+        resolutions: ["1024", "2048"],
+        tiers: { "1K": "1024", "2K": "2048" },
+        aspects: ["1:1", "3:2", "2:3"],
+      },
       // Medium output is documented up to $0.053. The $0.10/reference allowance deliberately
       // errs high because OpenAI bills mandatory high-fidelity input tokens but does not publish
       // a GPT Image 2 input-token formula.

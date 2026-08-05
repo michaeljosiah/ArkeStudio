@@ -19,6 +19,7 @@ import {
   ThemePreferenceSchema,
   BackgroundNotificationPreferenceSchema,
   ManifestDriftSchema,
+  ModelAvailabilitySchema,
   RoutingDefaultsSchema,
   RoutingFaultSchema,
   SpendStatusSchema,
@@ -465,6 +466,18 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       ...base,
       type: z.literal("routing.changed"),
       routing: RoutingDefaultsSchema,
+      faults: z.array(RoutingFaultSchema),
+    })
+    .strict(),
+  /**
+   * Which models this studio offers changed. Faults ride along because switching one off can
+   * strand a routing default, and the two are read together (SPEC-008 §2.7).
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("models.changed"),
+      models: ModelAvailabilitySchema,
       faults: z.array(RoutingFaultSchema),
     })
     .strict(),

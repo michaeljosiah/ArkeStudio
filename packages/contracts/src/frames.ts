@@ -318,6 +318,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * Offer a model, or stop offering it. A model switched off appears in no picker and cannot be
+   * chosen as a routing default; one that is already routed becomes a named fault rather than
+   * being silently re-routed to something else.
+   */
+  z
+    .object({
+      kind: z.literal("set-model-enabled"),
+      modelId: z.string().min(1),
+      enabled: z.boolean(),
+    })
+    .strict(),
+  /**
    * Configure one agent: which model runs it, and what it is for. Clearing a field returns
    * that half to the shipped default. The confinement rules are not addressable here.
    */

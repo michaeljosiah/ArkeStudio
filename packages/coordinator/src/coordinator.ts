@@ -647,6 +647,7 @@ export class Coordinator {
       ...(settings && manifest
         ? { routing: { defaults: settings.routing, faults: routingFaults(settings, manifest) } }
         : {}),
+      ...(settings ? { models: settings.models } : {}),
       ...(settings ? { spend: evaluateSpend(entries, settings.spend, new Date()) } : {}),
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
@@ -1515,6 +1516,19 @@ export class Coordinator {
           at: new Date().toISOString(),
           type: "routing.changed",
           routing: settings.routing,
+          faults: routingFaults(settings, this.opts.manifest),
+        });
+        return;
+      }
+      case "set-model-enabled": {
+        if (!this.appSettings || !this.opts.manifest) return;
+        const settings = await this.appSettings.setModelEnabled(msg.modelId, msg.enabled);
+        // Faults ride along: switching a model off can strand a default, and the client shows
+        // the two together rather than discovering the second on the next read.
+        this.emit({
+          at: new Date().toISOString(),
+          type: "models.changed",
+          models: settings.models,
           faults: routingFaults(settings, this.opts.manifest),
         });
         return;

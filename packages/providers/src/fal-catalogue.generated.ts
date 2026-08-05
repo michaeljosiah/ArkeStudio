@@ -22,6 +22,11 @@ export const FAL_MODELS: readonly ManifestModel[] = [
         "2MP",
         "4MP"
       ],
+      "tiers": {
+        "1K": "1MP",
+        "2K": "2MP",
+        "4K": "4MP"
+      },
       "aspects": [
         "16:9",
         "9:16",
@@ -50,6 +55,11 @@ export const FAL_MODELS: readonly ManifestModel[] = [
         "2K",
         "4K"
       ],
+      "tiers": {
+        "1K": "1K",
+        "2K": "2K",
+        "4K": "4K"
+      },
       "aspects": [
         "21:9",
         "16:9",
@@ -83,6 +93,11 @@ export const FAL_MODELS: readonly ManifestModel[] = [
         "2K",
         "4K"
       ],
+      "tiers": {
+        "1K": "1K",
+        "2K": "2K",
+        "4K": "4K"
+      },
       "aspects": [
         "21:9",
         "16:9",

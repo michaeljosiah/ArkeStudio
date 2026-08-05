@@ -26,7 +26,11 @@ const CURATED = {
     id: "flux-2-pro",
     capability: "image",
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-    limits: { resolutions: ["1MP", "2MP", "4MP"], aspects: ["16:9", "9:16", "1:1", "4:3"] },
+    limits: {
+      resolutions: ["1MP", "2MP", "4MP"],
+      tiers: { "1K": "1MP", "2K": "2MP", "4K": "4MP" },
+      aspects: ["16:9", "9:16", "1:1", "4:3"],
+    },
   },
   "fal-ai/nano-banana-2": {
     id: "nano-banana-2",
@@ -47,6 +51,7 @@ const CURATED = {
     // would silently halve every image, and nothing in the studio dispatches a 8:1 frame.
     limits: {
       resolutions: ["1K", "2K", "4K"],
+      tiers: { "1K": "1K", "2K": "2K", "4K": "4K" },
       aspects: ["21:9", "16:9", "3:2", "4:3", "1:1", "4:5", "3:4", "2:3", "9:16"],
     },
   },
@@ -57,6 +62,7 @@ const CURATED = {
     accepts: { referenceImages: 3, startFrame: false, endFrame: false },
     limits: {
       resolutions: ["1K", "2K", "4K"],
+      tiers: { "1K": "1K", "2K": "2K", "4K": "4K" },
       aspects: ["21:9", "16:9", "3:2", "4:3", "1:1", "4:5", "3:4", "2:3", "9:16"],
     },
   },

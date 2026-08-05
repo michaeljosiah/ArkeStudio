@@ -57,16 +57,43 @@ export const ModelAcceptsSchema = z
   .strict();
 export type ModelAccepts = z.infer<typeof ModelAcceptsSchema>;
 
+/**
+ * One vocabulary for image output size, across providers that each have their own. fal says
+ * 1K/2K/4K, Higgsfield says 1080p, flux counts megapixels and OpenAI counts pixels — a picker
+ * cannot be built on that directly, and a tier a model cannot reach has to be offerable-but-
+ * disabled rather than absent, so the reason is visible. Video keeps its own words: 720p and
+ * 1080p are what that surface means, and normalising them would only obscure it.
+ */
+export const SizeTierSchema = z.enum(["1K", "2K", "4K"]);
+export type SizeTier = z.infer<typeof SizeTierSchema>;
+
 export const ModelLimitsSchema = z
   .object({
     maxDurationSec: z.number().int().min(1).optional(),
     resolutions: z.array(z.string()).optional(),
+    /**
+     * Normalised tier → the provider's own word for it. The tier is what a user chooses; the
+     * value is what goes over the wire. A model omitting a tier cannot reach it.
+     */
+    tiers: z.record(SizeTierSchema, z.string().min(1)).optional(),
     aspects: z.array(z.string()).optional(),
     /** LLMs: the context window, for routing sanity rather than pricing. */
     maxContextTokens: z.number().int().min(1).optional(),
   })
   .strict();
 export type ModelLimits = z.infer<typeof ModelLimitsSchema>;
+
+/** The tiers a model can actually reach, in ascending order, for a picker to render. */
+export function tiersFor(model: { limits: ModelLimits }): SizeTier[] {
+  const declared = model.limits.tiers;
+  if (!declared) return [];
+  return (["1K", "2K", "4K"] as const).filter((tier) => declared[tier] !== undefined);
+}
+
+/** The provider's own word for a tier, or undefined when the model cannot reach it. */
+export function nativeResolution(model: { limits: ModelLimits }, tier: SizeTier): string | undefined {
+  return model.limits.tiers?.[tier];
+}
 
 export const ManifestModelSchema = z
   .object({
@@ -77,6 +104,14 @@ export const ManifestModelSchema = z
     accepts: ModelAcceptsSchema,
     limits: ModelLimitsSchema,
     pricing: PricingSchema,
+    /**
+     * Enabled from a provider's catalogue rather than shipped with a verified description. The
+     * price is real — nothing unpriced can be enabled — but what it accepts was never checked,
+     * so it runs at the floor: no references, no frames, the provider's default size. Marked
+     * wherever it appears, because understating a capability costs a dropped reference while
+     * overstating one costs a dispatch that dies after the estimate was accepted.
+     */
+    unverified: z.boolean().optional(),
     /** Local-runtime requirements, measured against the machine (R-22). */
     requires: z
       .object({

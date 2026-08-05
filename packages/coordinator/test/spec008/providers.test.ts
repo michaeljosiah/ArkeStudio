@@ -8,7 +8,7 @@ import {
   type ModelManifest,
 } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
-import { AppSettingsFile, routingFaults } from "../../src/app-settings.js";
+import { AppSettingsFile, availableModels, routingFaults } from "../../src/app-settings.js";
 import { CredentialStore, type Cipher } from "../../src/credentials/store.js";
 import { ProviderService } from "../../src/providers/service.js";
 import { SecretRegistry } from "../../src/redact.js";
@@ -153,6 +153,56 @@ describe("routing defaults resolve to concrete models (R-20, R-21 posture, D1)",
     assert.equal(faults.length, 1);
     assert.equal(faults[0]!.capability, "video");
     assert.match(faults[0]!.reason, /no longer in the manifest/);
+  });
+});
+
+describe("which models this studio offers (SPEC-008 §2.7)", () => {
+  it("everything is on until it is switched off, so an untouched settings file changes nothing", async () => {
+    const dir = await tempDir("arke-settings-");
+    const settings = new AppSettingsFile(join(dir, "settings.json"));
+    const loaded = await settings.load();
+    assert.deepEqual(loaded.models.disabled, []);
+    assert.equal(
+      availableModels(loaded, manifest).length,
+      manifest.models.length,
+      "an absent record means the whole manifest, not an empty roster",
+    );
+  });
+
+  it("switching one off removes it from what is offered, and switching it back restores it", async () => {
+    const dir = await tempDir("arke-settings-");
+    const settings = new AppSettingsFile(join(dir, "settings.json"));
+
+    await settings.setModelEnabled("seedance-2.0", false);
+    const off = await settings.load();
+    assert.deepEqual(off.models.disabled, ["seedance-2.0"]);
+    assert.ok(!availableModels(off, manifest).some((m) => m.id === "seedance-2.0"));
+
+    await settings.setModelEnabled("seedance-2.0", true);
+    assert.deepEqual((await settings.load()).models.disabled, []);
+  });
+
+  it("switching off a routed model strands the default rather than re-routing it", async () => {
+    const dir = await tempDir("arke-settings-");
+    const settings = new AppSettingsFile(join(dir, "settings.json"));
+    await settings.setRoutingDefault("video", "seedance-2.0", manifest);
+    await settings.setModelEnabled("seedance-2.0", false);
+
+    const loaded = await settings.load();
+    assert.equal(loaded.routing["video"], "seedance-2.0", "the choice is left where the user put it");
+    const faults = routingFaults(loaded, manifest);
+    assert.equal(faults.length, 1);
+    assert.equal(faults[0]!.capability, "video");
+    assert.match(faults[0]!.reason, /switched off in Providers/);
+  });
+
+  it("refuses to route to a model that is switched off", async () => {
+    const dir = await tempDir("arke-settings-");
+    const settings = new AppSettingsFile(join(dir, "settings.json"));
+    await settings.setModelEnabled("seedance-2.0", false);
+    const refused = await settings.setRoutingDefault("video", "seedance-2.0", manifest);
+    assert.ok(!refused.ok && /switched off in Providers/.test(refused.reason));
+    assert.equal((await settings.load()).routing["video"], undefined);
   });
 });
 
