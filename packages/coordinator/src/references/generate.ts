@@ -201,6 +201,11 @@ export function mainPhotoRequests(
   const identityReferences = input.identityReferences.slice(0, budget);
   const tier = tierFor(model, input.tier);
   const estimatedMicroUsd = pricedCharacterImage(model, "main-photo", identityReferences.length, tier);
+  // N previews are N jobs, not one job asking for N images, and that is the choice rather than
+  // an oversight (#138). Every fal route takes num_images up to 4, so one request would work —
+  // but a failure would then take all four candidates with it, a retry would re-spend on the
+  // three that arrived, and the queue would show one row for four charges. Per-image pricing is
+  // identical either way, so the only thing the fan-out costs is request count.
   return Array.from({ length: input.count }, (_, index) => ({
     estimatedMicroUsd,
     input: {
