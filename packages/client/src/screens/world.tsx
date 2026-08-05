@@ -253,6 +253,9 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
   // through was to go and change the global routing default first.
   // The same resolver the bar uses, so the button and the picker cannot disagree about which
   // model this surface will send — and a stranded default blocks rather than quietly running.
+  // The id is sent explicitly even when nothing was picked: with no saved routing default the
+  // bar shows the first usable model, while the coordinator's own fallback would take the first
+  // row in the manifest — which can be a provider this machine has no key for.
   const offered = usableModels(state, "image");
   const resolved = resolveModel(state, "image", choice.modelId);
   const model = resolved.stranded === null ? resolved.model : null;
@@ -287,7 +290,7 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
           variant="ghost"
           onClick={() => {
             setDismissed((prev) => [...prev, failed.id]);
-            generateWorldImage(worldId, choice.modelId);
+            generateWorldImage(worldId, model?.id);
           }}
         >
           Try again
@@ -348,7 +351,7 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
         {...(reason ? { title: reason } : {})}
         onClick={() => {
           setAsking(true);
-          generateWorldImage(worldId, choice.modelId);
+          generateWorldImage(worldId, model?.id);
         }}
       >
         {asking ? "Writing the prompt…" : running ? "Making the key art…" : "Generate key art from the logline"}

@@ -107,6 +107,35 @@ describe("Settings · Providers, one provider at a time", () => {
     assert.ok(html.includes("UNAVAILABLE"));
   });
 
+  it("does not offer models the key cannot reach, capability by capability", () => {
+    // A key can authenticate and still not do images. The pickers already exclude those rows;
+    // the pane counted them ON and let them be switched, which is the same contradiction in the
+    // other direction.
+    const base = stateWith({});
+    __setStateForTest({
+      ...base,
+      app: {
+        ...base.app,
+        providers: [
+          {
+            id: "fal",
+            configured: true,
+            validation: "valid",
+            probes: [
+              { capability: "image", available: false, reason: "not entitled" },
+              { capability: "video", available: true },
+            ],
+            fault: null,
+          },
+        ],
+      },
+    });
+    const html = providers();
+    // The fixture's fal rows are one video model plus the two image models added above.
+    assert.ok(html.includes("1 OF 2 ON"), "only the video row counts as on");
+    assert.ok(html.includes("1 on"), "and the rail agrees with the pane");
+  });
+
   it("says an em dash, not a count, for a provider with no key", () => {
     __setStateForTest(stateWith({}));
     const html = providers();

@@ -4,12 +4,11 @@ import {
   compilationIsStale,
   designatedCompilation,
   mainPhotoFor,
-  modelForCapability,
   type ManifestModel,
   type SizeTier,
   type Sheet,
 } from "@arke-studio/contracts";
-import { DispatchBar, usableModels } from "../components/dispatch-bar.js";
+import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Button, Callout, cx } from "../components/ui.js";
 import { Loading } from "../components/loading.js";
@@ -159,10 +158,13 @@ export function mainPhotoPromptFor(sheet: Sheet | null | undefined): string {
     .join(" ");
 }
 
-function routedImageModel(state: ReturnType<typeof useStore>["state"]): ManifestModel | null {
-  return state?.app.manifest
-    ? modelForCapability(state.app.manifest, state.app.routing.defaults, "image")
-    : null;
+/**
+ * The image model this screen is actually on — the bar's answer, not a second opinion. These
+ * hosts gate references and prompts on it, and resolving it differently from the bar meant the
+ * screen could compute "no references" against one model while submitting another.
+ */
+function shownImageModel(state: ReturnType<typeof useStore>["state"], chosenId?: string): ManifestModel | null {
+  return resolveModel(state, "image", chosenId).model;
 }
 
 /**
@@ -332,7 +334,7 @@ export function GenerateCharacterSheetScreen() {
   if (!world || !sheet || !sheetId) return null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = kit ? mainPhotoFor(kit) : null;
-  const chosenModel = usableModels(state, "image").find((m) => m.id === choice.modelId) ?? routedImageModel(state);
+  const chosenModel = shownImageModel(state, choice.modelId);
   const referencesAsText = !carriesIdentity(chosenModel);
   const pendingSheetTakes = world.referenceTakes
     .filter(
@@ -566,7 +568,7 @@ export function ReplaceMainPhotoScreen() {
   // The chosen model decides what can travel, so it decides what this screen shows travelling.
   // A silent downgrade from image identity to text description is the failure the bar exists to
   // prevent, and it has to be visible where the references are, not only in the bar's own line.
-  const model = usableModels(state, "image").find((m) => m.id === choice.modelId) ?? routedImageModel(state);
+  const model = shownImageModel(state, choice.modelId);
   const carriesReferences = model !== null && model.unverified !== true && model.accepts.referenceImages > 0;
   const canImport = typeof window !== "undefined" && window.arke !== undefined;
   const refs = uploaded && photo && carriesReferences ? [`references/${sheetId}/${photo.file}`] : [];
@@ -724,7 +726,7 @@ export function CharacterLooksScreen() {
   if (!world || !sheet || !sheetId) return null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = kit ? mainPhotoFor(kit) : null;
-  const chosenModel = usableModels(state, "image").find((m) => m.id === choice.modelId) ?? routedImageModel(state);
+  const chosenModel = shownImageModel(state, choice.modelId);
   const pendingLooks = world.referenceTakes.filter(
     (take) =>
       take.kind === "look" &&

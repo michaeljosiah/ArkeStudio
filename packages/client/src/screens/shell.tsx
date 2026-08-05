@@ -1238,7 +1238,16 @@ function ProviderPane({ id }: { id: ProviderId }) {
   const troubled = Boolean(status?.fault) || status?.validation === "invalid";
   const models = (state?.app.manifest?.models ?? []).filter((m) => m.provider === id);
   const disabled = new Set(state?.app.models.disabled ?? []);
-  const on = models.filter((m) => !disabled.has(m.id)).length;
+  // What this key actually unlocks, capability by capability — the same question the generation
+  // pickers ask. A key can authenticate and still not do images, and this pane used to count
+  // those image rows as ON and let them be switched while no picker would ever list them.
+  const unlocked = new Set(
+    deriveCapabilityAvailability(state?.app.providers ?? [])
+      .filter((a) => a.via.includes(id))
+      .map((a) => a.capability),
+  );
+  const reaches = (model: ManifestModel): boolean => unlocked.has(model.capability);
+  const on = models.filter((m) => reaches(m) && !disabled.has(m.id)).length;
   const capabilities = [...new Set(models.map((m) => m.capability))];
   return (
     <div className="fy-prov__pane">
@@ -1260,9 +1269,9 @@ function ProviderPane({ id }: { id: ProviderId }) {
               an em dash for this state and the pane must not contradict it two inches away. */}
           {models.length === 0
             ? "NONE IN THE MANIFEST"
-            : configured
-              ? `${on} OF ${models.length} ON`
-              : `${models.length} UNAVAILABLE`}
+            : unlocked.size === 0
+              ? `${models.length} UNAVAILABLE`
+              : `${on} OF ${models.length} ON`}
         </span>
       </div>
       <div className="fy-prov__models">
@@ -1272,17 +1281,19 @@ function ProviderPane({ id }: { id: ProviderId }) {
           <ProviderModelRow
             key={model.id}
             model={model}
-            enabled={!disabled.has(model.id)}
-            usable={configured}
+            enabled={reaches(model) && !disabled.has(model.id)}
+            usable={reaches(model)}
           />
         ))}
       </div>
       <div className="fy-set__note">
         {models.length === 0
           ? `nothing in the shipped manifest routes to ${info.displayName} yet`
-          : configured
-            ? "a model switched off appears in no picker and cannot be a routing default · a default already pointing at one is flagged in Who does what, never re-routed for you"
-            : `add a key above — ${info.displayName}'s models become switchable once it is connected`}
+          : unlocked.size === 0
+            ? configured
+              ? `this key does not unlock ${info.displayName}'s capabilities — test it above, or replace it`
+              : `add a key above — ${info.displayName}'s models become switchable once it is connected`
+            : "a model switched off appears in no picker and cannot be a routing default · a default already pointing at one is flagged in Who does what, never re-routed for you"}
       </div>
     </div>
   );
@@ -1314,7 +1325,14 @@ export function SettingsProvidersScreen() {
           {KEYED_PROVIDERS.map((p) => {
             const connected = providerStatus.some((s) => s.id === p.id && s.configured);
             const models = manifestModels.filter((m) => m.provider === p.id);
-            const on = models.filter((m) => !disabledModels.has(m.id)).length;
+            // Counted the same way the pane counts, which is the same way the pickers decide:
+            // a model behind a capability this key does not unlock is not on.
+            const unlocked = new Set(
+              availability.filter((a) => a.via.includes(p.id)).map((a) => a.capability),
+            );
+            const on = models.filter(
+              (m) => unlocked.has(m.capability) && !disabledModels.has(m.id),
+            ).length;
             return (
               <button
                 type="button"
