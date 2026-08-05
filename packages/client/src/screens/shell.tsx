@@ -66,6 +66,7 @@ import {
   testLocalVoice,
   validateProvider,
 } from "../lib/store.js";
+import { ArtStyleGrid, ArtStyleWords } from "../components/art-style-picker.js";
 import { playAudio, usePlayback } from "../lib/audio.js";
 import {
   computeNeedsYou,
@@ -545,6 +546,13 @@ export function NewWorldScreen() {
   const [firstCharacter, setFirstCharacter] = useState("");
   const [firstLocation, setFirstLocation] = useState("");
   const [submittedName, setSubmittedName] = useState<string | null>(null);
+  // The look is asked for, never inferred from the logline (design turn 38). It is the last
+  // thing before the world exists, because it is the one answer that applies to every image the
+  // world will ever make, and asking it while the logline is still being written would be asking
+  // about a world nobody has described yet.
+  const [step, setStep] = useState<"draft" | "look" | "words">("draft");
+  const [presetId, setPresetId] = useState<string | null>(null);
+  const [look, setLook] = useState("");
   const seededRef = useRef(false);
   const [genMode, setGenMode] = useState<"form" | "chat">("form");
   const modeTouchedRef = useRef(false);
@@ -606,6 +614,96 @@ export function NewWorldScreen() {
 
   const canCreate = connection === "open" && shownName.length > 0 && submittedName === null;
   const entries = 1 + railCharacters.length + railLocations.length + (draft?.threads.length ?? 0);
+
+  const begin = (artDirection?: string) => {
+    setSubmittedName(shownName);
+    createWorld({
+      name: shownName,
+      ...(shownLogline ? { logline: shownLogline } : {}),
+      ...(shownTone ? { tone: shownTone.toLowerCase() } : {}),
+      ...(shownGenre ? { genre: shownGenre.toLowerCase() } : {}),
+      ...(artDirection && artDirection.trim().length > 0 ? { artDirection: artDirection.trim() } : {}),
+      // Whatever was handed to the conversation follows it in. Sent always, not only when
+      // something is attached: the sandbox is the source of truth for what is waiting, and the
+      // screen's idea of it can lag an event behind.
+      genesisId,
+    });
+  };
+
+  if (step !== "draft") {
+    return (
+      <div className="fy-app" data-screen="new-world-art-direction">
+        <AppChrome back={{ label: "Back", to: "/worlds" }} context={{ label: "new world · art direction" }} />
+        <div className="fy-artstep">
+          <div className="fy-eyebrow-sm">NEW WORLD · STEP 3 OF 3</div>
+          {step === "look" ? (
+            <>
+              <h1 className="fy-story__h1">How should {shownName || "this world"} look?</h1>
+              <p className="fy-artstep__lede">
+                Pick a starting look. Every image this world makes — characters, locations, shots —
+                follows it until you change it. Nothing here is permanent: you can edit the words on
+                the next screen, or set a different look any time from Art direction.
+              </p>
+              <ArtStyleGrid
+                selectedId={presetId}
+                onSelect={(preset) => {
+                  setPresetId(preset?.id ?? null);
+                  // The preset seeds the words and is then forgotten. Re-picking the same one
+                  // rewrites the draft; that is what picking it again means.
+                  setLook(preset?.description ?? "");
+                  setStep("words");
+                }}
+              />
+              <div className="fy-artstep__foot">
+                <span className="fy-artstep__note">
+                  Nothing is generated yet. The look is recorded with the world and rides along
+                  from here.
+                </span>
+                <span style={{ flex: 1 }} />
+                {/* Skippable, but not hidden: a world with no look is a real state, and it is
+                    better said out loud than arrived at by closing a screen. */}
+                <Button variant="ghost" disabled={!canCreate} onClick={() => begin()}>
+                  Decide later
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <h1 className="fy-story__h1">The preset writes a first draft.</h1>
+              <p className="fy-artstep__lede">
+                These are the words that ride along with every generation. Edit them, or replace
+                them entirely. A preset seeds the text; it never locks it.
+              </p>
+              <ArtStyleWords selectedId={presetId} value={look} onChange={setLook} />
+              <div className="fy-artstep__reaches">
+                <div className="fy-prov__eyebrow">WHAT THIS LOOK REACHES</div>
+                <div>The world image · generated later, from the hub</div>
+                <div>Every character kit · main photo and sheet</div>
+                <div>Every location and every artifact</div>
+                <div>Every shot in every production · unless a production overrides</div>
+              </div>
+              <div className="fy-artstep__foot">
+                <Button variant="ghost" onClick={() => setStep("look")}>
+                  Back
+                </Button>
+                <span style={{ flex: 1 }} />
+                <span className="fy-artstep__note">
+                  recorded as world look v1 · changing it later goes through the accept gate
+                </span>
+                <Button
+                  variant="primary"
+                  disabled={!canCreate || look.trim().length === 0}
+                  onClick={() => begin(look)}
+                >
+                  {submittedName ? "Creating…" : "Looks right"}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fy-app" data-screen="new-world">
@@ -874,27 +972,12 @@ export function NewWorldScreen() {
           )}
           <div style={{ flex: 1, minHeight: 16 }} />
           <div style={{ display: "grid", gap: 8 }}>
-            <Button
-              variant="primary"
-              disabled={!canCreate}
-              onClick={() => {
-                setSubmittedName(shownName);
-                createWorld({
-                  name: shownName,
-                  ...(shownLogline ? { logline: shownLogline } : {}),
-                  ...(shownTone ? { tone: shownTone.toLowerCase() } : {}),
-                  ...(shownGenre ? { genre: shownGenre.toLowerCase() } : {}),
-                  // Whatever was handed to the conversation follows it in. Sent always, not
-                  // only when something is attached: the sandbox is the source of truth for
-                  // what is waiting, and the screen's idea of it can lag an event behind.
-                  genesisId,
-                });
-              }}
-            >
+            <Button variant="primary" disabled={!canCreate} onClick={() => setStep("look")}>
               {submittedName ? "Creating…" : "Begin in this world"}
             </Button>
             <div style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center" }}>
-              Opens the hub. Everything arrives as sketches — lock what holds, discard what doesn't.
+              One more question — how it should look — then the hub. Everything arrives as sketches:
+              lock what holds, discard what doesn't.
             </div>
           </div>
         </div>

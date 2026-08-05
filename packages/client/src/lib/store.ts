@@ -764,6 +764,8 @@ export function createWorld(input: {
   logline?: string;
   tone?: string;
   genre?: string;
+  /** The look chosen at genesis, recorded as world look v1. Absent when it was deferred. */
+  artDirection?: string;
   /** Begun from a conversation: its attachments are filed into the world as it opens. */
   genesisId?: string;
 }): void {

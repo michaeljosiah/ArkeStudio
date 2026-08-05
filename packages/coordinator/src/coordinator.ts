@@ -899,6 +899,7 @@ export class Coordinator {
             ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
             ...(msg.tone !== undefined ? { tone: msg.tone } : {}),
             ...(msg.genre !== undefined ? { genre: msg.genre } : {}),
+            ...(msg.artDirection !== undefined ? { artDirection: msg.artDirection } : {}),
           });
           this.readModel.setWorlds(await this.opts.provider.listWorlds());
           await this.openWorld(worldId);

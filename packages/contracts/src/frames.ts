@@ -33,6 +33,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       tone: z.string().max(200).optional(),
       genre: z.string().max(200).optional(),
       /**
+       * The look, asked for during genesis rather than inferred from the logline (SPEC-017,
+       * design turn 38). Absent when the author chose "Decide later": the world then has no
+       * recorded look and falls back to one derived from tone and genre, which is a different
+       * state from having chosen, and is shown as such.
+       */
+      artDirection: z.string().trim().min(1).max(2000).optional(),
+      /**
        * Begun from a genesis conversation: whatever was attached to it waits in that sandbox
        * and is filed into the world as it opens. Without this the files would be swept with
        * the sandbox, and handing something over would have meant nothing.
