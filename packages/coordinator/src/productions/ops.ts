@@ -351,6 +351,8 @@ export function composeDispatches(
         prompt: entry.prompt.text,
         references: entry.references.filter((r) => r.file !== null).map((r) => r.file),
         ...(entry.shot.durationSec !== undefined ? { durationSec: entry.shot.durationSec } : {}),
+        // The size the plan priced, carried into the job that will be charged for it.
+        ...(plan.resolution !== undefined ? { resolution: plan.resolution } : {}),
         provenance: provenanceFor(entry.budget.carried.map((c) => c.sheetId)),
       },
       estimatedMicroUsd: entry.estimatedMicroUsd,
@@ -378,11 +380,17 @@ export function composeDispatches(
           .join("\n"),
         references,
         durationSec: pass.durationSec,
+        ...(plan.resolution !== undefined ? { resolution: plan.resolution } : {}),
         // The explicit plan (R-19, D11): SPEC-013 segments from these, never guesses.
         shotPlan: pass.plan,
         provenance: provenanceFor(passReferencePlan.budget.carried.map((candidate) => candidate.sheetId)),
       },
-      estimatedMicroUsd: estimateMicroUsd(model, { durationSec: pass.durationSec }),
+      // Priced at the same size the job runs at. This recomputed the estimate without the
+      // resolution, so a 1080p pass was queued carrying a 720p figure.
+      estimatedMicroUsd: estimateMicroUsd(model, {
+        durationSec: pass.durationSec,
+        ...(plan.resolution !== undefined ? { resolution: plan.resolution } : {}),
+      }),
       landing: { dir: `productions/${productionId}/incoming/${scene.id}-pass-${pass.index}` },
     };
   });

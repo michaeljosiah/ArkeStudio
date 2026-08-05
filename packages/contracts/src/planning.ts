@@ -288,6 +288,12 @@ export interface ScenePlan {
   shots: ShotDispatchPlan[];
   passReferences: Array<{ passIndex: number; references: AttachmentDecision[]; budget: BudgetResult }>;
   pack: PackResult;
+  /**
+   * The size these estimates were computed at, carried so the jobs composed from this plan run
+   * at it too. Without it the plan priced 1080p and the dispatch quietly took the provider's
+   * default — the estimate and the request disagreeing about the same job.
+   */
+  resolution?: string;
   totalEstimatedMicroUsd: number;
   warnings: DispatchWarnings;
 }
@@ -447,6 +453,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     shots,
     passReferences,
     pack,
+    ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
     totalEstimatedMicroUsd: mode === "whole-scene" ? wholeSceneTotal : perShotTotal,
     warnings,
   };
