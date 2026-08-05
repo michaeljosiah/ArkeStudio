@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code Quality &amp; Design Audit - Startup Logic</title>
+  <style>
+    :root{--bg:#0f1419;--panel:#161b22;--panel2:#1c2330;--border:#2d3748;--text:#d7dde6;--muted:#8b97a8;--accent:#4fc3f7;--accent2:#81d4fa;--good:#66bb6a;--warn:#ffb74d;--bad:#ef5350;--code-bg:#11151c}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 "Segoe UI",system-ui,sans-serif}.wrap{max-width:1100px;margin:0 auto;padding:30px 22px 60px}header.doc{border-bottom:1px solid var(--border);padding-bottom:22px}h1{font-size:30px;line-height:1.2;margin:0 0 8px}h2{font-size:21px;margin:30px 0 12px;padding-bottom:7px;border-bottom:1px solid var(--border)}h3{font-size:18px;margin:24px 0 8px}.sub{color:var(--muted);font-size:16px}.meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-top:20px}.meta{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:11px}.meta b{display:block;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}.meta span{display:block;margin-top:3px}.callout{background:var(--panel);border-left:4px solid var(--accent);padding:15px 17px;margin:12px 0}.callout.good{border-color:var(--good)}.callout.warn{border-color:var(--warn)}.callout.danger{border-color:var(--bad)}nav{background:var(--panel);border:1px solid var(--border);padding:14px 18px}nav a{color:var(--accent2);margin-right:18px;white-space:nowrap}table{width:100%;border-collapse:collapse;background:var(--panel);margin:12px 0 20px}th,td{text-align:left;vertical-align:top;border:1px solid var(--border);padding:9px 10px}th{background:var(--panel2);color:var(--accent2)}code,pre{font-family:"Cascadia Code",Consolas,monospace;font-size:12px}code{color:var(--accent2)}pre{background:var(--code-bg);border:1px solid var(--border);padding:12px;overflow:auto;color:var(--text)}.badge{display:inline-block;border:1px solid var(--muted);border-radius:12px;padding:1px 8px;margin-right:5px;font-size:11px;color:var(--muted);vertical-align:middle}.critical{color:var(--bad);border-color:var(--bad)}.major{color:var(--warn);border-color:var(--warn)}.minor{color:var(--accent);border-color:var(--accent)}.note{color:var(--muted)}.finding{padding-top:4px}.finding .location{float:right;color:var(--accent2);font-weight:normal}.muted{color:var(--muted)}ul,ol{padding-left:22px}a{color:var(--accent2)}
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <header class="doc">
+    <h1>Code Quality &amp; Design Audit - Startup Logic</h1>
+    <div class="sub">Evidence-based review of Electron launch, coordinator recovery, runtime discovery, and world registry startup.</div>
+    <div class="meta-grid">
+      <div class="meta"><b>Scope</b><span>Application startup paths</span></div>
+      <div class="meta"><b>Branch/commit</b><span>main / fa10c7c</span></div>
+      <div class="meta"><b>Build</b><span>Pass; 625.99 kB client warning</span></div>
+      <div class="meta"><b>Tests</b><span>431 pass, 1 skipped (desktop + coordinator)</span></div>
+      <div class="meta"><b>Date</b><span>2026-08-04</span></div>
+      <div class="meta"><b>Files reviewed</b><span>24 startup/spec/test files</span></div>
+    </div>
+  </header>
+
+  <h2 id="contents">Contents</h2>
+  <nav>
+    <a href="#summary">Executive summary</a>
+    <a href="#scorecard">Scorecard</a>
+    <a href="#index">Findings</a>
+    <a href="#intentional">Intentional design</a>
+    <a href="#quick-wins">Quick wins</a>
+    <a href="#appendix">Appendix</a>
+  </nav>
+
+  <h2 id="summary">Executive Summary</h2>
+  <div class="callout warn">
+    <strong>Four validated startup defects were found and filed as GitHub issues.</strong>
+    The primary theme is that the launch UI is constructed after the work it is meant to report. Synchronous OpenCode probing adds about 0.7 seconds on the measured machine and can block for timeout-length periods. Queue reconciliation also grows superlinearly with durable history, reaching 6.58 seconds for 1,000 synthetic terminal jobs. Separately, the cached world registry never discovers valid world folders added while the app is closed.
+    <p>Issues <a href="https://github.com/michaeljosiah/ArkeStudio/issues/126">#126</a>, <a href="https://github.com/michaeljosiah/ArkeStudio/issues/127">#127</a>, <a href="https://github.com/michaeljosiah/ArkeStudio/issues/128">#128</a>, and <a href="https://github.com/michaeljosiah/ArkeStudio/issues/129">#129</a> contain reproduction details and acceptance criteria. The blank/unhandled startup-failure path and unbounded recovery cost should be addressed before treating the under-two-second startup requirement as satisfied.</p>
+  </div>
+
+  <h2 id="scorecard">Dimension Scorecard</h2>
+  <table>
+    <thead><tr><th>Dimension</th><th>Findings</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>Business-logic placement &amp; layering</td><td>Clean</td><td>Startup composition remains in Electron and coordinator services; no business rule was found in the renderer.</td></tr>
+      <tr><td>Bad TypeScript/Node practices</td><td>2 Major</td><td>A discarded startup promise leaves fatal initialization failures unhandled, and synchronous subprocesses block Electron main.</td></tr>
+      <tr><td>DRY violations</td><td>Clean</td><td>No startup defect was caused by duplicated rules or validation.</td></tr>
+      <tr><td>Performance / hot path</td><td>3 Major</td><td>First paint is ordered after recovery, runtime discovery blocks main, and queue recovery scales superlinearly.</td></tr>
+      <tr><td>Simplification / optimization</td><td>1 Major</td><td>Queue history and ledger can be folded once into maps/sets instead of repeatedly rescanned.</td></tr>
+      <tr><td>Over-engineering</td><td>Clean</td><td>The launch readiness, child supervision, and cache seams are justified by specifications and tests.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="index">Findings Index</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Dimension</th><th>Severity</th><th>Confidence</th><th>Location</th><th>Problem</th></tr></thead>
+    <tbody>
+      <tr><td><a href="#f1">ST-1</a></td><td>Node practices / performance</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>apps/desktop/src/main.ts:188-560</code></td><td>The first window is created after initialization, and startup rejection is unhandled.</td></tr>
+      <tr><td><a href="#f2">ST-2</a></td><td>Performance</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>packages/adapter-opencode/src/discovery.ts:19-79</code></td><td>Synchronous subprocess discovery blocks Electron main before first paint.</td></tr>
+      <tr><td><a href="#f3">ST-3</a></td><td>Performance / simplification</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>packages/coordinator/src/queue/dispatcher.ts:721-760</code></td><td>Queue startup repeatedly rescans complete journal and ledger files.</td></tr>
+      <tr><td><a href="#f4">ST-4</a></td><td>Correctness</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>packages/coordinator/src/world/provider.ts:106-116</code></td><td>A seeded registry never discovers worlds added while the app is closed.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="findings">Detailed Findings</h2>
+
+  <section class="finding" id="f1">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> Launch UI follows initialization and fatal startup failures are unhandled <span class="location"><code>main.ts:188-560</code></span></h3>
+    <p><strong>Dimension:</strong> Bad TypeScript/Node practices; startup performance</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>async function start(): Promise&lt;void&gt; {
+  await provider.ensureAppRoot();
+  const swept = await childLedger.reapStale();
+  // discovery and coordinator construction
+  const { port } = await coordinator.start(0);
+  await sweepSpool(appRoot);
+  window = new BrowserWindow({ show: false, ... });
+}
+
+app.whenReady().then(() =&gt; {
+  void start();
+});</code></pre>
+    <p><strong>Why it matters:</strong> The user sees no launch screen while app-root setup, child cleanup, runtime discovery, journal seeding, queue reconciliation, and world listing execute. This directly contradicts SPEC-001 section 2.8, which requires the launch screen to render before readiness probing. Because the discarded promise has no rejection handler and no window exists, a core startup rejection cannot be shown as an actionable failure.</p>
+    <p><strong>Recommendation:</strong> Create and load the launch window immediately after Electron becomes ready. Run initialization behind an explicit startup state machine and catch fatal startup errors into a visible retry/open-data-folder/quit state.</p>
+    <p><strong>Effort:</strong> Moderate. GitHub: <a href="https://github.com/michaeljosiah/ArkeStudio/issues/126">#126</a>.</p>
+  </section>
+
+  <section class="finding" id="f2">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> OpenCode discovery blocks Electron main <span class="location"><code>discovery.ts:19-79</code></span></h3>
+    <p><strong>Dimension:</strong> Performance / bad Node practice</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>const result = spawnSync(command, ["--version"], {
+  timeout: 10_000,
+  shell: process.platform === "win32",
+});
+
+const result = spawnSync(probe, [command], {
+  timeout: 5_000,
+});</code></pre>
+    <p><strong>Why it matters:</strong> <code>discoverOpenCode()</code> is called before the first window. Five healthy local probes took 721, 687, 691, 705, and 692 ms. A stalled configured, PATH, or bundled candidate can block Electron main for its full timeout, preventing event processing and first paint.</p>
+    <p><strong>Recommendation:</strong> Use asynchronous child processes and perform discovery after the launch window paints. Publish a starting health state, then update health/version when discovery settles.</p>
+    <p><strong>Effort:</strong> Moderate. GitHub: <a href="https://github.com/michaeljosiah/ArkeStudio/issues/127">#127</a>.</p>
+  </section>
+
+  <section class="finding" id="f3">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> Queue recovery is superlinear in durable history <span class="location"><code>dispatcher.ts:721-760</code></span></h3>
+    <p><strong>Dimension:</strong> Performance / simplification</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>const folded = [...byId.values()].map((job) =&gt; ({
+  ...job,
+  attempt: Math.max(job.attempt,
+    history.filter((row) =&gt; row.id === job.id &amp;&amp; row.status === "submitting").length),
+}));
+
+if (!(await this.opts.ledger.has(job.id))) { ... }
+
+// Desktop composition:
+has: async (jobId) =&gt;
+  (await this.ledger!.readAll()).some((e) =&gt; e.jobId === jobId)</code></pre>
+    <p><strong>Why it matters:</strong> The journal and ledger are append-only and never compacted. Startup filters the full history per job and reparses the full ledger up to three times per terminal job. A no-network temporary-file benchmark measured 167 ms for 100 jobs, 805 ms for 300, and 6,582 ms for 1,000. This recovery is awaited before coordinator transport and first-window construction.</p>
+    <p><strong>Recommendation:</strong> Fold status and submission counts in one journal pass. Read the ledger once into a <code>Set&lt;jobId&gt;</code>, update the set when recovery appends, and perform constant-time membership checks.</p>
+    <p><strong>Effort:</strong> Moderate. GitHub: <a href="https://github.com/michaeljosiah/ArkeStudio/issues/128">#128</a>.</p>
+  </section>
+
+  <section class="finding" id="f4">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> Seeded registry misses worlds added while closed <span class="location"><code>provider.ts:106-116</code></span></h3>
+    <p><strong>Dimension:</strong> Correctness</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>async listWorlds(): Promise&lt;WorldSummary[]&gt; {
+  await this.ensureAppRoot();
+  if (this.appIndex?.seeded) {
+    return this.appIndex.listWorlds(this.worldsDir());
+  }
+  const summaries = await this.scanAllSummaries();
+  ...
+}</code></pre>
+    <p><strong>Why it matters:</strong> <code>AppIndex.listWorlds()</code> validates only known registry rows. It never enumerates unknown directories. A restart reproduction with two valid folders returned <code>{"folders":2,"listed":1,"names":["Original"]}</code>. A copied, restored, or synced world therefore remains invisible indefinitely.</p>
+    <p><strong>Recommendation:</strong> Reconcile cheap directory/world-metadata identity against registry rows at startup. Add missing valid worlds and remove absent rows without full-scanning the contents of every known world.</p>
+    <p><strong>Effort:</strong> Moderate. GitHub: <a href="https://github.com/michaeljosiah/ArkeStudio/issues/129">#129</a>.</p>
+  </section>
+
+  <h2 id="intentional">Confirmed-Intentional</h2>
+  <ul>
+    <li><strong>Children start without gating UI readiness:</strong> <code>Coordinator.start()</code> invokes supervisors without awaiting their health at <code>packages/coordinator/src/coordinator.ts:559-561</code>. This correctly implements degraded optional features under SPEC-001 R-6.</li>
+    <li><strong>Stale-child cleanup is startup-critical:</strong> <code>ChildLedger.reapStale()</code> verifies owner and child identity before killing at <code>packages/coordinator/src/child-ledger.ts:270-310</code>. The cleanup is justified by orphan/file-lock history and should remain, though it can report progress through an already-painted launch UI.</li>
+    <li><strong>Registry summaries avoid full world scans:</strong> SPEC-003 R-6 and section 2.2 deliberately cache picker counts. ST-4 does not recommend scanning every world; it requires discovering directory additions with a cheap reconciliation.</li>
+    <li><strong>Queue reconciliation gates new work:</strong> SPEC-009 R-18 requires non-terminal recovery before accepting new jobs. ST-3 preserves that ordering and changes only the data structures used to perform it.</li>
+  </ul>
+
+  <h2 id="quick-wins">Quick Wins</h2>
+  <ol>
+    <li>Replace per-job ledger reads with one startup <code>Set</code>; this is the smallest high-value performance fix.</li>
+    <li>Make OpenCode path/version probes asynchronous so timeout cases cannot freeze Electron main.</li>
+    <li>Add startup tests for a delayed coordinator, a rejected coordinator, and a world directory added between runs.</li>
+    <li>Move first-window construction ahead of initialization, then expose existing readiness states through that window.</li>
+  </ol>
+
+  <h2 id="appendix">Appendix</h2>
+  <div class="callout good">
+    <strong>Verification run:</strong> <code>npm run build</code> passed. Desktop tests passed 15/15. Coordinator tests passed 416 with 1 Windows-conditional skip. The build reported a 625.99 kB minified client chunk and an existing CJS <code>import.meta</code> warning; neither was filed without a direct startup measurement or behavioral failure.
+  </div>
+  <div class="callout warn">
+    <strong>Concurrent worktree note:</strong> During the audit, unrelated uncommitted edits appeared in startup-adjacent files. Findings and GitHub issues were validated against commit <code>fa10c7c</code>. A later typecheck of the moving worktree failed in in-progress client/desktop voice changes; those failures were not attributed to the committed startup logic or filed by this audit.
+  </div>
+  <p class="muted">No application code was changed by this audit. This HTML report is the only file created.</p>
+</main>
+</body>
+</html>
