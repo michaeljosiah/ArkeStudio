@@ -1,3 +1,5 @@
+import { CHARACTER_ROLE_MAX } from "@arke-studio/contracts";
+
 /**
  * The application-owned agent roster (SPEC-005 §2.3, R-8, D4). Agents are product behaviour,
  * not user content: they never live inside a world folder, so a copied world is never a
@@ -32,6 +34,9 @@ directory are the complete scope of what you may change. Rules that are not your
   frontmatter and NEVER restates their text.
 - Keep the exact file format you were given: YAML frontmatter between --- fences, prose under
   ## section headings. Do not add, rename or remove frontmatter keys unless asked.
+- A character's role frontmatter is at most ${CHARACTER_ROLE_MAX} characters — it is a label, not a
+  sentence. "Tide-caller", "Salvage diver", "Keeper of the drowned verse". If what you want to
+  say does not fit, it belongs in Essence instead. The accept gate refuses a longer one.
 - Do not touch the version or updated fields; the application stamps them.
 - When you are done, stop. Do not summarise your changes into new files.`;
 

@@ -984,7 +984,7 @@ export class Coordinator {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
         try {
-          const proposal = await gate.stageSheetEdit(msg.path, msg.summary, msg.sections, "form");
+          const proposal = await gate.stageSheetEdit(msg.path, msg.summary, msg.sections, "form", msg.role);
           this.emit({
             at: new Date().toISOString(),
             type: "proposal.staged",
@@ -1049,7 +1049,9 @@ export class Coordinator {
                         ? "pending-review"
                         : outcome.status === "unresolved-conflicts"
                           ? "unresolved-conflicts"
-                          : "target-retired",
+                          : outcome.status === "invalid"
+                            ? "invalid"
+                            : "target-retired",
               detail:
                 outcome.status === "stale"
                   ? `moved since drafting: ${outcome.stalePaths.join(", ")}`
@@ -1059,7 +1061,9 @@ export class Coordinator {
                       ? `${outcome.count} conflicted field${outcome.count === 1 ? "" : "s"} await a choice`
                       : outcome.status === "target-retired"
                         ? `retired: ${outcome.paths.join(", ")}`
-                        : undefined,
+                        : outcome.status === "invalid"
+                          ? outcome.problems.map((p) => `${p.path}: ${p.message}`).join("; ")
+                          : undefined,
               ...(outcome.status === "needs-reconfirm" ? { authoritativeSignature: outcome.signature } : {}),
             });
           }

@@ -190,7 +190,8 @@ export interface ProposalGateNotice {
     | "no-op"
     | "pending-review"
     | "unresolved-conflicts"
-    | "target-retired";
+    | "target-retired"
+    | "invalid";
   detail?: string;
   authoritativeSignature?: string;
 }
@@ -202,6 +203,7 @@ const NOTICE_TITLES: Record<ProposalGateNotice["reason"], string> = {
   "pending-review": "Review the merged result",
   "unresolved-conflicts": "Conflicted fields await a choice",
   "target-retired": "The target was retired",
+  invalid: "A field is over its limit",
 };
 
 export function ProposalPanel({
@@ -258,6 +260,12 @@ export function ProposalPanel({
               <Button variant="primary" onClick={() => onAccept(notice.authoritativeSignature)}>
                 Accept with these consequences
               </Button>
+            </div>
+          )}
+          {/* There is no way to hand-edit a staged proposal, so say what the way out is. */}
+          {notice.reason === "invalid" && (
+            <div className="dom-proposal__noticehint">
+              Ask the studio to shorten it, or discard this draft. Nothing has landed.
             </div>
           )}
         </div>

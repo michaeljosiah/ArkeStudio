@@ -34,7 +34,13 @@ export type ConnectionStatus = "connecting" | "open" | "closed";
 /** The last blocked-accept notice per proposal (SPEC-004): why it did not land, and what to offer. */
 export interface GateNotice {
   reason:
-    "stale" | "needs-reconfirm" | "no-op" | "pending-review" | "unresolved-conflicts" | "target-retired";
+    | "stale"
+    | "needs-reconfirm"
+    | "no-op"
+    | "pending-review"
+    | "unresolved-conflicts"
+    | "target-retired"
+    | "invalid";
   detail?: string;
   authoritativeSignature?: string;
 }
@@ -876,8 +882,10 @@ export function stageSheetEdit(
   path: string,
   summary: string,
   sections: Array<{ heading: string; body: string }>,
+  /** Characters only: the new `role`, or "" to clear it. Omit to leave it untouched. */
+  role?: string,
 ): void {
-  send({ kind: "stage-sheet-edit", worldId, path, summary, sections });
+  send({ kind: "stage-sheet-edit", worldId, path, summary, sections, ...(role !== undefined ? { role } : {}) });
 }
 
 export function stageArtDirectionChange(

@@ -151,6 +151,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
         "pending-review",
         "unresolved-conflicts",
         "target-retired",
+        /** Authored content broke a bound the gate enforces, e.g. an over-long role (SPEC-007 R-18). */
+        "invalid",
       ]),
       detail: z.string().optional(),
       /** On needs-reconfirm: the authoritative set and its signature to echo back (R-10). */

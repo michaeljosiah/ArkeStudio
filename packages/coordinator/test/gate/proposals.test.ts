@@ -326,3 +326,143 @@ describe("ripples: preview and authority (R-8..R-10)", () => {
     await store.close();
   });
 });
+
+describe("role on the form edit path (SPEC-007 R-18)", () => {
+  /** The sections the form always sends back — unchanged, so only role can move. */
+  async function marenSections(dir: string) {
+    const doc = MarkdownFile.parse(await readFile(join(dir, MAREN), "utf8"));
+    return doc.sections().map((s) => ({ heading: s.heading, body: s.body }));
+  }
+
+  async function stagedFrontmatter(dir: string, id: string): Promise<Record<string, unknown>> {
+    const raw = await readFile(join(dir, ".proposals", id, "characters", "maren-kest.md"), "utf8");
+    return MarkdownFile.parse(raw).data;
+  }
+
+  it("writes role into the staged frontmatter, leaving the rest of it alone", async () => {
+    const { dir, store, gate } = await openGate();
+    const proposal = await gate.stageSheetEdit(
+      MAREN,
+      "Edit Maren Kest",
+      await marenSections(dir),
+      "form",
+      "Tide-caller of the Vigil",
+    );
+    const data = await stagedFrontmatter(dir, proposal.id);
+    assert.equal(data.role, "Tide-caller of the Vigil");
+    assert.equal(data.billing, "lead", "the neighbouring keys survive the edit (SPEC-002 R-6)");
+    assert.ok(data.voice, "voice assignment is untouched");
+    await store.close();
+  });
+
+  it("trims the role rather than storing the author's stray whitespace", async () => {
+    const { dir, store, gate } = await openGate();
+    const proposal = await gate.stageSheetEdit(MAREN, "e", await marenSections(dir), "form", "  Tide-caller  ");
+    assert.equal((await stagedFrontmatter(dir, proposal.id)).role, "Tide-caller");
+    await store.close();
+  });
+
+  it("clears the key entirely rather than writing an empty string", async () => {
+    const { dir, store, gate } = await openGate();
+    const proposal = await gate.stageSheetEdit(MAREN, "e", await marenSections(dir), "form", "   ");
+    const data = await stagedFrontmatter(dir, proposal.id);
+    assert.ok(!("role" in data), "an empty role reads back as truthy and hides the 'no role yet' state");
+    await store.close();
+  });
+
+  it("leaves role untouched when the form did not edit it", async () => {
+    const { dir, store, gate } = await openGate();
+    const proposal = await gate.stageSheetEdit(MAREN, "e", await marenSections(dir), "form");
+    assert.equal((await stagedFrontmatter(dir, proposal.id)).role, "Tide-caller");
+    await store.close();
+  });
+});
+
+describe("the gate bounds authored roles (SPEC-007 R-18)", () => {
+  const OVER = "x".repeat(29);
+
+  /** Stage a raw sheet edit the way a drafting agent writes one: straight into the proposal. */
+  async function stageRaw(dir: string, gate: ProposalManager, mutate: (doc: MarkdownFile) => void) {
+    const live = await readFile(join(dir, MAREN), "utf8");
+    const doc = MarkdownFile.parse(live);
+    mutate(doc);
+    return gate.stage({
+      kind: "sheet-edit",
+      summary: "agent draft",
+      source: "chat:studio",
+      targets: [{ path: MAREN, content: doc.serialize() }],
+    });
+  }
+
+  it("refuses a proposal whose role is over the cap", async () => {
+    const { dir, store, gate } = await openGate();
+    const proposal = await stageRaw(dir, gate, (doc) => doc.setData({ role: OVER }));
+    const outcome = await gate.accept(proposal.id);
+    assert.equal(outcome.status, "invalid", "the agent writes its own files; the gate is the only chokepoint");
+    assert.equal(outcome.status === "invalid" && outcome.problems.length, 1);
+    assert.match(
+      outcome.status === "invalid" ? outcome.problems[0]!.message : "",
+      /29 characters; the limit is 28/,
+      "the refusal names the number so it can be acted on",
+    );
+    assert.equal(store.getBundle().sheets.find((s) => s.id === "maren-kest")!.version, 4, "nothing landed");
+    await store.close();
+  });
+
+  it("accepts a role exactly at the cap", async () => {
+    const { dir, store, gate } = await openGate();
+    const atCap = "y".repeat(28);
+    const proposal = await stageRaw(dir, gate, (doc) => doc.setData({ role: atCap }));
+    assert.equal((await gate.accept(proposal.id)).status, "accepted");
+    assert.equal(store.getBundle().sheets.find((s) => s.id === "maren-kest")!.role, atCap);
+    await store.close();
+  });
+
+  it("still accepts an edit to a sheet whose role was already over the cap", async () => {
+    // The read path is deliberately permissive (R-18), so a world may already hold a long role.
+    // Refusing every later edit to that sheet would strand it, uneditable, on a rule that
+    // postdates it — the proposal is judged on what it CHANGES, not on what it carries.
+    const { dir, store, gate } = await openGate();
+    await writeFile(
+      join(dir, MAREN),
+      MarkdownFile.parse(await readFile(join(dir, MAREN), "utf8")).serialize().replace("role: Tide-caller", `role: ${OVER}`),
+      "utf8",
+    );
+    await store.reload();
+
+    const proposal = await stageRaw(dir, gate, (doc) => doc.setBody(doc.body.replace("Salt-crusted", "Salt-white")));
+    const outcome = await gate.accept(proposal.id);
+    assert.equal(outcome.status, "accepted", "the prose edit lands; the untouched long role rides along");
+    assert.equal(store.getBundle().sheets.find((s) => s.id === "maren-kest")!.role, OVER);
+    await store.close();
+  });
+
+  it("refuses when a proposal changes an over-cap role to a different over-cap role", async () => {
+    const { dir, store, gate } = await openGate();
+    await writeFile(
+      join(dir, MAREN),
+      MarkdownFile.parse(await readFile(join(dir, MAREN), "utf8")).serialize().replace("role: Tide-caller", `role: ${OVER}`),
+      "utf8",
+    );
+    await store.reload();
+
+    const proposal = await stageRaw(dir, gate, (doc) => doc.setData({ role: "z".repeat(40) }));
+    assert.equal((await gate.accept(proposal.id)).status, "invalid", "rewriting it is an authoring act, and is judged");
+    await store.close();
+  });
+
+  it("leaves locations and factions alone — role is a character field", async () => {
+    const { dir, store, gate } = await openGate();
+    const path = "locations/the-vigil.md";
+    const doc = MarkdownFile.parse(await readFile(join(dir, path), "utf8"));
+    doc.setData({ role: OVER });
+    const proposal = await gate.stage({
+      kind: "sheet-edit",
+      summary: "odd but not this rule's business",
+      source: "test",
+      targets: [{ path, content: doc.serialize() }],
+    });
+    assert.equal((await gate.accept(proposal.id)).status, "accepted");
+    await store.close();
+  });
+});

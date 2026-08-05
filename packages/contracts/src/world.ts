@@ -61,13 +61,28 @@ export const SheetSectionSchema = z
   .strict();
 export type SheetSection = z.infer<typeof SheetSectionSchema>;
 
+/**
+ * How long a character's `role` may be when it is *written* (SPEC-007 §2.3.1).
+ *
+ * The world hub draws the cast as fixed-height cards, and the role is the single 15px line
+ * under the name. 28 is the width budget of that 147px line at 11px in the sans face, measured
+ * at the average letter density of real roles — "Keeper of the drowned verse" is 27 and fits
+ * with room to spare. It is a budget for authoring, not a guarantee: 28 wide capitals would
+ * still overrun, which is why the card clips to one line regardless.
+ *
+ * Deliberately NOT enforced by `SheetSchema`. That schema is the *read* path — `scan.ts` drops
+ * any sheet it rejects — so a max here would make a character with a longer role disappear from
+ * a world that already opened fine. Authoring paths enforce it; reading stays permissive.
+ */
+export const CHARACTER_ROLE_MAX = 28;
+
 export const SheetSchema = z
   .object({
     id: SlugSchema,
     /** Frontmatter key is `type` (§2.3.2). */
     type: SheetKindSchema,
     name: z.string().min(1),
-    /** Characters: e.g. "Tide-caller". */
+    /** Characters: e.g. "Tide-caller". Authored within `CHARACTER_ROLE_MAX`; read unbounded. */
     role: z.string().optional(),
     /** Characters: e.g. "lead" | "support". Display vocabulary, not an enum the gate owns. */
     billing: z.string().optional(),
