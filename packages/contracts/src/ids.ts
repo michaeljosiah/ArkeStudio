@@ -48,6 +48,18 @@ export const ID_PREFIXES = {
   commit: "cm",
   session: "sess",
   providerCall: "pc",
+  // World Chat (#70 §5.1). Product identity is kept strictly separate from the harness's own
+  // session ids: a provider session is an ephemeral implementation detail that may be replaced
+  // between turns, and nothing durable is ever keyed on one.
+  conversation: "cv",
+  turn: "turn",
+  message: "msg",
+  run: "run",
+  checkReceipt: "check",
+  candidate: "cand",
+  candidateGroup: "grp",
+  chatAttachment: "wca",
+  chatEvent: "wce",
 } as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
@@ -66,6 +78,25 @@ export const PassIdSchema = prefixedIdSchema("ps");
 export const ProposalIdSchema = prefixedIdSchema("pr");
 export const ArtifactIdSchema = prefixedIdSchema("ar");
 export const ProviderCallIdSchema = prefixedIdSchema("pc");
+
+export const ConversationIdSchema = prefixedIdSchema("cv");
+export const TurnIdSchema = prefixedIdSchema("turn");
+export const MessageIdSchema = prefixedIdSchema("msg");
+export const RunIdSchema = prefixedIdSchema("run");
+export const CheckReceiptIdSchema = prefixedIdSchema("check");
+export const CandidateIdSchema = prefixedIdSchema("cand");
+export const CandidateGroupIdSchema = prefixedIdSchema("grp");
+export const ChatAttachmentIdSchema = prefixedIdSchema("wca");
+export const ChatEventIdSchema = prefixedIdSchema("wce");
+
+export type ConversationId = z.infer<typeof ConversationIdSchema>;
+export type TurnId = z.infer<typeof TurnIdSchema>;
+export type MessageId = z.infer<typeof MessageIdSchema>;
+export type RunId = z.infer<typeof RunIdSchema>;
+export type CheckReceiptId = z.infer<typeof CheckReceiptIdSchema>;
+export type CandidateId = z.infer<typeof CandidateIdSchema>;
+export type CandidateGroupId = z.infer<typeof CandidateGroupIdSchema>;
+export type ChatAttachmentId = z.infer<typeof ChatAttachmentIdSchema>;
 
 /**
  * Entity slugs are filenames (master spec §2.2): lowercase kebab-case, no spaces. Kept

@@ -10,6 +10,7 @@ export * from "./change.js";
 export * from "./events.js";
 export * from "./client-state.js";
 export * from "./frames.js";
+export * from "./world-chat.js";
 export * from "./adapter.js";
 export * from "./ask.js";
 export * from "./sheet-shapes.js";
