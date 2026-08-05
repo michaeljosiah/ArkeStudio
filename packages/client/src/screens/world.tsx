@@ -19,6 +19,7 @@ import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components
 import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
 import { ChevronRight, Play, Plus, Search, X } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
+import { DispatchBar } from "../components/dispatch-bar.js";
 import { Loading } from "../components/loading.js";
 import { characterPortraitPath, Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
@@ -247,6 +248,7 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
   const { state } = useStore();
   const world = state?.world;
   const [dismissed, setDismissed] = useState<readonly string[]>([]);
+  const [choice, setChoice] = useState<{ modelId?: string }>({});
   const configured = new Set((state?.app.providers ?? []).filter((p) => p.configured).map((p) => p.id));
   const model = state?.app.manifest
     ? modelForCapability(state.app.manifest, state.app.routing.defaults, "image")
@@ -282,7 +284,7 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
           variant="ghost"
           onClick={() => {
             setDismissed((prev) => [...prev, failed.id]);
-            generateWorldImage(worldId);
+            generateWorldImage(worldId, choice.modelId);
           }}
         >
           Try again
@@ -341,16 +343,16 @@ function WorldKeyArt({ worldId, slug, hasLogline }: { worldId: string; slug: str
         {...(reason ? { title: reason } : {})}
         onClick={() => {
           setAsking(true);
-          generateWorldImage(worldId);
+          generateWorldImage(worldId, choice.modelId);
         }}
       >
         {asking ? "Writing the prompt…" : running ? "Making the key art…" : "Generate key art from the logline"}
       </Button>
+      {/* Model only: this request carries no output spec, so the provider's own size is what
+          runs, and a size control that changed nothing would be worse than none. */}
+      <DispatchBar variant="controls" workflow="main-photo" choice={choice} onChoice={setChoice} />
       <span className="fy-keyart__note">
-        {reason ??
-          (model
-            ? `${PROVIDERS[model.provider].displayName} · ${model.displayName} · World look v${world?.artDirection.version ?? 1} carries as text · comes back for a yes`
-            : "")}
+        {reason ?? `World look v${world?.artDirection.version ?? 1} carries as text · comes back for a yes`}
       </span>
     </div>
   );

@@ -15,6 +15,7 @@ import { DegradedBanner, EmptyState, Screen } from "../components/layout.js";
 import { Badge, Button, Callout, Textarea, cx } from "../components/ui.js";
 import { ChevronLeft, ChevronRight, Play, Plus } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
+import { DispatchBar } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { CanonEntryRow } from "../domain/domain.js";
 import { seconds, usd } from "../lib/format.js";
@@ -1047,9 +1048,9 @@ export function DispatchDialogScreen() {
   const capability = production?.meta.format === "stills" ? "image" : "video";
   const models = (manifest?.models ?? []).filter((m) => m.capability === capability);
   const [sceneIdx, setSceneIdx] = useState(0);
-  const [modelId, setModelId] = useState<string | null>(null);
+  const [choice, setChoice] = useState<{ modelId?: string; resolution?: string }>({});
   const scene = production?.scenes[sceneIdx] ?? null;
-  const model = models.find((m) => m.id === (modelId ?? routing[capability])) ?? models[0] ?? null;
+  const model = models.find((m) => m.id === (choice.modelId ?? routing[capability])) ?? models[0] ?? null;
 
   // The whole plan, computed live from the world — the same function the coordinator executes.
   const plans = useMemo(() => {
@@ -1063,9 +1064,10 @@ export function DispatchDialogScreen() {
       scene,
       selections: production.selections,
       model,
+      ...(choice.resolution !== undefined ? { resolution: choice.resolution } : {}),
     };
     return { perShot: planScene(input, "per-shot"), wholeScene: planScene(input, "whole-scene") };
-  }, [world, production, scene, model]);
+  }, [world, production, scene, model, choice.resolution]);
 
   const sceneFile = scene ? sceneFileOf(scene) : null;
   const warnings = plans?.perShot.warnings ?? null;
@@ -1123,13 +1125,16 @@ export function DispatchDialogScreen() {
               : "Identity references remain distinct from the world's style treatment."}
           </Callout>
         )}
-        <div className="fy-choicerow">
-          {models.map((m) => (
-            <Button key={m.id} variant={m.id === model?.id ? "primary" : "ghost"} onClick={() => setModelId(m.id)}>
-              {m.displayName} · {modelCapabilityCopy(m)}
-            </Button>
-          ))}
-        </div>
+        {/* Controls only: the two mode cards below each carry their own estimate, computed from
+            the same plan the coordinator executes, and one figure up here could disagree with
+            them. Size speaks the video vocabulary — 720p is what this surface means. */}
+        <DispatchBar
+          variant="controls"
+          capability={capability}
+          workflow="main-photo"
+          choice={choice}
+          onChoice={setChoice}
+        />
         {warningRows.length > 0 ? (
           <Callout tone="warning" title={`${warningRows.length} thing${warningRows.length === 1 ? "" : "s"} worth knowing — none blocks`}>
             <ul style={{ margin: 0, paddingLeft: "1.2em" }}>
@@ -1154,7 +1159,7 @@ export function DispatchDialogScreen() {
                   variant="primary"
                   onClick={() => {
                     if (worldId && prodId && sceneFile && model) {
-                      dispatchScene(worldId, prodId, sceneFile, "per-shot", model.id);
+                      dispatchScene(worldId, prodId, sceneFile, "per-shot", model.id, choice.resolution);
                       navigate(`/w/${worldId}/p/${prodId}/generate`);
                     }
                   }}
@@ -1182,7 +1187,7 @@ export function DispatchDialogScreen() {
                       variant="primary"
                       onClick={() => {
                         if (worldId && prodId && sceneFile && model) {
-                          dispatchScene(worldId, prodId, sceneFile, "whole-scene", model.id);
+                          dispatchScene(worldId, prodId, sceneFile, "whole-scene", model.id, choice.resolution);
                           navigate(`/w/${worldId}/p/${prodId}/generate`);
                         }
                       }}

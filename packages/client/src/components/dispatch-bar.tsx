@@ -36,11 +36,13 @@ export interface DispatchChoice {
   model: ManifestModel;
   /** Absent where the surface makes one thing — a character sheet is one composite. */
   count?: number;
-  /** Absent when the chosen model declares no tiers, i.e. it is unverified. */
+  /** Images: the normalised tier. Absent when the model declares none, i.e. it is unverified. */
   tier?: SizeTier;
+  /** Video: the provider's own word, because 720p is what that surface means. */
+  resolution?: string;
 }
 
-const TIERS: readonly SizeTier[] = ["1K", "2K", "4K"];
+const TIERS: SizeTier[] = ["1K", "2K", "4K"];
 
 /** The models this studio offers for a capability: in the manifest, keyed, and switched on. */
 export function usableModels(
@@ -84,6 +86,7 @@ export function DispatchBar({
   primaryLabel,
   onPrimary,
   primaryDisabled = false,
+  variant = "full",
 }: {
   workflow: CharacterImageWorkflow;
   capability?: "image" | "video";
@@ -92,12 +95,18 @@ export function DispatchBar({
   onCount?: (count: number) => void;
   /** Per generated image, for the estimate. The bar does not decide what rides along. */
   referenceImages?: number;
-  choice: { modelId?: string; tier?: SizeTier };
-  onChoice: (choice: { modelId?: string; tier?: SizeTier }) => void;
-  onCancel: () => void;
-  primaryLabel: string;
-  onPrimary: (chosen: DispatchChoice) => void;
+  choice: { modelId?: string; tier?: SizeTier; resolution?: string };
+  onChoice: (choice: { modelId?: string; tier?: SizeTier; resolution?: string }) => void;
+  onCancel?: () => void;
+  primaryLabel?: string;
+  onPrimary?: (chosen: DispatchChoice) => void;
   primaryDisabled?: boolean;
+  /**
+   * "controls" leaves out the figure and the buttons: some hosts already own their own action
+   * and their own estimate — scene dispatch offers two modes with a price each — and duplicating
+   * either would put two numbers on one screen that could disagree.
+   */
+  variant?: "full" | "controls";
 }) {
   const { state } = useStore();
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -138,8 +147,16 @@ export function DispatchBar({
     );
   }
 
+  const isVideo = capability === "video";
   const reachable = tiersFor(model);
-  const tier = choice.tier !== undefined && reachable.includes(choice.tier) ? choice.tier : reachable[0];
+  const videoSizes = model.limits.resolutions ?? [];
+  const sizeOptions: string[] = isVideo ? videoSizes : TIERS;
+  const active = isVideo
+    ? (choice.resolution !== undefined && videoSizes.includes(choice.resolution)
+        ? choice.resolution
+        : videoSizes[0])
+    : (choice.tier !== undefined && reachable.includes(choice.tier) ? choice.tier : reachable[0]);
+  const tier = isVideo ? undefined : (active as SizeTier | undefined);
   const images = count ?? 1;
   const carried = model.unverified === true ? 0 : Math.min(referenceImages, model.accepts.referenceImages);
   const estimate = estimateCharacterImageMicroUsd(model, workflow, images, carried * images, tier);
@@ -212,21 +229,25 @@ export function DispatchBar({
 
         <span className="fy-dispatchbar__seg">
           <span className="fy-dispatchbar__eyebrow">SIZE</span>
-          {reachable.length === 0 ? (
+          {sizeOptions.length === 0 ? (
             <span className="fy-dispatchbar__fixed">provider default</span>
           ) : (
             <span>
-              {TIERS.map((value) => {
-                const canReach = reachable.includes(value);
+              {sizeOptions.map((value) => {
+                const canReach = isVideo || reachable.includes(value as SizeTier);
                 return (
                   <button
                     type="button"
                     key={value}
                     disabled={!canReach}
-                    aria-pressed={value === tier}
+                    aria-pressed={value === active}
                     title={canReach ? undefined : `${model.displayName} does not reach ${value}`}
-                    className={value === tier ? "is-active" : ""}
-                    onClick={() => onChoice({ ...choice, tier: value })}
+                    className={value === active ? "is-active" : ""}
+                    onClick={() =>
+                      onChoice(
+                        isVideo ? { ...choice, resolution: value } : { ...choice, tier: value as SizeTier },
+                      )
+                    }
                   >
                     {value}
                   </button>
@@ -236,25 +257,28 @@ export function DispatchBar({
           )}
         </span>
 
-        <span className="fy-dispatchbar__group">
-          <span className="fy-dispatchbar__estimate">~{formatMicroUsd(estimate)}</span>
-          <Button variant="ghost" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            disabled={primaryDisabled || stranded !== null}
-            onClick={() =>
-              onPrimary({
-                model,
-                ...(count !== undefined ? { count } : {}),
-                ...(tier !== undefined ? { tier } : {}),
-              })
-            }
-          >
-            {primaryLabel}
-          </Button>
-        </span>
+        {variant === "full" && onCancel && primaryLabel && onPrimary && (
+          <span className="fy-dispatchbar__group">
+            <span className="fy-dispatchbar__estimate">~{formatMicroUsd(estimate)}</span>
+            <Button variant="ghost" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={primaryDisabled || stranded !== null}
+              onClick={() =>
+                onPrimary({
+                  model,
+                  ...(count !== undefined ? { count } : {}),
+                  ...(tier !== undefined ? { tier } : {}),
+                  ...(isVideo && active !== undefined ? { resolution: active } : {}),
+                })
+              }
+            >
+              {primaryLabel}
+            </Button>
+          </span>
+        )}
       </div>
       <div className="fy-dispatchbar__detail">
         {stranded
