@@ -5,6 +5,7 @@ import {
   estimateMicroUsd,
   parseMentions,
   planScene,
+  sceneImageOutput,
   SceneSchema,
   ulid,
   type ArtifactSidecar,
@@ -353,6 +354,12 @@ export function composeDispatches(
         ...(entry.shot.durationSec !== undefined ? { durationSec: entry.shot.durationSec } : {}),
         // The size the plan priced, carried into the job that will be charged for it.
         ...(plan.resolution !== undefined ? { resolution: plan.resolution } : {}),
+        // Stills: the image clients size a request from output.width/height and ignore a bare
+        // resolution string, so a chosen tier has to arrive as dimensions or it changes nothing.
+        // Only when a tier was chosen — without one this path sent no size and still should.
+        ...(model.capability === "image" && plan.tier !== undefined
+          ? { output: sceneImageOutput(model, plan.tier) }
+          : {}),
         provenance: provenanceFor(entry.budget.carried.map((c) => c.sheetId)),
       },
       estimatedMicroUsd: entry.estimatedMicroUsd,

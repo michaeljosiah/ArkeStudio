@@ -67,6 +67,7 @@ import {
   validateProvider,
 } from "../lib/store.js";
 import { ArtStyleGrid, ArtStyleWords } from "../components/art-style-picker.js";
+import { seedFrom } from "../lib/art-styles.js";
 import { playAudio, usePlayback } from "../lib/audio.js";
 import {
   computeNeedsYou,
@@ -650,7 +651,7 @@ export function NewWorldScreen() {
                   setPresetId(preset?.id ?? null);
                   // The preset seeds the words and is then forgotten. Re-picking the same one
                   // rewrites the draft; that is what picking it again means.
-                  setLook(preset?.description ?? "");
+                  setLook(seedFrom(preset));
                   setStep("words");
                 }}
               />

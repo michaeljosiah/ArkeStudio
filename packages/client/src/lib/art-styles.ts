@@ -87,3 +87,15 @@ export const ART_STYLE_PRESETS: ArtStylePreset[] = [
 export function presetById(id: string): ArtStylePreset | undefined {
   return ART_STYLE_PRESETS.find((preset) => preset.id === id);
 }
+
+/**
+ * What the words become when a card is chosen — including the custom door, which empties them.
+ *
+ * Both surfaces call this rather than deciding for themselves. Picking a preset and then
+ * changing your mind to "Describe your own" left the preset's sentence sitting in the box under
+ * a line that said nothing was seeded, and accepting from there would have stored those words as
+ * if someone had written them.
+ */
+export function seedFrom(preset: ArtStylePreset | null): string {
+  return preset?.description ?? "";
+}

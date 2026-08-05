@@ -1855,6 +1855,7 @@ export class Coordinator {
             selections: production.selections,
             model,
             ...(msg.resolution !== undefined ? { resolution: msg.resolution } : {}),
+            ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
           },
           msg.mode,
         );

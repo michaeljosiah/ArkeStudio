@@ -1532,6 +1532,7 @@ export function dispatchScene(
   mode: "per-shot" | "whole-scene",
   modelId: string,
   resolution?: string,
+  tier?: SizeTier,
 ): void {
   send({
     kind: "dispatch-scene",
@@ -1542,6 +1543,7 @@ export function dispatchScene(
     modelId,
     requestId: queueRequest("dispatch-scene"),
     ...(resolution !== undefined ? { resolution } : {}),
+    ...(tier !== undefined ? { tier } : {}),
   });
 }
 

@@ -720,6 +720,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       mode: z.enum(["per-shot", "whole-scene"]),
       modelId: z.string().min(1),
       resolution: z.string().optional(),
+      /** Stills: the size tier, which the plan turns into real output dimensions. */
+      tier: SizeTierSchema.optional(),
     })
     .strict(),
   /** SPEC-012 R-22: accept/reject from the contact sheet; the full loop is SPEC-013's. */

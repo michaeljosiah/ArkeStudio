@@ -1075,9 +1075,10 @@ export function DispatchDialogScreen() {
       selections: production.selections,
       model,
       ...(resolution !== undefined ? { resolution } : {}),
+      ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
     };
     return { perShot: planScene(input, "per-shot"), wholeScene: planScene(input, "whole-scene") };
-  }, [world, production, scene, model, resolution]);
+  }, [world, production, scene, model, resolution, choice.tier]);
 
   const sceneFile = scene ? sceneFileOf(scene) : null;
   const warnings = plans?.perShot.warnings ?? null;
@@ -1169,7 +1170,7 @@ export function DispatchDialogScreen() {
                   variant="primary"
                   onClick={() => {
                     if (worldId && prodId && sceneFile && model) {
-                      dispatchScene(worldId, prodId, sceneFile, "per-shot", model.id, resolution);
+                      dispatchScene(worldId, prodId, sceneFile, "per-shot", model.id, resolution, choice.tier);
                       navigate(`/w/${worldId}/p/${prodId}/generate`);
                     }
                   }}
@@ -1197,7 +1198,7 @@ export function DispatchDialogScreen() {
                       variant="primary"
                       onClick={() => {
                         if (worldId && prodId && sceneFile && model) {
-                          dispatchScene(worldId, prodId, sceneFile, "whole-scene", model.id, resolution);
+                          dispatchScene(worldId, prodId, sceneFile, "whole-scene", model.id, resolution, choice.tier);
                           navigate(`/w/${worldId}/p/${prodId}/generate`);
                         }
                       }}

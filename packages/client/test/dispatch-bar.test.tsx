@@ -129,6 +129,27 @@ describe("a routed default that cannot run", () => {
   });
 });
 
+describe("with no model at all", () => {
+  const noModels = (): ClientState => ({
+    ...FIXTURE_STATE,
+    app: { ...FIXTURE_STATE.app, providers: [], routing: { defaults: {}, faults: [] } },
+  });
+
+  it("keeps the explanation and the way out where the host owns actions", () => {
+    __setStateForTest(noModels());
+    const html = bar();
+    assert.ok(html.includes("add a provider key in Settings"));
+    assert.ok(html.includes("Cancel"), "a dialog without a way out is a trap");
+  });
+
+  it("draws no dead buttons where the host owns none", () => {
+    __setStateForTest(noModels());
+    const html = bar({ variant: "controls", onCancel: undefined, primaryLabel: undefined, onPrimary: undefined });
+    assert.ok(html.includes("add a provider key in Settings"), "the reason is still said");
+    assert.ok(!html.includes("Cancel"), "a Cancel with no handler does nothing but confuse");
+  });
+});
+
 describe("the size control", () => {
   it("is absent where the host's request cannot carry a size", () => {
     __setStateForTest(stateWith({}));

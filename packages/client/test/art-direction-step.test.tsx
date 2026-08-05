@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { ArtStyleGrid, ArtStyleWords } from "../src/components/art-style-picker.js";
-import { ART_STYLE_PRESETS, presetById } from "../src/lib/art-styles.js";
+import { ART_STYLE_PRESETS, presetById, seedFrom } from "../src/lib/art-styles.js";
 import { NewWorldScreen } from "../src/screens/shell.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -68,5 +68,15 @@ describe("the art-direction step of genesis", () => {
   it("promises the step rather than springing it, so Begin is not a surprise", () => {
     __setStateForTest(FIXTURE_STATE);
     assert.ok(render().includes("One more question"));
+  });
+});
+
+describe("the words a card seeds", () => {
+  it("empties them for the custom door, so nothing is stored that nobody wrote", () => {
+    // Pick Editorial print, change your mind, click Describe your own — the box used to keep
+    // Editorial print's sentence while the line under it said nothing was seeded, and accepting
+    // from there stored those words as if someone had written them.
+    assert.equal(seedFrom(null), "");
+    assert.equal(seedFrom(presetById("editorial-print")!), presetById("editorial-print")!.description);
   });
 });

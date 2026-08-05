@@ -1,7 +1,7 @@
 import { compilationIsStale, designatedCompilation, mainPhotoFor, type ReferenceKit } from "./reference.js";
 import type { ResolvedArtDirection } from "./art-direction.js";
 import { referenceBudget, type BudgetCandidate, type BudgetResult } from "./reference-budget.js";
-import { estimateMicroUsd, type ManifestModel } from "./manifest.js";
+import { estimateMicroUsd, sceneImageOutput, type ManifestModel, type SizeTier } from "./manifest.js";
 import type { Scene, Shot } from "./scene.js";
 import type { Selections } from "./scene.js";
 import type { Sheet, WorldMeta } from "./world.js";
@@ -271,6 +271,8 @@ export interface ScenePlanInput {
   selections: Selections;
   model: ManifestModel;
   resolution?: string;
+  /** Stills: the chosen size tier, which becomes real output dimensions at dispatch. */
+  tier?: SizeTier;
   productionId?: string;
   artDirection?: ResolvedArtDirection;
 }
@@ -294,6 +296,8 @@ export interface ScenePlan {
    * default — the estimate and the request disagreeing about the same job.
    */
   resolution?: string;
+  /** Stills: the tier those estimates assumed, for the output spec the jobs carry. */
+  tier?: SizeTier;
   totalEstimatedMicroUsd: number;
   warnings: DispatchWarnings;
 }
@@ -371,11 +375,17 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
             durationSec: duration,
             ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
           })
-        : estimateMicroUsd(model, {
-            images: 1,
-            referenceImages: references.filter((reference) => reference.file !== null).length,
-            ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
-          });
+        : (() => {
+            // Priced from the frame that will actually be asked for. Without the megapixels a
+            // per-megapixel model came out at zero, which is not an estimate.
+            const output = sceneImageOutput(model, input.tier);
+            return estimateMicroUsd(model, {
+              images: 1,
+              referenceImages: references.filter((reference) => reference.file !== null).length,
+              megapixels: (output.width * output.height) / 1_000_000,
+              ...(output.resolution !== undefined ? { resolution: output.resolution } : {}),
+            });
+          })();
     return {
       shot,
       prompt: promptFor(world, sheets, scene, shot, input.artDirection?.description),
@@ -454,6 +464,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     passReferences,
     pack,
     ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
+    ...(input.tier !== undefined ? { tier: input.tier } : {}),
     totalEstimatedMicroUsd: mode === "whole-scene" ? wholeSceneTotal : perShotTotal,
     warnings,
   };

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import type { ArtDirectionHistoryEntry, ResolvedArtDirection } from "@arke-studio/contracts";
 import { ArtStyleGrid } from "../components/art-style-picker.js";
+import { seedFrom } from "../lib/art-styles.js";
 import { Button } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
 import { shortDate } from "../lib/format.js";
@@ -239,7 +240,7 @@ export function ArtDirectionProposalScreen() {
               selectedId={presetId}
               onSelect={(preset) => {
                 setPresetId(preset?.id ?? null);
-                if (preset) setDescription(preset.description);
+                setDescription(seedFrom(preset));
               }}
             />
           </div>

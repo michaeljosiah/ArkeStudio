@@ -170,14 +170,19 @@ export function DispatchBar({
           <span className="fy-dispatchbar__fixed">
             No {capability} model is available — add a provider key in Settings.
           </span>
-          <span className="fy-dispatchbar__group">
-            <Button variant="ghost" onClick={onCancel}>
-              Cancel
-            </Button>
-            <Button variant="primary" disabled>
-              {primaryLabel}
-            </Button>
-          </span>
+          {/* Only where the host gave us actions to render. A controls-only surface passes none,
+              and drawing a Cancel with no handler beside an unlabelled disabled button gave those
+              screens two dead controls where the explanation was the whole point. */}
+          {variant === "full" && onCancel && primaryLabel && (
+            <span className="fy-dispatchbar__group">
+              <Button variant="ghost" onClick={onCancel}>
+                Cancel
+              </Button>
+              <Button variant="primary" disabled>
+                {primaryLabel}
+              </Button>
+            </span>
+          )}
         </div>
       </div>
     );

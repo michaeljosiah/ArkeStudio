@@ -266,7 +266,20 @@ export function characterImageOutput(
   workflow: CharacterImageWorkflow,
   tier?: SizeTier,
 ): ImageOutputSpec {
-  const landscape = workflow === "character-sheet";
+  return imageOutput(model, workflow === "character-sheet", tier);
+}
+
+/**
+ * A still frame from a scene: landscape, and sized by the same tier vocabulary. Scene dispatch
+ * needs this because the image clients size a request from `output.width`/`height` and ignore a
+ * bare resolution string — a tier that never became dimensions moved the control and nothing
+ * else.
+ */
+export function sceneImageOutput(model: ManifestModel, tier?: SizeTier): ImageOutputSpec {
+  return imageOutput(model, true, tier);
+}
+
+function imageOutput(model: ManifestModel, landscape: boolean, tier?: SizeTier): ImageOutputSpec {
   const dimensions =
     model.provider === "openai"
       ? landscape
