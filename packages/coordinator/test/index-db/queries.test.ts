@@ -117,6 +117,45 @@ describe("search and the refusal floor (R-16..R-19, R-23, D8)", () => {
     assert.ok(candidates.some((c) => c.entryId === "CANON-002"));
     index.close();
   });
+
+  it("scores a title match above a body mention of the same word", async () => {
+    // The fixture cannot show this, and neither can a naive corpus: BM25 normalises by document
+    // length, so a short title-match entry outranks a long body-match one under *any* weighting.
+    // To isolate the column weight, both entries must be the same total length, differing only
+    // in which column holds the term. Filler entries keep the term out of every document, since
+    // a term present everywhere has zero IDF and all scores collapse to zero.
+    //
+    // The assertion is on scores rather than position because under the old weights the two
+    // score exactly equal — and an arbitrary tie-break could put either first, which would make
+    // a position assertion pass or fail by luck.
+    const filler = Array.from({ length: 18 }, (_, i) => `word${i}`).join(" ");
+    const dir = await makeTempWorld();
+    const bundle = await fixtureBundle();
+    const template = bundle.canon[0]!;
+    const index = WorldIndex.open(dir, {
+      ...bundle,
+      canon: [
+        { ...template, id: "CANON-101", title: "the lantern rule", body: `alpha beta ${filler}`, status: "settled", retired: false },
+        { ...template, id: "CANON-102", title: "the alpha rule", body: `beta lantern ${filler}`, status: "settled", retired: false },
+        ...Array.from({ length: 14 }, (_, i) => ({
+          ...template,
+          id: `CANON-2${String(i).padStart(2, "0")}`,
+          title: `unrelated ${i}`,
+          body: `nothing here ${filler}`,
+          status: "settled" as const,
+          retired: false,
+        })),
+      ],
+    });
+
+    const byId = new Map(searchCanon(index.db, "lantern").candidates.map((c) => [c.entryId, c.score]));
+    assert.ok(byId.has("CANON-101") && byId.has("CANON-102"), "both entries mention it");
+    assert.ok(
+      byId.get("CANON-101")! > byId.get("CANON-102")!,
+      `an entry named for the thing must outscore one that merely mentions it, but got ${byId.get("CANON-101")} vs ${byId.get("CANON-102")} — the bm25 title weight is landing on the wrong column`,
+    );
+    index.close();
+  });
 });
 
 describe("needs-you (R-14) — computed, never stored", () => {
