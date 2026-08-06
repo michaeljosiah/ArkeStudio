@@ -3388,7 +3388,6 @@ export class Coordinator {
         attachments: [],
         attachmentText: new Map(),
       }),
-      context: (userText) => ({ candidates: [], messages: [], tombstones: [], currentUserMessage: userText }),
       now: () => new Date().toISOString(),
     });
 
