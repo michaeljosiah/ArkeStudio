@@ -2784,3 +2784,12 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   .fy-chat__wrap .fy-gate__main { border-right: none; border-bottom: 1px solid var(--border); }
   .fy-chat__wrap .fy-gate__side { width: auto; }
 }
+
+/* Stop, while a turn is running. Beside the composer rather than inside it: the composer is for
+   saying things, and this stops one. */
+.fy-chat__cancel {
+  margin-top: 8px; align-self: center; background: none; border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 12px; font: 400 11px var(--font-mono);
+  color: var(--muted-foreground); cursor: pointer;
+}
+.fy-chat__cancel:hover { color: var(--foreground); }

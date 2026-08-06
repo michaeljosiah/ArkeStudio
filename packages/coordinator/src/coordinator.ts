@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { basename, extname, join } from "node:path";
@@ -19,6 +20,7 @@ import {
   previewLineFor,
   SceneSchema,
   type ConversationId,
+  type WorldChatCheckReceipt,
   type Job,
   type LedgerEntry,
   type ModelManifest,
@@ -129,6 +131,13 @@ import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { WorldChatService } from "./world-chat/service.js";
+import { WorldChatStore, conversationDir } from "./world-chat/store.js";
+import { WorldChatRunner } from "./world-chat/run.js";
+import { QueryLeaseRegistry } from "./world-chat/lease.js";
+import { WorldChatRetrieval } from "./world-chat/retrieval.js";
+import { WorldChatAttachmentStore } from "./world-chat/attachments.js";
+import { planFor } from "./world-chat/check-plan.js";
+import { createRunScratch, removeRunScratch } from "./world-chat/run-scratch.js";
 import { projectWorkspace } from "./world-chat/project.js";
 import { refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
 import {
@@ -252,6 +261,7 @@ export class Coordinator {
   private readonly changeLog: ChangeLog;
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
   private readonly worldQuery: WorldQueryServer;
+  private readonly worldChatRunners = new Map<string, WorldChatRunner>();
   private readonly grants: GrantStore | null;
   private readonly authoring: AuthoringService | null;
   private readonly genesis: GenesisService | null;
@@ -1127,6 +1137,30 @@ export class Coordinator {
           return;
         }
         await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "world-chat-send": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const service = new WorldChatService(store.dir);
+        const log = new WorldChatStore(conversationDir(store.dir, msg.conversationId));
+        if (!(await log.readMeta())) return;
+
+        const runner = this.worldChatRunner(store);
+        // The screen shows the message and the spinner as soon as the turn starts, so the
+        // snapshot is pushed before the model is waited on rather than after.
+        const inFlight = runner.send(log, msg.conversationId, msg.text, msg.attachmentIds);
+        await this.openWorldChat(store, msg.conversationId);
+        await inFlight;
+        await this.refreshWorldSnapshot(msg.worldId);
+        await this.openWorldChat(store, msg.conversationId);
+        void service;
+        return;
+      }
+      case "world-chat-cancel": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        this.worldChatRunner(store).cancel(msg.conversationId);
         return;
       }
       case "world-chat-create": {
@@ -3280,6 +3314,86 @@ export class Coordinator {
       deduplicated: outcome.outcome === "deduplicated",
     });
     await this.refreshWorldSnapshot(worldId);
+  }
+
+  /**
+   * The runner for the open world, built once and kept (#70 §8).
+   *
+   * Kept rather than rebuilt per command because it holds the in-flight runs: a runner made
+   * fresh for a cancel would have no record of the turn it was asked to stop.
+   */
+  private worldChatRunner(store: WorldStore): WorldChatRunner {
+    const existing = this.worldChatRunners.get(store.worldId);
+    if (existing) return existing;
+
+    const leases = new QueryLeaseRegistry(() => this.opts.provider.openStore?.()?.worldId ?? null);
+    const attachments = new WorldChatAttachmentStore(store.dir);
+    const receipts = new Map<string, WorldChatCheckReceipt[]>();
+    const retrieval = new WorldChatRetrieval({
+      leases,
+      getBundle: () => this.opts.provider.openStore?.()?.getBundle() ?? null,
+      getIndex: () => this.opts.provider.openStore?.()?.getIndex() ?? null,
+      attachments,
+      findAttachment: async (lease, id) => {
+        const loaded = await new WorldChatService(store.dir).load(lease.conversationId);
+        return loaded?.attachments.find((a) => a.id === id) ?? null;
+      },
+    });
+
+    const runner = new WorldChatRunner({
+      adapter: this.opts.adapter ?? null,
+      prepare: async ({ conversationId, runId }) => {
+        const lease = leases.mint({ worldId: store.worldId, conversationId, runId });
+        const url = this.worldQuery.leasedUrl(lease.token) ?? undefined;
+        // Without a configured app root — a dev or test coordinator — the OS temp directory
+        // still satisfies what §8.2 actually requires: somewhere outside the world.
+        const cwd = await createRunScratch({
+          appRoot: this.opts.appRoot ?? tmpdir(),
+          conversationId,
+          runId,
+          config: this.buildConfig ? this.buildConfig(url ? { worldQueryUrl: url } : {}) : {},
+        });
+        return { cwd, leaseToken: lease.token };
+      },
+      release: async ({ conversationId, runId }) => {
+        leases.revokeRun(runId);
+        retrieval.forgetRun(runId);
+        receipts.delete(runId);
+        await removeRunScratch(this.opts.appRoot ?? tmpdir(), conversationId, runId);
+      },
+      receiptsFor: (runId) => receipts.get(runId) ?? [],
+      runCheckPlan: async ({ draft, leaseToken }) => {
+        const plan = planFor(draft);
+        const produced: WorldChatCheckReceipt[] = [];
+        for (const [category, query] of Object.entries(plan.queries)) {
+          const tool = category === "sheet-search" ? "search_sheets" : "search_canon";
+          const outcome = await retrieval.call(leaseToken, tool, { query }).catch(() => null);
+          if (outcome) produced.push(outcome.receipt);
+        }
+        for (const target of plan.targets) {
+          if (target.kind === "world") continue;
+          const tool = target.kind === "canon" ? "get_entry" : "get_sheet";
+          const id = target.kind === "canon" ? target.entryId : target.sheetId;
+          const outcome = await retrieval.call(leaseToken, tool, { id }).catch(() => null);
+          if (outcome) produced.push(outcome.receipt);
+        }
+        return {
+          receipts: produced,
+          canonRevision: this.opts.provider.openStore?.()?.getBundle().meta.canonRevision ?? 0,
+        };
+      },
+      evidenceSources: (messages) => ({
+        messages,
+        bundle: store.getBundle(),
+        attachments: [],
+        attachmentText: new Map(),
+      }),
+      context: (userText) => ({ candidates: [], messages: [], tombstones: [], currentUserMessage: userText }),
+      now: () => new Date().toISOString(),
+    });
+
+    this.worldChatRunners.set(store.worldId, runner);
+    return runner;
   }
 
   /**

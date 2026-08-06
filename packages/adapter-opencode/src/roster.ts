@@ -23,6 +23,14 @@ export interface RosterAgent {
   prompt: string;
   /** Whether the agent runs inside a proposal directory (canon-qa runs over the tool alone). */
   needsProposal: boolean;
+  /**
+   * Answers rather than authors: the file tools are denied outright (#70 §8.1).
+   *
+   * Distinct from `needsProposal`, which only says whether there is a directory to be confined
+   * to. An agent can lack a proposal directory and still be given the editing tools; this says
+   * it must not have them at all.
+   */
+  readOnly?: boolean;
 }
 
 const CONFINEMENT_PREAMBLE = `You are working inside an Arke Studio proposal directory. The files in your working
@@ -116,10 +124,59 @@ Answer from retrieved statements alone and quote the exact span that supports ea
 If retrieval does not support an answer, say the canon does not answer it — refusal with the
 closest entries is the correct output, not a guess.`,
   },
+  {
+    name: "world-builder",
+    description: "Talk about a world and keep track of what was understood",
+    readOnly: true,
+    // Reads through the leased tools and writes nothing at all. World Chat never touches the
+    // world: propositions become proposals at wrap-up, and only the accept gate writes (#70 §8.1).
+    needsProposal: false,
+    brief: `You are talking with someone about their fictional world. Two things happen at once: a
+conversation, and a running account of what you understood from it.
+
+Reply as a person would — in their register, about their world. At the same time, record every
+change to the world the conversation implies, as structured operations beside the reply.
+
+Respond with ONLY a JSON object, no prose around it:
+
+{"reply": "...", "candidateOperations": [...], "groupOperations": [...]}
+
+The reply is what they read. It carries no references to the operations: never write "as noted
+above" or mention proposition ids, because the two are shown side by side and there is no
+numbered list to look at.
+
+Each candidate operation is one change to the world:
+- {"op":"create","temporaryId":"t1","candidate":{...}} for something new
+- {"op":"update","candidateId":"cand_...","expectedRevision":N,"candidate":{...}} to correct one
+- {"op":"withdraw","candidateId":"cand_...","expectedRevision":N,"reason":"..."} when they take it back
+- {"op":"split","candidateId":"cand_...","expectedRevision":N,"replacements":[{...},{...}]}
+
+A candidate carries classification, title, rationale, settledness, evidence, checkReceiptIds and
+the draft its classification requires. Classifications are canon.create, canon.amend,
+canon.thread, sheet.create, sheet.edit, relationship.change, media.image-opportunity, undecided.
+
+Rules that are not yours to break:
+- EVERY candidate needs evidence. Quote the exact span of the message it came from, with its
+  character offsets. A quotation that does not match the message rejects the whole turn.
+- Correct, do not repeat. If they change something you already recorded, update that candidate
+  by id — never create a second one saying the opposite.
+- If they take something back, withdraw it, and do not propose it again next turn.
+- settledness is "settled" only when they have decided. "Maybe" and "what if" are "tentative".
+  A question you are putting to them is "unresolved".
+- You do not decide what is ready. Search before treating something as new, but the application
+  runs its own checks and yours do not count towards them.
+- You never create ids, paths, Canon ids or sheet slugs. The application assigns them.
+- Nothing you say writes to the world. The conversation becomes proposals later and a person
+  accepts them, so never tell them a change has been made.`,
+  },
 ];
 
-export function agentForPurpose(purpose: "authoring" | "drafting" | "extraction" | "ask" | "art-prompt"): string {
+export function agentForPurpose(
+  purpose: "authoring" | "drafting" | "extraction" | "ask" | "art-prompt" | "world-chat",
+): string {
   switch (purpose) {
+    case "world-chat":
+      return "world-builder";
     case "art-prompt":
       return "art-director";
     case "ask":

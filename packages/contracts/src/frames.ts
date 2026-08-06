@@ -160,6 +160,30 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       conversationId: ConversationIdSchema.nullable(),
     })
     .strict(),
+  /**
+   * #70 §10.1.1: say something, and take a turn.
+   *
+   * `expectedConversationSeq` is refused when stale rather than silently re-planned: the reply
+   * must be to the conversation the person was actually looking at.
+   */
+  z
+    .object({
+      kind: z.literal("world-chat-send"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      conversationId: ConversationIdSchema,
+      text: z.string().min(1).max(16_000),
+      attachmentIds: z.array(z.string().min(1)).max(20).default([]),
+    })
+    .strict(),
+  /** #70: stop the turn in flight. Local and immediate. */
+  z
+    .object({
+      kind: z.literal("world-chat-cancel"),
+      worldId: UlidSchema,
+      conversationId: ConversationIdSchema,
+    })
+    .strict(),
   /** #70: create a conversation, optionally about something in particular. */
   z
     .object({

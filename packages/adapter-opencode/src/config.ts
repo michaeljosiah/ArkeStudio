@@ -16,6 +16,39 @@ const DENIED_TOOLS: Record<string, boolean> = {
   websearch: false,
 };
 
+/**
+ * Additionally denied to an agent that answers rather than authors (#70 §8.1).
+ *
+ * The authoring agents edit inside a proposal directory, which is the whole point of giving them
+ * one. World Chat has no proposal directory and writes nothing: its propositions become proposals
+ * at wrap-up, and only the accept gate touches the world. An agent that could edit would have a
+ * path into the world that bypasses the gate entirely — so the file tools are off, not merely
+ * unused.
+ */
+const READ_ONLY_TOOLS: Record<string, boolean> = {
+  ...DENIED_TOOLS,
+  edit: false,
+  write: false,
+  patch: false,
+};
+
+const READ_ONLY_PERMISSION: Record<string, string> = {
+  read: "allow",
+  glob: "allow",
+  grep: "allow",
+  list: "allow",
+  todowrite: "allow",
+  todoread: "allow",
+  "arke-world*": "allow",
+  "arke-world_*": "allow",
+  edit: "deny",
+  write: "deny",
+  patch: "deny",
+  bash: "deny",
+  webfetch: "deny",
+  websearch: "deny",
+};
+
 export interface SessionConfigInput {
   /** The world-query MCP server URL (loopback), when a world is open. */
   worldQueryUrl?: string;
@@ -39,29 +72,31 @@ export function buildSessionConfig(input: SessionConfigInput): Record<string, un
       prompt: override?.brief ? promptFor({ ...member, brief: override.brief }) : member.prompt,
       // Deny shell/network tools per agent; documented as risk reduction (R-10). The harness
       // honouring its own config is assumed; detection at accept is the layer that holds.
-      tools: { ...DENIED_TOOLS },
+      tools: member.readOnly ? { ...READ_ONLY_TOOLS } : { ...DENIED_TOOLS },
       // Custom agents default every tool to "ask", which stalls a headless session on an
       // invisible prompt (verified against OpenCode 1.18.10). Editing inside the proposal is
       // exactly what the user asked for (R-17), so the file/editing toolset is allowed
       // explicitly and shell/network are denied. A wildcard allow is NOT used — it was
       // observed to override the specific denies. Unlisted tools fall to the harness's ask
       // default, which surfaces through the permission backstop (R-16) and stays rare (D9).
-      permission: {
-        edit: "allow",
-        write: "allow",
-        read: "allow",
-        glob: "allow",
-        grep: "allow",
-        list: "allow",
-        patch: "allow",
-        todowrite: "allow",
-        todoread: "allow",
-        "arke-world*": "allow",
-        "arke-world_*": "allow",
-        bash: "deny",
-        webfetch: "deny",
-        websearch: "deny",
-      },
+      permission: member.readOnly
+        ? { ...READ_ONLY_PERMISSION }
+        : {
+            edit: "allow",
+            write: "allow",
+            read: "allow",
+            glob: "allow",
+            grep: "allow",
+            list: "allow",
+            patch: "allow",
+            todowrite: "allow",
+            todoread: "allow",
+            "arke-world*": "allow",
+            "arke-world_*": "allow",
+            bash: "deny",
+            webfetch: "deny",
+            websearch: "deny",
+          },
       // The agent's own choice wins over the session-wide one; absent, OpenCode keeps using
       // whatever it is configured with, which is the only safe default — pinning a model the
       // user's OpenCode has no auth for would break every session.
