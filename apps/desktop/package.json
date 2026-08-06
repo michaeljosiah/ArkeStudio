@@ -13,7 +13,7 @@
     "start": "npm run build && npm run rebuild:native && electron dist/main.cjs",
     "prepare:runtimes:x64": "node scripts/prepare-runtimes.mjs --arch x64",
     "prepare:runtimes:arm64": "node scripts/prepare-runtimes.mjs --arch arm64",
-    "prepare:runtimes": "npm run prepare:runtimes:x64 && npm run prepare:runtimes:arm64",
+    "prepare:runtimes": "npm run prepare:runtimes:x64",
     "smoke:voxa:x64": "node scripts/smoke-voxa.mjs --root build-resources/voxa/x64",
     "package": "npm run prepare:runtimes && npm run verify:licenses -- --require-runtimes && npm run build && node scripts/package-windows.mjs --publish never",
     "release": "npm run prepare:runtimes && npm run verify:licenses -- --require-runtimes && npm run build && node scripts/package-windows.mjs --publish never",

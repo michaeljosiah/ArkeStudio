@@ -44,7 +44,9 @@ if (existsSync(buildResources)) {
   }
 }
 
-if (process.argv.includes("--require-runtimes")) for (const arch of ["x64", "arm64"]) {
+// x64 only — the packaged architecture (see scripts/package-windows.mjs). The per-arch shape
+// below is kept so that restoring a second target is a one-line change, not a rewrite.
+if (process.argv.includes("--require-runtimes")) for (const arch of ["x64"]) {
   const voxa = join(buildResources, "voxa", arch);
   const espeak = join(buildResources, "espeak-ng", arch);
   for (const [component, root, executable] of [
