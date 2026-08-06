@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { WorldChatSummary } from "@arke-studio/contracts";
+import { renderToString } from "react-dom/server";
+import { MemoryRouter } from "react-router";
+import type { ClientState } from "@arke-studio/contracts";
+import { App } from "../src/App.js";
+import { __setStateForTest } from "../src/lib/store.js";
+import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { FIXTURE_STATE } from "./fixture-state.js";
 import { byPendingConsequence } from "../src/screens/world-chat.js";
 
 /**
@@ -68,5 +75,67 @@ describe("ordering conversations by pending consequence", () => {
     const a = row({ title: "a" });
     const b = row({ title: "b" });
     assert.deepEqual([a, b].sort(byPendingConsequence).map((r) => r.title), ["a", "b"]);
+  });
+});
+
+
+/**
+ * There has to be a way in.
+ *
+ * The whole feature was built — store, retrieval, turn engine, workspace, wrap-up — with no
+ * control anywhere that creates a conversation. The screen said "No conversations yet" and left
+ * it at that, which is a door with no handle.
+ */
+describe("starting a conversation", () => {
+  function render(state: ClientState): string {
+    __setStateForTest(state);
+    return renderToString(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat`]}>
+        <App />
+      </MemoryRouter>,
+    ).replaceAll("<!-- -->", "");
+  }
+
+  const withConversations = (rows: unknown[]): ClientState => ({
+    ...FIXTURE_STATE,
+    world: { ...FIXTURE_STATE.world!, conversations: rows as never },
+  });
+
+  it("offers a way in when there are none", () => {
+    assert.match(render(withConversations([])), /Start a conversation/);
+  });
+
+  it("offers a way in when there already are some", () => {
+    const html = render(
+      withConversations([
+        {
+          id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
+          title: "The bells",
+          status: "open",
+          updatedAt: AT,
+          pointCount: 1,
+          openProposalCount: 0,
+          notCarried: [],
+        },
+      ]),
+    );
+    assert.match(html, /New conversation/, "starting a second one must not require deleting the first");
+  });
+
+  it("does not disable the way in when the studio is not running", () => {
+    const down: ClientState = {
+      ...withConversations([]),
+      app: {
+        ...FIXTURE_STATE.app,
+        health: { ...FIXTURE_STATE.app.health, harness: { status: "unavailable", reason: "not started" } },
+      },
+    };
+    const html = render(down);
+    assert.match(html, /Start a conversation/);
+    assert.match(
+      html,
+      /needs OpenCode running/,
+      "it says what is missing rather than presenting a button that does nothing",
+    );
   });
 });
