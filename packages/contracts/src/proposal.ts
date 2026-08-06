@@ -23,6 +23,8 @@ export const ProposalKindSchema = z.enum([
   "extraction",
     "restore",
     "art-direction",
+  /** #70: the several changes one conversation turned into, staged together. */
+  "worldbuilding",
 ]);
 export type ProposalKind = z.infer<typeof ProposalKindSchema>;
 
@@ -52,6 +54,30 @@ export const ProposalConflictSchema = z
   .strict();
 export type ProposalConflict = z.infer<typeof ProposalConflictSchema>;
 
+/** Which proposition became which proposal, and at what revision (#70 §11.1). */
+export const WorldChatProposalOriginSchema = z
+  .object({
+    requestId: z.string().min(1),
+    conversationId: z.string().min(1),
+    candidateId: z.string().min(1),
+    candidateRevision: z.number().int().min(1),
+    groupId: z.string().min(1).optional(),
+    targetPaths: z.array(z.string().min(1)),
+    fields: z.array(z.string().min(1)),
+  })
+  .strict();
+export type WorldChatProposalOrigin = z.infer<typeof WorldChatProposalOriginSchema>;
+
+export const ProposalOpenChoiceSchema = z
+  .object({
+    choiceId: z.string().min(1),
+    kind: z.enum(["duplicate-or-amend", "unchecked-novelty"]),
+    question: z.string().min(1).max(400),
+    options: z.array(z.object({ optionId: z.string().min(1), label: z.string().min(1).max(200) }).strict()).min(2),
+  })
+  .strict();
+export type ProposalOpenChoice = z.infer<typeof ProposalOpenChoiceSchema>;
+
 export const ProposalSchema = z
   .object({
     id: ProposalIdSchema,
@@ -70,6 +96,29 @@ export const ProposalSchema = z
     /** Same-field conflicts from the last rebase; all must carry a resolution before accept. */
     conflicts: z.array(ProposalConflictSchema).optional(),
     rebasedAt: IsoDateTimeSchema.optional(),
+    /**
+     * #70 §11.1. Optional and defaulted so every proposal written before this existed still
+     * parses: a proposal on disk is a record, and a reader that rejected last week's records
+     * would lose work rather than migrate it.
+     */
+    draftRevision: z.number().int().min(1).default(1),
+    /**
+     * Which propositions became this proposal.
+     *
+     * Explains the draft; it never governs acceptance. The proposed files and the captured bases
+     * remain the gate's only authority, so a wrong or missing origin can mislead a reader but can
+     * never let something into the world that the gate would refuse.
+     */
+    worldChatOrigins: z.array(WorldChatProposalOriginSchema).optional(),
+    /**
+     * Questions the coordinator could not answer, blocking this proposal's acceptance and no
+     * other (R-34c).
+     *
+     * This is what lets wrap-up be one step. A question travels with the proposal it concerns
+     * rather than holding the whole wrap-up behind a dialog, so it is answered beside the values
+     * it would change and everything else stays acceptable.
+     */
+    openChoices: z.array(ProposalOpenChoiceSchema).optional(),
   })
   .strict();
 export type Proposal = z.infer<typeof ProposalSchema>;
