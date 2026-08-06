@@ -139,6 +139,16 @@ export function WorldChatConversationScreen() {
   const openThreads = points.filter((p) => p.kind === "question");
   const carried = points.filter((p) => p.kind === "point" && p.settled).length;
   const running = loaded?.runStatus === "running";
+  /**
+   * Attachments are private to this conversation, and the chips say which are readable.
+   * An image can be attached and referred to; it cannot be quoted, and the chip should not
+   * suggest otherwise (§13.2).
+   */
+  const chips = (loaded?.attachments ?? []).map((a) => ({
+    id: a.id,
+    file: a.readability === "not-readable" ? `${a.fileName} · not readable in chat` : a.fileName,
+    kind: a.kind,
+  }));
 
   return (
     <div data-screen="world-chat-conversation" className="fy-chat__wrap">
@@ -184,12 +194,13 @@ export function WorldChatConversationScreen() {
               onSubmit={() => {
                 const text = draft.trim();
                 if (!text || !worldId || running) return;
-                sendWorldChat(worldId, row.id, text);
+                sendWorldChat(worldId, row.id, text, chips.map((c) => c.id));
                 setDraft("");
               }}
               placeholder="Keep going…"
               busy={running}
               busyLabel="Thinking…"
+              attachments={chips}
               disabledReason={composerReason(state)}
             />
             {running && (

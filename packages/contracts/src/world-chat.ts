@@ -980,6 +980,26 @@ export const WorldChatWorkspaceSchema = z
     points: z.array(WorldChatPointSchema),
     /** Set while a turn is in flight, so the composer can say so. */
     runStatus: WorldChatRunStatusSchema.nullable().default(null),
+    /**
+     * The conversation's own attachments, as chips need them.
+     *
+     * `readability` travels because the chip has to be honest about it: an image can be attached
+     * and referred to but never quoted, and a chip that looked the same as a readable document
+     * would imply the Studio had read it (§13.2).
+     */
+    attachments: z
+      .array(
+        z
+          .object({
+            id: ChatAttachmentIdSchema,
+            fileName: z.string().min(1).max(255),
+            kind: z.enum(["document", "image", "audio", "video", "other"]),
+            readability: z.enum(["text-readable", "not-readable", "extracted-text-available"]),
+            promoted: z.boolean(),
+          })
+          .strict(),
+      )
+      .default([]),
     /** What could not be checked, stated rather than hidden (§9.4). */
     retrievalUnavailable: z.boolean().default(false),
   })

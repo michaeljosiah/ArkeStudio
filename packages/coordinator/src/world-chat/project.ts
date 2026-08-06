@@ -149,6 +149,13 @@ export function projectWorkspace(
     })),
     hasMore: loaded.hasMore,
     points: projectPoints(loaded.candidates, options),
+    attachments: loaded.attachments.map((a) => ({
+      id: a.id,
+      fileName: a.fileName,
+      kind: a.kind,
+      readability: a.readability,
+      promoted: a.promotedArtifactId !== undefined,
+    })),
     runStatus: loaded.activeRun?.status ?? null,
     // Any required observation that could not be made makes the panel say so rather than let a
     // proposition read as checked (§9.4).
