@@ -9,6 +9,7 @@ import {
   type WorldChatMessage,
 } from "@arke-studio/contracts";
 import { WorldChatRunner } from "../../src/world-chat/run.js";
+import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { scanWorld } from "../../src/world/scan.js";
@@ -301,6 +302,47 @@ describe("what the studio is told", () => {
       prompts[1]!,
       /A rule about the bells/,
       "the proposition from the first turn is in the second turn's context, so the model corrects it rather than proposing it again",
+    );
+  });
+
+  it("tells the studio what the conversation was opened about", async () => {
+    const prompts: string[] = [];
+    const worldPath = await tempDir("arke-entry-");
+    const conversationId = newId("cv") as ConversationId;
+    const store = new WorldChatStore(conversationDir(worldPath, conversationId));
+    await store.create(conversationId, AT);
+    // Opened from a character sheet, as the "Talk about them" button does.
+    await store.append(
+      {
+        type: "conversation.created",
+        title: "Maren Kest",
+        entryContext: { kind: "sheet", sheetKind: "character", sheetId: "maren-kest" },
+      },
+      { at: AT },
+    );
+    const bundle: WorldBundle = (await scanWorld(FIXTURE_WORLD)).bundle;
+
+    const runner = new WorldChatRunner({
+      adapter: fakeAdapter(["not json", "not json"], { prompts }),
+      prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
+      release: async () => {},
+      receiptsFor: () => [],
+      runCheckPlan: async () => ({ receipts: [], canonRevision: bundle.meta.canonRevision }),
+      evidenceSources: (messages: readonly WorldChatMessage[]) => ({
+        messages,
+        bundle,
+        attachments: [],
+        attachmentText: new Map(),
+      }),
+      describeEntry: (context) => describeEntryContext(context, bundle),
+      now: NOW,
+    });
+
+    await runner.send(store, conversationId, "her ear is worse than the sheet says");
+    assert.match(
+      prompts[0]!,
+      /Maren Kest/,
+      "without this, somebody who clicked through from a sheet would have to describe the character they were just reading",
     );
   });
 

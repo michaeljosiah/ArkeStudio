@@ -81,6 +81,8 @@ export interface RunDeps {
    * without it.
    */
   worldContext?: (view: WorldChatLoaded) => string;
+  /** What the conversation was opened about, worded for the model (#70 phase 6). */
+  describeEntry?: (context: NonNullable<WorldChatLoaded["entryContext"]>) => string;
   now: () => string;
   timeoutMs?: number;
 }
@@ -212,6 +214,9 @@ export class WorldChatRunner {
     const meta = await store.readMeta();
     const view = foldConversation(conversationId, meta?.createdAt ?? at, events).view;
     const assembled = assembleContext({
+      ...(view.entryContext && this.deps.describeEntry
+        ? { entryContext: this.deps.describeEntry(view.entryContext) }
+        : {}),
       ...(view.summary !== undefined ? { summary: view.summary } : {}),
       candidates: view.candidates,
       messages: view.messages,
@@ -457,6 +462,9 @@ function safeDetail(err: unknown): string {
 /** The context sections, in the order the agent brief expects them. */
 function renderPrompt(assembled: ReturnType<typeof assembleContext>): string {
   const sections: string[] = [];
+  // First, because it frames everything after it.
+  if (assembled.entryContext) sections.push(`## What this is about
+${assembled.entryContext}`);
   if (assembled.summary) sections.push(`## The conversation so far\n${assembled.summary}`);
   if (assembled.registry) sections.push(`## What you have already understood\n${assembled.registry}`);
   if (assembled.tombstones) {

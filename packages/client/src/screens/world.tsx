@@ -30,6 +30,7 @@ import { mediaUrl } from "../lib/media.js";
 import { playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
+import { useTalkItThrough } from "../lib/talk-it-through.js";
 import {
   askCanon,
   assignVoice,
@@ -969,6 +970,11 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const sheetPath = `${sheet.type === "character" ? "characters" : `${sheet.type}s`}/${sheet.id}.md`;
   const refs = sheetRefsMap[sheet.id];
   const isCharacter = sheet.type === "character";
+  /**
+   * The sheet is in front of them, so the conversation should start knowing that rather than
+   * making them describe the character they were just reading.
+   */
+  const { talk: talkAboutSheet, starting: sheetTalkStarting } = useTalkItThrough(worldId);
   const mainPhoto = kit ? mainPhotoFor(kit) : null;
   const characterSheet = kit ? designatedCompilation(kit) : null;
   const slug = world.meta.slug;
@@ -1099,6 +1105,14 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           )}
           <Button onClick={() => navigate(`/w/${worldId}/${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${sheet.id}/edit`)}>
             Edit the sheet
+          </Button>
+          <Button
+            onClick={() =>
+              talkAboutSheet(sheet.name, { kind: "sheet", sheetKind: sheet.type, sheetId: sheet.id })
+            }
+            disabled={sheetTalkStarting}
+          >
+            {sheetTalkStarting ? "Starting…" : "Talk about them"}
           </Button>
           <Button
             onClick={() => {
@@ -2443,11 +2457,22 @@ export const NewLocationScreen = () => (
 function AskOutcome({ worldId, question, result }: { worldId: string; question: string; result: import("@arke-studio/contracts").AskResult }) {
   const navigate = useNavigate();
   const world = useWorld();
+  const { talk, starting } = useTalkItThrough(worldId);
   const openAsThread = () => {
     const title = question.length > 80 ? `${question.slice(0, 77)}…` : question;
     openThreadMsg(worldId, title, question, result.outcome !== "answer" ? result.closest.map((c) => c.entryId) : []);
     navigate(`/w/${worldId}/canon`);
   };
+  /**
+   * The question and what the search found travel into the conversation, so the Studio starts
+   * where the refusal left off rather than being told the same thing again.
+   */
+  const talkItThrough = () =>
+    talk(question.length > 80 ? `${question.slice(0, 77)}…` : question, {
+      kind: "canon-question",
+      question,
+      candidateEntryIds: result.outcome === "answer" ? [] : result.closest.map((c) => c.entryId),
+    });
   if (result.outcome === "answer") {
     return (
       <Card className="scr-answer">
@@ -2497,6 +2522,9 @@ function AskOutcome({ worldId, question, result }: { worldId: string; question: 
       <div style={{ display: "flex", gap: "var(--space-2)" }}>
         <Button variant="primary" onClick={openAsThread}>
           Open as a thread
+        </Button>
+        <Button variant="ghost" onClick={talkItThrough} disabled={starting}>
+          {starting ? "Starting…" : "Talk it through"}
         </Button>
         <Button
           onClick={() => {
@@ -2689,6 +2717,14 @@ export function CanonEntryScreen() {
   const refs = useCanonRefs();
   const [amending, setAmending] = useState(false);
   const [statement, setStatement] = useState("");
+  const { talk: talkAbout, starting: talkStarting } = useTalkItThrough(worldId);
+  /**
+   * "Propose a change" is the direct route and stays the primary one. This is for the case the
+   * form cannot serve: when what the entry should say is the thing still being worked out.
+   */
+  const talkThroughEntry = () => {
+    if (entry) talkAbout(entry.title, { kind: "canon-entry", entryId: entry.id });
+  };
 
   useEffect(() => {
     if (worldId && entry) requestCanonRefs(worldId, entry.id);
@@ -2839,6 +2875,9 @@ export function CanonEntryScreen() {
                 }}
               >
                 Propose a change
+              </Button>
+              <Button variant="ghost" onClick={talkThroughEntry} disabled={talkStarting}>
+                {talkStarting ? "Starting…" : "Talk it through"}
               </Button>
               <Button
                 variant="ghost"
