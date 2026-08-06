@@ -1,5 +1,5 @@
 import { Route, Routes, useLocation, useNavigate } from "react-router";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import {
   ActivityScreen,
   FirstRunScreen,
@@ -62,8 +62,9 @@ import {
 } from "./screens/production.js";
 import { Navigate } from "react-router";
 import { QueueToaster } from "./components/queue-toaster.js";
+import { PlayerDock } from "./components/player.js";
 import { useThemePreference } from "./lib/theme.js";
-import { stopAudio } from "./lib/audio.js";
+import { dismissPlayback } from "./lib/audio.js";
 import { useUpdateStatus } from "./lib/store.js";
 
 export function UpdateTransition() {
@@ -85,7 +86,15 @@ export function App() {
   const location = useLocation();
   useThemePreference();
   useEffect(() => window.arke?.onActivateActivity?.(() => navigate("/activity")), [navigate]);
-  useEffect(() => stopAudio, [location.pathname]);
+  // The dock survives navigation (design 25c). It clears on an explicit dismiss or on leaving
+  // this world for another — a clip from the world you just closed has nothing to say here.
+  const openWorld = /^\/w\/([^/]+)/.exec(location.pathname)?.[1] ?? null;
+  const lastWorld = useRef<string | null>(null);
+  useEffect(() => {
+    if (openWorld === null) return;
+    if (lastWorld.current !== null && lastWorld.current !== openWorld) dismissPlayback();
+    lastWorld.current = openWorld;
+  }, [openWorld]);
   return (
     <>
       {/* The window has no native title bar to grab, so the top 44px is the app's own chrome
@@ -93,6 +102,7 @@ export function App() {
           no clicks, contributes nothing but geometry. */}
       <div className="fy-dragstrip" aria-hidden="true" />
       <QueueToaster />
+      <PlayerDock />
       <UpdateTransition />
       <Routes>
         <Route path="/" element={<LaunchScreen />} />

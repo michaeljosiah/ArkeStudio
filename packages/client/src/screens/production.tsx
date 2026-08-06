@@ -19,6 +19,8 @@ import { ChevronLeft, ChevronRight, Play, Plus } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
+import { ClipPlayButton } from "../components/player.js";
+import { mediaUrl } from "../lib/media.js";
 import { CanonEntryRow } from "../domain/domain.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
@@ -1446,9 +1448,8 @@ export function AudioScreen() {
           const speaker = speakerOf(s.audio?.speaker);
           return (
             <div key={s.id} className="fy-audiorow">
-              <span className="fy-audiorow__play" aria-hidden>
-                <Play size={11} />
-              </span>
+              {/* Nothing is generated for these lines yet, so there is no circle to press —
+                  the status dot carries that, rather than a button that cannot sound. */}
               <div className="fy-audiorow__id">
                 <div className="fy-audiorow__title">
                   {speaker?.name ?? s.audio?.kind}, “{s.audio?.line}”
@@ -1478,9 +1479,18 @@ export function AudioScreen() {
         {linked.length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>no audio artifacts yet — imports land here</div>}
         {linked.map((a) => (
           <div key={a.id} className="fy-audiorow">
-            <span className="fy-audiorow__play" aria-hidden>
-              <Play size={11} />
-            </span>
+            <ClipPlayButton
+              clip={
+                world
+                  ? {
+                      id: `artifact:${a.id}`,
+                      url: mediaUrl(world.meta.slug, `artifacts/${a.file}`),
+                      title: a.file.split("/").pop() ?? a.file,
+                      sub: `artifact · ${a.file}`,
+                    }
+                  : null
+              }
+            />
             <div className="fy-audiorow__id">
               <div className="fy-audiorow__title">{a.file.split("/").pop()}</div>
               <div className="fy-audiorow__sub">artifact · {a.file}</div>

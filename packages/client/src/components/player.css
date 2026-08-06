@@ -1,0 +1,237 @@
+/* ============================================================
+   Audio playback — the dock, the row control, the text actions.
+   Design 25c and the two Binding rules beside it. Every value is
+   a token; the fixed pixel sizes are the ones the rules pin.
+   ============================================================ */
+
+/* ---- The dock ------------------------------------------------
+   Mounted once for the whole app, never per screen. Floats rather
+   than banding the window so it never occupies a screen's footer. */
+.fy-dock {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-5);
+  transform: translateX(-50%);
+  z-index: 60;
+  box-sizing: border-box;
+  width: min(640px, calc(100vw - var(--space-6)));
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-1) solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: var(--shadow-pop);
+}
+
+.fy-dock__label {
+  width: 250px;
+  flex: none;
+  min-width: 0;
+}
+
+.fy-dock__title,
+.fy-dock__sub {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fy-dock__title {
+  font: 600 13px var(--font-sans);
+}
+
+.fy-dock__sub {
+  margin-top: 2px;
+  font: 400 10.5px var(--font-mono);
+  color: var(--neutral-400);
+}
+
+/* The visual track is 5px; the control is 16px so it can actually be hit. */
+.fy-dock__scrub {
+  flex: 1;
+  min-width: 0;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.fy-dock__scrub:disabled {
+  cursor: default;
+}
+
+.fy-dock__track {
+  width: 100%;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--border);
+  overflow: hidden;
+}
+
+.fy-dock__fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--foreground);
+}
+
+.fy-dock__time {
+  flex: none;
+  white-space: nowrap;
+  font: 400 10.5px var(--font-mono);
+  color: var(--neutral-400);
+  font-variant-numeric: tabular-nums;
+}
+
+.fy-dock__dismiss {
+  flex: none;
+  width: var(--space-6);
+  height: var(--space-6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--neutral-400);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+
+.fy-dock__dismiss:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.fy-dock__error {
+  flex: 1;
+  min-width: 0;
+  font: 400 10.5px var(--font-mono);
+  color: var(--destructive);
+}
+
+/* ---- The round transport control on a row --------------------
+   30px, filled — the same object as the dock's, so starting a clip
+   from a row reads as the row's button moving into the dock. */
+.fy-clipbtn {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+
+.fy-clipbtn:hover {
+  background: var(--neutral-700);
+}
+
+.fy-clipbtn:disabled {
+  background: var(--muted);
+  color: var(--muted-foreground);
+  cursor: default;
+}
+
+.fy-clipbtn--sm {
+  width: var(--space-6);
+  height: var(--space-6);
+}
+
+/* The voice card's control (design 3a) sits alone rather than at the head of a row, and
+   carries the extra weight for it. */
+.fy-clipbtn--lg {
+  width: 38px;
+  height: 38px;
+}
+
+.fy-clipbtn:focus-visible,
+.fy-dock__dismiss:focus-visible,
+.fy-dock__scrub:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* A row that is the sounding clip. Tint only — the geometry must not move. */
+.fy-audiorow--live {
+  background: var(--muted);
+}
+
+/* ---- Actions under a block of text ---------------------------
+   Out of the way until the text is under the pointer. Hidden with
+   opacity, never display, so revealing them shifts nothing. */
+.fy-textactions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 10px 0 0 -6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-standard);
+}
+
+.fy-texthost:hover .fy-textactions,
+.fy-texthost:focus-within .fy-textactions,
+.fy-textactions--live {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.fy-textactions__btn {
+  width: 26px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--neutral-400);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+
+.fy-textactions__btn:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.fy-textactions__btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* The loaded clip's source keeps its tint with the pointer gone — a mark nobody
+   can see cannot say where the sound came from. */
+.fy-textactions__btn--live {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.fy-textactions__note {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: var(--space-1);
+  font: 400 10.5px var(--font-mono);
+  color: var(--muted-foreground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fy-textactions {
+    transition: none;
+  }
+}
