@@ -359,124 +359,149 @@ const CandidateBaseSchema = z.object({
   supersedes: z.array(CandidateIdSchema).optional(),
 });
 
-/** The eight things a proposition can be. Each payload carries only what its files need. */
+/**
+ * The eight payloads a proposition can carry. Each carries only what its files need.
+ *
+ * Defined once and shared by the stored candidate (which adds the identity, status and checks
+ * the coordinator owns) and the model-facing draft (which adds none of those). Writing them
+ * twice would let the two drift, and the drift would show up at the worst moment: a model draft
+ * that validates on arrival but cannot become a stored candidate, discovered only after the
+ * user's turn is otherwise complete.
+ */
+const CanonCreatePayload = {
+  classification: z.literal("canon.create"),
+  draft: z
+    .object({
+      type: CanonEntryTypeSchema,
+      title: z.string().min(1).max(160),
+      statement: z.string().min(1),
+      links: z.array(WorldChatLinkRefSchema),
+    })
+    .strict(),
+} as const;
+
+const CanonAmendPayload = {
+  classification: z.literal("canon.amend"),
+  target: z.object({ kind: z.literal("canon"), entryId: CanonIdSchema }).strict(),
+  draft: z
+    .object({
+      type: CanonEntryTypeSchema.optional(),
+      title: z.string().min(1).max(160).optional(),
+      statement: z.string().min(1).optional(),
+      links: z.array(WorldChatLinkRefSchema).optional(),
+    })
+    .strict()
+    // An amendment that changes nothing is a no-op the gate would reject later; catching it
+    // here means it never becomes a proposal in the first place.
+    .refine((d) => Object.keys(d).length > 0, "an amendment must change at least one field"),
+} as const;
+
+const CanonThreadPayload = {
+  classification: z.literal("canon.thread"),
+  draft: z
+    .object({
+      title: z.string().min(1).max(160),
+      question: z.string().min(1),
+      consideredEntryIds: z.array(CanonIdSchema),
+    })
+    .strict(),
+} as const;
+
+const SheetCreatePayload = {
+  classification: z.literal("sheet.create"),
+  draft: z
+    .object({
+      type: SheetKindSchema,
+      name: z.string().min(1).max(120),
+      role: z.string().max(200).optional(),
+      billing: z.string().max(80).optional(),
+      region: z.string().max(120).optional(),
+      canonRules: z.array(CanonIdSchema),
+      links: z.array(WorldChatLinkRefSchema),
+      sections: z.array(SectionSchema),
+    })
+    .strict(),
+} as const;
+
+const SheetEditPayload = {
+  classification: z.literal("sheet.edit"),
+  target: z.object({ kind: z.literal("sheet"), sheetKind: SheetKindSchema, sheetId: SlugSchema }).strict(),
+  // Version, status, retirement and voice are absent on purpose: each has its own workflow,
+  // and a conversation must not be able to reach them by describing a sheet edit.
+  draft: z
+    .object({
+      name: z.string().min(1).max(120).optional(),
+      role: z.string().max(200).nullable().optional(),
+      billing: z.string().max(80).nullable().optional(),
+      region: z.string().max(120).nullable().optional(),
+      canonRules: z.array(CanonIdSchema).optional(),
+      links: z.array(WorldChatLinkRefSchema).optional(),
+      sections: z.array(SectionSchema).optional(),
+    })
+    .strict(),
+} as const;
+
+const RelationshipChangePayload = {
+  classification: z.literal("relationship.change"),
+  draft: z
+    .object({
+      from: WorldChatLinkRefSchema,
+      to: WorldChatLinkRefSchema,
+      linkAction: z.enum(["add", "remove", "unchanged"]),
+      proseEdits: z.array(
+        z
+          .object({
+            sheet: WorldChatLinkRefSchema,
+            sectionHeading: z.string().min(1).max(120),
+            /** The complete proposed section body, never an append instruction. */
+            body: z.string(),
+            reason: z.string().max(500),
+          })
+          .strict(),
+      ),
+    })
+    .strict(),
+} as const;
+
+const ImageOpportunityPayload = {
+  classification: z.literal("media.image-opportunity"),
+  draft: z
+    .object({
+      target: WorldChatEntityRefSchema,
+      purpose: z.enum(["world-key-art", "character-main-photo", "character-look"]),
+      brief: z.string().min(1).max(4000),
+      reason: z.string().max(1000),
+      dependencies: z.array(
+        z.union([
+          PendingRefSchema,
+          z.object({ proposalId: ProposalIdSchema, targetPath: z.string().optional() }).strict(),
+        ]),
+      ),
+    })
+    .strict(),
+} as const;
+
+const UndecidedPayload = {
+  classification: z.literal("undecided"),
+  draft: z
+    .object({
+      question: z.string().min(1),
+      plausibleActions: z.array(WorldChangeClassificationSchema),
+      possibleTargets: z.array(WorldChatEntityRefSchema),
+    })
+    .strict(),
+} as const;
+
+/** The eight things a proposition can be, as the coordinator stores them. */
 export const WorldChangeCandidateSchema = z.discriminatedUnion("classification", [
-  CandidateBaseSchema.extend({
-    classification: z.literal("canon.create"),
-    draft: z
-      .object({
-        type: CanonEntryTypeSchema,
-        title: z.string().min(1).max(160),
-        statement: z.string().min(1),
-        links: z.array(WorldChatLinkRefSchema),
-      })
-      .strict(),
-  }).strict(),
-  CandidateBaseSchema.extend({
-    classification: z.literal("canon.amend"),
-    target: z.object({ kind: z.literal("canon"), entryId: CanonIdSchema }).strict(),
-    draft: z
-      .object({
-        type: CanonEntryTypeSchema.optional(),
-        title: z.string().min(1).max(160).optional(),
-        statement: z.string().min(1).optional(),
-        links: z.array(WorldChatLinkRefSchema).optional(),
-      })
-      .strict()
-      // An amendment that changes nothing is a no-op the gate would reject later; catching it
-      // here means it never becomes a proposal in the first place.
-      .refine((d) => Object.keys(d).length > 0, "an amendment must change at least one field"),
-  }).strict(),
-  CandidateBaseSchema.extend({
-    classification: z.literal("canon.thread"),
-    draft: z
-      .object({
-        title: z.string().min(1).max(160),
-        question: z.string().min(1),
-        consideredEntryIds: z.array(CanonIdSchema),
-      })
-      .strict(),
-  }).strict(),
-  CandidateBaseSchema.extend({
-    classification: z.literal("sheet.create"),
-    draft: z
-      .object({
-        type: SheetKindSchema,
-        name: z.string().min(1).max(120),
-        role: z.string().max(200).optional(),
-        billing: z.string().max(80).optional(),
-        region: z.string().max(120).optional(),
-        canonRules: z.array(CanonIdSchema),
-        links: z.array(WorldChatLinkRefSchema),
-        sections: z.array(SectionSchema),
-      })
-      .strict(),
-  }).strict(),
-  CandidateBaseSchema.extend({
-    classification: z.literal("sheet.edit"),
-    target: z.object({ kind: z.literal("sheet"), sheetKind: SheetKindSchema, sheetId: SlugSchema }).strict(),
-    // Version, status, retirement and voice are absent on purpose: each has its own workflow,
-    // and a conversation must not be able to reach them by describing a sheet edit.
-    draft: z
-      .object({
-        name: z.string().min(1).max(120).optional(),
-        role: z.string().max(200).nullable().optional(),
-        billing: z.string().max(80).nullable().optional(),
-        region: z.string().max(120).nullable().optional(),
-        canonRules: z.array(CanonIdSchema).optional(),
-        links: z.array(WorldChatLinkRefSchema).optional(),
-        sections: z.array(SectionSchema).optional(),
-      })
-      .strict(),
-  }).strict(),
-  CandidateBaseSchema.extend({
-    classification: z.literal("relationship.change"),
-    draft: z
-      .object({
-        from: WorldChatLinkRefSchema,
-        to: WorldChatLinkRefSchema,
-        linkAction: z.enum(["add", "remove", "unchanged"]),
-        proseEdits: z.array(
-          z
-            .object({
-              sheet: WorldChatLinkRefSchema,
-              sectionHeading: z.string().min(1).max(120),
-              /** The complete proposed section body, never an append instruction. */
-              body: z.string(),
-              reason: z.string().max(500),
-            })
-            .strict(),
-        ),
-      })
-      .strict(),
-  }).strict(),
-  CandidateBaseSchema.extend({
-    classification: z.literal("media.image-opportunity"),
-    draft: z
-      .object({
-        target: WorldChatEntityRefSchema,
-        purpose: z.enum(["world-key-art", "character-main-photo", "character-look"]),
-        brief: z.string().min(1).max(4000),
-        reason: z.string().max(1000),
-        dependencies: z.array(
-          z.union([
-            PendingRefSchema,
-            z.object({ proposalId: ProposalIdSchema, targetPath: z.string().optional() }).strict(),
-          ]),
-        ),
-      })
-      .strict(),
-  }).strict(),
-  CandidateBaseSchema.extend({
-    classification: z.literal("undecided"),
-    draft: z
-      .object({
-        question: z.string().min(1),
-        plausibleActions: z.array(WorldChangeClassificationSchema),
-        possibleTargets: z.array(WorldChatEntityRefSchema),
-      })
-      .strict(),
-  }).strict(),
+  CandidateBaseSchema.extend(CanonCreatePayload).strict(),
+  CandidateBaseSchema.extend(CanonAmendPayload).strict(),
+  CandidateBaseSchema.extend(CanonThreadPayload).strict(),
+  CandidateBaseSchema.extend(SheetCreatePayload).strict(),
+  CandidateBaseSchema.extend(SheetEditPayload).strict(),
+  CandidateBaseSchema.extend(RelationshipChangePayload).strict(),
+  CandidateBaseSchema.extend(ImageOpportunityPayload).strict(),
+  CandidateBaseSchema.extend(UndecidedPayload).strict(),
 ]);
 
 export type WorldChangeCandidate = z.infer<typeof WorldChangeCandidateSchema>;
@@ -772,3 +797,128 @@ export const WorldChatCheckpointSchema = z
   })
   .strict();
 export type WorldChatCheckpoint = z.infer<typeof WorldChatCheckpointSchema>;
+
+// ---------------------------------------------------------------------------
+// What the model is allowed to say (#70 §8.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * The common part of a model-proposed candidate.
+ *
+ * Everything the coordinator owns is absent: identity, revision, status, subject grouping, group
+ * and proposal binding, paths, Canon IDs, sheet slugs, job IDs. The model proposes *what the
+ * change is*; it never decides what the change is called or whether it is ready.
+ *
+ * `checkReceiptIds` is the one field that looks like an exception and is not. A model may cite
+ * reads it made while composing, and those are shown as context — but they cannot satisfy the
+ * coordinator's required check plan (§8.3.1). Otherwise a model could mark its own homework by
+ * searching for something it knew would miss.
+ */
+export const ModelCandidateCommonSchema = z.object({
+  title: z.string().min(1).max(160),
+  rationale: z.string().max(1000),
+  settledness: SettlednessSchema,
+  evidence: z.array(CandidateEvidenceSchema),
+  checkReceiptIds: z.array(CheckReceiptIdSchema),
+});
+
+export const ModelCandidateDraftSchema = z.discriminatedUnion("classification", [
+  ModelCandidateCommonSchema.extend(CanonCreatePayload).strict(),
+  ModelCandidateCommonSchema.extend(CanonAmendPayload).strict(),
+  ModelCandidateCommonSchema.extend(CanonThreadPayload).strict(),
+  ModelCandidateCommonSchema.extend(SheetCreatePayload).strict(),
+  ModelCandidateCommonSchema.extend(SheetEditPayload).strict(),
+  ModelCandidateCommonSchema.extend(RelationshipChangePayload).strict(),
+  ModelCandidateCommonSchema.extend(ImageOpportunityPayload).strict(),
+  ModelCandidateCommonSchema.extend(UndecidedPayload).strict(),
+]);
+export type ModelCandidateDraft = z.infer<typeof ModelCandidateDraftSchema>;
+
+/** A temporary id is only meaningful inside the turn result that created it. */
+const TemporaryIdSchema = z.string().min(1).max(64);
+
+export const ModelCandidateRefSchema = z.union([
+  z.object({ candidateId: CandidateIdSchema, revision: z.number().int().min(1) }).strict(),
+  z.object({ temporaryId: TemporaryIdSchema }).strict(),
+]);
+export type ModelCandidateRef = z.infer<typeof ModelCandidateRefSchema>;
+
+export const ModelCandidateOperationSchema = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("create"), temporaryId: TemporaryIdSchema, candidate: ModelCandidateDraftSchema }).strict(),
+  z
+    .object({
+      op: z.literal("update"),
+      candidateId: CandidateIdSchema,
+      expectedRevision: z.number().int().min(1),
+      candidate: ModelCandidateDraftSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("withdraw"),
+      candidateId: CandidateIdSchema,
+      expectedRevision: z.number().int().min(1),
+      reason: z.string().min(1).max(1000),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("split"),
+      candidateId: CandidateIdSchema,
+      expectedRevision: z.number().int().min(1),
+      replacements: z.array(ModelCandidateDraftSchema).min(2),
+    })
+    .strict(),
+]);
+export type ModelCandidateOperation = z.infer<typeof ModelCandidateOperationSchema>;
+
+export const ModelGroupOperationSchema = z.discriminatedUnion("op", [
+  z
+    .object({
+      op: z.literal("create"),
+      temporaryId: TemporaryIdSchema,
+      title: z.string().min(1).max(160),
+      rationale: z.string().max(1000),
+      members: z.array(ModelCandidateRefSchema).min(2),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("update"),
+      groupId: CandidateGroupIdSchema,
+      expectedRevision: z.number().int().min(1),
+      title: z.string().min(1).max(160),
+      rationale: z.string().max(1000),
+      members: z.array(ModelCandidateRefSchema).min(2),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("withdraw"),
+      groupId: CandidateGroupIdSchema,
+      expectedRevision: z.number().int().min(1),
+      reason: z.string().min(1).max(1000),
+    })
+    .strict(),
+]);
+export type ModelGroupOperation = z.infer<typeof ModelGroupOperationSchema>;
+
+/**
+ * The assistant's entire completed message (§8.3).
+ *
+ * The freeform `reply` carries no machine references to propositions. The panel renders from the
+ * structured operations beside it, so an invalid candidate id is rejected in the operations
+ * rather than inferred out of prose — there is no path by which what the Studio *said* can create
+ * or alter a proposition that the operations did not.
+ *
+ * The bounds are hard. They are not a guess at what a model will do; they are what this app will
+ * accept, so that one turn cannot become a wall of propositions nobody can review.
+ */
+export const WorldChatTurnResultSchema = z
+  .object({
+    reply: z.string().max(8000),
+    candidateOperations: z.array(ModelCandidateOperationSchema).max(12),
+    groupOperations: z.array(ModelGroupOperationSchema).max(6),
+  })
+  .strict();
+export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
