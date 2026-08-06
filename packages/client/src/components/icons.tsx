@@ -83,6 +83,41 @@ export const Sparkle = icon(
   <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />,
 );
 export const Play = icon(<polygon points="6 3 20 12 6 21 6 3" />);
+export const Speaker = icon(
+  <>
+    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+  </>,
+);
+export const Copy = icon(
+  <>
+    <rect x="8" y="8" width="14" height="14" rx="2" ry="2" />
+    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+  </>,
+);
+
+/**
+ * Transport glyphs are solid, not stroked — they sit inside a filled circle, where a 1.75px
+ * outline reads as a hole rather than a control.
+ */
+function solid(paths: React.ReactNode) {
+  return function Icon({ size = 11 }: { size?: number }) {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        {paths}
+      </svg>
+    );
+  };
+}
+
+export const PlaySolid = solid(<path d="M7 5l12 7-12 7z" />);
+export const PauseSolid = solid(
+  <>
+    <rect x="6" y="4" width="4" height="16" rx="1.5" />
+    <rect x="14" y="4" width="4" height="16" rx="1.5" />
+  </>,
+);
 export const Lock = icon(
   <>
     <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />

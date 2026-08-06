@@ -626,6 +626,14 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-sheet__name { margin: 10px 0 0; font: 650 48px/1.02 var(--font-sans); letter-spacing: -0.03em; }
 .fy-sheet__badges { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+/* The Essence is the sheet's lead paragraph (design 3a), not a cell in the section grid. */
+.fy-sheet__lead {
+  margin: 10px 0 0;
+  font: 400 15px/1.6 var(--font-sans);
+  color: var(--muted-foreground);
+  max-width: 520px;
+  white-space: pre-wrap;
+}
 .fy-sheet__grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

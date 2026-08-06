@@ -68,7 +68,7 @@ import {
 } from "../lib/store.js";
 import { ArtStyleGrid, ArtStyleWords } from "../components/art-style-picker.js";
 import { seedFrom } from "../lib/art-styles.js";
-import { playAudio, usePlayback } from "../lib/audio.js";
+import { playClip, usePlayback } from "../lib/audio.js";
 import {
   computeNeedsYou,
   computeRunning,
@@ -1582,7 +1582,12 @@ export function SettingsLocalRuntimeScreen() {
   useEffect(() => {
     if (voiceTest?.status !== "ready" || !voiceTest.audioBase64 || playedTest.current === voiceTest.requestId) return;
     playedTest.current = voiceTest.requestId;
-    void playAudio(voiceTest.requestId, `data:audio/wav;base64,${voiceTest.audioBase64}`);
+    void playClip({
+      id: voiceTest.requestId,
+      url: `data:audio/wav;base64,${voiceTest.audioBase64}`,
+      title: "Local voice test",
+      sub: "settings · local runtime",
+    });
   }, [voiceTest]);
   const gbOrUnknown = (mb: number | null) => (mb === null ? "could not measure" : `${Math.round(mb / 1024)} GB`);
   const sourceLabel = voiceRuntime?.source === "environment"
@@ -1658,7 +1663,7 @@ export function SettingsLocalRuntimeScreen() {
           <div className="fy-set__note">
             {voiceTest.detail}
             {voiceTest.status === "ready" && voiceTest.audioBase64 && playback.status !== "playing" && (
-              <> · <button type="button" className="fy-set__link" onClick={() => void playAudio(voiceTest.requestId, `data:audio/wav;base64,${voiceTest.audioBase64}`)}>Play test</button></>
+              <> · <button type="button" className="fy-set__link" onClick={() => void playClip({ id: voiceTest.requestId, url: `data:audio/wav;base64,${voiceTest.audioBase64}`, title: "Local voice test", sub: "settings · local runtime" })}>Play test</button></>
             )}
           </div>
         )}

@@ -15,7 +15,7 @@ import {
 import { DegradedBanner, EmptyState, PageHeader, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
 import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
-import { ChevronRight, Play, Plus, Search } from "../components/icons.js";
+import { ChevronRight, Plus, Search } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { DispatchBar, resolveModel, usableModels } from "../components/dispatch-bar.js";
 import { Loading } from "../components/loading.js";
@@ -27,7 +27,8 @@ import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Wave } from "./production.js";
 import { shortDateTime } from "../lib/format.js";
 import { mediaUrl } from "../lib/media.js";
-import { pauseAudio, playAudio, stopAudio, usePlayback } from "../lib/audio.js";
+import { playClip, type Clip } from "../lib/audio.js";
+import { ClipPlayButton, TextActions } from "../components/player.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
   askCanon,
@@ -839,20 +840,111 @@ export function FactionsScreen() {
 
 // ---- Sheet detail ----------------------------------------------------------
 
+/**
+ * The voice card's play control (design 3a): hear the character in their own voice, reading
+ * their own line. Local voices synthesise free and immediately, so the control is the plain
+ * circle. A cloud voice that has not been generated yet states its price on the control before
+ * it is pressed (SPEC-011 R-10) and becomes the circle once there is something to replay.
+ */
+function VoiceCard({
+  worldId,
+  sheet,
+  worldSlug,
+  onChange,
+}: {
+  worldId: string | undefined;
+  sheet: Sheet;
+  worldSlug: string;
+  onChange: () => void;
+}) {
+  const voice = sheet.voice;
+  const provider = voice?.provider === "kokoro" || voice?.provider === "elevenlabs" ? voice.provider : null;
+  const candidates = useVoiceCandidates()[sheet.id];
+  const voiceAudio = useVoiceAudio();
+  const [requestId, setRequestId] = useState<string | null>(null);
+  const result = requestId ? voiceAudio[requestId] : undefined;
+  const played = useRef<string | null>(null);
+  const cloudPrice = candidates?.cloudPreviewMicroUsd ?? null;
+
+  // The price of a cloud preview rides along with the catalogue, which costs nothing to ask for.
+  useEffect(() => {
+    if (worldId && provider === "elevenlabs" && !candidates) requestVoiceCandidates(worldId, sheet.id);
+  }, [worldId, provider, candidates, sheet.id]);
+
+  const clip: Clip | null =
+    result?.status === "ready" && result.file
+      ? {
+          id: result.requestId,
+          url: mediaUrl(worldSlug, result.file),
+          title: `${sheet.name} · voice`,
+          sub: `${voice?.label ?? provider} · reads their own line`,
+        }
+      : null;
+
+  useEffect(() => {
+    if (clip && played.current !== clip.id) {
+      played.current = clip.id;
+      void playClip(clip);
+    }
+  }, [clip?.id]);
+
+  const busy = Boolean(requestId && !result);
+  const start = () => {
+    if (worldId && provider && voice) setRequestId(requestVoicePreview(worldId, sheet.id, provider, voice.voiceId));
+  };
+  return (
+    <div className="fy-voicecard">
+      {/* Not generated, and generating would charge: the price goes on the control rather than
+          behind it (R-10). Everything else is the plain circle. */}
+      {voice && provider === "elevenlabs" && !clip ? (
+        <Button variant="ghost" disabled={busy} onClick={start}>
+          {busy ? "Preparing…" : `Hear this voice${cloudPrice !== null ? ` · ${formatMicroUsd(cloudPrice)}` : ""}`}
+        </Button>
+      ) : (
+        voice &&
+        provider && <ClipPlayButton large clip={clip} busy={busy} onStart={start} label={`Hear ${sheet.name}'s voice`} />
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="fy-voicecard__label">{voice ? (voice.label ?? voice.provider) : "No voice assigned"}</div>
+        <div className="fy-voicecard__meta">
+          {result?.status === "failed" && result.error
+            ? result.error
+            : voice
+              ? `${voice.provider} · rides with every dialogue render`
+              : "dialogue renders stay silent until one is chosen"}
+        </div>
+        {voice && (
+          <div style={{ color: "var(--neutral-400)", marginTop: 6, overflow: "hidden" }}>
+            <Wave seed={`${voice.provider}/${voice.voiceId}`} width={290} height={22} />
+          </div>
+        )}
+      </div>
+      <div className="fy-voicecard__side">
+        <Button onClick={onChange}>{voice ? "Change voice" : "Choose voice"}</Button>
+      </div>
+    </div>
+  );
+}
+
 function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: string }) {
   const { worldId, sheetId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);
   const navigate = useNavigate();
   const voiceAudio = useVoiceAudio();
-  const playback = usePlayback();
   const [readRequestId, setReadRequestId] = useState<string | null>(null);
   const readResult = readRequestId ? voiceAudio[readRequestId] : undefined;
+  // A read the user asked for plays as soon as it lands, rather than making them click twice.
   useEffect(() => {
-    if (readResult?.status === "ready" && readResult.file && world) {
-      void playAudio(readResult.requestId, mediaUrl(world.meta.slug, readResult.file));
+    if (readResult?.status === "ready" && readResult.file && world && sheet) {
+      void playClip({
+        id: readResult.requestId,
+        url: mediaUrl(world.meta.slug, readResult.file),
+        title: `${sheet.name} · Essence`,
+        sub: `read aloud · ${sheet.voice?.label ?? sheet.voice?.provider ?? "voice"}`,
+      });
     }
-  }, [readResult?.requestId, readResult?.status, readResult?.file, world?.meta.slug]);
+  }, [readResult?.requestId, readResult?.status, readResult?.file, world?.meta.slug, sheet?.name]);
   const sheetRefsMap = useSheetRefs();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState<string | null>(null);
@@ -879,6 +971,41 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const mainPhoto = kit ? mainPhotoFor(kit) : null;
   const characterSheet = kit ? designatedCompilation(kit) : null;
   const slug = world.meta.slug;
+  // The Essence is the lead paragraph under the name (design 3a); the grid holds the rest.
+  const essence = isCharacter ? sheet.sections.find((s) => s.heading === "Essence") : undefined;
+  const gridSections = essence ? sheet.sections.filter((s) => s !== essence) : sheet.sections;
+  const voiceUsable = sheet.voice !== undefined && ["kokoro", "elevenlabs"].includes(sheet.voice.provider);
+  const essenceClip: Clip | null =
+    readResult?.status === "ready" && readResult.file
+      ? {
+          id: readResult.requestId,
+          url: mediaUrl(slug, readResult.file),
+          title: `${sheet.name} · Essence`,
+          sub: `read aloud · ${sheet.voice?.label ?? sheet.voice?.provider ?? "voice"}`,
+        }
+      : null;
+  const readEssence = () => {
+    if (!worldId) return;
+    // No usable voice yet: the read starts by choosing one, which is where this leads.
+    if (!voiceUsable) navigate(`/w/${worldId}/cast/${sheet.id}/voice`);
+    else setReadRequestId(readSheetSection(worldId, sheet.id, "Essence"));
+  };
+  const essenceNote =
+    readResult?.status === "confirmation-required" ? (
+      <span className="fy-textactions__note">
+        Exact Essence will be sent to ElevenLabs and retained in Activity.
+        <Button
+          onClick={() => {
+            if (worldId && readRequestId && readResult.confirmationToken)
+              readSheetSection(worldId, sheet.id, "Essence", readRequestId, readResult.confirmationToken);
+          }}
+        >
+          Confirm {readResult.characterCount} characters · {formatMicroUsd(readResult.estimatedMicroUsd)}
+        </Button>
+      </span>
+    ) : readRequestId && !readResult ? (
+      <span className="fy-textactions__note">Preparing audio…</span>
+    ) : undefined;
   const side = isCharacter ? (
         <div className="fy-sheet__side">
           <div className="fy-fan__drift">
@@ -937,6 +1064,28 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
               </Badge>
             )}
           </div>
+          {essence && (
+            <div className="fy-texthost">
+              <p className="fy-sheet__lead">{essence.body}</p>
+              <TextActions
+                clip={essenceClip}
+                onRead={readEssence}
+                copyText={essence.body}
+                readLabel={voiceUsable ? "Read aloud" : "Choose a voice to read this aloud"}
+                note={essenceNote}
+              />
+              {readResult?.status === "failed" && (
+                <Callout tone="warning" title="Read aloud unavailable">
+                  {readResult.error}{" "}
+                  {sheet.voice?.provider === "kokoro" && (
+                    <Button variant="ghost" onClick={() => navigate("/settings/local-runtime")}>
+                      Local runtime
+                    </Button>
+                  )}
+                </Callout>
+              )}
+            </div>
+          )}
         </div>
         <div className="fy-sheet__actions">
           {isCharacter && (
@@ -965,19 +1114,12 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           </Button>
         </div>
         {isCharacter && (
-          <div className="fy-voicecard">
-            <div>
-              <div className="fy-voicecard__label">{sheet.voice ? (sheet.voice.label ?? sheet.voice.provider) : "No voice assigned"}</div>
-              <div className="fy-voicecard__meta">
-                {sheet.voice ? `${sheet.voice.provider} · rides with every dialogue render` : "dialogue renders stay silent until one is chosen"}
-              </div>
-            </div>
-            <div className="fy-voicecard__side">
-              <Button onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}>
-                {sheet.voice ? "Change voice" : "Choose voice"}
-              </Button>
-            </div>
-          </div>
+          <VoiceCard
+            worldId={worldId}
+            sheet={sheet}
+            worldSlug={slug}
+            onChange={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}
+          />
         )}
         <div className="fy-sheet__quiet">
           <Button variant="ghost" onClick={() => setRenaming(renaming === null ? sheet.name : null)}>
@@ -1047,47 +1189,15 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         <ConnectedProposalPanel key={p.proposal.id} staged={p} />
       ))}
       <div className="fy-sheet__grid" style={isCharacter ? undefined : { gridTemplateColumns: "1fr", gap: 14 }}>
-        {sheet.sections.map((s) => (
+        {gridSections.map((s) => (
           <div key={s.heading}>
             <div className="fy-sheet__sechead" style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {s.heading}
               {!isCharacter && (
                 <span className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`} style={{ width: 5, height: 5 }} />
               )}
-              {isCharacter && s.heading === "Essence" && (
-                <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                  {!sheet.voice ? (
-                    <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}>Choose voice</Button>
-                  ) : !["kokoro", "elevenlabs"].includes(sheet.voice.provider) ? (
-                    <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}>Choose voice again</Button>
-                  ) : playback.requestId === readRequestId && playback.status === "playing" ? (
-                    <><Button variant="ghost" onClick={pauseAudio}>Pause</Button><Button variant="ghost" onClick={stopAudio}>Stop</Button></>
-                  ) : readResult?.status === "confirmation-required" ? (
-                    <span style={{ display: "grid", gap: 4, justifyItems: "end" }}>
-                      <span className="fy-mono">Exact Essence will be sent to ElevenLabs and retained in Activity.</span>
-                      <Button onClick={() => {
-                        if (worldId && readRequestId && readResult.confirmationToken) readSheetSection(worldId, sheet.id, "Essence", readRequestId, readResult.confirmationToken);
-                      }}>
-                        Confirm {readResult.characterCount} characters · {formatMicroUsd(readResult.estimatedMicroUsd)}
-                      </Button>
-                    </span>
-                  ) : (
-                    <Button variant="ghost" disabled={!s.body.trim()} onClick={() => {
-                      if (readResult?.status === "ready" && readResult.file && world) void playAudio(readResult.requestId, mediaUrl(world.meta.slug, readResult.file));
-                      else if (worldId) setReadRequestId(readSheetSection(worldId, sheet.id, "Essence"));
-                    }}>
-                      {readRequestId && !readResult ? "Preparing audio…" : readResult?.status === "ready" ? "Play" : "Read aloud"}
-                    </Button>
-                  )}
-                </span>
-              )}
             </div>
             <div className="fy-sheet__secbody">{s.body}</div>
-            {isCharacter && s.heading === "Essence" && readResult?.status === "failed" && (
-              <Callout tone="warning" title="Read aloud unavailable">
-                {readResult.error} {sheet.voice?.provider === "kokoro" && <Button variant="ghost" onClick={() => navigate("/settings/local-runtime")}>Local runtime</Button>}
-              </Callout>
-            )}
           </div>
         ))}
       </div>
@@ -1967,19 +2077,30 @@ function VoiceCandidatesPanel({
   const previews = useVoicePreviews();
   const sidecar = useVoiceSidecar();
   const voiceAudio = useVoiceAudio();
-  const playback = usePlayback();
   const world = useWorld();
+  const sheet = useSheet(worldId, sheetId);
   const [requests, setRequests] = useState<Record<string, string>>({});
   const autoPlayed = useRef(new Set<string>());
+  // Matching is what this screen is for, not a step inside it: the picker opens on the ranked
+  // list and states what it matched on, rather than asking first and showing nothing until then.
   useEffect(() => {
-    for (const requestId of Object.values(requests)) {
+    if (worldId && sheetId) requestVoiceCandidates(worldId, sheetId);
+  }, [worldId, sheetId]);
+  useEffect(() => {
+    for (const [key, requestId] of Object.entries(requests)) {
       const result = voiceAudio[requestId];
       if (result?.status === "ready" && result.file && world && !autoPlayed.current.has(requestId)) {
         autoPlayed.current.add(requestId);
-        void playAudio(requestId, mediaUrl(world.meta.slug, result.file));
+        const candidate = candidates?.ranked.find((r) => `${r.candidate.provider}/${r.candidate.voiceId}` === key)?.candidate;
+        void playClip({
+          id: requestId,
+          url: mediaUrl(world.meta.slug, result.file),
+          title: candidate?.label ?? "Voice preview",
+          sub: `preview · ${candidate?.provider ?? "voice"}`,
+        });
       }
     }
-  }, [requests, voiceAudio, world]);
+  }, [requests, voiceAudio, world, candidates]);
   return (
     <>
       {sidecar && sidecar.state !== "ready" && (
@@ -1987,75 +2108,76 @@ function VoiceCandidatesPanel({
           {sidecar.detail}
         </Callout>
       )}
+      {/* The catalogue, plainly. Matching the written voice was a step and a score on every
+          row for a judgement the ear makes in two seconds — the previews are the point. */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <Button
-          variant="primary"
-          onClick={() => {
-            if (worldId && sheetId) requestVoiceCandidates(worldId, sheetId);
-          }}
-        >
-          Match against the written voice
-        </Button>
-        {candidates && (
-          <span className="fy-mono">
-            matched to: {candidates.extracted.join(" · ") || "nothing extractable"} · previews read{" "}
-            {candidates.previewLine.source === "own-line"
-              ? "their own line"
-              : candidates.previewLine.source === "drafted"
-                ? "a line drafted from the sheet"
-                : "a stock sentence"}
-          </span>
-        )}
+        <span className="fy-mono">
+          {candidates
+            ? `${candidates.ranked.length} voice${candidates.ranked.length === 1 ? "" : "s"} · previews read ${
+                candidates.previewLine.source === "own-line"
+                  ? "their own line"
+                  : candidates.previewLine.source === "drafted"
+                    ? "a line drafted from the sheet"
+                    : "a stock sentence"
+              }`
+            : "loading voices…"}
+        </span>
       </div>
       {candidates && (
         <div style={{ display: "grid", gap: 8 }}>
-          {candidates.ranked.slice(0, 6).map(({ candidate, matched, overlap }, idx) => {
+          {candidates.ranked.map(({ candidate }) => {
             const key = `${candidate.provider}/${candidate.voiceId}`;
             const preview = previews[key];
             const requestId = requests[key];
             const result = requestId ? voiceAudio[requestId] : undefined;
+            // The one that is already this character's voice, not the one that scored best.
+            const assigned = sheet?.voice?.provider === candidate.provider && sheet.voice.voiceId === candidate.voiceId;
             return (
-              <div key={key} className={cx("fy-voicerow", idx === 0 && "fy-voicerow--selected")} style={{ cursor: "default" }}>
-                <span className="fy-voicerow__icon" aria-hidden>
-                  <Play size={12} />
-                </span>
+              <div key={key} className={cx("fy-voicerow", assigned && "fy-voicerow--selected")} style={{ cursor: "default" }}>
+                <ClipPlayButton
+                  small
+                  busy={Boolean(requestId && !result)}
+                  clip={
+                    result?.status === "ready" && result.file && world
+                      ? {
+                          id: result.requestId,
+                          url: mediaUrl(world.meta.slug, result.file),
+                          title: candidate.label,
+                          sub: `preview · ${candidate.provider}`,
+                        }
+                      : null
+                  }
+                />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="fy-voicerow__name">{candidate.label}</div>
                   <div className="fy-voicerow__sub">
                     {candidate.provider}
                     {candidate.local ? " · local — fixed catalogue, cannot be cloned" : candidate.canClone ? " · cloning available" : ""}
-                    {matched.length > 0 ? ` · matched to: ${matched.join(", ")}` : ""}
+                    {candidate.attributes.length > 0 ? ` · ${candidate.attributes.join(", ")}` : ""}
                   </div>
                 </div>
-                <span className="fy-mono" style={{ whiteSpace: "nowrap" }}>
-                  {Math.round(overlap * 100)}% match
-                </span>
-                <Button
-                  variant="ghost"
-                  disabled={Boolean(requestId && !result)}
-                  onClick={() => {
-                    if (result?.status === "ready" && result.file && world) {
-                      void playAudio(result.requestId, mediaUrl(world.meta.slug, result.file));
-                    } else if (worldId && sheetId) {
+                {assigned && <span className="fy-mono" style={{ whiteSpace: "nowrap" }}>current</span>}
+                {/* Generating a preview is the button's job; playing one back is the circle's,
+                    and pause and scrub belong to the dock. */}
+                {!result?.file && (
+                  <Button
+                    variant="ghost"
+                    disabled={Boolean(requestId && !result)}
+                    onClick={() => {
+                      if (!worldId || !sheetId) return;
                       if (candidate.provider === "kokoro" || candidate.provider === "elevenlabs") {
                         const supportedProvider = candidate.provider;
                         setRequests((current) => ({ ...current, [key]: requestVoicePreview(worldId, sheetId, supportedProvider, candidate.voiceId) }));
                       }
-                    }
-                  }}
-                >
-                  {playback.requestId === requestId && playback.status === "playing"
-                    ? "Playing…"
-                    : requestId && !result
+                    }}
+                  >
+                    {requestId && !result
                       ? "Preparing…"
-                  : result?.file
-                    ? "Replay · free"
-                    : candidate.local
-                      ? "Preview · free"
-                      : `Preview${candidates.cloudPreviewMicroUsd !== null ? ` · ${formatMicroUsd(candidates.cloudPreviewMicroUsd)}` : ""}`}
-                </Button>
-                {playback.requestId === requestId && playback.status === "playing" && <Button variant="ghost" onClick={pauseAudio}>Pause</Button>}
-                {playback.requestId === requestId && playback.status !== "idle" && <Button variant="ghost" onClick={stopAudio}>Stop</Button>}
+                      : candidate.local
+                        ? "Preview · free"
+                        : `Preview${candidates.cloudPreviewMicroUsd !== null ? ` · ${formatMicroUsd(candidates.cloudPreviewMicroUsd)}` : ""}`}
+                  </Button>
+                )}
                 <Button
                   onClick={() => {
                     if (worldId && sheetPath && (candidate.provider === "kokoro" || candidate.provider === "elevenlabs"))
@@ -3186,9 +3308,14 @@ export function ArtifactsScreen() {
                 </div>
               ) : a.kind === "audio" ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span className="fy-audiorow__play" aria-hidden>
-                    <Play size={11} />
-                  </span>
+                  <ClipPlayButton
+                    small
+                    clip={
+                      world
+                        ? { id: `artifact:${a.id}`, url: mediaUrl(world.meta.slug, `artifacts/${a.file}`), title: name, sub: `artifact · ${a.file}` }
+                        : null
+                    }
+                  />
                   <span style={{ color: "var(--neutral-400)", overflow: "hidden" }}>
                     <Wave seed={a.file} width={120} height={18} />
                   </span>

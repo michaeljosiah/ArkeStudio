@@ -8,6 +8,7 @@ import {
   OpenCodeAdapter,
   ROSTER,
 } from "@arke-studio/adapter-opencode";
+import { KOKORO_PRESETS, localCandidates } from "@arke-studio/voice";
 import { ChildLedger } from "./child-ledger.js";
 import { Coordinator } from "./coordinator.js";
 import { ChildSupervisor, registerExitBackstop } from "./supervisor.js";
@@ -96,6 +97,10 @@ const coordinator = new Coordinator({
   appRoot: devRoot,
   setup: nodeSetupDeps(),
   authoring: { buildConfig: buildSessionConfig, agentForPurpose, roster: ROSTER },
+  // The dev coordinator carries the app's own preset speakers so the voice picker has a
+  // catalogue to show without a sidecar or a provider key. No cloud sources: unkeyed
+  // providers contribute nothing anyway, and dev should never reach for one.
+  voice: { sidecar: null, localPresets: localCandidates(KOKORO_PRESETS), cloudSources: [] },
 });
 coordinator.superviseAs("harness", opencodeSupervisor);
 
