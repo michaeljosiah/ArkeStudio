@@ -1,6 +1,9 @@
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
+import type { WorldChatCheckReceipt } from "@arke-studio/contracts";
 import { refsForCanon, refsForSheet, searchCanon } from "../index-db/queries.js";
+import { LeaseDeniedError } from "../world-chat/lease.js";
+import type { WorldChatRetrieval } from "../world-chat/retrieval.js";
 import type { WorldStore } from "../world/store.js";
 
 /**
@@ -10,6 +13,17 @@ import type { WorldStore } from "../world/store.js";
  * here — ranked retrieval backed by the SPEC-003 index, the same search the canon Q&A path
  * uses. There is no write operation and no path parameter anywhere in the surface, so the
  * tool cannot be steered at the filesystem.
+ *
+ * Two surfaces are served from one port (#70 §9.1):
+ *
+ * - `/mcp` resolves against whichever world is open. That is right for the authoring agents,
+ *   which run inside the world the user is looking at and have no life beyond it.
+ * - `/mcp/<lease>` resolves against the world the lease was minted for, and refuses if that is
+ *   no longer the open one. World Chat runs outlive a moment of UI state, so "whichever world
+ *   is open" is not a safe question for them to be answered from.
+ *
+ * A path under `/mcp/` that is not a well-formed lease is rejected rather than falling back to
+ * the ambient surface, because falling back is precisely the bypass the lease exists to prevent.
  */
 
 interface JsonRpcRequest {
@@ -79,14 +93,66 @@ const TOOLS = [
   },
 ] as const;
 
+/** The World Chat surface (#70 §9.2): the five above, plus sheet search and attachment text. */
+const WORLD_CHAT_TOOLS = [
+  ...TOOLS,
+  {
+    name: "search_sheets",
+    description:
+      "Lexically search accepted character, location and faction sheets by name, role or region, and authored prose. Use this to find out whether an entity already exists before proposing a new one. Retired sheets are not searched.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search terms" },
+        kind: { type: "string", description: "Optional: character | location | faction" },
+        limit: { type: "number", description: "Maximum candidates (default 8, maximum 20)" },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_attachment_text",
+    description:
+      "Read a bounded range of text from a document attached to this conversation. Only attachments explicitly linked to this turn are readable, and only if they are text. Images, audio and video cannot be read.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Conversation attachment id" },
+        offset: { type: "number", description: "Character offset to start from (default 0)" },
+        limit: { type: "number", description: "Maximum characters to return" },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+  },
+] as const;
+
+export interface LeasedSurface {
+  retrieval: WorldChatRetrieval;
+  /** Every call's receipt, including the ones that failed or could not run (§9.3). */
+  onReceipt: (receipt: WorldChatCheckReceipt) => void;
+}
+
+/** A minted lease token: 32 random bytes as hex. */
+const LEASE_PATH = /^\/mcp\/([0-9a-f]{64})$/;
+
 export class WorldQueryServer {
   private server: Server | null = null;
   private port = 0;
 
-  constructor(private readonly getStore: () => WorldStore | null) {}
+  constructor(
+    private readonly getStore: () => WorldStore | null,
+    private readonly leased?: LeasedSurface,
+  ) {}
 
   url(): string | null {
     return this.server ? `http://127.0.0.1:${this.port}/mcp` : null;
+  }
+
+  /** The URL a leased run's session configuration points at (§8.2). */
+  leasedUrl(token: string): string | null {
+    return this.server ? `http://127.0.0.1:${this.port}/mcp/${token}` : null;
   }
 
   async start(): Promise<string> {
@@ -108,6 +174,17 @@ export class WorldQueryServer {
         } catch {
           res.writeHead(400).end();
           return;
+        }
+
+        const path = (req.url ?? "/mcp").split("?")[0] ?? "/mcp";
+        let token: string | null = null;
+        if (path.startsWith("/mcp/")) {
+          const match = LEASE_PATH.exec(path);
+          if (!match || !this.leased) {
+            res.writeHead(404).end();
+            return;
+          }
+          token = match[1]!;
         }
         const reply = (result: unknown) => {
           res.writeHead(200, { "Content-Type": "application/json" });
@@ -134,19 +211,42 @@ export class WorldQueryServer {
             reply({});
             return;
           case "tools/list":
-            reply({ tools: TOOLS });
+            reply({ tools: token === null ? TOOLS : WORLD_CHAT_TOOLS });
             return;
           case "tools/call": {
             const name = rpc.params?.["name"] as string;
             const args = (rpc.params?.["arguments"] as Record<string, unknown>) ?? {};
-            try {
-              const result = this.call(name, args);
-              reply({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
-            } catch (err) {
+            const asError = (err: unknown) =>
               reply({
                 content: [{ type: "text", text: `error: ${err instanceof Error ? err.message : String(err)}` }],
                 isError: true,
               });
+
+            if (token !== null) {
+              const leased = this.leased!;
+              void leased.retrieval
+                .call(token, name, args)
+                .then(({ result, receipt }) => {
+                  leased.onReceipt(receipt);
+                  reply({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                })
+                .catch((err: unknown) => {
+                  // A denied lease is not a tool failure to be recorded against the run; it means
+                  // this caller may not read the world at all, so nothing was observed.
+                  if (!(err instanceof LeaseDeniedError)) {
+                    const receipt = (err as { receipt?: WorldChatCheckReceipt }).receipt;
+                    if (receipt) leased.onReceipt(receipt);
+                  }
+                  asError(err);
+                });
+              return;
+            }
+
+            try {
+              const result = this.call(name, args);
+              reply({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+            } catch (err) {
+              asError(err);
             }
             return;
           }

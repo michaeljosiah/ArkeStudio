@@ -1,0 +1,310 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import {
+  newId,
+  type ChatAttachmentId,
+  type ConversationId,
+  type RunId,
+  type WorldChatAttachment,
+  type WorldChatCheckReceipt,
+} from "@arke-studio/contracts";
+import { WorldIndex } from "../../src/index-db/world-index.js";
+import { WorldQueryServer } from "../../src/harness/world-query.js";
+import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
+import { LeaseDeniedError, QueryLeaseRegistry } from "../../src/world-chat/lease.js";
+import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
+import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
+import { fixtureBundle } from "../index-db/helpers.js";
+import { makeTempWorld } from "../world/helpers.js";
+import { tempDir } from "../tmp.js";
+
+/**
+ * The leased read surface and its receipts (#70 §9.2–§9.4).
+ *
+ * The receipts are the part that matters. A candidate is called new because a search happened and
+ * found nothing — so a search that could not run must say so, and never look like one that ran and
+ * came back empty.
+ */
+
+const NOW = () => "2026-08-06T10:00:00Z";
+
+async function harness(options: { withIndex?: boolean } = {}) {
+  const worldDir = await makeTempWorld();
+  const bundle = await fixtureBundle();
+  const index = options.withIndex === false ? null : WorldIndex.open(worldDir, bundle);
+
+  const worldPath = await tempDir("arke-retrieval-");
+  const conversationId = newId("cv") as ConversationId;
+  const runId = newId("run") as RunId;
+  const log = new WorldChatStore(conversationDir(worldPath, conversationId));
+  await log.create(conversationId, NOW());
+  await log.append(
+    { type: "conversation.created", title: "retrieval", entryContext: { kind: "world" } },
+    { at: NOW() },
+  );
+
+  const attachments = new WorldChatAttachmentStore(worldPath, NOW);
+  const state = { world: bundle.meta.worldId as string | null };
+  const leases = new QueryLeaseRegistry(() => state.world, () => 1_000);
+  const known = new Map<string, WorldChatAttachment>();
+
+  const retrieval = new WorldChatRetrieval({
+    leases,
+    getBundle: () => bundle,
+    getIndex: () => index,
+    attachments,
+    findAttachment: async (_lease, id) => known.get(id) ?? null,
+    now: NOW,
+  });
+
+  const mint = (allowed: ChatAttachmentId[] = []) =>
+    leases.mint({ worldId: bundle.meta.worldId, conversationId, runId, allowedAttachmentIds: allowed });
+
+  return { retrieval, leases, mint, state, attachments, conversationId, known, index, runId };
+}
+
+describe("leased retrieval", () => {
+  it("searches canon and records what it consulted", async () => {
+    const h = await harness();
+    const { result, receipt } = await h.retrieval.call(h.mint().token, "search_canon", {
+      query: "tide calling",
+    });
+
+    assert.equal(receipt.tool, "search-canon");
+    assert.equal(receipt.status, "complete");
+    assert.equal(receipt.runId, h.runId);
+    assert.ok(receipt.searchedCount! > 0, "and says how many entries it searched");
+    assert.ok(
+      receipt.consulted.some((c) => c.ref.kind === "canon" && c.ref.entryId === "CANON-002"),
+      "the entry it found is named in the receipt, at the revision it was read at",
+    );
+    for (const c of receipt.consulted) assert.match(c.contentHash, /^sha256:[0-9a-f]{64}$/);
+    assert.ok((result as { floorCleared: boolean }).floorCleared);
+    h.index?.close();
+  });
+
+  it("searches sheets so the Studio can ask whether somebody already exists", async () => {
+    const h = await harness();
+    const { receipt } = await h.retrieval.call(h.mint().token, "search_sheets", { query: "Maren Kest" });
+    assert.equal(receipt.tool, "search-sheets");
+    assert.equal(receipt.status, "complete");
+    assert.ok(receipt.consulted.some((c) => c.ref.kind === "sheet" && c.ref.sheetId === "maren-kest"));
+    h.index?.close();
+  });
+
+  it("records an honest empty when a search runs and finds nothing", async () => {
+    const h = await harness();
+    const { receipt } = await h.retrieval.call(h.mint().token, "search_sheets", {
+      query: "zzzzqqq nobody",
+    });
+    assert.equal(receipt.status, "empty");
+    assert.ok(receipt.searchedCount! > 0, "it did look, and says how widely");
+    h.index?.close();
+  });
+
+  it("says unavailable, not empty, when it could not look at all", async () => {
+    const h = await harness({ withIndex: false });
+    const { result, receipt } = await h.retrieval.call(h.mint().token, "search_sheets", {
+      query: "Maren Kest",
+    });
+    assert.equal(
+      receipt.status,
+      "unavailable",
+      "'I found nothing' and 'I could not look' must not be the same receipt",
+    );
+    assert.equal((result as { unavailable: boolean }).unavailable, true);
+  });
+
+  it("still reads a named entry directly when the index is down (§9.4)", async () => {
+    const h = await harness({ withIndex: false });
+    const { receipt } = await h.retrieval.call(h.mint().token, "get_entry", { id: "CANON-002" });
+    assert.equal(receipt.status, "complete");
+    assert.equal(receipt.consulted[0]!.ref.kind, "canon");
+  });
+
+  it("reports a missing entry as empty rather than failing the turn", async () => {
+    const h = await harness();
+    const { result, receipt } = await h.retrieval.call(h.mint().token, "get_entry", { id: "CANON-999" });
+    assert.equal(receipt.status, "empty");
+    assert.deepEqual(receipt.consulted, []);
+    assert.equal((result as { found: boolean }).found, false);
+    h.index?.close();
+  });
+
+  it("bounds every result set, however much is asked for", async () => {
+    const h = await harness();
+    const { result } = await h.retrieval.call(h.mint().token, "list_entities", {
+      kind: "character",
+      limit: 5_000,
+    });
+    const entities = (result as { entities: unknown[] }).entities;
+    assert.ok(entities.length <= 20, "the hard maximum holds regardless of the request");
+    h.index?.close();
+  });
+
+  it("leaves retired entities out of a listing", async () => {
+    const h = await harness();
+    const { result } = await h.retrieval.call(h.mint().token, "list_entities", { kind: "canon" });
+    const ids = (result as { entities: Array<{ id: string }> }).entities.map((e) => e.id);
+    assert.ok(ids.length > 0);
+    h.index?.close();
+  });
+
+  it("refuses a tool that is not on the surface", async () => {
+    const h = await harness();
+    await assert.rejects(() => h.retrieval.call(h.mint().token, "commit", {}));
+    h.index?.close();
+  });
+
+  it("refuses every call once the world has changed underneath it", async () => {
+    const h = await harness();
+    const token = h.mint().token;
+    assert.ok(await h.retrieval.call(token, "get_entry", { id: "CANON-002" }));
+
+    h.state.world = "some-other-world";
+
+    await assert.rejects(
+      () => h.retrieval.call(token, "get_entry", { id: "CANON-002" }),
+      (err: unknown) => err instanceof LeaseDeniedError && err.failure === "world-changed",
+    );
+    h.index?.close();
+  });
+});
+
+describe("leased attachment reads", () => {
+  async function withAttachment() {
+    const h = await harness();
+    const attachment = await h.attachments.ingestText(h.conversationId, "the verse under the harbour");
+    h.known.set(attachment.id, attachment);
+    return { ...h, attachment };
+  }
+
+  it("reads an attachment the run was given", async () => {
+    const h = await withAttachment();
+    const { result, receipt } = await h.retrieval.call(
+      h.mint([h.attachment.id]).token,
+      "get_attachment_text",
+      { id: h.attachment.id },
+    );
+    assert.equal(receipt.tool, "get-attachment-text");
+    assert.equal(receipt.status, "complete");
+    assert.equal((result as { text: string }).text, "the verse under the harbour");
+    h.index?.close();
+  });
+
+  it("refuses one the run was not given, without saying whether it exists", async () => {
+    const h = await withAttachment();
+    await assert.rejects(
+      () => h.retrieval.call(h.mint().token, "get_attachment_text", { id: h.attachment.id }),
+      (err: unknown) => err instanceof LeaseDeniedError && err.failure === "attachment-not-allowed",
+    );
+    h.index?.close();
+  });
+
+  it("stops a run reading an unbounded amount of text", async () => {
+    const h = await harness();
+    const big = await h.attachments.ingestText(h.conversationId, "x".repeat(200_000));
+    h.known.set(big.id, big);
+    const token = h.mint([big.id]).token;
+
+    let total = 0;
+    for (let i = 0; i < 10; i++) {
+      try {
+        const { result } = await h.retrieval.call(token, "get_attachment_text", {
+          id: big.id,
+          offset: total,
+        });
+        total += (result as { text: string }).text.length;
+      } catch {
+        break;
+      }
+    }
+    assert.ok(total <= 32_000, `read ${total} characters, over the per-run bound`);
+    h.index?.close();
+  });
+});
+
+async function rpc(url: string, method: string, params?: Record<string, unknown>) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  return { status: res.status, body: res.status === 200 ? await res.json() : null };
+}
+
+describe("the served surface", () => {
+  async function serve(withLease: boolean) {
+    const h = await harness();
+    const receipts: WorldChatCheckReceipt[] = [];
+    const server = new WorldQueryServer(
+      () => null,
+      withLease ? { retrieval: h.retrieval, onReceipt: (r) => receipts.push(r) } : undefined,
+    );
+    await server.start();
+    return { h, server, receipts };
+  }
+
+  it("offers the world-chat tools on a leased path and the original five on the ambient one", async () => {
+    const { h, server } = await serve(true);
+    const token = h.mint().token;
+
+    const leased = await rpc(server.leasedUrl(token)!, "tools/list");
+    const names = (leased.body as { result: { tools: Array<{ name: string }> } }).result.tools.map((t) => t.name);
+    assert.ok(names.includes("search_sheets"));
+    assert.ok(names.includes("get_attachment_text"));
+
+    const ambient = await rpc(server.url()!, "tools/list");
+    const ambientNames = (ambient.body as { result: { tools: Array<{ name: string }> } }).result.tools.map(
+      (t) => t.name,
+    );
+    assert.ok(!ambientNames.includes("get_attachment_text"), "the authoring surface is unchanged");
+    assert.equal(ambientNames.length, 5);
+
+    await server.stop();
+    h.index?.close();
+  });
+
+  it("answers a leased call and hands back its receipt", async () => {
+    const { h, server, receipts } = await serve(true);
+    const token = h.mint().token;
+    const res = await rpc(server.leasedUrl(token)!, "tools/call", {
+      name: "search_canon",
+      arguments: { query: "tide calling" },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0]!.tool, "search-canon");
+    await server.stop();
+    h.index?.close();
+  });
+
+  it("rejects a malformed lease path instead of quietly serving the ambient world", async () => {
+    const { h, server } = await serve(true);
+    const res = await rpc(`${server.url()}/not-a-real-token`, "tools/list");
+    assert.equal(res.status, 404, "falling back to ambient here would be the bypass the lease prevents");
+    await server.stop();
+    h.index?.close();
+  });
+
+  it("rejects a well-formed but unknown lease", async () => {
+    const { h, server, receipts } = await serve(true);
+    const res = await rpc(server.leasedUrl("a".repeat(64))!, "tools/call", {
+      name: "search_canon",
+      arguments: { query: "anything" },
+    });
+    const body = res.body as { result: { isError?: boolean } };
+    assert.equal(body.result.isError, true);
+    assert.deepEqual(receipts, [], "a denied lease observed nothing, so it records nothing");
+    await server.stop();
+    h.index?.close();
+  });
+
+  it("serves no leased path at all when no lease surface is configured", async () => {
+    const { h, server } = await serve(false);
+    const res = await rpc(`${server.url()}/${"a".repeat(64)}`, "tools/list");
+    assert.equal(res.status, 404);
+    await server.stop();
+    h.index?.close();
+  });
+});
