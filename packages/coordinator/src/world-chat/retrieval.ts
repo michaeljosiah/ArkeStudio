@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   newId,
   type CanonEntry,
@@ -6,8 +5,8 @@ import {
   type Sheet,
   type WorldBundle,
   type WorldChatCheckReceipt,
-  type WorldChatEntityRef,
 } from "@arke-studio/contracts";
+import { canonObservation, sheetObservation } from "./observations.js";
 import { refsForCanon, refsForSheet, searchCanon, searchSheets } from "../index-db/queries.js";
 import type { WorldIndex } from "../index-db/world-index.js";
 import { LeaseDeniedError, type QueryLease, type QueryLeaseRegistry } from "./lease.js";
@@ -58,27 +57,6 @@ export class RetrievalError extends Error {
 export interface RetrievalOutcome {
   result: unknown;
   receipt: WorldChatCheckReceipt;
-}
-
-function hashOf(value: unknown): string {
-  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
-}
-
-/** A canon entry is observed at the world's canon revision; a sheet at its own version (§5.7). */
-function canonObservation(entry: CanonEntry, canonRevision: number) {
-  return {
-    ref: { kind: "canon", entryId: entry.id } as WorldChatEntityRef,
-    observedVersion: canonRevision,
-    contentHash: hashOf({ id: entry.id, title: entry.title, body: entry.body, status: entry.status }),
-  };
-}
-
-function sheetObservation(sheet: Sheet) {
-  return {
-    ref: { kind: "sheet", sheetKind: sheet.type, sheetId: sheet.id } as WorldChatEntityRef,
-    observedVersion: sheet.version,
-    contentHash: hashOf({ id: sheet.id, name: sheet.name, version: sheet.version, sections: sheet.sections }),
-  };
 }
 
 function boundedLimit(raw: unknown): number {
