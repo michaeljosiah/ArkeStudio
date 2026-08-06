@@ -374,7 +374,19 @@ export class Coordinator {
       getSnapshot: () => this.getState(),
       onMessage: (msg) => {
         const updateCommand = msg.kind === "install-update-and-restart" || msg.kind === "install-update-on-close";
-        const handling = this.handleClientMessage(msg).finally(() => this.activeMessages.delete(handling));
+        // Every handler answers its own failures; this is the backstop. One that throws instead
+        // used to become an unhandled rejection, which Node is entitled to exit on — a single
+        // malformed or stale frame could take the studio down with it, and the log would say
+        // nothing. Recorded and survived: a bad frame is a bad frame, not the end of the session.
+        const handling = this.handleClientMessage(msg)
+          .catch((err: unknown) => {
+            void this.appLog?.append({
+              kind: "message.failed",
+              command: msg.kind,
+              message: err instanceof Error ? err.message : String(err),
+            });
+          })
+          .finally(() => this.activeMessages.delete(handling));
         if (!updateCommand) this.activeMessages.add(handling);
       },
       // GET /media/<world-slug>/<world-relative-file> — read-only renderer media.
@@ -1929,11 +1941,21 @@ export class Coordinator {
           );
           return;
         }
-        await this.enqueueBatch(
-          msg.requestId,
-          msg.kind,
-          composeDispatches(msg.worldId, msg.productionId, scene, plan, model, bundle),
-        );
+        // Composition refuses work it cannot honour — a shot longer than the model can make, a
+        // pass over its reference limit. Those refusals are the point of recomputing the plan
+        // here rather than trusting the dialog, so they have to come back as a refusal. Thrown
+        // out of this handler they became an unhandled rejection: nothing answered the request,
+        // the dialog waited for a job that never arrived, and the process was entitled to exit.
+        let dispatches;
+        try {
+          dispatches = composeDispatches(msg.worldId, msg.productionId, scene, plan, model, bundle);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          void this.appLog?.append({ kind: "dispatch.refused", reason, detail: { sceneFile: msg.sceneFile } });
+          this.rejectEnqueue(msg.requestId, msg.kind, reason);
+          return;
+        }
+        await this.enqueueBatch(msg.requestId, msg.kind, dispatches);
         return;
       }
       case "accept-take": {
@@ -3450,7 +3472,12 @@ export class Coordinator {
       this.jobQueue?.dispose();
       for (const controller of this.reading.values()) controller.abort();
       for (const handle of this.exports.values()) handle.cancel();
+      // In-flight frames answer first, then the door shuts: no new work can arrive during the
+      // drains below. Transport.stop() was written and never called, so a stopped coordinator
+      // went on listening — invisible in the packaged app, where the process exits regardless,
+      // and the reason a stop-and-restart in one process could never bind its port again.
       await Promise.allSettled(this.activeMessages);
+      await this.transport.stop();
       await Promise.allSettled(this.backgroundWork);
       await Promise.allSettled(this.carrying.values());
       await this.appearanceWrite;

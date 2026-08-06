@@ -103,10 +103,15 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     for (const video of SHIPPED_MANIFEST.models.filter((m) => m.capability === "video" && m.provider === "fal")) {
       const options = durationOptions(video);
       assert.ok(options.length > 0, `${video.id} declares its lengths`);
-      const cap = video.limits.maxDurationSec;
-      if (cap !== undefined) {
-        assert.ok(options[options.length - 1]! <= cap, `${video.id}'s longest option is within its own cap`);
-      }
+      // Equal, not merely within: the cap packs whole-scene passes and the options are what the
+      // route can be asked for, so a cap above the longest option lets a pass be built that
+      // dispatch then refuses — with nothing warned beforehand, because the dialog's warning
+      // inspects shots. The generator derives one from the other; this is the guard on that.
+      assert.equal(
+        video.limits.maxDurationSec,
+        options[options.length - 1],
+        `${video.id}'s cap is its longest declared length`,
+      );
     }
   });
 

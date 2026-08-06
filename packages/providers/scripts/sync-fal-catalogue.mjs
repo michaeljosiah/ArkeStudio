@@ -245,6 +245,21 @@ console.log(`[fal] ${total} models in the catalogue; ${Object.keys(CURATED).leng
 const models = [];
 const endpoints = {};
 const editEndpoints = {};
+/**
+ * The cap comes from the lengths, where lengths are declared.
+ *
+ * Two numbers said the same thing and were free to disagree: `maxDurationSec` packs whole-scene
+ * passes, `durations` is what the route can be asked for. A cap above the longest declared length
+ * lets packScene build a pass that dispatch then refuses — and the dialog's warning only inspects
+ * shots, so nothing says so beforehand. Deriving one from the other removes the disagreement
+ * rather than testing for it.
+ */
+function limitsFor(curated) {
+  const declared = Object.keys(curated.limits.durations ?? {}).map(Number);
+  if (declared.length === 0) return curated.limits;
+  return { ...curated.limits, maxDurationSec: Math.max(...declared) };
+}
+
 const skipped = [];
 for (const [route, curated] of Object.entries(CURATED)) {
   const live = byRoute.get(route);
@@ -263,7 +278,7 @@ for (const [route, curated] of Object.entries(CURATED)) {
     capability: curated.capability,
     displayName: curated.displayName ?? live.title,
     accepts: curated.accepts,
-    limits: curated.limits,
+    limits: limitsFor(curated),
     pricing,
   });
   endpoints[curated.id] = route;

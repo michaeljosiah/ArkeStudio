@@ -314,6 +314,26 @@ describe("fal submit/poll round-trip carries the endpoint in the remote id", () 
     assert.equal(kling["duration"], "5");
   });
 
+  it("refuses a length the route does not offer, rather than dropping it", async () => {
+    // Sending nothing is the bug this replaced: the provider's default length runs while the
+    // estimate was computed from the seconds the job carries. The reachable case is a job
+    // journalled before an upgrade, still holding an unsnapped 6.5s.
+    let fetches = 0;
+    const client = new FalClient(async () => {
+      fetches += 1;
+      return new Response(JSON.stringify({ request_id: "req" }), { status: 200 });
+    });
+    await assert.rejects(
+      client.submit("k", {
+        model: "veo-3.1",
+        capability: "video",
+        params: { prompt: "x", references: [], durationSec: 6.5 },
+      }),
+      /veo-3\.1 cannot be asked for 6\.5s/,
+    );
+    assert.equal(fetches, 0, "refused before the money moves");
+  });
+
   it("refuses references for a model with no edit route, before any network call", async () => {
     let fetches = 0;
     const client = new FalClient(async () => {
