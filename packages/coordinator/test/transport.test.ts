@@ -33,6 +33,7 @@ const STATE: ClientState = {
   },
   worlds: [],
   world: null,
+  worldChat: null,
 };
 
 const EVENT = {

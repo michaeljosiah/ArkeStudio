@@ -422,6 +422,8 @@ const state: ClientState = {
     externalEdits: [],
     stale: false,
   },
+  // No conversation open by default: the workspace is loaded by id when one is chosen.
+  worldChat: null,
 };
 
 /** Runtime-validated on import so a drifted fixture fails the suite immediately. */

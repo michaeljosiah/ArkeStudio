@@ -1819,3 +1819,18 @@ export function __pendingQueueRequestsForTest(): string[] {
 export function __connectionStatusForTest(status: ConnectionStatus): void {
   handleStatus(status);
 }
+
+/**
+ * Open one conversation's workspace, or release the open one.
+ *
+ * Null closes it. The client holds one conversation at a time on purpose: a creator reads one at
+ * a time, and keeping every transcript a session has visited would make the app cost more the
+ * longer it stays open.
+ */
+export function openWorldChat(worldId: string, conversationId: string | null): void {
+  send({ kind: "world-chat-open", worldId, conversationId });
+}
+
+export function createWorldChat(worldId: string, title: string, requestId: string): void {
+  send({ kind: "world-chat-create", worldId, title, requestId });
+}

@@ -922,3 +922,66 @@ export const WorldChatTurnResultSchema = z
   })
   .strict();
 export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
+
+// ---------------------------------------------------------------------------
+// What the client renders (#70 §10.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * One line in the understanding panel.
+ *
+ * A projection, not the candidate itself. The panel shows what was understood in the user's own
+ * register; it has no use for revisions, structural keys, evidence spans or classifications, and
+ * sending them would invite a screen to start making decisions out of them. `settled` is here
+ * only so the wrap-up caption can say how many points would actually carry.
+ */
+export const WorldChatPointSchema = z
+  .object({
+    id: CandidateIdSchema,
+    /** A statement about the world, or a question still open. */
+    kind: z.enum(["point", "question"]),
+    /** The heading it displays under — the thing it is about. */
+    subject: z.string().min(1).max(160),
+    /** "sheet · v4", "new rule" — what the subject is, in the panel's own words. */
+    subjectKind: z.string().max(80),
+    /** One sentence, as the panel renders it. */
+    text: z.string().min(1).max(400),
+    /** Whether it is settled enough to become a proposal at wrap-up. */
+    settled: z.boolean(),
+  })
+  .strict();
+export type WorldChatPoint = z.infer<typeof WorldChatPointSchema>;
+
+export const WorldChatTranscriptMessageSchema = z
+  .object({
+    id: MessageIdSchema,
+    role: z.enum(["user", "studio"]),
+    text: z.string(),
+    /** Persisted receipts, already worded for a person: "read Maren Kest v4". */
+    receipts: z.array(z.string().max(200)),
+    createdAt: IsoDateTimeSchema,
+  })
+  .strict();
+export type WorldChatTranscriptMessage = z.infer<typeof WorldChatTranscriptMessageSchema>;
+
+/**
+ * One conversation as the client holds it.
+ *
+ * Loaded by id rather than carried in the world snapshot: opening a world must not cost every
+ * conversation ever had, and a transcript is not world state.
+ */
+export const WorldChatWorkspaceSchema = z
+  .object({
+    conversationId: ConversationIdSchema,
+    status: WorldChatStatusSchema,
+    messages: z.array(WorldChatTranscriptMessageSchema),
+    /** True when older messages exist before the first one here. */
+    hasMore: z.boolean().default(false),
+    points: z.array(WorldChatPointSchema),
+    /** Set while a turn is in flight, so the composer can say so. */
+    runStatus: WorldChatRunStatusSchema.nullable().default(null),
+    /** What could not be checked, stated rather than hidden (§9.4). */
+    retrievalUnavailable: z.boolean().default(false),
+  })
+  .strict();
+export type WorldChatWorkspace = z.infer<typeof WorldChatWorkspaceSchema>;

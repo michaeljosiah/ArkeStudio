@@ -51,6 +51,8 @@ export const SCREENS: ScreenEntry[] = [
   { id: "canon-entry", samplePath: `${W}/canon/CANON-002` },
   { id: "canon-thread", samplePath: `${W}/canon/CANON-044/thread` },
   { id: "new-canon", samplePath: `${W}/canon/new` },
+  { id: "world-chat", samplePath: `${W}/chat` },
+  { id: "world-chat-conversation", samplePath: `${W}/chat/cv_01J8F3K2QW9VZX4N7M0RTYB6HC` },
   { id: "artifacts", samplePath: `${W}/artifacts` },
   { id: "productions", samplePath: `${W}/productions` },
   { id: "new-production", samplePath: `${W}/productions/new` },

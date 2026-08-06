@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { GenesisIdSchema, JobIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, UlidSchema } from "./ids.js";
+import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, UlidSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
 import { BackgroundNotificationPreferenceSchema, ThemePreferenceSchema } from "./settings.js";
 import { CHARACTER_ROLE_MAX } from "./world.js";
+import { WorldChatContextSchema } from "./world-chat.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then `event` frames, sequence
@@ -145,6 +146,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   /** SPEC-004 R-7: the user has seen the merged result; the proposal becomes acceptable again. */
   z
     .object({ kind: z.literal("proposal-mark-seen"), worldId: UlidSchema, proposalId: z.string().min(1) })
+    .strict(),
+  /**
+   * #70: open one conversation's workspace, or close the open one.
+   *
+   * A null id closes it. The client holds one conversation at a time, so leaving a screen should
+   * release the transcript rather than accumulate every conversation the session has visited.
+   */
+  z
+    .object({
+      kind: z.literal("world-chat-open"),
+      worldId: UlidSchema,
+      conversationId: ConversationIdSchema.nullable(),
+    })
+    .strict(),
+  /** #70: create a conversation, optionally about something in particular. */
+  z
+    .object({
+      kind: z.literal("world-chat-create"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      title: z.string().min(1).max(200),
+      entryContext: WorldChatContextSchema.optional(),
+    })
     .strict(),
   /** SPEC-005: stage a proposal and run an authoring agent inside it. */
   z

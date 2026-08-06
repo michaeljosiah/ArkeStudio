@@ -46,6 +46,7 @@ export class ReadModel {
       },
       worlds: [],
       world: null,
+      worldChat: null,
     };
   }
 
@@ -97,7 +98,13 @@ export class ReadModel {
   }
 
   setWorld(world: WorldBundle | null): void {
-    this.state = { ...this.state, world };
+    // Closing or switching worlds drops the open conversation with it: a transcript belongs to
+    // the world it was about, and leaving one behind would show it under the next world opened.
+    this.state = { ...this.state, world, worldChat: world === null ? null : this.state.worldChat };
+  }
+
+  setWorldChat(worldChat: ClientState["worldChat"]): void {
+    this.state = { ...this.state, worldChat };
   }
 
   setHealth(component: HealthComponent, health: AppHealth[HealthComponent]): void {
