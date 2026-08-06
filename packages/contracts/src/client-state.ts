@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { WorldChatSummarySchema } from "./world-chat.js";
 import { ArtifactSidecarSchema } from "./artifact.js";
 import { ArtDirectionRecordSchema, ResolvedArtDirectionSchema } from "./art-direction.js";
 import { ChangeRecordSchema } from "./change.js";
@@ -149,6 +150,11 @@ export const WorldBundleSchema = z
     artifacts: z.array(ArtifactSidecarSchema),
     productions: z.array(ProductionBundleSchema),
     proposals: z.array(StagedProposalSchema),
+    /**
+     * Conversation rows only — never transcripts. Opening a world must not cost every
+     * conversation ever had, so the full workspace is loaded by id when one is chosen.
+     */
+    conversations: z.array(WorldChatSummarySchema).default([]),
     /** Recent tail of changes.jsonl, newest last. */
     changes: z.array(ChangeRecordSchema),
     /** Files that failed to parse; the valid entities are still usable (SPEC-002 R-2). */

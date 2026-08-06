@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { discoverConversations } from "../world-chat/discover.js";
 import {
   ArtDirectionRecordSchema,
   ArtifactSidecarSchema,
@@ -402,6 +403,8 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     artifacts,
     productions,
     proposals,
+    // Rows only. discoverConversations reads summaries, never transcripts.
+    conversations: (await discoverConversations(dir)).summaries,
     changes,
     problems,
     externalEdits: [],
