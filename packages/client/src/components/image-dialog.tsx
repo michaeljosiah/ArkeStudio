@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import { Portrait } from "./portrait.js";
 import { X } from "./icons.js";
 import { cx } from "./ui.js";
@@ -62,12 +62,22 @@ export function ImageDialog({
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const titleId = useId();
-  const [available, setAvailable] = useState(false);
-  // A different picture has not loaded yet, whatever the last one did. Without this the trigger
-  // stays enabled across a change of subject and briefly opens an empty frame.
-  useEffect(() => {
-    setAvailable(false);
-  }, [worldSlug, path]);
+  /*
+   * Which picture is known to have arrived, rather than a bare "something has".
+   *
+   * A different picture has not loaded yet, whatever the last one did — the trigger must not stay
+   * enabled across a change of subject and open an empty frame. That used to be an effect that
+   * reset the flag, which raced the load it was guarding: for a cached image the load can settle
+   * during the first paint, and the mount pass of the effect then set it straight back to false.
+   * Comparing against the current path decides the same thing during render, with nothing to race.
+   */
+  const subject = `${worldSlug ?? ""}|${path}`;
+  const [loaded, setLoaded] = useState<string | null>(null);
+  const available = loaded === subject;
+  const onAvailabilityChange = useCallback(
+    (ok: boolean) => setLoaded(ok ? subject : null),
+    [subject],
+  );
   const close = () => dialog.current?.close();
 
   return (
@@ -86,7 +96,7 @@ export function ImageDialog({
           path={path}
           label={label}
           radius={triggerRadius}
-          onAvailabilityChange={setAvailable}
+          onAvailabilityChange={onAvailabilityChange}
         />
       </button>
       <dialog

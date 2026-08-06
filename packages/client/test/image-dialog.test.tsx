@@ -68,12 +68,46 @@ describe("image dialog", () => {
   });
 
   it("will not offer to enlarge a picture that has not arrived", () => {
+    // Nothing has loaded in a server render, so no trigger may offer to enlarge anything yet.
+    const html = renderAt(`${W}/cast/maren-kest`);
+    const at = html.indexOf('aria-label="View larger main photo of Maren Kest"');
+    assert.ok(at > 0, "the trigger is rendered");
+    const tag = html.slice(html.lastIndexOf("<button", at), html.indexOf(">", at) + 1);
+    assert.match(tag, /\bdisabled\b/, "the trigger waits for the image");
+  });
+
+  /*
+   * Availability belongs to a picture, not to the component.
+   *
+   * It used to be a bare boolean reset by an effect, which raced the load it was guarding: a
+   * cached image settles during the first paint and the effect's mount pass then cleared it, so
+   * the character detail page's main photo — preloaded by the cast page it is reached from — was
+   * never clickable at all. Keying it to the subject decides the same thing during render, and
+   * still cannot enable for the previous picture, because the key changes with the path.
+   */
+  it("tracks which picture arrived rather than that one did", () => {
     const shared = readFileSync(join(here, "../src/components/image-dialog.tsx"), "utf8");
     assert.ok(shared.includes("disabled={!available}"), "the trigger waits for the image");
-    assert.ok(
-      shared.includes("setAvailable(false)"),
-      "and stops waiting again when the subject changes, or it enables for the wrong picture",
+    assert.match(
+      shared,
+      /const available = loaded === subject/,
+      "availability is compared against the picture on screen now",
     );
+    assert.match(shared, /const subject = `\$\{worldSlug \?\? ""\}\|\$\{path\}`/, "and the subject is that path");
+    assert.ok(
+      !/useEffect/.test(shared),
+      "with no effect left to race the load it guards",
+    );
+  });
+
+  /*
+   * The other half of the same bug lives in Portrait: a load event that has already fired never
+   * fires again, so an image the browser had cached reported nothing at all.
+   */
+  it("reads availability off a cached image as well as listening for it", () => {
+    const portrait = readFileSync(join(here, "../src/components/portrait.tsx"), "utf8");
+    assert.match(portrait, /node\.complete/, "an image that already finished is asked directly");
+    assert.match(portrait, /node\.naturalWidth > 0/, "and a broken one is not mistaken for a loaded one");
   });
 
   it("opens the character's main photo from the detail page", () => {
