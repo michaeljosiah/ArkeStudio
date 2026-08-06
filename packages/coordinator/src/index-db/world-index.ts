@@ -16,8 +16,9 @@ import { assertFts5, loadNodeSqlite, type Database, type DatabaseCtor } from "./
 // v2: canon_fts excludes open threads and retired entries (SPEC-006 R-16/R-19).
 // v3: sheet-link citations extracted for reverse relationship lookup (SPEC-007 R-4).
 // v4: superseded/queue-state tiles excluded from tile-source citations (SPEC-010 R-4, D11).
+// v5: sheet_fts added so World Chat can ask whether an entity already exists (#70 §9.2).
 // The bump is what forces existing indexes to rebuild — derivation changes are schema changes.
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -61,6 +62,10 @@ CREATE INDEX IF NOT EXISTS idx_take_shots ON take_shots(shot_id, production_id);
 CREATE TABLE IF NOT EXISTS take_sheets(take_id TEXT NOT NULL, sheet_id TEXT NOT NULL, sheet_version INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_take_sheets ON take_sheets(sheet_id, sheet_version);
 CREATE VIRTUAL TABLE IF NOT EXISTS canon_fts USING fts5(entry_id UNINDEXED, title, statement);
+-- kind is stored but not indexed: search_sheets takes it as a filter (#70 §9.2), and making it a
+-- searchable term would match every character sheet for the word "character" — noise that would
+-- swamp the name and prose matches the tool exists to find.
+CREATE VIRTUAL TABLE IF NOT EXISTS sheet_fts USING fts5(sheet_id UNINDEXED, kind UNINDEXED, name, descriptor, body);
 `;
 
 /** Stable fingerprint of everything the index derives from — the staleness signal (R-3). */
@@ -156,6 +161,7 @@ export class WorldIndex {
       this.insertWorldEntities(extraction, () => true);
       this.insertProductionRows(extraction, () => true);
       this.insertFts(bundle, () => true);
+      this.insertSheetFts(bundle, () => true);
       this.setMeta("schema_version", String(SCHEMA_VERSION));
       this.setMeta("world_id", bundle.meta.worldId);
       this.setMeta("fingerprint", fingerprint);
@@ -202,13 +208,16 @@ export class WorldIndex {
           "DELETE FROM citations WHERE source_id = ? AND source_kind IN ('character','location','faction','canon')",
         );
         const delFts = this.db.prepare("DELETE FROM canon_fts WHERE entry_id = ?");
+        const delSheetFts = this.db.prepare("DELETE FROM sheet_fts WHERE sheet_id = ?");
         for (const id of worldEntityIds) {
           del.run(id);
           delCit.run(id);
           delFts.run(id);
+          delSheetFts.run(id);
         }
         this.insertWorldEntities(extraction, (id) => worldEntityIds.has(id));
         this.insertFts(bundle, (id) => worldEntityIds.has(id));
+        this.insertSheetFts(bundle, (id) => worldEntityIds.has(id));
         // A cited entity's version may have moved: live-reference citations from unchanged
         // sources must follow (dispatch/tile rows are recorded truth and never move — R-8).
         this.refreshLiveTargetVersions(extraction, worldEntityIds);
@@ -239,7 +248,7 @@ export class WorldIndex {
 
   private wipe(): void {
     this.db.exec(
-      "DELETE FROM entities; DELETE FROM citations; DELETE FROM takes; DELETE FROM take_shots; DELETE FROM take_sheets; DELETE FROM canon_fts;",
+      "DELETE FROM entities; DELETE FROM citations; DELETE FROM takes; DELETE FROM take_shots; DELETE FROM take_sheets; DELETE FROM canon_fts; DELETE FROM sheet_fts;",
     );
   }
 
@@ -305,6 +314,29 @@ export class WorldIndex {
       // "searched all N" stays honest.
       if (entry.status === "open" || entry.retired === true) continue;
       if (include(entry.id)) insFts.run(entry.id, entry.title, entry.body);
+    }
+  }
+
+  /**
+   * The sheet corpus World Chat searches to ask "does this person already exist?" (#70 §9.2).
+   *
+   * Only text that helps match an entity goes in: name, the role or region that distinguishes two
+   * people with similar names, and the authored prose. Operational metadata stays out — voice
+   * assignments, media paths, billing, versions and timestamps are not what anybody means when
+   * they ask whether the harbourmaster is already written down, and indexing them would let a
+   * search for "eleven" hit a sheet because of its version number.
+   */
+  private insertSheetFts(bundle: WorldBundle, include: (sheetId: string) => boolean): void {
+    const insSheetFts = this.db.prepare(
+      "INSERT INTO sheet_fts(sheet_id, kind, name, descriptor, body) VALUES (?,?,?,?,?)",
+    );
+    for (const sheet of bundle.sheets) {
+      // Retired sheets resolve for old citations but must not answer new questions — the same
+      // rule canon_fts follows (SPEC-002 R-26, SPEC-006 R-19).
+      if (sheet.retired === true) continue;
+      if (!include(sheet.id)) continue;
+      const body = sheet.sections.map((s) => `${s.heading}\n${s.body}`).join("\n\n");
+      insSheetFts.run(sheet.id, sheet.type, sheet.name, sheet.role ?? sheet.region ?? "", body);
     }
   }
 

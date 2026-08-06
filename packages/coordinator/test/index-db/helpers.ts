@@ -19,5 +19,6 @@ export function dumpIndex(db: Database): Record<string, unknown[]> {
     take_shots: all("SELECT * FROM take_shots ORDER BY take_id, shot_id"),
     take_sheets: all("SELECT * FROM take_sheets ORDER BY take_id, sheet_id"),
     canon_fts: all("SELECT entry_id, title, statement FROM canon_fts ORDER BY entry_id"),
+    sheet_fts: all("SELECT sheet_id, kind, name, descriptor, body FROM sheet_fts ORDER BY sheet_id"),
   };
 }

@@ -10,6 +10,7 @@ import {
   ripplesForCanonEntry,
   ripplesForSheet,
   searchCanon,
+  searchSheets,
 } from "../../src/index-db/queries.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { fixtureBundle } from "./helpers.js";
@@ -149,5 +150,94 @@ describe("needs-you (R-14) — computed, never stored", () => {
     assert.ok(kinds.includes("failed-job"));
     const review = items.find((i) => i.kind === "review")!;
     assert.equal(review.count, 2, "tk_A1 (frame) and tk_D4 await review");
+  });
+});
+
+describe("sheet search (#70 §9.2)", () => {
+  it("finds a character by name", async () => {
+    const { index } = await openFixtureIndex();
+    const result = searchSheets(index.db, "Maren Kest");
+    assert.equal(result.floorCleared, true);
+    assert.equal(result.candidates[0]!.sheetId, "maren-kest");
+    index.close();
+  });
+
+  it("ranks the sheet named for a term above one that merely mentions it", async () => {
+    const { index } = await openFixtureIndex();
+    // "Bray" is Bray Half-Hitch's name and also appears in Maren's Relationships prose.
+    const result = searchSheets(index.db, "Bray");
+    const ids = result.candidates.map((c) => c.sheetId);
+    assert.ok(ids.includes("bray-half-hitch"));
+    assert.ok(ids.includes("maren-kest"), "the passing mention is still found");
+    assert.equal(
+      ids[0],
+      "bray-half-hitch",
+      "asking about Bray must surface Bray, not the sheet that talks about him",
+    );
+    index.close();
+  });
+
+  it("finds an entity by the role that distinguishes it", async () => {
+    const { index } = await openFixtureIndex();
+    const ids = searchSheets(index.db, "tide-caller").candidates.map((c) => c.sheetId);
+    assert.ok(ids.includes("maren-kest"));
+    index.close();
+  });
+
+  it("finds an entity by its authored prose", async () => {
+    const { index } = await openFixtureIndex();
+    const ids = searchSheets(index.db, "oilskin").candidates.map((c) => c.sheetId);
+    assert.deepEqual(ids, ["maren-kest"]);
+    index.close();
+  });
+
+  it("narrows to one kind and counts only that kind as searched", async () => {
+    const { index } = await openFixtureIndex();
+    const result = searchSheets(index.db, "harbour", { kind: "character" });
+    assert.equal(result.searched, 3, "three character sheets in the fixture");
+    for (const c of result.candidates) assert.equal(c.kind, "character");
+    index.close();
+  });
+
+  it("does not index operational metadata", async () => {
+    const { index } = await openFixtureIndex();
+    // Maren carries an ElevenLabs assignment with voiceId v_8Kq2. Neither is world knowledge,
+    // and a search that hit them would let the Studio cite a voice ID as though it were prose.
+    assert.deepEqual(searchSheets(index.db, "elevenlabs").candidates, []);
+    assert.deepEqual(searchSheets(index.db, "v_8Kq2").candidates, []);
+    index.close();
+  });
+
+  it("leaves retired sheets out of the searchable set", async () => {
+    const dir = await makeTempWorld();
+    const bundle = await fixtureBundle();
+    const index = WorldIndex.open(dir, {
+      ...bundle,
+      sheets: bundle.sheets.map((s) => (s.id === "the-chorister" ? { ...s, retired: true } : s)),
+    });
+
+    const ids = searchSheets(index.db, "chorister").candidates.map((c) => c.sheetId);
+    assert.ok(!ids.includes("the-chorister"), "a retired sheet must not answer a new question");
+    assert.equal(
+      searchSheets(index.db, "chorister", { kind: "character" }).searched,
+      2,
+      "and the searched count says so honestly",
+    );
+    index.close();
+  });
+
+  it("reports an empty result rather than guessing when the query has no usable terms", async () => {
+    const { index } = await openFixtureIndex();
+    const result = searchSheets(index.db, "?! -");
+    assert.equal(result.floorCleared, false);
+    assert.deepEqual(result.candidates, []);
+    assert.equal(result.searched, 6, "and still says how many sheets it would have searched");
+    index.close();
+  });
+
+  it("honours the result limit", async () => {
+    const { index } = await openFixtureIndex();
+    assert.ok(searchSheets(index.db, "the harbour water", { limit: 1 }).candidates.length <= 1);
+    index.close();
   });
 });

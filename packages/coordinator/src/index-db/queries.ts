@@ -72,6 +72,60 @@ export function searchCanon(
   return { searched, floorCleared: false, candidates: rows.slice(0, 3) };
 }
 
+export interface SheetCandidate {
+  sheetId: string;
+  kind: string;
+  name: string;
+  /** Role for a character, region for a location — what tells two similar names apart. */
+  descriptor: string;
+  score: number;
+}
+
+export interface SheetSearchResult {
+  searched: number;
+  floorCleared: boolean;
+  candidates: SheetCandidate[];
+}
+
+/**
+ * Lexical search over accepted sheets (#70 §9.2).
+ *
+ * Same bounded discipline as `searchCanon`: a floor, an honest `searched` count, and the closest
+ * few as receipts when nothing clears it. The question this answers is "is this person already
+ * written down?", so a name match outranks a passing mention in someone else's prose.
+ *
+ * The weights are positional over *every* column, including the UNINDEXED ones, which is why the
+ * two leading zeros are here rather than omitted — a weight list that skips them silently shifts
+ * onto the wrong columns.
+ */
+export function searchSheets(
+  db: Database,
+  query: string,
+  opts: { kind?: string; limit?: number; floor?: number } = {},
+): SheetSearchResult {
+  const limit = opts.limit ?? 8;
+  const floor = opts.floor ?? DEFAULT_RELEVANCE_FLOOR;
+  const searched = (
+    opts.kind === undefined
+      ? (db.prepare("SELECT COUNT(*) AS n FROM sheet_fts").get() as { n: number })
+      : (db.prepare("SELECT COUNT(*) AS n FROM sheet_fts WHERE kind = ?").get(opts.kind) as { n: number })
+  ).n;
+  const match = ftsQuery(query);
+  if (match === null) return { searched, floorCleared: false, candidates: [] };
+
+  const select =
+    "SELECT sheet_id AS sheetId, kind, name, descriptor, -bm25(sheet_fts, 0.0, 0.0, 8.0, 3.0, 1.0) AS score FROM sheet_fts WHERE sheet_fts MATCH ?";
+  const rows = (
+    opts.kind === undefined
+      ? db.prepare(`${select} ORDER BY score DESC LIMIT ?`).all(match, limit)
+      : db.prepare(`${select} AND kind = ? ORDER BY score DESC LIMIT ?`).all(match, opts.kind, limit)
+  ) as SheetCandidate[];
+
+  const above = rows.filter((r) => r.score >= floor);
+  if (above.length > 0) return { searched, floorCleared: true, candidates: above };
+  return { searched, floorCleared: false, candidates: rows.slice(0, 3) };
+}
+
 /** Ranked lexical overlap for a proposed entry — an aid for human judgement, never a block (R-19, D11). */
 export function contradictionCandidates(
   db: Database,
