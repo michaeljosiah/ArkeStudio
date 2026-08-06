@@ -390,6 +390,7 @@ const state: ClientState = {
           reservedCanonIds: [],
           source: "chat:sess_9f2",
           created: "2026-07-30T18:00:00Z",
+          draftRevision: 1,
         },
         ripple: {
           computedAt: "2026-07-30T18:00:01Z",

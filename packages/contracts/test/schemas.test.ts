@@ -395,6 +395,9 @@ describe("proposals and ripples", () => {
     reservedCanonIds: [],
     source: "chat:sess_9f2",
     created: "2026-07-30T18:00:00Z",
+    // Defaulted by the schema (#70 §11.1), so a proposal that omits it parses — but round-trip
+    // identity only holds for one that carries it.
+    draftRevision: 1,
   };
 
   it("round-trips unchanged", () => {

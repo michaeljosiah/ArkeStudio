@@ -9,6 +9,8 @@ import {
   RipplePreviewSchema,
   type Proposal,
   type ProposalConflict,
+  type ProposalOpenChoice,
+  type WorldChatProposalOrigin,
   type RippleItem,
   type RipplePreview,
 } from "@arke-studio/contracts";
@@ -47,6 +49,10 @@ export interface StageInput {
   reserveCanonIds?: number;
   /** Ids already reserved by the caller (store.allocateCanonIds) — recorded, not re-allocated. */
   preReservedCanonIds?: string[];
+  /** #70: which propositions became this proposal. Explains the draft; never governs accept. */
+  worldChatOrigins?: WorldChatProposalOrigin[];
+  /** #70: questions blocking this proposal's acceptance and no other (R-34c). */
+  openChoices?: ProposalOpenChoice[];
 }
 
 const PROPOSALS_DIR = ".proposals";
@@ -136,6 +142,9 @@ export class ProposalManager {
         reservedCanonIds,
         source: input.source,
         created: at,
+        draftRevision: 1,
+        ...(input.worldChatOrigins ? { worldChatOrigins: input.worldChatOrigins } : {}),
+        ...(input.openChoices ? { openChoices: input.openChoices } : {}),
       };
       await this.writeManifest(proposal);
       await this.refreshPreview(proposal);

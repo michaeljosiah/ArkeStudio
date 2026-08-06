@@ -11,7 +11,7 @@ import type { WorldStore } from "../world/store.js";
  * commits through SPEC-004 — nothing special-cases the way into the world (R-3).
  */
 
-function entryContent(input: {
+export function entryContent(input: {
   id: string;
   type: string;
   title: string;
