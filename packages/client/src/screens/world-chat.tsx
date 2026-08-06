@@ -5,7 +5,14 @@ import { Composer } from "../components/composer.js";
 import { EmptyState } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
-import { cancelWorldChat, openWorldChat, sendWorldChat, useStore, wrapUpWorldChat } from "../lib/store.js";
+import {
+  cancelWorldChat,
+  createWorldChat,
+  openWorldChat,
+  sendWorldChat,
+  useStore,
+  wrapUpWorldChat,
+} from "../lib/store.js";
 
 /**
  * World Chat (#70 phase 3): talking about a world, and seeing what was heard.
@@ -52,7 +59,34 @@ export function WorldChatScreen() {
   const { worldId } = useParams();
   useOpenWorldGuard(worldId);
   const { state } = useStore();
+  const navigate = useNavigate();
   const world = state?.world;
+  const [starting, setStarting] = useState(false);
+
+  /**
+   * Start one, and go to it when it opens.
+   *
+   * Creating is the coordinator's job, so the new id does not exist here yet — but the create
+   * handler opens the conversation as it finishes, so the workspace arriving in state is the
+   * signal to navigate. Watching that is exact; diffing the conversation list would also fire
+   * for one created in another window.
+   *
+   * No title is asked for. Nobody knows what a conversation is about before having it, and being
+   * made to name it first is a toll on the thing the feature exists for. It can be renamed once
+   * there is something to call it.
+   */
+  const opened = state?.worldChat?.conversationId ?? null;
+  useEffect(() => {
+    if (!starting || !opened || !worldId) return;
+    setStarting(false);
+    navigate(`/w/${worldId}/chat/${opened}`);
+  }, [starting, opened, worldId, navigate]);
+
+  const start = () => {
+    if (!worldId || starting) return;
+    setStarting(true);
+    createWorldChat(worldId, "New conversation", crypto.randomUUID());
+  };
 
   const rows = useMemo(() => [...(world?.conversations ?? [])].sort(byPendingConsequence), [world?.conversations]);
 
@@ -63,13 +97,27 @@ export function WorldChatScreen() {
       {rows.length === 0 ? (
         <EmptyState
           title="No conversations yet"
-          hint="Talk about this world and the studio keeps track of what it understood. Nothing is written to the world until you turn a conversation into proposals and accept them."
+          hint={
+            harnessReady(state)
+              ? "Talk about this world and the studio keeps track of what it understood. Nothing is written to the world until you turn a conversation into proposals and accept them."
+              : "Talk about this world and the studio keeps track of what it understood. Chat needs OpenCode running before anyone can answer — you can still start one and come back to it."
+          }
+          action={
+            <Button variant="primary" size="lg" onClick={start} disabled={starting}>
+              {starting ? "Starting…" : "Start a conversation"}
+            </Button>
+          }
         />
       ) : (
         <div className="fy-chatlist">
           <div className="fy-chatlist__head">
-            <div className="fy-eyebrow-sm">WORLD CHAT</div>
-            <h1 className="fy-story__h1">What we have been talking about</h1>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="fy-eyebrow-sm">WORLD CHAT</div>
+              <h1 className="fy-story__h1">What we have been talking about</h1>
+            </div>
+            <Button variant="primary" onClick={start} disabled={starting}>
+              {starting ? "Starting…" : "New conversation"}
+            </Button>
           </div>
           <ul className="fy-chatlist__items">
             {rows.map((row) => (
@@ -325,6 +373,11 @@ function groupBySubject(
  * A dead box that says nothing is the failure this avoids: without a harness there is no one to
  * answer, and the honest thing is to say so rather than accept a message that will go nowhere.
  */
+/** Whether there is anything to talk to. Starting a conversation nobody can answer is a dead end. */
+function harnessReady(state: ReturnType<typeof useStore>["state"]): boolean {
+  return state?.app.health.harness.status === "healthy";
+}
+
 function composerReason(state: ReturnType<typeof useStore>["state"]): string | undefined {
   if (!state) return "Still connecting.";
   if (state.app.health.harness.status !== "healthy") {

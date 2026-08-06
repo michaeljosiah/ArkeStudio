@@ -132,6 +132,7 @@ import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { WorldChatService } from "./world-chat/service.js";
 import { wrapUp, WrapUpError } from "./world-chat/wrapup.js";
+import { titleFrom } from "./world-chat/title.js";
 import { recordResolution, sendBack } from "./world-chat/resolution.js";
 import { WorldChatStore, conversationDir } from "./world-chat/store.js";
 import { WorldChatRunner } from "./world-chat/run.js";
@@ -1171,6 +1172,19 @@ export class Coordinator {
         const service = new WorldChatService(store.dir);
         const log = new WorldChatStore(conversationDir(store.dir, msg.conversationId));
         if (!(await log.readMeta())) return;
+
+        /**
+         * A conversation is named by the first thing said in it.
+         *
+         * It is created before anyone knows what it is about, so it starts as "New conversation";
+         * leaving it there would give somebody a list of identical rows. The opening sentence is
+         * what they would have called it anyway.
+         */
+        const before = await log.read();
+        const isFirst = !before.events.some((e) => e.event.type === "turn.started");
+        if (isFirst) {
+          await service.rename(msg.conversationId, titleFrom(msg.text)).catch(() => {});
+        }
 
         const runner = this.worldChatRunner(store);
         // The screen shows the message and the spinner as soon as the turn starts, so the
