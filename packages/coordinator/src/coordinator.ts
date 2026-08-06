@@ -133,6 +133,7 @@ import { WorldQueryServer } from "./harness/world-query.js";
 import { WorldChatService } from "./world-chat/service.js";
 import { wrapUp, WrapUpError } from "./world-chat/wrapup.js";
 import { titleFrom } from "./world-chat/title.js";
+import { describeEntryContext } from "./world-chat/entry-context.js";
 import { recordResolution, sendBack } from "./world-chat/resolution.js";
 import { WorldChatStore, conversationDir } from "./world-chat/store.js";
 import { WorldChatRunner } from "./world-chat/run.js";
@@ -3476,6 +3477,7 @@ export class Coordinator {
           canonRevision: this.opts.provider.openStore?.()?.getBundle().meta.canonRevision ?? 0,
         };
       },
+      describeEntry: (context) => describeEntryContext(context, store.getBundle()),
       evidenceSources: (messages) => ({
         messages,
         bundle: store.getBundle(),

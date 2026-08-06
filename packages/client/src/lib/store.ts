@@ -15,6 +15,7 @@ import {
   type RankedVoice,
   type ReconcileAction,
   type ReferenceAngle,
+  type WorldChatContext,
   ulid,
 } from "@arke-studio/contracts";
 import type { ArkeBridge, AttachTarget } from "../arke-bridge.js";
@@ -1831,8 +1832,13 @@ export function openWorldChat(worldId: string, conversationId: string | null): v
   send({ kind: "world-chat-open", worldId, conversationId });
 }
 
-export function createWorldChat(worldId: string, title: string, requestId: string): void {
-  send({ kind: "world-chat-create", worldId, title, requestId });
+export function createWorldChat(
+  worldId: string,
+  title: string,
+  requestId: string,
+  entryContext?: WorldChatContext,
+): void {
+  send({ kind: "world-chat-create", worldId, title, requestId, ...(entryContext ? { entryContext } : {}) });
 }
 
 /** Say something in a conversation, and take a turn. */
