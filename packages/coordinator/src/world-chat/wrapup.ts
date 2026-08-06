@@ -191,6 +191,26 @@ export async function wrapUp(input: WrapUpInput): Promise<WrapUpResult> {
     if (item.candidate.classification === "canon.thread") threadProposalIds.push(proposal.id);
   }
 
+  /**
+   * Each proposition that carried is now proposed, and says which proposal it became (§6.5).
+   *
+   * Without this a closed conversation would still show its propositions as live, because the
+   * panel renders live ones and nothing else had moved them. It also gives send-back the link it
+   * needs to put them back.
+   */
+  for (const [index, item] of built.entries()) {
+    await log.append(
+      {
+        type: "candidate.status-changed",
+        candidateId: item.candidate.id,
+        revision: item.candidate.revision,
+        status: "proposed",
+        proposalId: proposals[index]!.id,
+      },
+      { at: input.now() },
+    );
+  }
+
   // Step 6: the conversation closes here, once every proposal is durable — and not one step
   // earlier.
   await log.append(

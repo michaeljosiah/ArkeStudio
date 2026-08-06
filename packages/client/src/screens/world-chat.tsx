@@ -5,7 +5,7 @@ import { Composer } from "../components/composer.js";
 import { EmptyState } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
-import { cancelWorldChat, openWorldChat, sendWorldChat, useStore } from "../lib/store.js";
+import { cancelWorldChat, openWorldChat, sendWorldChat, useStore, wrapUpWorldChat } from "../lib/store.js";
 
 /**
  * World Chat (#70 phase 3): talking about a world, and seeing what was heard.
@@ -267,8 +267,14 @@ export function WorldChatConversationScreen() {
             <Button
               variant="primary"
               size="lg"
-              disabled={carried === 0}
-              onClick={() => navigate(`/w/${worldId}/proposals`)}
+              disabled={carried === 0 || loaded === null || running}
+              onClick={() => {
+                if (!worldId || !loaded) return;
+                wrapUpWorldChat(worldId, row.id, loaded.seq);
+                // Straight to the proposals, with no step in between: the earlier design had a
+                // confirmation sheet here that said less than the screen it stood in front of.
+                navigate(`/w/${worldId}/proposals`);
+              }}
             >
               Turn this into proposals
             </Button>

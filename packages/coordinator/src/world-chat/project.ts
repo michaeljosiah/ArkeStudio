@@ -148,6 +148,7 @@ export function projectWorkspace(
       createdAt: m.createdAt,
     })),
     hasMore: loaded.hasMore,
+    seq: loaded.seq,
     points: projectPoints(loaded.candidates, options),
     attachments: loaded.attachments.map((a) => ({
       id: a.id,

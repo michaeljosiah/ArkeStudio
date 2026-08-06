@@ -978,6 +978,13 @@ export const WorldChatWorkspaceSchema = z
     /** True when older messages exist before the first one here. */
     hasMore: z.boolean().default(false),
     points: z.array(WorldChatPointSchema),
+    /**
+     * How many events this conversation has, so wrap-up can be refused when it has moved on.
+     *
+     * Carried to the screen because the refusal has to be checkable at the moment the button is
+     * pressed rather than discovered afterwards.
+     */
+    seq: z.number().int().min(0).default(0),
     /** Set while a turn is in flight, so the composer can say so. */
     runStatus: WorldChatRunStatusSchema.nullable().default(null),
     /**
