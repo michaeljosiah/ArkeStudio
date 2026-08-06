@@ -118,6 +118,7 @@ export function WorldLayout() {
     ["locations", "Locations"],
     ["factions", "Factions"],
     ["canon", "Canon"],
+    ["chat", "World Chat"],
     ["artifacts", "Artifacts"],
     ["productions", "Productions"],
   ] as const;

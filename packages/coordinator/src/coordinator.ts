@@ -18,6 +18,7 @@ import {
   planScene,
   previewLineFor,
   SceneSchema,
+  type ConversationId,
   type Job,
   type LedgerEntry,
   type ModelManifest,
@@ -127,6 +128,8 @@ import { GenesisService } from "./harness/genesis.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
+import { WorldChatService } from "./world-chat/service.js";
+import { projectWorkspace } from "./world-chat/project.js";
 import { refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
 import {
   createSheetFromSentence,
@@ -1113,6 +1116,30 @@ export class Coordinator {
         if (!gate) return;
         await gate.markSeen(msg.proposalId).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "world-chat-open": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        if (msg.conversationId === null) {
+          this.readModel.setWorldChat(null);
+          this.transport.broadcastSnapshot();
+          return;
+        }
+        await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "world-chat-create": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const service = new WorldChatService(store.dir);
+        const row = await service.create({
+          title: msg.title,
+          requestId: msg.requestId,
+          ...(msg.entryContext ? { entryContext: msg.entryContext } : {}),
+        });
+        await this.refreshWorldSnapshot(msg.worldId);
+        await this.openWorldChat(store, row.id);
         return;
       }
       case "draft-with-studio": {
@@ -3253,6 +3280,32 @@ export class Coordinator {
       deduplicated: outcome.outcome === "deduplicated",
     });
     await this.refreshWorldSnapshot(worldId);
+  }
+
+  /**
+   * Load one conversation into the snapshot (#70 §10.3).
+   *
+   * Sheet names and versions are resolved here rather than stored on the proposition, because a
+   * sheet renamed since the conversation happened should read under its current name — the panel
+   * describes what the studio understands about the world as it is now, not as it was.
+   */
+  private async openWorldChat(store: WorldStore, conversationId: ConversationId): Promise<void> {
+    const service = new WorldChatService(store.dir);
+    const loaded = await service.load(conversationId);
+    if (!loaded) {
+      this.readModel.setWorldChat(null);
+      this.transport.broadcastSnapshot();
+      return;
+    }
+    const bundle = store.getBundle();
+    const sheets = new Map(bundle.sheets.map((s) => [s.id, s]));
+    this.readModel.setWorldChat(
+      projectWorkspace(loaded, new Map(), {
+        sheetName: (slug) => sheets.get(slug)?.name ?? null,
+        sheetVersion: (slug) => sheets.get(slug)?.version ?? null,
+      }),
+    );
+    this.transport.broadcastSnapshot();
   }
 
   private async refreshWorldSnapshot(worldId: string): Promise<void> {

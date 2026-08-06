@@ -2724,3 +2724,63 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------------------------------------------------------------------------
+   World Chat (#70, design turn 41)
+
+   The split, the rail and the head are Genesis's — `fy-gate` — because the design binds them:
+   "World Chat is the world's Genesis: the same split, the same composer, the same rail." Only
+   what is genuinely new to this screen is here.
+   --------------------------------------------------------------------------- */
+
+.fy-chatlist { padding: 30px 44px 40px; max-width: 860px; }
+.fy-chatlist__head { margin-bottom: 22px; }
+.fy-chatlist__items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.fy-chatlist__item {
+  display: flex; flex-direction: column; gap: 3px; padding: 13px 16px; border-radius: 8px;
+  text-decoration: none; color: inherit; border: 1px solid transparent; transition: background 0.14s var(--ease-out);
+}
+.fy-chatlist__item:hover { background: var(--muted); }
+.fy-chatlist__title { font: 550 14px/1.35 var(--font-sans); }
+.fy-chatlist__sub { font: 400 11.5px var(--font-mono); color: var(--muted-foreground); }
+/* A conversation owed a decision says so in the one place the eye already is. */
+.fy-chatlist__sub--waiting { color: var(--warning); }
+
+.fy-chat__about { font: 400 12px var(--font-mono); color: var(--muted-foreground); margin-top: 5px; }
+.fy-chat__loading { font: 400 12.5px var(--font-sans); color: var(--muted-foreground); padding: 8px 0; }
+
+.fy-chat__transcript { display: flex; flex-direction: column; gap: 18px; }
+.fy-chat__turn { display: flex; flex-direction: column; gap: 6px; max-width: 82%; }
+.fy-chat__turn--user { align-self: flex-end; align-items: flex-end; }
+.fy-chat__turn--studio { align-self: flex-start; }
+.fy-chat__bubble { padding: 11px 15px; border-radius: 12px; font: 400 13.5px/1.62 var(--font-sans); white-space: pre-wrap; }
+.fy-chat__turn--user .fy-chat__bubble { background: var(--primary); color: var(--primary-foreground); }
+.fy-chat__turn--studio .fy-chat__bubble { background: var(--muted); }
+/* What was actually read, under the reply that used it — persisted receipts, never live activity. */
+.fy-chat__receipts { display: flex; flex-wrap: wrap; gap: 4px 10px; padding-left: 3px; }
+.fy-chat__receipt { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
+.fy-chat__receipt::before { content: "✓ "; color: var(--success, var(--muted-foreground)); }
+
+.fy-chat__composer { flex: none; padding: 12px 36px 20px; border-top: 1px solid var(--border); }
+.fy-chat__composernote { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); margin-top: 8px; text-align: center; }
+
+.fy-panel__head { flex: none; margin-bottom: 18px; }
+.fy-panel__title { font: 650 16px/1.2 var(--font-sans); letter-spacing: -0.01em; }
+.fy-panel__count { font: 400 11px var(--font-mono); color: var(--muted-foreground); margin-top: 4px; }
+.fy-panel__note { font: 400 11.5px/1.55 var(--font-sans); color: var(--muted-foreground); margin-top: 9px; }
+.fy-panel__body { display: flex; flex-direction: column; gap: 20px; }
+.fy-panel__empty { font: 400 12.5px/1.6 var(--font-sans); color: var(--muted-foreground); }
+.fy-panel__group { display: flex; flex-direction: column; gap: 5px; }
+.fy-panel__subject { font: 600 13px var(--font-sans); }
+.fy-panel__kind { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); margin-bottom: 3px; }
+/* No control on a point, by design: a point is corrected by saying so, not by pressing anything. */
+.fy-panel__point { font: 400 12.5px/1.6 var(--font-sans); color: var(--muted-foreground); }
+.fy-panel__caption { font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); text-align: center; }
+
+/* Narrow: one sheet, never a layer on a layer (design 41c). The rail moves below the
+   conversation rather than over it, so nothing is hidden behind anything else. */
+@media (max-width: 1100px) {
+  .fy-chat__wrap .fy-gate { flex-direction: column; }
+  .fy-chat__wrap .fy-gate__main { border-right: none; border-bottom: 1px solid var(--border); }
+  .fy-chat__wrap .fy-gate__side { width: auto; }
+}

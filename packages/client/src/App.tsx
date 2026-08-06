@@ -18,6 +18,7 @@ import {
 import { SettingsAgentsScreen } from "./screens/agents.js";
 import { ArtDirectionProposalScreen, ArtDirectionScreen } from "./screens/art-direction.js";
 import { ProposalsScreen } from "./screens/proposals.js";
+import { WorldChatConversationScreen, WorldChatScreen } from "./screens/world-chat.js";
 import {
   CharacterLooksScreen,
   CharacterReferenceScreen,
@@ -147,6 +148,8 @@ export function App() {
           <Route path="canon/new" element={<NewCanonScreen />} />
           <Route path="canon/:entryId" element={<CanonEntryScreen />} />
           <Route path="canon/:entryId/thread" element={<CanonThreadScreen />} />
+          <Route path="chat" element={<WorldChatScreen />} />
+          <Route path="chat/:conversationId" element={<WorldChatConversationScreen />} />
           <Route path="artifacts" element={<ArtifactsScreen />} />
           <Route path="productions" element={<ProductionsScreen />} />
           <Route path="productions/new" element={<NewProductionScreen />} />

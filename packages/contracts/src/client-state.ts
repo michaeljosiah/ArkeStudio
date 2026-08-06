@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { WorldChatSummarySchema } from "./world-chat.js";
+import { WorldChatSummarySchema, WorldChatWorkspaceSchema } from "./world-chat.js";
 import { ArtifactSidecarSchema } from "./artifact.js";
 import { ArtDirectionRecordSchema, ResolvedArtDirectionSchema } from "./art-direction.js";
 import { ChangeRecordSchema } from "./change.js";
@@ -260,6 +260,14 @@ export const ClientStateSchema = z
     worlds: z.array(WorldSummarySchema),
     /** Null until a world is opened. */
     world: WorldBundleSchema.nullable(),
+    /**
+     * The one conversation currently open, or null.
+     *
+     * Deliberately singular. A creator reads one conversation at a time, and holding every
+     * transcript a world has ever had would make opening the world cost more the longer they use
+     * it — the same reason the world snapshot carries conversation rows and not their contents.
+     */
+    worldChat: WorldChatWorkspaceSchema.nullable().default(null),
   })
   .strict();
 export type ClientState = z.infer<typeof ClientStateSchema>;
