@@ -275,6 +275,21 @@ describe("the dispatch dialog warnings (R-20, D12, §3.2)", () => {
     // sh_12 has a start frame in fixture selections; any others may not.
     for (const w of plan.warnings.shotsWithoutFrame) assert.ok(w.number > 0, "named by number");
     assert.ok(!plan.warnings.shotsWithoutFrame.some((w) => w.shotId === "sh_12"), "sh_12 has its frame");
+
+    // ...but only for a model that would carry one. Telling someone to go and accept a frame,
+    // on a route with no image input, sends them to fix something that changes nothing (#154).
+    const textOnly = planScene(
+      {
+        world: bundle.meta,
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene,
+        selections: production.selections,
+        model: { ...VIDEO_MODEL, accepts: { ...VIDEO_MODEL.accepts, startFrame: false, endFrame: false } },
+      },
+      "per-shot",
+    );
+    assert.deepEqual(textOnly.warnings.shotsWithoutFrame, []);
     // The one-reference cap drops someone, and says who.
     const tight = planScene(
       {

@@ -60,8 +60,21 @@ describe("the shipped manifest (R-9, §3.2)", () => {
   });
 
   it("capability copy matches the manifest for accepting and refusing models (R-10)", () => {
-    assert.equal(modelCapabilityCopy(model("seedance-2.0")), "no refs · frames · 15s");
+    // No frames on the fal video routes: they are text-to-video, and their schemas declare no
+    // image or frame field at all (#154). The copy said "frames" because the row did.
+    assert.equal(modelCapabilityCopy(model("seedance-2.0")), "no refs · 15s");
+    // Higgsfield's row still claims them. Left alone deliberately: its client does not match its
+    // API either (#137), and there is no schema to check the claim against yet.
     assert.equal(modelCapabilityCopy(model("halcyon-1.5")), "no refs · frames · 12s");
+  });
+
+  it("no fal video row claims a frame its route cannot take", () => {
+    // The failure this prevents: the picker printing "frames" beside a model, and the dispatch
+    // dialog warning about shots without one, for a route that has no image input at all.
+    for (const video of SHIPPED_MANIFEST.models.filter((m) => m.capability === "video" && m.provider === "fal")) {
+      assert.equal(video.accepts.startFrame, false, `${video.id} claims no start frame`);
+      assert.equal(video.accepts.endFrame, false, `${video.id} claims no end frame`);
+    }
   });
 
   it("prices every model in the unit it is billed in, never a bare figure", () => {

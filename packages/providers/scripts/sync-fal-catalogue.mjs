@@ -95,13 +95,18 @@ const CURATED = {
       assumedImageOutputTokensPerImage: 6500,
     },
   },
+  // No frames on any of these: they are text-to-video routes, and their schemas declare no image
+  // or frame field at all (#154). The flags were inert — nothing in dispatch ever sent a frame —
+  // but the picker printed "frames" from them and the dialog warned about shots that lacked one.
+  // Carrying a start frame means dispatching to the image-to-video siblings instead, which is
+  // its own piece of work.
   // Durations are the route's own enum, read from its schema: fal video routes take a string
   // from a fixed list, never a number of seconds, and the lists differ per family.
   // https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bytedance/seedance-2.0/text-to-video
   "bytedance/seedance-2.0/text-to-video": {
     id: "seedance-2.0",
     capability: "video",
-    accepts: { referenceImages: 0, startFrame: true, endFrame: true },
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     limits: {
       maxDurationSec: 15,
       durations: { "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" },
@@ -112,7 +117,7 @@ const CURATED = {
   "bytedance/seedance-2.0/fast/text-to-video": {
     id: "seedance-2.0-fast",
     capability: "video",
-    accepts: { referenceImages: 0, startFrame: true, endFrame: true },
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     // The fast route tops out at 720p — its schema offers 480p and 720p only. It was listed at
     // 1080p, a size it cannot make, which the picker offered and the price list charged for.
     limits: {
@@ -125,7 +130,7 @@ const CURATED = {
   "fal-ai/veo3.1": {
     id: "veo-3.1",
     capability: "video",
-    accepts: { referenceImages: 0, startFrame: true, endFrame: true },
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     // Veo counts in "4s"/"6s"/"8s" and takes nothing between them.
     limits: {
       maxDurationSec: 8,
@@ -137,7 +142,7 @@ const CURATED = {
   "fal-ai/veo3.1/fast": {
     id: "veo-3.1-fast",
     capability: "video",
-    accepts: { referenceImages: 0, startFrame: true, endFrame: false },
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     limits: {
       maxDurationSec: 8,
       durations: { "4": "4s", "6": "6s", "8": "8s" },
@@ -148,7 +153,7 @@ const CURATED = {
   "fal-ai/kling-video/v3/pro/text-to-video": {
     id: "kling-3-pro",
     capability: "video",
-    accepts: { referenceImages: 0, startFrame: true, endFrame: true },
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     // No resolutions at all: the kling v3 text-to-video schema has no resolution field, so a
     // size listed here was offered in the picker and sent as a word the route does not know.
     limits: { maxDurationSec: 15, durations: { "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" }, aspects: ["16:9", "9:16", "1:1"] },
@@ -156,7 +161,7 @@ const CURATED = {
   "fal-ai/kling-video/v3/standard/text-to-video": {
     id: "kling-3-standard",
     capability: "video",
-    accepts: { referenceImages: 0, startFrame: true, endFrame: false },
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     limits: { maxDurationSec: 15, durations: { "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" }, aspects: ["16:9", "9:16"] },
   },
 };
