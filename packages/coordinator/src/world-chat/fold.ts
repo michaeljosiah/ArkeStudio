@@ -50,6 +50,7 @@ export function foldConversation(
 
   let title = "Untitled conversation";
   let status: WorldChatStatus = "open";
+  let notCarried: WorldChatLoaded["notCarried"] = [];
   let entryContext: WorldChatLoaded["entryContext"];
   let updatedAt = createdAt;
   let summary: string | undefined;
@@ -175,6 +176,7 @@ export function foldConversation(
       case "wrapup.completed":
         status = "closed";
         for (const p of e.proposalIds) proposalIds.add(p);
+        notCarried = e.notCarried;
         break;
       case "wrapup.failed":
         break;
@@ -250,6 +252,7 @@ export function foldConversation(
     activeRun: [...runs.values()].find((r) => r.status === "interrupted" || r.status === "running") ?? null,
     ...(summary ? { summary } : {}),
     proposalIds: [...proposalIds],
+    notCarried,
     problems,
   };
   return { view, problems, tombstones: [...tombstones.values()], needsInterruptedRunRepair };
@@ -266,5 +269,6 @@ export function summarise(view: WorldChatLoaded): WorldChatSummary {
     pointCount: view.candidates.filter((c) => c.status === "live").length,
     openProposalCount: view.proposalIds.length,
     ...(view.reopened ? { reopened: true } : {}),
+    notCarried: view.notCarried,
   };
 }

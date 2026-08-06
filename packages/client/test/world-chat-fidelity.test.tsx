@@ -43,6 +43,7 @@ function stateWithConversation(): ClientState {
           updatedAt: "2026-08-06T10:00:00Z",
           pointCount: 3,
           openProposalCount: 0,
+          notCarried: [],
         },
       ],
     },

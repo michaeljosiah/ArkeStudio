@@ -30,6 +30,7 @@ import {
   type WorldProblem,
 } from "@arke-studio/contracts";
 import { MarkdownFile, sha256 } from "./text-files.js";
+import { projectReview } from "../gate/review.js";
 import { toExtendedLength, toPortable } from "./paths.js";
 import { readChanges } from "./change-writer.js";
 
@@ -289,10 +290,29 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
             ArtDirectionRecordSchema.parse(JSON.parse(raw)),
           )
         : null;
+    // The review is computed here because this is the one place that has both halves: the
+    // proposed file and the base captured beside it.
+    const readStaged = async (rel: string): Promise<string | null> =>
+      (await exists(join(dir, ".proposals", pid, ...rel.split("/"))))
+        ? await readFile(toExtendedLength(join(dir, ".proposals", pid, ...rel.split("/"))), "utf8").catch(() => null)
+        : null;
+    const proposedByPath = new Map<string, string | null>();
+    const baseByPath = new Map<string, string | null>();
+    for (const t of proposal.targets) {
+      proposedByPath.set(t.path, await readStaged(t.path));
+      baseByPath.set(t.path, await readStaged(`_base/${t.path}`));
+    }
+    const review = projectReview({
+      proposal,
+      proposed: (path) => proposedByPath.get(path) ?? null,
+      base: (path) => baseByPath.get(path) ?? null,
+    });
+
     proposals.push({
       proposal,
       ripple,
       ...(proposedArtDirection ? { artDirection: proposedArtDirection } : {}),
+      ...(review.targets.length > 0 ? { review } : {}),
     });
   }
 

@@ -9,6 +9,7 @@ import {
   resolveProposalConflict,
   useAuthoring,
   useGateNotices,
+  sendProposalBack,
   useWorld,
 } from "../lib/store.js";
 import { ProposalPanel } from "./domain.js";
@@ -52,6 +53,9 @@ export function ConnectedProposalPanel({ staged }: { staged: StagedProposal }) {
         notice={notices[id]}
         onAccept={running ? undefined : (confirmSignature) => acceptProposal(worldId, id, confirmSignature)}
         onDiscard={running ? undefined : () => discardProposal(worldId, id)}
+        {...(!running && (staged.proposal.worldChatOrigins ?? []).length > 0
+          ? { onSendBack: () => sendProposalBack(worldId, id) }
+          : {})}
         onRebase={() => rebaseProposal(worldId, id)}
         onResolve={(path, field, choice) => resolveProposalConflict(worldId, id, path, field, choice)}
         onMarkSeen={() => markProposalSeen(worldId, id)}

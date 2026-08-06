@@ -378,3 +378,24 @@
   font: var(--type-label);
   color: var(--danger);
 }
+
+/* Field-level review (#70 §11.5, design 41b).
+
+   The reviewer's question is "what would this change?", and the answer is the sentence that is
+   there now beside the one that would replace it. A list of file paths cannot answer it. */
+.dom-review { display: flex; flex-direction: column; gap: 14px; }
+.dom-review__target { display: flex; flex-direction: column; gap: 8px; }
+.dom-review__head { display: flex; align-items: baseline; gap: 8px; }
+.dom-review__label { font: 600 13.5px var(--font-sans); }
+.dom-review__kind { font-size: 10.5px; color: var(--muted-foreground); }
+.dom-review__field { display: flex; flex-direction: column; gap: 3px; }
+.dom-review__name {
+  font: 500 10.5px var(--font-sans); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted-foreground); margin-top: 4px;
+}
+.dom-review__was, .dom-review__now { display: flex; gap: 8px; font: 400 12.5px/1.6 var(--font-sans); }
+/* The old value is legible but plainly past: struck through would make it hard to read, and the
+   reviewer still needs to read it to judge the change. */
+.dom-review__was { color: var(--muted-foreground); }
+.dom-review__tag { flex: none; width: 30px; font-size: 10px; color: var(--muted-foreground); padding-top: 2px; }
+.dom-review__removed { color: var(--muted-foreground); font-style: italic; }
