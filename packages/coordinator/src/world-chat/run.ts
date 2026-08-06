@@ -7,6 +7,8 @@ import {
   type ModelCandidateDraft,
   type RunId,
   type TurnId,
+  type ChatAttachmentId,
+  type WorldChatAttachment,
   type WorldChatCheckReceipt,
   type WorldChatMessage,
   type WorldChatLoaded,
@@ -40,11 +42,18 @@ export const DEFAULT_TURN_TIMEOUT_MS = 120_000;
 
 export interface RunDeps {
   adapter: HarnessAdapter | null;
-  /** Mint a lease and produce the scratch directory the session runs in. */
-  prepare: (input: { conversationId: ConversationId; runId: RunId }) => Promise<{
-    cwd: string;
-    leaseToken: string;
-  }>;
+  /**
+   * Mint a lease and produce the scratch directory the session runs in.
+   *
+   * `attachmentIds` are the only attachments this run may read. Scoped per run rather than per
+   * conversation: a document handed over in one turn should not become readable forever, and a
+   * file attached to another conversation must never be reachable at all (§9.1, §13.2).
+   */
+  prepare: (input: {
+    conversationId: ConversationId;
+    runId: RunId;
+    attachmentIds: readonly ChatAttachmentId[];
+  }) => Promise<{ cwd: string; leaseToken: string }>;
   /** Release the lease and clean the scratch, whatever the outcome. */
   release: (input: { conversationId: ConversationId; runId: RunId }) => Promise<void>;
   /** Receipts this run produced, in order. */
@@ -54,7 +63,16 @@ export interface RunDeps {
     draft: ModelCandidateDraft;
     leaseToken: string;
   }) => Promise<{ receipts: readonly WorldChatCheckReceipt[]; canonRevision: number }>;
+  /** The world half of evidence verification; the conversation half comes from the fold. */
   evidenceSources: (messages: readonly WorldChatMessage[]) => EvidenceSources;
+  /**
+   * The text of a readable attachment, or null.
+   *
+   * Needed so an attachment quotation can be verified against the bytes it claims to come from.
+   * Without it every such quotation fails, which is worse than not offering attachments at all:
+   * the Studio would read a document through the tool and then be unable to cite it.
+   */
+  readAttachmentText?: (attachment: WorldChatAttachment) => Promise<string | null>;
   /**
    * The focused slice of accepted world state a run may see (§8.5).
    *
@@ -221,7 +239,12 @@ export class WorldChatRunner {
       return { status: "cancelled" };
     }
 
-    const { cwd, leaseToken } = await this.deps.prepare({ conversationId, runId });
+    const linked = attachmentIds as readonly ChatAttachmentId[];
+    const { cwd, leaseToken } = await this.deps.prepare({
+      conversationId,
+      runId,
+      attachmentIds: linked,
+    });
 
     try {
       const session = await adapter.createSession({ purpose: "world-chat", cwd, agent: "world-builder" });
@@ -230,7 +253,7 @@ export class WorldChatRunner {
       const prompt = renderPrompt(assembled);
       let raw = await askOnce(adapter, session.sessionId, prompt, timeoutMs, controller.signal);
 
-      let outcome = await this.applyResult(store, conversationId, raw, runId, leaseToken, at);
+      let outcome = await this.applyResult(store, conversationId, raw, runId, leaseToken, at, linked);
       if (!outcome.ok) {
         // The one corrective turn (§8.4). It names the faults and asks for the whole result
         // again — never a partial fix, which would come back as a partial result.
@@ -250,7 +273,7 @@ export class WorldChatRunner {
           timeoutMs,
           controller.signal,
         );
-        outcome = await this.applyResult(store, conversationId, raw, runId, leaseToken, at);
+        outcome = await this.applyResult(store, conversationId, raw, runId, leaseToken, at, linked);
       }
 
       if (!outcome.ok) {
@@ -286,6 +309,7 @@ export class WorldChatRunner {
     runId: RunId,
     leaseToken: string,
     at: string,
+    allowed: readonly ChatAttachmentId[],
   ): Promise<{ ok: true; reply: string } | { ok: false; problems: readonly TurnProblem[] }> {
     const { events } = await store.read();
     const meta = await store.readMeta();
@@ -297,6 +321,20 @@ export class WorldChatRunner {
     const messages = folded.messages;
     const checksByDraft = new Map<ModelCandidateDraft, CandidateChecks>();
 
+    // Only the attachments this run was given, and only the ones that can honestly be read as
+    // text. An unreadable file is still attachable and linkable — the chat simply cannot quote
+    // it, and saying so is better than a quotation nobody can check (§13.2).
+    const readable = folded.attachments.filter(
+      (a) => allowed.includes(a.id) && a.readability !== "not-readable",
+    );
+    const attachmentText = new Map<string, string>();
+    if (this.deps.readAttachmentText) {
+      for (const attachment of readable) {
+        const text = await this.deps.readAttachmentText(attachment).catch(() => null);
+        if (text !== null) attachmentText.set(attachment.id, text);
+      }
+    }
+
     const outcome = validateTurnResult({
       raw,
       conversationId,
@@ -305,7 +343,11 @@ export class WorldChatRunner {
       groups: folded.groups,
       tombstones: tombstonesFrom(events),
       receiptsThisRun: this.deps.receiptsFor(runId),
-      evidenceSources: this.deps.evidenceSources(messages),
+      evidenceSources: {
+        ...this.deps.evidenceSources(messages),
+        attachments: readable,
+        attachmentText,
+      },
       checksFor: (draft) => checksByDraft.get(draft) ?? emptyChecks(),
       now: this.deps.now,
     });

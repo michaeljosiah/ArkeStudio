@@ -2874,7 +2874,7 @@ export function CanonThreadScreen() {
   const [dismissed, setDismissed] = useState<readonly string[]>([]);
   const attached = useStore()
     .attached.filter((a) => a.worldId === worldId && !dismissed.includes(a.artifactId))
-    .map(({ artifactId, file, kind }) => ({ artifactId, file, kind }));
+    .map(({ artifactId, file, kind }) => ({ id: artifactId, file, kind }));
   // Refusals are news, not a list: only what the world turned away since this screen opened
   // shows on a chip here. The Artifacts screen keeps the fuller account.
   const notices = useArtifactNotices();
@@ -2891,15 +2891,15 @@ export function CanonThreadScreen() {
   const [offerDone, setOfferDone] = useState<readonly string[]>([]);
   const offerable = [...attached]
     .reverse()
-    .find((a) => a.kind === "document" && !offerDone.includes(a.artifactId));
+    .find((a) => a.kind === "document" && !offerDone.includes(a.id));
   const offer = offerable
     ? {
-        artifactId: offerable.artifactId,
+        id: offerable.id,
         file: offerable.file,
-        state: reading[offerable.artifactId]?.state,
-        found: reading[offerable.artifactId]?.found ?? 0,
-        dropped: reading[offerable.artifactId]?.dropped ?? 0,
-        reason: reading[offerable.artifactId]?.reason,
+        state: reading[offerable.id]?.state,
+        found: reading[offerable.id]?.found ?? 0,
+        dropped: reading[offerable.id]?.dropped ?? 0,
+        reason: reading[offerable.id]?.reason,
       }
     : null;
 
@@ -2983,10 +2983,10 @@ export function CanonThreadScreen() {
                 found={offer.found}
                 dropped={offer.dropped}
                 {...(offer.reason !== undefined ? { reason: offer.reason } : {})}
-                onRead={() => extractArtifact(worldId, offer.artifactId)}
-                onStop={() => stopExtraction(worldId, offer.artifactId)}
+                onRead={() => extractArtifact(worldId, offer.id)}
+                onStop={() => stopExtraction(worldId, offer.id)}
                 onReview={() => navigate(`/w/${worldId}/artifacts`)}
-                onDismiss={() => setOfferDone((prev) => [...prev, offer.artifactId])}
+                onDismiss={() => setOfferDone((prev) => [...prev, offer.id])}
               />
             )}
           </div>

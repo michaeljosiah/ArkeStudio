@@ -591,7 +591,7 @@ export function NewWorldScreen() {
   // Attachments here have no artifact id — there is no world to hold one yet. The sandbox
   // de-collides the names, so the name is the identity until Begin turns them into artifacts.
   const attachTarget = { kind: "genesis-attach", genesisId } as const;
-  const handed = (g?.attachments ?? []).map((a) => ({ artifactId: a.name, file: a.name, kind: a.kind }));
+  const handed = (g?.attachments ?? []).map((a) => ({ id: a.name, file: a.name, kind: a.kind }));
 
   // The coordinator opens the new world and re-snapshots; when it lands, seed the optional
   // first sheets through the same gate everything else uses, then go there.

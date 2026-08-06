@@ -3342,8 +3342,13 @@ export class Coordinator {
 
     const runner = new WorldChatRunner({
       adapter: this.opts.adapter ?? null,
-      prepare: async ({ conversationId, runId }) => {
-        const lease = leases.mint({ worldId: store.worldId, conversationId, runId });
+      prepare: async ({ conversationId, runId, attachmentIds }) => {
+        const lease = leases.mint({
+          worldId: store.worldId,
+          conversationId,
+          runId,
+          allowedAttachmentIds: attachmentIds,
+        });
         const url = this.worldQuery.leasedUrl(lease.token) ?? undefined;
         // Without a configured app root — a dev or test coordinator — the OS temp directory
         // still satisfies what §8.2 actually requires: somewhere outside the world.
@@ -3385,9 +3390,16 @@ export class Coordinator {
       evidenceSources: (messages) => ({
         messages,
         bundle: store.getBundle(),
+        // The runner supplies these from the fold: it knows which attachments this run was
+        // given, and reading every attachment a conversation ever had would be both wasteful
+        // and wrong.
         attachments: [],
         attachmentText: new Map(),
       }),
+      readAttachmentText: async (attachment) => {
+        const read = await attachments.readText(attachment).catch(() => null);
+        return read?.text ?? null;
+      },
       now: () => new Date().toISOString(),
     });
 
