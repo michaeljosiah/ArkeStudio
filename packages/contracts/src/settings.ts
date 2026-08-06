@@ -99,7 +99,10 @@ export const AppSettingsSchema = z
       )
       .default({ theme: "system" }),
     voxa: z
-      .preprocess((value) => (VoxaSettingsSchema.safeParse(value).success ? value : {}), VoxaSettingsSchema)
+      .preprocess(
+        (value) => (VoxaSettingsSchema.safeParse(value).success ? value : {}),
+        VoxaSettingsSchema,
+      )
       .default({ executablePath: null, modelRoot: null, extraArgs: [] }),
     /** Per-agent overrides, keyed by roster name. */
     agents: z.record(z.string().min(1), AgentSettingsSchema).default({}),

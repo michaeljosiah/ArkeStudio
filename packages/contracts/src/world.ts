@@ -113,15 +113,7 @@ export type Sheet = z.infer<typeof SheetSchema>;
 // Canon entries — canon/CANON-nnn.md (§2.3.3)
 // ---------------------------------------------------------------------------
 
-export const CanonEntryTypeSchema = z.enum([
-  "rule",
-  "lore",
-  "location",
-  "faction",
-  "timeline",
-  "tone",
-  "thread",
-]);
+export const CanonEntryTypeSchema = z.enum(["rule", "lore", "location", "faction", "timeline", "tone", "thread"]);
 export type CanonEntryType = z.infer<typeof CanonEntryTypeSchema>;
 
 export const CanonEntryStatusSchema = z.enum(["proposed", "settled", "open"]);

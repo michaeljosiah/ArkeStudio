@@ -174,9 +174,7 @@ export function modelForCapability(
 ): ManifestModel | null {
   const routed = routing?.[capability];
   if (routed !== undefined) {
-    const model = manifest.models.find(
-      (candidate) => candidate.id === routed && candidate.capability === capability,
-    );
+    const model = manifest.models.find((candidate) => candidate.id === routed && candidate.capability === capability);
     if (model) return model;
   }
   return manifest.models.find((candidate) => candidate.capability === capability) ?? null;
@@ -217,15 +215,11 @@ export function estimateMicroUsd(model: ManifestModel, input: EstimateInput): nu
   const milli = (value: number): number => Math.round(value * 1000);
   switch (p.kind) {
     case "perSecond": {
-      const rate =
-        (input.resolution !== undefined ? p.byResolution?.[input.resolution] : undefined) ??
-        p.microUsdPerSecond;
+      const rate = (input.resolution !== undefined ? p.byResolution?.[input.resolution] : undefined) ?? p.microUsdPerSecond;
       return Math.ceil((milli(input.durationSec ?? 0) * rate) / 1000);
     }
     case "perImage": {
-      const rate =
-        (input.resolution !== undefined ? p.byResolution?.[input.resolution] : undefined) ??
-        p.microUsdPerImage;
+      const rate = (input.resolution !== undefined ? p.byResolution?.[input.resolution] : undefined) ?? p.microUsdPerImage;
       return (input.images ?? 1) * rate + (input.referenceImages ?? 0) * (p.microUsdPerReferenceImage ?? 0);
     }
     case "perMegapixel":
@@ -302,13 +296,13 @@ function imageOutput(model: ManifestModel, landscape: boolean, tier?: SizeTier):
         ? landscape
           ? { width: 1536, height: 864 }
           : { width: 1024, height: 1820 }
-        : model.provider === "higgsfield"
-          ? landscape
-            ? { width: 1920, height: 1080 }
-            : { width: 1024, height: 1024 }
-          : landscape
-            ? { width: 1536, height: 1024 }
-            : { width: 1024, height: 1280 };
+      : model.provider === "higgsfield"
+        ? landscape
+          ? { width: 1920, height: 1080 }
+          : { width: 1024, height: 1024 }
+      : landscape
+        ? { width: 1536, height: 1024 }
+        : { width: 1024, height: 1280 };
   const aspect =
     model.provider === "openai"
       ? landscape
