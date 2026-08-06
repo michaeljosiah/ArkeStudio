@@ -404,6 +404,8 @@ const state: ClientState = {
         },
       },
     ],
+    // Rows only, never transcripts — a world snapshot must not carry what was said.
+    conversations: [],
     changes: [
       {
         ts: "2026-07-14T09:00:00Z",
