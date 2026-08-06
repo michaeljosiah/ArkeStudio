@@ -565,6 +565,22 @@ export type WorldChatAttachment = z.infer<typeof WorldChatAttachmentSchema>;
 // ---------------------------------------------------------------------------
 
 /**
+ * A proposition a wrap-up did not carry, and why (R-13, R-27d).
+ *
+ * The summary travels with the reason because the approvals screen names what did not come
+ * across. A bare id would be unusable there, and a bare count would be worse: it would tell
+ * somebody they had lost something without telling them what.
+ */
+export const WorldChatNotCarriedSchema = z
+  .object({
+    candidateId: CandidateIdSchema,
+    summary: z.string().min(1).max(300),
+    reason: z.enum(["tentative", "undecided", "target-missing", "invalid"]),
+  })
+  .strict();
+export type WorldChatNotCarried = z.infer<typeof WorldChatNotCarriedSchema>;
+
+/**
  * `turn.completed` carries the reply, its receipts and every proposition it changed in one
  * record. Splitting them would let a crash persist a reply that refers to propositions which
  * never landed, and the panel would then describe changes that do not exist.
@@ -667,15 +683,7 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
       requestId: z.string().min(1),
       proposalIds: z.array(ProposalIdSchema),
       /** Named, never merely counted — a dropped idea must be visible as a dropped idea. */
-      notCarried: z.array(
-        z
-          .object({
-            candidateId: CandidateIdSchema,
-            summary: z.string().min(1).max(300),
-            reason: z.enum(["tentative", "undecided", "target-missing", "invalid"]),
-          })
-          .strict(),
-      ),
+      notCarried: z.array(WorldChatNotCarriedSchema),
       mediaIdeaIds: z.array(CandidateIdSchema),
     })
     .strict(),
@@ -743,6 +751,8 @@ export const WorldChatSummarySchema = z
     /** Proposals from its wrap-up that are still awaiting a decision. */
     openProposalCount: z.number().int().min(0),
     reopened: z.boolean().optional(),
+    /** What its wrap-up could not carry, so the approvals screen can say so. */
+    notCarried: z.array(WorldChatNotCarriedSchema).default([]),
   })
   .strict();
 export type WorldChatSummary = z.infer<typeof WorldChatSummarySchema>;
@@ -779,6 +789,8 @@ export const WorldChatLoadedSchema = z
     activeRun: WorldChatRunSchema.nullable(),
     summary: z.string().max(8000).optional(),
     proposalIds: z.array(ProposalIdSchema),
+    /** What its wrap-up could not carry; empty until one has happened. */
+    notCarried: z.array(WorldChatNotCarriedSchema).default([]),
     problems: z.array(WorldChatProblemSchema),
   })
   .strict();

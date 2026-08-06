@@ -113,6 +113,36 @@ export const StagedProposalSchema = z
     ripple: RipplePreviewSchema.nullable(),
     /** Present for art-direction proposals so review renders the proposed record, not a guess. */
     artDirection: ArtDirectionRecordSchema.optional(),
+    /**
+     * What this proposal would change, field by field (#70 §11.5).
+     *
+     * Computed from the captured base and the proposed files, so the screen shows what will
+     * happen rather than what a summary claims will happen.
+     */
+    review: z
+      .object({
+        targets: z.array(
+          z
+            .object({
+              path: z.string().min(1),
+              label: z.string(),
+              kind: z.string(),
+              action: z.enum(["create", "amend"]),
+              fields: z.array(
+                z
+                  .object({
+                    field: z.string().min(1),
+                    before: z.string().nullable(),
+                    proposed: z.string().nullable(),
+                  })
+                  .strict(),
+              ),
+            })
+            .strict(),
+        ),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type StagedProposal = z.infer<typeof StagedProposalSchema>;

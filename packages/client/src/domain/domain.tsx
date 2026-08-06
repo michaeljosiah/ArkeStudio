@@ -214,6 +214,7 @@ export function ProposalPanel({
   onRebase,
   onResolve,
   onMarkSeen,
+  onSendBack,
   disabledReason,
 }: {
   staged: StagedProposal;
@@ -223,6 +224,8 @@ export function ProposalPanel({
   onRebase?: () => void;
   onResolve?: (path: string, field: string, choice: "mine" | "theirs") => void;
   onMarkSeen?: () => void;
+  /** Present only for a proposal that came from a conversation there is still somewhere to send it to. */
+  onSendBack?: () => void;
   disabledReason?: string;
 }) {
   const { proposal, ripple } = staged;
@@ -237,16 +240,51 @@ export function ProposalPanel({
         {proposal.pendingReview && <Badge tone="danger">rebased — review</Badge>}
       </div>
       <div className="dom-proposal__summary">{proposal.summary}</div>
-      <div className="dom-proposal__targets">
-        {proposal.targets.map((t) => (
-          <div key={t.path} className="dom-proposal__target mono">
-            {t.path}
-            <span className="dom-proposal__base">
-              {t.baseVersion === null ? "new file" : `against v${t.baseVersion}`}
-            </span>
-          </div>
-        ))}
-      </div>
+      {staged.review ? (
+        <div className="dom-review">
+          {staged.review.targets.map((t) => (
+            <div key={t.path} className="dom-review__target">
+              <div className="dom-review__head">
+                <span className="dom-review__label">{t.label}</span>
+                <span className="dom-review__kind mono">{t.kind}</span>
+              </div>
+              {t.fields.map((f) => (
+                <div key={f.field} className="dom-review__field">
+                  <div className="dom-review__name">{f.field}</div>
+                  {f.before !== null && (
+                    <div className="dom-review__was">
+                      <span className="dom-review__tag mono">was</span>
+                      <span>{f.before}</span>
+                    </div>
+                  )}
+                  {f.proposed !== null ? (
+                    <div className="dom-review__now">
+                      <span className="dom-review__tag mono">now</span>
+                      <span>{f.proposed}</span>
+                    </div>
+                  ) : (
+                    <div className="dom-review__now">
+                      <span className="dom-review__tag mono">now</span>
+                      <span className="dom-review__removed">removed</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="dom-proposal__targets">
+          {proposal.targets.map((t) => (
+            <div key={t.path} className="dom-proposal__target mono">
+              {t.path}
+              <span className="dom-proposal__base">
+                {t.baseVersion === null ? "new file" : `against v${t.baseVersion}`}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       {notice && (
         <div className="dom-proposal__notice" role="alert">
           <strong>{NOTICE_TITLES[notice.reason]}.</strong> {notice.detail}
@@ -308,6 +346,11 @@ export function ProposalPanel({
             title={disabledReason}
           >
             Accept
+          </Button>
+        )}
+        {onSendBack && (
+          <Button variant="ghost" onClick={onSendBack} title="Reopens the conversation this came from">
+            Send back to the conversation
           </Button>
         )}
         <Button variant="ghost" onClick={onDiscard} disabled={!onDiscard} title={disabledReason}>
