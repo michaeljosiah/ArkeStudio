@@ -37,6 +37,20 @@ export interface CanonSearchResult {
  */
 export const DEFAULT_RELEVANCE_FLOOR = 0.3;
 
+/**
+ * Column weights for `canon_fts(entry_id UNINDEXED, title, statement)`.
+ *
+ * The leading zero is load-bearing. FTS5 counts bm25 weights positionally across *every* column,
+ * including UNINDEXED ones, so a two-weight list puts its first weight on `entry_id` — which
+ * never matches, so the weight is simply discarded — and leaves both real columns at 1.0. That
+ * is what this call did until now: the intended title boost was silently absent, and a title
+ * match ranked no higher than a passing mention in somebody else's statement.
+ *
+ * Nothing about the call site shows that. It is written here so the next person to add a column
+ * or tune a weight has the trap in front of them.
+ */
+const CANON_WEIGHTS = "0.0, 5.0, 1.0";
+
 /** Escape user text into an FTS5 OR-query over its word tokens. */
 export function ftsQuery(input: string): string | null {
   const tokens = input
@@ -61,7 +75,7 @@ export function searchCanon(
 
   const rows = db
     .prepare(
-      "SELECT entry_id AS entryId, title, statement, -bm25(canon_fts, 5.0, 1.0) AS score FROM canon_fts WHERE canon_fts MATCH ? ORDER BY score DESC LIMIT ?",
+      `SELECT entry_id AS entryId, title, statement, -bm25(canon_fts, ${CANON_WEIGHTS}) AS score FROM canon_fts WHERE canon_fts MATCH ? ORDER BY score DESC LIMIT ?`,
     )
     .all(match, limit) as CanonCandidate[];
 
@@ -136,7 +150,7 @@ export function contradictionCandidates(
   if (match === null) return [];
   const rows = db
     .prepare(
-      "SELECT entry_id AS entryId, title, statement, -bm25(canon_fts, 5.0, 1.0) AS score FROM canon_fts WHERE canon_fts MATCH ? ORDER BY score DESC LIMIT ?",
+      `SELECT entry_id AS entryId, title, statement, -bm25(canon_fts, ${CANON_WEIGHTS}) AS score FROM canon_fts WHERE canon_fts MATCH ? ORDER BY score DESC LIMIT ?`,
     )
     .all(match, limit + 1) as CanonCandidate[];
   return rows.filter((r) => r.entryId !== proposed.excludeEntryId).slice(0, limit);
