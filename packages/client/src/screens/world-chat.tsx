@@ -167,8 +167,21 @@ export function WorldChatConversationScreen() {
     return () => openWorldChat(worldId, null);
   }, [worldId, conversationId]);
 
+  // The workspace — transcript, receipts and points — is loaded by id rather than carried in the
+  // world snapshot, because opening a world must not cost every conversation ever had.
+  const workspace = state?.worldChat ?? null;
+  const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
+
   if (!world) return null;
-  if (!row) {
+  /**
+   * Missing means missing from both.
+   *
+   * The row and the workspace arrive by different routes, so one can lag the other by a frame —
+   * and the workspace is the better authority: it was loaded by this id and came back. Declaring
+   * the conversation gone because the *summary list* had not caught up is how somebody who has
+   * just created one is told it does not exist.
+   */
+  if (!row && !loaded) {
     return (
       <div data-screen="world-chat-conversation">
         <EmptyState
@@ -178,10 +191,6 @@ export function WorldChatConversationScreen() {
       </div>
     );
   }
-
-  // The workspace — transcript, receipts and points — is loaded by id rather than carried in the
-  // world snapshot, because opening a world must not cost every conversation ever had.
-  const loaded = state?.worldChat?.conversationId === row.id ? state.worldChat : null;
   const points = loaded?.points ?? [];
   const groups = groupBySubject(points);
   const openThreads = points.filter((p) => p.kind === "question");
@@ -205,8 +214,8 @@ export function WorldChatConversationScreen() {
           <div className="fy-gate__head">
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-eyebrow-sm">WORLD CHAT</div>
-              <h1 className="fy-story__h1">{row.title}</h1>
-              {row.entryContext && row.entryContext.kind !== "world" && (
+              <h1 className="fy-story__h1">{row?.title ?? "New conversation"}</h1>
+              {row?.entryContext && row.entryContext.kind !== "world" && (
                 <div className="fy-chat__about">{aboutLabel(row.entryContext)}</div>
               )}
             </div>
@@ -242,7 +251,7 @@ export function WorldChatConversationScreen() {
               onSubmit={() => {
                 const text = draft.trim();
                 if (!text || !worldId || running) return;
-                sendWorldChat(worldId, row.id, text, chips.map((c) => c.id));
+                sendWorldChat(worldId, conversationId!, text, chips.map((c) => c.id));
                 setDraft("");
               }}
               placeholder="Keep going…"
@@ -255,7 +264,7 @@ export function WorldChatConversationScreen() {
               <button
                 type="button"
                 className="fy-chat__cancel"
-                onClick={() => worldId && cancelWorldChat(worldId, row.id)}
+                onClick={() => worldId && conversationId && cancelWorldChat(worldId, conversationId)}
               >
                 Stop
               </button>
@@ -318,7 +327,7 @@ export function WorldChatConversationScreen() {
               disabled={carried === 0 || loaded === null || running}
               onClick={() => {
                 if (!worldId || !loaded) return;
-                wrapUpWorldChat(worldId, row.id, loaded.seq);
+                wrapUpWorldChat(worldId, conversationId!, loaded.seq);
                 // Straight to the proposals, with no step in between: the earlier design had a
                 // confirmation sheet here that said less than the screen it stood in front of.
                 navigate(`/w/${worldId}/proposals`);

@@ -103,6 +103,18 @@ export class ReadModel {
     this.state = { ...this.state, world, worldChat: world === null ? null : this.state.worldChat };
   }
 
+  /**
+   * Conversation rows, without re-reading the world.
+   *
+   * `.conversations` is excluded from the watcher on purpose — a transcript is not world state and
+   * must not trigger a rescan — which means nothing else notices when a conversation is created,
+   * renamed, closed or reopened. This is how those changes reach the screen.
+   */
+  setConversations(conversations: NonNullable<ClientState["world"]>["conversations"]): void {
+    if (!this.state.world) return;
+    this.state = { ...this.state, world: { ...this.state.world, conversations } };
+  }
+
   setWorldChat(worldChat: ClientState["worldChat"]): void {
     this.state = { ...this.state, worldChat };
   }
