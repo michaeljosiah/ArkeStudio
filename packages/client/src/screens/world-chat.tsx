@@ -5,7 +5,7 @@ import { Composer } from "../components/composer.js";
 import { EmptyState } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
-import { openWorldChat, useStore } from "../lib/store.js";
+import { cancelWorldChat, openWorldChat, sendWorldChat, useStore } from "../lib/store.js";
 
 /**
  * World Chat (#70 phase 3): talking about a world, and seeing what was heard.
@@ -138,6 +138,7 @@ export function WorldChatConversationScreen() {
   const groups = groupBySubject(points);
   const openThreads = points.filter((p) => p.kind === "question");
   const carried = points.filter((p) => p.kind === "point" && p.settled).length;
+  const running = loaded?.runStatus === "running";
 
   return (
     <div data-screen="world-chat-conversation" className="fy-chat__wrap">
@@ -180,10 +181,26 @@ export function WorldChatConversationScreen() {
             <Composer
               value={draft}
               onChange={setDraft}
-              onSubmit={() => setDraft("")}
+              onSubmit={() => {
+                const text = draft.trim();
+                if (!text || !worldId || running) return;
+                sendWorldChat(worldId, row.id, text);
+                setDraft("");
+              }}
               placeholder="Keep going…"
+              busy={running}
+              busyLabel="Thinking…"
               disabledReason={composerReason(state)}
             />
+            {running && (
+              <button
+                type="button"
+                className="fy-chat__cancel"
+                onClick={() => worldId && cancelWorldChat(worldId, row.id)}
+              >
+                Stop
+              </button>
+            )}
             <div className="fy-chat__composernote">
               world author · talking changes nothing until you wrap up
             </div>

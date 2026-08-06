@@ -1834,3 +1834,25 @@ export function openWorldChat(worldId: string, conversationId: string | null): v
 export function createWorldChat(worldId: string, title: string, requestId: string): void {
   send({ kind: "world-chat-create", worldId, title, requestId });
 }
+
+/** Say something in a conversation, and take a turn. */
+export function sendWorldChat(
+  worldId: string,
+  conversationId: string,
+  text: string,
+  attachmentIds: string[] = [],
+): void {
+  send({
+    kind: "world-chat-send",
+    worldId,
+    requestId: crypto.randomUUID(),
+    conversationId,
+    text,
+    attachmentIds,
+  });
+}
+
+/** Stop the turn in flight. */
+export function cancelWorldChat(worldId: string, conversationId: string): void {
+  send({ kind: "world-chat-cancel", worldId, conversationId });
+}

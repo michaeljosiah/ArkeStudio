@@ -1,0 +1,287 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import {
+  newId,
+  type ConversationId,
+  type HarnessAdapter,
+  type RunId,
+  type WorldBundle,
+  type WorldChatMessage,
+} from "@arke-studio/contracts";
+import { WorldChatRunner } from "../../src/world-chat/run.js";
+import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
+import { foldConversation } from "../../src/world-chat/fold.js";
+import { scanWorld } from "../../src/world/scan.js";
+import { FIXTURE_WORLD } from "../world/helpers.js";
+import { tempDir } from "../tmp.js";
+
+/**
+ * The turn (#70 §8).
+ *
+ * The tests that carry weight are about ordering, not happy paths: the user's message survives a
+ * turn that fails, and nothing the model produced survives a turn that fails. Those two together
+ * are what make the transcript trustworthy — you can always see what you said, and you never see
+ * a reply describing work that did not happen.
+ */
+
+const AT = "2026-08-06T10:00:00Z";
+const NOW = () => AT;
+
+/**
+ * A harness that says whatever the test tells it to, one answer per turn.
+ *
+ * Answers may be functions so a test can compose one *after* the turn has started — evidence has
+ * to quote the real message id, which does not exist until `send` has written it.
+ */
+function fakeAdapter(
+  answers: Array<string | (() => string | Promise<string>)>,
+  options: { hang?: boolean } = {},
+): HarnessAdapter {
+  let turn = 0;
+  return {
+    id: "fake",
+    capabilities: () => new Set(["events"] as never),
+    readiness: () => ({ ready: true }),
+    createSession: async () => ({ sessionId: "s1" }) as never,
+    sendMessage: async () => ({ ok: true }) as never,
+    dispatchAsync: async () => ({ ok: true }) as never,
+    streamEvents: (signal?: AbortSignal) =>
+      (async function* () {
+        if (options.hang) {
+          await new Promise((resolve) => {
+            signal?.addEventListener("abort", resolve, { once: true });
+          });
+          return;
+        }
+        const answer = answers[Math.min(turn++, answers.length - 1)]!;
+        const text = typeof answer === "function" ? await answer() : answer;
+        yield { type: "message.completed", sessionId: "s1", text } as never;
+      })(),
+  } as unknown as HarnessAdapter;
+}
+
+async function setup(adapter: HarnessAdapter, options: { timeoutMs?: number } = {}) {
+  const worldPath = await tempDir("arke-run-");
+  const conversationId = newId("cv") as ConversationId;
+  const store = new WorldChatStore(conversationDir(worldPath, conversationId));
+  await store.create(conversationId, AT);
+  await store.append(
+    { type: "conversation.created", title: "a talk", entryContext: { kind: "world" } },
+    { at: AT },
+  );
+  const bundle: WorldBundle = (await scanWorld(FIXTURE_WORLD)).bundle;
+
+  const released: RunId[] = [];
+  const runner = new WorldChatRunner({
+    adapter,
+    prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
+    release: async ({ runId }) => void released.push(runId),
+    receiptsFor: () => [],
+    runCheckPlan: async () => ({ receipts: [], canonRevision: bundle.meta.canonRevision }),
+    evidenceSources: (messages: readonly WorldChatMessage[]) => ({
+      messages,
+      bundle,
+      attachments: [],
+      attachmentText: new Map(),
+    }),
+    context: (userText) => ({ candidates: [], messages: [], tombstones: [], currentUserMessage: userText }),
+    now: NOW,
+    ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+  });
+
+  const view = async () => {
+    const meta = await store.readMeta();
+    return foldConversation(meta!.id, meta!.createdAt, (await store.read()).events).view;
+  };
+
+  return { runner, store, conversationId, view, released };
+}
+
+/** A well-formed answer whose evidence quotes the message it was actually sent with. */
+function goodAnswer(said: string, quote: string, messageId: string): string {
+  const start = said.indexOf(quote);
+  return JSON.stringify({
+    reply: "Noted.",
+    candidateOperations: [
+      {
+        op: "create",
+        temporaryId: "t1",
+        candidate: {
+          classification: "canon.create",
+          title: "A rule about the bells",
+          rationale: "They said so.",
+          settledness: "settled",
+          checkReceiptIds: [],
+          evidence: [
+            { kind: "message", messageId, quote, start, end: start + quote.length, purpose: "intent" },
+          ],
+          draft: { type: "lore", title: "The bells", statement: "The bells pass sideways.", links: [] },
+        },
+      },
+    ],
+    groupOperations: [],
+  });
+}
+
+describe("taking a turn", () => {
+  it("keeps the user's message even when the turn fails", async () => {
+    const { runner, store, conversationId, view } = await setup(fakeAdapter(["not json at all", "still not json"]));
+    const outcome = await runner.send(store, conversationId, "Her aunt taught her the bells.");
+
+    assert.equal(outcome.status, "failed");
+    const folded = await view();
+    assert.equal(folded.messages.length, 1, "what they typed is still there");
+    assert.equal(folded.messages[0]!.text, "Her aunt taught her the bells.");
+    assert.equal(folded.messages[0]!.role, "user");
+  });
+
+  it("writes nothing the model produced when the turn fails", async () => {
+    const { runner, store, conversationId, view } = await setup(fakeAdapter(["garbage", "garbage"]));
+    await runner.send(store, conversationId, "anything");
+
+    const folded = await view();
+    assert.deepEqual(folded.candidates, [], "no half-applied propositions");
+    assert.ok(
+      !folded.messages.some((m) => m.role === "studio"),
+      "and no reply describing work that did not happen",
+    );
+  });
+
+  it("takes exactly one corrective turn, not a loop", async () => {
+    let asked = 0;
+    const counting = fakeAdapter(["bad", "bad"]);
+    const original = counting.dispatchAsync.bind(counting);
+    counting.dispatchAsync = async (input) => {
+      asked += 1;
+      return original(input);
+    };
+
+    const { runner, store, conversationId } = await setup(counting);
+    await runner.send(store, conversationId, "anything");
+    assert.equal(asked, 2, "the first attempt and one correction — never a third");
+  });
+
+  it("records the failure on the run rather than losing it", async () => {
+    const { runner, store, conversationId } = await setup(fakeAdapter(["bad", "bad"]));
+    await runner.send(store, conversationId, "anything");
+
+    const { events } = await store.read();
+    const finished = events.find((e) => e.event.type === "run.finished");
+    assert.ok(finished, "the run says how it ended");
+    const run = (finished!.event as { run: { status: string; safeDetail?: string } }).run;
+    assert.equal(run.status, "failed");
+    assert.ok(run.safeDetail && run.safeDetail.length > 0);
+  });
+
+  it("says the studio is unavailable rather than starting a run that cannot happen", async () => {
+    const down = { ...fakeAdapter([]), readiness: () => ({ ready: false, reason: "OpenCode is not running" }) };
+    const { runner, store, conversationId, view } = await setup(down as HarnessAdapter);
+    const outcome = await runner.send(store, conversationId, "hello");
+
+    assert.equal(outcome.status, "unavailable");
+    assert.deepEqual((await view()).messages, [], "and no turn was started at all");
+  });
+
+  it("releases the lease and scratch whatever the outcome", async () => {
+    const { runner, store, conversationId, released } = await setup(fakeAdapter(["bad", "bad"]));
+    await runner.send(store, conversationId, "anything");
+    assert.equal(released.length, 1, "a failed turn still gives back its lease");
+  });
+});
+
+describe("a turn that lands", () => {
+  it("records the reply and the proposition it came with", async () => {
+    const said = "Her aunt taught her the bells, not her mother.";
+    const worldPath = await tempDir("arke-run-ok-");
+    const conversationId = newId("cv") as ConversationId;
+    const store = new WorldChatStore(conversationDir(worldPath, conversationId));
+    await store.create(conversationId, AT);
+    await store.append(
+      { type: "conversation.created", title: "a talk", entryContext: { kind: "world" } },
+      { at: AT },
+    );
+    const bundle: WorldBundle = (await scanWorld(FIXTURE_WORLD)).bundle;
+
+    // Composed at dispatch time, once the user's message is in the log and has an id.
+    const answer = async () => {
+      const meta = await store.readMeta();
+      const view = foldConversation(meta!.id, meta!.createdAt, (await store.read()).events).view;
+      return goodAnswer(said, "Her aunt taught her the bells", view.messages[0]!.id);
+    };
+
+    const runner = new WorldChatRunner({
+      adapter: fakeAdapter([answer]),
+      prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
+      release: async () => {},
+      receiptsFor: () => [],
+      runCheckPlan: async () => ({ receipts: [], canonRevision: bundle.meta.canonRevision }),
+      evidenceSources: (messages: readonly WorldChatMessage[]) => ({
+        messages,
+        bundle,
+        attachments: [],
+        attachmentText: new Map(),
+      }),
+      context: (userText) => ({ candidates: [], messages: [], tombstones: [], currentUserMessage: userText }),
+      now: NOW,
+    });
+
+    const outcome = await runner.send(store, conversationId, said);
+    assert.equal(outcome.status, "completed", "a well-formed answer lands");
+
+    const meta = await store.readMeta();
+    const view = foldConversation(meta!.id, meta!.createdAt, (await store.read()).events).view;
+    assert.equal(view.messages.length, 2, "what they said and what the studio said");
+    assert.equal(view.messages[1]!.role, "studio");
+    assert.equal(view.candidates.length, 1, "and the proposition it understood");
+    assert.equal(view.candidates[0]!.status, "live");
+    assert.equal(view.candidates[0]!.title, "A rule about the bells");
+    assert.equal(view.activeRun, null, "with no run left running");
+  });
+});
+
+describe("a turn that never answers", () => {
+  it("times out rather than waiting forever, and says so", async () => {
+    const { runner, store, conversationId } = await setup(fakeAdapter([], { hang: true }), { timeoutMs: 60 });
+    const outcome = await runner.send(store, conversationId, "hello");
+    assert.equal(outcome.status, "timeout");
+
+    const { events } = await store.read();
+    const run = (events.find((e) => e.event.type === "run.finished")!.event as { run: { status: string } }).run;
+    assert.equal(run.status, "timeout");
+  });
+
+  it("carries no world or conversation content in what it records", async () => {
+    const secret = "the drowned god sings beneath the harbour";
+    const { runner, store, conversationId } = await setup(fakeAdapter([], { hang: true }), { timeoutMs: 60 });
+    await runner.send(store, conversationId, secret);
+
+    const { events } = await store.read();
+    const run = (events.find((e) => e.event.type === "run.finished")!.event as {
+      run: { safeDetail?: string };
+    }).run;
+    assert.ok(
+      !(run.safeDetail ?? "").includes(secret),
+      "operator-safe detail never carries what was said",
+    );
+  });
+
+  it("stops immediately when cancelled, without waiting for the model", async () => {
+    const { runner, store, conversationId } = await setup(fakeAdapter([], { hang: true }), { timeoutMs: 30_000 });
+    const inFlight = runner.send(store, conversationId, "hello");
+    // The run registers itself synchronously before awaiting the model, so this reaches it.
+    await new Promise((resolve) => setImmediate(resolve));
+    const stopped = runner.cancel(conversationId);
+    const outcome = await inFlight;
+
+    assert.equal(stopped, true);
+    assert.equal(outcome.status, "cancelled");
+    const { events } = await store.read();
+    const run = (events.find((e) => e.event.type === "run.finished")!.event as { run: { status: string } }).run;
+    assert.equal(run.status, "interrupted");
+  });
+
+  it("reports nothing to cancel when no turn is running", async () => {
+    const { runner, conversationId } = await setup(fakeAdapter(["x"]));
+    assert.equal(runner.cancel(conversationId), false);
+  });
+});

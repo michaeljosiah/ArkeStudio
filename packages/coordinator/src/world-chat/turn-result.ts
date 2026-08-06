@@ -288,7 +288,12 @@ function fresh(
   input: ValidateInput,
   at: string,
 ): WorldChangeCandidate {
-  const { title, rationale, settledness, evidence, ...payload } = draft;
+  // `checkReceiptIds` is model-facing only. It is what the model says it read, and it is dropped
+  // here because the stored candidate carries `checks` instead — the coordinator's own findings.
+  // Keeping both would put the model's account of its searching next to the real one, where the
+  // difference between them is exactly what must not be blurred (§8.3.1).
+  const { title, rationale, settledness, evidence, checkReceiptIds, ...payload } = draft;
+  void checkReceiptIds;
   return {
     ...(payload as object),
     id,

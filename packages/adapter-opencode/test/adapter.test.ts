@@ -534,3 +534,52 @@ describe("the stream channel is never downgraded by a bad moment (R-2)", () => {
     assert.equal(stub.streamPaths[0], "/api/event", "404 means absent — the fallback is correct there");
   });
 });
+
+describe("the world-builder writes nothing (#70 §8.1)", () => {
+  function worldBuilder() {
+    const config = buildSessionConfig({});
+    const agents = config["agent"] as Record<
+      string,
+      { tools: Record<string, boolean>; permission: Record<string, string> }
+    >;
+    return agents["world-builder"]!;
+  }
+
+  it("is on the roster", () => {
+    assert.ok(worldBuilder(), "World Chat has an agent to run");
+  });
+
+  it("has no edit, write or patch tool at all", () => {
+    const agent = worldBuilder();
+    // Not merely unused: an agent that could edit would have a path into the world that goes
+    // around the accept gate, which is the one thing this feature promises cannot happen.
+    for (const tool of ["edit", "write", "patch"]) {
+      assert.equal(agent.tools[tool], false, `${tool} is switched off`);
+      assert.equal(agent.permission[tool], "deny", `${tool} is denied`);
+    }
+  });
+
+  it("has no shell or network tool", () => {
+    const agent = worldBuilder();
+    for (const tool of ["bash", "webfetch", "websearch"]) {
+      assert.equal(agent.tools[tool], false);
+      assert.equal(agent.permission[tool], "deny");
+    }
+  });
+
+  it("can still read the world through the leased tools", () => {
+    const agent = worldBuilder();
+    assert.equal(agent.permission["read"], "allow");
+    assert.equal(agent.permission["arke-world*"], "allow");
+  });
+
+  it("never falls back to a wildcard, which was observed to override denies", () => {
+    assert.equal("*" in worldBuilder().permission, false);
+  });
+
+  it("leaves the authoring agents able to edit inside their proposal", () => {
+    const config = buildSessionConfig({});
+    const agents = config["agent"] as Record<string, { permission: Record<string, string> }>;
+    assert.equal(agents["sheet-editor"]!.permission["edit"], "allow", "authoring is unchanged");
+  });
+});
