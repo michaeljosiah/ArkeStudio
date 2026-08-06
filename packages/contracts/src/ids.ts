@@ -89,6 +89,9 @@ export const CandidateGroupIdSchema = prefixedIdSchema("grp");
 export const ChatAttachmentIdSchema = prefixedIdSchema("wca");
 export const ChatEventIdSchema = prefixedIdSchema("wce");
 
+/** The World Chat ids all carry their type; this one predates them and had only a schema. */
+export type ProposalId = z.infer<typeof ProposalIdSchema>;
+
 export type ConversationId = z.infer<typeof ConversationIdSchema>;
 export type TurnId = z.infer<typeof TurnIdSchema>;
 export type MessageId = z.infer<typeof MessageIdSchema>;

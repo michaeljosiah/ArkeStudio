@@ -176,6 +176,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       attachmentIds: z.array(z.string().min(1)).max(20).default([]),
     })
     .strict(),
+  /**
+   * #70 §10.1.1: turn the conversation into proposals and close it.
+   *
+   * One command. A stale `expectedConversationSeq` is refused rather than silently re-planned,
+   * because what gets written must be what the person was last shown.
+   */
+  z
+    .object({
+      kind: z.literal("world-chat-wrap-up"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      conversationId: ConversationIdSchema,
+      expectedConversationSeq: z.number().int().min(0),
+    })
+    .strict(),
+  /** #70 R-34a: return a proposal to the conversation it came from, and reopen it. */
+  z
+    .object({
+      kind: z.literal("proposal-send-back"),
+      worldId: UlidSchema,
+      proposalId: z.string().min(1),
+    })
+    .strict(),
   /** #70: stop the turn in flight. Local and immediate. */
   z
     .object({

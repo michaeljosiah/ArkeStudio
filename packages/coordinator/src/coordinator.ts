@@ -131,6 +131,8 @@ import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { WorldChatService } from "./world-chat/service.js";
+import { wrapUp, WrapUpError } from "./world-chat/wrapup.js";
+import { recordResolution, sendBack } from "./world-chat/resolution.js";
 import { WorldChatStore, conversationDir } from "./world-chat/store.js";
 import { WorldChatRunner } from "./world-chat/run.js";
 import { QueryLeaseRegistry } from "./world-chat/lease.js";
@@ -1032,6 +1034,9 @@ export class Coordinator {
       case "proposal-accept": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
+        // Read before accepting: acceptance rewrites the manifest, and the origin is needed to
+        // tell the conversation what became of its propositions.
+        const acceptedFrom = await gate.readManifest(msg.proposalId).catch(() => null);
         try {
           const outcome = await gate.accept(
             msg.proposalId,
@@ -1040,6 +1045,10 @@ export class Coordinator {
           const at = new Date().toISOString();
           if (outcome.status === "accepted") {
             this.authoring?.release(msg.proposalId);
+            const store = this.opts.provider.openStore?.();
+            if (store && acceptedFrom) {
+              await recordResolution(store, acceptedFrom, "accepted", () => at);
+            }
             this.emit({
               at,
               type: "proposal.resolved",
@@ -1091,8 +1100,13 @@ export class Coordinator {
       case "proposal-discard": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
+        const discardedFrom = await gate.readManifest(msg.proposalId).catch(() => null);
         try {
           await gate.discard(msg.proposalId);
+          const store = this.opts.provider.openStore?.();
+          if (store && discardedFrom) {
+            await recordResolution(store, discardedFrom, "discarded", () => new Date().toISOString());
+          }
           this.emit({
             at: new Date().toISOString(),
             type: "proposal.resolved",
@@ -1155,6 +1169,45 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         await this.openWorldChat(store, msg.conversationId);
         void service;
+        return;
+      }
+      case "world-chat-wrap-up": {
+        const store = this.opts.provider.openStore?.();
+        const gate = this.opts.provider.gate?.();
+        if (!store || !gate) return;
+        try {
+          await wrapUp({
+            store,
+            gate,
+            conversationId: msg.conversationId,
+            requestId: msg.requestId,
+            expectedConversationSeq: msg.expectedConversationSeq,
+            now: () => new Date().toISOString(),
+          });
+        } catch (err) {
+          // The refusal is the answer: nothing was written, and the conversation is still open
+          // and still says what it understood.
+          void this.appLog?.append({
+            level: "warn",
+            event: "world-chat.wrap-up-refused",
+            reason: err instanceof WrapUpError ? err.reason : "unknown",
+          });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "proposal-send-back": {
+        const store = this.opts.provider.openStore?.();
+        const gate = this.opts.provider.gate?.();
+        if (!store || !gate) return;
+        const proposal = await gate.readManifest(msg.proposalId).catch(() => null);
+        if (!proposal) return;
+        const conversationId = await sendBack(store, gate, proposal, () => new Date().toISOString()).catch(
+          () => null,
+        );
+        await this.refreshWorldSnapshot(msg.worldId);
+        if (conversationId) await this.openWorldChat(store, conversationId);
         return;
       }
       case "world-chat-cancel": {

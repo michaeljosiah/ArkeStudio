@@ -1856,3 +1856,23 @@ export function sendWorldChat(
 export function cancelWorldChat(worldId: string, conversationId: string): void {
   send({ kind: "world-chat-cancel", worldId, conversationId });
 }
+
+/** Turn the conversation into proposals and close it. */
+export function wrapUpWorldChat(
+  worldId: string,
+  conversationId: string,
+  expectedConversationSeq: number,
+): void {
+  send({
+    kind: "world-chat-wrap-up",
+    worldId,
+    requestId: crypto.randomUUID(),
+    conversationId,
+    expectedConversationSeq,
+  });
+}
+
+/** Return a proposal to the conversation it came from, and reopen it. */
+export function sendProposalBack(worldId: string, proposalId: string): void {
+  send({ kind: "proposal-send-back", worldId, proposalId });
+}
