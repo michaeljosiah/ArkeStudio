@@ -8,7 +8,6 @@ import {
   type ConversationId,
   type MessageId,
   type ModelCandidateDraft,
-  type RunId,
   type TurnId,
   type WorldBundle,
   type WorldChangeCandidate,
