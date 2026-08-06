@@ -46,11 +46,21 @@ const DURATIONS = new Map(
 function durationParam(model: string, params: Record<string, unknown>): Record<string, string> {
   const seconds = params["durationSec"];
   if (typeof seconds !== "number") return {};
-  const wire = DURATIONS.get(model)?.[String(Math.round(seconds))];
-  // The coordinator snaps to a declared length before dispatch, so a miss here means the job was
-  // planned against a different manifest than the one shipped. Sending the raw number under a
-  // name the route does not know is what this replaced; sending nothing at least runs.
-  return wire === undefined ? {} : { duration: wire };
+  const declared = DURATIONS.get(model);
+  // A model with no declared lengths never asks for one — the provider's default is the honest
+  // answer there, and the estimate was computed the same way.
+  if (declared === undefined) return {};
+  const wire = declared[String(seconds)];
+  if (wire === undefined) {
+    // Refused, not dropped. Sending nothing is exactly the bug this replaced: the provider's
+    // default length runs while the estimate was computed from the seconds the job carries.
+    // A miss means the job was planned against a different manifest than the one shipped —
+    // a job journalled before an upgrade, most likely, still holding an unsnapped length.
+    throw new Error(
+      `fal: ${model} cannot be asked for ${seconds}s — it offers ${Object.keys(declared).join(", ")}s`,
+    );
+  }
+  return { duration: wire };
 }
 
 /** fal takes file inputs as URLs; a data URI is a URL that needs nobody's storage. */
