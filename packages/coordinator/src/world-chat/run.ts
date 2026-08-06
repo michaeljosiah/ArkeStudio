@@ -9,9 +9,10 @@ import {
   type TurnId,
   type WorldChatCheckReceipt,
   type WorldChatMessage,
+  type WorldChatLoaded,
   type WorldChatRun,
 } from "@arke-studio/contracts";
-import { assembleContext, type ContextInput } from "./context.js";
+import { assembleContext } from "./context.js";
 import { deriveChecks, planFor } from "./check-plan.js";
 import { correctiveMessage, validateTurnResult, type TurnProblem } from "./turn-result.js";
 import type { EvidenceSources } from "./evidence.js";
@@ -54,7 +55,14 @@ export interface RunDeps {
     leaseToken: string;
   }) => Promise<{ receipts: readonly WorldChatCheckReceipt[]; canonRevision: number }>;
   evidenceSources: (messages: readonly WorldChatMessage[]) => EvidenceSources;
-  context: (userText: string) => ContextInput;
+  /**
+   * The focused slice of accepted world state a run may see (§8.5).
+   *
+   * Only this section comes from outside: the rest of the context is the conversation's own
+   * fold, which the runner already has. Optional because a conversation is still a conversation
+   * without it.
+   */
+  worldContext?: (view: WorldChatLoaded) => string;
   now: () => string;
   timeoutMs?: number;
 }
@@ -173,11 +181,31 @@ export class WorldChatRunner {
       createdAt: at,
     };
 
-    const assembled = assembleContext(this.deps.context(text));
+    /**
+     * Context comes from the conversation's own fold, not from the caller.
+     *
+     * The first version of this took a callback that only ever saw the new message, so every
+     * turn arrived with no history: the Studio could not remember what was said two turns ago,
+     * which makes a conversation into a series of unrelated questions. The fold is the record of
+     * what has been said and understood, so it is what the model is given — bounded by §8.5, and
+     * with retractions travelling as keys so a withdrawn idea is not put back in front of it.
+     */
+    const { events } = await store.read();
+    const meta = await store.readMeta();
+    const view = foldConversation(conversationId, meta?.createdAt ?? at, events).view;
+    const assembled = assembleContext({
+      ...(view.summary !== undefined ? { summary: view.summary } : {}),
+      candidates: view.candidates,
+      messages: view.messages,
+      tombstones: tombstonesFrom(events),
+      ...(this.deps.worldContext ? { worldContext: this.deps.worldContext(view) } : {}),
+      currentUserMessage: text,
+    });
+
     const run: WorldChatRun = {
       id: runId,
       turnId,
-      basedOnConversationSeq: (await store.read()).events.length,
+      basedOnConversationSeq: events.length,
       status: "running",
       adapter: adapter.id,
       harnessCleanup: "pending",

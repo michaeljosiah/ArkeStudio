@@ -35,7 +35,7 @@ const NOW = () => AT;
  */
 function fakeAdapter(
   answers: Array<string | (() => string | Promise<string>)>,
-  options: { hang?: boolean } = {},
+  options: { hang?: boolean; prompts?: string[] } = {},
 ): HarnessAdapter {
   let turn = 0;
   return {
@@ -44,7 +44,10 @@ function fakeAdapter(
     readiness: () => ({ ready: true }),
     createSession: async () => ({ sessionId: "s1" }) as never,
     sendMessage: async () => ({ ok: true }) as never,
-    dispatchAsync: async () => ({ ok: true }) as never,
+    dispatchAsync: async (input: { parts: Array<{ text?: string }> }) => {
+      options.prompts?.push(input.parts.map((p) => p.text ?? "").join(""));
+      return { ok: true } as never;
+    },
     streamEvents: (signal?: AbortSignal) =>
       (async function* () {
         if (options.hang) {
@@ -84,7 +87,6 @@ async function setup(adapter: HarnessAdapter, options: { timeoutMs?: number } = 
       attachments: [],
       attachmentText: new Map(),
     }),
-    context: (userText) => ({ candidates: [], messages: [], tombstones: [], currentUserMessage: userText }),
     now: NOW,
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
   });
@@ -221,7 +223,6 @@ describe("a turn that lands", () => {
         attachments: [],
         attachmentText: new Map(),
       }),
-      context: (userText) => ({ candidates: [], messages: [], tombstones: [], currentUserMessage: userText }),
       now: NOW,
     });
 
@@ -236,6 +237,80 @@ describe("a turn that lands", () => {
     assert.equal(view.candidates[0]!.status, "live");
     assert.equal(view.candidates[0]!.title, "A rule about the bells");
     assert.equal(view.activeRun, null, "with no run left running");
+  });
+});
+
+describe("what the studio is told", () => {
+  it("carries earlier turns, so the conversation is one conversation", async () => {
+    const prompts: string[] = [];
+    const { runner, store, conversationId } = await setup(
+      fakeAdapter(["not json", "not json"], { prompts }),
+    );
+
+    await runner.send(store, conversationId, "Her aunt taught her the bells.");
+    await runner.send(store, conversationId, "And the lock was built after.");
+
+    // Two attempts per failed turn, so the second turn's first prompt is index 2.
+    const secondTurn = prompts[2]!;
+    assert.match(
+      secondTurn,
+      /Her aunt taught her the bells\./,
+      "the second turn must know what was said in the first — without this the Studio answers each message as though it were the only one",
+    );
+    assert.match(secondTurn, /And the lock was built after\./, "and what was just said");
+  });
+
+  it("puts what it already understood in front of the model", async () => {
+    const said = "Her aunt taught her the bells, not her mother.";
+    const prompts: string[] = [];
+    const worldPath = await tempDir("arke-ctx-");
+    const conversationId = newId("cv") as ConversationId;
+    const store = new WorldChatStore(conversationDir(worldPath, conversationId));
+    await store.create(conversationId, AT);
+    await store.append(
+      { type: "conversation.created", title: "a talk", entryContext: { kind: "world" } },
+      { at: AT },
+    );
+    const bundle: WorldBundle = (await scanWorld(FIXTURE_WORLD)).bundle;
+
+    const good = async () => {
+      const meta = await store.readMeta();
+      const view = foldConversation(meta!.id, meta!.createdAt, (await store.read()).events).view;
+      return goodAnswer(said, "Her aunt taught her the bells", view.messages[0]!.id);
+    };
+
+    const runner = new WorldChatRunner({
+      adapter: fakeAdapter([good, "not json", "not json"], { prompts }),
+      prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
+      release: async () => {},
+      receiptsFor: () => [],
+      runCheckPlan: async () => ({ receipts: [], canonRevision: bundle.meta.canonRevision }),
+      evidenceSources: (messages: readonly WorldChatMessage[]) => ({
+        messages,
+        bundle,
+        attachments: [],
+        attachmentText: new Map(),
+      }),
+      now: NOW,
+    });
+
+    await runner.send(store, conversationId, said);
+    await runner.send(store, conversationId, "anything else");
+
+    assert.match(
+      prompts[1]!,
+      /A rule about the bells/,
+      "the proposition from the first turn is in the second turn's context, so the model corrects it rather than proposing it again",
+    );
+  });
+
+  it("names withdrawn ideas without repeating what they said", async () => {
+    const prompts: string[] = [];
+    const { runner, store, conversationId } = await setup(fakeAdapter(["not json", "not json"], { prompts }));
+    await runner.send(store, conversationId, "the whale bone idea");
+    assert.ok(prompts.length > 0);
+    // Nothing withdrawn yet, so the section is simply absent rather than empty and confusing.
+    assert.ok(!prompts[0]!.includes("Withdrawn"));
   });
 });
 
