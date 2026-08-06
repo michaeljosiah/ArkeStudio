@@ -14,7 +14,7 @@ import {
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, PageHeader, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
-import { CanonEntryRow, ReferenceTile } from "../domain/domain.js";
+import { ReferenceTile } from "../domain/domain.js";
 import { ChevronRight, Plus, Search } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { DispatchBar, resolveModel, usableModels } from "../components/dispatch-bar.js";
@@ -477,61 +477,12 @@ export function WorldOverviewScreen() {
           <Button variant="secondary">Write</Button>
         </div>
       </div>
-      {proposals.length > 0 && (
-        <div style={{ padding: "0 96px" }}>
-          {/* The panels used to stack here in full. They have their own screen now, which has room
-              for the list beside them; this stays because the hub is where people look first. */}
-          <Section title="Needs you" aside={<span>{proposals.length} awaiting a decision</span>}>
-            <button
-              type="button"
-              className="fy-needsyou"
-              onClick={() => navigate(`/w/${worldId}/proposals`)}
-            >
-              <span className="fy-needsyou__lead">
-                {proposals.length === 1
-                  ? "One proposal is waiting on you."
-                  : `${proposals.length} proposals are waiting on you.`}
-              </span>
-              <span className="fy-needsyou__sub">
-                {proposals[0]!.proposal.summary}
-                {proposals.length > 1 ? `, and ${proposals.length - 1} more` : ""}
-              </span>
-              <ChevronRight size={15} />
-            </button>
-          </Section>
-        </div>
-      )}
-      {threads.length > 0 && (
-        <div style={{ padding: "0 96px" }}>
-          <Section title="Open threads" aside={<span>unsettled canon, waiting to be pulled</span>}>
-            <div className="scr-sectionlist">
-              {threads.map((t) => (
-                <CanonEntryRow key={t.id} entry={t} onOpen={() => navigate(`/w/${worldId}/canon/${t.id}/thread`)} />
-              ))}
-            </div>
-          </Section>
-        </div>
-      )}
-      <div style={{ padding: "0 96px 40px" }}>
-        <Section title="Recent changes">
-          <div className="scr-sectionlist scr-changelist">
-            {[...world.changes].reverse().slice(0, 8).map((c, i) => (
-              <div key={i} className="scr-change">
-                <span className="scr-change__entity">{c.entity}</span>
-                <span>
-                  {c.fromVersion != null
-                    ? `v${c.fromVersion} → v${c.toVersion}`
-                    : c.toVersion !== undefined
-                      ? `created v${c.toVersion}`
-                      : "created"}
-                  {c.fieldsChanged ? ` · ${c.fieldsChanged.join(", ")}` : ""}
-                </span>
-                <span className="scr-change__when">{shortDateTime(c.ts)}</span>
-              </div>
-            ))}
-          </div>
-        </Section>
-      </div>
+      {/*
+       * Needs you, Open threads and Recent changes used to stack below the hub. Each of them now
+       * has a screen that shows it properly — proposals, canon, and activity — and the chrome
+       * carries a warning dot to the first two from anywhere, so restating them here only pushed
+       * the world's own entrances further down the page.
+       */}
     </div>
   );
 }
@@ -601,6 +552,7 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
                       label={featured.name}
                       dialogLabel={`${featured.name} portrait`}
                       title={featured.name}
+                      subtitle="main photo"
                       triggerLabel={`View larger portrait of ${featured.name}`}
                       closeLabel="Close portrait"
                       triggerClassName="fy-feature__portrait-button"
@@ -1016,7 +968,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
                   worldSlug={slug}
                   path={mainPhoto ? `references/${sheet.id}/${mainPhoto.file}` : sheetPortraitPath(sheet.id)}
                   label={`${sheet.name}: main photo`}
-                  title={`${sheet.name} · main photo`}
+                  title={sheet.name}
+                  subtitle="main photo"
                   triggerLabel={`View larger main photo of ${sheet.name}`}
                   closeLabel="Close main photo"
                   triggerClassName="fy-designcard__portrait-button"

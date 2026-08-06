@@ -131,6 +131,55 @@ describe("World Chat is built on the Genesis split", () => {
     assert.match(CSS, /\.fy-gate__side\s*\{[^}]*background:\s*var\(--muted\)/s, "the rail sits on --muted");
   });
 
+  /*
+   * The canvas floats its nav absolutely and pads each column 104px to clear it; here the nav is
+   * sticky and so takes 53px of the column's own box. 52px is what puts this screen's first line
+   * where 41a puts it, and both columns must use the same number or the eyebrow and the rail's
+   * heading stop sitting on one line — which is the alignment the head is built around.
+   */
+  it("clears the floating nav by the same amount in both columns", () => {
+    const head = /\.fy-chat__wrap \.fy-gate__head\s*\{[^}]*padding-top:\s*52px/s;
+    const side = /\.fy-chat__wrap \.fy-gate__side\s*\{[^}]*padding-top:\s*52px/s;
+    assert.match(CSS, head, "the conversation column clears the nav at 52px");
+    assert.match(CSS, side, "and the rail clears it by exactly as much");
+  });
+});
+
+describe("the transcript", () => {
+  /*
+   * Each bubble squares the one corner facing its own speaker. It is the only thing distinguishing
+   * the two columns once a reply is short enough to sit level with the message above it, so it is
+   * pinned rather than left to whichever radius a later edit reaches for.
+   */
+  it("gives each speaker its own tail and its own measure (41a)", () => {
+    assert.match(
+      CSS,
+      /\.fy-chat__turn--user \.fy-chat__bubble\s*\{[^}]*border-radius:\s*14px 14px 4px 14px/s,
+      "the user's bubble squares its bottom-right",
+    );
+    assert.match(
+      CSS,
+      /\.fy-chat__turn--studio \.fy-chat__bubble\s*\{[^}]*border-radius:\s*14px 14px 14px 4px/s,
+      "the studio's squares its bottom-left",
+    );
+    assert.match(CSS, /\.fy-chat__turn--user\s*\{[^}]*max-width:\s*380px/s, "the user's measure is 380px");
+    assert.match(CSS, /\.fy-chat__turn--studio\s*\{[^}]*max-width:\s*440px/s, "the studio's is 440px");
+  });
+
+  /* A receipt explains the answer it sits in; loose beneath the bubble it read as its own turn. */
+  it("keeps receipts inside the reply that earned them", () => {
+    const html = renderConversation();
+    const bubble = html.indexOf('class="fy-chat__bubble"');
+    const receipts = html.indexOf('class="fy-chat__receipts"');
+    if (receipts > 0) {
+      assert.ok(receipts > bubble, "the receipts render within a bubble, not after it");
+      assert.ok(
+        !/<\/div><div class="fy-chat__receipts"/.test(html),
+        "and are not a sibling of the bubble",
+      );
+    }
+  });
+
   it("heads the conversation with an eyebrow and an h1, as Genesis does", () => {
     const html = renderConversation();
     assert.ok(html.includes("fy-eyebrow-sm"));
@@ -148,6 +197,29 @@ describe("the understanding panel", () => {
       1,
       "the rail holds exactly one action, the wrap-up; anything else is asking for approval mid-conversation",
     );
+  });
+
+  /*
+   * A subject is a card on the canvas, not a bare group. The rail sits on --muted, so it is the
+   * card's own --background that separates one reading from the next; without it two subjects
+   * each holding a single line ran together into one list.
+   */
+  it("gives each subject a card of its own (41a)", () => {
+    assert.match(
+      CSS,
+      /\.fy-panel__group\s*\{[^}]*background:\s*var\(--background\)/s,
+      "the card lifts off the muted rail",
+    );
+    assert.match(CSS, /\.fy-panel__group\s*\{[^}]*border:\s*1px solid var\(--border\)/s);
+    assert.match(CSS, /\.fy-panel__group\s*\{[^}]*border-radius:\s*12px/s);
+    assert.match(CSS, /\.fy-panel__group\s*\{[^}]*box-shadow:\s*var\(--shadow-xs\)/s);
+  });
+
+  /* Title and tally on one baseline: the count qualifies the title rather than following it. */
+  it("sets the tally beside the panel's title, in the colour of an undecided thing", () => {
+    const rail = railHtml(renderConversation());
+    assert.ok(rail.includes('class="fy-panel__headline"'), "the two share a row");
+    assert.match(CSS, /\.fy-panel__count\s*\{[^}]*color:\s*var\(--warning\)/s, "nothing here is settled yet");
   });
 
   it("says out loud that nothing here is a decision", () => {

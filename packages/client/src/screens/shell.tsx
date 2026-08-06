@@ -636,15 +636,32 @@ export function NewWorldScreen() {
       <div className="fy-app" data-screen="new-world-art-direction">
         <AppChrome back={{ label: "Back", to: "/worlds" }} context={{ label: "new world · art direction" }} />
         <div className="fy-artstep">
-          <div className="fy-eyebrow-sm">NEW WORLD · STEP 3 OF 3</div>
           {step === "look" ? (
             <>
-              <h1 className="fy-story__h1">How should {shownName || "this world"} look?</h1>
-              <p className="fy-artstep__lede">
-                Pick a starting look. Every image this world makes — characters, locations, shots —
-                follows it until you change it. Nothing here is permanent: you can edit the words on
-                the next screen, or set a different look any time from Art direction.
-              </p>
+              <div className="fy-artstep__head">
+                <div>
+                  <div className="fy-artstep__steps">
+                    <span className="fy-eyebrow-sm">NEW WORLD · STEP 3 OF 3</span>
+                    <i />
+                    <i />
+                    <i />
+                  </div>
+                  <h1 className="fy-artstep__h1">How should {shownName || "this world"} look?</h1>
+                  <p className="fy-artstep__lede">
+                    Pick a starting look. Every image this world makes — characters, locations,
+                    shots — follows it until you change it. Nothing here is permanent: you can edit
+                    the words on the next screen, or set a different look any time from Art
+                    direction.
+                  </p>
+                </div>
+                <div className="fy-artstep__aside">
+                  <div className="fy-artstep__asidehead">SAME HARBOUR, NINE TREATMENTS</div>
+                  <div className="fy-artstep__asidenote">
+                    Each preview is one scene rendered each way, so you compare the treatment and
+                    not the subject.
+                  </div>
+                </div>
+              </div>
               <ArtStyleGrid
                 selectedId={presetId}
                 onSelect={(preset) => {
@@ -670,7 +687,13 @@ export function NewWorldScreen() {
             </>
           ) : (
             <>
-              <h1 className="fy-story__h1">The preset writes a first draft.</h1>
+              <div className="fy-artstep__steps">
+                <span className="fy-eyebrow-sm">NEW WORLD · STEP 3 OF 3</span>
+                <i />
+                <i />
+                <i />
+              </div>
+              <h1 className="fy-artstep__h1">The preset writes a first draft.</h1>
               <p className="fy-artstep__lede">
                 These are the words that ride along with every generation. Edit them, or replace
                 them entirely. A preset seeds the text; it never locks it.

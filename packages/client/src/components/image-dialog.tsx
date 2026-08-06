@@ -24,6 +24,7 @@ export function ImageDialog({
   label,
   dialogLabel,
   title,
+  subtitle,
   triggerLabel,
   closeLabel,
   triggerClassName,
@@ -42,6 +43,12 @@ export function ImageDialog({
   dialogLabel?: string;
   /** Heading inside the dialog. */
   title: ReactNode;
+  /**
+   * What this picture is, under the name — "main photo", "character sheet". The canvas (42a)
+   * splits the two rather than running them together on one line, so the subject reads first and
+   * the kind sits under it in mono, the way every other metadata line in the app does.
+   */
+  subtitle?: ReactNode;
   /** Accessible name for the trigger. */
   triggerLabel: string;
   /** Accessible name for the close button; defaults from the trigger's subject. */
@@ -93,7 +100,10 @@ export function ImageDialog({
       >
         <div className="fy-portrait-dialog__panel">
           <div className="fy-portrait-dialog__head">
-            <h2 id={titleId}>{title}</h2>
+            <div className="fy-portrait-dialog__titles">
+              <h2 id={titleId}>{title}</h2>
+              {subtitle && <div className="fy-portrait-dialog__sub">{subtitle}</div>}
+            </div>
             <button
               type="button"
               className="fy-portrait-dialog__close"
