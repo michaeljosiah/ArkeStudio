@@ -243,7 +243,7 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
     }
   }
 
-  const groups = buildGroups(result, input, idByTemporary, candidates, at);
+  const groups = buildGroups(result, input, idByTemporary, candidates);
   return { ok: true, turn: { reply: result.reply, candidates, groups, tombstones } };
 }
 
@@ -334,7 +334,6 @@ function buildGroups(
   input: ValidateInput,
   idByTemporary: ReadonlyMap<string, CandidateId>,
   candidates: readonly WorldChangeCandidate[],
-  at: string,
 ): CandidateGroup[] {
   const revisionOf = (id: CandidateId): number =>
     candidates.find((c) => c.id === id)?.revision ?? input.existing.find((c) => c.id === id)?.revision ?? 1;
@@ -371,7 +370,6 @@ function buildGroups(
       status: "live",
     });
   }
-  void at;
   return groups;
 }
 
