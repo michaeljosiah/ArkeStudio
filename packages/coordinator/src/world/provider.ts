@@ -8,6 +8,7 @@ import type { WorldProvider } from "../world-provider.js";
 import { atomicWriteFile } from "./atomic.js";
 import { appendChanges } from "./change-writer.js";
 import { checkPathBudget, fromPortable, toExtendedLength, type PathBudget } from "./paths.js";
+import { installSampleWorld } from "./sample-world.js";
 import { readWorldMeta, scanWorld, WorldOpenError, SUPPORTED_SCHEMA_VERSION } from "./scan.js";
 import { uniqueSlug } from "./slug.js";
 import { WorldStore } from "./store.js";
@@ -264,6 +265,17 @@ export class FsWorldProvider implements WorldProvider {
       updated: at,
     });
     return { worldId, slug };
+  }
+
+  /**
+   * Install the sample world (SPEC-016 R-6). The copy and the identity rewrite live in
+   * `sample-world.ts`; what belongs here is the app index, which learns about the new world
+   * the same way it learns about a folder someone dropped in by hand — the next `listWorlds`
+   * finds it and scans it, so its counts come from the world rather than from an assumption.
+   */
+  async installSampleWorld(sourceDir: string): Promise<{ worldId: string; slug: string; name: string }> {
+    await this.ensureAppRoot();
+    return installSampleWorld({ sourceDir, appRoot: this.appRoot });
   }
 
   private async findWorldDir(worldId: string): Promise<string> {

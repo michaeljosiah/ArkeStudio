@@ -635,6 +635,11 @@ async function initialize(): Promise<{ port: number }> {
     jobsSeedPath: join(appRoot, "queue", "jobs.jsonl"),
     ledgerSeedPath: join(appRoot, "ledger.jsonl"),
     appRoot,
+    // The sample world ships beside the other resources (SPEC-016 R-6, R-8), the same way
+    // ffmpeg and the harness binary do. Unpackaged there is no resources directory to read, so
+    // this build honestly has none; the dev coordinator points at the repo fixture instead, and
+    // that is where the feature is exercised from source.
+    sampleWorldPath: app.isPackaged ? join(process.resourcesPath, "sample-world") : null,
     authoring: { buildConfig: buildSessionConfig, agentForPurpose, roster: ROSTER },
     cipher,
     secretRegistry: providerSecrets,

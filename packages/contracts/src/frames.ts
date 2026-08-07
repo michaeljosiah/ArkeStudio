@@ -54,7 +54,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
-      sectionHeading: z.literal("Essence"),
+      // The reader names a section — the prose never travels; the server reads the authoritative
+      // sheet. A character's Essence and Appearance are the descriptive prose worth hearing.
+      sectionHeading: z.enum(["Essence", "Appearance"]),
       confirmationToken: z.string().min(1).optional(),
     })
     .strict(),
@@ -85,6 +87,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   /** Or do not: the candidate is deleted and the world keeps the image it had. */
   z.object({ kind: z.literal("discard-world-image"), worldId: UlidSchema }).strict(),
   z.object({ kind: z.literal("archive-world"), worldId: UlidSchema }).strict(),
+  /**
+   * Install the sample world (SPEC-016 R-6). No arguments: which world ships is a property of
+   * the build, and offering a choice the build cannot honour would be offering a lie. Asking
+   * twice is not an error — the second copy is a world of its own, slugged accordingly.
+   */
+  z.object({ kind: z.literal("install-sample-world") }).strict(),
   /** SPEC-002: reload after an external change made the open world stale (R-23). */
   z.object({ kind: z.literal("reload-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: adopt one closed-world edit — snapshot, bump, log (R-28). */
@@ -468,7 +476,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().min(1).max(200),
     })
     .strict(),
-  /** SPEC-007 R-15: voice assignment is a gated sheet change. */
+  /** The human's own action: assigning (or clearing) a voice commits straight to the sheet —
+   *  it still versions and ripples, but does not stage a proposal for the same person to accept. */
   z
     .object({
       kind: z.literal("assign-voice"),

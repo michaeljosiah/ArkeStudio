@@ -14,7 +14,6 @@ import {
   type QueueCommand,
   type RankedVoice,
   type ReconcileAction,
-  type ReferenceAngle,
   type WorldChatContext,
   ulid,
 } from "@arke-studio/contracts";
@@ -910,6 +909,20 @@ export function useArchiveNote(): StoreState["archiveNote"] {
   return useStore().archiveNote;
 }
 
+/** Copy the sample world this build carries into the library (SPEC-016 R-6). */
+export function installSampleWorld(): void {
+  send({ kind: "install-sample-world" });
+}
+
+/**
+ * Whether there is a sample world to install, and how the last attempt went. Read off the
+ * snapshot rather than folded from events: the answer is settled at start-up, so a Settings
+ * pane opened much later still gets it.
+ */
+export function useSampleWorld(): ClientState["app"]["sampleWorld"] | null {
+  return useStore().state?.app.sampleWorld ?? null;
+}
+
 export function reloadWorld(worldId: string): void {
   send({ kind: "reload-world", worldId });
 }
@@ -1260,11 +1273,7 @@ export function useReconcileReport(): ReconcileAction[] | null {
   return useStore().reconcileReport;
 }
 
-// ---- SPEC-010: reference kits ----------------------------------------------
-
-export function establishLook(worldId: string, sheetId: string, count: number): void {
-  send({ kind: "establish-look", worldId, sheetId, count, requestId: queueRequest("establish-look") });
-}
+// ---- SPEC-010/017: reference kits ------------------------------------------
 
 export function chooseAnchor(
   worldId: string,
@@ -1397,32 +1406,6 @@ export function attachCharacterLook(
   send({ kind: "attach-character-look", worldId, sheetId, lookId, scope });
 }
 
-export function lockTile(worldId: string, sheetId: string, angle: ReferenceAngle, name?: string): void {
-  send({ kind: "lock-tile", worldId, sheetId, angle, ...(name !== undefined ? { name } : {}) });
-}
-
-export function generateMissingTiles(worldId: string, sheetId: string, group: "head" | "body"): void {
-  send({
-    kind: "generate-missing-tiles",
-    worldId,
-    sheetId,
-    group,
-    requestId: queueRequest("generate-missing-tiles"),
-  });
-}
-
-export function regenerateTile(worldId: string, sheetId: string, angle: ReferenceAngle): void {
-  send({ kind: "regenerate-tile", worldId, sheetId, angle, requestId: queueRequest("regenerate-tile") });
-}
-
-export function compileGrid(worldId: string, sheetId: string): void {
-  send({ kind: "compile-grid", worldId, sheetId });
-}
-
-export function designateCompilation(worldId: string, sheetId: string, file: string): void {
-  send({ kind: "designate-compilation", worldId, sheetId, file });
-}
-
 export function setStyleOverride(worldId: string, sheetId: string, style: string | null): void {
   send({ kind: "set-style-override", worldId, sheetId, style });
 }
@@ -1455,7 +1438,7 @@ export function requestVoicePreview(
 export function readSheetSection(
   worldId: string,
   sheetId: string,
-  sectionHeading: "Essence",
+  sectionHeading: "Essence" | "Appearance",
   requestId = queueRequest("read-sheet-section"),
   confirmationToken?: string,
 ): string {

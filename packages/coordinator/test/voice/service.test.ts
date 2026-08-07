@@ -289,8 +289,17 @@ describe("authoritative sheet speech", () => {
     });
   });
 
-  it("rejects unknown headings, empty text, and legacy assignments", () => {
-    assert.throws(() => authoritativeSheetSpeech(SHEET, "Appearance"), /not available/);
+  it("reads Appearance too, and rejects unknown headings, empty text, and legacy assignments", () => {
+    const withAppearance = {
+      ...SHEET,
+      sections: [...SHEET.sections, { heading: "Appearance", body: "Salt-crusted braids, pale grey eyes." }],
+    } as Sheet;
+    assert.deepEqual(authoritativeSheetSpeech(withAppearance, "Appearance"), {
+      text: "Salt-crusted braids, pale grey eyes.",
+      provider: "elevenlabs",
+      voiceId: "v_8Kq2",
+    });
+    assert.throws(() => authoritativeSheetSpeech(SHEET, "Relationships"), /not available/);
     assert.throws(() => authoritativeSheetSpeech({ ...SHEET, voice: { ...SHEET.voice!, provider: "openai" } } as Sheet, "Essence"), /supported voice/);
     assert.throws(() => authoritativeSheetSpeech({ ...SHEET, sections: [{ heading: "Essence", body: "  " }] } as Sheet, "Essence"), /Nothing to read/);
   });

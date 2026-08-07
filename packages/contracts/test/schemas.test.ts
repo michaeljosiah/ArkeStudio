@@ -692,6 +692,22 @@ describe("domain events and frames", () => {
       sheetId: "maren-kest",
       sectionHeading: "Essence",
     }));
+    assert.doesNotThrow(() => ClientMessageSchema.parse({
+      kind: "read-sheet-section",
+      requestId: WORLD_ID,
+      worldId: WORLD_ID,
+      sheetId: "maren-kest",
+      sectionHeading: "Appearance",
+    }));
+    // The reader names a readable section: one outside the set, or prose smuggled in a stray
+    // field, is refused — the server reads the authoritative sheet, never the client's text.
+    assert.throws(() => ClientMessageSchema.parse({
+      kind: "read-sheet-section",
+      requestId: WORLD_ID,
+      worldId: WORLD_ID,
+      sheetId: "maren-kest",
+      sectionHeading: "Relationships",
+    }));
     assert.throws(() => ClientMessageSchema.parse({
       kind: "read-sheet-section",
       requestId: WORLD_ID,

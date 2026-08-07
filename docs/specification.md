@@ -1120,8 +1120,9 @@ sheet. Voice takes are auditioned against the cut before landing in it.
 - **R-VOICE-1** A voice SHALL be assigned to a sheet and inherited by every line that sheet
   speaks, across every production.
   - **WHEN** a line is retaken with a different delivery **THEN** the voice is unchanged.
-- **R-VOICE-2** Assigning a voice SHALL pass through the accept gate and increment the sheet
-  version, and the ripple SHALL list the productions affected.
+- **R-VOICE-2** Assigning a voice SHALL commit directly — it is the author's own pick, not a
+  drafted change awaiting review — while still incrementing the sheet version, and the ripple
+  SHALL list the productions affected.
 - **R-VOICE-3** The voice picker SHALL preview candidates using the character's own canon
   dialogue.
 - **R-VOICE-4** Local voices SHALL be presented as a fixed catalogue, and voice cloning SHALL
@@ -1811,7 +1812,8 @@ across restarts and are revocable, reusing Arke's `grant-store`.
   Voxa uses is GPL and must remain a separate executable, never linked.
 - **N-7 · Installer.** NSIS, currently unsigned; signing is required before v1. OpenCode and Voxa
   are included only when their external build resources are staged; models are downloaded rather
-  than shipped.
+  than shipped. The sample world **is** shipped — 12 MB, so that first run needs no network to
+  show what the application is for (SPEC-016 R-6, D12).
 - **N-8 · Accessibility.** Full keyboard navigation, reduced-motion respected, and no
   information conveyed by colour alone — the design system is monochrome, so imagery carries
   colour and the UI must not depend on it.

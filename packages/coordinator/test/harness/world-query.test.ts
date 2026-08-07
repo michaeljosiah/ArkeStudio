@@ -70,7 +70,7 @@ describe("the read-only world-query tool (R-11, D2, D3)", () => {
       searched: number;
       candidates: Array<{ entryId: string; statement: string }>;
     };
-    assert.equal(parsed.searched, 5);
+    assert.equal(parsed.searched, 28);
     assert.equal(parsed.candidates[0]!.entryId, "CANON-002");
     assert.ok(parsed.candidates[0]!.statement.includes("stood in"), "full statement text (R-23)");
   });
@@ -81,7 +81,7 @@ describe("the read-only world-query tool (R-11, D2, D3)", () => {
     };
     const parsed = JSON.parse(sheet.content[0]!.text) as { id: string; version: number };
     assert.equal(parsed.id, "maren-kest");
-    assert.equal(parsed.version, 4);
+    assert.equal(parsed.version, 5);
 
     const related = (await rpc(url, "tools/call", { name: "related", arguments: { id: "maren-kest" } })) as {
       content: Array<{ text: string }>;

@@ -74,6 +74,7 @@ import {
 } from "./voice/service.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import { readContainedImageReferences } from "./world/reference-files.js";
+import { sampleWorldAvailable } from "./world/sample-world.js";
 import {
   characterLookRequests,
   characterSheetRequest,
@@ -157,7 +158,7 @@ import {
   duplicateSheet,
   stageSheetRename,
   stageSheetStatus,
-  stageVoiceAssignment,
+  applyVoiceAssignment,
 } from "./sheets/authoring.js";
 import { ReadModel } from "./read-model.js";
 import { ChildSupervisor, type SupervisorStatus } from "./supervisor.js";
@@ -180,6 +181,12 @@ export interface CoordinatorOptions {
   /** Optional NDJSON seeds so fixtures light the Activity screens (jobs.jsonl / ledger.jsonl). */
   jobsSeedPath?: string;
   ledgerSeedPath?: string;
+  /**
+   * The sample world this build carries (SPEC-016 R-6), or null when it carries none. Where it
+   * lives is the shell's to know — packaged, in resources; in dev, in the repo — so it arrives
+   * here as a path rather than being looked for.
+   */
+  sampleWorldPath?: string | null;
   /** App root for remembered grants (SPEC-005 R-16). Absent → grants are session-only. */
   appRoot?: string;
   /** Session-config builders from the adapter package, injected to keep dependencies one-way. */
@@ -1049,6 +1056,36 @@ export class Coordinator {
         this.transport.broadcastSnapshot();
         return;
       }
+      case "install-sample-world": {
+        const install = this.opts.provider.installSampleWorld?.bind(this.opts.provider);
+        const source = this.opts.sampleWorldPath ?? null;
+        const refuse = (reason: string) => {
+          this.readModel.setSampleWorld({ installing: false, note: { text: reason, refused: true } });
+          this.emit({ at: new Date().toISOString(), type: "sample-world.refused", reason });
+        };
+        if (!install || source === null) {
+          refuse("this build does not carry the sample world");
+          this.transport.broadcastSnapshot();
+          return;
+        }
+        // Megabytes of art take a moment to copy. The flag is what stops a second click
+        // starting a second copy while the first is still being written.
+        this.readModel.setSampleWorld({ installing: true, note: null });
+        this.transport.broadcastSnapshot();
+        try {
+          const { worldId, slug, name } = await install(source);
+          this.readModel.setWorlds(await this.opts.provider.listWorlds());
+          this.readModel.setSampleWorld({
+            installing: false,
+            note: { text: `${name} is in your library.`, refused: false },
+          });
+          this.emit({ at: new Date().toISOString(), type: "sample-world.installed", worldId, slug, name });
+        } catch (err) {
+          refuse(err instanceof Error ? err.message : String(err));
+        }
+        this.transport.broadcastSnapshot();
+        return;
+      }
       case "reload-world": {
         const reload = this.opts.provider.reloadWorld?.bind(this.opts.provider);
         if (!reload) return;
@@ -1754,14 +1791,15 @@ export class Coordinator {
         return;
       }
       case "assign-voice": {
-        const gate = this.opts.provider.gate?.();
+        // A human's direct action, not a draft: the person clicking Assign is the approval, so
+        // this commits straight through rather than staging a proposal for them to re-accept.
         const store = this.opts.provider.openStore?.();
-        if (!gate || !store) return;
+        if (!store) return;
         if (msg.voice) {
           const available = (await this.voiceService?.catalogue().catch(() => [])) ?? [];
           if (!available.some((voice) => voice.provider === msg.voice!.provider && voice.voiceId === msg.voice!.voiceId)) return;
         }
-        await stageVoiceAssignment(store, gate, { path: msg.path, voice: msg.voice }).catch(() => {});
+        await applyVoiceAssignment(store, { path: msg.path, voice: msg.voice }).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -3802,6 +3840,13 @@ export class Coordinator {
         await readNdjson(this.opts.ledgerSeedPath, (x) => LedgerEntrySchema.parse(x)),
       );
     }
+    // Asked once, at start-up: whether the sample world is installable is a fact about the
+    // build, and the Settings pane should not have to discover it by trying.
+    this.readModel.setSampleWorld({
+      available:
+        this.opts.provider.installSampleWorld !== undefined &&
+        (await sampleWorldAvailable(this.opts.sampleWorldPath ?? null)),
+    });
   }
 
   async stop(): Promise<void> {

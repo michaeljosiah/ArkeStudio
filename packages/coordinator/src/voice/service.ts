@@ -62,7 +62,9 @@ export function authoritativeSheetSpeech(sheet: Sheet, heading: string): {
   voiceId: string;
 } {
   if (sheet.type !== "character") throw new Error("Only character sections can be read aloud.");
-  if (heading !== "Essence") throw new Error("This section is not available for read aloud.");
+  if (heading !== "Essence" && heading !== "Appearance") {
+    throw new Error("This section is not available for read aloud.");
+  }
   const text = normalizeSpeechText(sheet.sections.find((section) => section.heading === heading)?.body ?? "");
   if (!text) throw new Error("Nothing to read yet.");
   if (!sheet.voice || (sheet.voice.provider !== "kokoro" && sheet.voice.provider !== "elevenlabs")) {

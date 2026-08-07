@@ -1,20 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import {
   CHARACTER_ROLE_MAX,
-  compilationIsStale,
   deriveCut,
   designatedCompilation,
   formatMicroUsd,
-  headGate,
   mainPhotoFor,
-  tileIsStale,
   type CanonEntry,
   type Sheet,
 } from "@arke-studio/contracts";
-import { DegradedBanner, EmptyState, PageHeader, Screen, Section } from "../components/layout.js";
+import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
-import { ReferenceTile } from "../domain/domain.js";
 import { ChevronRight, Plus, Search } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { DispatchBar, resolveModel, usableModels } from "../components/dispatch-bar.js";
@@ -35,8 +31,6 @@ import { useTalkItThrough } from "../lib/talk-it-through.js";
 import {
   askCanon,
   assignVoice,
-  chooseAnchor as chooseAnchorMsg,
-  compileGrid as compileGridMsg,
   createProduction,
   createSheetFromSentence,
   attachFiles,
@@ -48,13 +42,9 @@ import {
   useWorldImage,
   attachHostText,
   hostCanAttach,
-  designateCompilation,
   continueStudio,
   draftWithStudio,
   duplicateSheet,
-  establishLook,
-  generateMissingTiles,
-  lockTile as lockTileMsg,
   openThread as openThreadMsg,
   reconcileExternalEdit,
   reloadWorld,
@@ -65,7 +55,6 @@ import {
   retireEntity,
   searchCanonList,
   setSheetStatus,
-  setStyleOverride as setStyleOverrideMsg,
   settleThread,
   stageCanonAmendment as stageAmendmentMsg,
   stageCanonEntry as stageEntryMsg,
@@ -885,19 +874,21 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const sheet = useSheet(worldId, sheetId);
   const navigate = useNavigate();
   const voiceAudio = useVoiceAudio();
-  const [readRequestId, setReadRequestId] = useState<string | null>(null);
-  const readResult = readRequestId ? voiceAudio[readRequestId] : undefined;
+  // Read-aloud is shared across the character's descriptive sections; the state tracks which one
+  // the user last asked to hear so the clip, cost note and failure attach to the right block.
+  const [read, setRead] = useState<{ requestId: string; section: "Essence" | "Appearance" } | null>(null);
+  const readResult = read ? voiceAudio[read.requestId] : undefined;
   // A read the user asked for plays as soon as it lands, rather than making them click twice.
   useEffect(() => {
-    if (readResult?.status === "ready" && readResult.file && world && sheet) {
+    if (read && readResult?.status === "ready" && readResult.file && world && sheet) {
       void playClip({
         id: readResult.requestId,
         url: mediaUrl(world.meta.slug, readResult.file),
-        title: `${sheet.name} · Essence`,
+        title: `${sheet.name} · ${read.section}`,
         sub: `read aloud · ${sheet.voice?.label ?? sheet.voice?.provider ?? "voice"}`,
       });
     }
-  }, [readResult?.requestId, readResult?.status, readResult?.file, world?.meta.slug, sheet?.name]);
+  }, [read?.section, readResult?.requestId, readResult?.status, readResult?.file, world?.meta.slug, sheet?.name]);
   const sheetRefsMap = useSheetRefs();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState<string | null>(null);
@@ -933,37 +924,70 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const essence = isCharacter ? sheet.sections.find((s) => s.heading === "Essence") : undefined;
   const gridSections = essence ? sheet.sections.filter((s) => s !== essence) : sheet.sections;
   const voiceUsable = sheet.voice !== undefined && ["kokoro", "elevenlabs"].includes(sheet.voice.provider);
-  const essenceClip: Clip | null =
-    readResult?.status === "ready" && readResult.file
-      ? {
-          id: readResult.requestId,
-          url: mediaUrl(slug, readResult.file),
-          title: `${sheet.name} · Essence`,
-          sub: `read aloud · ${sheet.voice?.label ?? sheet.voice?.provider ?? "voice"}`,
-        }
-      : null;
-  const readEssence = () => {
-    if (!worldId) return;
-    // No usable voice yet: the read starts by choosing one, which is where this leads.
-    if (!voiceUsable) navigate(`/w/${worldId}/cast/${sheet.id}/voice`);
-    else setReadRequestId(readSheetSection(worldId, sheet.id, "Essence"));
+  // The read controls, the loaded clip and the cost note for one section. Essence and Appearance
+  // share this; each shows its own speaker on hover and its own "preparing"/confirmation state.
+  const sectionAudio = (heading: "Essence" | "Appearance") => {
+    const active = read?.section === heading ? readResult : undefined;
+    const clip: Clip | null =
+      active?.status === "ready" && active.file
+        ? {
+            id: active.requestId,
+            url: mediaUrl(slug, active.file),
+            title: `${sheet.name} · ${heading}`,
+            sub: `read aloud · ${sheet.voice?.label ?? sheet.voice?.provider ?? "voice"}`,
+          }
+        : null;
+    const onRead = () => {
+      if (!worldId) return;
+      // No usable voice yet: the read starts by choosing one, which is where this leads.
+      if (!voiceUsable) navigate(`/w/${worldId}/cast/${sheet.id}/voice`);
+      else setRead({ requestId: readSheetSection(worldId, sheet.id, heading), section: heading });
+    };
+    const note =
+      active?.status === "confirmation-required" ? (
+        <span className="fy-textactions__note">
+          Exact {heading} will be sent to ElevenLabs and retained in Activity.
+          <Button
+            onClick={() => {
+              if (worldId && read && active.confirmationToken)
+                readSheetSection(worldId, sheet.id, heading, read.requestId, active.confirmationToken);
+            }}
+          >
+            Confirm {active.characterCount} characters · {formatMicroUsd(active.estimatedMicroUsd)}
+          </Button>
+        </span>
+      ) : read?.section === heading && !active ? (
+        <span className="fy-textactions__note">Preparing audio…</span>
+      ) : undefined;
+    return { clip, onRead, note };
   };
-  const essenceNote =
-    readResult?.status === "confirmation-required" ? (
-      <span className="fy-textactions__note">
-        Exact Essence will be sent to ElevenLabs and retained in Activity.
-        <Button
-          onClick={() => {
-            if (worldId && readRequestId && readResult.confirmationToken)
-              readSheetSection(worldId, sheet.id, "Essence", readRequestId, readResult.confirmationToken);
-          }}
-        >
-          Confirm {readResult.characterCount} characters · {formatMicroUsd(readResult.estimatedMicroUsd)}
-        </Button>
-      </span>
-    ) : readRequestId && !readResult ? (
-      <span className="fy-textactions__note">Preparing audio…</span>
-    ) : undefined;
+  // Text with the hover read-aloud/copy affordance (design 3a). The prose element differs by
+  // section — a lead paragraph, a grid cell — so the caller passes it; the host is the same.
+  const readableProse = (heading: "Essence" | "Appearance", body: string, prose: ReactNode) => {
+    const { clip, onRead, note } = sectionAudio(heading);
+    return (
+      <div className="fy-texthost">
+        {prose}
+        <TextActions
+          clip={clip}
+          onRead={onRead}
+          copyText={body}
+          readLabel={voiceUsable ? "Read aloud" : "Choose a voice to read this aloud"}
+          note={note}
+        />
+        {read?.section === heading && readResult?.status === "failed" && (
+          <Callout tone="warning" title="Read aloud unavailable">
+            {readResult.error}{" "}
+            {sheet.voice?.provider === "kokoro" && (
+              <Button variant="ghost" onClick={() => navigate("/settings/local-runtime")}>
+                Local runtime
+              </Button>
+            )}
+          </Callout>
+        )}
+      </div>
+    );
+  };
   const side = isCharacter ? (
         <div className="fy-sheet__side">
           <div className="fy-fan__drift">
@@ -1023,28 +1047,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
               </Badge>
             )}
           </div>
-          {essence && (
-            <div className="fy-texthost">
-              <p className="fy-sheet__lead">{essence.body}</p>
-              <TextActions
-                clip={essenceClip}
-                onRead={readEssence}
-                copyText={essence.body}
-                readLabel={voiceUsable ? "Read aloud" : "Choose a voice to read this aloud"}
-                note={essenceNote}
-              />
-              {readResult?.status === "failed" && (
-                <Callout tone="warning" title="Read aloud unavailable">
-                  {readResult.error}{" "}
-                  {sheet.voice?.provider === "kokoro" && (
-                    <Button variant="ghost" onClick={() => navigate("/settings/local-runtime")}>
-                      Local runtime
-                    </Button>
-                  )}
-                </Callout>
-              )}
-            </div>
-          )}
+          {essence && readableProse("Essence", essence.body, <p className="fy-sheet__lead">{essence.body}</p>)}
         </div>
         <div className="fy-sheet__actions">
           {isCharacter && (
@@ -1156,17 +1159,23 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         <ConnectedProposalPanel key={p.proposal.id} staged={p} />
       ))}
       <div className="fy-sheet__grid" style={isCharacter ? undefined : { gridTemplateColumns: "1fr", gap: 14 }}>
-        {gridSections.map((s) => (
-          <div key={s.heading}>
-            <div className="fy-sheet__sechead" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {s.heading}
-              {!isCharacter && (
-                <span className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`} style={{ width: 5, height: 5 }} />
-              )}
+        {gridSections.map((s) => {
+          // Appearance carries the same descriptive prose as the Essence, so it earns the same
+          // hover read-aloud — once it holds real text, not the empty-section placeholder.
+          const readable = isCharacter && s.heading === "Appearance" && s.body.trim() !== "" && s.body.trim() !== "—";
+          const body = <div className="fy-sheet__secbody">{s.body}</div>;
+          return (
+            <div key={s.heading}>
+              <div className="fy-sheet__sechead" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {s.heading}
+                {!isCharacter && (
+                  <span className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`} style={{ width: 5, height: 5 }} />
+                )}
+              </div>
+              {readable ? readableProse("Appearance", s.body, body) : body}
             </div>
-            <div className="fy-sheet__secbody">{s.body}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {rules.length > 0 && (
         <Section title="Canon rules" aside={<span>owned by canon — edit in canon, not here</span>}>
@@ -1557,300 +1566,7 @@ export function CharacterEditScreen() {
   );
 }
 
-// ---- Reference kit / model sheet / voice ----------------------------------
-
-export function ReferenceKitScreen() {
-  const { worldId, sheetId } = useParams();
-  const world = useOpenWorldGuard(worldId);
-  const sheet = useSheet(worldId, sheetId);
-  const { state } = useStore();
-  const navigate = useNavigate();
-  const kit = world?.referenceKits.find((k) => k.sheetId === sheetId) ?? null;
-  const gate = headGate(kit ?? { sheetId: sheetId ?? "x", tiles: [], compilations: [] });
-  const hasAnchor = kit?.anchor !== undefined;
-  const staleTiles = sheet && kit ? kit.tiles.filter((t) => tileIsStale(t, sheet.version)) : [];
-  // Establish candidates become immutable takes on arrival; selection addresses that record,
-  // never a provider filename that another generation may share.
-  const candidates =
-    state?.app.jobs
-      .filter(
-        (j) =>
-          j.status === "succeeded" &&
-          j.target.kind === "establish-candidate" &&
-          j.target.id?.startsWith(`${sheetId}/`) === true,
-      )
-      .flatMap((job) => {
-        const take = world?.referenceTakes.find(
-          (candidate) =>
-            candidate.jobId === job.id &&
-            candidate.kind === "main-photo" &&
-            candidate.reference?.sheetId === sheetId,
-        );
-        return take?.media
-          ? [{ takeId: take.id, file: `references/${sheetId}/takes/${take.id}/${take.media}` }]
-          : [];
-      }) ?? [];
-  const [style, setStyle] = useState<string | null>(null);
-  const styleValue = style ?? kit?.styleOverride ?? "";
-  const compilation = [...(kit?.compilations ?? [])].reverse().find((c) => c.accepted) ?? null;
-  const slug = world?.meta.slug;
-  const tileBlock = (tile: (NonNullable<typeof kit>["tiles"])[number], i: number) => (
-    <div key={`${tile.angle}-${i}`} className="fy-tile" style={{ width: "auto" }}>
-      <ReferenceTile tile={tile} worldSlug={slug} sheetId={sheetId} />
-      {tile.status === "generated" && (
-        <div style={{ marginTop: 6 }}>
-          <Button
-            onClick={() => {
-              if (worldId && sheetId) lockTileMsg(worldId, sheetId, tile.angle);
-            }}
-          >
-            Lock
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-  return (
-    <div data-screen="reference-kit">
-      <div className="fy-kithead">
-        <span className="fy-kithead__avatar">
-          <Portrait worldSlug={slug} path={sheetId ? sheetPortraitPath(sheetId) : ""} label="" radius={99} />
-        </span>
-        <div>
-          <h1 className="fy-kithead__name">{sheet?.name ?? "Reference kit"}</h1>
-          <div className="fy-mono" style={{ marginTop: 2 }}>
-            reference kit · design v{sheet?.version ?? "…"} ·{" "}
-            {hasAnchor ? "anchor set — every generation carries it" : "no anchor yet — establish a look first"}
-          </div>
-        </div>
-        <span className="fy-h1row__push" />
-        <span className="fy-seg">
-          <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}`)}>
-            Overview
-          </button>
-          <span className="fy-seg__item fy-seg__item--active">Reference</span>
-          <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/voice`)}>
-            Voice
-          </button>
-        </span>
-      </div>
-      <div className="fy-kit">
-        <div className="fy-kit__main">
-          {staleTiles.length > 0 && sheet && (
-            <Callout tone="warning" title={`${staleTiles.length} tile${staleTiles.length === 1 ? "" : "s"} predate v${sheet.version}`}>
-              Made against an older sheet — regenerate looks to catch up. They still reference; the gap is named, not
-              enforced.
-            </Callout>
-          )}
-          {!hasAnchor && (
-            <div>
-              <div className="fy-listhead" style={{ marginBottom: 10 }}>
-                Establish a look
-                <span className="fy-mono">candidates from the sentence and the world's tone</span>
-              </div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    if (worldId && sheetId) establishLook(worldId, sheetId, 4);
-                  }}
-                >
-                  Generate first looks ×4
-                </Button>
-                <span className="fy-mono">pick one and it becomes the face everything inherits</span>
-              </div>
-              {candidates.length > 0 && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-                  {candidates.map((candidate) => (
-                    <Button
-                      key={candidate.takeId}
-                      onClick={() => {
-                        if (worldId && sheetId) chooseAnchorMsg(worldId, sheetId, { source: "take", takeId: candidate.takeId });
-                      }}
-                    >
-                      Choose {candidate.file.split("/").pop()}
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          <div>
-            <div className="fy-listhead" style={{ marginBottom: 10 }}>
-              Head · turnaround
-              <span className={gate.ready ? "fy-mono" : "fy-mono"} style={gate.ready ? { color: "var(--success)" } : undefined}>
-                {gate.ready ? "complete — body unlocked" : `${4 - gate.outstanding.length} of 4 locked · outstanding: ${gate.outstanding.join(", ")}`}
-              </span>
-            </div>
-            <div className="fy-tilerow">{(kit?.tiles ?? []).filter((t) => t.angle.startsWith("head")).map(tileBlock)}</div>
-            <div style={{ marginTop: 10 }}>
-              <Button
-                variant="ghost"
-                disabled={!hasAnchor}
-                onClick={() => {
-                  if (worldId && sheetId) generateMissingTiles(worldId, sheetId, "head");
-                }}
-              >
-                Generate missing head angles
-              </Button>
-            </div>
-          </div>
-          <div>
-            <div className="fy-listhead" style={{ marginBottom: 10 }}>
-              Full body · turnaround
-              <span className="fy-mono">{gate.ready ? "unlocked" : "waiting on head lock — a body without a locked face is a different person"}</span>
-            </div>
-            <div className="fy-tilerow">{(kit?.tiles ?? []).filter((t) => t.angle.startsWith("body")).map(tileBlock)}</div>
-            <div style={{ marginTop: 10 }}>
-              <Button
-                variant="ghost"
-                disabled={!gate.ready}
-                title={gate.ready ? undefined : `outstanding: ${gate.outstanding.join(", ")}`}
-                onClick={() => {
-                  if (worldId && sheetId) generateMissingTiles(worldId, sheetId, "body");
-                }}
-              >
-                {gate.ready
-                  ? "Generate missing body angles"
-                  : `Body blocked · ${gate.outstanding.length} head angle${gate.outstanding.length === 1 ? "" : "s"} outstanding`}
-              </Button>
-            </div>
-          </div>
-        </div>
-        <div className="fy-kit__rail">
-          <div className="fy-boardcard fy-boardcard--quiet">
-            <div style={{ font: "600 14px var(--font-sans)" }}>How this stays consistent</div>
-            <div className="fy-boardcard__body">
-              Locked angles ride along as reference with every generation. New angles are judged against them · drift
-              gets flagged, not filed.
-            </div>
-          </div>
-          <div className="fy-boardcard">
-            <div className="fy-boardcard__head">
-              Model sheet
-              {staleTiles.length > 0 && <span className="fy-boardcard__state" style={{ color: "var(--warning)" }}>tiles newer than last sheet</span>}
-            </div>
-            <div style={{ marginTop: 8, border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", background: "var(--background)" }}>
-              <div style={{ height: 196 }}>
-                <Portrait
-                  worldSlug={slug}
-                  path={compilation && sheetId ? `references/${sheetId}/${compilation.file}` : ""}
-                  label={`${sheet?.name ?? "sheet"}: compiled model sheet`}
-                  radius={0}
-                />
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 9px", borderTop: "1px solid var(--border)" }}>
-                <span style={{ font: "500 8px var(--font-mono)", letterSpacing: "0.08em", textTransform: "uppercase" }}>{sheet?.name}</span>
-                <span style={{ font: "400 8px var(--font-mono)", color: "var(--neutral-400)" }}>
-                  SHEET v{sheet?.version} · {world?.meta.name?.toUpperCase()}
-                </span>
-              </div>
-            </div>
-            <div className="fy-boardcard__mono">
-              the single reference where a model takes only one · generated from the sheet + locked tiles · lands here
-              on accept
-            </div>
-            <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
-              <Button variant="primary" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/model-sheet`)}>
-                Generate sheet…
-              </Button>
-            </div>
-          </div>
-          <div className="fy-boardcard">
-            <div className="fy-boardcard__head">Rendering style</div>
-            <div className="fy-boardcard__body">Override travels with this sheet only — canon doesn't change.</div>
-            <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
-              <Input placeholder="inherits the world's art direction" value={styleValue} onChange={(e) => setStyle(e.target.value)} />
-              <Button
-                onClick={() => {
-                  if (worldId && sheetId) {
-                    setStyleOverrideMsg(worldId, sheetId, styleValue.trim() === "" ? null : styleValue.trim());
-                    setStyle(null);
-                  }
-                }}
-              >
-                Set
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export function ModelSheetScreen() {
-  const { sheetId, worldId } = useParams();
-  const world = useOpenWorldGuard(worldId);
-  const sheet = useSheet(worldId, sheetId);
-  const kit = world?.referenceKits.find((k) => k.sheetId === sheetId) ?? null;
-  const locked = kit?.tiles.filter((t) => t.status === "locked") ?? [];
-  const designated = kit ? designatedCompilation(kit) : null;
-  return (
-    <Screen id="model-sheet-generate">
-      <PageHeader
-        title="Model sheet"
-        meta={<span>{locked.length} locked tiles available to compile</span>}
-        actions={
-          <Button
-            variant="primary"
-            disabled={locked.length === 0}
-            onClick={() => {
-              if (worldId && sheetId) compileGridMsg(worldId, sheetId);
-            }}
-          >
-            Compile classic grid — free, local
-          </Button>
-        }
-      />
-      {(kit?.compilations ?? []).length > 0 && sheet && (
-        <Section title="Compilations" aside={<span>exactly one rides along with dispatches</span>}>
-          <div className="scr-sectionlist">
-            {kit!.compilations.map((c) => {
-              const stale = compilationIsStale(kit!, c, sheet.version);
-              const isDesignated = designated?.file === c.file;
-              return (
-                <div key={c.file} className="scr-sheetsection">
-                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-                    <strong style={{ font: "var(--type-ui)" }}>{c.file}</strong>
-                    <span style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>
-                      {c.format} · sheet v{c.sheetVersion} · {c.tiles.length} tiles
-                    </span>
-                    <span style={{ marginLeft: "auto", display: "flex", gap: "var(--space-2)" }}>
-                      {stale && <Badge tone="warning">stale — sheet is at v{sheet.version}</Badge>}
-                      {isDesignated ? (
-                        <Badge tone="success">rides along</Badge>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          onClick={() => {
-                            if (worldId && sheetId) designateCompilation(worldId, sheetId, c.file);
-                          }}
-                        >
-                          Designate
-                        </Button>
-                      )}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Section>
-      )}
-      <Callout title="The grid is deterministic">
-        Same tiles in, identical image out — a composite, not a generation. It costs nothing, cannot
-        hallucinate, and never touches a provider. Pitch and expression boards arrive as takes with
-        SPEC-013's review loop.
-      </Callout>
-      <div className="lay-cardgrid">
-        {locked.map((tile, i) => (
-          <ReferenceTile key={`${tile.angle}-${i}`} tile={tile} worldSlug={world?.meta.slug} sheetId={sheetId} />
-        ))}
-      </div>
-    </Screen>
-  );
-}
+// ---- Voice ----------------------------------------------------------------
 
 export function VoicePickerScreen() {
   const { worldId, sheetId } = useParams();
@@ -1861,7 +1577,12 @@ export function VoicePickerScreen() {
   const [voiceId, setVoiceId] = useState("");
   const [label, setLabel] = useState("");
   const [manual, setManual] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const sheetPath = sheet ? `characters/${sheet.id}.md` : null;
+  // Clearing commits straight through; drop the busy state once the sheet has no voice again.
+  useEffect(() => {
+    if (clearing && !sheet?.voice) setClearing(false);
+  }, [sheet?.voice, clearing]);
   return (
     <div className="fy-app" data-screen="voice-picker" style={{ minHeight: "calc(100vh - 44px)" }}>
       <div className="fy-scrim">
@@ -1932,23 +1653,27 @@ export function VoicePickerScreen() {
                         });
                       }}
                     >
-                      Stage assignment
+                      Assign
                     </Button>
                   </div>
                 </div>
               )}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              <span className="fy-mono">a gated sheet change — it versions and ripples · assigning updates every production</span>
+              <span className="fy-mono">your own change · applies at once · versions the sheet · updates every production</span>
               <span style={{ flex: 1 }} />
               {sheet?.voice && (
                 <Button
                   variant="ghost"
+                  disabled={clearing}
                   onClick={() => {
-                    if (worldId && sheetPath) assignVoice(worldId, sheetPath, null);
+                    if (worldId && sheetPath) {
+                      setClearing(true);
+                      assignVoice(worldId, sheetPath, null);
+                    }
                   }}
                 >
-                  Clear voice
+                  {clearing ? <Loading inline label="Clearing…" /> : "Clear voice"}
                 </Button>
               )}
               <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}`)}>
@@ -1978,7 +1703,15 @@ function VoiceCandidatesPanel({
   const world = useWorld();
   const sheet = useSheet(worldId, sheetId);
   const [requests, setRequests] = useState<Record<string, string>>({});
+  const [assigning, setAssigning] = useState<string | null>(null);
   const autoPlayed = useRef(new Set<string>());
+  // Assigning commits straight through (no gate), so the change lands in the next world snapshot:
+  // the pressed row stays busy until this sheet's voice is the one we just assigned.
+  useEffect(() => {
+    if (assigning && sheet?.voice && `${sheet.voice.provider}/${sheet.voice.voiceId}` === assigning) {
+      setAssigning(null);
+    }
+  }, [sheet?.voice, assigning]);
   // Matching is what this screen is for, not a step inside it: the picker opens on the ranked
   // list and states what it matched on, rather than asking first and showing nothing until then.
   useEffect(() => {
@@ -2077,16 +1810,19 @@ function VoiceCandidatesPanel({
                   </Button>
                 )}
                 <Button
+                  disabled={assigning === key || assigned}
                   onClick={() => {
-                    if (worldId && sheetPath && (candidate.provider === "kokoro" || candidate.provider === "elevenlabs"))
+                    if (worldId && sheetPath && (candidate.provider === "kokoro" || candidate.provider === "elevenlabs")) {
+                      setAssigning(key);
                       assignVoice(worldId, sheetPath, {
                         provider: candidate.provider,
                         voiceId: candidate.voiceId,
                         label: candidate.label,
                       });
+                    }
                   }}
                 >
-                  Assign
+                  {assigning === key ? <Loading inline label="Assigning…" /> : assigned ? "Assigned" : "Assign"}
                 </Button>
                 {(result?.error ?? preview?.error) && <span className="fy-mono">{result?.error ?? preview?.error}</span>}
               </div>

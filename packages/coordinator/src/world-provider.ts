@@ -21,6 +21,11 @@ export interface WorldProvider {
   reloadWorld?(worldId: string): Promise<WorldBundle>;
   /** Move a world out of the library into `archive/`, whole. Returns where it went. */
   archiveWorld?(worldId: string): Promise<{ folder: string }>;
+  /**
+   * Copy the sample world shipped with this build into the library under a fresh identity
+   * (SPEC-016 R-6). Where the build keeps it is the shell's business, not the provider's.
+   */
+  installSampleWorld?(sourceDir: string): Promise<{ worldId: string; slug: string; name: string }>;
   reconcileExternalEdit?(worldId: string, path: string): Promise<WorldBundle>;
   onWorldStale?(cb: (worldId: string) => void): void;
   /** The accept gate over the open world (SPEC-004). Null until a world is open. */

@@ -204,7 +204,7 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     const bundle = store.getBundle();
     assert.equal(bundle.problems.length, 1);
     assert.equal(bundle.problems[0]!.path, "characters/broken.md");
-    assert.equal(bundle.sheets.length, 6, "the valid entities are usable");
+    assert.equal(bundle.sheets.length, 12, "the valid entities are usable");
     await store.close();
   });
 
@@ -216,7 +216,7 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     const sheet = bundle.sheets.find((s) => s.id === "the-chorister");
     assert.ok(sheet, "retired entity still resolves");
     assert.equal(sheet.retired, true);
-    assert.equal(sheet.version, 2, "retirement is a versioned change");
+    assert.equal(sheet.version, 6, "retirement is a versioned change");
     await store.close();
   });
 
@@ -225,7 +225,7 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     const store = await WorldStore.open(dir, { clock: CLOCK });
     const path = "characters/maren-kest.md";
 
-    // Make v5 so v4 is historical.
+    // Make v6 so v5 is historical.
     const live = await readFile(join(dir, path), "utf8");
     const doc = MarkdownFile.parse(live);
     doc.setBody(doc.body.replace("Salt-crusted braids", "Iron-grey braids"));
@@ -235,12 +235,12 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
       files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(live) }],
     });
 
-    await store.restoreVersion(path, 4, "test");
+    await store.restoreVersion(path, 5, "test");
     const after = MarkdownFile.parse(await readFile(join(dir, path), "utf8"));
-    assert.equal(after.data["version"], 6, "restore produced v6, not a rewrite of v4");
-    assert.ok(after.body.includes("Salt-crusted braids"), "content is v4's");
-    const v5 = await readFile(join(dir, ".history/characters/maren-kest/v5.md"), "utf8");
-    assert.ok(v5.includes("Iron-grey braids"), "v5 remains in history (R-20)");
+    assert.equal(after.data["version"], 7, "restore produced v7, not a rewrite of v5");
+    assert.ok(after.body.includes("Salt-crusted braids"), "content is v5's");
+    const v6 = await readFile(join(dir, ".history/characters/maren-kest/v6.md"), "utf8");
+    assert.ok(v6.includes("Iron-grey braids"), "v6 remains in history (R-20)");
     await store.close();
   });
 
@@ -265,7 +265,7 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     const bundle = second.getBundle();
     assert.equal(bundle.externalEdits.length, 0);
     const sheet = bundle.sheets.find((s) => s.id === "bray-half-hitch");
-    assert.equal(sheet?.version, 3, "adoption bumped the version");
+    assert.equal(sheet?.version, 7, "adoption bumped the version");
     const changeLine = bundle.changes.findLast((c) => c.entity === "characters/bray-half-hitch");
     assert.equal(changeLine?.source, "external-edit");
     await second.close();
@@ -290,7 +290,7 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await rename(dir, newDir);
     const reopened = await WorldStore.open(newDir, { clock: CLOCK });
     const bundle = reopened.getBundle();
-    assert.equal(bundle.sheets.length, 6);
+    assert.equal(bundle.sheets.length, 12);
     assert.deepEqual(bundle.problems, []);
     await reopened.close();
   });

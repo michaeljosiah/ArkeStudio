@@ -26,7 +26,7 @@ describe("threads (R-14..R-16, D5, D6)", () => {
       question: "The watch is a civic office — but who actually pays the wages?",
       candidates: ["CANON-019", "CANON-001"],
     });
-    assert.equal(entryId, "CANON-045", "allocated from nextCanonId");
+    assert.equal(entryId, "CANON-072", "allocated from nextCanonId");
     const bundle = store.getBundle();
     const entry = bundle.canon.find((c) => c.id === entryId);
     assert.equal(entry?.type, "thread");
@@ -46,12 +46,12 @@ describe("threads (R-14..R-16, D5, D6)", () => {
     const index = store.getIndex()!;
     const result = searchCanon(index.db, "tide tithe watch wages");
     assert.ok(
-      result.candidates.every((c) => c.entryId !== "CANON-045"),
+      result.candidates.every((c) => c.entryId !== "CANON-072"),
       "the thread shares the vocabulary and still never surfaces",
     );
-    // The fixture's own open thread is excluded too, and the searched count says so honestly.
+    // The fixture's own open threads are excluded too, and the searched count says so honestly.
     assert.ok(result.candidates.every((c) => c.entryId !== "CANON-044"));
-    assert.equal(result.searched, 5, "6 entries minus the open thread");
+    assert.equal(result.searched, 28, "34 entries minus the six open threads");
     await store.close();
   });
 
@@ -86,11 +86,11 @@ describe("threads (R-14..R-16, D5, D6)", () => {
       title: "The tithe is paid at slack water",
       statement: "No tithe changes hands while the tide is moving.",
     });
-    assert.deepEqual(staged.reservedCanonIds, ["CANON-045"]);
-    assert.equal(staged.targets[0]!.path, "canon/CANON-045.md");
+    assert.deepEqual(staged.reservedCanonIds, ["CANON-072"]);
+    assert.equal(staged.targets[0]!.path, "canon/CANON-072.md");
     const outcome = await gate.accept(staged.id);
     assert.equal(outcome.status, "accepted");
-    const entry = store.getBundle().canon.find((c) => c.id === "CANON-045");
+    const entry = store.getBundle().canon.find((c) => c.id === "CANON-072");
     assert.equal(entry?.status, "settled");
     assert.equal(entry?.introducedAt, store.getBundle().meta.canonRevision);
     await store.close();
@@ -103,7 +103,7 @@ describe("threads (R-14..R-16, D5, D6)", () => {
     assert.equal(bundle.canon.find((c) => c.id === "CANON-002")?.retired, true, "still resolvable");
     const result = searchCanon(store.getIndex()!.db, "tide calling stood in");
     assert.ok(result.candidates.every((c) => c.entryId !== "CANON-002"), "absent from retrieval");
-    assert.equal(result.searched, 4, "5 searchable minus the retired one");
+    assert.equal(result.searched, 27, "28 searchable minus the retired one");
     await store.close();
   });
 });
