@@ -27,7 +27,7 @@ describe("reference queries (R-11, R-12)", () => {
     const refs = refsForSheet(index.db, "maren-kest");
     assert.equal(refs.tiles, 3);
     assert.deepEqual(refs.productions, ["saltlight"]);
-    assert.deepEqual(refs.scenes, ["sh_12"]);
+    assert.deepEqual(refs.scenes, ["sh_04", "sh_07", "sh_12", "sh_20", "sh_21", "sh_22"]);
     assert.deepEqual(refs.takesByVersion, { 3: 1, 4: 2 });
     index.close();
   });
@@ -35,7 +35,7 @@ describe("reference queries (R-11, R-12)", () => {
   it("answers a canon entry's cited-by from the index alone", async () => {
     const { index } = await openFixtureIndex();
     const refs = refsForCanon(index.db, "CANON-002");
-    assert.deepEqual(refs.sheets, [{ id: "maren-kest", atVersion: 4 }]);
+    assert.deepEqual(refs.sheets, [{ id: "maren-kest", atVersion: 5 }]);
     assert.ok(refs.takesByRevision[41]! >= 1 && refs.takesByRevision[42]! >= 1);
     index.close();
   });
@@ -49,8 +49,8 @@ describe("ripple queries (R-13) — from the index, never a model", () => {
 
     assert.match(byKind.get("stale-reference-tiles")!.summary, /^3 reference tiles predate v5/);
     assert.deepEqual(byKind.get("productions-pick-up")!.targets, ["saltlight"]);
-    assert.deepEqual(byKind.get("scene-briefs-rerender")!.targets, ["sc_04"]);
-    assert.deepEqual(byKind.get("owning-canon-rules")!.targets, ["CANON-002"]);
+    assert.deepEqual(byKind.get("scene-briefs-rerender")!.targets, ["sc_02", "sc_04", "sc_06"]);
+    assert.deepEqual(byKind.get("owning-canon-rules")!.targets, ["CANON-002", "CANON-058"]);
     assert.deepEqual(byKind.get("takes-pinned-to-old-version")!.targets, ["tk_01J8F0000000000000000000B2"]);
     index.close();
   });
@@ -84,18 +84,18 @@ describe("search and the refusal floor (R-16..R-19, R-23, D8)", () => {
 
   it("reports the searched count truthfully (R-18)", async () => {
     const { index } = await openFixtureIndex();
-    assert.equal(searchCanon(index.db, "anything at all").searched, 5);
+    assert.equal(searchCanon(index.db, "anything at all").searched, 28);
     index.close();
   });
 
   it("refuses below the floor with closest entries as receipts, and no model in the path (R-17, D8)", async () => {
     const { index } = await openFixtureIndex();
-    const result = searchCanon(index.db, "bicycle warranty paperwork");
+    const result = searchCanon(index.db, "bicycle warranty umbrella typewriter");
     assert.equal(result.floorCleared, false);
     assert.ok(result.candidates.length <= 3);
     // Structural: this module has no model dependency to call — the refusal renders from
     // retrieval alone. The assertion is that the result is complete in itself.
-    assert.equal(result.searched, 5);
+    assert.equal(result.searched, 28);
     index.close();
   });
 
@@ -233,7 +233,7 @@ describe("sheet search (#70 §9.2)", () => {
   it("narrows to one kind and counts only that kind as searched", async () => {
     const { index } = await openFixtureIndex();
     const result = searchSheets(index.db, "harbour", { kind: "character" });
-    assert.equal(result.searched, 3, "three character sheets in the fixture");
+    assert.equal(result.searched, 5, "five character sheets in the fixture");
     for (const c of result.candidates) assert.equal(c.kind, "character");
     index.close();
   });
@@ -259,7 +259,7 @@ describe("sheet search (#70 §9.2)", () => {
     assert.ok(!ids.includes("the-chorister"), "a retired sheet must not answer a new question");
     assert.equal(
       searchSheets(index.db, "chorister", { kind: "character" }).searched,
-      2,
+      4,
       "and the searched count says so honestly",
     );
     index.close();
@@ -270,7 +270,7 @@ describe("sheet search (#70 §9.2)", () => {
     const result = searchSheets(index.db, "?! -");
     assert.equal(result.floorCleared, false);
     assert.deepEqual(result.candidates, []);
-    assert.equal(result.searched, 6, "and still says how many sheets it would have searched");
+    assert.equal(result.searched, 12, "and still says how many sheets it would have searched");
     index.close();
   });
 

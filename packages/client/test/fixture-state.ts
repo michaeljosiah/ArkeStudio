@@ -105,6 +105,9 @@ const state: ClientState = {
     setup: null,
     update: { status: "idle", targetVersion: null, progressPercent: null, flow: null, detail: null },
     env: null,
+    // Available, so the navigation test renders the pane that offers the install rather than
+    // the shorter one that explains why it cannot.
+    sampleWorld: { available: true, installing: false, note: null },
   },
   worlds: [
     {

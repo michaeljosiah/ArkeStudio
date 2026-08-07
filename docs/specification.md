@@ -1811,7 +1811,8 @@ across restarts and are revocable, reusing Arke's `grant-store`.
   Voxa uses is GPL and must remain a separate executable, never linked.
 - **N-7 · Installer.** NSIS, currently unsigned; signing is required before v1. OpenCode and Voxa
   are included only when their external build resources are staged; models are downloaded rather
-  than shipped.
+  than shipped. The sample world **is** shipped — 12 MB, so that first run needs no network to
+  show what the application is for (SPEC-016 R-6, D12).
 - **N-8 · Accessibility.** Full keyboard navigation, reduced-motion respected, and no
   information conveyed by colour alone — the design system is monochrome, so imagery carries
   colour and the UI must not depend on it.

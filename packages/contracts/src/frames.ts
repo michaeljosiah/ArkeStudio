@@ -85,6 +85,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   /** Or do not: the candidate is deleted and the world keeps the image it had. */
   z.object({ kind: z.literal("discard-world-image"), worldId: UlidSchema }).strict(),
   z.object({ kind: z.literal("archive-world"), worldId: UlidSchema }).strict(),
+  /**
+   * Install the sample world (SPEC-016 R-6). No arguments: which world ships is a property of
+   * the build, and offering a choice the build cannot honour would be offering a lie. Asking
+   * twice is not an error — the second copy is a world of its own, slugged accordingly.
+   */
+  z.object({ kind: z.literal("install-sample-world") }).strict(),
   /** SPEC-002: reload after an external change made the open world stale (R-23). */
   z.object({ kind: z.literal("reload-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: adopt one closed-world edit — snapshot, bump, log (R-28). */

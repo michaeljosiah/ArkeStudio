@@ -17,7 +17,7 @@ describe("the app index (R-5, R-6, R-15, D2, D3)", () => {
     const provider = new FsWorldProvider(root);
     const first = await provider.listWorlds(); // seeds
     assert.equal(first.length, 1);
-    assert.equal(first[0]!.counts.characters, 3);
+    assert.equal(first[0]!.counts.characters, 5);
 
     // Change the world's contents directly. A registry-served list must NOT see it — proof
     // that no world folder was scanned to produce the answer.
@@ -27,12 +27,12 @@ describe("the app index (R-5, R-6, R-15, D2, D3)", () => {
       "utf8",
     );
     const second = await provider.listWorlds();
-    assert.equal(second[0]!.counts.characters, 3, "served from the registry, not a scan");
+    assert.equal(second[0]!.counts.characters, 5, "served from the registry, not a scan");
 
     // Opening the world refreshes its registry row with real counts.
     await provider.loadWorld(second[0]!.worldId);
     const third = await provider.listWorlds();
-    assert.equal(third[0]!.counts.characters, 4);
+    assert.equal(third[0]!.counts.characters, 6);
     await provider.close();
   });
 
@@ -51,7 +51,7 @@ describe("the app index (R-5, R-6, R-15, D2, D3)", () => {
     const provider = new FsWorldProvider(root);
     const [known] = await provider.listWorlds();
     assert.ok(known);
-    assert.equal(known.counts.characters, 3);
+    assert.equal(known.counts.characters, 5);
     await provider.close();
 
     const copiedDir = join(root, "worlds", "the-restored-world");
@@ -73,7 +73,7 @@ describe("the app index (R-5, R-6, R-15, D2, D3)", () => {
     const restarted = new FsWorldProvider(root);
     const worlds = await restarted.listWorlds();
     assert.equal(worlds.length, 2);
-    assert.equal(worlds.find((world) => world.worldId === known.worldId)?.counts.characters, 3);
+    assert.equal(worlds.find((world) => world.worldId === known.worldId)?.counts.characters, 5);
     assert.equal(worlds.find((world) => world.worldId === copiedMeta.worldId)?.name, "The Restored World");
     await restarted.close();
   });

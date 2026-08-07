@@ -890,6 +890,20 @@ export function useArchiveNote(): StoreState["archiveNote"] {
   return useStore().archiveNote;
 }
 
+/** Copy the sample world this build carries into the library (SPEC-016 R-6). */
+export function installSampleWorld(): void {
+  send({ kind: "install-sample-world" });
+}
+
+/**
+ * Whether there is a sample world to install, and how the last attempt went. Read off the
+ * snapshot rather than folded from events: the answer is settled at start-up, so a Settings
+ * pane opened much later still gets it.
+ */
+export function useSampleWorld(): ClientState["app"]["sampleWorld"] | null {
+  return useStore().state?.app.sampleWorld ?? null;
+}
+
 export function reloadWorld(worldId: string): void {
   send({ kind: "reload-world", worldId });
 }

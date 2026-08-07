@@ -68,14 +68,14 @@ describe("incremental update equals cold rebuild (R-20, D6)", () => {
       const sheetPath = "characters/bray-half-hitch.md";
       const sheetLive = await readFile(join(dir, sheetPath), "utf8");
       const sheetDoc = MarkdownFile.parse(sheetLive);
-      sheetDoc.setData({ canonRules: ["CANON-045"] });
+      sheetDoc.setData({ canonRules: ["CANON-072"] });
       const canonNew =
-        "---\nid: CANON-045\ntype: rule\ntitle: Debts are knots\nstatus: settled\nintroducedAt: 0\nlinks: [bray-half-hitch]\n---\n\nA debt to the Council is tied, not counted.\n";
+        "---\nid: CANON-072\ntype: rule\ntitle: Debts are knots\nstatus: settled\nintroducedAt: 0\nlinks: [bray-half-hitch]\n---\n\nA debt to the Council is tied, not counted.\n";
       await store.commit({
         kind: "canon-and-sheet",
         source: "test",
         files: [
-          { path: "canon/CANON-045.md", action: "create", content: canonNew, baseHash: null },
+          { path: "canon/CANON-072.md", action: "create", content: canonNew, baseHash: null },
           { path: sheetPath, action: "replace", content: sheetDoc.serialize(), baseHash: sha256(sheetLive) },
         ],
       });

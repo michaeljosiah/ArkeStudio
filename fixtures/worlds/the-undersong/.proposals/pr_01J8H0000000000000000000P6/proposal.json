@@ -1,0 +1,16 @@
+{
+  "id": "pr_01J8H0000000000000000000P6",
+  "kind": "canon-edit",
+  "summary": "1847 belongs in the watch rule — the year the ledger does not explain, recorded where the next watchkeeper will actually read it",
+  "targets": [
+    {
+      "path": "canon/CANON-019.md",
+      "baseVersion": 60,
+      "baseHash": "sha256:4b7d20c9e16a83f5"
+    }
+  ],
+  "baseCanonRevision": 90,
+  "reservedCanonIds": [],
+  "source": "form",
+  "created": "2026-08-07T09:20:00Z"
+}

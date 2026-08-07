@@ -26,6 +26,7 @@ export const SCREENS: ScreenEntry[] = [
   { id: "settings-agents", samplePath: "/settings/agents" },
   { id: "settings-local-runtime", samplePath: "/settings/local-runtime" },
   { id: "settings-who-does-what", samplePath: "/settings/who-does-what" },
+  { id: "settings-sample-world", samplePath: "/settings/sample-world" },
   { id: "settings-about", samplePath: "/settings/about" },
   { id: "activity", samplePath: "/activity" },
 

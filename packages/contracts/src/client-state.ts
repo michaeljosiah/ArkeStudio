@@ -285,6 +285,20 @@ export const ClientStateSchema = z
           .strict()
           .nullable()
           .default(null),
+        /**
+         * The sample world this build carries (SPEC-016 R-6). In the snapshot for the same
+         * reason `env` is: whether there is one to install is settled at start-up, so a
+         * Settings pane opened long afterwards can say what it knows instead of asking.
+         */
+        sampleWorld: z
+          .object({
+            available: z.boolean(),
+            installing: z.boolean(),
+            /** What the last attempt did, in words. Null until one has been made. */
+            note: z.object({ text: z.string().min(1), refused: z.boolean() }).strict().nullable(),
+          })
+          .strict()
+          .default({ available: false, installing: false, note: null }),
       })
       .strict(),
     worlds: z.array(WorldSummarySchema),

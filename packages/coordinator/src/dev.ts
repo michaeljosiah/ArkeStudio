@@ -95,6 +95,9 @@ const coordinator = new Coordinator({
   jobsSeedPath: join(devRoot, "queue", "jobs.jsonl"),
   ledgerSeedPath: join(devRoot, "ledger.jsonl"),
   appRoot: devRoot,
+  // What the packaged build reads out of its resources, dev reads out of the repo — so
+  // Settings · Sample world is a working surface here and not a dead one (SPEC-016 R-6).
+  sampleWorldPath: join(fixturesRoot, "worlds", "the-undersong"),
   setup: nodeSetupDeps(),
   authoring: { buildConfig: buildSessionConfig, agentForPurpose, roster: ROSTER },
   // The dev coordinator carries the app's own preset speakers so the voice picker has a

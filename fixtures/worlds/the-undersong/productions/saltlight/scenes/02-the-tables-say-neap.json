@@ -1,0 +1,47 @@
+{
+  "id": "sc_02",
+  "number": 2,
+  "slug": "the-tables-say-neap",
+  "title": "The tables say neap",
+  "status": "accepted",
+  "version": 3,
+  "inherits": { "location": "the-vigil", "timeOfDay": "dusk", "tone": "quiet dread" },
+  "shots": [
+    {
+      "id": "sh_04",
+      "number": 4,
+      "title": "The ledger, opened",
+      "description": "@the-vigil rail desk. @maren-kest opens the ledger to tonight's page and fills the predicted column from the tables. Six columns, unchanged since 1747.",
+      "camera": "CU · locked, overhead",
+      "audio": { "kind": "sfx", "line": "pen, chain, wind under the door" },
+      "durationSec": 5
+    },
+    {
+      "id": "sh_05",
+      "number": 5,
+      "title": "Neap",
+      "description": "Insert: the word *neap* in her hand, in the predicted column. Ink still wet.",
+      "camera": "ECU · static",
+      "audio": { "kind": "silence" },
+      "durationSec": 2.5
+    },
+    {
+      "id": "sh_06",
+      "number": 6,
+      "title": "The waterline disagrees",
+      "description": "From the rail, the marker post at the harbour mouth. The tide is a hand-span above where the tables put it, and steady — not rising, which is worse.",
+      "camera": "MS · slow push-in",
+      "audio": { "kind": "sfx", "line": "water against stone, too high" },
+      "durationSec": 6
+    },
+    {
+      "id": "sh_07",
+      "number": 7,
+      "title": "She checks it twice",
+      "description": "@maren-kest looks from the post to the ledger and back. She does not write anything. The not-writing is the beat.",
+      "camera": "MCU · handheld, minimal",
+      "audio": { "kind": "silence" },
+      "durationSec": 4
+    }
+  ]
+}

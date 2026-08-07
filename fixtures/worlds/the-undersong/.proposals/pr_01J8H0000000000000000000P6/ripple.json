@@ -1,0 +1,26 @@
+{
+  "computedAt": "2026-08-07T09:20:01Z",
+  "governing": false,
+  "items": [
+    {
+      "kind": "owning-canon-rules",
+      "summary": "CANON-045 owns the ledger's accuracy — the amendment must record the gap without restating the rule",
+      "targets": ["CANON-045"]
+    },
+    {
+      "kind": "contradiction-candidates",
+      "summary": "\"oldest unbroken record\" and a missing year pull against each other — the gate should see both sentences side by side",
+      "targets": ["CANON-019", "CANON-045"]
+    },
+    {
+      "kind": "productions-see-new-revision",
+      "summary": "The Ledger of Nights draws on CANON-019 in two chapters — drafts pick up the amendment on next dispatch",
+      "targets": ["the-ledger-of-nights"]
+    },
+    {
+      "kind": "gains-cross-reference",
+      "summary": "CANON-064's Charter Night entry gains a cross-reference to the missing year",
+      "targets": ["CANON-064"]
+    }
+  ]
+}

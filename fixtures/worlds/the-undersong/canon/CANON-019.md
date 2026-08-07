@@ -5,9 +5,17 @@ title: The Vigil holds the harbour mouth
 status: settled
 introducedAt: 14
 settledAt: 20
-links: [the-vigil]
+amendedAt: 60
+links: [the-vigil, CANON-052]
 ---
 
 The Vigil predates the town and its rail must never be left unmanned between dusk and slack
 water. The watch is a civic office, paid by the Ebb Council, and its ledger of nights is the
 oldest unbroken record the harbour has.
+
+**Amended at revision 60.** The civic reason the watch gives for itself — safety, cargo,
+drowning — is true and is not the whole of it. An unmanned rail is not only an unwatched harbour.
+It is a stitch nobody is holding for however long the gap lasts (CANON-052), and the record's
+silence on this is not an oversight. Nobody who set the rule down seems to have wanted it written
+any more plainly than "must never be left unmanned." Two hundred years of watchkeepers have kept
+that instruction exactly, and correctly, without ever being told why it was so absolute.

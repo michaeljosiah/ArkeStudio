@@ -59,6 +59,13 @@ extraResources:
   - from: build-resources/espeak-ng/${arch}
     to: espeak-ng
     filter: ["**/*"]
+  # The sample world (SPEC-016 R-6). Specified as an optional download while it was 31 MB of
+  # full-resolution art; at 12 MB, bundling costs less than the network dependency it removes —
+  # a first run that promises no account, no key and no network should not need one to show
+  # what the application is for.
+  - from: ../../fixtures/worlds/the-undersong
+    to: sample-world
+    filter: ["**/*"]
   - from: ../../THIRD-PARTY-NOTICES.md
     to: THIRD-PARTY-NOTICES.md
 win:

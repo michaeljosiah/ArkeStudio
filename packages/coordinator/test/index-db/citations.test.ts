@@ -71,11 +71,11 @@ describe("citation extraction (§2.4, R-8..R-10)", () => {
       .get("tk_01J8F0000000000000000000B2") as { v: number };
     assert.equal(dispatchRow.v, 4);
 
-    // Live references, by contrast, follow: the sheet's canon-rule citation now carries v5.
+    // Live references, by contrast, follow: the sheet's canon-rule citation now carries v6.
     const rule = after.db
       .prepare("SELECT source_version AS v FROM citations WHERE source_id = 'maren-kest' AND relation = 'canon-rule'")
       .get() as { v: number };
-    assert.equal(rule.v, 5);
+    assert.equal(rule.v, 6);
     await store.close();
   });
 

@@ -330,6 +330,29 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
 
   /**
+   * The sample world landed in the library (SPEC-016 R-6). Carries the slug because a second
+   * install is `the-undersong-2`, and a screen that says otherwise would be naming a folder
+   * that is not there.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("sample-world.installed"),
+      worldId: UlidSchema,
+      slug: SlugSchema,
+      name: z.string().min(1),
+    })
+    .strict(),
+  /** Installing refused, and why — a build without the sample world says so rather than stalling. */
+  z
+    .object({
+      ...base,
+      type: z.literal("sample-world.refused"),
+      reason: z.string().min(1),
+    })
+    .strict(),
+
+  /**
    * Reading a document for facts (SPEC-015 stage two), as the chat sees it. Extraction was
    * silent before: it ran, wrote a batch into the artifact and said nothing, so a screen could
    * only find out by noticing the snapshot had changed. These two events are what let the offer
