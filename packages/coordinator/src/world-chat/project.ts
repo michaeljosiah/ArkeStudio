@@ -77,6 +77,7 @@ function wouldCarry(candidate: WorldChangeCandidate): boolean {
  * a short present-tense phrase. The vocabulary is this product's, because the tools are.
  */
 const WORKING_LABELS: Record<string, string> = {
+  // The world-query tools, which arrive namespaced — see workingLabel.
   search_canon: "Searching canon",
   search_sheets: "Searching the cast",
   get_entry: "Reading canon",
@@ -84,6 +85,31 @@ const WORKING_LABELS: Record<string, string> = {
   list_entities: "Looking over the world",
   related: "Checking what references it",
   get_attachment_text: "Reading what you attached",
+  /*
+   * The harness's own read-only tools. The world-builder agent is allowed read, glob, grep, list
+   * and the todo pair (adapter-opencode/config.ts READ_ONLY_PERMISSION), and it does reach for
+   * them — a turn that only ever showed the world-query verbs would fall back to the generic
+   * label for a good part of its life.
+   */
+  read: "Reading a file",
+  glob: "Looking through files",
+  grep: "Searching the files",
+  list: "Looking through files",
+  todowrite: "Planning what to check",
+  todoread: "Planning what to check",
+  /*
+   * Delegation, which in practice is most of what a turn reports.
+   *
+   * Observed against a real turn: the world-builder agent calls `task`, and every world-query
+   * call then happens inside the *child* session — which the runner filters out, because it
+   * matches events on its own session id. So the vocabulary above is mostly unreachable today
+   * and this is the label a turn actually shows.
+   *
+   * Worded without naming delegation. That a model spawned a helper is an implementation detail
+   * of the harness, and saying "delegating" invites "to whom?" — a question this product has no
+   * surface to answer and no reason to raise.
+   */
+  task: "Working through it",
 };
 
 /** The resting label, before any tool has run. Never blank: a spinner with no words is a shrug. */
@@ -92,8 +118,26 @@ export const THINKING_LABEL = "Thinking";
 /** The label for a turn that has started writing its reply. */
 export const WRITING_LABEL = "Writing";
 
+/**
+ * The verb for one tool call.
+ *
+ * MCP tools do not arrive under the names they were registered with. opencode keys every one as
+ * `${server}_${tool}` (its `mcp/index.ts`), so `search_canon` — served by the `arke-world` MCP —
+ * reaches us as `arke-world_search_canon`. The first version of this looked up the bare name,
+ * missed on every world-query call, and fell back to "Checking the world" for the whole turn.
+ * The words were all correct and none of them were ever shown.
+ *
+ * Matched by suffix rather than by stripping a hard-coded `arke-world_`, so renaming the MCP
+ * server cannot silently take the vocabulary out again — which is precisely how this went
+ * unnoticed: a fallback that reads plausibly hides its own failure.
+ */
 export function workingLabel(tool: string): string {
-  return WORKING_LABELS[tool] ?? "Checking the world";
+  const direct = WORKING_LABELS[tool];
+  if (direct !== undefined) return direct;
+  for (const [name, label] of Object.entries(WORKING_LABELS)) {
+    if (tool.endsWith(`_${name}`)) return label;
+  }
+  return "Checking the world";
 }
 
 export interface ProjectOptions {

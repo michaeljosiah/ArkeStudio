@@ -210,6 +210,46 @@ describe("saying that the studio is working", () => {
     const html = renderWorking({ runStatus: null, runStartedAt: null });
     assert.doesNotMatch(html, /fy-working/, "the line belongs to the turn, not to the screen");
   });
+
+  /**
+   * Caught by watching a real turn: the sequence began "Writing" — the last word of the
+   * *previous* turn. Progress is transient and keyed by conversation, so without gating it on
+   * the run's own start, every turn opens by describing work that finished a minute ago.
+   */
+  it("ignores a label left over from the previous turn", () => {
+    renderWorking();
+    __applyEventForTest({
+      at: "2026-08-06T09:59:00Z", // before this run started
+      type: "world-chat.progress",
+      conversationId: CV,
+      label: "Writing",
+    } as never);
+    const html = renderToString(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CV}`]}>
+        <App />
+      </MemoryRouter>,
+    ).replaceAll("<!-- -->", "");
+
+    assert.match(html, /Thinking/, "it falls back to the resting word");
+    assert.doesNotMatch(html, /Writing/, "rather than describing the turn before this one");
+  });
+
+  it("takes a label produced by this turn", () => {
+    renderWorking();
+    __applyEventForTest({
+      at: "2026-08-06T10:00:30Z", // after this run started
+      type: "world-chat.progress",
+      conversationId: CV,
+      label: "Searching canon",
+    } as never);
+    const html = renderToString(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CV}`]}>
+        <App />
+      </MemoryRouter>,
+    ).replaceAll("<!-- -->", "");
+
+    assert.match(html, /Searching canon/);
+  });
 });
 
 /**
