@@ -403,3 +403,126 @@ describe("fetching the local runtimes at setup", () => {
     assert.match(model.detail ?? "", /waiting on/);
   });
 });
+
+/**
+ * An archive component: the shape the Higgsfield CLI arrives in (issue 137). A release
+ * publishes one archive per architecture holding a single executable, so the component fetches,
+ * verifies, unpacks, and uses the binary where it landed — nothing is installed and nothing
+ * reaches PATH.
+ */
+const GZIP_MAGIC = [0x1f, 0x8b] as const;
+
+function archiveCatalogue(): CatalogueEntry[] {
+  return [
+    {
+      id: "higgsfield-cli",
+      displayName: "Higgsfield CLI",
+      purpose: "Generates through your Higgsfield account",
+      sizeMb: 1,
+      optional: true,
+      spec: {
+        kind: "archive",
+        dir: "higgsfield-cli",
+        executable: "hf.exe",
+        byArch: {
+          x64: { url: "https://example.test/hf_x64.tar.gz", file: "hf_x64.tar.gz", sizeMb: 1, magic: GZIP_MAGIC },
+          arm64: { url: "https://example.test/hf_arm64.tar.gz", file: "hf_arm64.tar.gz", sizeMb: 1, magic: GZIP_MAGIC },
+        },
+      },
+    },
+  ];
+}
+
+/** A `tar` that really writes the executable the archive is supposed to contain. */
+function archiveDeps(opts: { tarCode?: number; emit?: boolean } = {}) {
+  const base = deps({ chunks: [bytes(2048, GZIP_MAGIC)] });
+  return {
+    ...base,
+    async run(command: string, args: readonly string[]) {
+      base.calls.push(`run ${command} ${args.join(" ")}`);
+      if (command === "tar" && (opts.emit ?? true)) {
+        const into = args[args.indexOf("-C") + 1]!;
+        await mkdir(into, { recursive: true });
+        await writeFile(join(into, "hf.exe"), "MZ");
+      }
+      return { code: opts.tarCode ?? 0, output: opts.tarCode ? "tar: not in gzip format" : "" };
+    },
+  };
+}
+
+describe("a tool that arrives as an archive (issue 137)", () => {
+  it("fetches this machine's architecture, unpacks it, and lands the executable", async () => {
+    const appRoot = await root();
+    const events: DomainEvent[] = [];
+    const d = archiveDeps();
+    const svc = new LocalSetupService(d, (e) => events.push(e), {
+      appRoot,
+      catalogue: archiveCatalogue(),
+      throttleMs: 0,
+      arch: "arm64",
+    });
+
+    svc.retry("higgsfield-cli");
+    await svc.run();
+
+    assert.ok(d.calls.includes("fetch https://example.test/hf_arm64.tar.gz"), "the arm64 archive, not the x64 one");
+    const row = last(events).components.find((c) => c.id === "higgsfield-cli");
+    assert.equal(row?.state, "ready");
+    // Beside the models, not among them: an executable is not a weight file.
+    assert.equal(await readFile(join(appRoot, "higgsfield-cli", "hf.exe"), "utf8"), "MZ");
+  });
+
+  it("is offered, never fetched unasked — a vendor's tool is not the app's call", async () => {
+    const appRoot = await root();
+    const events: DomainEvent[] = [];
+    const d = archiveDeps();
+    const svc = new LocalSetupService(d, (e) => events.push(e), {
+      appRoot,
+      catalogue: archiveCatalogue(),
+      throttleMs: 0,
+    });
+
+    await svc.run();
+    assert.equal(last(events).components.find((c) => c.id === "higgsfield-cli")?.state, "available");
+    assert.equal(d.calls.filter((c) => c.startsWith("fetch")).length, 0);
+  });
+
+  it("an archive that does not unpack leaves nothing that looks installed", async () => {
+    const appRoot = await root();
+    const events: DomainEvent[] = [];
+    const svc = new LocalSetupService(archiveDeps({ tarCode: 1, emit: false }), (e) => events.push(e), {
+      appRoot,
+      catalogue: archiveCatalogue(),
+      throttleMs: 0,
+    });
+
+    svc.retry("higgsfield-cli");
+    await svc.run();
+
+    const row = last(events).components.find((c) => c.id === "higgsfield-cli");
+    assert.equal(row?.state, "failed");
+    assert.match(row!.detail!, /gzip/);
+    // Discovery stats this path. A half-unpacked archive here would read as a working tool.
+    await assert.rejects(readFile(join(appRoot, "higgsfield-cli", "hf.exe")));
+  });
+
+  it("says so rather than guessing when no build exists for this machine", async () => {
+    const appRoot = await root();
+    const events: DomainEvent[] = [];
+    const only = archiveCatalogue();
+    only[0]!.spec = { ...(only[0]!.spec as { kind: "archive" } & Record<string, unknown>), byArch: {} } as never;
+    const svc = new LocalSetupService(archiveDeps(), (e) => events.push(e), {
+      appRoot,
+      catalogue: only,
+      throttleMs: 0,
+      arch: "arm64",
+    });
+
+    svc.retry("higgsfield-cli");
+    await svc.run();
+
+    const row = last(events).components.find((c) => c.id === "higgsfield-cli");
+    assert.equal(row?.state, "blocked");
+    assert.match(row!.detail!, /architecture/);
+  });
+});

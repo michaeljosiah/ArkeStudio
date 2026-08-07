@@ -6,6 +6,7 @@ import { FalClient } from "../src/clients/fal.js";
 import { HiggsfieldClient } from "../src/clients/higgsfield.js";
 import { OllamaClient } from "../src/clients/ollama.js";
 import { OpenAiClient } from "../src/clients/openai.js";
+import { lazyHiggsfieldRunner } from "../src/higgsfield-cli.js";
 import { ProviderAuthError, type CommandRunner, type FetchLike } from "../src/types.js";
 
 /** A fetch fake: route → {status, body}. Anything unrouted throws (network unreachable). */
@@ -594,5 +595,30 @@ describe("provider artifact filenames match their declared image format", () => 
       new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/webp" } });
     const artifacts = await new HiggsfieldClient(run, fetchImpl).fetchArtifacts("", "j");
     assert.deepEqual(artifacts.map((artifact) => artifact.name), ["output-1.webp"]);
+  });
+});
+
+describe("the CLI can arrive after the app has started (issue 137)", () => {
+  it("binds on first use, not at launch, so an install does not need a restart", async () => {
+    let installed = false;
+    let probes = 0;
+    const runner = lazyHiggsfieldRunner(
+      async () => {
+        probes += 1;
+        return installed ? { command: "C:/app/hf.exe", source: "bundled" as const, version: "1.1.22" } : null;
+      },
+      () => async () => ({ code: 0, stdout: "{}", stderr: "" }),
+    );
+
+    // Before: the remedy, not an ENOENT — an absent CLI is not the shot having failed (R-4).
+    const missing = await runner(["account", "status"]);
+    assert.equal(missing.code, null);
+    assert.match(missing.stderr, /not installed/);
+
+    installed = true;
+    assert.equal((await runner(["account", "status"])).code, 0);
+    // And once bound it stays bound: discovery is not re-run on every call.
+    await runner(["account", "status"]);
+    assert.equal(probes, 2);
   });
 });

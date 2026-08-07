@@ -1194,9 +1194,25 @@ const CAPABILITY_LABEL: Record<Capability, string> = {
  * command to type, always visible rather than revealed by a failure, because the in-app button
  * cannot serve every machine and finding that out at the moment it fails is too late.
  */
+/**
+ * Which setup component fetches each tool. The app can install these itself, so "not
+ * installed" is a state with an action rather than only an instruction.
+ */
+const TOOL_COMPONENT: Partial<Record<ProviderId, string>> = { higgsfield: "higgsfield-cli" };
+
 function ProviderToolLine({ id }: { id: ProviderId }) {
   const { state } = useStore();
+  const setup = useSetup();
   const [copied, setCopied] = useState(false);
+  const component = setup?.components.find((c) => c.id === TOOL_COMPONENT[id]);
+  const fetching = component?.state === "downloading" || component?.state === "installing" || component?.state === "queued";
+  const arrived = component?.state === "ready" || component?.state === "present";
+  // The download finishing is not the row changing: discovery is what decides where the tool
+  // is, so ask again rather than leaving "not installed" beside a tool that just landed.
+  const published = state?.app.providerTools.find((t) => t.provider === id)?.state;
+  useEffect(() => {
+    if (arrived && published === "absent") refreshProviderTool(id);
+  }, [arrived, published, id]);
   // No published status means discovery has not reported — a build with no probe wired, or the
   // moment before the first one lands. That is "we have not looked", which still owes the user
   // a row and a command; rendering nothing would leave the pane with no credential line at all.
@@ -1229,6 +1245,16 @@ function ProviderToolLine({ id }: { id: ProviderId }) {
         <div className="fy-prov__eyebrow">SIGN-IN</div>
         <div className="fy-set__field">
           <span style={{ flex: 1 }}>{label}</span>
+          {tool.state === "absent" && (
+            <button
+              type="button"
+              className="fy-set__link"
+              disabled={fetching}
+              onClick={() => setupRetry(TOOL_COMPONENT[id]!)}
+            >
+              {fetching ? "installing…" : `Install${component ? ` · ${component.sizeMb} MB` : ""}`}
+            </button>
+          )}
           {tool.state === "signing-in" ? (
             <button type="button" className="fy-set__link" onClick={() => cancelProviderToolSignIn(id)}>
               Stop waiting

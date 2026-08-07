@@ -32,7 +32,24 @@ export type ComponentKind =
    * A model pulled by a runtime we do not own, through its own CLI. No catalogue entry ships
    * one — which model Ollama runs is chosen in Settings · Local runtime, on the disk it costs.
    */
-  | { kind: "pull"; command: string; args: readonly string[] };
+  | { kind: "pull"; command: string; args: readonly string[] }
+  /**
+   * A compressed archive holding one executable: fetched, verified, extracted, and then run
+   * where it landed. Nothing is installed and nothing reaches PATH — the app holds the path
+   * itself, so the copy it fetched cannot be confused with one the user manages, and removing
+   * the app removes it.
+   *
+   * Per architecture, because a release publishes one archive per architecture and picking the
+   * wrong one produces a binary that will not start rather than a download that fails.
+   */
+  | {
+      kind: "archive";
+      /** Relative to the app root, not the models folder — this is a tool, not a weight file. */
+      dir: string;
+      /** What the archive must contain for the fetch to have worked. */
+      executable: string;
+      byArch: Partial<Record<"x64" | "arm64", DownloadFile>>;
+    };
 
 export interface CatalogueEntry {
   id: string;
@@ -57,9 +74,14 @@ const WHISPER = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 /** The app's own preset speakers (packages/voice KOKORO_PRESETS) — one small file each. */
 const KOKORO_VOICES = ["af_bella", "af_nicole", "am_michael", "am_adam", "bf_emma", "bm_george"] as const;
 
+const HIGGSFIELD_VERSION = "1.1.22";
+const HIGGSFIELD_RELEASE = `https://github.com/higgsfield-ai/cli/releases/download/v${HIGGSFIELD_VERSION}`;
+
 /** ONNX files begin with a protobuf field header; GGML files begin with the ASCII tag. */
 const ONNX_MAGIC = [0x08] as const;
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const; // "lmgg" — ggml little-endian tag
+/** gzip's two-byte header, so an HTML error page never gets extracted as an archive. */
+const GZIP_MAGIC = [0x1f, 0x8b] as const;
 
 export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   {
@@ -110,6 +132,42 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     },
   },
   // ---- offered, never fetched on their own -------------------------------------------
+  // The Higgsfield CLI. Offered rather than fetched because it is only useful to somebody who
+  // has a Higgsfield account to sign in to, and downloading a vendor's tool unasked is not the
+  // app's call. Discovery prefers an installation already on PATH, so a machine that ran
+  // `npm i -g @higgsfield/cli` or `brew install` never ends up with a second, drifting copy.
+  //
+  // Pinned to a release, with that release's own published checksums. The archive ships
+  // `hf.exe`; `higgsfield`, `higgs` and `hf` are shims the npm package installs, which is why
+  // discovery looks for all four spellings.
+  {
+    id: "higgsfield-cli",
+    displayName: "Higgsfield CLI",
+    purpose: "Generates images and video through your Higgsfield account — sign in from Providers",
+    sizeMb: 7,
+    optional: true,
+    spec: {
+      kind: "archive",
+      dir: "higgsfield-cli",
+      executable: "hf.exe",
+      byArch: {
+        x64: {
+          url: `${HIGGSFIELD_RELEASE}/hf_${HIGGSFIELD_VERSION}_windows_amd64.tar.gz`,
+          file: `hf_${HIGGSFIELD_VERSION}_windows_amd64.tar.gz`,
+          sizeMb: 7,
+          magic: GZIP_MAGIC,
+          sha256: "f8eb1700954ec8e019db005107c5c6746dea05e0648437f87e22b981e637b2c7",
+        },
+        arm64: {
+          url: `${HIGGSFIELD_RELEASE}/hf_${HIGGSFIELD_VERSION}_windows_arm64.tar.gz`,
+          file: `hf_${HIGGSFIELD_VERSION}_windows_arm64.tar.gz`,
+          sizeMb: 6,
+          magic: GZIP_MAGIC,
+          sha256: "f74f71475c04913a74b5f21f7cb71284b6978e9949b2256d0aa5b51a306fb88b",
+        },
+      },
+    },
+  },
   // Gemma 4 through Ollama. Sizes are Ollama's published download sizes; the VRAM figures
   // follow the manifest's convention of the weights plus a couple of gigabytes to work in.
   {

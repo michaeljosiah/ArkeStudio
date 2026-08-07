@@ -32,7 +32,7 @@ import {
 import {
   createProviderClients,
   discoverHiggsfield,
-  higgsfieldRunner,
+  lazyHiggsfieldRunner,
   higgsfieldSignIn,
   higgsfieldWhoAmI,
   probeRuntime,
@@ -131,14 +131,16 @@ function bundledVoxaPath(): string | null {
 }
 
 /**
- * Where a Higgsfield CLI we fetched ourselves would live. The release archive ships `hf.exe`,
- * not `higgsfield.exe` — the three documented command names are npm shims. Nothing writes here
- * yet; discovery prefers an installation already on PATH either way, so a machine that ran
+ * Where the Higgsfield CLI lands when Settings fetches it — the `higgsfield-cli` catalogue
+ * entry's directory, under the app root. The release archive ships `hf.exe`, not
+ * `higgsfield.exe`: the three documented command names are npm shims.
+ *
+ * Discovery still prefers an installation already on PATH, so a machine that ran
  * `npm i -g @higgsfield/cli` or `brew install` never ends up with a second, drifting copy.
  */
-function bundledHiggsfieldPath(): string | null {
-  const path = app.isPackaged ? join(process.resourcesPath, "higgsfield", "hf.exe") : null;
-  return path !== null && existsSync(path) ? path : null;
+function fetchedHiggsfieldPath(appRoot: string): string | null {
+  const path = join(appRoot, "higgsfield-cli", "hf.exe");
+  return existsSync(path) ? path : null;
 }
 
 let coordinator: Coordinator | null = null;
@@ -428,11 +430,15 @@ async function initialize(): Promise<{ port: number }> {
   // Higgsfield authenticates through its own CLI, so "is it configured" is a discovery
   // question rather than a credential one. Absent is a legitimate answer: the client then
   // fails every call with the remedy, and Settings can offer to fetch it.
-  const bundledHiggsfield = bundledHiggsfieldPath();
-  const higgsfieldCli = await discoverHiggsfield(bundledHiggsfield ? { bundledPath: bundledHiggsfield } : {});
+  // Recomputed per call, not captured: Settings can fetch the CLI mid-session, and a path
+  // resolved at launch would have said "absent" for the rest of the run.
+  const findHiggsfield = () => {
+    const fetched = fetchedHiggsfieldPath(appRoot);
+    return discoverHiggsfield(fetched ? { bundledPath: fetched } : {});
+  };
   const providerClients = createProviderClients({
     fetch: (url, init) => fetch(url, init),
-    ...(higgsfieldCli ? { higgsfield: higgsfieldRunner(higgsfieldCli.command) } : {}),
+    higgsfield: lazyHiggsfieldRunner(findHiggsfield),
     capture: providerCalls,
   });
 
@@ -673,7 +679,7 @@ async function initialize(): Promise<{ port: number }> {
     // login is a browser flow we start and wait on rather than a value anyone types (#137).
     toolProbes: {
       higgsfield: {
-        discover: () => discoverHiggsfield(bundledHiggsfield ? { bundledPath: bundledHiggsfield } : {}),
+        discover: findHiggsfield,
         whoAmI: (command) => higgsfieldWhoAmI(command),
         signIn: (command, signal) => higgsfieldSignIn(command, signal),
       },

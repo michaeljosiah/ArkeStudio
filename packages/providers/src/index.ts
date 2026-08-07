@@ -17,6 +17,7 @@ export {
   higgsfieldRunner,
   higgsfieldSignIn,
   higgsfieldWhoAmI,
+  lazyHiggsfieldRunner,
   missingHiggsfieldRunner,
   type DiscoveredHiggsfield,
   type HiggsfieldDiscoveryOptions,

@@ -168,6 +168,29 @@ export function missingHiggsfieldRunner(): CommandRunner {
 }
 
 /**
+ * A runner that finds the CLI when it is first needed rather than at startup, and remembers it.
+ *
+ * The app can install the CLI itself from Settings, and a runner bound at launch would have
+ * captured "absent" — so the tool a user just fetched would not work until they restarted, with
+ * nothing on screen saying why. Discovery is a couple of cheap process probes and only runs
+ * again while the answer is still no.
+ */
+export function lazyHiggsfieldRunner(
+  discover: () => Promise<DiscoveredHiggsfield | null>,
+  bind: (command: string) => CommandRunner = (command) => higgsfieldRunner(command),
+): CommandRunner {
+  let bound: CommandRunner | null = null;
+  return async (args, options) => {
+    if (bound === null) {
+      const found = await discover().catch(() => null);
+      if (found === null) return missingHiggsfieldRunner()(args, options);
+      bound = bind(found.command);
+    }
+    return bound(args, options);
+  };
+}
+
+/**
  * Who the CLI is signed in as. `account status` is the probe rather than `auth token`, for the
  * same reason the client uses it: `auth token` prints the live token to stdout, and something
  * that only needs a yes or no should not be handling a secret to get one.
