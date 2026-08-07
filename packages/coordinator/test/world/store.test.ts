@@ -4,6 +4,7 @@ import { cp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tempDir } from "../tmp.js";
+import { until } from "../wait.js";
 import { WorldLockedError } from "../../src/world/lock.js";
 import { WorldOpenError, readWorldMeta } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -11,6 +12,16 @@ import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { FIXTURE_WORLD, makeTempWorld } from "./helpers.js";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
+
+/**
+ * Long enough that a watcher event would have landed if one were coming.
+ *
+ * Only for the assertions that something does *not* happen — you cannot wait for a non-event, so
+ * these have to spend the time. Everything asserting that a report *did* arrive waits on the
+ * report itself via `until`, which is what stops a busy machine from failing the suite.
+ */
+const SETTLE_MS = 1000;
+const settle = () => new Promise<void>((resolve) => setTimeout(resolve, SETTLE_MS));
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
@@ -24,13 +35,12 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     // Editors and sync tools often rewrite the same bytes or touch metadata. The final world is
     // unchanged, so the OS event is only a dirty signal and must not become a warning.
     await writeFile(path, bytes);
-    await delay(1000);
+    await settle();
     assert.equal(reports, 0);
     assert.equal(store.getBundle().stale, false);
 
     await writeFile(path, Buffer.concat([bytes, Buffer.from("\nexternal change\n")]));
-    await delay(1000);
-    assert.equal(reports, 1);
+    await until(() => reports === 1, "the changed bytes to be reported stale");
     assert.equal(store.getBundle().stale, true);
     await store.close();
   });
@@ -43,8 +53,7 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     const baseline = await readFile(scanStatePath, "utf8");
     const path = join(dir, "characters", "maren-kest.md");
     await writeFile(path, `${await readFile(path, "utf8")}\nexternal change\n`);
-    await delay(1000);
-    assert.equal(reports, 1);
+    await until(() => reports === 1, "the external edit to be reported stale");
     assert.equal(await readFile(scanStatePath, "utf8"), baseline, "speculative verification never adopts bytes");
 
     await store.reload();
@@ -58,8 +67,7 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     let reports = 0;
     const store = await WorldStore.open(dir, { clock: CLOCK, events: { onStale: () => reports++ } });
     await writeFile(join(dir, "characters", "maren-kest.md"), "not valid frontmatter");
-    await delay(1000);
-    assert.equal(reports, 1);
+    await until(() => reports === 1, "the malformed bytes to be reported stale");
     await store.reload();
     assert.ok(store.getBundle().problems.some((problem) => problem.path === "characters/maren-kest.md"));
     await store.close();
@@ -75,8 +83,7 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
       } else {
         await rm(join(dir, "characters", "maren-kest.md"));
       }
-      await delay(1000);
-      assert.equal(reports, 1, `${action} is a verified manifest difference`);
+      await until(() => reports === 1, `${action} to be reported as a verified manifest difference`);
       await store.close();
     }
   });
@@ -88,7 +95,7 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     const { mkdir } = await import("node:fs/promises");
     await mkdir(join(dir, "exports"), { recursive: true });
     await writeFile(join(dir, "exports", "review.mp4"), "derived output");
-    await delay(1000);
+    await settle();
     assert.equal(reports, 0);
     assert.equal(store.getBundle().stale, false);
     await store.close();
