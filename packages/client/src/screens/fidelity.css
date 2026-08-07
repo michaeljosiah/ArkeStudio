@@ -1576,8 +1576,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   padding: 24px;
   overflow-y: auto;
 }
+/*
+ * 982px, not the canvas's declared 920.
+ *
+ * The design canvas is content-box and this app resets everything to border-box, so a width read
+ * off the canvas source is a *content* width and arrives here 60px of padding and 2px of border
+ * short. 920 + 30 + 30 + 1 + 1 is what the canvas actually renders, and what the pane inside
+ * needs in order to hold the provider list and its detail at the sizes 40a draws them.
+ */
 .fy-settings {
-  width: 920px;
+  width: 982px;
   max-width: 100%;
   background: var(--background);
   border: 1px solid var(--border);
@@ -1606,8 +1614,10 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 /* The canvas fixes this at 624px on an 850px frame (40a); the cap stays viewport-relative so a
    short window still fits, but it no longer stops 64px short of the design on a tall one. */
 .fy-settings__body { display: flex; gap: 24px; margin-top: 18px; min-height: 470px; max-height: min(624px, 73vh); }
+/* 177px = the canvas's 160px of tab plus its 16px gutter and 1px rule; see .fy-settings above on
+   why every canvas width needs its padding and border added back here. */
 .fy-settings__rail {
-  width: 160px;
+  width: 177px;
   flex: none;
   display: flex;
   flex-direction: column;
@@ -1715,10 +1725,80 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-set__dot--warn { background: var(--warning); }
 .fy-set__state { font: 400 10px var(--font-mono); color: var(--muted-foreground); }
 .fy-set__note { font: 400 10px/1.6 var(--font-mono); color: var(--neutral-400); margin-top: 10px; }
-.fy-theme-options { border: 0; padding: 0; margin: 0; }
+.fy-theme-options { border: 0; padding: 0; margin: 4px 0 0; }
 .fy-theme-option { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
+/* The list ends at the last option, not with a rule under it hanging into the space below. */
+.fy-theme-option:last-of-type { border-bottom: 0; }
 .fy-theme-option__copy { display: block; flex: 1; min-width: 0; }
-.fy-theme-option input { width: 15px; height: 15px; margin: 0; accent-color: var(--foreground); }
+/*
+ * The name over its explanation, not beside it — these are spans, where the shared settings row
+ * uses divs and stacks on its own.
+ *
+ * 35d also sets this list a step larger than the row template every other pane uses (13px over
+ * 12.5px, a 10px hint over 9.5px): three choices given a whole pane can afford it, and eight
+ * provider rows in the same space cannot, which is why the sizes are scoped here.
+ */
+.fy-theme-option__copy .fy-set__title { display: block; font: 600 13px var(--font-sans); }
+.fy-theme-option__copy .fy-set__caps {
+  display: block;
+  font: 400 10px var(--font-mono);
+  color: var(--muted-foreground);
+  margin-top: 3px;
+}
+/*
+ * The ring, drawn rather than tinted (35d). A native radio with accent-color is the platform's
+ * dot, which on Windows is a filled disc and looks nothing like the design's hollow ring.
+ *
+ * Both states keep a 15px hole and thicken outward — 1.5px idle, 4.5px chosen — so selecting one
+ * makes the ring heavier without moving the centre. That is why the outer sizes differ: 15 + 1.5
+ * either side is 18, and 15 + 4.5 either side is 24. The canvas gets those totals from
+ * content-box; here they are stated, because everything in this app is border-box.
+ */
+.fy-theme-option input {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex: none;
+  border-radius: 99px;
+  border: 1.5px solid var(--neutral-300);
+  background: transparent;
+  cursor: pointer;
+}
+.fy-theme-option input:checked { width: 24px; height: 24px; border: 4.5px solid var(--foreground); }
+.fy-theme-option input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+/*
+ * What each theme looks like, as two swatches (35d).
+ *
+ * These paint from the ramp on purpose and are exempt from the surface rule in tokens.test.ts:
+ * a swatch *depicts* a theme, so the light one must stay light in dark mode and the dark one dark
+ * in light mode. Following the active theme would leave both cards showing the same thing.
+ */
+/* The appearance pane fills its height so the swatches can sit at its foot, where 35d puts them;
+   every other pane keeps the shared content-height grid. */
+.fy-settings__pane:has(.fy-set--appearance) { align-content: stretch; }
+.fy-set--appearance { display: flex; flex-direction: column; }
+.fy-themeswatches { display: flex; gap: 12px; margin-top: auto; padding-top: 18px; }
+.fy-themeswatch { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.fy-themeswatch__frame { height: 74px; display: flex; align-items: center; gap: 9px; padding: 0 14px; }
+.fy-themeswatch__block { width: 26px; height: 26px; border-radius: 7px; flex: none; }
+.fy-themeswatch__lines { flex: 1; min-width: 0; }
+.fy-themeswatch__lines i { display: block; height: 6px; border-radius: 99px; }
+.fy-themeswatch__lines i:first-child { width: 70%; }
+.fy-themeswatch__lines i:last-child { width: 45%; margin-top: 5px; }
+.fy-themeswatch__caption {
+  padding: 8px 12px; border-top: 1px solid var(--border);
+  font: 500 10px var(--font-mono); letter-spacing: 0.05em; color: var(--muted-foreground);
+}
+.fy-themeswatch--light .fy-themeswatch__frame { background: var(--neutral-50); }
+.fy-themeswatch--light .fy-themeswatch__block { background: var(--neutral-900); }
+.fy-themeswatch--light .fy-themeswatch__lines i:first-child { background: var(--neutral-200); }
+.fy-themeswatch--light .fy-themeswatch__lines i:last-child { background: var(--neutral-100); }
+.fy-themeswatch--dark .fy-themeswatch__frame { background: var(--neutral-950); }
+.fy-themeswatch--dark .fy-themeswatch__block { background: var(--neutral-50); }
+.fy-themeswatch--dark .fy-themeswatch__lines i:first-child { background: var(--neutral-800); }
+.fy-themeswatch--dark .fy-themeswatch__lines i:last-child { background: var(--neutral-900); }
 .fy-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .fy-set__why { display: flex; align-items: center; gap: 7px; margin-top: 7px; }
 .fy-set__why span:last-child { font: 400 10.5px/1.5 var(--font-sans); color: var(--muted-foreground); }
@@ -1853,9 +1933,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
    and the sections below are drawn over it. */
 .fy-prov { display: flex; min-height: 300px; max-height: 46vh; overflow: hidden; }
 .fy-prov__rail {
-  /* 196px is the canvas's number (40a): a provider name plus its "4 on" tally without either
-     eliding, which 178 could not hold for the longer names. */
-  width: 196px;
+  /* 211px = the canvas's 196px of row plus its 14px gutter and 1px rule (40a). The row is what
+     the number is really about: a provider name beside its "4 on" tally, neither eliding. */
+  width: 211px;
   flex: none;
   border-right: 1px solid var(--border);
   padding-right: 14px;
@@ -1913,11 +1993,39 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-prov__model--off { opacity: 0.45; }
 .fy-prov__modelname { font: 400 12.5px var(--font-sans); color: var(--foreground); }
 .fy-prov__price { font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
+/*
+ * An outlined pill, not bare amber text (40c). It has to survive being the third thing on a model
+ * row after a name and a price, and the outline is what keeps it a badge rather than a word that
+ * happens to be coloured. The same shape the dispatch bar gives it, at this row's smaller size.
+ */
+/* The alert threshold, on the screen that reports it (26a). */
+.fy-spendalert__toggle {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: 400 11px var(--font-sans);
+  padding: 0;
+}
+.fy-spendalert__toggle:hover { color: var(--foreground); }
+.fy-spendalert {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.fy-spendalert__label { font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+
 .fy-prov__unverified {
   font: 500 8.5px var(--font-mono);
-  letter-spacing: 0.1em;
   font-style: normal;
   color: var(--warning);
+  border: 1px solid var(--warning);
+  border-radius: 999px;
+  padding: 2px 7px;
+  flex: none;
 }
 /*
  * The switch is the row's only control, so it carries the whole state: filled is on.
@@ -2035,6 +2143,11 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-set__aboutname { font: 650 26px var(--font-sans); letter-spacing: -0.02em; }
 .fy-set__aboutmeta { font: 400 11px var(--font-mono); color: var(--neutral-400); }
 .fy-set__aboutline { font: 400 12.5px var(--font-sans); color: var(--muted-foreground); margin-top: 5px; }
+.fy-set__actions { display: flex; gap: 9px; margin-top: 14px; }
+/* At the foot of the pane, where 35b puts it — after the rows, not floating among them. */
+.fy-set__copyright { margin-top: auto; padding-top: 18px; font: 400 10px var(--font-mono); color: var(--neutral-400); }
+.fy-settings__pane:has(.fy-set--about) { align-content: stretch; }
+.fy-set--about { display: flex; flex-direction: column; }
 
 .fy-update-transition { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: var(--space-6); background: color-mix(in srgb, var(--background) 92%, transparent); backdrop-filter: blur(12px); }
 .fy-update-transition__panel { max-width: 440px; text-align: center; color: var(--foreground); }

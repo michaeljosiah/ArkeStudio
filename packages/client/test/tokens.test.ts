@@ -84,6 +84,9 @@ describe("design tokens", () => {
         if (selector === "" || selector.startsWith(".dark")) continue;
         // A mark, not a surface.
         if (/dot/i.test(selector)) continue;
+        // A swatch depicts a theme rather than wearing one: the light card has to stay light in
+        // dark mode, or the pair stops being a comparison.
+        if (/swatch/i.test(selector)) continue;
         // Paired with an explicit dark counterpart somewhere in the same file.
         if (!text.includes(`.dark ${selector}`)) offenders.push(`${relative(SRC, path)}: ${selector}`);
       }
