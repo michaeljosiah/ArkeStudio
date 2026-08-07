@@ -209,30 +209,6 @@
   color: var(--muted-foreground);
 }
 
-.scr-changelist {
-  display: grid;
-}
-.scr-change {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: var(--space-4);
-  align-items: baseline;
-  padding: var(--space-2) var(--space-4);
-  border-bottom: var(--border-1) solid var(--line-soft);
-  font: var(--type-ui);
-  font-weight: var(--weight-regular);
-}
-.scr-change__entity {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--muted-foreground);
-}
-.scr-change__when {
-  font: var(--type-label);
-  color: var(--faint);
-  white-space: nowrap;
-}
-
 /* ---- Canon ask --------------------------------------------- */
 .scr-answer {
   display: grid;

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import { Portrait } from "./portrait.js";
 import { X } from "./icons.js";
 import { cx } from "./ui.js";
@@ -24,6 +24,7 @@ export function ImageDialog({
   label,
   dialogLabel,
   title,
+  subtitle,
   triggerLabel,
   closeLabel,
   triggerClassName,
@@ -42,6 +43,12 @@ export function ImageDialog({
   dialogLabel?: string;
   /** Heading inside the dialog. */
   title: ReactNode;
+  /**
+   * What this picture is, under the name — "main photo", "character sheet". The canvas (42a)
+   * splits the two rather than running them together on one line, so the subject reads first and
+   * the kind sits under it in mono, the way every other metadata line in the app does.
+   */
+  subtitle?: ReactNode;
   /** Accessible name for the trigger. */
   triggerLabel: string;
   /** Accessible name for the close button; defaults from the trigger's subject. */
@@ -55,12 +62,22 @@ export function ImageDialog({
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const titleId = useId();
-  const [available, setAvailable] = useState(false);
-  // A different picture has not loaded yet, whatever the last one did. Without this the trigger
-  // stays enabled across a change of subject and briefly opens an empty frame.
-  useEffect(() => {
-    setAvailable(false);
-  }, [worldSlug, path]);
+  /*
+   * Which picture is known to have arrived, rather than a bare "something has".
+   *
+   * A different picture has not loaded yet, whatever the last one did — the trigger must not stay
+   * enabled across a change of subject and open an empty frame. That used to be an effect that
+   * reset the flag, which raced the load it was guarding: for a cached image the load can settle
+   * during the first paint, and the mount pass of the effect then set it straight back to false.
+   * Comparing against the current path decides the same thing during render, with nothing to race.
+   */
+  const subject = `${worldSlug ?? ""}|${path}`;
+  const [loaded, setLoaded] = useState<string | null>(null);
+  const available = loaded === subject;
+  const onAvailabilityChange = useCallback(
+    (ok: boolean) => setLoaded(ok ? subject : null),
+    [subject],
+  );
   const close = () => dialog.current?.close();
 
   return (
@@ -79,7 +96,7 @@ export function ImageDialog({
           path={path}
           label={label}
           radius={triggerRadius}
-          onAvailabilityChange={setAvailable}
+          onAvailabilityChange={onAvailabilityChange}
         />
       </button>
       <dialog
@@ -93,7 +110,10 @@ export function ImageDialog({
       >
         <div className="fy-portrait-dialog__panel">
           <div className="fy-portrait-dialog__head">
-            <h2 id={titleId}>{title}</h2>
+            <div className="fy-portrait-dialog__titles">
+              <h2 id={titleId}>{title}</h2>
+              {subtitle && <div className="fy-portrait-dialog__sub">{subtitle}</div>}
+            </div>
             <button
               type="button"
               className="fy-portrait-dialog__close"

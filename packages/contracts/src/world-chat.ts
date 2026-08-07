@@ -787,6 +787,16 @@ export const WorldChatLoadedSchema = z
     groups: z.array(CandidateGroupSchema),
     attachments: z.array(WorldChatAttachmentSchema),
     activeRun: WorldChatRunSchema.nullable(),
+    /**
+     * The most recent run that ended without producing a reply, once it is no longer active.
+     *
+     * Without this a failure erases itself: `activeRun` is only ever a running or interrupted
+     * run, so a turn that timed out stops being active the instant it fails and the screen goes
+     * quiet — which is exactly what it looks like when nothing was sent at all. A person who
+     * waited two minutes for an answer is owed the difference between "still thinking" and
+     * "this did not work".
+     */
+    lastFailedRun: WorldChatRunSchema.nullable().default(null),
     summary: z.string().max(8000).optional(),
     proposalIds: z.array(ProposalIdSchema),
     /** What its wrap-up could not carry; empty until one has happened. */
@@ -999,6 +1009,21 @@ export const WorldChatWorkspaceSchema = z
     seq: z.number().int().min(0).default(0),
     /** Set while a turn is in flight, so the composer can say so. */
     runStatus: WorldChatRunStatusSchema.nullable().default(null),
+    /**
+     * The turn that failed and left no reply, so the screen can say so and offer it again.
+     *
+     * `runStatus` cannot carry this: it is read from the *active* run, and a failed run stops
+     * being active the moment it fails. Silence then looks the same as never having asked.
+     */
+    lastFailure: z
+      .object({
+        turnId: TurnIdSchema,
+        status: WorldChatRunStatusSchema,
+        /** Operator-safe; never carries message, candidate or world content. */
+        detail: z.string().max(500).optional(),
+      })
+      .strict()
+      .optional(),
     /**
      * The conversation's own attachments, as chips need them.
      *

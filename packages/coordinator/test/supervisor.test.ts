@@ -114,18 +114,28 @@ describe("ChildSupervisor", () => {
   });
 
   it("reports a typed protocol failure instead of generic absence", async () => {
+    // The budget is generous on purpose. A stated incompatibility is terminal, so this returns
+    // as soon as the child answers once — the budget only has to cover process spawn, which on a
+    // loaded machine takes longer than the 500ms this used to allow. That race was the flake:
+    // under load the child never answered in time, validateHealth never ran, and the assertion
+    // saw the timeout message instead of the reason.
     const sup = new ChildSupervisor({
       id: "voxa",
       command: process.execPath,
       args: [CHILD],
       env: { MODE: "healthy", PROTOCOL_VERSION: "2" },
       validateHealth: async () => ({ ok: false, reason: "voxa health contract is incompatible" }),
-      readyTimeoutMs: 500,
+      readyTimeoutMs: 20_000,
       probeIntervalMs: 50,
     });
+    const started = Date.now();
     await sup.start();
     assert.equal(sup.status, "failed");
     assert.equal(sup.reason, "voxa health contract is incompatible");
+    assert.ok(
+      Date.now() - started < 15_000,
+      "and it stops as soon as the contract is known to be wrong, rather than spending the budget",
+    );
   });
 
   it("declares failure with a stated reason when a child never becomes healthy, and kills it (R-5)", async () => {

@@ -250,12 +250,37 @@ export function foldConversation(
     groups: [...groups.values()],
     attachments: [...attachments.values()],
     activeRun: [...runs.values()].find((r) => r.status === "interrupted" || r.status === "running") ?? null,
+    // The newest run only, and only when it failed: an older failure that a later turn already
+    // answered is history, not a thing to keep apologising for.
+    lastFailedRun: lastRunIfFailed([...runs.values()], shown),
     ...(summary ? { summary } : {}),
     proposalIds: [...proposalIds],
     notCarried,
     problems,
   };
   return { view, problems, tombstones: [...tombstones.values()], needsInterruptedRunRepair };
+}
+
+/**
+ * The newest run, when it failed and left the conversation without an answer.
+ *
+ * Cancelling is excluded: the person pressed stop, so they know why there is no reply, and being
+ * told about it would be the app explaining their own decision back to them. Everything else --
+ * timeout, failure, an exhausted budget -- is the app owing an explanation.
+ *
+ * Also excluded once a later studio message exists for the same turn, which is what a retry
+ * produces: the failure is then answered history rather than the state of the conversation.
+ */
+function lastRunIfFailed(runs: WorldChatRun[], messages: WorldChatMessage[]): WorldChatRun | null {
+  const newest = runs.reduce<WorldChatRun | null>(
+    (best, run) => (best === null || run.startedAt >= best.startedAt ? run : best),
+    null,
+  );
+  if (newest === null) return null;
+  if (newest.status === "running" || newest.status === "completed" || newest.status === "cancelled") return null;
+  if (newest.status === "interrupted") return null; // already carried by activeRun, with its own repair
+  const answered = messages.some((m) => m.turnId === newest.turnId && m.role === "studio");
+  return answered ? null : newest;
 }
 
 /** The row the world snapshot carries: enough to choose a conversation, and no history. */

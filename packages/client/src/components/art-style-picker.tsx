@@ -1,4 +1,5 @@
 import { Textarea } from "./ui.js";
+import { Check, Plus } from "./icons.js";
 import { ART_STYLE_PRESETS, presetById, type ArtStylePreset } from "../lib/art-styles.js";
 
 /**
@@ -32,6 +33,18 @@ export function ArtStyleGrid({
           className={preset.id === selectedId ? "fy-styles__card is-selected" : "fy-styles__card"}
           onClick={() => onSelect(preset)}
         >
+          {/*
+           * The same harbour, nine treatments. The preview is the control here — a name and a
+           * sentence describe a look, but only seeing one scene rendered nine ways lets you
+           * compare the treatment instead of the subject, which is the whole reason this step
+           * is a grid rather than a dropdown.
+           */}
+          <span className="fy-styles__frame">
+            <img src={`/art-styles/${preset.id}.svg`} alt="" aria-hidden="true" />
+            <span className="fy-styles__tick" aria-hidden="true">
+              <Check size={12} />
+            </span>
+          </span>
           <span className="fy-styles__name">{preset.name}</span>
           <span className="fy-styles__blurb">{preset.blurb}</span>
         </button>
@@ -44,7 +57,11 @@ export function ArtStyleGrid({
         className={selectedId === null ? "fy-styles__card fy-styles__card--custom is-selected" : "fy-styles__card fy-styles__card--custom"}
         onClick={() => onSelect(null)}
       >
-        <span className="fy-styles__name">Describe your own</span>
+        <span className="fy-styles__frame">
+          <Plus size={17} />
+          <span className="fy-styles__customlabel">Describe your own</span>
+        </span>
+        <span className="fy-styles__name">Custom</span>
         <span className="fy-styles__blurb">Write the look in your own words.</span>
       </button>
     </div>

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, UlidSchema } from "./ids.js";
+import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
@@ -154,6 +154,28 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({ kind: z.literal("proposal-mark-seen"), worldId: UlidSchema, proposalId: z.string().min(1) })
     .strict(),
   /**
+   * #70 §11.4.1, §12.1: change one field of a staged proposal before accepting it.
+   *
+   * `field` is the label the review projection showed — "Title", "Statement", "Name", a section
+   * heading — because the person is editing the line they were looking at, not a file offset.
+   *
+   * `expectedDraftRevision` is refused when stale rather than merged. Two people, or two windows,
+   * editing the same proposal must not silently combine into a version neither of them read: the
+   * losing edit comes back and says so. `requestId` makes the retry after that idempotent.
+   */
+  z
+    .object({
+      kind: z.literal("proposal-update-field"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      proposalId: z.string().min(1),
+      path: z.string().min(1),
+      field: z.string().min(1),
+      value: z.string().max(20_000),
+      expectedDraftRevision: z.number().int().min(1),
+    })
+    .strict(),
+  /**
    * #70: open one conversation's workspace, or close the open one.
    *
    * A null id closes it. The client holds one conversation at a time, so leaving a screen should
@@ -195,6 +217,23 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: z.string().min(1),
       conversationId: ConversationIdSchema,
       expectedConversationSeq: z.number().int().min(0),
+    })
+    .strict(),
+  /**
+   * #70 §10.1.1: run a failed turn again.
+   *
+   * Names an existing failed, cancelled or interrupted turn and starts a new run against it. No
+   * second user message is appended — messages are immutable and the person already said this
+   * once; asking them to retype it to recover from our timeout would be the app charging them
+   * for its own failure.
+   */
+  z
+    .object({
+      kind: z.literal("world-chat-retry-turn"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      conversationId: ConversationIdSchema,
+      turnId: TurnIdSchema,
     })
     .strict(),
   /** #70 R-34a: return a proposal to the conversation it came from, and reopen it. */

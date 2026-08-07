@@ -134,6 +134,8 @@ import { WorldQueryServer } from "./harness/world-query.js";
 import { WorldChatService } from "./world-chat/service.js";
 import { wrapUp, WrapUpError } from "./world-chat/wrapup.js";
 import { titleFrom } from "./world-chat/title.js";
+import { describeEntryContext } from "./world-chat/entry-context.js";
+import { discoverConversations } from "./world-chat/discover.js";
 import { recordResolution, sendBack } from "./world-chat/resolution.js";
 import { WorldChatStore, conversationDir } from "./world-chat/store.js";
 import { WorldChatRunner } from "./world-chat/run.js";
@@ -1125,7 +1127,9 @@ export class Coordinator {
                           ? "unresolved-conflicts"
                           : outcome.status === "invalid"
                             ? "invalid"
-                            : "target-retired",
+                            : outcome.status === "draft-unresolved"
+                              ? "draft-unresolved"
+                              : "target-retired",
               detail:
                 outcome.status === "stale"
                   ? `moved since drafting: ${outcome.stalePaths.join(", ")}`
@@ -1137,7 +1141,9 @@ export class Coordinator {
                         ? `retired: ${outcome.paths.join(", ")}`
                         : outcome.status === "invalid"
                           ? outcome.problems.map((p) => `${p.path}: ${p.message}`).join("; ")
-                          : undefined,
+                          : outcome.status === "draft-unresolved"
+                            ? "an earlier edit to this proposal did not finish, and what its files now say is unknown"
+                            : undefined,
               ...(outcome.status === "needs-reconfirm" ? { authoritativeSignature: outcome.signature } : {}),
             });
           }
@@ -1192,6 +1198,47 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "proposal-update-field": {
+        const gate = this.opts.provider.gate?.();
+        if (!gate) return;
+        const outcome = await gate
+          .updateField({
+            proposalId: msg.proposalId,
+            requestId: msg.requestId,
+            path: msg.path,
+            field: msg.field,
+            value: msg.value,
+            expectedDraftRevision: msg.expectedDraftRevision,
+          })
+          .catch(() => null);
+        // A refusal is said out loud. The screen is showing a value the person just typed, and
+        // silently reverting it on the next snapshot would read as the app losing their work
+        // rather than as somebody else having changed it first.
+        if (outcome && outcome.status !== "updated") {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.blocked",
+            worldId: msg.worldId,
+            proposalId: msg.proposalId,
+            reason:
+              outcome.status === "stale"
+                ? "stale"
+                : outcome.status === "draft-unresolved"
+                  ? "draft-unresolved"
+                  : "invalid",
+            detail:
+              outcome.status === "stale"
+                ? "somebody changed this proposal while you were editing — it has been reloaded"
+                : outcome.status === "rejected"
+                  ? outcome.message
+                  : outcome.status === "unknown-target"
+                    ? "that file is not part of this proposal"
+                    : "an earlier edit to this proposal did not finish, and what its files now say is unknown",
+          });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "world-chat-open": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -1227,11 +1274,29 @@ export class Coordinator {
         // The screen shows the message and the spinner as soon as the turn starts, so the
         // snapshot is pushed before the model is waited on rather than after.
         const inFlight = runner.send(log, msg.conversationId, msg.text, msg.attachmentIds);
+        // The title may have just changed, and the screen shows the message immediately.
+        await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
         await inFlight;
         await this.refreshWorldSnapshot(msg.worldId);
+        await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
         void service;
+        return;
+      }
+      case "world-chat-retry-turn": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const log = new WorldChatStore(conversationDir(store.dir, msg.conversationId));
+        if (!(await log.readMeta())) return;
+
+        const inFlight = this.worldChatRunner(store).retry(log, msg.conversationId, msg.turnId);
+        // The spinner replaces the failure notice immediately, so pressing it looks like it worked.
+        await this.openWorldChat(store, msg.conversationId);
+        await inFlight;
+        await this.refreshWorldSnapshot(msg.worldId);
+        await this.refreshConversations(store);
+        await this.openWorldChat(store, msg.conversationId);
         return;
       }
       case "world-chat-wrap-up": {
@@ -1257,6 +1322,7 @@ export class Coordinator {
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);
+        await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
         return;
       }
@@ -1270,6 +1336,7 @@ export class Coordinator {
           () => null,
         );
         await this.refreshWorldSnapshot(msg.worldId);
+        await this.refreshConversations(store);
         if (conversationId) await this.openWorldChat(store, conversationId);
         return;
       }
@@ -1288,7 +1355,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.entryContext ? { entryContext: msg.entryContext } : {}),
         });
-        await this.refreshWorldSnapshot(msg.worldId);
+        await this.refreshConversations(store);
         await this.openWorldChat(store, row.id);
         return;
       }
@@ -3513,6 +3580,7 @@ export class Coordinator {
           canonRevision: this.opts.provider.openStore?.()?.getBundle().meta.canonRevision ?? 0,
         };
       },
+      describeEntry: (context) => describeEntryContext(context, store.getBundle()),
       evidenceSources: (messages) => ({
         messages,
         bundle: store.getBundle(),
@@ -3531,6 +3599,18 @@ export class Coordinator {
 
     this.worldChatRunners.set(store.worldId, runner);
     return runner;
+  }
+
+  /**
+   * Bring the conversation rows up to date (#70 §10.3).
+   *
+   * Called after anything that changes what a row says — creating, renaming from a first
+   * message, closing at wrap-up, reopening on send-back. None of those touch a world file, so
+   * none of them would otherwise be noticed.
+   */
+  private async refreshConversations(store: WorldStore): Promise<void> {
+    const { summaries } = await discoverConversations(store.dir);
+    this.readModel.setConversations(summaries);
   }
 
   /**

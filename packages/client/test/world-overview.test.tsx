@@ -353,12 +353,21 @@ describe("the gate's over-limit refusal reaches the user (SPEC-007 R-18)", () =>
       // The panels used to stack on the hub and the notice was read there. They have their own
       // screen now, so this reads it where it renders — the requirement is that the refusal
       // reaches the user, not that it reaches them on any particular screen.
+      //
+      // What carries findability from the hub is the chrome, not a panel on it: the proposals
+      // icon wears the same warning dot as activity whenever something waits and reaches the
+      // proposals screen from anywhere, which is a stronger guarantee than one screen's copy.
       const hub = renderToString(
         <MemoryRouter initialEntries={[`/w/${WORLD_ID}`]}>
           <App />
         </MemoryRouter>,
       ).replace(/<!-- -->/g, "");
-      assert.match(hub, /waiting on you/, "the hub still says something is waiting, so the notice is findable");
+      assert.match(
+        hub,
+        /title="Proposals — 1 awaiting a decision"/,
+        "the chrome still says something is waiting, so the notice is findable",
+      );
+      assert.match(hub, /fy-iconbtn__dot/, "and wears the warning dot that says so at a glance");
 
       const html = renderToString(
         <MemoryRouter initialEntries={[`/w/${WORLD_ID}/proposals`]}>

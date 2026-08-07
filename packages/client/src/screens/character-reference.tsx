@@ -45,7 +45,8 @@ function CharacterSheetPreview({
       worldSlug={worldSlug}
       path={path}
       label={`${characterName} character sheet`}
-      title={`${characterName} · character sheet`}
+      title={characterName}
+      subtitle="character sheet"
       triggerLabel={`View larger character sheet for ${characterName}`}
       closeLabel="Close character sheet"
       triggerClassName="fy-character-sheet-preview"
@@ -196,7 +197,8 @@ export function CharacterReferenceScreen() {
               worldSlug={world.meta.slug}
               path={photo ? `references/${sheetId}/${photo.file}` : ""}
               label={photo ? `${sheet.name} main photo` : "Main photo outstanding"}
-              title={`${sheet.name} · main photo`}
+              title={sheet.name}
+              subtitle="main photo"
               triggerLabel={`View larger main photo of ${sheet.name}`}
               closeLabel="Close main photo"
               triggerClassName="fy-reference-card__zoom"

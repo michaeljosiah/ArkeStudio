@@ -81,6 +81,8 @@ export interface RunDeps {
    * without it.
    */
   worldContext?: (view: WorldChatLoaded) => string;
+  /** What the conversation was opened about, worded for the model (#70 phase 6). */
+  describeEntry?: (context: NonNullable<WorldChatLoaded["entryContext"]>) => string;
   now: () => string;
   timeoutMs?: number;
 }
@@ -176,6 +178,40 @@ export class WorldChatRunner {
     text: string,
     attachmentIds: readonly string[] = [],
   ): Promise<TurnOutcome> {
+    return this.runTurn(store, conversationId, text, attachmentIds);
+  }
+
+  /**
+   * Run a turn that already exists again, after it failed (§10.1.1).
+   *
+   * No second user message. They said it once, and a run that timed out is the app's failure,
+   * not theirs -- making them retype it to recover would charge them for it. The original words
+   * are read back out of the log and asked again under a fresh run on the same turn.
+   */
+  async retry(store: WorldChatStore, conversationId: ConversationId, turnId: TurnId): Promise<TurnOutcome> {
+    const { events } = await store.read();
+    const meta = await store.readMeta();
+    const view = foldConversation(conversationId, meta?.createdAt ?? this.deps.now(), events).view;
+    const original = view.messages.find((m) => m.turnId === turnId && m.role === "user");
+    if (!original) return { status: "failed", reason: "that turn is not in this conversation" };
+    if (view.messages.some((m) => m.turnId === turnId && m.role === "studio")) {
+      // Already answered -- a second click, or a stale screen. Re-asking would duplicate a reply.
+      return { status: "completed", reply: "" };
+    }
+    return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId);
+  }
+
+  /**
+   * The turn itself. `existingTurnId` set means this is a retry: a new run against words already
+   * in the log, recorded as `run.retry-started` rather than as a second `turn.started`.
+   */
+  private async runTurn(
+    store: WorldChatStore,
+    conversationId: ConversationId,
+    text: string,
+    attachmentIds: readonly string[] = [],
+    existingTurnId?: TurnId,
+  ): Promise<TurnOutcome> {
     const adapter = this.deps.adapter;
     if (!adapter || !adapter.readiness().ready) {
       return { status: "unavailable", reason: adapter?.readiness().reason ?? "the studio is not available" };
@@ -188,7 +224,7 @@ export class WorldChatRunner {
     this.cancelling.set(conversationId, controller);
 
     const at = this.deps.now();
-    const turnId = newId("turn") as TurnId;
+    const turnId = existingTurnId ?? (newId("turn") as TurnId);
     const runId = newId("run") as RunId;
     const message: WorldChatMessage = {
       id: newId("msg") as MessageId,
@@ -212,6 +248,9 @@ export class WorldChatRunner {
     const meta = await store.readMeta();
     const view = foldConversation(conversationId, meta?.createdAt ?? at, events).view;
     const assembled = assembleContext({
+      ...(view.entryContext && this.deps.describeEntry
+        ? { entryContext: this.deps.describeEntry(view.entryContext) }
+        : {}),
       ...(view.summary !== undefined ? { summary: view.summary } : {}),
       candidates: view.candidates,
       messages: view.messages,
@@ -232,7 +271,11 @@ export class WorldChatRunner {
     };
 
     // The user's words are durable before the model is asked. Whatever happens next, they said it.
-    await store.append({ type: "turn.started", message, run }, { at });
+    // On a retry they already are, so only the new run is recorded.
+    await store.append(
+      existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
+      { at },
+    );
     if (controller.signal.aborted) {
       await this.finish(store, run, "interrupted", "cancelled before the studio was asked");
       this.cancelling.delete(conversationId);
@@ -457,6 +500,9 @@ function safeDetail(err: unknown): string {
 /** The context sections, in the order the agent brief expects them. */
 function renderPrompt(assembled: ReturnType<typeof assembleContext>): string {
   const sections: string[] = [];
+  // First, because it frames everything after it.
+  if (assembled.entryContext) sections.push(`## What this is about
+${assembled.entryContext}`);
   if (assembled.summary) sections.push(`## The conversation so far\n${assembled.summary}`);
   if (assembled.registry) sections.push(`## What you have already understood\n${assembled.registry}`);
   if (assembled.tombstones) {

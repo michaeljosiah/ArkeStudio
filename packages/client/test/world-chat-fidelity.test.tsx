@@ -27,6 +27,17 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CSS = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
+/** The annotated design master, whose `dv-rule` notes are the binding ones (turn 41). */
+const DESIGN_MASTER = readFileSync(join(here, "../../../design-system/Arke Studio.dc.html"), "utf8");
+/** The width the master binds World Chat's split to — held in one place, so it cannot drift. */
+const BINDING_WIDTH = /Below <b>(\d+)px<\/b> the split becomes <b>one column<\/b>/.exec(DESIGN_MASTER)?.[1];
+
+/** The stylesheet's narrow block for World Chat, as written at the master's binding width. */
+function narrowBlock(): string | undefined {
+  return new RegExp(`@media \\(max-width: ${BINDING_WIDTH}px\\) \\{([^@]*fy-gate[^@]*?)\\n\\}`, "s").exec(
+    CSS,
+  )?.[1];
+}
 
 const CONVERSATION_ID = "cv_01J8F3K2QW9VZX4N7M0RTYB6HC";
 
@@ -128,8 +139,92 @@ describe("World Chat is built on the Genesis split", () => {
   it("inherits the design's binding measurements from that split", () => {
     // Asserted against the CSS the screen actually uses, so a change to either side fails here.
     assert.match(CSS, /\.fy-gate__main\s*\{[^}]*flex:\s*1\.2/, "left column is flex 1.2");
-    assert.match(CSS, /\.fy-gate__side\s*\{[^}]*width:\s*470px/s, "the rail is 470px");
     assert.match(CSS, /\.fy-gate__side\s*\{[^}]*background:\s*var\(--muted\)/s, "the rail sits on --muted");
+    /*
+     * 470 is World Chat's own number, and it is the whole width here rather than the content
+     * width: 41a sets box-sizing:border-box on this rail where the canvas is otherwise content-box,
+     * so the shared `fy-gate__side` carries the 534 the other gate screens render and the chat
+     * wrap states 470 for itself. Asserting the scoped rule is what keeps rule 2 honest.
+     */
+    assert.match(
+      CSS,
+      /\.fy-chat__wrap \.fy-gate__side\s*\{[^}]*width:\s*470px/s,
+      "the rail is 470px on World Chat",
+    );
+  });
+
+  /*
+   * The canvas floats its nav absolutely and pads each column 104px to clear it; here the nav is
+   * sticky and so takes 53px of the column's own box. 52px is what puts this screen's first line
+   * where 41a puts it, and both columns must use the same number or the eyebrow and the rail's
+   * heading stop sitting on one line — which is the alignment the head is built around.
+   */
+  it("clears the floating nav by the same amount in both columns", () => {
+    const head = /\.fy-chat__wrap \.fy-gate__head\s*\{[^}]*padding-top:\s*52px/s;
+    const side = /\.fy-chat__wrap \.fy-gate__side\s*\{[^}]*padding-top:\s*52px/s;
+    assert.match(CSS, head, "the conversation column clears the nav at 52px");
+    assert.match(CSS, side, "and the rail clears it by exactly as much");
+  });
+});
+
+describe("the transcript", () => {
+  /*
+   * Each bubble squares the one corner facing its own speaker. It is the only thing distinguishing
+   * the two columns once a reply is short enough to sit level with the message above it, so it is
+   * pinned rather than left to whichever radius a later edit reaches for.
+   */
+  it("gives each speaker its own tail and its own measure (41a)", () => {
+    assert.match(
+      CSS,
+      /\.fy-chat__turn--user \.fy-chat__bubble\s*\{[^}]*border-radius:\s*14px 14px 4px 14px/s,
+      "the user's bubble squares its bottom-right",
+    );
+    assert.match(
+      CSS,
+      /\.fy-chat__turn--studio \.fy-chat__bubble\s*\{[^}]*border-radius:\s*14px 14px 14px 4px/s,
+      "the studio's squares its bottom-left",
+    );
+    assert.match(CSS, /\.fy-chat__turn--user\s*\{[^}]*max-width:\s*380px/s, "the user's measure is 380px");
+    assert.match(CSS, /\.fy-chat__turn--studio\s*\{[^}]*max-width:\s*440px/s, "the studio's is 440px");
+  });
+
+  /* A receipt explains the answer it sits in; loose beneath the bubble it read as its own turn. */
+  it("keeps receipts inside the reply that earned them", () => {
+    const html = renderConversation();
+    const bubble = html.indexOf('class="fy-chat__bubble"');
+    const receipts = html.indexOf('class="fy-chat__receipts"');
+    if (receipts > 0) {
+      assert.ok(receipts > bubble, "the receipts render within a bubble, not after it");
+      assert.ok(
+        !/<\/div><div class="fy-chat__receipts"/.test(html),
+        "and are not a sibling of the bubble",
+      );
+    }
+  });
+
+  it("collapses at the width the design system says it collapses at", () => {
+    // The binding width is the one number that lived only in the stylesheet, where nothing would
+    // have noticed it moving away from the drawn frame. Read it out of the master's own rule so
+    // the two cannot drift: change either side alone and this fails.
+    assert.ok(BINDING_WIDTH, "the master records World Chat's narrow binding width as a dv-rule");
+    assert.match(
+      CSS,
+      new RegExp(`@media \\(max-width: ${BINDING_WIDTH}px\\) \\{[^@]*\\.fy-chat__wrap \\.fy-gate\\b`),
+      `the stylesheet collapses World Chat at the master's ${BINDING_WIDTH}px`,
+    );
+  });
+
+  it("moves the rail beneath the conversation rather than over it", () => {
+    // 41c: one sheet, never a layer on a layer. A drawer would be the easy implementation and the
+    // wrong one — it hides the conversation behind the thing that describes it.
+    const narrow = narrowBlock();
+    assert.ok(narrow, "the narrow block exists");
+    assert.match(narrow, /\.fy-chat__wrap \.fy-gate \{[^}]*flex-direction:\s*column/, "one column");
+    assert.match(narrow, /\.fy-gate__side \{[^}]*width:\s*auto/, "the rail gives up its fixed width");
+    assert.ok(
+      !/position:\s*(fixed|absolute)/.test(narrow) && !/transform:/.test(narrow),
+      "and is laid out in flow — a drawer or overlay would be a layer on a layer",
+    );
   });
 
   it("heads the conversation with an eyebrow and an h1, as Genesis does", () => {
@@ -149,6 +244,29 @@ describe("the understanding panel", () => {
       1,
       "the rail holds exactly one action, the wrap-up; anything else is asking for approval mid-conversation",
     );
+  });
+
+  /*
+   * A subject is a card on the canvas, not a bare group. The rail sits on --muted, so it is the
+   * card's own --background that separates one reading from the next; without it two subjects
+   * each holding a single line ran together into one list.
+   */
+  it("gives each subject a card of its own (41a)", () => {
+    assert.match(
+      CSS,
+      /\.fy-panel__group\s*\{[^}]*background:\s*var\(--background\)/s,
+      "the card lifts off the muted rail",
+    );
+    assert.match(CSS, /\.fy-panel__group\s*\{[^}]*border:\s*1px solid var\(--border\)/s);
+    assert.match(CSS, /\.fy-panel__group\s*\{[^}]*border-radius:\s*12px/s);
+    assert.match(CSS, /\.fy-panel__group\s*\{[^}]*box-shadow:\s*var\(--shadow-xs\)/s);
+  });
+
+  /* Title and tally on one baseline: the count qualifies the title rather than following it. */
+  it("sets the tally beside the panel's title, in the colour of an undecided thing", () => {
+    const rail = railHtml(renderConversation());
+    assert.ok(rail.includes('class="fy-panel__headline"'), "the two share a row");
+    assert.match(CSS, /\.fy-panel__count\s*\{[^}]*color:\s*var\(--warning\)/s, "nothing here is settled yet");
   });
 
   it("says out loud that nothing here is a decision", () => {

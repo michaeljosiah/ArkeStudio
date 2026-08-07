@@ -691,15 +691,32 @@ export function NewWorldScreen() {
       <div className="fy-app" data-screen="new-world-art-direction">
         <AppChrome back={{ label: "Back", to: "/worlds" }} context={{ label: "new world · art direction" }} />
         <div className="fy-artstep">
-          <div className="fy-eyebrow-sm">NEW WORLD · STEP 3 OF 3</div>
           {step === "look" ? (
             <>
-              <h1 className="fy-story__h1">How should {shownName || "this world"} look?</h1>
-              <p className="fy-artstep__lede">
-                Pick a starting look. Every image this world makes — characters, locations, shots —
-                follows it until you change it. Nothing here is permanent: you can edit the words on
-                the next screen, or set a different look any time from Art direction.
-              </p>
+              <div className="fy-artstep__head">
+                <div>
+                  <div className="fy-artstep__steps">
+                    <span className="fy-eyebrow-sm">NEW WORLD · STEP 3 OF 3</span>
+                    <i />
+                    <i />
+                    <i />
+                  </div>
+                  <h1 className="fy-artstep__h1">How should {shownName || "this world"} look?</h1>
+                  <p className="fy-artstep__lede">
+                    Pick a starting look. Every image this world makes — characters, locations,
+                    shots — follows it until you change it. Nothing here is permanent: you can edit
+                    the words on the next screen, or set a different look any time from Art
+                    direction.
+                  </p>
+                </div>
+                <div className="fy-artstep__aside">
+                  <div className="fy-artstep__asidehead">SAME HARBOUR, NINE TREATMENTS</div>
+                  <div className="fy-artstep__asidenote">
+                    Each preview is one scene rendered each way, so you compare the treatment and
+                    not the subject.
+                  </div>
+                </div>
+              </div>
               <ArtStyleGrid
                 selectedId={presetId}
                 onSelect={(preset) => {
@@ -725,7 +742,13 @@ export function NewWorldScreen() {
             </>
           ) : (
             <>
-              <h1 className="fy-story__h1">The preset writes a first draft.</h1>
+              <div className="fy-artstep__steps">
+                <span className="fy-eyebrow-sm">NEW WORLD · STEP 3 OF 3</span>
+                <i />
+                <i />
+                <i />
+              </div>
+              <h1 className="fy-artstep__h1">The preset writes a first draft.</h1>
               <p className="fy-artstep__lede">
                 These are the words that ride along with every generation. Edit them, or replace
                 them entirely. A preset seeds the text; it never locks it.
@@ -1368,14 +1391,8 @@ export function SettingsProvidersScreen() {
   );
   const [selected, setSelected] = useState<ProviderId | null>(null);
   const current = selected ?? firstConnected?.id ?? KEYED_PROVIDERS[0]!.id;
-  const spend = state?.app.spend ?? null;
-  const [threshold, setThreshold] = useState<string | null>(null);
-  const [period, setPeriod] = useState<string | null>(null);
-  const thresholdValue = threshold ?? (spend ? String(spend.settings.thresholdMicroUsd / 1_000_000) : "0");
-  const periodValue = period ?? String(spend?.settings.periodDays ?? 7);
   return (
     <div data-screen="settings-providers" className="fy-set">
-      <div className="fy-set__eyebrow">CLOUD PROVIDERS</div>
       <div className="fy-prov">
         <div className="fy-prov__rail" role="tablist" aria-label="Providers">
           {KEYED_PROVIDERS.map((p) => {
@@ -1410,79 +1427,17 @@ export function SettingsProvidersScreen() {
         </div>
         <ProviderPane id={current} />
       </div>
-      <div className="fy-set__note">
-        a provider is entered once · its key covers every capability it lists · stored encrypted at
-        OS level, outside every world, and no export can carry one
-      </div>
-
-      <div className="fy-set__eyebrow">WHAT THIS MACHINE CAN DO</div>
-      {availability.map((a) => (
-        <div key={a.capability} className="fy-set__row">
-          <div className="fy-set__name fy-set__name--wide">
-            <div className="fy-set__title">{CAPABILITY_LABEL[a.capability]}</div>
-            <div className="fy-set__caps fy-set__caps--tokens">{a.capability}</div>
-          </div>
-          <span className="fy-set__state">
-            {a.available ? a.via.map((v) => PROVIDER_TABLE[v].displayName).join(", ") : (a.reason ?? "unavailable")}
-          </span>
-          <span className={cx("fy-set__dot", a.available && "fy-set__dot--ok")} />
-        </div>
-      ))}
-      <div className="fy-set__note">
-        derived from configured, validated providers · testing a key probes each capability
-        separately, so one that authenticates but cannot do video says so here rather than at the
-        end of composing a scene
-      </div>
-
-      <div className="fy-set__eyebrow">SPEND</div>
-      {spend && (
-        <div className="fy-set__row">
-          <div className="fy-set__name fy-set__name--wide">
-            <div className="fy-set__title">
-              {formatMicroUsd(spend.rollingMicroUsd)} in the last {spend.settings.periodDays} day
-              {spend.settings.periodDays === 1 ? "" : "s"}
-            </div>
-            <div className="fy-set__caps">
-              {spend.settings.thresholdMicroUsd > 0
-                ? `threshold ${formatMicroUsd(spend.settings.thresholdMicroUsd)}${spend.alerted ? " · over" : ""}`
-                : "no threshold set"}
-            </div>
-          </div>
-          <span className={cx("fy-set__dot", spend.alerted ? "fy-set__dot--warn" : "fy-set__dot--ok")} />
-        </div>
-      )}
-      {spend?.alerted && (
-        <div className="fy-set__why">
-          <span className="fy-set__dot fy-set__dot--warn" />
-          <span>
-            Over the threshold. Dispatch still works — the money is yours; this is a warning, not a
-            stop.
-          </span>
-        </div>
-      )}
-      <div className="fy-set__row">
-        <span className="fy-set__routelabel">alert at $</span>
-        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
-          <Input style={{ maxWidth: 110 }} value={thresholdValue} onChange={(e) => setThreshold(e.target.value)} />
-          <span className="fy-set__state">over</span>
-          <Input style={{ maxWidth: 70 }} value={periodValue} onChange={(e) => setPeriod(e.target.value)} />
-          <span className="fy-set__state">days</span>
-          <Button
-            onClick={() => {
-              const usdValue = Number.parseFloat(thresholdValue);
-              const days = Number.parseInt(periodValue, 10);
-              if (Number.isFinite(usdValue) && usdValue >= 0 && Number.isFinite(days) && days >= 1) {
-                setSpendThreshold(Math.round(usdValue * 1_000_000), Math.min(days, 365));
-                setThreshold(null);
-                setPeriod(null);
-              }
-            }}
-          >
-            Set
-          </Button>
-        </div>
-      </div>
-      <div className="fy-set__note">alerts on a rolling window, across all worlds · never blocks</div>
+      {/*
+       * The pane is the provider list and its detail, and nothing else (40a).
+       *
+       * Four things used to sit around it. "What this machine can do" is the same question as "who
+       * does what", which turn 35 gave a tab of its own — a copy here answered it twice and they
+       * could disagree. Spend belongs to Activity (26a), which already draws it by provider with
+       * the alert note; the threshold control moved there with it, so the note's own "Set" opens
+       * the thing it names rather than sending you to another screen to find it. The eyebrow and
+       * the closing note went with them: 35a needed a heading because its pane was a flat list of
+       * keys, and 40a's rail already says what this is.
+       */}
     </div>
   );
 }
@@ -1529,7 +1484,7 @@ export function SettingsAppearanceScreen() {
   const preference = useThemePreference();
   const resolved = useResolvedTheme();
   return (
-    <div data-screen="settings-appearance" className="fy-set">
+    <div data-screen="settings-appearance" className="fy-set fy-set--appearance">
       <div className="fy-set__eyebrow">THEME</div>
       <fieldset className="fy-theme-options">
         <legend className="fy-sr-only">Theme</legend>
@@ -1550,6 +1505,25 @@ export function SettingsAppearanceScreen() {
         ))}
       </fieldset>
       <div className="fy-set__note">currently using {resolved} · stored for the application, never in a world</div>
+      {/*
+       * The two themes, side by side. Fixed swatches rather than a live preview of the current
+       * one: the point is to show what the choice above would look like, and a card that followed
+       * the active theme would only ever show you what you can already see.
+       */}
+      <div className="fy-themeswatches" aria-hidden="true">
+        {(["light", "dark"] as const).map((theme) => (
+          <div key={theme} className={`fy-themeswatch fy-themeswatch--${theme}`}>
+            <div className="fy-themeswatch__frame">
+              <span className="fy-themeswatch__block" />
+              <span className="fy-themeswatch__lines">
+                <i />
+                <i />
+              </span>
+            </div>
+            <div className="fy-themeswatch__caption">{theme.toUpperCase()}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1782,6 +1756,7 @@ const ROUTED_CAPABILITIES: readonly Capability[] = ["video", "image", "voice-tts
 
 export function SettingsWhoDoesWhatScreen() {
   const { state } = useStore();
+  const navigate = useNavigate();
   const manifest = state?.app.manifest ?? null;
   const configured = new Set((state?.app.providers ?? []).filter((p) => p.configured).map((p) => p.id));
   const routing = state?.app.routing ?? { defaults: {}, faults: [] };
@@ -1852,6 +1827,13 @@ export function SettingsWhoDoesWhatScreen() {
         defaults for new work · any production can override per dispatch, and the override travels
         with that dispatch alone
         {manifest ? ` · manifest v${manifest.manifestVersion}` : ""}
+      </div>
+      {/* The way out, at the foot (40d): every repair this screen can suggest — turn a model back
+          on, or find a key for one — is made on the Providers tab. */}
+      <div className="fy-set__actions">
+        <Button variant="secondary" onClick={() => navigate("/settings/providers")}>
+          Open Providers
+        </Button>
       </div>
 
       {drift.length > 0 && (
@@ -1936,6 +1918,7 @@ export function SettingsAboutScreen() {
   const { state } = useStore();
   const update = useUpdateStatus();
   const diagnostics = useDiagnosticsBundle();
+  const [showNotices, setShowNotices] = useState(false);
   const updateCopy = (() => {
     if (!update) return "Updates are ready when you choose to check.";
     const version = update.targetVersion ? ` v${update.targetVersion}` : "";
@@ -1953,7 +1936,7 @@ export function SettingsAboutScreen() {
     return "Check when you are ready. Nothing downloads without you.";
   })();
   return (
-    <div data-screen="settings-about" className="fy-set">
+    <div data-screen="settings-about" className="fy-set fy-set--about">
       <div className="fy-set__eyebrow">ABOUT</div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginTop: 14 }}>
         <span className="fy-set__aboutname">Arke</span>
@@ -1991,6 +1974,26 @@ export function SettingsAboutScreen() {
         )}
       </div>
 
+      {/* Its own row, as 35b has it: the licence is a fact about the product, not a suffix on the
+          version number, and it is what the two links below belong to. */}
+      <div className="fy-set__row">
+        <div className="fy-set__name fy-set__name--wide">
+          <div className="fy-set__title">Open source</div>
+          <div className="fy-set__caps">MIT licence · your canon is a readable format, leave any time</div>
+        </div>
+        <a
+          className="fy-set__link"
+          href="https://github.com/michaeljosiah/ArkeStudio"
+          target="_blank"
+          rel="noreferrer"
+        >
+          GitHub ↗
+        </a>
+        <button type="button" className="fy-set__link" onClick={() => setShowNotices((s) => !s)}>
+          Third-party licences
+        </button>
+      </div>
+
       <div className="fy-set__row">
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">Your data</div>
@@ -2016,11 +2019,15 @@ export function SettingsAboutScreen() {
         <Textarea readOnly value={diagnostics} style={{ minHeight: 160, marginTop: 10, font: "var(--type-mono, monospace)" }} />
       )}
 
-      <div className="fy-set__note">
-        OpenCode (MIT) · Voxa (MIT) · espeak-ng (GPL, separate process, never linked) · ffmpeg
-        (LGPL build, subprocess) · better-sqlite3 (MIT) · Electron (MIT) · Geist (OFL) — full
-        notices in THIRD-PARTY-NOTICES.md beside the app
-      </div>
+      {/* Behind the link that names it, rather than a wall of licences under every visit. */}
+      {showNotices && (
+        <div className="fy-set__note">
+          OpenCode (MIT) · Voxa (MIT) · espeak-ng (GPL, separate process, never linked) · ffmpeg
+          (LGPL build, subprocess) · better-sqlite3 (MIT) · Electron (MIT) · Geist (OFL) — full
+          notices in THIRD-PARTY-NOTICES.md beside the app
+        </div>
+      )}
+      <div className="fy-set__copyright">© 2026 Arke contributors</div>
     </div>
   );
 }
@@ -2075,6 +2082,14 @@ export function ActivityScreen() {
   const [inspectedJobId, setInspectedJobId] = useState<string | null>(null);
   const [inspectAllCalls, setInspectAllCalls] = useState(false);
   const activeWorldId = state?.world?.meta.worldId ?? null;
+  // The alert threshold, set where it is reported (26a). Closed until asked for: the note says
+  // what the alert is, and most visits to this screen are not about changing it.
+  const [editingThreshold, setEditingThreshold] = useState(false);
+  const [threshold, setThreshold] = useState<string | null>(null);
+  const [period, setPeriod] = useState<string | null>(null);
+  const thresholdValue =
+    threshold ?? String((state?.app.spend?.settings.thresholdMicroUsd ?? 0) / 1_000_000);
+  const periodValue = period ?? String(state?.app.spend?.settings.periodDays ?? 7);
 
   const jobs = [...(state?.app.jobs ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const scoped = <T extends { worldId?: string }>(items: T[]): T[] =>
@@ -2281,13 +2296,50 @@ export function ActivityScreen() {
                 {state?.app.spend?.alerted && state.app.spend
                   ? `Over the threshold: ${formatMicroUsd(state.app.spend.rollingMicroUsd)} against ${formatMicroUsd(state.app.spend.settings.thresholdMicroUsd)}. Nothing is blocked.`
                   : `Alert at ${formatMicroUsd(state?.app.spend?.settings.thresholdMicroUsd ?? 0)} / ${spend.periodDays}d${(state?.app.spend?.settings.thresholdMicroUsd ?? 0) === 0 ? " · off" : ""}`}
-                <span
-                  style={{ marginLeft: "auto", cursor: "pointer", font: "400 11px var(--font-sans)" }}
-                  onClick={() => navigate("/settings/providers")}
+                {/* Opens the control in place. It used to send you to Settings, which is where the
+                    threshold lived; 26a puts the threshold on this screen, so it is here now. */}
+                <button
+                  type="button"
+                  className="fy-spendalert__toggle"
+                  aria-expanded={editingThreshold}
+                  onClick={() => setEditingThreshold((open) => !open)}
                 >
-                  Set
-                </span>
+                  {editingThreshold ? "Close" : "Set"}
+                </button>
               </div>
+              {editingThreshold && (
+                <div className="fy-spendalert">
+                  <span className="fy-spendalert__label">alert at $</span>
+                  <Input
+                    aria-label="Alert threshold in dollars"
+                    style={{ maxWidth: 92 }}
+                    value={thresholdValue}
+                    onChange={(e) => setThreshold(e.target.value)}
+                  />
+                  <span className="fy-spendalert__label">over</span>
+                  <Input
+                    aria-label="Alert window in days"
+                    style={{ maxWidth: 62 }}
+                    value={periodValue}
+                    onChange={(e) => setPeriod(e.target.value)}
+                  />
+                  <span className="fy-spendalert__label">days</span>
+                  <Button
+                    onClick={() => {
+                      const usdValue = Number.parseFloat(thresholdValue);
+                      const days = Number.parseInt(periodValue, 10);
+                      if (Number.isFinite(usdValue) && usdValue >= 0 && Number.isFinite(days) && days >= 1) {
+                        setSpendThreshold(Math.round(usdValue * 1_000_000), Math.min(days, 365));
+                        setThreshold(null);
+                        setPeriod(null);
+                        setEditingThreshold(false);
+                      }
+                    }}
+                  >
+                    Save
+                  </Button>
+                </div>
+              )}
               {drift.map((d) => (
                 <Callout key={d.modelId} tone="warning" title={`${d.modelId} estimates are drifting`}>
                   ~{(d.medianDivergencePerMille / 10).toFixed(0)}% off across {d.samples} provider-reported charges —

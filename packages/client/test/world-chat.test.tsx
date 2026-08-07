@@ -139,3 +139,60 @@ describe("starting a conversation", () => {
     );
   });
 });
+
+
+/**
+ * A conversation you have just made is not missing.
+ *
+ * Reported from a real session: clicking "Start a conversation" landed on "That conversation is
+ * not here". The workspace had loaded and the summary row had not, because `.conversations` is
+ * excluded from the watcher and the cached bundle never noticed the new one. The screen believed
+ * the stale list over the workspace in front of it.
+ */
+describe("arriving at a conversation the list has not caught up with", () => {
+  function renderAt(state: ClientState, conversationId: string): string {
+    __setStateForTest(state);
+    return renderToString(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${conversationId}`]}>
+        <App />
+      </MemoryRouter>,
+    ).replaceAll("<!-- -->", "");
+  }
+
+  const CV = "cv_01J8F3K2QW9VZX4N7M0RTYB6HC";
+
+  const workspace = {
+    conversationId: CV,
+    status: "open",
+    seq: 1,
+    hasMore: false,
+    runStatus: null,
+    retrievalUnavailable: false,
+    messages: [],
+    points: [],
+    attachments: [],
+  };
+
+  it("shows the conversation when the workspace has it but the list does not", () => {
+    const state = {
+      ...FIXTURE_STATE,
+      world: { ...FIXTURE_STATE.world!, conversations: [] },
+      worldChat: workspace as never,
+    } as ClientState;
+
+    const html = renderAt(state, CV);
+    assert.ok(
+      !html.includes("That conversation is not here"),
+      "the workspace loaded by this id is better evidence than a list that has not refreshed",
+    );
+  });
+
+  it("still says so when neither has it", () => {
+    const state = {
+      ...FIXTURE_STATE,
+      world: { ...FIXTURE_STATE.world!, conversations: [] },
+      worldChat: null,
+    } as ClientState;
+    assert.match(renderAt(state, CV), /That conversation is not here/);
+  });
+});

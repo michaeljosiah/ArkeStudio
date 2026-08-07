@@ -7,6 +7,7 @@ import { Button, cx } from "../components/ui.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import {
   cancelWorldChat,
+  retryWorldChatTurn,
   createWorldChat,
   openWorldChat,
   sendWorldChat,
@@ -167,8 +168,21 @@ export function WorldChatConversationScreen() {
     return () => openWorldChat(worldId, null);
   }, [worldId, conversationId]);
 
+  // The workspace — transcript, receipts and points — is loaded by id rather than carried in the
+  // world snapshot, because opening a world must not cost every conversation ever had.
+  const workspace = state?.worldChat ?? null;
+  const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
+
   if (!world) return null;
-  if (!row) {
+  /**
+   * Missing means missing from both.
+   *
+   * The row and the workspace arrive by different routes, so one can lag the other by a frame —
+   * and the workspace is the better authority: it was loaded by this id and came back. Declaring
+   * the conversation gone because the *summary list* had not caught up is how somebody who has
+   * just created one is told it does not exist.
+   */
+  if (!row && !loaded) {
     return (
       <div data-screen="world-chat-conversation">
         <EmptyState
@@ -178,15 +192,12 @@ export function WorldChatConversationScreen() {
       </div>
     );
   }
-
-  // The workspace — transcript, receipts and points — is loaded by id rather than carried in the
-  // world snapshot, because opening a world must not cost every conversation ever had.
-  const loaded = state?.worldChat?.conversationId === row.id ? state.worldChat : null;
   const points = loaded?.points ?? [];
   const groups = groupBySubject(points);
   const openThreads = points.filter((p) => p.kind === "question");
   const carried = points.filter((p) => p.kind === "point" && p.settled).length;
   const running = loaded?.runStatus === "running";
+  const failure = loaded?.lastFailure;
   /**
    * Attachments are private to this conversation, and the chips say which are readable.
    * An image can be attached and referred to; it cannot be quoted, and the chip should not
@@ -205,11 +216,13 @@ export function WorldChatConversationScreen() {
           <div className="fy-gate__head">
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-eyebrow-sm">WORLD CHAT</div>
-              <h1 className="fy-story__h1">{row.title}</h1>
-              {row.entryContext && row.entryContext.kind !== "world" && (
-                <div className="fy-chat__about">{aboutLabel(row.entryContext)}</div>
-              )}
+              <h1 className="fy-story__h1">{row?.title ?? "New conversation"}</h1>
             </div>
+            {/* Beside the title rather than beneath it (41a): the head bottom-aligns the two so a
+                named subject reads as one line instead of a stack that grows. */}
+            {row?.entryContext && row.entryContext.kind !== "world" && (
+              <div className="fy-chat__about">{aboutLabel(row.entryContext)}</div>
+            )}
           </div>
 
           <div className="fy-gate__body">
@@ -219,18 +232,35 @@ export function WorldChatConversationScreen() {
               <div className="fy-chat__transcript" aria-live="polite">
                 {loaded.messages.map((m) => (
                   <div key={m.id} className={cx("fy-chat__turn", `fy-chat__turn--${m.role}`)}>
-                    <div className="fy-chat__bubble">{m.text}</div>
-                    {m.role === "studio" && m.receipts.length > 0 && (
-                      <div className="fy-chat__receipts">
-                        {m.receipts.map((r, i) => (
-                          <span key={i} className="fy-chat__receipt">
-                            {r}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    <div className="fy-chat__bubble">
+                      {m.text}
+                      {m.role === "studio" && m.receipts.length > 0 && (
+                        // One tick for the row, not one per receipt: the tick means "this is what
+                        // was read", and repeating it turned a footnote into a checklist.
+                        <div className="fy-chat__receipts">{`✓ ${m.receipts.join(" · ")}`}</div>
+                      )}
+                    </div>
                   </div>
                 ))}
+                {/*
+                  A turn that failed says so where the reply would have been. Silence here is
+                  indistinguishable from never having asked, which is how a two-minute timeout
+                  reads as "nothing happens".
+                */}
+                {failure && !running && (
+                  <div className="fy-chat__failed" role="status">
+                    <div className="fy-chat__failedtext">{failureLine(failure)}</div>
+                    <button
+                      type="button"
+                      className="fy-chat__retry"
+                      onClick={() =>
+                        worldId && conversationId && retryWorldChatTurn(worldId, conversationId, failure.turnId)
+                      }
+                    >
+                      Try that again
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -242,7 +272,7 @@ export function WorldChatConversationScreen() {
               onSubmit={() => {
                 const text = draft.trim();
                 if (!text || !worldId || running) return;
-                sendWorldChat(worldId, row.id, text, chips.map((c) => c.id));
+                sendWorldChat(worldId, conversationId!, text, chips.map((c) => c.id));
                 setDraft("");
               }}
               placeholder="Keep going…"
@@ -255,7 +285,7 @@ export function WorldChatConversationScreen() {
               <button
                 type="button"
                 className="fy-chat__cancel"
-                onClick={() => worldId && cancelWorldChat(worldId, row.id)}
+                onClick={() => worldId && conversationId && cancelWorldChat(worldId, conversationId)}
               >
                 Stop
               </button>
@@ -268,9 +298,11 @@ export function WorldChatConversationScreen() {
 
         <div className="fy-gate__side">
           <div className="fy-panel__head">
-            <div className="fy-panel__title">What I&rsquo;ve understood</div>
-            <div className="fy-panel__count">
-              {points.length} point{points.length === 1 ? "" : "s"} · nothing decided
+            <div className="fy-panel__headline">
+              <div className="fy-panel__title">What I&rsquo;ve understood</div>
+              <div className="fy-panel__count">
+                {points.length} point{points.length === 1 ? "" : "s"} · nothing decided
+              </div>
             </div>
             <div className="fy-panel__note">
               If a line is wrong, say so and it changes. There is nothing to approve here.
@@ -286,8 +318,10 @@ export function WorldChatConversationScreen() {
               <>
                 {groups.map((group) => (
                   <div key={group.subject} className="fy-panel__group">
-                    <div className="fy-panel__subject">{group.subject}</div>
-                    <div className="fy-panel__kind">{group.kind}</div>
+                    <div className="fy-panel__grouphead">
+                      <div className="fy-panel__subject">{group.subject}</div>
+                      <div className="fy-panel__kind">{group.kind}</div>
+                    </div>
                     {group.items.map((p) => (
                       <div key={p.id} className="fy-panel__point">
                         {p.text}
@@ -297,8 +331,10 @@ export function WorldChatConversationScreen() {
                 ))}
                 {openThreads.length > 0 && (
                   <div className="fy-panel__group">
-                    <div className="fy-panel__subject">Still open</div>
-                    <div className="fy-panel__kind">not settled</div>
+                    <div className="fy-panel__grouphead">
+                      <div className="fy-panel__subject">Still open</div>
+                      <div className="fy-panel__kind">not settled</div>
+                    </div>
                     {openThreads.map((p) => (
                       <div key={p.id} className="fy-panel__point">
                         {p.text}
@@ -318,7 +354,7 @@ export function WorldChatConversationScreen() {
               disabled={carried === 0 || loaded === null || running}
               onClick={() => {
                 if (!worldId || !loaded) return;
-                wrapUpWorldChat(worldId, row.id, loaded.seq);
+                wrapUpWorldChat(worldId, conversationId!, loaded.seq);
                 // Straight to the proposals, with no step in between: the earlier design had a
                 // confirmation sheet here that said less than the screen it stood in front of.
                 navigate(`/w/${worldId}/proposals`);
@@ -376,6 +412,24 @@ function groupBySubject(
 /** Whether there is anything to talk to. Starting a conversation nobody can answer is a dead end. */
 function harnessReady(state: ReturnType<typeof useStore>["state"]): boolean {
   return state?.app.health.harness.status === "healthy";
+}
+
+/**
+ * What a failed turn says.
+ *
+ * Plainly, and about the app rather than the person: they typed something reasonable and waited.
+ * The `detail` the coordinator carries is operator-safe by construction, so it can be shown, but
+ * it is a supporting clause and never the whole sentence -- "the studio took too long to answer"
+ * on its own does not tell somebody the message is still there and can be sent again.
+ */
+function failureLine(failure: { status: string; detail?: string }): string {
+  const opening =
+    failure.status === "timeout"
+      ? "That took too long and stopped."
+      : failure.status === "budget-exceeded"
+        ? "That turn ran past its budget and stopped."
+        : "That did not go through.";
+  return `${opening} Nothing was lost — your message is still here.`;
 }
 
 function composerReason(state: ReturnType<typeof useStore>["state"]): string | undefined {

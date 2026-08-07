@@ -15,6 +15,7 @@ import {
   type RankedVoice,
   type ReconcileAction,
   type ReferenceAngle,
+  type WorldChatContext,
   ulid,
 } from "@arke-studio/contracts";
 import type { ArkeBridge, AttachTarget } from "../arke-bridge.js";
@@ -41,7 +42,9 @@ export interface GateNotice {
     | "pending-review"
     | "unresolved-conflicts"
     | "target-retired"
-    | "invalid";
+    | "invalid"
+    /** #70 SS11.4.1: an in-place edit whose outcome is unknown, so accepting is not offered. */
+    | "draft-unresolved";
   detail?: string;
   authoritativeSignature?: string;
 }
@@ -1845,8 +1848,13 @@ export function openWorldChat(worldId: string, conversationId: string | null): v
   send({ kind: "world-chat-open", worldId, conversationId });
 }
 
-export function createWorldChat(worldId: string, title: string, requestId: string): void {
-  send({ kind: "world-chat-create", worldId, title, requestId });
+export function createWorldChat(
+  worldId: string,
+  title: string,
+  requestId: string,
+  entryContext?: WorldChatContext,
+): void {
+  send({ kind: "world-chat-create", worldId, title, requestId, ...(entryContext ? { entryContext } : {}) });
 }
 
 /** Say something in a conversation, and take a turn. */
@@ -1869,6 +1877,14 @@ export function sendWorldChat(
 /** Stop the turn in flight. */
 export function cancelWorldChat(worldId: string, conversationId: string): void {
   send({ kind: "world-chat-cancel", worldId, conversationId });
+}
+
+/**
+ * Run a failed turn again. No second message: they already said it once, and retyping it to
+ * recover from our timeout would be the app charging them for its own failure.
+ */
+export function retryWorldChatTurn(worldId: string, conversationId: string, turnId: string): void {
+  send({ kind: "world-chat-retry-turn", worldId, requestId: crypto.randomUUID(), conversationId, turnId });
 }
 
 /** Turn the conversation into proposals and close it. */

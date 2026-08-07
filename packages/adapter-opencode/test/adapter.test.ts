@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it, type TestContext } from "node:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { CHARACTER_ROLE_MAX, type HarnessEvent } from "@arke-studio/contracts";
 import { OpenCodeAdapter } from "../src/opencode-adapter.js";
 import { probeCapabilities } from "../src/capabilities.js";
@@ -216,6 +216,32 @@ describe("the live adapter over the stub server", () => {
     assert.ok(!body.location?.directory?.includes("\\"), "no backslash reaches the wire");
   });
 
+  it("names the agent on the prompt, not only at session creation", async () => {
+    // The bug this pins cost a silent two-minute timeout with no error anywhere. OpenCode
+    // resolves the agent per message: a prompt that does not name one runs under `build`, its
+    // coding agent, which reads "talk about my world" as a task and delegates to the real agent
+    // as a subagent in a child session where `task` is denied. Nothing completes and nothing
+    // fails — and our own trace still says the session was created as `world-builder`, because
+    // it was. Only the prompt body tells the truth, so that is what this reads.
+    const session = await adapter.createSession({ purpose: "world-chat", agent: "world-builder" });
+    await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: "the bells" }] });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const prompt = stub.lastRequest(/prompt_async$/);
+    assert.ok(prompt, "the prompt reached the wire");
+    assert.equal((prompt.body as { agent?: string }).agent, "world-builder");
+  });
+
+  it("leaves the agent off a prompt for a session that never named one", async () => {
+    const session = await adapter.createSession({ purpose: "authoring" });
+    await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: "draft it" }] });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const prompt = stub.lastRequest(/prompt_async$/);
+    assert.ok(prompt, "the prompt reached the wire");
+    assert.ok(!("agent" in (prompt.body as object)), "no agent invented where the caller named none");
+  });
+
   it("streams a scripted turn: tool activity, delta, completion — and filters foreign sessions", async () => {
     const session = await adapter.createSession({ purpose: "authoring", agent: "sheet-editor" });
     const seen: HarnessEvent[] = [];
@@ -395,19 +421,61 @@ describe("discovery (R-1)", () => {
     assert.equal(found?.version, "7.7.7");
   });
 
-  it("falls back to PATH when nothing is configured", async (t) => {
-    // Put our own opencode first on PATH rather than trusting the machine to have one — a test
-    // that passes because the developer happens to have it installed proves nothing on CI.
-    const onPath = stubOpenCode(t, "opencode", "6.6.6");
-    const original = process.env["PATH"];
-    process.env["PATH"] = `${join(onPath, "..")}${delimiter}${original ?? ""}`;
-    try {
-      const found = await discoverOpenCode();
-      assert.equal(found?.source, "path");
-      assert.equal(found?.version, "6.6.6");
-    } finally {
-      process.env["PATH"] = original;
-    }
+  /*
+   * Driven through the runCommand seam rather than by planting a binary on PATH and spawning the
+   * real `where`.
+   *
+   * The version that did spawn was flaky: `where` walks every PATH entry, measures ~300ms on a
+   * developer machine, and was seen taking over 5s on a loaded CI runner — at which point the
+   * probe was killed, discovery reported nothing found, and the assertion failed on an
+   * environment's spare capacity rather than on this module's behaviour. Real spawning is still
+   * covered by the configured-path test above, which starts an actual stub through the same
+   * runCommand; what is left here is the fallback order, and that is logic.
+   */
+  it("falls back to PATH when nothing is configured", async () => {
+    const command = process.platform === "win32" ? "C:\\tools\\opencode.cmd" : "/usr/local/bin/opencode";
+    const found = await discoverOpenCode({
+      runCommand: async (_command, args) =>
+        args[0] === "opencode" ? { status: 0, stdout: `${command}\n` } : { status: 0, stdout: "6.6.6\n" },
+    });
+    assert.equal(found?.source, "path");
+    assert.equal(found?.version, "6.6.6");
+    assert.equal(found?.command, command);
+  });
+
+  /*
+   * `where` prints every match, and only the extension-bearing one can be spawned — a bare
+   * `opencode` alongside `opencode.cmd` is the shape that breaks it. A real runner cannot be
+   * relied on to produce that pair, so it is stated here.
+   */
+  it("picks the spawnable entry when the probe returns several matches", async (t) => {
+    if (process.platform !== "win32") return t.skip("`where`'s multi-match output is Windows-only");
+    const found = await discoverOpenCode({
+      runCommand: async (_command, args) =>
+        args[0] === "opencode"
+          ? { status: 0, stdout: "C:\\tools\\opencode\r\nC:\\tools\\opencode.cmd\r\n" }
+          : { status: 0, stdout: "6.6.6\n" },
+    });
+    assert.equal(found?.command, "C:\\tools\\opencode.cmd", "the extensionless match cannot be started");
+  });
+
+  /*
+   * The budget that made the old test flaky, now asserted rather than assumed: a probe slower than
+   * the previous 5s ceiling still resolves. A machine being busy must not read as "not installed".
+   */
+  it("waits out a probe slower than the old five-second ceiling", async () => {
+    const found = await discoverOpenCode({
+      runCommand: (command, args, timeoutMs) =>
+        new Promise((resolve) => {
+          if (args[0] === "opencode") {
+            assert.ok(timeoutMs > 5_000, `the PATH probe budget is ${timeoutMs}ms, which a loaded box can exceed`);
+            setTimeout(() => resolve({ status: 0, stdout: "/usr/local/bin/opencode\n" }), 5_200);
+            return;
+          }
+          resolve({ status: 0, stdout: "6.6.6\n" });
+        }),
+    });
+    assert.equal(found?.source, "path", "a slow probe is not the same as a missing installation");
   });
 
   it("does not block the event loop while a process probe is delayed", async () => {
