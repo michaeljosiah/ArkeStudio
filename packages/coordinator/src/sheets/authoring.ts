@@ -7,10 +7,11 @@ import {
   type SheetKind,
   type VoiceAssignment,
 } from "@arke-studio/contracts";
+import type { CommitResult } from "../world/commit.js";
 import type { ProposalManager } from "../gate/proposals.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { uniqueSlug } from "../world/slug.js";
-import { MarkdownFile } from "../world/text-files.js";
+import { MarkdownFile, sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
 
 /**
@@ -199,11 +200,16 @@ export async function stageSheetRename(
 }
 
 /** Voice assignment as a gated change (R-15): versions and ripples like any other edit. */
-export async function stageVoiceAssignment(
+/**
+ * Assign or clear a character's voice. This is the human's own action — the person clicking
+ * Assign *is* the approval — so it commits straight to the sheet rather than staging a proposal
+ * for that same person to accept. It still versions and ripples like any sheet edit; it just
+ * does not wait at the gate. (Cf. `retire`/`restoreVersion`: direct human commits, not drafts.)
+ */
+export async function applyVoiceAssignment(
   store: WorldStore,
-  gate: ProposalManager,
   input: { path: string; voice: { provider: string; voiceId: string; label?: string } | null },
-): Promise<Proposal> {
+): Promise<CommitResult> {
   const live = await readLive(store, input.path);
   if (live === null) throw new Error(`${input.path} does not exist`);
   const doc = MarkdownFile.parse(live);
@@ -218,18 +224,15 @@ export async function stageVoiceAssignment(
       provider: input.voice.provider,
       voiceId: input.voice.voiceId,
       ...(input.voice.label !== undefined ? { label: input.voice.label } : {}),
-      // The assignment lands at the version the accept produces (base + 1).
+      // The commit bumps the sheet to base + 1; the assignment lands at that version.
       assignedAtVersion: currentVersion + 1,
     };
     doc.setData({ voice: assignment });
   }
-  return gate.stage({
+  return store.commit({
     kind: "sheet-edit",
-    summary: input.voice
-      ? `Assign voice ${input.voice.label ?? input.voice.voiceId} to ${String(doc.data["name"])}`
-      : `Clear ${String(doc.data["name"])}'s voice`,
     source: "form",
-    targets: [{ path: input.path, content: doc.serialize() }],
+    files: [{ path: input.path, action: "replace", content: doc.serialize(), baseHash: sha256(live) }],
   });
 }
 

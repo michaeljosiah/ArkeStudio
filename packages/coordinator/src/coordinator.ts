@@ -151,7 +151,7 @@ import {
   duplicateSheet,
   stageSheetRename,
   stageSheetStatus,
-  stageVoiceAssignment,
+  applyVoiceAssignment,
 } from "./sheets/authoring.js";
 import { ReadModel } from "./read-model.js";
 import { ChildSupervisor, type SupervisorStatus } from "./supervisor.js";
@@ -1658,14 +1658,15 @@ export class Coordinator {
         return;
       }
       case "assign-voice": {
-        const gate = this.opts.provider.gate?.();
+        // A human's direct action, not a draft: the person clicking Assign is the approval, so
+        // this commits straight through rather than staging a proposal for them to re-accept.
         const store = this.opts.provider.openStore?.();
-        if (!gate || !store) return;
+        if (!store) return;
         if (msg.voice) {
           const available = (await this.voiceService?.catalogue().catch(() => [])) ?? [];
           if (!available.some((voice) => voice.provider === msg.voice!.provider && voice.voiceId === msg.voice!.voiceId)) return;
         }
-        await stageVoiceAssignment(store, gate, { path: msg.path, voice: msg.voice }).catch(() => {});
+        await applyVoiceAssignment(store, { path: msg.path, voice: msg.voice }).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }

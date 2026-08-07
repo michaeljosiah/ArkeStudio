@@ -1120,8 +1120,9 @@ sheet. Voice takes are auditioned against the cut before landing in it.
 - **R-VOICE-1** A voice SHALL be assigned to a sheet and inherited by every line that sheet
   speaks, across every production.
   - **WHEN** a line is retaken with a different delivery **THEN** the voice is unchanged.
-- **R-VOICE-2** Assigning a voice SHALL pass through the accept gate and increment the sheet
-  version, and the ripple SHALL list the productions affected.
+- **R-VOICE-2** Assigning a voice SHALL commit directly — it is the author's own pick, not a
+  drafted change awaiting review — while still incrementing the sheet version, and the ripple
+  SHALL list the productions affected.
 - **R-VOICE-3** The voice picker SHALL preview candidates using the character's own canon
   dialogue.
 - **R-VOICE-4** Local voices SHALL be presented as a fixed catalogue, and voice cloning SHALL

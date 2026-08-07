@@ -54,7 +54,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
-      sectionHeading: z.literal("Essence"),
+      // The reader names a section — the prose never travels; the server reads the authoritative
+      // sheet. A character's Essence and Appearance are the descriptive prose worth hearing.
+      sectionHeading: z.enum(["Essence", "Appearance"]),
       confirmationToken: z.string().min(1).optional(),
     })
     .strict(),
@@ -412,7 +414,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().min(1).max(200),
     })
     .strict(),
-  /** SPEC-007 R-15: voice assignment is a gated sheet change. */
+  /** The human's own action: assigning (or clearing) a voice commits straight to the sheet —
+   *  it still versions and ripples, but does not stage a proposal for the same person to accept. */
   z
     .object({
       kind: z.literal("assign-voice"),
