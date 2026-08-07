@@ -52,6 +52,15 @@ function run(command, commandArgs, options = {}) {
 }
 
 function commandPath(command) {
+  // Windows ships bsdtar at a known path, and it is the one this script means. A shell whose
+  // PATH prefers GNU tar — Git Bash and MSYS2 both do — reads the `C:` in an absolute archive
+  // path as a remote host and fails with "Cannot connect to C: resolve failed". Resolving the
+  // binary rather than escaping the path: `--force-local` would cure GNU tar and bsdtar rejects
+  // the flag outright, so the flag cannot be passed unconditionally.
+  if (command === "tar.exe") {
+    const system32 = join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "tar.exe");
+    return existsSync(system32) ? system32 : command;
+  }
   if (command !== "cmake.exe") return command;
   const candidates = [
     command,
