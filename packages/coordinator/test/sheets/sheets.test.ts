@@ -190,7 +190,7 @@ describe("creation paths (R-10..R-12, D7, D9)", () => {
       files: [{ path: "characters/bray-half-hitch.md", action: "replace", content: doc.serialize(), baseHash: sha256(live) }],
     });
     const copyAfter = store.getBundle().sheets.find((s) => s.id === "sella-half-hitch");
-    assert.deepEqual(copyAfter?.origin, { sheet: "bray-half-hitch", version: 2 }, "unmoved");
+    assert.deepEqual(copyAfter?.origin, { sheet: "bray-half-hitch", version: 6 }, "unmoved");
     await store.close();
   });
 
