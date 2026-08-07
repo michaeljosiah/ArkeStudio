@@ -158,6 +158,17 @@ export function projectWorkspace(
       promoted: a.promotedArtifactId !== undefined,
     })),
     runStatus: loaded.activeRun?.status ?? null,
+    // A turn that failed says so, and says it in the words a person can act on. Without this the
+    // screen is identical whether the studio answered, failed, or was never asked.
+    ...(loaded.lastFailedRun
+      ? {
+          lastFailure: {
+            turnId: loaded.lastFailedRun.turnId,
+            status: loaded.lastFailedRun.status,
+            ...(loaded.lastFailedRun.safeDetail ? { detail: loaded.lastFailedRun.safeDetail } : {}),
+          },
+        }
+      : {}),
     // Any required observation that could not be made makes the panel say so rather than let a
     // proposition read as checked (§9.4).
     retrievalUnavailable: loaded.candidates.some((c) => c.checks.state === "unavailable"),

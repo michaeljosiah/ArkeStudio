@@ -609,6 +609,31 @@ describe("domain events and frames", () => {
     assert.throws(() => FrameSchema.parse({ kind: "event", seq: 0, event }));
   });
 
+  it("carries an expected draft revision on an in-place proposal edit", () => {
+    // #70 §11.4.1. The revision is what stops two windows quietly merging into a third version
+    // neither person read, so it is required rather than optional, and it is a real revision:
+    // a draft starts at 1, and 0 would be a client that had not loaded the proposal.
+    const edit = {
+      kind: "proposal-update-field",
+      worldId: WORLD_ID,
+      requestId: "req-1",
+      proposalId: "pr_1",
+      path: "canon/CANON-018.md",
+      field: "Statement",
+      value: "The bells cannot ring below the western lock.",
+      expectedDraftRevision: 1,
+    };
+    assert.doesNotThrow(() => ClientMessageSchema.parse(edit));
+    for (const missing of ["requestId", "expectedDraftRevision", "path", "field", "value"]) {
+      const { [missing]: _dropped, ...without } = edit as Record<string, unknown>;
+      assert.throws(() => ClientMessageSchema.parse(without), `${missing} must be required`);
+    }
+    assert.throws(() => ClientMessageSchema.parse({ ...edit, expectedDraftRevision: 0 }));
+    assert.throws(() => ClientMessageSchema.parse({ ...edit, value: "x".repeat(20_001) }));
+    // No path or id may ride along that the coordinator did not compute.
+    assert.throws(() => ClientMessageSchema.parse({ ...edit, targetPath: "../../etc/passwd" }));
+  });
+
   it("validates client messages", () => {
     assert.doesNotThrow(() => ClientMessageSchema.parse({ kind: "hello", lastSeq: 12 }));
     assert.doesNotThrow(() => ClientMessageSchema.parse({ kind: "open-world", worldId: WORLD_ID }));

@@ -7,6 +7,7 @@ import { Button, cx } from "../components/ui.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import {
   cancelWorldChat,
+  retryWorldChatTurn,
   createWorldChat,
   openWorldChat,
   sendWorldChat,
@@ -196,6 +197,7 @@ export function WorldChatConversationScreen() {
   const openThreads = points.filter((p) => p.kind === "question");
   const carried = points.filter((p) => p.kind === "point" && p.settled).length;
   const running = loaded?.runStatus === "running";
+  const failure = loaded?.lastFailure;
   /**
    * Attachments are private to this conversation, and the chips say which are readable.
    * An image can be attached and referred to; it cannot be quoted, and the chip should not
@@ -240,6 +242,25 @@ export function WorldChatConversationScreen() {
                     </div>
                   </div>
                 ))}
+                {/*
+                  A turn that failed says so where the reply would have been. Silence here is
+                  indistinguishable from never having asked, which is how a two-minute timeout
+                  reads as "nothing happens".
+                */}
+                {failure && !running && (
+                  <div className="fy-chat__failed" role="status">
+                    <div className="fy-chat__failedtext">{failureLine(failure)}</div>
+                    <button
+                      type="button"
+                      className="fy-chat__retry"
+                      onClick={() =>
+                        worldId && conversationId && retryWorldChatTurn(worldId, conversationId, failure.turnId)
+                      }
+                    >
+                      Try that again
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -391,6 +412,24 @@ function groupBySubject(
 /** Whether there is anything to talk to. Starting a conversation nobody can answer is a dead end. */
 function harnessReady(state: ReturnType<typeof useStore>["state"]): boolean {
   return state?.app.health.harness.status === "healthy";
+}
+
+/**
+ * What a failed turn says.
+ *
+ * Plainly, and about the app rather than the person: they typed something reasonable and waited.
+ * The `detail` the coordinator carries is operator-safe by construction, so it can be shown, but
+ * it is a supporting clause and never the whole sentence -- "the studio took too long to answer"
+ * on its own does not tell somebody the message is still there and can be sent again.
+ */
+function failureLine(failure: { status: string; detail?: string }): string {
+  const opening =
+    failure.status === "timeout"
+      ? "That took too long and stopped."
+      : failure.status === "budget-exceeded"
+        ? "That turn ran past its budget and stopped."
+        : "That did not go through.";
+  return `${opening} Nothing was lost — your message is still here.`;
 }
 
 function composerReason(state: ReturnType<typeof useStore>["state"]): string | undefined {

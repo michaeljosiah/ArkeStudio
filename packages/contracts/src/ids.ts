@@ -60,6 +60,8 @@ export const ID_PREFIXES = {
   candidateGroup: "grp",
   chatAttachment: "wca",
   chatEvent: "wce",
+  /** One in-place proposal edit, as recorded in its draft journal (#70 §11.4.1). */
+  draftOperation: "dop",
 } as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
