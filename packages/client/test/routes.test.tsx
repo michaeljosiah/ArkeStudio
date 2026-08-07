@@ -22,6 +22,30 @@ function renderAt(path: string): string {
   );
 }
 
+/**
+ * Every `<button>` that opens while another is still open, as a slice of the outer one.
+ *
+ * A control inside a control is invalid HTML, and the browser's repair — closing the outer one
+ * at the inner tag — is not what the markup said, so React refuses to hydrate it. It cost the
+ * world picker its "Create a world" button: clickable by mouse, and absent from the
+ * accessibility tree because the parser had already thrown it out of the card.
+ */
+function nestedButtons(html: string): string[] {
+  const found: string[] = [];
+  const open: number[] = [];
+  const tags = /<button\b|<\/button>/g;
+  let tag: RegExpExecArray | null;
+  while ((tag = tags.exec(html)) !== null) {
+    if (tag[0] === "</button>") open.pop();
+    else {
+      // The outer tag is the offender; the inner one is usually a shared <Button>.
+      if (open.length > 0) found.push(html.slice(open[0]!, open[0]! + 90));
+      open.push(tag.index);
+    }
+  }
+  return found;
+}
+
 describe("screen inventory", () => {
   it("covers the full screen inventory (52 screens)", () => {
     assert.equal(SCREENS.length, 52);
@@ -37,6 +61,13 @@ describe("screen inventory", () => {
       );
     });
   }
+
+  it("never nests one control inside another (SPEC-001 R-7)", () => {
+    for (const screen of SCREENS) {
+      const hits = nestedButtons(renderAt(screen.samplePath));
+      assert.equal(hits.length, 0, `${screen.id} nests a <button> inside — ${hits.join(" · ")}`);
+    }
+  });
 
   it("smoke-renders the root router", () => {
     const html = renderAt("/");

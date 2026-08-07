@@ -589,7 +589,12 @@ export function WorldPickerScreen() {
                 </div>
               </div>
             ))}
-            <button type="button" className="fy-newworldcard" onClick={() => navigate("/worlds/new")}>
+            {/* The card is the target, not the control — the same shape the first-run cards
+                already use. It was a <button> holding another one, which is invalid HTML: the
+                inner control is unreachable in the accessibility tree, and React refuses to
+                hydrate it. The whole card still takes a click; what a keyboard and a screen
+                reader land on is the one thing here that names what it does. */}
+            <div className="fy-newworldcard" onClick={() => navigate("/worlds/new")}>
               <span className="fy-newprodcard__ring" style={{ width: 46, height: 46 }}>
                 <Plus size={20} />
               </span>
@@ -600,7 +605,7 @@ export function WorldPickerScreen() {
               <span style={{ marginTop: 6 }}>
                 <Button>Create a world</Button>
               </span>
-            </button>
+            </div>
           </div>
         )}
       </div>
