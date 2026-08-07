@@ -215,10 +215,12 @@ export function WorldChatConversationScreen() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-eyebrow-sm">WORLD CHAT</div>
               <h1 className="fy-story__h1">{row?.title ?? "New conversation"}</h1>
-              {row?.entryContext && row.entryContext.kind !== "world" && (
-                <div className="fy-chat__about">{aboutLabel(row.entryContext)}</div>
-              )}
             </div>
+            {/* Beside the title rather than beneath it (41a): the head bottom-aligns the two so a
+                named subject reads as one line instead of a stack that grows. */}
+            {row?.entryContext && row.entryContext.kind !== "world" && (
+              <div className="fy-chat__about">{aboutLabel(row.entryContext)}</div>
+            )}
           </div>
 
           <div className="fy-gate__body">
@@ -228,16 +230,14 @@ export function WorldChatConversationScreen() {
               <div className="fy-chat__transcript" aria-live="polite">
                 {loaded.messages.map((m) => (
                   <div key={m.id} className={cx("fy-chat__turn", `fy-chat__turn--${m.role}`)}>
-                    <div className="fy-chat__bubble">{m.text}</div>
-                    {m.role === "studio" && m.receipts.length > 0 && (
-                      <div className="fy-chat__receipts">
-                        {m.receipts.map((r, i) => (
-                          <span key={i} className="fy-chat__receipt">
-                            {r}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    <div className="fy-chat__bubble">
+                      {m.text}
+                      {m.role === "studio" && m.receipts.length > 0 && (
+                        // One tick for the row, not one per receipt: the tick means "this is what
+                        // was read", and repeating it turned a footnote into a checklist.
+                        <div className="fy-chat__receipts">{`✓ ${m.receipts.join(" · ")}`}</div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -277,9 +277,11 @@ export function WorldChatConversationScreen() {
 
         <div className="fy-gate__side">
           <div className="fy-panel__head">
-            <div className="fy-panel__title">What I&rsquo;ve understood</div>
-            <div className="fy-panel__count">
-              {points.length} point{points.length === 1 ? "" : "s"} · nothing decided
+            <div className="fy-panel__headline">
+              <div className="fy-panel__title">What I&rsquo;ve understood</div>
+              <div className="fy-panel__count">
+                {points.length} point{points.length === 1 ? "" : "s"} · nothing decided
+              </div>
             </div>
             <div className="fy-panel__note">
               If a line is wrong, say so and it changes. There is nothing to approve here.
@@ -295,8 +297,10 @@ export function WorldChatConversationScreen() {
               <>
                 {groups.map((group) => (
                   <div key={group.subject} className="fy-panel__group">
-                    <div className="fy-panel__subject">{group.subject}</div>
-                    <div className="fy-panel__kind">{group.kind}</div>
+                    <div className="fy-panel__grouphead">
+                      <div className="fy-panel__subject">{group.subject}</div>
+                      <div className="fy-panel__kind">{group.kind}</div>
+                    </div>
                     {group.items.map((p) => (
                       <div key={p.id} className="fy-panel__point">
                         {p.text}
@@ -306,8 +310,10 @@ export function WorldChatConversationScreen() {
                 ))}
                 {openThreads.length > 0 && (
                   <div className="fy-panel__group">
-                    <div className="fy-panel__subject">Still open</div>
-                    <div className="fy-panel__kind">not settled</div>
+                    <div className="fy-panel__grouphead">
+                      <div className="fy-panel__subject">Still open</div>
+                      <div className="fy-panel__kind">not settled</div>
+                    </div>
                     {openThreads.map((p) => (
                       <div key={p.id} className="fy-panel__point">
                         {p.text}

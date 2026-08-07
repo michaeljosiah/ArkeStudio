@@ -24,6 +24,28 @@ function icon(paths: React.ReactNode) {
   };
 }
 
+/*
+ * The tick is drawn heavier than the 1.75px house stroke: it only ever appears reversed out of a
+ * filled 20px dot (the selected art-style card, 38a), where a hairline disappears.
+ */
+export function Check({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
 export const ChevronRight = icon(<path d="m9 18 6-6-6-6" />);
 export const ChevronLeft = icon(<path d="m15 18-6-6 6-6" />);
 export const Search = icon(

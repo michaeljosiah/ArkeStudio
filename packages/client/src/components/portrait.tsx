@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { mainPhotoFor, type WorldBundle } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
 
@@ -24,6 +24,30 @@ export function Portrait({
   useEffect(() => {
     setFailed(false);
   }, [worldSlug, path]);
+
+  // Held in a ref so `settle` below keeps one identity: callers pass an inline arrow, and a ref
+  // callback that changes every render is detached and reattached every render with it.
+  const notify = useRef(onAvailabilityChange);
+  notify.current = onAvailabilityChange;
+
+  /*
+   * Availability is read off the element as well as listened for.
+   *
+   * A cached image is already `complete` before React can attach onLoad, and a load event that
+   * has already fired never fires again — so an image that arrived fastest is precisely the one
+   * whose onLoad never runs. Screens preload these files (the cast page emits <link rel=preload>
+   * for the very portraits its rows link to), which made that the normal case rather than a race:
+   * the enlarge trigger on the character detail page stayed disabled every time.
+   */
+  const settle = useCallback((node: HTMLImageElement | null) => {
+    if (!node || !node.complete) return;
+    if (node.naturalWidth > 0) notify.current?.(true);
+    else {
+      setFailed(true);
+      notify.current?.(false);
+    }
+  }, []);
+
   if (!worldSlug || failed) {
     return (
       <div className="fy-portrait--fallback" style={{ borderRadius: radius }}>
@@ -31,17 +55,22 @@ export function Portrait({
       </div>
     );
   }
+  const src = mediaUrl(worldSlug, path);
   return (
     <img
+      // Remounted per source, so `settle` runs again for the next picture rather than only for
+      // the first one to occupy this slot.
+      key={src}
+      ref={settle}
       className="fy-portrait"
       style={{ borderRadius: radius }}
-      src={mediaUrl(worldSlug, path)}
+      src={src}
       alt={label}
       draggable={false}
-      onLoad={() => onAvailabilityChange?.(true)}
+      onLoad={() => notify.current?.(true)}
       onError={() => {
         setFailed(true);
-        onAvailabilityChange?.(false);
+        notify.current?.(false);
       }}
     />
   );

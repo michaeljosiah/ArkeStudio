@@ -54,6 +54,50 @@ describe("design tokens", () => {
     assert.deepEqual(offenders, [], `hard-coded colours found in: ${offenders.join(", ")}`);
   });
 
+  /*
+   * The .dark scope overrides the semantic tokens only — the --neutral-* ramp is deliberately
+   * left alone, so a ramp value used as a *surface* keeps its light-mode colour on a near-black
+   * page. That has produced the same bug four times: a setup bar whose track and fill landed
+   * 1.03:1 apart, a switch whose off and on states landed 1.15:1 apart, and two image plates that
+   * flashed white on a dark dialog.
+   *
+   * A fill therefore either resolves through a semantic token, or keeps the ramp and states its
+   * dark counterpart explicitly. Dots are exempt: a ramp-coloured mark inverts emphasis in dark
+   * but stays perfectly legible, which is a judgement call rather than a defect.
+   *
+   * Only the light end of the ramp is checked. The failure is specifically a light surface that
+   * never darkens; the dark end is used deliberately for the plates behind creator artwork, which
+   * hold their colour in both themes on purpose — the same reason --media-overlay-bg does.
+   */
+  it("paints no surface from the ramp without saying what it becomes in dark (R-11)", () => {
+    const offenders: string[] = [];
+    for (const path of walk(SRC)) {
+      if (path.startsWith(TOKENS_DIR + sep) || !path.endsWith(".css")) continue;
+      // Comments come out first. Left in, a comment above a rule is swallowed into the selector
+      // capture — which quietly exempted every rule that carried an explanation, i.e. exactly the
+      // ones most likely to be doing something subtle.
+      const text = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "\n");
+      // Selector(s) immediately preceding a light-ramp `background` declaration.
+      const rule = /(^|[}\n])\s*([^{}@]+?)\s*\{[^{}]*?background:\s*var\(--neutral-(?:50|100|200|300)\)/gms;
+      for (const match of text.matchAll(rule)) {
+        const selector = match[2]!.trim().replace(/\s+/g, " ");
+        if (selector === "" || selector.startsWith(".dark")) continue;
+        // A mark, not a surface.
+        if (/dot/i.test(selector)) continue;
+        // A swatch depicts a theme rather than wearing one: the light card has to stay light in
+        // dark mode, or the pair stops being a comparison.
+        if (/swatch/i.test(selector)) continue;
+        // Paired with an explicit dark counterpart somewhere in the same file.
+        if (!text.includes(`.dark ${selector}`)) offenders.push(`${relative(SRC, path)}: ${selector}`);
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      `ramp used as a surface with no .dark counterpart:\n  ${offenders.join("\n  ")}`,
+    );
+  });
+
   it("styles queue toasts from tokens and inherits the global reduced-motion policy", () => {
     const toast = readFileSync(join(SRC, "components", "toast.css"), "utf8");
     const globals = readFileSync(join(SRC, "theme", "globals.css"), "utf8");

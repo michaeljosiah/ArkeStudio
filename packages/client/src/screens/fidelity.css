@@ -310,7 +310,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   transition: transform 0.35s var(--ease-out), box-shadow 0.35s var(--ease-out);
 }
 .fy-polaroid:hover { transform: rotate(0deg) translateY(-14px) !important; box-shadow: var(--shadow-xl); }
-.fy-polaroid__frame { width: 154px; height: 180px; }
+/*
+ * The frame fills the card's content box rather than stating 154px.
+ *
+ * This is the one card whose width is NOT re-derived from the canvas: 41a's polaroid renders 187
+ * wide, but rule 11 fixes "170px wide ... the width budget of that 147px line", and 170 as the
+ * whole width is what puts the role line at exactly 147. Keeping that leaves the content box at
+ * 152.7, which a literal 154 overhangs by a pixel; 100% tracks it and the 180 height — the part
+ * the rule actually pins — is untouched.
+ */
+.fy-polaroid__frame { width: 100%; height: 180px; }
 /*
  * Both lines are single-line and clipped. The frame and the padding are already fixed, so
  * pinning these two makes the card a constant 243px tall — the fan stays level no matter how
@@ -327,7 +336,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-polaroid__role { font: 400 11px/15px var(--font-sans); color: var(--muted-foreground); margin: 1px 3px 0; height: 15px; }
 
 .fy-worldcard {
-  width: 280px;
+  width: 306px;
   /*
    * One number for the real card and the dashed "New world" placeholder beside it, so the two
    * cannot drift apart. It is the sum of the pinned bands below (frame, name, logline, meta and
@@ -403,7 +412,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   display: flex;
   align-items: center;
   gap: 18px;
-  width: 420px;
+  width: 450px;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   padding: 14px;
@@ -467,9 +476,17 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-feature__sub { margin: 3px 6px 0; font: 400 13px/1.5 var(--font-sans); color: var(--muted-foreground); }
 .fy-feature__actions { display: flex; gap: 8px; margin: 14px 6px 2px; }
 
+/*
+ * Sized to the picture, not to a column (design 42a). The rule is explicit: the panel takes the
+ * image's own aspect, "because a dialog whose whole purpose is seeing the picture properly should
+ * not letterbox it". A fixed width with object-fit:contain did exactly that — a 5:6 portrait
+ * opened inside a 920px box and wore a band of dead surface down both sides. Now the image sizes
+ * itself within the viewport budget and the panel shrink-wraps whatever aspect arrives, so one
+ * declaration serves portraits, character sheets and landscape stills alike.
+ */
 .fy-portrait-dialog {
-  width: min(920px, calc(100vw - 48px));
-  max-width: none;
+  width: fit-content;
+  max-width: calc(100vw - 48px);
   max-height: calc(100vh - 48px);
   padding: 0;
   border: 1px solid var(--border);
@@ -479,15 +496,38 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   box-shadow: var(--shadow-xl);
   overflow: hidden;
 }
-.fy-portrait-dialog::backdrop { background: color-mix(in srgb, var(--neutral-950) 72%, transparent); }
-.fy-portrait-dialog__panel { display: flex; flex-direction: column; max-height: calc(100vh - 48px); }
-.fy-portrait-dialog__head { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border); }
-.fy-portrait-dialog__head h2 { margin: 0; font: 600 16px var(--font-sans); }
-.fy-portrait-dialog__close { display: inline-flex; align-items: center; justify-content: center; margin-left: auto; width: 32px; height: 32px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; cursor: pointer; }
-.fy-portrait-dialog__close:hover { background: var(--accent); }
+/*
+ * The wash inverts with the theme. It was --neutral-950, which the .dark scope deliberately does
+ * not override — so the scrim stayed near-black in both, and in dark mode it was a black veil
+ * over a black page that said nothing about there being a layer above it.
+ */
+.fy-portrait-dialog::backdrop { background: color-mix(in srgb, var(--background) 72%, transparent); }
+/* Zoom-out over the backdrop, because clicking it is how you dismiss; the panel itself is not a
+   target, so it takes the cursor back. The trigger that opened this is zoom-in — the pair is what
+   says the two are the same picture at two sizes. */
+.fy-portrait-dialog { cursor: zoom-out; }
+.fy-portrait-dialog__panel { display: flex; flex-direction: column; max-height: calc(100vh - 48px); cursor: default; }
+.fy-portrait-dialog__head { display: flex; align-items: center; gap: 11px; padding: 13px 18px; border-bottom: 1px solid var(--border); flex: none; }
+.fy-portrait-dialog__titles { flex: 1; min-width: 0; }
+.fy-portrait-dialog__head h2 { margin: 0; font: 600 13.5px var(--font-sans); }
+.fy-portrait-dialog__sub { font: 400 10.5px var(--font-mono); color: var(--neutral-400); margin-top: 2px; }
+.fy-portrait-dialog__close { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--neutral-400); cursor: zoom-out; }
+.fy-portrait-dialog__close:hover { background: var(--accent); color: var(--foreground); }
 .fy-portrait-dialog__close:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.fy-portrait-dialog__image { min-height: 0; padding: var(--space-5); background: var(--neutral-950); }
-.fy-portrait-dialog__image .fy-portrait { width: 100%; height: calc(100vh - 150px); object-fit: contain; }
+/* No backing plate: the canvas shows the panel's own surface behind the image, and a --neutral-950
+   plate here was the second thing on this dialog that ignored the theme. */
+.fy-portrait-dialog__image { min-height: 0; padding: 14px; }
+.fy-portrait-dialog__image .fy-portrait {
+  display: block;
+  width: auto;
+  height: auto;
+  /* 48px of viewport margin + 28px of panel padding; the head is ~54px of that budget. */
+  max-width: calc(100vw - 76px);
+  max-height: calc(100vh - 130px);
+  object-fit: contain;
+}
+/* A picture that never arrived still needs a box, and without one the panel collapses to its head. */
+.fy-portrait-dialog__image .fy-portrait--fallback { width: 320px; height: 384px; }
 
 .fy-ledgerhead {
   display: flex;
@@ -568,7 +608,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 
 .fy-designcard {
-  width: 320px;
+  width: 342px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -661,7 +701,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-sheet__actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .fy-sheet__quiet { display: flex; gap: 4px; flex-wrap: wrap; }
 .fy-character-overview-tabs { position: absolute; top: 68px; right: 90px; z-index: 10; }
-.fy-overview-sheet { width: 320px; margin-top: 22px; padding: 0 0 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: var(--shadow-sm); text-align: left; cursor: pointer; overflow: hidden; }
+.fy-overview-sheet { width: 322px; margin-top: 22px; padding: 0 0 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: var(--shadow-sm); text-align: left; cursor: pointer; overflow: hidden; }
 .fy-overview-sheet > span { display: block; width: 320px; height: 168px; overflow: hidden; }
 .fy-overview-sheet strong { display: inline-block; margin: 9px 0 0 12px; font: 600 12px var(--font-sans); }
 .fy-overview-sheet small { float: right; margin: 11px 12px 0 0; font: 400 9px var(--font-mono); color: var(--success); }
@@ -676,7 +716,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 
 .fy-newworldcard {
-  width: 280px;
+  width: 283px;
   height: var(--fy-worldcard-h);
   border: 1.5px dashed var(--neutral-300);
   border-radius: var(--radius-card);
@@ -716,7 +756,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-prodwrap { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 
 .fy-prodrail {
-  width: 236px;
+  width: 265px;
   flex: none;
   border-right: 1px solid var(--border);
   padding: 20px 14px;
@@ -983,13 +1023,13 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 /* generate workspace (11b) */
 .fy-gen { display: flex; flex: 1; min-height: 0; }
-.fy-gen__left { width: 392px; flex: none; border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px 22px; overflow-y: auto; }
+.fy-gen__left { width: 437px; flex: none; border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px 22px; overflow-y: auto; }
 .fy-gen__label { display: flex; align-items: baseline; gap: 8px; font: 600 12.5px var(--font-sans); margin: 16px 0 8px; }
 .fy-refstrip { display: flex; gap: 8px; flex: none; }
 .fy-refstrip__wide { width: 118px; height: 64px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex: none; }
-.fy-refstrip__tile { width: 48px; height: 64px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex: none; }
+.fy-refstrip__tile { width: 50px; height: 64px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex: none; }
 .fy-refstrip__add {
-  width: 48px;
+  width: 51px;
   height: 64px;
   border: 1.5px dashed var(--neutral-300);
   border-radius: 7px;
@@ -1072,7 +1112,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-scrub__fill { height: 100%; border-radius: 99px; background: var(--foreground); }
 .fy-gen__verdict { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex: none; flex-wrap: wrap; }
 
-.fy-gen__takes { width: 128px; flex: none; border-left: 1px solid var(--border); padding: 20px 12px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+.fy-gen__takes { width: 153px; flex: none; border-left: 1px solid var(--border); padding: 20px 12px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
 .fy-taketile { cursor: pointer; opacity: 0.75; transition: opacity 0.2s; background: transparent; border: none; padding: 0; }
 .fy-taketile:hover, .fy-taketile--active { opacity: 1; }
 .fy-taketile__frame { width: 100%; height: 58px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
@@ -1434,7 +1474,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   color: var(--muted-foreground);
 }
 .fy-story__side {
-  width: 470px;
+  width: 534px;
   flex: none;
   padding: 26px 32px;
   background: var(--muted);
@@ -1460,7 +1500,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 /* production cards (2c) */
 .fy-prodcards { display: flex; justify-content: center; gap: 30px; padding: 40px 0 46px; align-items: flex-start; flex-wrap: wrap; animation: fy-fade-up 0.7s var(--ease-out) 0.22s both; }
 .fy-prodcard {
-  width: 330px;
+  width: 332px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -1545,8 +1585,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   padding: 24px;
   overflow-y: auto;
 }
+/*
+ * 982px, not the canvas's declared 920.
+ *
+ * The design canvas is content-box and this app resets everything to border-box, so a width read
+ * off the canvas source is a *content* width and arrives here 60px of padding and 2px of border
+ * short. 920 + 30 + 30 + 1 + 1 is what the canvas actually renders, and what the pane inside
+ * needs in order to hold the provider list and its detail at the sizes 40a draws them.
+ */
 .fy-settings {
-  width: 920px;
+  width: 982px;
   max-width: 100%;
   background: var(--background);
   border: 1px solid var(--border);
@@ -1572,9 +1620,13 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   transition: var(--transition-control);
 }
 .fy-settings__close:hover { background: var(--accent); color: var(--foreground); }
-.fy-settings__body { display: flex; gap: 24px; margin-top: 18px; min-height: 470px; max-height: min(560px, 70vh); }
+/* The canvas fixes this at 624px on an 850px frame (40a); the cap stays viewport-relative so a
+   short window still fits, but it no longer stops 64px short of the design on a tall one. */
+.fy-settings__body { display: flex; gap: 24px; margin-top: 18px; min-height: 470px; max-height: min(624px, 73vh); }
+/* 177px = the canvas's 160px of tab plus its 16px gutter and 1px rule; see .fy-settings above on
+   why every canvas width needs its padding and border added back here. */
 .fy-settings__rail {
-  width: 160px;
+  width: 177px;
   flex: none;
   display: flex;
   flex-direction: column;
@@ -1682,10 +1734,80 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-set__dot--warn { background: var(--warning); }
 .fy-set__state { font: 400 10px var(--font-mono); color: var(--muted-foreground); }
 .fy-set__note { font: 400 10px/1.6 var(--font-mono); color: var(--neutral-400); margin-top: 10px; }
-.fy-theme-options { border: 0; padding: 0; margin: 0; }
+.fy-theme-options { border: 0; padding: 0; margin: 4px 0 0; }
 .fy-theme-option { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
+/* The list ends at the last option, not with a rule under it hanging into the space below. */
+.fy-theme-option:last-of-type { border-bottom: 0; }
 .fy-theme-option__copy { display: block; flex: 1; min-width: 0; }
-.fy-theme-option input { width: 15px; height: 15px; margin: 0; accent-color: var(--foreground); }
+/*
+ * The name over its explanation, not beside it — these are spans, where the shared settings row
+ * uses divs and stacks on its own.
+ *
+ * 35d also sets this list a step larger than the row template every other pane uses (13px over
+ * 12.5px, a 10px hint over 9.5px): three choices given a whole pane can afford it, and eight
+ * provider rows in the same space cannot, which is why the sizes are scoped here.
+ */
+.fy-theme-option__copy .fy-set__title { display: block; font: 600 13px var(--font-sans); }
+.fy-theme-option__copy .fy-set__caps {
+  display: block;
+  font: 400 10px var(--font-mono);
+  color: var(--muted-foreground);
+  margin-top: 3px;
+}
+/*
+ * The ring, drawn rather than tinted (35d). A native radio with accent-color is the platform's
+ * dot, which on Windows is a filled disc and looks nothing like the design's hollow ring.
+ *
+ * Both states keep a 15px hole and thicken outward — 1.5px idle, 4.5px chosen — so selecting one
+ * makes the ring heavier without moving the centre. That is why the outer sizes differ: 15 + 1.5
+ * either side is 18, and 15 + 4.5 either side is 24. The canvas gets those totals from
+ * content-box; here they are stated, because everything in this app is border-box.
+ */
+.fy-theme-option input {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex: none;
+  border-radius: 99px;
+  border: 1.5px solid var(--neutral-300);
+  background: transparent;
+  cursor: pointer;
+}
+.fy-theme-option input:checked { width: 24px; height: 24px; border: 4.5px solid var(--foreground); }
+.fy-theme-option input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+/*
+ * What each theme looks like, as two swatches (35d).
+ *
+ * These paint from the ramp on purpose and are exempt from the surface rule in tokens.test.ts:
+ * a swatch *depicts* a theme, so the light one must stay light in dark mode and the dark one dark
+ * in light mode. Following the active theme would leave both cards showing the same thing.
+ */
+/* The appearance pane fills its height so the swatches can sit at its foot, where 35d puts them;
+   every other pane keeps the shared content-height grid. */
+.fy-settings__pane:has(.fy-set--appearance) { align-content: stretch; }
+.fy-set--appearance { display: flex; flex-direction: column; }
+.fy-themeswatches { display: flex; gap: 12px; margin-top: auto; padding-top: 18px; }
+.fy-themeswatch { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.fy-themeswatch__frame { height: 74px; display: flex; align-items: center; gap: 9px; padding: 0 14px; }
+.fy-themeswatch__block { width: 26px; height: 26px; border-radius: 7px; flex: none; }
+.fy-themeswatch__lines { flex: 1; min-width: 0; }
+.fy-themeswatch__lines i { display: block; height: 6px; border-radius: 99px; }
+.fy-themeswatch__lines i:first-child { width: 70%; }
+.fy-themeswatch__lines i:last-child { width: 45%; margin-top: 5px; }
+.fy-themeswatch__caption {
+  padding: 8px 12px; border-top: 1px solid var(--border);
+  font: 500 10px var(--font-mono); letter-spacing: 0.05em; color: var(--muted-foreground);
+}
+.fy-themeswatch--light .fy-themeswatch__frame { background: var(--neutral-50); }
+.fy-themeswatch--light .fy-themeswatch__block { background: var(--neutral-900); }
+.fy-themeswatch--light .fy-themeswatch__lines i:first-child { background: var(--neutral-200); }
+.fy-themeswatch--light .fy-themeswatch__lines i:last-child { background: var(--neutral-100); }
+.fy-themeswatch--dark .fy-themeswatch__frame { background: var(--neutral-950); }
+.fy-themeswatch--dark .fy-themeswatch__block { background: var(--neutral-50); }
+.fy-themeswatch--dark .fy-themeswatch__lines i:first-child { background: var(--neutral-800); }
+.fy-themeswatch--dark .fy-themeswatch__lines i:last-child { background: var(--neutral-900); }
 .fy-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .fy-set__why { display: flex; align-items: center; gap: 7px; margin-top: 7px; }
 .fy-set__why span:last-child { font: 400 10.5px/1.5 var(--font-sans); color: var(--muted-foreground); }
@@ -1706,39 +1828,105 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   width: 100%;
   margin: 0 auto;
 }
+/* The step's own heading scale (38a): larger than the in-world h1, because this screen is a full
+   page of its own with nothing else competing for the top of it. */
+.fy-artstep__h1 { margin: 12px 0 0; font: 650 38px/1.05 var(--font-sans); letter-spacing: -0.03em; }
+/* Head and aside share a baseline: the note about the previews explains the grid below, so it
+   belongs beside the copy that introduces it rather than floating over the first row. */
+.fy-artstep__head { display: flex; align-items: flex-end; gap: 24px; }
+.fy-artstep__aside { margin-left: auto; padding-bottom: 6px; text-align: right; flex: none; }
+.fy-artstep__asidehead { font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
+.fy-artstep__asidenote { font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); max-width: 230px; margin-top: 5px; }
+/* Three bars for three steps, all filled: this is the last one. */
+.fy-artstep__steps { display: flex; align-items: center; gap: 9px; }
+.fy-artstep__steps i { width: 44px; height: 3px; border-radius: 99px; background: var(--foreground); }
 .fy-artstep__lede {
-  font: 400 13px/1.65 var(--font-sans);
+  font: 400 13.5px/1.65 var(--font-sans);
   color: var(--muted-foreground);
-  margin: 0;
-  max-width: 68ch;
+  margin: 11px 0 0;
+  max-width: 640px;
 }
-.fy-artstep__foot { display: flex; align-items: center; gap: 12px; margin-top: auto; padding-top: 8px; }
+.fy-artstep__foot { display: flex; align-items: center; gap: 14px; margin-top: auto; border-top: 1px solid var(--border); padding: 16px 0 22px; }
 .fy-artstep__note { font: 400 10.5px/1.5 var(--font-mono); color: var(--neutral-400); }
 .fy-artstep__reaches { display: grid; gap: 5px; margin-top: 4px; }
 .fy-artstep__reaches > div { font: 400 11.5px var(--font-sans); color: var(--muted-foreground); }
+/*
+ * The preset library (38a). The card is a preview with its name beneath — the border belongs to
+ * the picture, not to a box around the words, so the nine treatments sit in a row of images and
+ * the labels read as captions. Fixed 224px rather than a fluid track: these are meant to be
+ * compared against each other, and a column width that changes with the viewport changes the
+ * apparent crop of every scene at once.
+ */
 .fy-styles {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
   margin: 4px 0;
 }
 .fy-styles__card {
   display: flex;
   flex-direction: column;
-  gap: 4px;
   align-items: flex-start;
   text-align: left;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--background);
+  width: 224px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
   cursor: pointer;
 }
-.fy-styles__card:hover { border-color: var(--neutral-400); }
-.fy-styles__card.is-selected { border-color: var(--foreground); box-shadow: inset 0 0 0 1px var(--foreground); }
-.fy-styles__card--custom { border-style: dashed; }
-.fy-styles__name { font: 600 12.5px var(--font-sans); }
-.fy-styles__blurb { font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); }
+.fy-styles__frame {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 134px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-sizing: border-box;
+}
+.fy-styles__frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fy-styles__card:hover .fy-styles__frame { border-color: var(--neutral-400); }
+/*
+ * Selection is a 2px edge and a shadow, and the border stays inside the frame's box so the card
+ * does not shift by a pixel as it is picked — with nine of these in a wrapping row, one growing
+ * would reflow the whole grid.
+ */
+.fy-styles__card.is-selected .fy-styles__frame {
+  border-width: 2px;
+  border-color: var(--foreground);
+  box-shadow: var(--shadow-md);
+}
+.fy-styles__card:focus-visible .fy-styles__frame { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-styles__tick {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--foreground);
+  color: var(--background);
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.fy-styles__card.is-selected .fy-styles__tick { display: flex; }
+/* The custom door is a frame like the rest, dashed rather than filled: an empty picture you write. */
+.fy-styles__card--custom .fy-styles__frame {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-style: dashed;
+  border-color: var(--neutral-300);
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+.fy-styles__card--custom:hover .fy-styles__frame { background: var(--accent); color: var(--foreground); }
+.fy-styles__customlabel { font: 500 11px var(--font-sans); }
+.fy-styles__name { font: 600 12px var(--font-sans); margin-top: 8px; }
+.fy-styles__blurb { font: 400 10.5px/1.45 var(--font-sans); color: var(--muted-foreground); margin-top: 2px; }
 .fy-styles__words { display: grid; gap: 6px; }
 .fy-styles__wordshead { display: flex; align-items: baseline; gap: 10px; }
 .fy-styles__wordshead > span:first-child { font: 600 12.5px var(--font-sans); }
@@ -1754,7 +1942,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
    and the sections below are drawn over it. */
 .fy-prov { display: flex; min-height: 300px; max-height: 46vh; overflow: hidden; }
 .fy-prov__rail {
-  width: 178px;
+  /* 211px = the canvas's 196px of row plus its 14px gutter and 1px rule (40a). The row is what
+     the number is really about: a provider name beside its "4 on" tally, neither eliding. */
+  width: 211px;
   flex: none;
   border-right: 1px solid var(--border);
   padding-right: 14px;
@@ -1812,19 +2002,54 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-prov__model--off { opacity: 0.45; }
 .fy-prov__modelname { font: 400 12.5px var(--font-sans); color: var(--foreground); }
 .fy-prov__price { font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
+/*
+ * An outlined pill, not bare amber text (40c). It has to survive being the third thing on a model
+ * row after a name and a price, and the outline is what keeps it a badge rather than a word that
+ * happens to be coloured. The same shape the dispatch bar gives it, at this row's smaller size.
+ */
+/* The alert threshold, on the screen that reports it (26a). */
+.fy-spendalert__toggle {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: 400 11px var(--font-sans);
+  padding: 0;
+}
+.fy-spendalert__toggle:hover { color: var(--foreground); }
+.fy-spendalert {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.fy-spendalert__label { font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+
 .fy-prov__unverified {
   font: 500 8.5px var(--font-mono);
-  letter-spacing: 0.1em;
   font-style: normal;
   color: var(--warning);
+  border: 1px solid var(--warning);
+  border-radius: 999px;
+  padding: 2px 7px;
+  flex: none;
 }
-/* The switch is the row's only control, so it carries the whole state: filled is on. */
+/*
+ * The switch is the row's only control, so it carries the whole state: filled is on.
+ *
+ * The off track is --border, not the canvas's --neutral-200. The ramp is not overridden under
+ * .dark, so an off switch stayed at its light-mode value while an on switch became --foreground:
+ * the two landed about 1.15:1 apart and the row stopped saying which it was. --border resolves to
+ * the same value as --neutral-200 in light, so nothing about the light rendering changes.
+ */
 .fy-prov__switch {
   width: 32px;
   height: 19px;
   border: 0;
   border-radius: 999px;
-  background: var(--neutral-200);
+  background: var(--border);
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
@@ -1927,6 +2152,11 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-set__aboutname { font: 650 26px var(--font-sans); letter-spacing: -0.02em; }
 .fy-set__aboutmeta { font: 400 11px var(--font-mono); color: var(--neutral-400); }
 .fy-set__aboutline { font: 400 12.5px var(--font-sans); color: var(--muted-foreground); margin-top: 5px; }
+.fy-set__actions { display: flex; gap: 9px; margin-top: 14px; }
+/* At the foot of the pane, where 35b puts it — after the rows, not floating among them. */
+.fy-set__copyright { margin-top: auto; padding-top: 18px; font: 400 10px var(--font-mono); color: var(--neutral-400); }
+.fy-settings__pane:has(.fy-set--about) { align-content: stretch; }
+.fy-set--about { display: flex; flex-direction: column; }
 
 .fy-update-transition { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: var(--space-6); background: color-mix(in srgb, var(--background) 92%, transparent); backdrop-filter: blur(12px); }
 .fy-update-transition__panel { max-width: 440px; text-align: center; color: var(--foreground); }
@@ -1939,7 +2169,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-activity { display: flex; flex: 1; min-height: 0; }
 .fy-activity__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 28px 40px 24px; overflow-y: auto; }
 .fy-activity__side {
-  width: 330px;
+  width: 391px;
   flex: none;
   border-left: 1px solid var(--border);
   padding: 30px;
@@ -1999,11 +2229,17 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-launch__panel { width: 640px; max-width: 100%; margin-top: 20px; flex: none; animation: fy-fade-up 0.8s var(--ease-out) 0.15s both; }
 .fy-launch__row { display: flex; align-items: baseline; width: 100%; gap: 10px; }
 .fy-launch__title { font: 600 13px var(--font-sans); letter-spacing: -0.01em; }
+/*
+ * The track is --muted, not --neutral-100. The ramp is not overridden under .dark, so the track
+ * kept its light-mode value while the fill below resolves to --foreground — in dark the two sat
+ * about 1.03:1 apart and the setup bar showed no progress at all. --muted resolves to the same
+ * value as --neutral-100 in light, so nothing about the light rendering changes.
+ */
 .fy-setupbar {
   width: 100%;
   height: 6px;
   border-radius: 99px;
-  background: var(--neutral-100);
+  background: var(--muted);
   margin-top: 10px;
   overflow: hidden;
 }
@@ -2063,7 +2299,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   display: flex;
   align-items: center;
   gap: 9px;
-  width: 460px;
+  width: 488px;
   max-width: 100%;
   margin: 22px auto 0;
   height: 42px;
@@ -2170,15 +2406,33 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   flex-direction: column;
   gap: 5px;
 }
+/*
+ * Ruled lines standing for a document's text, on the --muted plate above.
+ *
+ * These keep a ramp value with an explicit .dark counterpart rather than moving to a semantic
+ * token, because the usual swap does not work on a recessed surface: --border resolves within
+ * 1.05:1 of --muted in dark and the lines disappear entirely. The pair below holds the same quiet
+ * register in both themes — 1.16:1 in light, 1.46:1 in dark — instead of the 12:1 that --neutral-200
+ * alone produced, which drew a bank of near-white bars on a dark card.
+ */
 .fy-doclines span { height: 3px; background: var(--neutral-200); border-radius: 99px; }
+.dark .fy-doclines span { background: var(--neutral-700); }
 
 /* the gate split (18a/28a/27a/10a — shares fy-story bones) */
 .fy-gate { display: flex; min-height: calc(100vh - 132px); }
 .fy-gate__main { flex: 1.2; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow: hidden; }
 .fy-gate__head { padding: 22px 36px 12px; flex: none; display: flex; align-items: flex-start; gap: 12px; animation: fy-fade-up 0.6s var(--ease-out) both; }
 .fy-gate__body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 36px 22px; display: flex; flex-direction: column; gap: 15px; animation: fy-fade-up 0.5s var(--ease-out) both; }
+/*
+ * 534px = the canvas's 470px of rail plus the 64px of padding it sits in.
+ *
+ * The canvas is content-box and this app is border-box, so 470 read off the source arrived as a
+ * 406px rail — 64px short on 10a, 12a, 18a, 27a and 28a. World Chat is the exception below: 41a
+ * sets box-sizing:border-box on its own rail, so there 470 really is the whole width, which is
+ * also the number its binding rule states.
+ */
 .fy-gate__side {
-  width: 470px;
+  width: 534px;
   flex: none;
   padding: 26px 32px;
   background: var(--muted);
@@ -2200,7 +2454,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-entry__title { margin: 10px 0 0; font: 650 38px/1.05 var(--font-sans); letter-spacing: -0.028em; }
 .fy-entry__body { font: 400 17px/1.65 var(--font-sans); margin-top: 18px; max-width: 640px; white-space: pre-wrap; }
 .fy-entry__side {
-  width: 400px;
+  width: 465px;
   flex: none;
   border-left: 1px solid var(--border);
   padding: 30px 32px;
@@ -2219,7 +2473,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 /* location detail (23b) */
 .fy-locdetail { display: flex; min-height: calc(100vh - 132px); }
 .fy-locdetail__hero { flex: 1.25; min-width: 0; padding: 26px 0 26px 44px; animation: fy-fade-up 0.6s var(--ease-out) both; }
-.fy-locdetail__side { width: 470px; flex: none; padding: 38px 44px 30px 36px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; animation: fy-fade-up 0.7s var(--ease-out) 0.12s both; }
+.fy-locdetail__side { width: 550px; flex: none; padding: 38px 44px 30px 36px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; animation: fy-fade-up 0.7s var(--ease-out) 0.12s both; }
 .fy-locdetail__name { margin: 0; font: 650 34px/1.05 var(--font-sans); letter-spacing: -0.028em; }
 .fy-facet__head { display: flex; align-items: center; gap: 8px; font: 600 13px var(--font-sans); }
 .fy-facet__body { font: 400 12.5px/1.6 var(--font-sans); color: var(--muted-foreground); margin-top: 4px; white-space: pre-wrap; }
@@ -2409,8 +2663,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-reference-candidates { border-top: 1px solid var(--border); padding: 8px 15px; display: flex; align-items: center; gap: 10px; background: var(--success-bg); }
 .fy-reference-candidates span { font: 400 10px var(--font-mono); color: var(--success); }
 .fy-reference-candidates .ui-btn { margin-left: auto; }
-.fy-character-sheet-dialog { width: min(1200px, calc(100vw - 48px)); }
-.fy-character-sheet-dialog .fy-portrait-dialog__image .fy-portrait { height: calc(100vh - 150px); object-fit: contain; }
+/* The character sheet is a wider plate than a portrait, and used to say so with its own fixed
+   width. It no longer needs to: the dialog takes whatever aspect the image has. */
 
 /* Generate character sheet (31b) */
 .fy-generation-scrim { width: 100%; min-height: 850px; height: 100%; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--neutral-200) 72%, var(--background)); overflow: auto; padding: 40px; }
@@ -2441,7 +2695,10 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-sheet-dialog__layout h2 { font: 600 17px var(--font-sans); }
 .fy-sheet-dialog__layout p { font: 400 11px var(--font-mono); color: var(--neutral-400); margin-top: 4px; }
 .fy-sheet-layout-sample { width: 154px; height: 96px; flex: none; padding: 9px; border: 1px solid var(--border); border-radius: 10px; background: var(--muted); display: grid; grid-template-columns: repeat(2,1fr); gap: 5px; }
+/* Panels in a miniature of the sheet layout, on the --muted box above — same reasoning as
+   .fy-doclines span: a recessed backing needs the .dark pair, not --border. */
 .fy-sheet-layout-sample i { background: var(--neutral-200); border-radius: 4px; }
+.dark .fy-sheet-layout-sample i { background: var(--neutral-700); }
 .fy-sheet-dialog__line { border-top: 1px solid var(--border); margin: 24px 0 20px; }
 .fy-sheet-dialog__stylehead { display: flex; align-items: center; font: 500 10px var(--font-mono); letter-spacing: .14em; color: var(--neutral-400); }
 .fy-sheet-dialog__stylehead button { margin-left: auto; border: 0; background: transparent; color: var(--foreground); font: 500 11px var(--font-sans); cursor: pointer; }
@@ -2494,7 +2751,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-mainphoto-dialog__empty strong { font: 600 15px var(--font-sans); color: var(--foreground); }
 .fy-mainphoto-dialog__empty span { font: 400 10px var(--font-mono); margin-top: 6px; text-align: center; }
 .fy-mainphoto-dialog__grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2,1fr); grid-template-rows: repeat(2,245px); gap: 12px; margin-top: 18px; }
-.fy-mainphoto-dialog__grid button { position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--neutral-100); padding: 0; cursor: pointer; }
+/* --muted, not --neutral-100: this plate is what shows before a preview paints, and the ramp does
+   not invert, so in dark it was a white rectangle sitting on the dialog until the image arrived. */
+.fy-mainphoto-dialog__grid button { position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--muted); padding: 0; cursor: pointer; }
 .fy-mainphoto-dialog__grid button.is-selected { border: 3px solid var(--foreground); }
 .fy-mainphoto-dialog__grid button > span { position: absolute; top: 9px; right: 9px; padding: 4px 7px; border-radius: 999px; background: var(--background); font: 500 8px var(--font-mono); }
 .fy-mainphoto-dialog__commit { display: flex; align-items: center; gap: 14px; margin-top: 18px; }
@@ -2520,7 +2779,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-looks-note { margin-top: auto; padding-top: 18px; font: 400 10px/1.55 var(--font-mono); color: var(--neutral-400); }
 .fy-looks-results { min-width: 0; display: flex; flex-direction: column; }
 .fy-looks-results__grid { display: grid; grid-template-columns: repeat(3,1fr); grid-template-rows: 250px 180px; gap: 12px; flex: 1; }
-.fy-looks-results__grid button { position: relative; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--neutral-100); padding: 0; cursor: pointer; }
+.fy-looks-results__grid button { position: relative; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--muted); padding: 0; cursor: pointer; }
 .fy-looks-results__grid button.is-selected { border: 2px solid var(--foreground); grid-row: span 2; }
 .fy-looks-results__grid button > span { position: absolute; left: 10px; bottom: 10px; padding: 4px 8px; border-radius: 999px; background: color-mix(in srgb, var(--background) 92%, transparent); font: 500 9px var(--font-mono); }
 .fy-looks-results > footer { height: 58px; display: flex; align-items: center; gap: 10px; }
@@ -2584,12 +2843,14 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
    370px side panel, and the figure travels with the buttons in one group so it
    is never orphaned at the left of a new line. */
 .fy-dispatchbar { position: relative; border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
-.fy-dispatchbar__row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; row-gap: 12px; }
+.fy-dispatchbar__row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; row-gap: 12px; }
 .fy-dispatchbar__eyebrow { font: 500 10px var(--font-mono); letter-spacing: .14em; color: var(--neutral-400); }
 .fy-dispatchbar__provider { font: 400 10px var(--font-mono); color: var(--neutral-400); }
+/* Less padding on the right than the left: the chevron carries its own optical space, and an even
+   12px made the pill look as though it leaned. */
 .fy-dispatchbar__pill {
   display: flex; align-items: center; gap: 8px; flex: none; white-space: nowrap;
-  padding: 6px 12px; border: 1px solid var(--border); border-radius: 9px;
+  padding: 6px 10px 6px 12px; border: 1px solid var(--border); border-radius: 9px;
   background: var(--background); cursor: pointer; font: 500 12.5px var(--font-sans); color: var(--foreground);
 }
 .fy-dispatchbar__pill:hover { background: var(--accent); }
@@ -2598,6 +2859,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   padding: 2px 6px; border-radius: 999px; background: var(--secondary);
   font: 500 8px var(--font-mono); color: var(--muted-foreground);
 }
+/* Held off the model name by more than the row gap: the badge qualifies the whole pill, not the
+   word beside it. */
+.fy-dispatchbar__pill strong { margin-left: 8px; }
 .fy-dispatchbar__pill em,
 .fy-dispatchbar__picker em {
   padding: 2px 6px; border-radius: 999px; border: 1px solid var(--warning);
@@ -2634,24 +2898,33 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-dispatchbar__pickerfoot { border-top: 1px solid var(--border); margin-top: 7px; padding: 10px 10px 4px; }
 .fy-dispatchbar__pickerfoot span { display: block; font: 400 10.5px var(--font-sans); color: var(--muted-foreground); }
 .fy-dispatchbar__pickerfoot span + span { font: 400 9.5px var(--font-mono); color: var(--neutral-400); margin-top: 4px; }
-/* A reference the chosen model cannot carry: shown struck through rather than removed, so the
-   downgrade from image identity to text description is something you see happen. */
+/*
+ * A reference the chosen model cannot carry: shown struck through rather than removed, so the
+ * downgrade from image identity to text description is something you see happen (39c).
+ *
+ * The canvas drops a chip by going dashed and neutral-300 with the label struck; a tile carries
+ * a picture as well, so it dims too — but the dashed edge is what says "not sent" rather than
+ * "not loaded yet", which a dim alone reads as.
+ */
 .fy-mainphoto-dialog__refs .is-dropped { opacity: .45; }
-.fy-mainphoto-dialog__refs .is-dropped span { text-decoration: line-through; }
+.fy-mainphoto-dialog__refs .is-dropped { border-style: dashed; border-color: var(--neutral-300); }
+.fy-mainphoto-dialog__refs .is-dropped span { text-decoration: line-through; color: var(--neutral-300); }
 .fy-sheetgen__purpose { display: block; font: 400 10px var(--font-mono); color: var(--neutral-400); }
 
 /* ---- proposals (turn 41b): the list beside the one you are deciding on ---- */
 
 .fy-proposals { display: flex; flex-direction: column; min-height: 0; }
+/* 22px in, not the wide page gutter: the head belongs to the list beneath it, which starts at
+   the column edge — a 44px indent left it floating over nothing. */
 .fy-proposals__head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 14px;
-  padding: 18px 44px 14px;
+  padding: 14px 22px;
   border-bottom: var(--border-1) solid var(--border);
 }
-.fy-proposals__count { font: 600 15px var(--font-sans); }
-.fy-proposals__meta { font: 400 12px var(--font-sans); color: var(--muted-foreground); }
+.fy-proposals__count { font: 600 14px var(--font-sans); }
+.fy-proposals__meta { font: 400 11.5px var(--font-sans); color: var(--muted-foreground); }
 .fy-proposals__body { display: flex; align-items: stretch; flex: 1; min-height: 0; }
 /* 265px is the design's number: wide enough for a summary line, narrow enough that the
    decision itself keeps the room. */
@@ -2670,14 +2943,14 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--muted-foreground);
-  padding: 0 16px;
+  padding: 0 15px;
   margin-bottom: 8px;
 }
 .fy-proposals__item {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 9px 16px;
+  padding: 9px 15px;
   border: 0;
   border-left: 2px solid transparent;
   background: transparent;
@@ -2688,42 +2961,15 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-proposals__item:hover { background: var(--background); }
 .fy-proposals__item--on { background: var(--background); border-left-color: var(--foreground); }
 .fy-proposals__item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-.fy-proposals__summary { display: block; font: 500 12.5px/1.4 var(--font-sans); }
+.fy-proposals__summary { display: block; font: 500 12px/1.4 var(--font-sans); }
 .fy-proposals__sub {
   display: block;
   font: 400 11px var(--font-sans);
   color: var(--neutral-400);
-  margin-top: 2px;
+  margin-top: 1px;
 }
-.fy-proposals__detail { flex: 1; min-width: 0; padding: 18px 26px; overflow-y: auto; }
+.fy-proposals__detail { flex: 1; min-width: 0; padding: 18px 24px; overflow-y: auto; }
 
-/* The hub's pointer at pending work — a summary, not the decision itself. */
-.fy-needsyou {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  text-align: left;
-  padding: 14px 18px;
-  border: var(--border-1) solid var(--border);
-  border-radius: 12px;
-  background: var(--card);
-  color: inherit;
-  cursor: pointer;
-  transition: var(--transition-control);
-}
-.fy-needsyou:hover { border-color: var(--neutral-400); }
-.fy-needsyou:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.fy-needsyou__lead { font: 600 13px var(--font-sans); flex: none; }
-.fy-needsyou__sub {
-  flex: 1;
-  min-width: 0;
-  font: 400 12px var(--font-sans);
-  color: var(--muted-foreground);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 /* ---------------------------------------------------------------------------
    World Chat (#70, design turn 41)
@@ -2746,35 +2992,83 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 /* A conversation owed a decision says so in the one place the eye already is. */
 .fy-chatlist__sub--waiting { color: var(--warning); }
 
-.fy-chat__about { font: 400 12px var(--font-mono); color: var(--muted-foreground); margin-top: 5px; }
+/*
+ * Clearing the floating nav. On the design canvas the pill nav is absolutely placed at top:56px
+ * and every column pads 104px to clear it; here the nav is sticky and therefore in flow, taking
+ * 53px (12 margin + 41 tall) of the column's own box. 52px lands this screen's first line at the
+ * same 149px from the window top the canvas puts it at. Scoped to the chat wrap because the rest
+ * of `fy-gate`'s screens (10a/18a/27a/28a) carry no nav on the canvas and must not gain the gap.
+ */
+.fy-chat__wrap .fy-gate__head { padding-top: 52px; align-items: flex-end; gap: 14px; }
+/* 41a states box-sizing:border-box on this rail, so its 470 is the whole width — the one number
+   rule 2 names, and the only gate screen where the canvas means total rather than content. */
+.fy-chat__wrap .fy-gate__side { width: 470px; padding-top: 52px; }
+
+/*
+ * What this conversation is about, as a chip beside the title rather than a line beneath it: the
+ * head is baseline-heavy already, and the canvas bottom-aligns the chip with the h1 so the two
+ * read as one line rather than a stack that grows when a subject is named.
+ */
+.fy-chat__about {
+  flex: none; display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 13px; border: 1px solid var(--border); border-radius: 999px;
+  font: 400 12px var(--font-sans); color: var(--muted-foreground);
+  white-space: nowrap;
+}
 .fy-chat__loading { font: 400 12.5px var(--font-sans); color: var(--muted-foreground); padding: 8px 0; }
 
-.fy-chat__transcript { display: flex; flex-direction: column; gap: 18px; }
-.fy-chat__turn { display: flex; flex-direction: column; gap: 6px; max-width: 82%; }
-.fy-chat__turn--user { align-self: flex-end; align-items: flex-end; }
-.fy-chat__turn--studio { align-self: flex-start; }
-.fy-chat__bubble { padding: 11px 15px; border-radius: 12px; font: 400 13.5px/1.62 var(--font-sans); white-space: pre-wrap; }
-.fy-chat__turn--user .fy-chat__bubble { background: var(--primary); color: var(--primary-foreground); }
-.fy-chat__turn--studio .fy-chat__bubble { background: var(--muted); }
-/* What was actually read, under the reply that used it — persisted receipts, never live activity. */
-.fy-chat__receipts { display: flex; flex-wrap: wrap; gap: 4px 10px; padding-left: 3px; }
-.fy-chat__receipt { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
-.fy-chat__receipt::before { content: "✓ "; color: var(--success, var(--muted-foreground)); }
+.fy-chat__transcript { display: flex; flex-direction: column; gap: 14px; }
+.fy-chat__turn { display: flex; flex-direction: column; }
+.fy-chat__turn--user { align-self: flex-end; align-items: flex-end; max-width: 380px; }
+.fy-chat__turn--studio { align-self: flex-start; max-width: 440px; }
+.fy-chat__bubble { font: 400 13px/1.6 var(--font-sans); white-space: pre-wrap; }
+/*
+ * The tail. Each bubble squares off the one corner that faces its own speaker, which is what
+ * tells the two columns apart once the transcript is long — colour alone stops carrying it as
+ * soon as a reply is short enough to sit level with the message above it.
+ */
+.fy-chat__turn--user .fy-chat__bubble {
+  background: var(--primary); color: var(--primary-foreground);
+  border-radius: 14px 14px 4px 14px; padding: 11px 15px; line-height: 1.55;
+}
+.fy-chat__turn--studio .fy-chat__bubble {
+  background: var(--secondary);
+  border-radius: 14px 14px 14px 4px; padding: 12px 15px;
+}
+/*
+ * What was actually read, inside the reply that used it — persisted receipts, never live
+ * activity. Inside the bubble rather than under it: a receipt belongs to the answer it explains,
+ * and a loose line beneath reads as a separate turn once the transcript scrolls.
+ */
+.fy-chat__receipts { margin-top: 8px; font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
 
-.fy-chat__composer { flex: none; padding: 12px 36px 20px; border-top: 1px solid var(--border); }
-.fy-chat__composernote { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); margin-top: 8px; text-align: center; }
+.fy-chat__composer { flex: none; padding: 14px 36px 22px; }
+.fy-chat__composernote { font: 400 10.5px var(--font-mono); color: var(--neutral-400); margin-top: 10px; }
 
-.fy-panel__head { flex: none; margin-bottom: 18px; }
-.fy-panel__title { font: 650 16px/1.2 var(--font-sans); letter-spacing: -0.01em; }
-.fy-panel__count { font: 400 11px var(--font-mono); color: var(--muted-foreground); margin-top: 4px; }
-.fy-panel__note { font: 400 11.5px/1.55 var(--font-sans); color: var(--muted-foreground); margin-top: 9px; }
-.fy-panel__body { display: flex; flex-direction: column; gap: 20px; }
-.fy-panel__empty { font: 400 12.5px/1.6 var(--font-sans); color: var(--muted-foreground); }
-.fy-panel__group { display: flex; flex-direction: column; gap: 5px; }
-.fy-panel__subject { font: 600 13px var(--font-sans); }
-.fy-panel__kind { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); margin-bottom: 3px; }
+.fy-panel__head { flex: none; }
+/* Title and tally share a baseline: the count qualifies the title, and stacking it made the rail
+   head three lines deep before a single point had arrived. */
+.fy-panel__headline { display: flex; align-items: baseline; gap: 10px; }
+.fy-panel__title { font: 600 15px var(--font-sans); }
+/* Amber because nothing here is decided yet — the one place on this screen that says so. */
+.fy-panel__count { font: 400 10px var(--font-mono); color: var(--warning); }
+.fy-panel__note { font: 400 11.5px/1.6 var(--font-sans); color: var(--muted-foreground); margin-top: 7px; }
+.fy-panel__body { display: flex; flex-direction: column; }
+.fy-panel__empty { font: 400 12.5px/1.6 var(--font-sans); color: var(--muted-foreground); margin-top: 10px; }
+/*
+ * A subject is a card. The points under it are one reading, and on --muted the card's own
+ * --background is what separates that reading from the next; bare groups on a tinted rail ran
+ * together as soon as two subjects each held a single line.
+ */
+.fy-panel__group {
+  background: var(--background); border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px 16px; box-shadow: var(--shadow-xs); margin-top: 10px;
+}
+.fy-panel__grouphead { display: flex; align-items: baseline; gap: 8px; }
+.fy-panel__subject { font: 600 12.5px var(--font-sans); flex: 1; min-width: 0; }
+.fy-panel__kind { font: 400 10px var(--font-mono); color: var(--neutral-400); }
 /* No control on a point, by design: a point is corrected by saying so, not by pressing anything. */
-.fy-panel__point { font: 400 12.5px/1.6 var(--font-sans); color: var(--muted-foreground); }
+.fy-panel__point { font: 400 12.5px/1.6 var(--font-sans); color: var(--foreground); margin-top: 6px; }
 .fy-panel__caption { font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); text-align: center; }
 
 /* Narrow: one sheet, never a layer on a layer (design 41c). The rail moves below the
