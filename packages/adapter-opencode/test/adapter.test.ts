@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it, type TestContext } from "node:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { CHARACTER_ROLE_MAX, type HarnessEvent } from "@arke-studio/contracts";
 import { OpenCodeAdapter } from "../src/opencode-adapter.js";
 import { probeCapabilities } from "../src/capabilities.js";
@@ -395,19 +395,61 @@ describe("discovery (R-1)", () => {
     assert.equal(found?.version, "7.7.7");
   });
 
-  it("falls back to PATH when nothing is configured", async (t) => {
-    // Put our own opencode first on PATH rather than trusting the machine to have one — a test
-    // that passes because the developer happens to have it installed proves nothing on CI.
-    const onPath = stubOpenCode(t, "opencode", "6.6.6");
-    const original = process.env["PATH"];
-    process.env["PATH"] = `${join(onPath, "..")}${delimiter}${original ?? ""}`;
-    try {
-      const found = await discoverOpenCode();
-      assert.equal(found?.source, "path");
-      assert.equal(found?.version, "6.6.6");
-    } finally {
-      process.env["PATH"] = original;
-    }
+  /*
+   * Driven through the runCommand seam rather than by planting a binary on PATH and spawning the
+   * real `where`.
+   *
+   * The version that did spawn was flaky: `where` walks every PATH entry, measures ~300ms on a
+   * developer machine, and was seen taking over 5s on a loaded CI runner — at which point the
+   * probe was killed, discovery reported nothing found, and the assertion failed on an
+   * environment's spare capacity rather than on this module's behaviour. Real spawning is still
+   * covered by the configured-path test above, which starts an actual stub through the same
+   * runCommand; what is left here is the fallback order, and that is logic.
+   */
+  it("falls back to PATH when nothing is configured", async () => {
+    const command = process.platform === "win32" ? "C:\\tools\\opencode.cmd" : "/usr/local/bin/opencode";
+    const found = await discoverOpenCode({
+      runCommand: async (_command, args) =>
+        args[0] === "opencode" ? { status: 0, stdout: `${command}\n` } : { status: 0, stdout: "6.6.6\n" },
+    });
+    assert.equal(found?.source, "path");
+    assert.equal(found?.version, "6.6.6");
+    assert.equal(found?.command, command);
+  });
+
+  /*
+   * `where` prints every match, and only the extension-bearing one can be spawned — a bare
+   * `opencode` alongside `opencode.cmd` is the shape that breaks it. A real runner cannot be
+   * relied on to produce that pair, so it is stated here.
+   */
+  it("picks the spawnable entry when the probe returns several matches", async (t) => {
+    if (process.platform !== "win32") return t.skip("`where`'s multi-match output is Windows-only");
+    const found = await discoverOpenCode({
+      runCommand: async (_command, args) =>
+        args[0] === "opencode"
+          ? { status: 0, stdout: "C:\\tools\\opencode\r\nC:\\tools\\opencode.cmd\r\n" }
+          : { status: 0, stdout: "6.6.6\n" },
+    });
+    assert.equal(found?.command, "C:\\tools\\opencode.cmd", "the extensionless match cannot be started");
+  });
+
+  /*
+   * The budget that made the old test flaky, now asserted rather than assumed: a probe slower than
+   * the previous 5s ceiling still resolves. A machine being busy must not read as "not installed".
+   */
+  it("waits out a probe slower than the old five-second ceiling", async () => {
+    const found = await discoverOpenCode({
+      runCommand: (command, args, timeoutMs) =>
+        new Promise((resolve) => {
+          if (args[0] === "opencode") {
+            assert.ok(timeoutMs > 5_000, `the PATH probe budget is ${timeoutMs}ms, which a loaded box can exceed`);
+            setTimeout(() => resolve({ status: 0, stdout: "/usr/local/bin/opencode\n" }), 5_200);
+            return;
+          }
+          resolve({ status: 0, stdout: "6.6.6\n" });
+        }),
+    });
+    assert.equal(found?.source, "path", "a slow probe is not the same as a missing installation");
   });
 
   it("does not block the event loop while a process probe is delayed", async () => {
