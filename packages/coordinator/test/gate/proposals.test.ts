@@ -34,7 +34,7 @@ describe("proposal lifecycle (R-1..R-4, R-16)", () => {
       source: "test",
       targets: [{ path: MAREN }],
     });
-    assert.equal(proposal.targets[0]!.baseVersion, 4);
+    assert.equal(proposal.targets[0]!.baseVersion, 5);
     assert.equal(proposal.targets[0]!.baseHash, sha256(live));
     assert.ok(await stat(join(dir, ".proposals", proposal.id, "characters", "maren-kest.md")));
     assert.ok(await stat(join(dir, ".proposals", proposal.id, "_base", "characters", "maren-kest.md")));
@@ -58,7 +58,7 @@ describe("proposal lifecycle (R-1..R-4, R-16)", () => {
     });
     const outcome = await gate.accept(proposal.id);
     assert.equal(outcome.status, "no-op");
-    assert.equal(store.getBundle().sheets.find((s) => s.id === "maren-kest")!.version, 4, "no version bumped");
+    assert.equal(store.getBundle().sheets.find((s) => s.id === "maren-kest")!.version, 5, "no version bumped");
     await store.close();
   });
 
@@ -71,7 +71,7 @@ describe("proposal lifecycle (R-1..R-4, R-16)", () => {
       targets: [{ path: MAREN }],
       reserveCanonIds: 1,
     });
-    assert.deepEqual(first.reservedCanonIds, ["CANON-045"]);
+    assert.deepEqual(first.reservedCanonIds, ["CANON-072"]);
     await gate.discard(first.id);
 
     await assert.rejects(() => stat(join(dir, ".proposals", first.id)), "the directory is gone");
@@ -85,7 +85,7 @@ describe("proposal lifecycle (R-1..R-4, R-16)", () => {
       targets: [{ path: MAREN }],
       reserveCanonIds: 1,
     });
-    assert.deepEqual(second.reservedCanonIds, ["CANON-046"], "the discarded 045 is a gap, never reissued");
+    assert.deepEqual(second.reservedCanonIds, ["CANON-073"], "the discarded 072 is a gap, never reissued");
     await store.close();
   });
 
@@ -166,9 +166,9 @@ describe("accept: one commit, versions derived (R-11, R-12)", () => {
     assert.equal(outcome.status, "accepted");
     assert.equal(commits, 1, "exactly one commit() call (R-11)");
     const bundle = store.getBundle();
-    assert.equal(bundle.meta.canonRevision, 43, "one increment for two entries");
-    assert.equal(bundle.sheets.find((s) => s.id === "maren-kest")!.version, 5);
-    assert.equal(bundle.proposals.length, 1, "only the fixture proposal remains");
+    assert.equal(bundle.meta.canonRevision, 105, "one increment for two entries");
+    assert.equal(bundle.sheets.find((s) => s.id === "maren-kest")!.version, 6);
+    assert.equal(bundle.proposals.length, 2, "only the fixture proposals remain");
     await store.close();
   });
 
@@ -230,7 +230,7 @@ describe("staleness and rebase (R-5..R-7, R-15)", () => {
     assert.ok(final.includes("Iron-grey braids"), "the proposal's edit landed");
     assert.ok(final.includes("Lower than the tide."), "the competing edit survived");
     const doc = MarkdownFile.parse(final);
-    assert.equal(doc.data["version"], 6, "v5 was the competing commit; the rebase landed v6");
+    assert.equal(doc.data["version"], 7, "v6 was the competing commit; the rebase landed v7");
     await store.close();
   });
 
@@ -405,7 +405,7 @@ describe("the gate bounds authored roles (SPEC-007 R-18)", () => {
       /29 characters; the limit is 28/,
       "the refusal names the number so it can be acted on",
     );
-    assert.equal(store.getBundle().sheets.find((s) => s.id === "maren-kest")!.version, 4, "nothing landed");
+    assert.equal(store.getBundle().sheets.find((s) => s.id === "maren-kest")!.version, 5, "nothing landed");
     await store.close();
   });
 

@@ -5,8 +5,8 @@ title: The Departure
 status: settled
 introducedAt: 1
 settledAt: 66
-amendedAt: 75
-links: [CANON-001, CANON-052, CANON-054, CANON-055, CANON-060, CANON-065]
+amendedAt: 99
+links: [CANON-001, CANON-052, CANON-054, CANON-055, CANON-060, CANON-065, CANON-067, CANON-068]
 ---
 
 Before the charter. Before the harbour had a name to lose. Something older than every god that
@@ -43,3 +43,11 @@ instruction — and, more disturbing than the instruction, the obedience. The ol
 inscription on the subject is three words long:
 
 > AND THEY WENT.
+
+**Amended at revision 99.** Two terms the record now uses throughout, and one correction. The
+gods who made echoes are their **Authors** — the word is precise, because what they did was
+closer to authorship than fabrication (CANON-068). And the Departure has a stage this entry
+previously omitted, because nobody had connected the evidence: **the Promise**. The separation
+was apparently not intended to be final. A return was expected, testified to, and preserved in
+human memory — and it has not come (CANON-067). Whatever else the Open Age is, it is longer
+than anyone who began it seems to have planned for.

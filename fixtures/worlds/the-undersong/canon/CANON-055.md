@@ -5,7 +5,8 @@ title: What an echo is
 status: settled
 introducedAt: 76
 settledAt: 76
-links: [CANON-053, CANON-052, CANON-054, CANON-051]
+amendedAt: 96
+links: [CANON-053, CANON-052, CANON-054, CANON-051, CANON-068, CANON-069]
 ---
 
 An echo is not a god. It contains no divine soul, no theology of its own, and often nothing a
@@ -33,3 +34,15 @@ Centuries wear away language, then identity, then context, until only the comman
 old word for this is **the Narrowing**, and it is why the oldest echoes are the most dangerous:
 they are on their way to being pure instruction. What the harbour has felt this past year
 (CANON-051) is the Narrowing, from inside.
+
+**Amended at revision 96 (CANON-068, CANON-069).** The paragraph above records how the
+Narrowing *looks*. It is probably not what the Narrowing *is*. The stronger model: the Core may
+remain intact — mandate, context, sophistication and all — while the bridge into this world
+fails in three ways at once. Context narrows: the local model can represent fewer distinctions
+about a world that has drifted past its Author's assumptions. Action narrows: a subtle
+intelligence is left choosing among a few crude interventions. Expression narrows: conditions,
+warnings and explanations collapse into the fragments a human mind can still receive. KEEP
+THEM may not be the Mandate at all. It may be all of the Mandate that can still cross the
+bridge. Humanity has very likely been mistaking a failing runtime for a dying — or corrupted —
+intelligence, and the difference matters enormously: a dying mind is a tragedy to witness. An
+intact mind behind a collapsing bridge is a tragedy that could, in principle, be *reached*.

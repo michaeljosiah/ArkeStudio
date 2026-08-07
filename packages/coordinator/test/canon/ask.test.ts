@@ -113,7 +113,7 @@ describe("the grounded pipeline, adversarially (§3.2)", () => {
     const { result, adapter } = await askWith([], "bicycle warranty umbrella typewriter");
     assert.equal(result.outcome, "refusal");
     assert.equal(result.outcome === "refusal" && result.cause, "nothing-retrieved");
-    assert.equal(result.outcome === "refusal" && result.searched, 23, "open threads are not searched (R-16)");
+    assert.equal(result.outcome === "refusal" && result.searched, 28, "open threads are not searched (R-16)");
     assert.equal(adapter.sessionsCreated, 0, "no session was created");
   });
 

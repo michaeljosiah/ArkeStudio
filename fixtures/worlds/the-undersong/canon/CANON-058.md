@@ -4,6 +4,7 @@ type: lore
 title: Dreams, and the one who does not dream
 status: settled
 introducedAt: 81
+amendedAt: 103
 settledAt: 81
 links: [CANON-052, CANON-054, CANON-050, maren-kest, perrin-tallow]
 ---
@@ -19,8 +20,9 @@ they have been rude to interrupt.
 
 The **Tide-Called** are the rare few who receive something even while awake. Maren Kest is one.
 It is not a power; it is an abnormal sensitivity, and what arrives is not sentences but
-impressions — OPEN. DOWN. NOT HIM. SEVEN BECOME SIX. DO NOT LET THE QUIET END. Any of these
-could mean a dozen things, and Maren has been wrong about them before.
+impressions — OPEN. DOWN. NOT HIM. SEVEN BECOME SIX. DO NOT LET THE QUIET END. SAVE THE ONE
+WHO OPENS THE DOOR. Any of these could mean a dozen things, and Maren has been wrong about
+them before.
 
 > Room note: she stays wrong sometimes. The moment she becomes a reliable translator, the
 > Keeper becomes a plot device and the dread dies. Her misreadings are load-bearing.

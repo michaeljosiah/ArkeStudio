@@ -5,7 +5,7 @@ title: The gap is closing
 status: settled
 introducedAt: 40
 settledAt: 55
-amendedAt: 63
+amendedAt: 101
 links: [CANON-001, CANON-050, CANON-052, maren-kest]
 ---
 
@@ -33,3 +33,10 @@ pulled tighter, faster, more often, is not a god approaching its final page — 
 has started costing more to hold shut than it used to, after two centuries of something on the
 other side of it slowly finishing the work of becoming someone. Nobody has measured the Unkept
 against a clock before, because there was never a reason to. There is now.
+
+**Amended at revision 101 (CANON-069).** And the acceleration's simplicity has a colder
+reading than decay: bandwidth. A mind that must pay for every syllable it sends across a
+failing bridge stops sending sentences. More verses, plainer verses, a phrase where there used
+to be a season of music — that is not necessarily a smaller intelligence. It may be a large one
+economising, spending its narrowing budget on the only words that still matter. The Last Verse
+may be the cheapest possible form of the most important thing it has ever had to say.

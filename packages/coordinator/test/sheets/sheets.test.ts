@@ -96,7 +96,7 @@ describe("lifecycle (R-5..R-9, D5, D6)", () => {
     assert.equal(outcome.status, "accepted");
     const sheet = store.getBundle().sheets.find((s) => s.id === "the-chorister");
     assert.equal(sheet?.status, "locked");
-    assert.equal(sheet?.version, 2);
+    assert.equal(sheet?.version, 6);
     await store.close();
   });
 
@@ -126,8 +126,8 @@ describe("creation paths (R-10..R-12, D7, D9)", () => {
       sentence: "A rope-seller who remembers every knot she has ever sold.",
     });
     assert.equal(draft.slug, "ola-ninefinger");
-    assert.match(draft.scope, /canon v42/);
-    assert.match(draft.scope, /3 existing characters/);
+    assert.match(draft.scope, /canon v104/);
+    assert.match(draft.scope, /5 existing characters/);
     const outcome = await gate.accept(draft.proposal.id);
     assert.equal(outcome.status, "accepted");
     const sheet = store.getBundle().sheets.find((s) => s.id === "ola-ninefinger");
@@ -178,7 +178,7 @@ describe("creation paths (R-10..R-12, D7, D9)", () => {
     );
     const copy = store.getBundle().sheets.find((s) => s.id === "sella-half-hitch");
     assert.equal(copy?.status, "sketch");
-    assert.deepEqual(copy?.origin, { sheet: "bray-half-hitch", version: 2 });
+    assert.deepEqual(copy?.origin, { sheet: "bray-half-hitch", version: 6 });
 
     // Advance the source; the copy's origin record does not move (a record, not a dependency).
     const live = await readFile(join(dir, "characters", "bray-half-hitch.md"), "utf8");
@@ -250,9 +250,9 @@ describe("voice and links (R-4, R-15, D10)", () => {
     const outcome = await gate.accept(staged.id);
     assert.equal(outcome.status, "accepted");
     const sheet = store.getBundle().sheets.find((s) => s.id === "bray-half-hitch");
-    assert.equal(sheet?.version, 3);
+    assert.equal(sheet?.version, 7);
     assert.equal(sheet?.voice?.voiceId, "v_rope");
-    assert.equal(sheet?.voice?.assignedAtVersion, 3, "the assignment records the version it landed at");
+    assert.equal(sheet?.voice?.assignedAtVersion, 7, "the assignment records the version it landed at");
     await store.close();
   });
 

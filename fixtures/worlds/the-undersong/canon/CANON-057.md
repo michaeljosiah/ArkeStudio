@@ -5,7 +5,8 @@ title: The Seven Anchors
 status: settled
 introducedAt: 80
 settledAt: 80
-links: [CANON-052, CANON-056, CANON-063, widows-walk, the-drowned-chapel, perrin-tallow]
+amendedAt: 100
+links: [CANON-052, CANON-056, CANON-063, CANON-069, CANON-070, widows-walk, the-drowned-chapel, perrin-tallow]
 ---
 
 Seven structures around the harbour sustain the Binding without anyone alive knowing they do.
@@ -28,3 +29,11 @@ that happens to dismantle a prison.
 
 > Room note: no character may ever say "the Seven Anchors" aloud as though it were known
 > terminology. The term is the record's. Inside the story they are line items.
+
+**Amended at revision 100 (CANON-069).** "The instrument it plays, or is" was the poetry;
+here is the engineering. The anchors are **coupling structures** — geometry, material and
+resonance that keep the Keeper's manifestation cheap to maintain — and they contain no piece
+of it, the way an aerial contains no piece of the broadcast. Destroying one does not wound the
+Core. It raises the price of being here (CANON-069): fidelity narrows, authority narrows, and
+the Binding's interference against the Unremembered thins with them (CANON-070). Which is why
+a demolition costing, correct in every line, is the most dangerous document in this world.

@@ -5,7 +5,8 @@ title: Elsewhere — other instructions still running
 status: settled
 introducedAt: 84
 settledAt: 84
-links: [CANON-053, CANON-055, CANON-052]
+amendedAt: 104
+links: [CANON-053, CANON-055, CANON-052, CANON-071]
 ---
 
 The harbour is not the only place where something was left behind. It is only the place this
@@ -33,3 +34,9 @@ the language the commands were given in may not map onto human concepts at all (
 
 > Room note: no Surveyor appears in either current production. This entry exists so the world
 > is larger than the harbour, not so someone can arrive in act three with answers.
+
+**Amended at revision 104.** One more, from further out than the rest: somewhere in a future
+this record will never reach, an expedition finds a dead civilisation's defensive fleet still
+on station — **the Sleeping Fleet** — faithfully protecting "citizens" defined by a biological
+standard nobody alive can meet. Filed here because it is the whole cosmology in one image: a
+promise, outliving everyone it was made to, still keeping (CANON-071).

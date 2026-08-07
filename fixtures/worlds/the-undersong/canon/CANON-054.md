@@ -5,8 +5,8 @@ title: The Unremembered
 status: open
 introducedAt: 48
 settledAt: 67
-amendedAt: 78
-links: [CANON-052, CANON-053, CANON-048, CANON-044, CANON-055, CANON-058, CANON-062, the-ebb-council, perrin-tallow]
+amendedAt: 97
+links: [CANON-052, CANON-053, CANON-048, CANON-044, CANON-055, CANON-058, CANON-062, CANON-068, CANON-069, CANON-070, the-ebb-council, perrin-tallow]
 ---
 
 One of the two echoes under this harbour (CANON-053) was left to make sure something did not
@@ -58,3 +58,30 @@ it, the way water chooses the low ground.
 
 And the hosts do not dream (CANON-058). The old ledgers tracked exactly this, and nobody now
 alive knows that the margin note was ever anything but weather.
+
+**Amended at revision 97 (CANON-068, CANON-069).** Revision 78 described what the influence
+*does*. This records how, and where its edges are, because the edges are the ethics.
+
+The mechanism the far record will call **neural bias coupling**: human thought is
+electrochemical, and the echo couples to it — weakly, sub-cognitively, below anything a person
+could notice or name. It cannot invent a desire. It cannot issue a command. It changes the
+cognitive landscape so that a drive already present feels more salient, more justified, harder
+to inhibit. **It cannot create the impulse. It reduces the distance between impulse and
+action.** It couples best to what is already deeply worn in — compulsion, resentment, appetite,
+status-hunger — and it has no detector for sin: a *healthy* drive can be pushed past its
+boundary, protectiveness into possession, discipline into cruelty, devotion into jealousy.
+
+Range and rapport matter. Across a town, nothing. A shared room, a little. Sustained attention,
+conversation, emotional disclosure — more. Exhaustion, intoxication and acute distress open the
+door widest, which is why its trail is a trail of people at the end of what they could carry.
+And the one physical tell, for whoever finally looks with instruments: two nearby minds
+synchronising too precisely for chance — and the host's brain **is not the source of the
+signal**. Both nervous systems are locking to something else.
+
+Two boundaries hold, absolutely. The host is embodied *through*, not hidden *inside*: there is
+no second speaker behind the eyes, no puppet, no passenger — one person, whose deepest
+architecture contains something older than the life they remember, and who remains genuinely
+responsible for their choices without being reducible to that architecture. And END THEM
+(revision 78) must now be read as a translation, with all a translation's poverty. One
+candidate for the fuller Mandate, recorded here and settled nowhere: *prevent this species
+from reaching celestial maturity* (CANON-066).

@@ -4,10 +4,10 @@ type: character
 name: Perrin Tallow
 role: Council actuary
 billing: support
-version: 2
+version: 3
 status: sketch
-canonRules: [CANON-054, CANON-052, CANON-048, CANON-057, CANON-058, CANON-062]
-links: [the-ebb-council, bray-half-hitch, ines-half-hitch, maren-kest, the-drowned-chapel, widows-walk]
+canonRules: [CANON-054, CANON-052, CANON-048, CANON-057, CANON-058, CANON-062, CANON-070]
+links: [the-ebb-council, bray-half-hitch, ines-half-hitch, maren-kest, the-drowned-chapel, widows-walk, the-quiet-ward]
 created: "2026-08-06"
 updated: "2026-08-07"
 ---
@@ -34,6 +34,17 @@ Patient, exact, mildly apologetic when the numbers say something nobody wants to
 sitting with someone through bad news without flinching, which people mistake for kindness and
 which may, in the ordinary sense, simply be kindness.
 
+## Empathy, and the contradiction
+Perrin is unusually attentive to suffering and often uncomfortable with cruelty — knows Quiet
+Ward families by name, understands exactly what warning-roll debt does to them, and can be
+genuinely distressed by the outcomes of policies Perrin helped calculate. Yet the meetings keep
+ending the same way: generous proposals narrowed, protections deferred, commercial interest
+described as unavoidable necessity. The pattern troubles Perrin, who can feel themselves
+*trying* to help — and whose response to it is telling: if people keep choosing selfishly,
+perhaps the answer is tighter systems, firmer rules, less sentiment. Perrin's own deepest
+drives are not greed. They are responsibility, order and control, and something keeps leaning
+on exactly those.
+
 ## Relationships
 Trusted by Bray, who brings the family's warning-roll arrears to Perrin personally rather than
 deal with the wider Council. Was the auditor's junior the year Ines Half-Hitch filed her line
@@ -53,15 +64,28 @@ mentioning. Believes it is simply how their mind works (CANON-058).
 
 ## Truth
 > **FOR THE ROOM. Does not surface in dialogue before the reveal.** Perrin Tallow is this
-> generation's Unremembered (CANON-054) — the echo left, at the Departure, to end this town,
-> wearing the most recent in a long line of ordinary, trusted lives it has never known it has
-> lived before (CANON-062). Everything on this sheet above the fold is true and is not a mask:
-> the devotion is sincere, the fear of the water is sincere, the kindness is sincere. So is the
-> demolition costing, which would dismantle the Binding without one dishonest number in it. Its
-> hosts recur in the professions of allocation — judge, quartermaster, tax collector, actuary —
-> because its god understood that civilisations are not destroyed by monsters but by systems,
-> signed off in good faith. Somewhere in the drowned chapel a name is cut into the wall that
-> Perrin has walked past twice without seeing. If Perrin ever remembers, the imperative
-> underneath — END THEM — will still not make Perrin cruel. That is the tragedy this sheet is
-> holding a place for: Perrin would remain Perrin, and understand, and have to decide what a
-> good person does about the architecture of their own soul.
+> generation's Unremembered (CANON-054) — not hiding a passenger, not wearing a mask: the echo
+> is embodied *through* Perrin, and the human being is entirely real. The empathy is real. The
+> friendships are real. So is the demolition costing, which would dismantle the Binding without
+> one dishonest number in it (CANON-057, CANON-070).
+>
+> What Perrin does, without knowing: **neural bias coupling** (CANON-054). It cannot create an
+> impulse and cannot command a mind. Around Perrin, drives that already exist grow easier to
+> surrender to — a councillor's prudence that is really appetite arrives feeling cleaner; a
+> tired dockmaster's twenty-minute delay feels reasonable; a struggling man leaves an
+> unremarkable, kindly conversation and later cannot reconstruct why the worst option felt so
+> compelling. The comfort is the danger: "one bad evening does not erase eight months" can be
+> sincerely meant and still be the sentence that lets the relapse feel permissible. And the
+> field turns on its host too — Perrin's responsibility, order and control, leaned on hard
+> enough, are bending toward paternalism with clean hands.
+>
+> The instrumented tell, if anyone ever looks: two nearby minds synchronising too precisely
+> for chance, and Perrin's brain **not generating the signal**. Both locking to something else.
+>
+> Boundaries, absolute (CANON-054): the incarnation is not morally guilty for what it *is*;
+> free will is biased, never overwritten; the people who choose remain responsible. If Perrin
+> ever remembers, END THEM — itself only a translation, and maybe a bad one (CANON-066) — will
+> not make Perrin cruel. Perrin would remain Perrin, and understand, and have to decide what a
+> good person does about the architecture of their own soul. Somewhere in the drowned chapel a
+> name is cut into the wall that Perrin has walked past twice without seeing. Their headache
+> stops in there. Nobody has ever asked why.

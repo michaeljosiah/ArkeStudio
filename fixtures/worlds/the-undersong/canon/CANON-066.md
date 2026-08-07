@@ -4,6 +4,7 @@ type: thread
 title: KEEP THEM, read twice
 status: open
 introducedAt: 89
+amendedAt: 102
 links: [CANON-052, CANON-054, CANON-065]
 ---
 
@@ -25,6 +26,13 @@ arrangement might have intended: not extinguish. **Conclude.** Release. Make the
 
 On that reading, the two echoes are not guardian and monster. They are two standing orders
 about the same door, still executing, long after anyone who understood the door has gone.
+
+**Amended at revision 102 (CANON-054).** A third reading has joined the pair, and it is the
+one that reframes both mandates at once: *prevent this species from reaching celestial
+maturity.* If the Unremembered's order was never extermination but arrest — keep them from
+becoming what their makers were — then KEEP THEM acquires a mirror it never asked for, and the
+question of which echo is protecting humanity from what becomes genuinely undecidable from
+inside the harbour. Recorded, not settled. Nothing in this entry is settled. That is the entry.
 
 > Room note: unresolved on purpose, permanently. The best mythologies keep one question larger
 > than the story, and this is this world's. Any draft that answers it should be treated as a

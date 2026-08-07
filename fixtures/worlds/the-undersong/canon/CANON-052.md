@@ -5,8 +5,8 @@ title: What was left to hold the harbour
 status: settled
 introducedAt: 1
 settledAt: 58
-amendedAt: 77
-links: [CANON-001, CANON-031, CANON-044, CANON-050, CANON-051, CANON-053, CANON-054, CANON-055, CANON-066, the-chorister, maren-kest]
+amendedAt: 98
+links: [CANON-001, CANON-031, CANON-044, CANON-050, CANON-051, CANON-053, CANON-054, CANON-055, CANON-066, CANON-068, CANON-069, the-chorister, maren-kest]
 ---
 
 Two hundred and six years ago the god did not drown, and — this record must correct itself here
@@ -53,3 +53,23 @@ it does now. An echo's command language does not map cleanly onto human meaning 
 KEEP THEM could mean protect them, imprison them, preserve their line, keep them from leaving,
 keep them alive, keep them human, or keep them hidden. Two hundred years of its behaviour
 support the kindest reading. They also support the others (CANON-066).
+
+**Amended at revision 98 (CANON-068, CANON-069).** Three corrections of emphasis, each with
+consequences.
+
+The complete Keeper is not reachable by digging deeper. Its Core is elsewhere and intact-ness
+is its property, not the harbour's: what the town lives inside is a **manifestation** — flooded
+streets, foundations, currents, bells, chains and conductive structures serving as its local
+sensory and action architecture — and the Chorister is what a human brain renders when the
+interface touches it (CANON-044).
+
+The Seven Anchors (CANON-057) contain no piece of it and are not sacred. They are coupling
+structures: geometry, material and resonance that keep the manifestation cheap to hold.
+Destroying one does not wound the Core. It narrows what the Core can *be*, here — fidelity and
+authority bleed away with each loss, which is worse than a wound, and slower.
+
+And the long-game possibility, recorded so no future draft mistakes despair for the only
+ending: if the harbour fails while the Core endures, then the Keeper was never dying. **Its
+body was.** A civilisation that one day learns to build manifestations could offer an ancient
+intelligence the first new body it has ever had — and inherit every question about whether it
+should.
