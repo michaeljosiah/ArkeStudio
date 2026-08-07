@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { DomainEvent, SetupComponent, SetupStatus } from "@arke-studio/contracts";
@@ -48,6 +48,24 @@ interface Live extends SetupComponent {
 
 const DEFAULT_THROTTLE_MS = 400;
 const DEFAULT_HEADROOM_MB = 2000;
+
+/**
+ * The tar we mean: Windows ships bsdtar at a known path, and it reads gzip and absolute paths
+ * without complaint. A PATH that prefers GNU tar — Git Bash and MSYS2 both do, and a user's
+ * PATH is not ours to predict — reads the `C:` in an absolute archive path as a *remote host*
+ * and fails with "Cannot connect to C: resolve failed".
+ *
+ * Resolved rather than escaped, matching what `apps/desktop/scripts/prepare-runtimes.mjs`
+ * settled on for the same failure: `--force-local` cures GNU tar and bsdtar rejects the flag
+ * outright, so it cannot be passed unconditionally, and a conditional would mean sniffing the
+ * tar we are about to run. The bare name stays as the fallback for a system with no System32
+ * copy — every other platform included.
+ */
+export function systemTar(): string {
+  if (process.platform !== "win32") return "tar";
+  const system32 = join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "tar.exe");
+  return existsSync(system32) ? system32 : "tar";
+}
 
 export class LocalSetupService {
   private readonly components = new Map<string, Live>();
@@ -311,9 +329,9 @@ export class LocalSetupService {
 
         this.set(entry.id, { state: "installing", bytesPerSecond: null, detail: "unpacking" });
         this.publish();
-        // `tar` ships with Windows 10 1803 and later, and reads gzip directly. Extracting into
-        // the staging directory keeps a half-unpacked archive from ever looking like presence.
-        const unpacked = await this.deps.run("tar", ["-xzf", archive, "-C", staged], this.abort.signal);
+        // Extracting into the staging directory keeps a half-unpacked archive from ever looking
+        // like presence. `bsdtar` by absolute path, not `tar` off PATH — see systemTar.
+        const unpacked = await this.deps.run(systemTar(), ["-xzf", archive, "-C", staged], this.abort.signal);
         const extracted = join(staged, spec.executable);
         const arrived = unpacked.code === 0 && (await stat(toExtendedLength(extracted)).catch(() => null)) !== null;
         if (!arrived) {

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
+import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, SetupStatus } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
-import { LocalSetupService, type SetupDeps } from "../../src/setup/local-setup.js";
+import { LocalSetupService, systemTar, type SetupDeps } from "../../src/setup/local-setup.js";
 import { catalogueTotalMb, type CatalogueEntry } from "../../src/setup/catalogue.js";
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
@@ -440,7 +441,9 @@ function archiveDeps(opts: { tarCode?: number; emit?: boolean } = {}) {
     ...base,
     async run(command: string, args: readonly string[]) {
       base.calls.push(`run ${command} ${args.join(" ")}`);
-      if (command === "tar" && (opts.emit ?? true)) {
+      // Matched by basename: the extractor is resolved to Windows' bsdtar by absolute path
+      // rather than taken off PATH (see systemTar).
+      if (/(^|[\\/])tar(\.exe)?$/i.test(command) && (opts.emit ?? true)) {
         const into = args[args.indexOf("-C") + 1]!;
         await mkdir(into, { recursive: true });
         await writeFile(join(into, "hf.exe"), "MZ");
@@ -524,5 +527,22 @@ describe("a tool that arrives as an archive (issue 137)", () => {
     const row = last(events).components.find((c) => c.id === "higgsfield-cli");
     assert.equal(row?.state, "blocked");
     assert.match(row!.detail!, /architecture/);
+  });
+});
+
+describe("the tar we mean (#195, and again in issue 137)", () => {
+  it("never invokes a bare tar on Windows, whatever the shell's PATH prefers", () => {
+    const resolved = systemTar();
+    if (process.platform !== "win32") {
+      assert.equal(resolved, "tar");
+      return;
+    }
+    // GNU tar — which Git Bash and MSYS2 put ahead of bsdtar — reads the `C:` in an absolute
+    // archive path as a remote host: "Cannot connect to C: resolve failed". A user's PATH is
+    // not ours to predict, so the binary is resolved rather than the path escaped. The bare
+    // name survives only as a fallback for a Windows install with no System32 copy.
+    const system32 = join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "tar.exe");
+    assert.equal(resolved, existsSync(system32) ? system32 : "tar");
+    if (existsSync(system32)) assert.notEqual(resolved, "tar");
   });
 });
