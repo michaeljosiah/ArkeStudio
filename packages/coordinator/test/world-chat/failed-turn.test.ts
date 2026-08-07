@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { newId, type WorldChatRun, type WorldChatStoredEvent } from "@arke-studio/contracts";
 import { foldConversation } from "../../src/world-chat/fold.js";
-import { projectWorkspace } from "../../src/world-chat/project.js";
+import { projectWorkspace, workingLabel } from "../../src/world-chat/project.js";
 
 /**
  * A turn that failed has to be visible (#70 §10.1.1).
@@ -230,6 +230,50 @@ describe("a turn that ended without an answer", () => {
       "interrupted",
       "and with no live run it is still the crash reading, which the restart repair owns",
     );
+  });
+
+  /**
+   * The vocabulary has to survive the namespacing (§15.3).
+   *
+   * Caught by driving a real turn, not by a test: the line appeared, the clock ticked, and the
+   * label read "Checking the world" for the whole turn. opencode keys MCP tools as
+   * `${server}_${tool}`, so every world-query call missed a map written against bare names, and
+   * the fallback was plausible enough to look deliberate. A wrong word is harder to see than a
+   * missing one.
+   */
+  it("labels a world-query tool through the name the harness actually sends", () => {
+    assert.equal(workingLabel("arke-world_search_canon"), "Searching canon");
+    assert.equal(workingLabel("arke-world_get_sheet"), "Reading a sheet");
+    assert.equal(workingLabel("arke-world_get_attachment_text"), "Reading what you attached");
+  });
+
+  it("still labels a bare name, in case the namespacing ever goes away", () => {
+    assert.equal(workingLabel("search_canon"), "Searching canon");
+  });
+
+  it("labels the harness's own read-only tools, which this agent also uses", () => {
+    assert.equal(workingLabel("grep"), "Searching the files");
+    assert.equal(workingLabel("read"), "Reading a file");
+  });
+
+  /**
+   * Observed against a real turn: this is the tool the agent actually calls. Pinned because it
+   * is the label most turns will show, so a change to it is a change to what the app says while
+   * somebody waits — not an internal detail.
+   */
+  it("labels delegation without naming it", () => {
+    assert.equal(workingLabel("task"), "Working through it");
+    assert.doesNotMatch(workingLabel("task"), /delegat|subagent|agent/i, "not the harness's business");
+  });
+
+  it("falls back for anything it does not know, rather than inventing a verb", () => {
+    assert.equal(workingLabel("some_future_tool"), "Checking the world");
+  });
+
+  it("never leaks the tool name itself into the label", () => {
+    for (const tool of ["arke-world_search_canon", "grep", "some_future_tool"]) {
+      assert.doesNotMatch(workingLabel(tool), /arke-world|_/, "a progress line is not a receipt (R-18)");
+    }
   });
 
   it("carries no world or message content in the detail it shows", () => {

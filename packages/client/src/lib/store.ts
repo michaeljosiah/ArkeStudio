@@ -143,7 +143,7 @@ interface StoreState {
    * spinner falls back to its resting word. Kept out of the workspace because the workspace is a
    * projection of the durable log, and this is deliberately not durable.
    */
-  worldChatProgress: Record<string, string>;
+  worldChatProgress: Record<string, { label: string; at: string }>;
   voiceSidecar: { state: "not-started" | "downloading" | "unavailable" | "ready"; detail: string } | null;
   voiceRuntimeTest: {
     requestId: string;
@@ -591,7 +591,10 @@ function handleFrame(json: string): void {
         ],
       };
     } else if (event.type === "world-chat.progress") {
-      worldChatProgress = { ...worldChatProgress, [event.conversationId]: event.label };
+      worldChatProgress = {
+        ...worldChatProgress,
+        [event.conversationId]: { label: event.label, at: event.at },
+      };
     } else if (event.type === "voice.sidecar") {
       voiceSidecar = { state: event.state, detail: event.detail };
     } else if (event.type === "voice.runtime-test") {
@@ -1938,10 +1941,22 @@ export function useWorldChatRefusals(conversationId: string | undefined): Array<
   return conversationId ? (refusals[conversationId] ?? []) : [];
 }
 
-/** What the studio is doing this second, or null when it is not doing anything. */
-export function useWorldChatProgress(conversationId: string | undefined): string | null {
+/**
+ * What the studio is doing this second, or null when it is not doing anything.
+ *
+ * `since` discards a label left over from the previous turn. Progress is transient and keyed by
+ * conversation, so without it the last word of one turn — usually "Writing" — is what the next
+ * turn shows for its first couple of seconds, describing work that finished a minute ago.
+ */
+export function useWorldChatProgress(
+  conversationId: string | undefined,
+  since: string | null,
+): string | null {
   const progress = useStore().worldChatProgress;
-  return conversationId ? (progress[conversationId] ?? null) : null;
+  const entry = conversationId ? progress[conversationId] : undefined;
+  if (!entry) return null;
+  if (since !== null && entry.at < since) return null;
+  return entry.label;
 }
 
 /** Shelve a conversation. Reversible, and loses nothing. */

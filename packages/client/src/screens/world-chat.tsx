@@ -275,7 +275,6 @@ export function WorldChatConversationScreen() {
    */
   const [dismissed, setDismissed] = useState<string[]>([]);
   const refusals = useWorldChatRefusals(conversationId);
-  const progress = useWorldChatProgress(conversationId);
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
@@ -292,6 +291,8 @@ export function WorldChatConversationScreen() {
   // world snapshot, because opening a world must not cost every conversation ever had.
   const workspace = state?.worldChat ?? null;
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
+  // Gated on the run's own start so a label from the previous turn is not shown for this one.
+  const progress = useWorldChatProgress(conversationId, loaded?.runStartedAt ?? null);
 
   if (!world) return null;
   /**
