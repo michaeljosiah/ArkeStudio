@@ -23,13 +23,19 @@ export class ProviderService {
     private readonly clock: () => string = () => new Date().toISOString(),
   ) {}
 
-  /** Seed statuses from stored credentials; local runtimes need no key to be configured. */
+  /**
+   * Seed statuses from stored credentials. A runtime that authenticates nothing is configured
+   * by existing; a provider whose credential lives in a tool we drive cannot be answered from
+   * here at all — only a probe knows whether that tool is present and signed in, so it starts
+   * unconfigured and `validate` is what turns it on.
+   */
   async init(): Promise<void> {
     const configured = new Set(this.credentials ? await this.credentials.configuredProviders() : []);
     for (const id of Object.keys(PROVIDERS) as ProviderId[]) {
+      const credential = PROVIDERS[id].credential;
       this.statuses.set(id, {
         id,
-        configured: PROVIDERS[id].local || configured.has(id),
+        configured: credential === "none" || (credential === "in-app" && configured.has(id)),
         validation: "untested",
         probes: [],
         fault: null,
@@ -75,7 +81,10 @@ export class ProviderService {
         })),
       });
     }
-    const key = PROVIDERS[id].local ? "" : ((await this.credentials?.get(id)) ?? null);
+    // Only an in-app credential is ours to fetch. The other two kinds pass an empty key: the
+    // runtime needs none, and the external tool holds its own.
+    const external = PROVIDERS[id].credential === "external";
+    const key = PROVIDERS[id].credential === "in-app" ? ((await this.credentials?.get(id)) ?? null) : "";
     if (key === null) {
       return this.patch(id, {
         validation: "invalid",
@@ -96,6 +105,9 @@ export class ProviderService {
         probes,
         lastValidated: this.clock(),
         fault: null,
+        // The probe *is* the configured answer for an external credential — there is no file
+        // to have found it in, so a signed-out tool must be able to turn this back off.
+        ...(external ? { configured: anyAvailable } : {}),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -104,6 +116,7 @@ export class ProviderService {
         validation: "invalid",
         probes: PROVIDERS[id].capabilities.map((capability) => ({ capability, available: false, reason: message })),
         lastValidated: this.clock(),
+        ...(external ? { configured: false } : {}),
       });
     }
   }

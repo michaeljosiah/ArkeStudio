@@ -11,7 +11,7 @@ import {
   UlidSchema,
 } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema, ReconcileActionSchema } from "./job.js";
-import { ProviderStatusSchema } from "./provider.js";
+import { ProviderStatusSchema, ProviderToolStatusSchema } from "./provider.js";
 import { ProviderCallRecordSchema } from "./provider-call.js";
 import { ShotSelectionSchema } from "./scene.js";
 import {
@@ -525,6 +525,14 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   /** Provider configuration or validation changed — the full set, never a patch (SPEC-008 R-2, R-3). */
   z
     .object({ ...base, type: z.literal("provider.status"), providers: z.array(ProviderStatusSchema) })
+    .strict(),
+  /**
+   * An external tool's presence or sign-in changed (issue #137). Separate from provider.status
+   * because it changes on its own schedule — a token expiring, a login finishing minutes after
+   * it started — and carries what to do about it rather than only whether it works.
+   */
+  z
+    .object({ ...base, type: z.literal("provider.tool-status"), tools: z.array(ProviderToolStatusSchema) })
     .strict(),
   /** Routing defaults or their faults changed (SPEC-008 R-20, §2.7). */
   z

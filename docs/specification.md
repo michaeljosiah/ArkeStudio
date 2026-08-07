@@ -1519,7 +1519,7 @@ back to the source artifact — so months later, "where did this come from" has 
 | Provider | Capabilities | Route |
 |---|---|---|
 | **FAL** | image, video | Gateway — the predominant route for image and video models |
-| **Higgsfield** | image, video | Gateway |
+| **Higgsfield** | image, video | Gateway — driven through its own CLI, which also holds its credential |
 | **OpenAI** | LLM, image | Direct |
 | **Anthropic** | LLM | Direct |
 | **ElevenLabs** | voice TTS, cloning | Direct |
@@ -1588,8 +1588,15 @@ through the same filter and contain no world content.
 A hand-maintained manifest, seeded from FAL's and Higgsfield's catalogues, declaring per model:
 capabilities (reference images, start frame, end frame), duration cap, resolution and aspect
 options, and cost. This is what powers the model picker's honest capability copy
-(*"Seedance 2.0 · refs · frames · 15s"* against *"Halcyon 1.5 · frames only · 12s"*) and the
-pre-dispatch estimate.
+(*"Seedance 2.0 · no refs · 15s"* against *"Higgsfield Soul 2.0 · refs ×1"*) and the pre-dispatch
+estimate.
+
+Higgsfield rows come from `higgsfield model list --json` and are keyed on its `job_type`, which
+is the string a dispatch actually names. The earlier rows were written from the HTTP
+documentation and neither of them dispatched: one was spelled differently in the live catalogue,
+and the other named a model that does not exist in it at all (issue 137). A row whose price
+cannot be established does not ship — an estimate is shown and accepted before money is spent, so
+a guessed rate is worse than an absent model.
 
 ## 14.4 Cost
 

@@ -72,6 +72,7 @@ const state: ClientState = {
         fault: null,
       },
     ],
+    providerTools: [],
     manifest: {
       manifestVersion: 9,
       generated: "2026-07-28",

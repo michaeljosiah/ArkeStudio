@@ -190,6 +190,7 @@ export class ProviderCallStore {
       elapsedMs: null,
       status: "pending",
       httpStatus: null,
+      exitCode: null,
       request: { headers: input.headers, body: input.body },
       response: null,
       error: null,
@@ -197,20 +198,33 @@ export class ProviderCallStore {
     return id;
   }
 
+  /**
+   * A call came back. HTTP calls carry `status`; a subprocess carries `exitCode` instead, and
+   * whichever is present decides whether the provider rejected the request — a non-2xx status
+   * or a non-zero exit. A process that produced neither (spawn failure, timeout) is a transport
+   * failure, not a rejection, and reaches `fail` rather than here.
+   */
   async finish(
     id: string,
-    input: { status: number; headers: Record<string, string>; body: unknown },
+    input: {
+      status?: number;
+      exitCode?: number | null;
+      headers: Record<string, string>;
+      body: unknown;
+    },
   ): Promise<void> {
     await this.load();
     const record = this.current.get(id);
     if (!record) return;
     const completedAt = new Date().toISOString();
+    const rejected = input.status !== undefined ? input.status >= 400 : input.exitCode !== 0;
     await this.append({
       ...record,
       completedAt,
       elapsedMs: Math.max(0, Date.parse(completedAt) - Date.parse(record.startedAt)),
-      status: input.status >= 400 ? "rejected" : record.operation === "submit" ? "accepted" : "succeeded",
-      httpStatus: input.status,
+      status: rejected ? "rejected" : record.operation === "submit" ? "accepted" : "succeeded",
+      httpStatus: input.status ?? null,
+      exitCode: input.exitCode ?? null,
       response: { headers: input.headers, body: input.body },
       error: null,
     });

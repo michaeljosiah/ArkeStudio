@@ -31,6 +31,10 @@ import {
 } from "@arke-studio/adapter-opencode";
 import {
   createProviderClients,
+  discoverHiggsfield,
+  lazyHiggsfieldRunner,
+  higgsfieldSignIn,
+  higgsfieldWhoAmI,
   probeRuntime,
   SHIPPED_MANIFEST,
   type VoiceCatalogueClient,
@@ -124,6 +128,19 @@ function windowsArchitecture(): "x64" | "arm64" | null {
 function bundledVoxaPath(): string | null {
   const path = app.isPackaged ? join(process.resourcesPath, "voxa", "voxa.exe") : null;
   return path !== null && existsSync(path) ? path : null;
+}
+
+/**
+ * Where the Higgsfield CLI lands when Settings fetches it — the `higgsfield-cli` catalogue
+ * entry's directory, under the app root. The release archive ships `hf.exe`, not
+ * `higgsfield.exe`: the three documented command names are npm shims.
+ *
+ * Discovery still prefers an installation already on PATH, so a machine that ran
+ * `npm i -g @higgsfield/cli` or `brew install` never ends up with a second, drifting copy.
+ */
+function fetchedHiggsfieldPath(appRoot: string): string | null {
+  const path = join(appRoot, "higgsfield-cli", "hf.exe");
+  return existsSync(path) ? path : null;
 }
 
 let coordinator: Coordinator | null = null;
@@ -410,7 +427,20 @@ async function initialize(): Promise<{ port: number }> {
   // One client set serves validation (SPEC-008) and dispatch (SPEC-009).
   const providerSecrets = new SecretRegistry();
   const providerCalls = new ProviderCallStore(join(appRoot, "provider-calls", "calls.jsonl"), providerSecrets);
-  const providerClients = createProviderClients((url, init) => fetch(url, init), providerCalls);
+  // Higgsfield authenticates through its own CLI, so "is it configured" is a discovery
+  // question rather than a credential one. Absent is a legitimate answer: the client then
+  // fails every call with the remedy, and Settings can offer to fetch it.
+  // Recomputed per call, not captured: Settings can fetch the CLI mid-session, and a path
+  // resolved at launch would have said "absent" for the rest of the run.
+  const findHiggsfield = () => {
+    const fetched = fetchedHiggsfieldPath(appRoot);
+    return discoverHiggsfield(fetched ? { bundledPath: fetched } : {});
+  };
+  const providerClients = createProviderClients({
+    fetch: (url, init) => fetch(url, init),
+    higgsfield: lazyHiggsfieldRunner(findHiggsfield),
+    capture: providerCalls,
+  });
 
   // Voxa discovery is environment -> configured -> bundled -> absent. Configured paths stay
   // in the main process; renderer state receives only source, basename, and safe categories.
@@ -645,6 +675,15 @@ async function initialize(): Promise<{ port: number }> {
     secretRegistry: providerSecrets,
     providerCalls,
     validators: providerClients,
+    // Higgsfield's credential is the CLI's, not ours: presence and sign-in are probes, and the
+    // login is a browser flow we start and wait on rather than a value anyone types (#137).
+    toolProbes: {
+      higgsfield: {
+        discover: findHiggsfield,
+        whoAmI: (command) => higgsfieldWhoAmI(command),
+        signIn: (command, signal) => higgsfieldSignIn(command, signal),
+      },
+    },
     manifest: SHIPPED_MANIFEST,
     probeRuntime: () => probeRuntime(appRoot),
     dispatchClients: providerClients,

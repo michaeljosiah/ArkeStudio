@@ -113,8 +113,15 @@ export function resolveModel(
 function strandReason(state: ReturnType<typeof useStore>["state"], model: ManifestModel): string {
   if ((state?.app.models.disabled ?? []).includes(model.id)) return "turned off in Providers";
   const status = (state?.app.providers ?? []).find((p) => p.id === model.provider);
-  if (status?.configured !== true) return `no ${PROVIDERS[model.provider].displayName} key`;
-  return `the ${PROVIDERS[model.provider].displayName} key does not unlock this`;
+  const info = PROVIDERS[model.provider];
+  // Not every provider takes a key, and telling someone to paste one they can never paste
+  // sends them to a field that does not exist (issue 137).
+  if (info.credential === "external") {
+    if (status?.configured !== true) return `not signed in to ${info.displayName}`;
+    return `this ${info.displayName} account does not unlock this`;
+  }
+  if (status?.configured !== true) return `no ${info.displayName} key`;
+  return `the ${info.displayName} key does not unlock this`;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { DomainEvent, SetupComponent, SetupStatus } from "@arke-studio/contracts";
@@ -38,6 +38,8 @@ export interface SetupOptions {
   throttleMs?: number;
   /** Refuse to start without this much headroom beyond the download itself. */
   headroomMb?: number;
+  /** Which architecture's archive to fetch. Injectable so a test needs no particular machine. */
+  arch?: "x64" | "arm64";
 }
 
 interface Live extends SetupComponent {
@@ -46,6 +48,24 @@ interface Live extends SetupComponent {
 
 const DEFAULT_THROTTLE_MS = 400;
 const DEFAULT_HEADROOM_MB = 2000;
+
+/**
+ * The tar we mean: Windows ships bsdtar at a known path, and it reads gzip and absolute paths
+ * without complaint. A PATH that prefers GNU tar — Git Bash and MSYS2 both do, and a user's
+ * PATH is not ours to predict — reads the `C:` in an absolute archive path as a *remote host*
+ * and fails with "Cannot connect to C: resolve failed".
+ *
+ * Resolved rather than escaped, matching what `apps/desktop/scripts/prepare-runtimes.mjs`
+ * settled on for the same failure: `--force-local` cures GNU tar and bsdtar rejects the flag
+ * outright, so it cannot be passed unconditionally, and a conditional would mean sniffing the
+ * tar we are about to run. The bare name stays as the fallback for a system with no System32
+ * copy — every other platform included.
+ */
+export function systemTar(): string {
+  if (process.platform !== "win32") return "tar";
+  const system32 = join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "tar.exe");
+  return existsSync(system32) ? system32 : "tar";
+}
 
 export class LocalSetupService {
   private readonly components = new Map<string, Live>();
@@ -100,6 +120,21 @@ export class LocalSetupService {
     return join(this.opts.appRoot, "models");
   }
 
+  /** Tools live beside the models, not among them: an executable is not a weight file. */
+  private toolDir(spec: { dir: string }): string {
+    return join(this.opts.appRoot, spec.dir);
+  }
+
+  /**
+   * The archive for this machine. A release publishes one per architecture, and picking the
+   * wrong one yields a binary that will not start — a worse failure than not fetching at all,
+   * because it looks installed.
+   */
+  private archiveFor(spec: { byArch: Partial<Record<"x64" | "arm64", DownloadFile>> }): DownloadFile | null {
+    const arch = this.opts.arch ?? (process.arch === "arm64" ? "arm64" : "x64");
+    return spec.byArch[arch] ?? null;
+  }
+
   /** What is already here. Cheap, and always runs before anything is fetched. */
   async detect(): Promise<void> {
     for (const [id, c] of this.components) {
@@ -135,6 +170,12 @@ export class LocalSetupService {
     if (spec.kind === "installer") {
       if (await this.deps.probeUrl("http://127.0.0.1:11434/api/version")) return true;
       return (await this.deps.which("ollama")) !== null;
+    }
+    if (spec.kind === "archive") {
+      // The executable under its real name is the proof: extraction writes into a staging
+      // directory and only a complete extraction is moved into place.
+      const info = await stat(toExtendedLength(join(this.toolDir(spec), spec.executable))).catch(() => null);
+      return info !== null && info.size > 0;
     }
     if (spec.kind === "pull") {
       const listed = await this.deps.run(spec.command, ["list"], this.abort.signal).catch(() => null);
@@ -265,6 +306,49 @@ export class LocalSetupService {
         }
         await rm(toExtendedLength(staged), { force: true }).catch(() => {});
         this.set(entry.id, { state: "ready", detail: undefined, bytesPerSecond: null });
+        this.publish();
+        return;
+      }
+
+      if (spec.kind === "archive") {
+        const file = this.archiveFor(spec);
+        if (file === null) {
+          this.set(entry.id, {
+            state: "blocked",
+            detail: `no ${entry.displayName} build is published for this machine's architecture`,
+          });
+          this.publish();
+          return;
+        }
+        const dir = this.toolDir(spec);
+        const staged = join(dir, ".staging");
+        const archive = join(staged, file.file);
+        this.set(entry.id, { state: "downloading", bytesDone: 0, detail: undefined });
+        this.publish();
+        const received = await this.download(entry.id, file, archive, 0);
+
+        this.set(entry.id, { state: "installing", bytesPerSecond: null, detail: "unpacking" });
+        this.publish();
+        // Extracting into the staging directory keeps a half-unpacked archive from ever looking
+        // like presence. `bsdtar` by absolute path, not `tar` off PATH — see systemTar.
+        const unpacked = await this.deps.run(systemTar(), ["-xzf", archive, "-C", staged], this.abort.signal);
+        const extracted = join(staged, spec.executable);
+        const arrived = unpacked.code === 0 && (await stat(toExtendedLength(extracted)).catch(() => null)) !== null;
+        if (!arrived) {
+          await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
+          this.set(entry.id, {
+            state: "failed",
+            detail: firstLine(unpacked.output) || `the archive did not contain ${spec.executable}`,
+          });
+          this.publish();
+          return;
+        }
+        // Only a complete extraction takes the real path, so presence is never half a tool.
+        const target = join(dir, spec.executable);
+        await rm(toExtendedLength(target), { force: true }).catch(() => {});
+        await rename(toExtendedLength(extracted), toExtendedLength(target));
+        await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
+        this.set(entry.id, { state: "ready", bytesDone: received, bytesPerSecond: null, detail: undefined });
         this.publish();
         return;
       }

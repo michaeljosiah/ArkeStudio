@@ -1,7 +1,14 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import type { ProviderId } from "@arke-studio/contracts";
-import type { FetchLike, ProviderCallCapture, ProviderCallContext, ProviderClient } from "./types.js";
+import type {
+  CommandResult,
+  CommandRunner,
+  FetchLike,
+  ProviderCallCapture,
+  ProviderCallContext,
+  ProviderClient,
+} from "./types.js";
 
 interface Scope extends ProviderCallContext {
   operation: string;
@@ -131,13 +138,49 @@ async function responseBody(response: Response): Promise<unknown> {
   }
 }
 
+/**
+ * The subcommand path a CLI was invoked with, stopping at the first flag: "generate create
+ * text2image_soul_v2", "account status". Values are left out of the endpoint because they
+ * belong in the body — the same split a URL and its request payload already have.
+ */
+function commandPath(args: readonly string[]): string {
+  const end = args.findIndex((arg) => arg.startsWith("-"));
+  const path = (end === -1 ? args : args.slice(0, end)).join(" ");
+  return path.length > 0 ? path : "(no arguments)";
+}
+
+/**
+ * What a subprocess said, structured where it can be. JSON is parsed so the record carries a
+ * walkable object — the store's sanitiser strips signed query strings and registered secrets
+ * as it descends, and it cannot descend into a single opaque string.
+ */
+function commandResponseBody(result: CommandResult): unknown {
+  const stdout = result.stdout.trim();
+  let parsed: unknown = stdout.length > 0 ? stdout : null;
+  if (stdout.length > 0) {
+    try {
+      parsed = summarizeMedia(JSON.parse(stdout));
+    } catch {
+      /* not JSON: the text is the honest record of what came back */
+    }
+  }
+  const stderr = result.stderr.trim();
+  return stderr.length > 0 ? { stdout: parsed, stderr } : { stdout: parsed };
+}
+
+/** Stands in for a runner the provider does not have, so a miswiring fails loudly. */
+const noRunner: CommandRunner = async () => {
+  throw new Error("this provider is not driven as a subprocess");
+};
+
 export function captureProviderClient(
   provider: ProviderId,
-  factory: (fetch: FetchLike) => ProviderClient,
+  factory: (fetch: FetchLike, run: CommandRunner) => ProviderClient,
   fetchImpl: FetchLike,
   capture?: ProviderCallCapture,
+  runImpl: CommandRunner = noRunner,
 ): ProviderClient {
-  if (!capture) return factory(fetchImpl);
+  if (!capture) return factory(fetchImpl, runImpl);
   const scope = new AsyncLocalStorage<Scope>();
   const observedFetch: FetchLike = async (url, init) => {
     const current = scope.getStore() ?? { operation: "provider" };
@@ -164,7 +207,40 @@ export function captureProviderClient(
       throw error;
     }
   };
-  const client = factory(observedFetch);
+  /**
+   * The same instrumentation for a provider we drive as a CLI (issue 137). Without this the
+   * payload history simply has no rows for Higgsfield: submit and poll leave no trace, and the
+   * only calls that would appear are the artifact downloads at the end.
+   */
+  const observedRun: CommandRunner = async (args, options) => {
+    const current = scope.getStore() ?? { operation: "provider" };
+    const id = await capture.start({
+      provider,
+      operation: current.operation,
+      context: current,
+      method: "EXEC",
+      endpoint: commandPath(args),
+      headers: {},
+      body: { args: [...args] },
+    });
+    try {
+      const result = await runImpl(args, options);
+      // A process that never produced an exit status did not reject anything — it failed to
+      // run, which is the transport failure `fail` records.
+      if (result.code === null) {
+        await capture.fail(id, new Error(result.stderr.trim() || "the process produced no exit status"));
+        return result;
+      }
+      void capture
+        .finish(id, { exitCode: result.code, headers: {}, body: commandResponseBody(result) })
+        .catch(() => {});
+      return result;
+    } catch (error) {
+      await capture.fail(id, error);
+      throw error;
+    }
+  };
+  const client = factory(observedFetch, observedRun);
   const run = <T>(operation: string, context: ProviderCallContext | undefined, fn: () => Promise<T>) =>
     scope.run({ operation, ...context }, fn);
   const wrapped = {

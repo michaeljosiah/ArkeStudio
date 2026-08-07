@@ -1,6 +1,7 @@
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import {
+  credentialKindOf,
   formatMicroUsd,
   PROVIDERS,
   ulid,
@@ -1039,8 +1040,10 @@ export class JobQueue {
   // ---- misc -----------------------------------------------------------------
 
   private async keyFor(provider: string): Promise<string | null> {
-    const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[provider]?.local === true;
-    if (local) return ""; // local runtimes take no key (SPEC-008)
+    // Only an in-app credential is ours to hand over. A local runtime takes none, and an
+    // external one is held by the tool the client drives — both dispatch with an empty key
+    // rather than being held for a credential that was never going to be in `credentials.dat`.
+    if (credentialKindOf(provider) !== "in-app") return "";
     return this.opts.getKey(provider);
   }
 
