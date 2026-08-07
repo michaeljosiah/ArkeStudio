@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { ProviderToolStatus } from "@arke-studio/contracts";
 import { ProviderToolService, type ToolProbe } from "../../src/providers/tool.js";
@@ -9,7 +10,13 @@ import { ProviderToolService, type ToolProbe } from "../../src/providers/tool.js
  * places, and collapsing any two of them into "not configured" is the failure this replaces.
  */
 
-const FOUND = { command: "C:\\tools\\higgsfield.cmd", source: "path" as const, version: "1.1.22" };
+/**
+ * Built with `join` rather than written as a literal Windows path. `basename` splits on the
+ * running platform's separator, so a hard-coded `C:\tools\...` is the whole string on Linux and
+ * this asserted nothing there — it failed in CI on exactly that.
+ */
+const TOOL_DIR = join("tools", "higgsfield");
+const FOUND = { command: join(TOOL_DIR, "higgsfield.cmd"), source: "path" as const, version: "1.1.22" };
 
 function service(probe: Partial<ToolProbe>) {
   const seen: ProviderToolStatus[] = [];
@@ -43,7 +50,7 @@ describe("a provider whose credential is not ours (issue #137)", () => {
     assert.equal(status.state, "ready");
     assert.equal(status.account, "someone@example.test");
     assert.equal(status.executableName, "higgsfield.cmd");
-    assert.ok(!JSON.stringify(status).includes("C:\\\\tools"), "no absolute path crosses the boundary");
+    assert.ok(!JSON.stringify(status).includes(TOOL_DIR), "no directory crosses the boundary (R-6)");
   });
 
   it("publishes signing-in before it blocks, so the row is not silent for minutes", async () => {
