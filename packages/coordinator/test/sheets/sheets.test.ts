@@ -13,7 +13,7 @@ import {
   scopeImageExtraction,
   stageSheetRename,
   stageSheetStatus,
-  stageVoiceAssignment,
+  applyVoiceAssignment,
 } from "../../src/sheets/authoring.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -241,14 +241,13 @@ describe("creation paths (R-10..R-12, D7, D9)", () => {
 });
 
 describe("voice and links (R-4, R-15, D10)", () => {
-  it("voice assignment is gated, versions, and lands at the accepted version", async () => {
-    const { store, gate } = await open();
-    const staged = await stageVoiceAssignment(store, gate, {
+  it("voice assignment goes straight through, versions, and records the version it lands at", async () => {
+    const { store } = await open();
+    // The human clicking Assign is the approval — it commits directly, no gate round-trip.
+    await applyVoiceAssignment(store, {
       path: "characters/bray-half-hitch.md",
       voice: { provider: "elevenlabs", voiceId: "v_rope", label: "Rope and rum" },
     });
-    const outcome = await gate.accept(staged.id);
-    assert.equal(outcome.status, "accepted");
     const sheet = store.getBundle().sheets.find((s) => s.id === "bray-half-hitch");
     assert.equal(sheet?.version, 3);
     assert.equal(sheet?.voice?.voiceId, "v_rope");

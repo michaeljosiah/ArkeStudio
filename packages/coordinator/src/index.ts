@@ -156,7 +156,7 @@ export {
   scopeImageExtraction,
   stageSheetRename,
   stageSheetStatus,
-  stageVoiceAssignment,
+  applyVoiceAssignment,
   type ImageExtraction,
 } from "./sheets/authoring.js";
 export { AuthoringService, describeActionClass, settlePermission } from "./harness/authoring.js";

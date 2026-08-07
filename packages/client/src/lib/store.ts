@@ -1435,7 +1435,7 @@ export function requestVoicePreview(
 export function readSheetSection(
   worldId: string,
   sheetId: string,
-  sectionHeading: "Essence",
+  sectionHeading: "Essence" | "Appearance",
   requestId = queueRequest("read-sheet-section"),
   confirmationToken?: string,
 ): string {

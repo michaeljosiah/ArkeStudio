@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import {
   CHARACTER_ROLE_MAX,
@@ -886,19 +886,21 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const sheet = useSheet(worldId, sheetId);
   const navigate = useNavigate();
   const voiceAudio = useVoiceAudio();
-  const [readRequestId, setReadRequestId] = useState<string | null>(null);
-  const readResult = readRequestId ? voiceAudio[readRequestId] : undefined;
+  // Read-aloud is shared across the character's descriptive sections; the state tracks which one
+  // the user last asked to hear so the clip, cost note and failure attach to the right block.
+  const [read, setRead] = useState<{ requestId: string; section: "Essence" | "Appearance" } | null>(null);
+  const readResult = read ? voiceAudio[read.requestId] : undefined;
   // A read the user asked for plays as soon as it lands, rather than making them click twice.
   useEffect(() => {
-    if (readResult?.status === "ready" && readResult.file && world && sheet) {
+    if (read && readResult?.status === "ready" && readResult.file && world && sheet) {
       void playClip({
         id: readResult.requestId,
         url: mediaUrl(world.meta.slug, readResult.file),
-        title: `${sheet.name} · Essence`,
+        title: `${sheet.name} · ${read.section}`,
         sub: `read aloud · ${sheet.voice?.label ?? sheet.voice?.provider ?? "voice"}`,
       });
     }
-  }, [readResult?.requestId, readResult?.status, readResult?.file, world?.meta.slug, sheet?.name]);
+  }, [read?.section, readResult?.requestId, readResult?.status, readResult?.file, world?.meta.slug, sheet?.name]);
   const sheetRefsMap = useSheetRefs();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState<string | null>(null);
@@ -934,37 +936,70 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const essence = isCharacter ? sheet.sections.find((s) => s.heading === "Essence") : undefined;
   const gridSections = essence ? sheet.sections.filter((s) => s !== essence) : sheet.sections;
   const voiceUsable = sheet.voice !== undefined && ["kokoro", "elevenlabs"].includes(sheet.voice.provider);
-  const essenceClip: Clip | null =
-    readResult?.status === "ready" && readResult.file
-      ? {
-          id: readResult.requestId,
-          url: mediaUrl(slug, readResult.file),
-          title: `${sheet.name} · Essence`,
-          sub: `read aloud · ${sheet.voice?.label ?? sheet.voice?.provider ?? "voice"}`,
-        }
-      : null;
-  const readEssence = () => {
-    if (!worldId) return;
-    // No usable voice yet: the read starts by choosing one, which is where this leads.
-    if (!voiceUsable) navigate(`/w/${worldId}/cast/${sheet.id}/voice`);
-    else setReadRequestId(readSheetSection(worldId, sheet.id, "Essence"));
+  // The read controls, the loaded clip and the cost note for one section. Essence and Appearance
+  // share this; each shows its own speaker on hover and its own "preparing"/confirmation state.
+  const sectionAudio = (heading: "Essence" | "Appearance") => {
+    const active = read?.section === heading ? readResult : undefined;
+    const clip: Clip | null =
+      active?.status === "ready" && active.file
+        ? {
+            id: active.requestId,
+            url: mediaUrl(slug, active.file),
+            title: `${sheet.name} · ${heading}`,
+            sub: `read aloud · ${sheet.voice?.label ?? sheet.voice?.provider ?? "voice"}`,
+          }
+        : null;
+    const onRead = () => {
+      if (!worldId) return;
+      // No usable voice yet: the read starts by choosing one, which is where this leads.
+      if (!voiceUsable) navigate(`/w/${worldId}/cast/${sheet.id}/voice`);
+      else setRead({ requestId: readSheetSection(worldId, sheet.id, heading), section: heading });
+    };
+    const note =
+      active?.status === "confirmation-required" ? (
+        <span className="fy-textactions__note">
+          Exact {heading} will be sent to ElevenLabs and retained in Activity.
+          <Button
+            onClick={() => {
+              if (worldId && read && active.confirmationToken)
+                readSheetSection(worldId, sheet.id, heading, read.requestId, active.confirmationToken);
+            }}
+          >
+            Confirm {active.characterCount} characters · {formatMicroUsd(active.estimatedMicroUsd)}
+          </Button>
+        </span>
+      ) : read?.section === heading && !active ? (
+        <span className="fy-textactions__note">Preparing audio…</span>
+      ) : undefined;
+    return { clip, onRead, note };
   };
-  const essenceNote =
-    readResult?.status === "confirmation-required" ? (
-      <span className="fy-textactions__note">
-        Exact Essence will be sent to ElevenLabs and retained in Activity.
-        <Button
-          onClick={() => {
-            if (worldId && readRequestId && readResult.confirmationToken)
-              readSheetSection(worldId, sheet.id, "Essence", readRequestId, readResult.confirmationToken);
-          }}
-        >
-          Confirm {readResult.characterCount} characters · {formatMicroUsd(readResult.estimatedMicroUsd)}
-        </Button>
-      </span>
-    ) : readRequestId && !readResult ? (
-      <span className="fy-textactions__note">Preparing audio…</span>
-    ) : undefined;
+  // Text with the hover read-aloud/copy affordance (design 3a). The prose element differs by
+  // section — a lead paragraph, a grid cell — so the caller passes it; the host is the same.
+  const readableProse = (heading: "Essence" | "Appearance", body: string, prose: ReactNode) => {
+    const { clip, onRead, note } = sectionAudio(heading);
+    return (
+      <div className="fy-texthost">
+        {prose}
+        <TextActions
+          clip={clip}
+          onRead={onRead}
+          copyText={body}
+          readLabel={voiceUsable ? "Read aloud" : "Choose a voice to read this aloud"}
+          note={note}
+        />
+        {read?.section === heading && readResult?.status === "failed" && (
+          <Callout tone="warning" title="Read aloud unavailable">
+            {readResult.error}{" "}
+            {sheet.voice?.provider === "kokoro" && (
+              <Button variant="ghost" onClick={() => navigate("/settings/local-runtime")}>
+                Local runtime
+              </Button>
+            )}
+          </Callout>
+        )}
+      </div>
+    );
+  };
   const side = isCharacter ? (
         <div className="fy-sheet__side">
           <div className="fy-fan__drift">
@@ -1024,28 +1059,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
               </Badge>
             )}
           </div>
-          {essence && (
-            <div className="fy-texthost">
-              <p className="fy-sheet__lead">{essence.body}</p>
-              <TextActions
-                clip={essenceClip}
-                onRead={readEssence}
-                copyText={essence.body}
-                readLabel={voiceUsable ? "Read aloud" : "Choose a voice to read this aloud"}
-                note={essenceNote}
-              />
-              {readResult?.status === "failed" && (
-                <Callout tone="warning" title="Read aloud unavailable">
-                  {readResult.error}{" "}
-                  {sheet.voice?.provider === "kokoro" && (
-                    <Button variant="ghost" onClick={() => navigate("/settings/local-runtime")}>
-                      Local runtime
-                    </Button>
-                  )}
-                </Callout>
-              )}
-            </div>
-          )}
+          {essence && readableProse("Essence", essence.body, <p className="fy-sheet__lead">{essence.body}</p>)}
         </div>
         <div className="fy-sheet__actions">
           {isCharacter && (
@@ -1157,17 +1171,23 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         <ConnectedProposalPanel key={p.proposal.id} staged={p} />
       ))}
       <div className="fy-sheet__grid" style={isCharacter ? undefined : { gridTemplateColumns: "1fr", gap: 14 }}>
-        {gridSections.map((s) => (
-          <div key={s.heading}>
-            <div className="fy-sheet__sechead" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {s.heading}
-              {!isCharacter && (
-                <span className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`} style={{ width: 5, height: 5 }} />
-              )}
+        {gridSections.map((s) => {
+          // Appearance carries the same descriptive prose as the Essence, so it earns the same
+          // hover read-aloud — once it holds real text, not the empty-section placeholder.
+          const readable = isCharacter && s.heading === "Appearance" && s.body.trim() !== "" && s.body.trim() !== "—";
+          const body = <div className="fy-sheet__secbody">{s.body}</div>;
+          return (
+            <div key={s.heading}>
+              <div className="fy-sheet__sechead" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {s.heading}
+                {!isCharacter && (
+                  <span className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`} style={{ width: 5, height: 5 }} />
+                )}
+              </div>
+              {readable ? readableProse("Appearance", s.body, body) : body}
             </div>
-            <div className="fy-sheet__secbody">{s.body}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {rules.length > 0 && (
         <Section title="Canon rules" aside={<span>owned by canon — edit in canon, not here</span>}>
@@ -1931,7 +1951,12 @@ export function VoicePickerScreen() {
   const [voiceId, setVoiceId] = useState("");
   const [label, setLabel] = useState("");
   const [manual, setManual] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const sheetPath = sheet ? `characters/${sheet.id}.md` : null;
+  // Clearing commits straight through; drop the busy state once the sheet has no voice again.
+  useEffect(() => {
+    if (clearing && !sheet?.voice) setClearing(false);
+  }, [sheet?.voice, clearing]);
   return (
     <div className="fy-app" data-screen="voice-picker" style={{ minHeight: "calc(100vh - 44px)" }}>
       <div className="fy-scrim">
@@ -2002,23 +2027,27 @@ export function VoicePickerScreen() {
                         });
                       }}
                     >
-                      Stage assignment
+                      Assign
                     </Button>
                   </div>
                 </div>
               )}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              <span className="fy-mono">a gated sheet change — it versions and ripples · assigning updates every production</span>
+              <span className="fy-mono">your own change · applies at once · versions the sheet · updates every production</span>
               <span style={{ flex: 1 }} />
               {sheet?.voice && (
                 <Button
                   variant="ghost"
+                  disabled={clearing}
                   onClick={() => {
-                    if (worldId && sheetPath) assignVoice(worldId, sheetPath, null);
+                    if (worldId && sheetPath) {
+                      setClearing(true);
+                      assignVoice(worldId, sheetPath, null);
+                    }
                   }}
                 >
-                  Clear voice
+                  {clearing ? <Loading inline label="Clearing…" /> : "Clear voice"}
                 </Button>
               )}
               <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}`)}>
@@ -2048,7 +2077,15 @@ function VoiceCandidatesPanel({
   const world = useWorld();
   const sheet = useSheet(worldId, sheetId);
   const [requests, setRequests] = useState<Record<string, string>>({});
+  const [assigning, setAssigning] = useState<string | null>(null);
   const autoPlayed = useRef(new Set<string>());
+  // Assigning commits straight through (no gate), so the change lands in the next world snapshot:
+  // the pressed row stays busy until this sheet's voice is the one we just assigned.
+  useEffect(() => {
+    if (assigning && sheet?.voice && `${sheet.voice.provider}/${sheet.voice.voiceId}` === assigning) {
+      setAssigning(null);
+    }
+  }, [sheet?.voice, assigning]);
   // Matching is what this screen is for, not a step inside it: the picker opens on the ranked
   // list and states what it matched on, rather than asking first and showing nothing until then.
   useEffect(() => {
@@ -2147,16 +2184,19 @@ function VoiceCandidatesPanel({
                   </Button>
                 )}
                 <Button
+                  disabled={assigning === key || assigned}
                   onClick={() => {
-                    if (worldId && sheetPath && (candidate.provider === "kokoro" || candidate.provider === "elevenlabs"))
+                    if (worldId && sheetPath && (candidate.provider === "kokoro" || candidate.provider === "elevenlabs")) {
+                      setAssigning(key);
                       assignVoice(worldId, sheetPath, {
                         provider: candidate.provider,
                         voiceId: candidate.voiceId,
                         label: candidate.label,
                       });
+                    }
                   }}
                 >
-                  Assign
+                  {assigning === key ? <Loading inline label="Assigning…" /> : assigned ? "Assigned" : "Assign"}
                 </Button>
                 {(result?.error ?? preview?.error) && <span className="fy-mono">{result?.error ?? preview?.error}</span>}
               </div>
