@@ -275,8 +275,6 @@ export function WorldChatConversationScreen() {
    */
   const [dismissed, setDismissed] = useState<string[]>([]);
   const refusals = useWorldChatRefusals(conversationId);
-  const progress = useWorldChatProgress(conversationId);
-
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
