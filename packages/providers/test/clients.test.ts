@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { describe, it } from "node:test";
 import { ElevenLabsClient } from "../src/clients/elevenlabs.js";
 import { FalClient } from "../src/clients/fal.js";
 import { HiggsfieldClient } from "../src/clients/higgsfield.js";
 import { OllamaClient } from "../src/clients/ollama.js";
 import { OpenAiClient } from "../src/clients/openai.js";
-import type { FetchLike } from "../src/types.js";
+import { ProviderAuthError, type CommandRunner, type FetchLike } from "../src/types.js";
 
 /** A fetch fake: route → {status, body}. Anything unrouted throws (network unreachable). */
 function fakeFetch(routes: Array<{ match: RegExp; status: number; body?: unknown }>): FetchLike {
@@ -207,45 +208,177 @@ describe("openai image submission", () => {
   });
 });
 
-describe("higgsfield image submission", () => {
-  it("translates neutral output intent and never forwards the neutral field", async () => {
-    let sent: Record<string, unknown> = {};
-    const client = new HiggsfieldClient(async (_url, init) => {
-      sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
-      return new Response(JSON.stringify({ id: "job-1" }), { status: 200 });
-    });
-    await client.submit("k", {
-      model: "soul-2.0",
+/**
+ * Higgsfield is driven as a subprocess, so its seam is a command runner rather than a fetch
+ * (issue #137). Same idea as `fakeFetch`: route on the argument list, and anything unrouted is
+ * a command that does not exist.
+ */
+function fakeExec(routes: Array<{ match: RegExp; code?: number; stdout?: string; stderr?: string }>) {
+  const calls: string[][] = [];
+  const run: CommandRunner = async (args) => {
+    calls.push([...args]);
+    const line = args.join(" ");
+    const hit = routes.find((r) => r.match.test(line));
+    if (!hit) return { code: 127, stdout: "", stderr: `higgsfield: unroutable "${line}"` };
+    return { code: hit.code ?? 0, stdout: hit.stdout ?? "", stderr: hit.stderr ?? "" };
+  };
+  return { run, calls };
+}
+
+const unreachableFetch: FetchLike = async () => {
+  throw new Error("no HTTP call expected");
+};
+
+/** The argument that follows `flag`, or undefined when it was never passed. */
+function flagValue(argv: string[], flag: string): string | undefined {
+  const at = argv.indexOf(flag);
+  return at === -1 ? undefined : argv[at + 1];
+}
+
+describe("higgsfield drives the CLI (issue #137)", () => {
+  it("dispatches to the job_type and translates neutral output intent", async () => {
+    const { run, calls } = fakeExec([{ match: /generate create/, stdout: JSON.stringify({ id: "job-1" }) }]);
+    const accepted = await new HiggsfieldClient(run, unreachableFetch).submit("", {
+      model: "text2image_soul_v2",
       capability: "image",
       params: {
         prompt: "x",
         references: [],
         provenance: { canonRevision: 1 },
-        output: { width: 1024, height: 1024, aspect: "1:1", resolution: "1080p" },
+        output: { width: 1024, height: 1024, aspect: "1:1", resolution: "2k" },
       },
     });
-    assert.equal(sent["aspect_ratio"], "1:1");
-    assert.equal(sent["resolution"], "1080p");
-    assert.ok(!("output" in sent));
-    assert.ok(!("references" in sent));
-    assert.ok(!("provenance" in sent));
+    assert.equal(accepted.remoteId, "job-1");
+    const argv = calls[0]!;
+    assert.deepEqual(argv.slice(0, 3), ["generate", "create", "text2image_soul_v2"]);
+    assert.equal(flagValue(argv, "--prompt"), "x");
+    assert.equal(flagValue(argv, "--aspect_ratio"), "1:1");
+    // Soul calls the size tier `quality`; sending `--resolution` would be a flag it rejects.
+    assert.equal(flagValue(argv, "--quality"), "2k");
+    assert.equal(flagValue(argv, "--resolution"), undefined);
+    // Coordinator bookkeeping is not Higgsfield's, and the CLI errors on an undeclared flag.
+    assert.ok(!argv.includes("--output"));
+    assert.ok(!argv.includes("--references"));
+    assert.ok(!argv.includes("--provenance"));
+    // Machine-readable and unstyled, or the parse eats ANSI escapes.
+    assert.ok(argv.includes("--json") && argv.includes("--no-color"));
   });
 
-  it("refuses local references before network submission", async () => {
-    let fetches = 0;
-    const client = new HiggsfieldClient(async () => {
-      fetches += 1;
-      return new Response(JSON.stringify({ id: "job-1" }), { status: 200 });
+  it("passes references as files the CLI uploads, then removes them", async () => {
+    const { run, calls } = fakeExec([{ match: /generate create/, stdout: JSON.stringify({ id: "job-2" }) }]);
+    await new HiggsfieldClient(run, unreachableFetch).submit("", {
+      model: "text2image_soul_v2",
+      capability: "image",
+      params: { prompt: "x", references: ["references/maren-kest/main.png"] },
+      imageReferences: [{ name: "main.png", contentType: "image/png", data: new Uint8Array([1, 2, 3]) }],
     });
+    const file = flagValue(calls[0]!, "--image-references");
+    assert.ok(file !== undefined, "the reference went as a path");
+    assert.match(file, /reference-1\.png$/);
+    // Ephemeral verified bytes: the temp copy does not outlive the submission.
+    assert.equal(existsSync(file), false);
+  });
+
+  it("refuses a submission whose references did not all resolve to bytes", async () => {
+    const { run, calls } = fakeExec([{ match: /generate create/, stdout: JSON.stringify({ id: "job-3" }) }]);
     await assert.rejects(
-      client.submit("k", {
-        model: "soul-2.0",
+      new HiggsfieldClient(run, unreachableFetch).submit("", {
+        model: "text2image_soul_v2",
         capability: "image",
-        params: { prompt: "x", references: ["references/maren-kest/main.png"] },
+        params: { prompt: "x", references: ["a.png", "b.png"] },
+        imageReferences: [{ name: "a.png", contentType: "image/png", data: new Uint8Array([1]) }],
       }),
-      /no implemented reference-image transport/,
+      /not every image reference was prepared/,
     );
-    assert.equal(fetches, 0);
+    assert.equal(calls.length, 0, "nothing was spent proving it");
+  });
+
+  it("maps job status onto the queue's states, and names one it does not know", async () => {
+    const states = async (status: string) => {
+      const { run } = fakeExec([{ match: /generate get/, stdout: JSON.stringify({ id: "j", status }) }]);
+      return new HiggsfieldClient(run, unreachableFetch).poll("", "j");
+    };
+    assert.deepEqual(await states("completed"), { state: "succeeded" });
+    assert.deepEqual(await states("queued"), { state: "queued" });
+    assert.deepEqual(await states("in_progress"), { state: "running" });
+    assert.deepEqual(await states("canceled"), { state: "cancelled" });
+    assert.equal((await states("failed")).state, "failed");
+    // Loud, like fal's: only "completed" has been seen against a live account, so an
+    // unrecognised value must surface with the provider's own word rather than poll forever.
+    const surprise = await states("marinating");
+    assert.equal(surprise.state, "failed");
+    assert.match(surprise.error!, /unexpected status "marinating"/);
+  });
+
+  it("downloads the result url and ignores the thumbnail beside it", async () => {
+    const { run } = fakeExec([
+      {
+        match: /generate get/,
+        stdout: JSON.stringify({
+          id: "j",
+          status: "completed",
+          result_url: "https://assets.test/full.png",
+          min_result_url: "https://assets.test/thumb.webp",
+        }),
+      },
+    ]);
+    const fetched: string[] = [];
+    const fetchImpl: FetchLike = async (url) => {
+      fetched.push(url);
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/png" } });
+    };
+    const artifacts = await new HiggsfieldClient(run, fetchImpl).fetchArtifacts("", "j");
+    assert.deepEqual(fetched, ["https://assets.test/full.png"]);
+    assert.deepEqual(
+      artifacts.map((a) => a.name),
+      ["output-1.png"],
+    );
+  });
+
+  it("reports a signed-out CLI as a provider fault, not a work failure (R-4)", async () => {
+    const { run } = fakeExec([{ match: /generate get/, code: 1, stderr: "Session expired" }]);
+    await assert.rejects(new HiggsfieldClient(run, unreachableFetch).poll("", "j"), (err: unknown) => {
+      assert.ok(err instanceof ProviderAuthError);
+      return true;
+    });
+  });
+
+  it("validates on the free account probe, and says so when the account cannot pay", async () => {
+    const ok = fakeExec([
+      { match: /account status/, stdout: JSON.stringify({ credits: 12.5, email: "someone@example.test" }) },
+    ]);
+    assert.deepEqual(await new HiggsfieldClient(ok.run, unreachableFetch).validateKey(""), [
+      { capability: "image", available: true },
+      { capability: "video", available: true },
+    ]);
+    // Never a real generation (§2.4): the probe reads the balance and nothing else.
+    assert.deepEqual(ok.calls[0]!.slice(0, 2), ["account", "status"]);
+
+    const broke = fakeExec([{ match: /account status/, stdout: JSON.stringify({ credits: 0 }) }]);
+    const probes = await new HiggsfieldClient(broke.run, unreachableFetch).validateKey("");
+    assert.equal(probes[0]!.available, false);
+    assert.match(probes[0]!.reason!, /no credit/);
+
+    const out = fakeExec([{ match: /account status/, code: 1, stderr: "Not authenticated" }]);
+    const signedOut = await new HiggsfieldClient(out.run, unreachableFetch).validateKey("");
+    assert.equal(signedOut[0]!.available, false);
+    assert.match(signedOut[0]!.reason!, /auth login/);
+  });
+
+  it("cancel spends nothing, because the CLI has no cancel verb", async () => {
+    const { run, calls } = fakeExec([]);
+    await new HiggsfieldClient(run, unreachableFetch).cancel("", "j");
+    assert.deepEqual(calls, []);
+  });
+
+  it("declares nothing it cannot honour — a listing without our key cannot reconcile", async () => {
+    const { run } = fakeExec([]);
+    assert.deepEqual(new HiggsfieldClient(run, unreachableFetch).declarations, {
+      supportsIdempotencyKey: false,
+      supportsLookupByKey: false,
+      supportsListRecent: false,
+      reportsCost: false,
+    });
   });
 });
 
@@ -451,20 +584,15 @@ describe("provider artifact filenames match their declared image format", () => 
     assert.deepEqual(artifacts.map((artifact) => artifact.name), ["output-1.jpg", "output-2.webp"]);
   });
 
-  it("higgsfield preserves JPEG and WebP extensions", async () => {
-    const bytes = new Uint8Array([1, 2, 3]);
-    const fetchImpl: FetchLike = async (url) => {
-      if (url.endsWith("/v1/jobs/job-1")) {
-        return new Response(JSON.stringify({
-          outputs: [
-            { url: "https://assets.test/a", content_type: "image/jpeg" },
-            { url: "https://assets.test/b", content_type: "image/webp" },
-          ],
-        }), { status: 200 });
-      }
-      return new Response(bytes, { status: 200 });
-    };
-    const artifacts = await new HiggsfieldClient(fetchImpl).fetchArtifacts("k", "job-1");
-    assert.deepEqual(artifacts.map((artifact) => artifact.name), ["output-1.jpg", "output-2.webp"]);
+  it("higgsfield names the file from the served content type, not the url", async () => {
+    // The result url carries no extension we can trust, so the download's own content type is
+    // what decides — a webp landing as ".png" is a file nothing downstream opens.
+    const { run } = fakeExec([
+      { match: /generate get/, stdout: JSON.stringify({ id: "j", result_url: "https://assets.test/a" }) },
+    ]);
+    const fetchImpl: FetchLike = async () =>
+      new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/webp" } });
+    const artifacts = await new HiggsfieldClient(run, fetchImpl).fetchArtifacts("", "j");
+    assert.deepEqual(artifacts.map((artifact) => artifact.name), ["output-1.webp"]);
   });
 });

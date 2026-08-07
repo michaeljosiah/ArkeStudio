@@ -11,13 +11,22 @@ export { OllamaClient } from "./clients/ollama.js";
 export { OpenAiClient } from "./clients/openai.js";
 export { jsonRequest, tryProbe } from "./clients/http.js";
 export { requireModel, SHIPPED_MANIFEST } from "./manifest-data.js";
-export { createProviderClients, PROVIDER_DECLARATIONS } from "./registry.js";
+export { createProviderClients, PROVIDER_DECLARATIONS, type ProviderClientDeps } from "./registry.js";
+export {
+  discoverHiggsfield,
+  higgsfieldRunner,
+  missingHiggsfieldRunner,
+  type DiscoveredHiggsfield,
+  type HiggsfieldDiscoveryOptions,
+} from "./higgsfield-cli.js";
 export { captureProviderClient } from "./capture.js";
 export { probeRuntime, type ProbeDeps } from "./runtime-detect.js";
 export { gateLocalRuntimes } from "@arke-studio/contracts";
 export {
   ProviderAuthError,
   ProviderRequestRejectedError,
+  type CommandResult,
+  type CommandRunner,
   type FetchedArtifact,
   type FetchLike,
   type PollResult,

@@ -63,9 +63,10 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     // No frames on the fal video routes: they are text-to-video, and their schemas declare no
     // image or frame field at all (#154). The copy said "frames" because the row did.
     assert.equal(modelCapabilityCopy(model("seedance-2.0")), "no refs · 15s");
-    // Higgsfield's row still claims them. Left alone deliberately: its client does not match its
-    // API either (#137), and there is no schema to check the claim against yet.
-    assert.equal(modelCapabilityCopy(model("halcyon-1.5")), "no refs · frames · 12s");
+    // The accepting side. This used to be Higgsfield's "halcyon-1.5", whose row claimed both
+    // frames — for a model that turned out not to exist in the catalogue under any name (#137).
+    // Soul is the real row, and it takes exactly one reference.
+    assert.equal(modelCapabilityCopy(model("text2image_soul_v2")), "refs ×1");
   });
 
   it("no fal video row claims a frame its route cannot take", () => {
@@ -166,7 +167,16 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
     const each = banana.pricing.microUsdPerImage;
     assert.equal(estimateMicroUsd(banana, {}), each);
     assert.equal(estimateMicroUsd(banana, { images: 4 }), each * 4);
-    assert.equal(estimateMicroUsd(model("soul-2.0"), { images: 2, resolution: "4k" }), 240000);
+    assert.equal(estimateMicroUsd(model("text2image_soul_v2"), { images: 2 }), 120000);
+    // The per-image resolution override is a pricing *shape*, not a property of any shipped
+    // row — it used to be exercised through a Higgsfield row that priced a 4k tier the model
+    // could not reach. Build it here instead, so the arithmetic is tested without a row having
+    // to be wrong to test it.
+    const tiered = {
+      ...model("text2image_soul_v2"),
+      pricing: { kind: "perImage" as const, microUsdPerImage: 60000, byResolution: { "2k": 120000 } },
+    };
+    assert.equal(estimateMicroUsd(tiered, { images: 2, resolution: "2k" }), 240000);
   });
 
   it("prices GPT Image 2 reference input conservatively", () => {
@@ -276,8 +286,9 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
       estimateCharacterImageMicroUsd(flux, "main-photo") * 4,
     );
     const fourKOnly = {
-      ...model("soul-2.0"),
-      limits: { ...model("soul-2.0").limits, resolutions: ["4k"] },
+      ...model("text2image_soul_v2"),
+      limits: { ...model("text2image_soul_v2").limits, resolutions: ["4k"] },
+      pricing: { kind: "perImage" as const, microUsdPerImage: 60000, byResolution: { "4k": 120000 } },
     };
     assert.equal(characterImageOutput(fourKOnly, "character-sheet").resolution, "4k");
     assert.equal(estimateCharacterImageMicroUsd(fourKOnly, "character-sheet"), 120000);

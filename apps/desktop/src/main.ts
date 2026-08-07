@@ -31,6 +31,8 @@ import {
 } from "@arke-studio/adapter-opencode";
 import {
   createProviderClients,
+  discoverHiggsfield,
+  higgsfieldRunner,
   probeRuntime,
   SHIPPED_MANIFEST,
   type VoiceCatalogueClient,
@@ -123,6 +125,17 @@ function windowsArchitecture(): "x64" | "arm64" | null {
 
 function bundledVoxaPath(): string | null {
   const path = app.isPackaged ? join(process.resourcesPath, "voxa", "voxa.exe") : null;
+  return path !== null && existsSync(path) ? path : null;
+}
+
+/**
+ * Where a Higgsfield CLI we fetched ourselves would live. The release archive ships `hf.exe`,
+ * not `higgsfield.exe` — the three documented command names are npm shims. Nothing writes here
+ * yet; discovery prefers an installation already on PATH either way, so a machine that ran
+ * `npm i -g @higgsfield/cli` or `brew install` never ends up with a second, drifting copy.
+ */
+function bundledHiggsfieldPath(): string | null {
+  const path = app.isPackaged ? join(process.resourcesPath, "higgsfield", "hf.exe") : null;
   return path !== null && existsSync(path) ? path : null;
 }
 
@@ -410,7 +423,16 @@ async function initialize(): Promise<{ port: number }> {
   // One client set serves validation (SPEC-008) and dispatch (SPEC-009).
   const providerSecrets = new SecretRegistry();
   const providerCalls = new ProviderCallStore(join(appRoot, "provider-calls", "calls.jsonl"), providerSecrets);
-  const providerClients = createProviderClients((url, init) => fetch(url, init), providerCalls);
+  // Higgsfield authenticates through its own CLI, so "is it configured" is a discovery
+  // question rather than a credential one. Absent is a legitimate answer: the client then
+  // fails every call with the remedy, and Settings can offer to fetch it.
+  const bundledHiggsfield = bundledHiggsfieldPath();
+  const higgsfieldCli = await discoverHiggsfield(bundledHiggsfield ? { bundledPath: bundledHiggsfield } : {});
+  const providerClients = createProviderClients({
+    fetch: (url, init) => fetch(url, init),
+    ...(higgsfieldCli ? { higgsfield: higgsfieldRunner(higgsfieldCli.command) } : {}),
+    capture: providerCalls,
+  });
 
   // Voxa discovery is environment -> configured -> bundled -> absent. Configured paths stay
   // in the main process; renderer state receives only source, basename, and safe categories.

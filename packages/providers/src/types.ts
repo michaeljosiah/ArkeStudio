@@ -69,6 +69,23 @@ export class ProviderRequestRejectedError extends Error {
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
+export interface CommandResult {
+  /** The exit status, or null when the process never produced one (spawn failure, timeout). */
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * A provider driven as a subprocess rather than over HTTP. The runner is already bound to a
+ * discovered command, so a client composes arguments and never learns where the binary lives —
+ * the same seam `FetchLike` gives the HTTP clients, and the same reason: tests need no CLI.
+ */
+export type CommandRunner = (
+  args: readonly string[],
+  options?: { timeoutMs?: number },
+) => Promise<CommandResult>;
+
 export interface ProviderCallContext {
   jobId?: string;
   attempt?: number;

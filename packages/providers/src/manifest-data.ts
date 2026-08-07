@@ -13,38 +13,42 @@ import { FAL_MODELS } from "./fal-catalogue.generated.js";
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 13,
-  generated: "2026-08-05",
+  manifestVersion: 14,
+  generated: "2026-08-07",
   models: [
     // ---- fal: generated from the live catalogue ---------------------------
     ...FAL_MODELS.map((model) => ({
       ...model,
       accepts: { ...model.accepts, referenceRoles: false },
     })),
-    // ---- video ------------------------------------------------------------
-    {
-      id: "halcyon-1.5",
-      provider: "higgsfield",
-      capability: "video",
-      displayName: "Halcyon 1.5",
-      accepts: { referenceImages: 0, referenceRoles: false, startFrame: true, endFrame: true },
-      limits: { maxDurationSec: 12, resolutions: ["720p", "1080p"], aspects: ["16:9", "9:16"] },
-      pricing: { kind: "perSecond", microUsdPerSecond: 35000 },
-    },
     // ---- image ------------------------------------------------------------
+    // Higgsfield rows are keyed on the CLI's `job_type`, because that is the string
+    // `generate create` dispatches to. `higgsfield model list --json` is the authority for
+    // them, not the CLI repository's MODELS.md: the live catalogue carries 77 job types
+    // against MODELS.md's 55, and `display_name` is not unique — four distinct job types all
+    // report "Nano Banana Pro". The previous rows were written from the HTTP docs and neither
+    // one dispatched: "soul-2.0" is spelled `text2image_soul_v2`, and "halcyon-1.5" does not
+    // exist in the catalogue at all, under that or any other name.
     {
-      id: "soul-2.0",
+      id: "text2image_soul_v2",
       provider: "higgsfield",
       capability: "image",
-      displayName: "Soul 2.0",
-      accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
+      displayName: "Higgsfield Soul 2.0",
+      accepts: { referenceImages: 1, referenceRoles: false, startFrame: false, endFrame: false },
       limits: {
-        resolutions: ["1080p", "4k"],
-        tiers: { "1K": "1080p", "4K": "4k" },
-        aspects: ["16:9", "1:1"],
+        // The route calls this `quality`, not `resolution` — see SIZE_FLAG in the client.
+        resolutions: ["1.5k", "2k"],
+        tiers: { "1K": "1.5k", "2K": "2k" },
+        aspects: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
       },
-      pricing: { kind: "perImage", microUsdPerImage: 60000, byResolution: { "4k": 120000 } },
+      pricing: { kind: "perImage", microUsdPerImage: 60000 },
     },
+    // ---- video ------------------------------------------------------------
+    // Deliberately none. The catalogue has 22 video job types, and Higgsfield publishes no
+    // price list we can read — the removed row's per-second figure belonged to a model that
+    // does not exist, so it cannot be carried to a real one. A video row lands when its price
+    // does; offering one at a guessed rate would put a wrong number in front of a user before
+    // they spend (R-14).
     {
       id: "gpt-image-2",
       provider: "openai",
