@@ -1952,7 +1952,7 @@
         <a href="#graph">Graph</a>
         <a href="#architecture">Architecture</a>
       </nav>
-      <div class="topmeta">feature brief / production story workspace / rev 2 / 2026-08-05</div>
+      <div class="topmeta">feature brief / production story workspace / rev 3 / 2026-08-07</div>
     </header>
 
     <main class="shell">
@@ -1966,11 +1966,12 @@
           <div class="eyebrow">A production-scoped creative workspace</div>
           <h1>Build the world. Then direct the story.</h1>
           <p class="hero__lede">
-            World Chat — specified by issue #70, not yet built — explores what may belong in the world;
-            explicit review and the accept gate decide what becomes true. The production Story workspace
-            explores what this film, series, or micro-drama does with accepted world truth. Conversation stays
-            close to the work without becoming another source of truth. Both sit on a conversation and
-            candidate layer that does not exist today; #70 owns it, and this feature consumes it.
+            World Chat explores what may belong in the world; explicit review and the accept gate decide what
+            becomes true. It shipped, and it is world-scoped by construction — its folder table says
+            <code>productions/ unchanged</code>. The production Story workspace explores what this film,
+            series, or micro-drama does with accepted world truth. Conversation stays close to the work
+            without becoming another source of truth. The conversation and candidate layer now exists; what
+            it does not have is a vocabulary for a production, and that is what this feature adds.
           </p>
           <div class="hero__rule" aria-label="Core source-of-truth hierarchy">
             <div><b>World</b><span>Canon, sheets, art direction</span></div>
@@ -2033,10 +2034,12 @@
             Season, and Episode scope. Scene chat asks, "What happens in this moment, and how should it be
             covered?" Generate permits shot-local prompt overrides and explicit dispatch, but it cannot mutate
             Canon, the season architecture, or scene script. The interfaces may share a conversation
-            framework, but their scopes and candidate types are different. That shared framework — a durable
-            thread, typed candidates that exist before any proposal — is issue #70's, and it is unbuilt. Today
-            the only conversational surfaces are entity-scoped chats on a canon thread or a sheet, and they
-            stage a proposal before the first turn rather than after exploration.
+            framework, but their scopes and candidate types are different. That shared framework now exists:
+            issue #70 shipped a durable conversation, a running understanding, and batched approval at
+            wrap-up. Its machinery is reusable — the run driver, leases, retrieval, checkpoint and fold,
+            wrap-up recovery. Its vocabulary is not: a conversation's context can be the world, a canon
+            question, a canon entry, a sheet, or an attachment, and a proposition can be about the world,
+            canon, or a sheet. Nothing in it can be about a production.
           </p>
         </div>
       </section>
@@ -2048,10 +2051,11 @@
             <h2>What is actually there today.</h2>
           </div>
           <p>
-            Every claim this brief makes about "current code" was read back against the working tree on
-            2026-08-05. Paths and symbol names are given rather than line numbers, which rot. Three claims in
-            the first revision were wrong or generous; they are corrected in place throughout this document,
-            and the corrections are listed after the table.
+            Every claim this brief makes about "current code" was read back against <code>main</code> on
+            2026-08-07, and before that on 2026-08-05. Paths and symbol names are given rather than line
+            numbers, which rot. Two rows have flipped since the last revision, one was taken up as an issue
+            and half-answered, and one claim this brief itself made was wrong. All four are set out after the
+            table, and the corrections are made in place throughout the document rather than appended.
           </p>
         </div>
 
@@ -2091,8 +2095,12 @@
               </tr>
               <tr>
                 <td>Conversation persists across sessions</td>
-                <td><span class="chip chip--none">not built</span></td>
-                <td>Transcripts live in the client store keyed by proposal id and reset on reload. Nothing writes a thread to disk.</td>
+                <td><span class="chip chip--partial">two mechanisms</span></td>
+                <td>
+                  A World Chat conversation is durable: <code>.conversations/&lt;cv&gt;/events.jsonl</code> with
+                  a derived, deletable checkpoint. The older entity chats on a canon thread or a sheet still
+                  keep their transcript in the client store keyed by proposal id, and still lose it on reload.
+                </td>
               </tr>
               <tr>
                 <td>Scenes are drafted in conversation</td>
@@ -2106,10 +2114,22 @@
               </tr>
               <tr>
                 <td>World Chat exists</td>
+                <td><span class="chip chip--built">built</span></td>
+                <td>
+                  Shipped across five phases plus a hardening pass. A world nav item beside Productions, a
+                  durable conversation, candidates carrying evidence, check receipts, settledness and
+                  grouping, and a <code>worldbuilding</code> proposal kind staged at wrap-up. Reworked
+                  mid-flight from per-change staging to continuous review with batched approval.
+                </td>
+              </tr>
+              <tr>
+                <td>That conversation layer can talk about a production</td>
                 <td><span class="chip chip--none">not built</span></td>
                 <td>
-                  <code>docs/issues/070.worldbuilding-chat.md</code> is <code>status: proposed</code>. No route, no
-                  candidate lifecycle. Existing chat is entity-scoped and stages its proposal before turn one.
+                  A conversation's context is world, canon question, canon entry, sheet, or attachment. A
+                  proposition is about the world, canon, or a sheet, and is classified as canon, sheet,
+                  relationship, or image opportunity. There is no production in any of those three
+                  vocabularies.
                 </td>
               </tr>
               <tr>
@@ -2139,18 +2159,51 @@
               </tr>
               <tr>
                 <td>A start frame travels with the request</td>
-                <td><span class="chip chip--none">not built</span></td>
+                <td><span class="chip chip--none">not built, now owned</span></td>
                 <td>
-                  <code>accepts.startFrame</code> is declared per model and consumed only by picker copy and one
-                  warning. <code>startFrameTakeId</code> is set on accept and read by the board compiler.
-                  <code>composeDispatches</code> never attaches a frame; <code>SubmitRequest</code> carries
-                  identity references only.
+                  Raised as issue #154, which took the honest half: every fal video row now declares no frame,
+                  because the routes they point at are text-to-video with no frame field, and a test refuses
+                  any row that claims one. The "shot N has no accepted frame" warning is gated on the model
+                  actually accepting one, so it returns by itself the day a route carries it. Carrying a frame
+                  means dispatching to the image-to-video siblings — still open.
                 </td>
               </tr>
               <tr>
-                <td>Vertical output on the video path</td>
+                <td>Output size travels with the request</td>
+                <td><span class="chip chip--built">built</span></td>
+                <td>
+                  Video sends the route's own resolution word; image sends real dimensions, because the image
+                  clients ignore a bare resolution string. The estimate is recomputed at the size and the
+                  length the job actually runs at.
+                </td>
+              </tr>
+              <tr>
+                <td>Vertical <em>generation</em></td>
                 <td><span class="chip chip--none">not built</span></td>
-                <td>Aspect is computed only for character images. Shot params are prompt, references, duration, provenance. Export presets are landscape.</td>
+                <td>
+                  <code>limits.aspects</code> is declared per model — seedance lists <code>9:16</code> — and is
+                  read by nothing. A scene still is hard-coded landscape. Vertical <em>export</em> already
+                  works: the social preset is 1080&times;1920.
+                </td>
+              </tr>
+              <tr>
+                <td>A pass is asked for at a length the route offers</td>
+                <td><span class="chip chip--built">built</span></td>
+                <td>
+                  A video route takes one of a fixed few lengths as its own word, not a number of seconds.
+                  Dispatch rounds up to the nearest offered length, refuses by name anything longer than the
+                  longest, and stretches the shot plan to cover the clip that was actually asked for.
+                </td>
+              </tr>
+              <tr>
+                <td>Packing and the askable length are kept in agreement</td>
+                <td><span class="chip chip--partial">holds, unenforced</span></td>
+                <td>
+                  Packing uses the model's duration cap; dispatch can only ask for a value on its length list.
+                  All six fal video rows agree today, checked one by one, and nothing checks it. The
+                  shot-level warning has no pass-level equivalent, so a divergent row would price a plan that
+                  then refuses at dispatch.
+                </td>
               </tr>
               <tr>
                 <td>Order derives from <code>Scene.number</code></td>
@@ -2167,15 +2220,17 @@
 
         <div class="thesis">
           <article class="thesis__card">
-            <span class="number">CORRECTION 01</span>
-            <h3>World Chat is a premise, not a platform.</h3>
+            <span class="number">CHANGED / REV 2 TO REV 3</span>
+            <h3>The dependency changed shape rather than disappearing.</h3>
             <p>
-              The first revision contrasted this workspace with an existing World Chat. Both are unbuilt, and
-              both need issue #70's conversation and candidate layer first. Sequencing follows.
+              Revision 2 said this feature waits on a conversation layer that did not exist. It exists now,
+              and it is smaller than the wait implied: the machinery is general and the vocabulary is
+              world-only. "Land issue #70's layer" becomes "extend it to production scope" — a real piece of
+              work, but a bounded one, and no longer a blocking unknown.
             </p>
           </article>
           <article class="thesis__card">
-            <span class="number">CORRECTION 02</span>
+            <span class="number">STILL TRUE</span>
             <h3>Story authority is nearly settled already.</h3>
             <p>
               The scanner already treats <code>story.json</code> as the structured overview and
@@ -2185,11 +2240,12 @@
             </p>
           </article>
           <article class="thesis__card">
-            <span class="number">CORRECTION 03</span>
-            <h3>Two seed sources, one implemented.</h3>
+            <span class="number">RETRACTED</span>
+            <h3>Vertical export already worked.</h3>
             <p>
-              The Day One panel's "from another production" seed is grounded in SPEC-012 R-3, which is
-              specified and unbuilt. It is proposed work here, not inherited work.
+              Revision 2 said the export presets were landscape-only and used that to size the profile work.
+              They were not: a 1080&times;1920 social preset has been there all along. What is missing is
+              vertical <em>generation</em>, which is a narrower job than the one the last revision described.
             </p>
           </article>
         </div>
@@ -2240,14 +2296,14 @@
 
         <div class="scope-stack">
           <article class="scope-card">
-            <span class="eyebrow">World scope · proposed by #70</span>
+            <span class="eyebrow">World scope · shipped, #70</span>
             <h3>World Chat</h3>
-            <p>Would explore and propose:</p>
+            <p>Explores and proposes:</p>
             <ul>
               <li>Canon and open questions</li>
               <li>Characters, locations, factions</li>
-              <li>Canon, sheet, and media opportunities defined by issue #70</li>
-              <li>Today: entity-scoped chat on one canon thread or sheet at a time</li>
+              <li>Canon, sheet, relationship, and image-opportunity propositions</li>
+              <li>Nothing about a production — by construction, not by omission</li>
             </ul>
           </article>
           <div class="arrow">&rarr;</div>
@@ -2600,9 +2656,9 @@
             <h3>Seven episodes are seven deliverables.</h3>
             <p>
               The cut is derived by sorting every scene in the production into one timeline. If an episode is
-              a range over scenes, then the cut, exports, and the export presets all need an episode
-              dimension, and the presets are landscape-only today. That is SPEC-013 work this brief implies
-              and must name.
+              a range over scenes, then the cut and the exports need an episode dimension — one cut and one
+              export per release unit, not one per production. The presets themselves are fine: a vertical
+              social preset already exists. That is SPEC-013 work this brief implies and must name.
             </p>
           </article>
           <article class="thesis__card">
@@ -2768,8 +2824,10 @@
             workspace may propose several production changes in one conversation, but none becomes
             authoritative until staged and accepted. Two things this screen needs before it can behave as
             drawn: a writer for <code>story.json</code> through the existing gate — the
-            <code>story-overview</code> proposal kind is already reserved and unused — and a durable thread,
-            because today a transcript lives in client memory and disappears on reload.
+            <code>story-overview</code> proposal kind is already reserved and unused — and a durable thread.
+            The second is now a matter of reuse rather than invention: World Chat keeps a conversation as an
+            append-only event log with a derived checkpoint, and a production thread should be the same
+            record with a production in its context, not a second design.
           </p>
         </div>
       </section>
@@ -2950,27 +3008,39 @@
                 <p>Run passes concurrently for speed. The cut may need stronger visual repair at the join.</p>
               </div>
               <div class="policy">
-                <b>Oversize shot</b>
+                <b>Oversize shot &middot; already enforced</b>
                 <p>
                   A shot longer than the cap must be shortened, split explicitly, or sent to a longer-cap
-                  model. Arke never splits it silently.
+                  model. Arke never splits it silently — and no longer only in the plan: dispatch refuses the
+                  shot by name and by the longest length that route can make.
                 </p>
               </div>
               <div class="policy">
-                <b>Prerequisite / frame transport</b>
+                <b>Prerequisite / frame transport &middot; issue #154</b>
                 <p>
-                  Boundary chaining needs a start frame inside the request. Today the pinned frame is
-                  computed, chained on accept, drawn on the board, and never sent: no dispatch path attaches
-                  one, and the model's declared frame capability is used only for picker copy and a warning.
-                  This must be built before the pass plan, not alongside it.
+                  Boundary chaining needs a start frame inside the request. The pinned frame is computed,
+                  chained on accept, and drawn on the board; no dispatch path attaches one. #154 has already
+                  made the claim honest — no video route now says it takes a frame when it cannot, and the
+                  warning is gated on the model. Carrying one means dispatching to the image-to-video
+                  siblings. Build that before the pass plan, not alongside it.
                 </p>
               </div>
               <div class="policy">
-                <b>Prerequisite / vertical output</b>
+                <b>Prerequisite / vertical generation</b>
                 <p>
-                  A 9:16 micro-drama has nowhere to land. Aspect is computed only for character images; shot
-                  dispatch carries prompt, references, duration, and provenance. The video path needs an
-                  explicit output spec and per-model aspect capability.
+                  Size now reaches the provider, so there is a seam to use. Aspect does not:
+                  <code>limits.aspects</code> is declared per model and read by nothing, and a scene still is
+                  hard-coded landscape. Vertical export already works, so this is one field and one picker,
+                  not a new output path.
+                </p>
+              </div>
+              <div class="policy">
+                <b>Lengths are words, not seconds</b>
+                <p>
+                  A route takes one of a fixed few lengths in its own vocabulary. Dispatch rounds up to the
+                  nearest, refuses anything longer than the longest by name, and stretches the shot plan to
+                  cover the clip actually asked for. The tail handle below is therefore arithmetic before it
+                  is a design choice, and a boundary frame comes from the asked length, not the planned one.
                 </p>
               </div>
             </aside>
@@ -3267,8 +3337,9 @@
           <div class="roadmap">
             <h3>Build in this order</h3>
             <p style="margin: -6px 0 16px; color: var(--ink-soft); font-size: 12px">
-              Items 1 to 3 ship against the architecture as it stands today and need no new entity. Everything
-              after item 4 depends on a conversation layer this repository does not have.
+              Items 1 to 3 ship against the architecture as it stands today and need no new entity. Item 4 was
+              a blocking unknown in the last revision and is now a bounded extension: the conversation layer
+              landed, world-scoped.
             </p>
             <ol>
               <li>
@@ -3296,11 +3367,13 @@
                 >
               </li>
               <li>
-                <b>Land issue #70's conversation and candidate layer.</b
+                <b>Extend issue #70's layer to production scope.</b
                 ><span
-                  >Durable threads and typed candidates that exist before a proposal. Every scoped
-                  conversation below consumes it; building Story threads first would either duplicate that
-                  design or silently force it.</span
+                  >The durable conversation, the running understanding, and batched approval at wrap-up all
+                  shipped, and the machinery underneath them is scope-neutral. What is world-only is the
+                  vocabulary: three enumerations decide what a conversation can be about, what a proposition
+                  can point at, and how a change is classified. Production scope means adding to those three
+                  and to wrap-up's materialisation — not building a second chat.</span
                 >
               </li>
               <li>
@@ -3319,11 +3392,12 @@
                 >
               </li>
               <li>
-                <b>Add profile beneath format, with a real output spec.</b
+                <b>Add profile beneath format, and read the aspect already declared.</b
                 ><span
-                  >Micro-drama defaults tune duration, hook window, cliffhanger checks, and export presets —
-                  and aspect needs somewhere to go: the video dispatch path has no output spec and the export
-                  presets are landscape-only.</span
+                  >Micro-drama defaults tune duration, hook window, cliffhanger checks, and export preset.
+                  Aspect is the only genuinely missing piece and it is small: models already declare which
+                  aspects they take, size already reaches the provider, vertical export already works, and a
+                  scene still is hard-coded landscape.</span
                 >
               </li>
               <li>
@@ -3344,15 +3418,16 @@
                 <b>Make the cut and exports episode-aware.</b
                 ><span
                   >Seven episodes are seven deliverables. The cut derives one timeline from every scene in the
-                  production; an episode range needs its own cut, its own export, and vertical presets.</span
+                  production; an episode range needs its own cut and its own export. The presets already
+                  cover the shapes.</span
                 >
               </li>
               <li>
-                <b>Add frame transport.</b
+                <b>Finish issue #154: carry a frame.</b
                 ><span
-                  >Carry start and end frames into the provider request. Declared per model, computed per
-                  shot, warned about at dispatch, and never sent today — and chained passes cannot work
-                  without it.</span
+                  >#154 has already removed the untrue claims and gated the warning, so the honest half is
+                  done. The rest is dispatching to the image-to-video route of each family, where the frame
+                  field exists under a different name per route. Chained passes cannot work without it.</span
                 >
               </li>
               <li>
@@ -3360,7 +3435,8 @@
                 ><span
                   >Keep the editorial Scene board local; compile provider-ready Generation storyboards per
                   pass from model duration, storyboard transport, frame, reference, audio, and shot-count
-                  capability.</span
+                  capability. While here, tie packing to the lengths a route can actually be asked for rather
+                  than to its cap, and give the pass the over-length warning the shot already has.</span
                 >
               </li>
               <li>
@@ -3415,7 +3491,9 @@
         <div class="callout">
           <strong>The collective product decision.</strong>
           <p>
-            Do not make World Chat the universal front door. Do not create a second disconnected Director app.
+            Do not make World Chat the universal front door — it now has a door, in the world rail, directly
+            beside Productions, and the asymmetry this brief was written to fix has widened rather than
+            closed. Do not create a second disconnected Director app.
             Keep Day One as Season Production home, evolve Story into a scope-aware Series / Season / Episode
             workspace, keep scene chat contextual, and reveal graph complexity progressively. Script answers
             what happens; shots answer how it is filmed; the editorial board shows the complete shot plan;
@@ -3426,21 +3504,32 @@
             And a decision about this document. It is a brief, not a specification: no frontmatter, no
             numbered requirements, no acceptance criteria, no testing section — nothing here is estimable yet.
             It should become three things. Items 1 to 3 of the roadmap are ordinary issues that can be written
-            today. Items 6 to 9 belong in one specification for production entities, gated behind issue #70
-            landing. Item 13 belongs in a specification of its own, gated behind frame transport.
+            today. Items 4 and 6 to 9 belong in one specification for production entities and production-scoped
+            conversation, which is now an extension of something real rather than a bet on something
+            proposed. Item 13 belongs in a specification of its own, gated behind issue #154.
+          </p>
+          <p style="margin-top: 18px">
+            The companion brief for issue #70 is
+            <code>docs/features/worldbuilding-chat.html</code>, and its implementation authority is
+            <code>docs/issues/070.worldbuilding-chat.md</code>. Two pieces of tidying belong with whoever
+            picks this up: that issue document still reads <code>status: proposed</code> although the feature
+            has shipped and been hardened, and the companion brief's footer still says the document needs
+            revising to match a design it has since been revised to match.
           </p>
         </div>
       </section>
     </main>
 
     <footer class="footer shell">
-      Arke Studio feature brief, revision 2. Grounded in the current production routes, SPEC-012, issue #70's
-      proposed consent architecture, prototype frames 6a / 33a / 10b / 9a / 34e / 35c, and the micro-drama
-      research transcript. This document proposes the connective experience; it does not claim the Series,
-      Season, Episode, Scene script, profile, graph, or generation-storyboard models are implemented today.
-      Every "current code" claim was read back against the working tree on 2026-08-05 and is recorded in the
-      claim ledger; where the first revision was wrong — World Chat, story authority, the second Day One seed
-      source — the correction is in the text rather than a note at the end.
+      Arke Studio feature brief, revision 3. Grounded in the current production routes, SPEC-012, issue #70's
+      shipped conversation architecture, prototype frames 6a / 33a / 10b / 9a / 34e / 35c, and the
+      micro-drama research transcript. This document proposes the connective experience; it does not claim
+      the Series, Season, Episode, Scene script, profile, graph, or generation-storyboard models are
+      implemented today. Every "current code" claim was read back against <code>main</code> on 2026-08-07 and
+      is recorded in the claim ledger. Revision 2 corrected three claims about existing code; revision 3
+      records two rows that flipped, one issue that took up a finding, and one claim of its own — that
+      vertical export was missing — that was simply wrong. Corrections are made in the text rather than
+      appended as notes, because a brief that keeps its errors at the end stops being read from the front.
     </footer>
   </body>
 </html>
