@@ -19,6 +19,20 @@ export default async function verifyPackagedRuntimes(context) {
   ]) {
     if (!existsSync(join(voxa, runtime))) throw new Error(`packaged Voxa lacks ${runtime}`);
   }
+  // The sample world (SPEC-016 R-6, R-8). An extraResources entry that quietly fails to copy
+  // does not fail the build — the application simply reports having no sample world, which is
+  // indistinguishable from a build that never carried one. This is the only place that tells
+  // the difference before a user does.
+  const sampleWorld = join(resources, "sample-world");
+  if (!existsSync(join(sampleWorld, "world.json"))) {
+    throw new Error("the sample world is missing from the installer (resources/sample-world/world.json)");
+  }
+  for (const expected of ["characters", "canon", "references", "productions", "world-art.png"]) {
+    if (!existsSync(join(sampleWorld, expected))) {
+      throw new Error(`the packaged sample world is incomplete — ${expected} did not copy`);
+    }
+  }
+
   const forbidden = new Set(["kokoro-82m", "whisper-base-en", "model_quantized.onnx", "ggml-base.en.bin"]);
   const inspect = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {

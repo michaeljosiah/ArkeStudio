@@ -107,10 +107,13 @@ describe("verification primitives (R-6)", () => {
 
 describe("the grounded pipeline, adversarially (§3.2)", () => {
   it("refuses below the floor with NO model call — nothing to argue with (R-10)", async () => {
-    const { result, adapter } = await askWith([], "bicycle warranty paperwork rotation");
+    // The probe must share no vocabulary with the fixture world. "paperwork" stopped being
+    // alien when the canon grew an administrative-horror spine, and the fixture will keep
+    // growing — pick words no coastal ghost story will ever want.
+    const { result, adapter } = await askWith([], "bicycle warranty umbrella typewriter");
     assert.equal(result.outcome, "refusal");
     assert.equal(result.outcome === "refusal" && result.cause, "nothing-retrieved");
-    assert.equal(result.outcome === "refusal" && result.searched, 5, "open threads are not searched (R-16)");
+    assert.equal(result.outcome === "refusal" && result.searched, 23, "open threads are not searched (R-16)");
     assert.equal(adapter.sessionsCreated, 0, "no session was created");
   });
 

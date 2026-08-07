@@ -1,0 +1,56 @@
+{
+  "id": "sc_06",
+  "number": 6,
+  "slug": "slack-water",
+  "title": "Slack water",
+  "status": "draft",
+  "version": 3,
+  "inherits": { "location": "the-vigil", "timeOfDay": "night", "tone": "quiet dread" },
+  "shots": [
+    {
+      "id": "sh_20",
+      "number": 20,
+      "title": "Barely winded",
+      "description": "@maren-kest straightens off the rail. She has just argued a tide back a hand-span and she is fine. She checks her own hearing the way you test a tooth — a habit, negative result, unremarked.",
+      "camera": "MCU · static",
+      "audio": { "kind": "sfx", "line": "water settling, correct" },
+      "durationSec": 5
+    },
+    {
+      "id": "sh_21",
+      "number": 21,
+      "title": "Bray mishears her",
+      "description": "@bray-half-hitch on the stair, mid-story. @maren-kest says the tide is back. He answers a slightly different sentence — warm, wrong, already laughing at himself for it. He asks her to say it again. This is the rupture and it lasts four seconds.",
+      "camera": "MS · handheld, no push-in — the camera must not help",
+      "audio": { "kind": "dialogue", "speaker": "bray-half-hitch", "line": "…say again? wind took it." },
+      "durationSec": 4
+    },
+    {
+      "id": "sh_22",
+      "number": 22,
+      "title": "She does not laugh",
+      "description": "@maren-kest says it again. He hears it. The moment closes over as if nothing happened, because for him nothing did. She is still looking at him after he has gone back to the story.",
+      "camera": "CU · locked, hold past comfort",
+      "audio": { "kind": "silence" },
+      "durationSec": 6
+    },
+    {
+      "id": "sh_23",
+      "number": 23,
+      "title": "Listen the other way",
+      "description": "@the-chorister at the rail, not announced — in this shot, absent from the last. They are not looking at her. They are looking toward the town.",
+      "camera": "WS · locked, no reframe",
+      "audio": { "kind": "vo", "speaker": "the-chorister", "line": "the last verse. listen the other way." },
+      "durationSec": 6
+    },
+    {
+      "id": "sh_24",
+      "number": 24,
+      "title": "The harbour, level",
+      "description": "From the rail: the water exactly where the tables put it. Corrected. @the-saltmarket pilings dry to their proper mark, the tithe-box a smudge of brass at the north gate. Nothing is wrong and everything has been paid for.",
+      "camera": "EWS · static, hold to black",
+      "audio": { "kind": "sfx", "line": "bells, far under, once" },
+      "durationSec": 9
+    }
+  ]
+}

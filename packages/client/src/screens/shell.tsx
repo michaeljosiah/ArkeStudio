@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router";
 import { Badge, Button, Callout, Input, StatusDot, Textarea, cx, type StatusDotTone } from "../components/ui.js";
 import { EmptyState } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
-import { Archive, Plus, X } from "../components/icons.js";
+import { Archive, Plus, Sparkle, X } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import type { StartupState } from "../arke-bridge.js";
 import { Loading } from "../components/loading.js";
@@ -47,6 +47,8 @@ import {
   setModelEnabled,
   setRoutingDefault,
   setSpendThreshold,
+  installSampleWorld,
+  useSampleWorld,
   useArchiveNote,
   useDiagnosticsBundle,
   useProviderCalls,
@@ -323,6 +325,7 @@ function aboutLeft(seconds: number): string {
 export function FirstRunScreen() {
   const navigate = useNavigate();
   const env = useEnvCheck();
+  const sample = useSampleWorld();
   return (
     <div className="fy-app" data-screen="first-run">
       <AppChrome divided={false} />
@@ -368,7 +371,41 @@ export function FirstRunScreen() {
               </div>
             </div>
           </div>
-          <div className="fy-firstrun__flank" style={{ transform: "rotate(4deg)" }} />
+          {/* A blank name is a hard place to start from if you have never seen one of these
+              finished. The sample world takes the other side of the fan — solid rather than
+              dashed, because unlike the card beside it, this one is not an empty slot. */}
+          {sample?.available === true ? (
+            <div className="fy-fan__drift" style={{ animationDelay: "0.6s" }}>
+              <div
+                className="fy-createcard fy-createcard--filled"
+                onClick={() => {
+                  if (sample.installing) return;
+                  installSampleWorld();
+                }}
+              >
+                <div className="fy-createcard__ring">
+                  <Sparkle size={22} />
+                </div>
+                <div className="fy-createcard__title">Or start from ours</div>
+                <div className="fy-createcard__sub">
+                  The Undersong: a cast, its canon, and a production part-way through. Yours to
+                  take apart.
+                </div>
+                <div style={{ marginTop: 4 }}>
+                  <Button disabled={sample.installing}>
+                    {sample.installing ? "Installing…" : "Install the sample world"}
+                  </Button>
+                </div>
+                {sample.note?.refused === true && (
+                  <div className="fy-createcard__sub" style={{ color: "var(--destructive)" }}>
+                    {sample.note.text}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="fy-firstrun__flank" style={{ transform: "rotate(4deg)" }} />
+          )}
         </div>
         <div style={{ textAlign: "center", paddingTop: 30 }}>
           <span style={{ font: "400 13px var(--font-sans)", color: "var(--muted-foreground)" }}>
@@ -399,6 +436,7 @@ export function WorldPickerScreen() {
   const worlds = state?.worlds ?? [];
   const [confirming, setConfirming] = useState<string | null>(null);
   const archiveNote = useArchiveNote();
+  const sample = useSampleWorld();
   const hour = new Date().getHours();
   const greeting = hour < 5 ? "Working late" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const lede =
@@ -432,8 +470,25 @@ export function WorldPickerScreen() {
           <div style={{ padding: "54px 88px" }}>
             <EmptyState
               title="No worlds yet"
-              hint="Create one, or drop an existing world folder into your ArkeStudio directory."
-              action={<Button onClick={() => navigate("/first-run")}>Start</Button>}
+              hint={
+                sample?.available === true
+                  ? "Create one, install ours to pull apart, or drop an existing world folder into your ArkeStudio directory."
+                  : "Create one, or drop an existing world folder into your ArkeStudio directory."
+              }
+              action={
+                <span style={{ display: "inline-flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                  <Button onClick={() => navigate("/first-run")}>Start</Button>
+                  {sample?.available === true && (
+                    <Button
+                      variant="ghost"
+                      disabled={sample.installing}
+                      onClick={() => installSampleWorld()}
+                    >
+                      {sample.installing ? "Installing…" : "Install the sample world"}
+                    </Button>
+                  )}
+                </span>
+              }
             />
           </div>
         ) : (
@@ -1031,6 +1086,7 @@ export function SettingsLayout() {
                     ["local-runtime", "Local runtime"],
                     ["agents", "Agents"],
                     ["who-does-what", "Who does what"],
+                    ["sample-world", "Sample world"],
                     ["about", "About"],
                   ] as const
                 ).map(([slug, label]) => (
@@ -1817,6 +1873,60 @@ export function SettingsWhoDoesWhatScreen() {
           ))}
           <div className="fy-set__note">the shipped manifest needs an update — estimates keep missing what was billed</div>
         </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The sample world (SPEC-016 R-6). The Undersong is the world this application was designed
+ * against, and it ships whole: characters with reference kits, canon that contradicts itself in
+ * places, a production part-way through, and a proposal still waiting at the gate.
+ *
+ * Installing is a copy, so it is safe to do twice and safe to ruin — which is the point of
+ * having one. The pane says both, because a user who does not know the copy is theirs will
+ * treat it as a museum piece and learn nothing from it.
+ */
+export function SettingsSampleWorldScreen() {
+  const sample = useSampleWorld();
+  const installing = sample?.installing === true;
+  const available = sample?.available === true;
+  return (
+    <div data-screen="settings-sample-world" className="fy-set">
+      <div className="fy-set__eyebrow">SAMPLE WORLD</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginTop: 14 }}>
+        <span className="fy-set__aboutname">The Undersong</span>
+        <span className="fy-set__aboutmeta">coastal fantasy · quiet dread</span>
+      </div>
+      <div className="fy-set__aboutline">A drowned god still sings beneath the harbour.</div>
+
+      <div className="fy-set__row" style={{ marginTop: 14 }}>
+        <div className="fy-set__name fy-set__name--wide">
+          <div className="fy-set__title">Install a copy</div>
+          <div className="fy-set__caps">
+            {available
+              ? "a cast with reference kits, canon, a production under way, and a proposal at the gate"
+              : "this build does not carry it"}
+          </div>
+          {available && (
+            <div className="fy-set__note">
+              It lands beside your own worlds as an ordinary folder. Change it, break it, archive
+              it — nothing here is read-only, and installing again gives you a fresh copy.
+            </div>
+          )}
+        </div>
+        {available && (
+          <Button variant="primary" disabled={installing} onClick={() => installSampleWorld()}>
+            {installing ? "Installing…" : "Install"}
+          </Button>
+        )}
+      </div>
+
+      {sample?.note && (
+        <div className="fy-set__why" style={{ marginTop: 10 }}>
+          <span className={cx("fy-set__dot", sample.note.refused ? "fy-set__dot--warn" : "fy-set__dot--ok")} />
+          <span>{sample.note.text}</span>
+        </div>
       )}
     </div>
   );

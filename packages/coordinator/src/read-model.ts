@@ -43,6 +43,7 @@ export class ReadModel {
         setup: null,
         update: IDLE_UPDATE_STATE,
         env: null,
+        sampleWorld: { available: false, installing: false, note: null },
       },
       worlds: [],
       world: null,
@@ -78,6 +79,12 @@ export class ReadModel {
   /** The one-shot environment verification, kept so late-joining clients still see it. */
   setEnv(env: NonNullable<ClientState["app"]["env"]>): void {
     this.state = { ...this.state, app: { ...this.state.app, env } };
+  }
+
+  /** Whether this build has a sample world, and how the last install of it went. */
+  setSampleWorld(patch: Partial<ClientState["app"]["sampleWorld"]>): void {
+    const sampleWorld = { ...this.state.app.sampleWorld, ...patch };
+    this.state = { ...this.state, app: { ...this.state.app, sampleWorld } };
   }
 
   /** The roster as it will run, and what the harness says it can run. */

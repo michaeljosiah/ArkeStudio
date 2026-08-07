@@ -11,6 +11,7 @@ import {
   SettingsLocalRuntimeScreen,
   SettingsNotificationsScreen,
   SettingsProvidersScreen,
+  SettingsSampleWorldScreen,
   SettingsWhoDoesWhatScreen,
   ShellChrome,
   WorldPickerScreen,
@@ -120,6 +121,7 @@ export function App() {
             <Route path="local-runtime" element={<SettingsLocalRuntimeScreen />} />
             <Route path="agents" element={<SettingsAgentsScreen />} />
             <Route path="who-does-what" element={<SettingsWhoDoesWhatScreen />} />
+            <Route path="sample-world" element={<SettingsSampleWorldScreen />} />
             <Route path="about" element={<SettingsAboutScreen />} />
           </Route>
           <Route path="/activity" element={<ActivityScreen />} />

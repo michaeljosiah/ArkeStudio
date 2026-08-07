@@ -1,0 +1,24 @@
+{
+  "version": 6,
+  "logline": "The harbour's luck was never free. A tide-caller finds the invoice, and her own name is not on it.",
+  "spine": "Maren goes looking for a forger in the Vigil's ledger and finds an accounts department. Every tide her town has argued with for two centuries was paid for in fractions of hearing, drawn automatically from whoever stood close enough to lend it — no signature, no consent, nothing anyone chose. The book is not the mystery. The book is the receipt. What breaks her is not learning who has been paying; it is watching the payment fall due on the one person she would have covered it for, in an office run, with real kindness, by someone who has no idea what he is.",
+  "acts": [
+    {
+      "title": "First night · 1820",
+      "summary": "A watchkeeper strikes through a predicted tide and writes what the water actually did, then a second correction: *called it back. paid.* Neat, unhurried, in the same ink. Maren has made that stroke herself, on Tuesday."
+    },
+    {
+      "title": "Second night · 1901",
+      "summary": "The same hand, eighty-one years on, with both columns filled in one sitting — the observed tide written six hours before it happened, and correct. She stops looking for a forger. A forger would have had to be wrong once."
+    },
+    {
+      "title": "Third night · 1974",
+      "summary": "Ines Half-Hitch audits the ledger and finds it accurate, which is the finding, and files it correctly. Maren reads the forty pages and then reads the ward register, and the two documents are the same document seen from opposite ends."
+    },
+    {
+      "title": "Fourth night · not yet",
+      "summary": "There is an entry three weeks ahead in a hand she now recognises as her own, with a share against it larger than the town has left to give. She takes the only question left to the Council and is received kindly, correctly, by a man who has spent his working life guarding this town from the wrong direction. The rupture is not the entry. The rupture is who the ledger had already assigned it to."
+    }
+  ],
+  "targetLength": "novella · around 40,000 words"
+}

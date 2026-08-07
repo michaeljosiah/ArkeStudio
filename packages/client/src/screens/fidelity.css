@@ -2040,6 +2040,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   transition: transform 0.35s var(--ease-out), box-shadow 0.35s var(--ease-out), border-color 0.2s;
 }
 .fy-createcard:hover { transform: rotate(0deg) translateY(-8px); box-shadow: var(--shadow-lg); border-color: var(--neutral-500); }
+/* The sample world already exists, so it is drawn as a thing rather than as a space for one —
+   solid where the card beside it is dashed, and leaning the other way so the pair reads as a fan. */
+.fy-createcard--filled { border-style: solid; border-color: var(--border); transform: rotate(1.5deg); }
 .fy-createcard__ring {
   width: 52px;
   height: 52px;
