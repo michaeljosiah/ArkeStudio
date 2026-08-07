@@ -1792,7 +1792,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 </sc-if>
 <sc-if value="{{ s.newprod }}" hint-placeholder-val="{{ false }}">
 <div data-screen-label="6a New production" style="width:1360px;height:850px;font-family:var(--font-sans);color:var(--foreground);position:relative;overflow:hidden;background:var(--background)">
-  <div style="position:absolute;inset:0;filter:blur(7px) saturate(.8);opacity:.4"><img src="assets/saltlight-shot15.png" alt="" style="width:100%;height:100%;object-fit:cover"></div>
+  <div style="position:absolute;inset:0;filter:blur(7px) saturate(.8);opacity:.4"><img src="assets/saltlight-shot15.png" alt="" style="display:block;width:100%;height:100%;object-fit:cover"></div>
   <div style="position:absolute;inset:0;background:color-mix(in srgb, var(--background) 60%, transparent)"></div>
   <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
     <div style="width:780px;background:var(--background);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-xl);padding:28px 30px;animation:fadeUp .5s var(--ease-out) both">
@@ -1825,8 +1825,9 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
         <span style="font:400 11px var(--font-mono);color:var(--neutral-400)">joins The Undersong · shares all 6 characters</span>
         <span style="flex:1"></span>
         <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="ghost" onClick="{{ go.productions }}" hint-size="80px,36px">Cancel</x-import>
-        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" onClick="{{ go.dayone }}" hint-size="170px,40px">Create production</x-import>
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" onClick="{{ go.dayone }}" hint-size="230px,40px">Create and open day one</x-import>
       </div>
+      <div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:10px;text-align:right">nothing generates · nothing is copied out of the world</div>
     </div>
   </div>
 </div>
@@ -1864,8 +1865,8 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
       </div>
       <div style="display:flex;align-items:center;gap:14px;margin-top:26px;animation:fadeUp .7s var(--ease-out) .1s both">
         <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" onClick="{{ go.newscene }}" hint-size="200px,40px">Draft scene 1 · talk it out</x-import>
-        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="lg" onClick="{{ go.story }}" hint-size="180px,40px">Start from the story</x-import>
-        
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="lg" onClick="{{ go.storynew }}" hint-size="190px,40px">Shape the story first</x-import>
+        <span style="font:400 11px var(--font-mono);color:var(--neutral-400)">a scene is a conversation · shots come after you accept</span>
       </div>
       <div style="border:1px solid var(--border);border-radius:var(--radius-card);box-shadow:var(--shadow-xs);background:var(--muted);padding:16px 20px;margin-top:34px;animation:fadeUp .7s var(--ease-out) .18s both">
         <div style="display:flex;align-items:center;gap:10px"><span style="font:500 10.5px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">ARRIVES WITH THE WORLD</span><span style="flex:1"></span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">6 cast · 4 locations · 41 canon entries</span></div>
@@ -1884,23 +1885,33 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
           <span style="font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="color:var(--foreground)" onClick="{{ go.world }}">Open the world</span>
         </div>
       </div>
-      <div style="margin-top:30px;animation:fadeUp .7s var(--ease-out) .26s both">
-        <div style="display:flex;align-items:baseline;gap:10px"><span style="font:600 13px var(--font-sans)">Seeds from the canon</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">from open threads in the canon</span></div>
-        <div style="display:flex;gap:14px;margin-top:12px">
-          <div style="flex:1;border:1px solid var(--border);border-radius:12px;padding:14px 17px;box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400);background:var(--muted)" onClick="{{ go.newscene }}">
-            <div style="display:flex;align-items:center;gap:8px"><span style="width:6px;height:6px;border-radius:99px;background:var(--warning);flex:none"></span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">OPEN THREAD</span></div>
+      <div style="margin-top:26px;animation:fadeUp .7s var(--ease-out) .26s both">
+        <div style="display:flex;align-items:baseline;gap:10px"><span style="font:600 13px var(--font-sans)">Seeds from the canon</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">open threads make good first scenes</span></div>
+        <div style="display:flex;gap:14px;margin-top:11px">
+          <div style="flex:1;box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400);background:var(--muted)" onClick="{{ go.newscene }}">
+            <div style="display:flex;align-items:center;gap:8px"><span style="width:6px;height:6px;border-radius:99px;background:var(--warning);flex:none"></span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">OPEN THREAD · CANON-044</span></div>
             <div style="font:600 13.5px var(--font-sans);margin-top:7px">Who governs what the water leaves behind?</div>
             <div style="font:400 11.5px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:4px">A salvage dispute is a whole music video: Bray against the Ebb Council.</div>
           </div>
-          <div style="flex:1;border:1px solid var(--border);border-radius:12px;padding:14px 17px;box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400);background:var(--muted)" onClick="{{ go.newscene }}">
-            <div style="display:flex;align-items:center;gap:8px"><span style="width:6px;height:6px;border-radius:99px;background:var(--warning);flex:none"></span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">OPEN THREAD</span></div>
+          <div style="flex:1;box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400);background:var(--muted)" onClick="{{ go.newscene }}">
+            <div style="display:flex;align-items:center;gap:8px"><span style="width:6px;height:6px;border-radius:99px;background:var(--warning);flex:none"></span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">OPEN THREAD · CANON-018</span></div>
             <div style="font:600 13.5px var(--font-sans);margin-top:7px">What does the song want, and who answers it?</div>
             <div style="font:400 11.5px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:4px">The Chorister has no voice yet. A music video could be where it gets one.</div>
           </div>
-          <div style="flex:1;border:1px solid var(--border);border-radius:12px;padding:14px 17px;box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400);background:var(--muted)" onClick="{{ go.newscene }}">
-            <div style="display:flex;align-items:center;gap:8px"><span style="width:6px;height:6px;border-radius:99px;background:var(--neutral-300);flex:none"></span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">FROM SALTLIGHT</span></div>
+        </div>
+      </div>
+      <div style="margin-top:22px;animation:fadeUp .7s var(--ease-out) .32s both">
+        <div style="display:flex;align-items:baseline;gap:10px"><span style="font:600 13px var(--font-sans)">Left uncovered elsewhere</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">work another production planned and never shot</span></div>
+        <div style="display:flex;gap:14px;margin-top:11px">
+          <div style="flex:1;box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400);background:var(--muted)" onClick="{{ go.newscene }}">
+            <div style="display:flex;align-items:center;gap:8px"><span style="width:6px;height:6px;border-radius:99px;background:var(--neutral-400);flex:none"></span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">SALTLIGHT · SCENE 7, NO TAKES</span></div>
             <div style="font:600 13.5px var(--font-sans);margin-top:7px">The pier, before the film begins</div>
-            <div style="font:400 11.5px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:4px">A prequel beat to scene 4's hold.</div>
+            <div style="font:400 11.5px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Accepted there, never generated. It would cost Undertow nothing to answer it.</div>
+          </div>
+          <div style="flex:1;box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400);background:var(--muted)" onClick="{{ go.newscene }}">
+            <div style="display:flex;align-items:center;gap:8px"><span style="width:6px;height:6px;border-radius:99px;background:var(--neutral-400);flex:none"></span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">SALTLIGHT · SHOT 15, NO FRAME</span></div>
+            <div style="font:600 13.5px var(--font-sans);margin-top:7px">The Chorister, from behind</div>
+            <div style="font:400 11.5px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:4px">A gap in one cut is an opening in another.</div>
           </div>
         </div>
       </div>
@@ -2420,56 +2431,147 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 </div>
 </sc-if>
 <sc-if value="{{ s.story }}" hint-placeholder-val="{{ false }}">
-<div data-screen-label="10b Story overview" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
+<div data-screen-label="44a Story · the conversation and the overview it shapes" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
   <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
-    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">Saltlight · story overview</span></div>
-    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;border:0;background:transparent;padding:0 6px;cursor:pointer" onClick="{{ go.home }}"><span style="font:650 15px var(--font-sans);letter-spacing:-0.02em;color:var(--foreground)">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
-    <div style="flex:1;min-width:0;text-align:right;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control);position:relative" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.proposals }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg><span style="position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--warning)"></span></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control);position:relative" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.activity }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg><span style="position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--warning)"></span></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.settings }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span><span style="display:inline-flex;align-items:center;gap:2px;margin-left:12px;vertical-align:middle"><span style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path></svg></span><span style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg></span><span style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--destructive);color:#fff"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span></span></div>
+    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Saltlight · story</span></div>
+    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;padding:0 6px;cursor:pointer" onClick="{{ go.home }}"><span style="font:650 15px var(--font-sans);letter-spacing:-.02em">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
+    <div style="flex:1;min-width:0;text-align:right"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.proposals }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.activity }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.settings }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span></div>
   </div>
   <div style="display:flex;flex:1;min-height:0">
-    <div style="flex:1.2;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--border)">
-      <div style="padding:22px 36px 12px;flex:none;animation:fadeUp .6s var(--ease-out) both">
-        <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">STORY OVERVIEW · SHORT FILM</div>
+    <div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px">
+      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;transition:var(--transition-control);box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)" onClick="{{ go.productions }}">
+        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Saltlight</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">short film · 1:48 cut</div></div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
+      </div>
+      <div style="height:14px"></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.dashboard }}">Dashboard</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Story<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v2</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.scenes }}">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">7</span></div>
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;border:1px dashed var(--border);font:400 12px var(--font-sans);cursor:pointer;transition:var(--transition-control);box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)" onClick="{{ go.newscene }}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>New scene</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.generate }}">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">23</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.cut }}">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">1:48</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.audio }}">Audio<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">4</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.exports }}">Exports<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">2</span></div>
+      <div style="flex:1"></div>
+      <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground);transition:var(--transition-control)" style-hover="color:var(--foreground)" onClick="{{ go.world }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--border)">
+      <div style="padding:30px 34px 12px;flex:none;animation:fadeUp .6s var(--ease-out) both">
+        <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">STORY · SALTLIGHT</div>
         <h1 style="margin:8px 0 0;font:650 26px/1.1 var(--font-sans);letter-spacing:-0.025em">Find the spine together.</h1>
       </div>
-      <div style="flex:1;min-height:0;overflow:hidden;padding:10px 36px;display:flex;flex-direction:column;gap:14px;animation:fadeUp .7s var(--ease-out) .1s both">
-        <div style="align-self:flex-end;max-width:380px;background:var(--primary);color:var(--primary-foreground);border-radius:14px 14px 4px 14px;padding:11px 15px;font:400 13px/1.55 var(--font-sans)">Three movements in eight minutes: she hears it, she's warned, she answers.</div>
-        <div style="align-self:flex-start;max-width:440px;background:var(--secondary);border-radius:14px 14px 14px 4px;padding:12px 15px;font:400 13px/1.6 var(--font-sans)">That maps cleanly. One structural note: the warning has no scene yet. Sereth warns Maren nowhere in the current five. Either the lantern hand-off in scene 4 carries it silently, or you owe the middle a scene.<div style="font:400 10.5px/1.5 var(--font-mono);color:var(--muted-foreground);margin-top:8px">canon check: Sereth's debt to Maren is unnamed on both sheets. A spoken warning would force you to name it. The silent version protects that.</div></div>
-        <div style="align-self:flex-end;max-width:380px;background:var(--primary);color:var(--primary-foreground);border-radius:14px 14px 4px 14px;padding:11px 15px;font:400 13px/1.55 var(--font-sans)">Silent. And the ending stays on her back. We never see the sea change.</div>
-        <div style="align-self:flex-start;max-width:440px;background:var(--secondary);border-radius:14px 14px 14px 4px;padding:12px 15px;font:400 13px/1.6 var(--font-sans)">Held: the answer is heard, never shown. That's the tone card doing its job. Overview updated, act three is now a single unbroken shot.</div>
+      <div style="flex:1;min-height:0;overflow:hidden;padding:8px 34px;display:flex;flex-direction:column;gap:13px;animation:fadeUp .7s var(--ease-out) .1s both">
+        <div style="align-self:flex-end;max-width:380px;background:var(--primary);color:var(--primary-foreground);border-radius:14px 14px 4px 14px;padding:11px 15px;font:400 13px/1.55 var(--font-sans)">It should end with Maren choosing the harbour over the song. Not a victory.</div>
+        <div style="align-self:flex-start;max-width:440px;background:var(--secondary);border-radius:14px 14px 14px 4px;padding:12px 15px;font:400 13px/1.6 var(--font-sans)">Then the middle has to cost her something the song was giving her, or the choice is free. Scene 4 is where she still has both, so that is the last place the price can be set.<div style="margin-top:8px;font:400 10.5px var(--font-mono);color:var(--neutral-400)">✓ read 7 accepted scenes · nothing written</div>
+        </div>
+        <div style="align-self:flex-end;max-width:380px;background:var(--primary);color:var(--primary-foreground);border-radius:14px 14px 4px 14px;padding:11px 15px;font:400 13px/1.55 var(--font-sans)">Her hearing. She loses the bells first.</div>
+        <div style="align-self:flex-start;max-width:440px;background:var(--secondary);border-radius:14px 14px 14px 4px;padding:12px 15px;font:400 13px/1.6 var(--font-sans)">That gives the film a spine I can state in one line, and it changes the third act rather than the scenes you have already locked. Scenes 5 and 6 would read differently afterwards, which is a note on them, not a rewrite of them.<div style="margin-top:8px;font:400 10.5px var(--font-mono);color:var(--neutral-400)">✓ read Maren Kest v4 · searched 41 canon entries · nothing written</div>
+        </div>
       </div>
-      <div style="flex:none;padding:14px 36px 22px;animation:fadeUp .7s var(--ease-out) .2s both">
+      <div style="flex:none;padding:12px 34px 20px">
         <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:12px 16px;box-shadow:var(--shadow-xs);cursor:text;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
           <span style="flex:1;font:400 13.5px var(--font-sans);color:var(--text-placeholder)">Keep shaping the story…</span>
-          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></span><span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.voicemode }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">↵ send</span>
+          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></span>
+          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.voicemode }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span>
+          <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">↵ send</span>
         </div>
-        <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
-          <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">in context:</span>
-          <span style="border:1px solid var(--border);border-radius:999px;padding:2px 10px;font:500 11px var(--font-sans)">all 5 scenes</span>
-          <span style="border:1px solid var(--border);border-radius:999px;padding:2px 10px;font:500 11px var(--font-sans)">Maren + Sereth · sheets</span>
-          <span style="border:1px solid var(--border);border-radius:999px;padding:2px 10px;font:500 11px var(--font-sans)">Tone · quiet dread</span>
-        </div>
+        <div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:9px">story author · cloud · in context: 7 scenes, 6 cast sheets, tone · talking changes nothing</div>
       </div>
     </div>
-    <div style="width:470px;flex:none;padding:26px 32px;background:var(--muted);display:flex;flex-direction:column;animation:fadeUp .7s var(--ease-out) .15s both">
-      <div style="display:flex;align-items:baseline;gap:10px"><div style="font:600 15px var(--font-sans)">Overview draft</div><span style="font:400 10px var(--font-mono);color:var(--warning)">proposed · v3</span></div>
-      <div style="background:var(--background);border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow-xs);margin-top:12px">
-        <div style="font:400 13.5px/1.55 var(--font-sans);font-style:italic;color:var(--text-secondary)">"A tide-caller hears the drowned god's verse rise, and must decide, before the light sweeps past, whether to answer."</div>
-        <div style="margin-top:14px">
-          <div style="display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line-soft)"><span style="font:500 11px var(--font-mono);color:var(--muted-foreground);width:38px">ACT I</span><span style="font:400 12.5px var(--font-sans);flex:1">She hears it · market, dive, chamber</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">sc 1–3 · 3:10</span></div>
-          <div style="display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line-soft)"><span style="font:500 11px var(--font-mono);color:var(--muted-foreground);width:38px">ACT II</span><span style="font:400 12.5px var(--font-sans);flex:1">The silent warning · verse rises, lantern passes</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">sc 4 + new · 2:30</span></div>
-          <div style="display:flex;align-items:center;gap:10px;padding:8px 2px"><span style="font:500 11px var(--font-mono);color:var(--muted-foreground);width:38px">ACT III</span><span style="font:400 12.5px var(--font-sans);flex:1">She answers · the pier, one unbroken shot</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">sc 5 · 2:20</span></div>
-        </div>
+    <div style="width:470px;box-sizing:border-box;flex:none;padding:30px 30px 0;background:var(--muted);display:flex;flex-direction:column;overflow:hidden;animation:fadeUp .7s var(--ease-out) .15s both">
+      <div style="display:flex;align-items:baseline;gap:10px">
+        <div style="font:600 15px var(--font-sans)">The overview, as it stands</div>
+        <span style="font:400 10px var(--font-mono);color:var(--warning)">v2 · 3 changes</span>
       </div>
-      <div style="background:var(--background);border:1px solid var(--border);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow-xs);margin-top:12px;display:flex;align-items:center;gap:12px">
-        <span style="width:7px;height:7px;border-radius:99px;background:var(--warning);flex:none"></span>
-        <div style="flex:1"><div style="font:600 12.5px var(--font-sans)">Act II has a gap</div><div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:2px">"Below deck, the answer" would close it. Draft is waiting from your last session.</div></div>
-        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="sm" onClick="{{ go.newscene }}" hint-size="100px,32px">Open draft</x-import>
+      <div style="font:400 11.5px/1.6 var(--font-sans);color:var(--muted-foreground);margin-top:7px">This is the accepted overview with what the conversation would change marked on it. Nothing here is written yet.</div>
+      <div style="box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow-xs);margin-top:12px">
+        <div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 12.5px var(--font-sans);flex:1">Logline</span><span style="font:400 10px var(--font-mono);color:var(--warning)">would change</span></div>
+        <div style="font:400 12.5px/1.6 var(--font-sans);margin-top:6px">A bell-ringer who can hear the drowned god chooses the harbour that cannot hear it, and goes deaf keeping the choice.</div>
+        <div style="font:400 11.5px/1.6 var(--font-sans);color:var(--neutral-400);margin-top:6px">Accepted: “… chooses the harbour, and loses the song.”</div>
+      </div>
+      <div style="box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow-xs);margin-top:10px">
+        <div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 12.5px var(--font-sans);flex:1">Spine</span><span style="font:400 10px var(--font-mono);color:var(--warning)">would change</span></div>
+        <div style="font:400 12.5px/1.6 var(--font-sans);margin-top:6px"><b style="font-weight:600">I.</b> The bells still answer her.</div>
+        <div style="font:400 12.5px/1.6 var(--font-sans);margin-top:3px"><b style="font-weight:600">II.</b> The price is set at the Vigil: hearing, not loyalty.</div>
+        <div style="font:400 12.5px/1.6 var(--font-sans);margin-top:3px"><b style="font-weight:600">III.</b> She rings anyway, and hears nothing come back.</div>
+      </div>
+      <div style="box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow-xs);margin-top:10px">
+        <div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 12.5px var(--font-sans);flex:1">Reads differently afterwards</span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">not a rewrite</span></div>
+        <div style="font:400 12.5px/1.6 var(--font-sans);margin-top:6px">Scenes 5 and 6 keep every accepted word. The overview steers what comes next; it never edits a scene you have locked.</div>
       </div>
       <div style="flex:1"></div>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" onClick="{{ go.dashboard }}" hint-size="100%,40px">Accept the overview</x-import>
-        <div style="font:400 11px/1.5 var(--font-sans);color:var(--muted-foreground);text-align:center">The overview steers scene drafting and packing. It never overwrites a scene you've locked.</div>
+      <div style="flex:none;padding:12px 0 14px;border-top:1px solid var(--border);margin-top:14px">
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" onClick="{{ go.proposals }}" hint-size="100%,40px">Turn this into a proposal</x-import>
+        <div style="font:400 10.5px/1.5 var(--font-mono);color:var(--neutral-400);margin-top:9px;text-align:center">one file, one proposal · accept is still a separate act</div>
+      </div>
+    </div>
+  </div>
+</div>
+</sc-if>
+<sc-if value="{{ s.storynew }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="44b Story · before there is an overview" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
+  <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
+    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Undertow · story</span></div>
+    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;padding:0 6px;cursor:pointer" onClick="{{ go.home }}"><span style="font:650 15px var(--font-sans);letter-spacing:-.02em">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
+    <div style="flex:1;min-width:0;text-align:right"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.proposals }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.activity }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.settings }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span></div>
+  </div>
+  <div style="display:flex;flex:1;min-height:0">
+    <div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px">
+      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;transition:var(--transition-control);box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)" onClick="{{ go.productions }}">
+        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Undertow</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">music video · day one</div></div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
+      </div>
+      <div style="height:14px"></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.dayone }}">Dashboard</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Story<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">·</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;border:1px dashed var(--border);font:400 12px var(--font-sans);cursor:pointer;transition:var(--transition-control);box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)" onClick="{{ go.newscene }}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>New scene</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:00</span></div>
+      <div style="flex:1"></div>
+      <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground);transition:var(--transition-control)" style-hover="color:var(--foreground)" onClick="{{ go.world }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--border)">
+      <div style="padding:30px 34px 12px;flex:none;animation:fadeUp .6s var(--ease-out) both">
+        <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">STORY · UNDERTOW</div>
+        <h1 style="margin:8px 0 0;font:650 26px/1.1 var(--font-sans);letter-spacing:-0.025em">Find the spine together.</h1>
+      </div>
+      <div style="flex:1;min-height:0;overflow:hidden;padding:8px 34px;display:flex;flex-direction:column;gap:13px;animation:fadeUp .7s var(--ease-out) .1s both">
+        <div style="align-self:flex-start;max-width:460px;background:var(--secondary);border-radius:14px 14px 14px 4px;padding:12px 15px;font:400 13px/1.6 var(--font-sans)">Undertow has no overview yet, and it does not need one to start. Say roughly what the film is doing and I will keep a draft beside you; when it is worth keeping, you turn it into a proposal.<div style="margin-top:8px;font:400 10.5px var(--font-mono);color:var(--neutral-400)">✓ read The Undersong · tone: quiet dread · nothing written</div>
+        </div>
+      </div>
+      <div style="flex:none;padding:12px 34px 20px">
+        <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:12px 16px;box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)" onClick="{{ go.story }}">
+          <span style="flex:1;font:400 13.5px var(--font-sans);color:var(--text-placeholder)">Three minutes, one location, and it has to end badly…</span>
+          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></span>
+          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.voicemode }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span>
+          <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">↵ send</span>
+        </div>
+        <div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:9px">story author · cloud · in context: 0 scenes, 6 cast sheets, tone · talking changes nothing</div>
+      </div>
+    </div>
+    <div style="width:470px;box-sizing:border-box;flex:none;padding:30px 30px 0;background:var(--muted);display:flex;flex-direction:column;overflow:hidden;animation:fadeUp .7s var(--ease-out) .15s both">
+      <div style="display:flex;align-items:baseline;gap:10px">
+        <div style="font:600 15px var(--font-sans)">The overview, as it stands</div>
+        <span style="font:400 10px var(--font-mono);color:var(--neutral-400)">not started</span>
+      </div>
+      <div style="font:400 11.5px/1.6 var(--font-sans);color:var(--muted-foreground);margin-top:7px">An overview is one logline and a spine. It steers scene drafting and pass packing, and it never overwrites a scene you have locked.</div>
+      <div style="box-sizing:border-box;border:1px dashed var(--border);border-radius:12px;padding:13px 16px;margin-top:12px">
+        <div style="font:400 10px var(--font-mono);color:var(--neutral-400)">LOGLINE</div>
+        <div style="font:400 12.5px/1.6 var(--font-sans);color:var(--muted-foreground);margin-top:6px">One sentence. What happens, to whom, and what it costs.</div>
+      </div>
+      <div style="box-sizing:border-box;border:1px dashed var(--border);border-radius:12px;padding:13px 16px;margin-top:10px">
+        <div style="font:400 10px var(--font-mono);color:var(--neutral-400)">SPINE</div>
+        <div style="font:400 12.5px/1.6 var(--font-sans);color:var(--muted-foreground);margin-top:6px">Two or three lines. Enough to tell whether a scene belongs.</div>
+      </div>
+      <div style="box-sizing:border-box;border:1px dashed var(--border);border-radius:12px;padding:13px 16px;margin-top:10px">
+        <div style="font:400 10px var(--font-mono);color:var(--neutral-400)">OR SKIP IT</div>
+        <div style="font:400 12.5px/1.6 var(--font-sans);color:var(--muted-foreground);margin-top:6px">Draft a scene first and let the spine catch up. Nothing downstream requires an overview to exist.</div>
+      </div>
+      <div style="flex:1"></div>
+      <div style="flex:none;padding:12px 0 14px;border-top:1px solid var(--border);margin-top:14px">
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="lg" hint-size="100%,40px">Turn this into a proposal</x-import>
+        <div style="font:400 10.5px/1.5 var(--font-mono);color:var(--neutral-400);margin-top:9px;text-align:center">nothing to propose yet · the draft fills as you talk</div>
       </div>
     </div>
   </div>
