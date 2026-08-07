@@ -1,0 +1,1361 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="How Arke Studio is put together: the processes, the layers, the packages, the wire between the window and the coordinator, where every kind of state lives, the trust boundaries — and a plain answer to whether this is a client/server architecture and what that flexibility is worth."
+    />
+    <title>Arke Studio - Architecture</title>
+    <style>
+      :root {
+        --paper: #f4f1ea;
+        --paper-deep: #e8e1d6;
+        --ink: #171715;
+        --ink-soft: #5f5b53;
+        --ink-faint: #6f6a61;
+        --line: rgba(23, 23, 21, 0.14);
+        --line-strong: rgba(23, 23, 21, 0.28);
+        --card: rgba(255, 255, 255, 0.78);
+        --card-solid: #fffefa;
+        --night: #11161a;
+        --night-soft: #1c2429;
+        --coral: #ec6a4a;
+        --coral-soft: #f6c4b6;
+        --teal: #2d7b7a;
+        --teal-soft: #a8d3ce;
+        --amber: #c88d32;
+        --red: #b9483d;
+        --green: #3e7455;
+        --sans: "Segoe UI Variable Text", "Aptos", "Segoe UI", system-ui, sans-serif;
+        --display: "Segoe UI Variable Display", "Aptos Display", "Segoe UI", system-ui, sans-serif;
+        --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+        --shadow: 0 24px 70px rgba(28, 24, 18, 0.12);
+        --shadow-small: 0 10px 30px rgba(28, 24, 18, 0.09);
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 16% 0%, rgba(236, 106, 74, 0.11), transparent 27rem),
+          radial-gradient(circle at 88% 9%, rgba(45, 123, 122, 0.12), transparent 30rem),
+          var(--paper);
+        font-family: var(--sans);
+        line-height: 1.62;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      a { color: inherit; }
+      .shell { width: min(1320px, calc(100% - 40px)); margin: 0 auto; }
+
+      .topbar {
+        position: sticky; top: 0; z-index: 50;
+        display: flex; align-items: center; gap: 18px;
+        min-height: 58px; padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(244, 241, 234, 0.92);
+        backdrop-filter: blur(18px);
+      }
+      .brand { display: flex; align-items: baseline; gap: 7px; white-space: nowrap; }
+      .brand strong { font-size: 16px; letter-spacing: -0.02em; }
+      .brand span { color: var(--ink-soft); font-size: 12px; }
+      .toc { display: flex; gap: 2px; overflow: auto; scrollbar-width: none; }
+      .toc a {
+        padding: 7px 9px; border-radius: 999px; color: var(--ink-soft);
+        font-size: 12px; text-decoration: none; white-space: nowrap;
+      }
+      .toc a:hover { color: var(--ink); background: rgba(255, 255, 255, 0.72); }
+      .topmeta { margin-left: auto; color: var(--ink-soft); font-size: 11px; font-family: var(--mono); }
+
+      .hero {
+        position: relative; margin-top: 24px; padding: 74px 72px 62px;
+        border-radius: 28px; background: var(--night); color: white;
+        box-shadow: var(--shadow); overflow: hidden;
+      }
+      .hero::after {
+        content: ""; position: absolute; inset: 0;
+        background: radial-gradient(circle at 82% 14%, rgba(236, 106, 74, 0.26), transparent 26rem);
+      }
+      .hero__copy { position: relative; z-index: 2; max-width: 860px; }
+      .eyebrow {
+        font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em;
+        text-transform: uppercase; color: var(--ink-soft);
+      }
+      .hero .eyebrow { color: rgba(255, 255, 255, 0.66); }
+      .hero h1 {
+        margin: 16px 0 20px; font-family: var(--display);
+        font-size: clamp(38px, 5vw, 62px); line-height: 1.03;
+        letter-spacing: -0.035em; font-weight: 600;
+      }
+      .hero p { margin: 0 0 14px; font-size: 17px; color: rgba(255, 255, 255, 0.8); max-width: 68ch; }
+      .hero__facts {
+        position: relative; z-index: 2; display: flex; flex-wrap: wrap; gap: 30px;
+        margin-top: 40px; padding-top: 26px; border-top: 1px solid rgba(255, 255, 255, 0.16);
+      }
+      .hero__fact strong { display: block; font-family: var(--display); font-size: 24px; letter-spacing: -0.02em; }
+      .hero__fact span { font-size: 12px; color: rgba(255, 255, 255, 0.6); }
+
+      .section { padding: 78px 0 8px; }
+      .section__head { max-width: 820px; margin-bottom: 34px; }
+      .section h2 {
+        margin: 12px 0 14px; font-family: var(--display);
+        font-size: clamp(27px, 3.3vw, 40px); line-height: 1.1;
+        letter-spacing: -0.03em; font-weight: 600;
+      }
+      .section h3 {
+        margin: 38px 0 12px; font-family: var(--display);
+        font-size: 19px; letter-spacing: -0.015em; font-weight: 600;
+      }
+      .section p { margin: 0 0 14px; max-width: 78ch; }
+      .lede { font-size: 17px; color: var(--ink-soft); }
+
+      .grid { display: grid; gap: 18px; }
+      .grid--2 { grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+      .grid--3 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+
+      .card {
+        padding: 22px 24px; border: 1px solid var(--line); border-radius: 16px;
+        background: var(--card); box-shadow: var(--shadow-small);
+      }
+      .card h4 { margin: 8px 0 8px; font-size: 15px; font-weight: 600; }
+      .card p { margin: 0; font-size: 13.5px; color: var(--ink-soft); }
+      .card p + p { margin-top: 9px; }
+
+      .rule {
+        margin: 26px 0; padding: 16px 20px; border-left: 3px solid var(--coral);
+        background: rgba(236, 106, 74, 0.07); font-size: 14px;
+      }
+      .rule b { font-weight: 600; }
+      .rule p { margin: 0 0 10px; font-size: 14px; max-width: none; }
+      .rule p:last-child { margin-bottom: 0; }
+      .rule--teal { border-left-color: var(--teal); background: rgba(45, 123, 122, 0.07); }
+
+      .note {
+        margin: 22px 0; padding: 15px 19px; border: 1px dashed var(--line-strong);
+        border-radius: 12px; background: rgba(255, 255, 255, 0.5);
+        font-size: 13.5px; color: var(--ink-soft);
+      }
+
+      table { width: 100%; border-collapse: collapse; margin: 20px 0 8px; font-size: 13.5px; }
+      th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; }
+      td strong { font-weight: 600; }
+      td code, p code, li code, th code { font-family: var(--mono); font-size: 12px; background: rgba(23,23,21,0.06); padding: 1px 5px; border-radius: 4px; }
+      .num { font-family: var(--mono); font-size: 12px; color: var(--ink-faint); white-space: nowrap; }
+
+      .tag {
+        display: inline-block; padding: 2px 8px; border-radius: 999px;
+        font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+      }
+      .tag--new { background: rgba(62, 116, 85, 0.16); color: var(--green); }
+      .tag--mod { background: rgba(200, 141, 50, 0.18); color: #8a5f14; }
+      .tag--none { background: rgba(23, 23, 21, 0.07); color: var(--ink-faint); }
+      .tag--no { background: rgba(185, 72, 61, 0.14); color: var(--red); }
+
+      pre {
+        margin: 18px 0; padding: 20px 22px; overflow-x: auto;
+        border: 1px solid var(--line); border-radius: 14px;
+        background: var(--card-solid); font-family: var(--mono);
+        font-size: 12.5px; line-height: 1.72; color: var(--ink);
+      }
+      pre b { color: var(--coral); font-weight: 600; }
+      pre i { color: var(--ink-faint); font-style: normal; }
+      pre .t { display: block; font-family: var(--sans); font-size: 11px; letter-spacing: 0.1em;
+        text-transform: uppercase; color: var(--ink-faint); margin-bottom: 12px; }
+
+      /* ---- figures ---- */
+      .fig { margin: 30px 0 8px; max-width: 1000px; }
+      .fig svg { display: block; width: 100%; height: auto; }
+      .fig figcaption {
+        margin-top: 10px; font-family: var(--mono); font-size: 11px;
+        color: var(--ink-faint); letter-spacing: 0.02em;
+      }
+
+      /* ---- numbered steps ---- */
+      .steps { counter-reset: step; margin-top: 26px; max-width: 90ch; }
+      .step { position: relative; padding: 0 0 30px 58px; }
+      .step::before {
+        counter-increment: step; content: counter(step);
+        position: absolute; left: 0; top: 0; width: 36px; height: 36px;
+        border-radius: 50%; background: var(--ink); color: #fff;
+        display: grid; place-items: center; font-family: var(--mono); font-size: 13px;
+      }
+      .step::after { content: ""; position: absolute; left: 17.5px; top: 42px; bottom: 4px; width: 1px; background: var(--line); }
+      .step:last-child::after { display: none; }
+      .step h4 { margin: 7px 0 8px; font-size: 16px; font-weight: 600; }
+      .step p { margin: 0 0 10px; font-size: 14px; }
+      .step__see { font-size: 12.5px; color: var(--ink-faint); border-left: 2px solid var(--line); padding-left: 12px; margin-top: 10px; }
+
+      footer { margin: 70px 0 60px; padding-top: 26px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-faint); }
+      footer a { color: var(--ink-soft); }
+
+      @media (max-width: 1080px) {
+        .hero { padding: 52px 28px 44px; }
+        .shell { width: calc(100% - 28px); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="brand"><strong>Arke Studio</strong><span>architecture</span></div>
+        <nav class="toc">
+          <a href="#shape">The shape</a>
+          <a href="#clientserver">Client/server</a>
+          <a href="#layers">Layers</a>
+          <a href="#packages">Packages</a>
+          <a href="#wire">The wire</a>
+          <a href="#coordinator">The coordinator</a>
+          <a href="#paths">Two paths</a>
+          <a href="#state">State</a>
+          <a href="#accept">Accepting</a>
+          <a href="#processes">Processes</a>
+          <a href="#trust">Trust</a>
+          <a href="#costs">Costs</a>
+          <a href="#words">Words</a>
+        </nav>
+        <div class="topmeta">written against this build</div>
+      </div>
+
+      <section class="hero" id="top">
+        <div class="hero__copy">
+          <div class="eyebrow">How the whole system is put together</div>
+          <h1>One program, two halves, one folder of truth.</h1>
+          <p>
+            Arke Studio is a desktop app made of two real, separate things that talk over a network
+            protocol on your own machine. One half is a <b>React client</b> that draws screens and
+            sends commands. The other is the <b>coordinator</b> — the part that owns your files,
+            enforces the rules, runs the queue and holds the keys.
+          </p>
+          <p>
+            Around them: two optional helper programs, a folder of plain files that is the only
+            durable truth, and a set of cloud providers that are only ever called when you ask.
+            This document is the pieces, the layers, the wire, the state and the trust boundaries —
+            and a plain answer to the question that always comes first.
+          </p>
+        </div>
+        <div class="hero__facts">
+          <div class="hero__fact"><strong>6</strong><span>packages, one app</span></div>
+          <div class="hero__fact"><strong>123</strong><span>commands the client may send</span></div>
+          <div class="hero__fact"><strong>59</strong><span>events it may receive</span></div>
+          <div class="hero__fact"><strong>3</strong><span>processes at most, one required</span></div>
+          <div class="hero__fact"><strong>0</strong><span>databases of record</span></div>
+          <div class="hero__fact"><strong>105</strong><span>test files</span></div>
+        </div>
+      </section>
+
+      <!-- ================================================================= -->
+      <section class="section" id="shape">
+        <div class="section__head">
+          <div class="eyebrow">Section one</div>
+          <h2>The shape, in one picture.</h2>
+          <p class="lede">
+            Everything below is on your machine except the box at bottom right. The two arrows that
+            leave the machine only carry work you explicitly asked for.
+          </p>
+        </div>
+
+        <figure class="fig">
+          <svg viewBox="0 0 840 420" role="img" aria-label="Diagram: one process containing the React renderer and the coordinator talking over loopback; two optional child processes to the right; the disk below left; cloud providers below right.">
+            <defs>
+              <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="#a49c8e"/>
+              </marker>
+              <marker id="arc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="#ec6a4a"/>
+              </marker>
+            </defs>
+
+            <rect x="8" y="22" width="556" height="200" rx="16" fill="#efeae0" stroke="#d9d4cb"/>
+            <text x="26" y="44" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" letter-spacing="1.4" fill="#8d877c">ONE PROCESS — THE ARKE STUDIO APP</text>
+
+            <rect x="26" y="56" width="240" height="104" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="44" y="82" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="15" font-weight="600" fill="#171715">Renderer</text>
+            <text x="44" y="104" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">The React client. Draws every</text>
+            <text x="44" y="121" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">screen, sends commands. Holds</text>
+            <text x="44" y="138" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">no keys and decides nothing.</text>
+
+            <rect x="306" y="56" width="240" height="104" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="324" y="82" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="15" font-weight="600" fill="#171715">Coordinator</text>
+            <text x="324" y="104" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">The domain layer. The world</text>
+            <text x="324" y="121" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">folder, the accept gate, the</text>
+            <text x="324" y="138" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">index, the queue, the ledger.</text>
+
+            <line x1="270" y1="108" x2="302" y2="108" stroke="#ec6a4a" stroke-width="1.4" marker-end="url(#arc)" marker-start="url(#arc)"/>
+            <text x="26" y="180" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#8d877c">a WebSocket on 127.0.0.1, on a port picked at start-up — checked both ways</text>
+            <text x="26" y="202" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#8d877c">both halves start and stop together — closing the window stops all of it</text>
+
+            <rect x="596" y="14" width="200" height="88" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="614" y="40" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="14" font-weight="600" fill="#171715">OpenCode</text>
+            <text x="614" y="61" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">The writing harness.</text>
+            <text x="614" y="79" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">Optional. HTTP on loopback.</text>
+
+            <rect x="596" y="118" width="200" height="88" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="614" y="144" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="14" font-weight="600" fill="#171715">Voxa</text>
+            <text x="614" y="165" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">Speech, entirely local.</text>
+            <text x="614" y="183" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">Optional. HTTP + WebSocket.</text>
+
+            <line x1="550" y1="92" x2="592" y2="56" stroke="#a49c8e" marker-end="url(#ar)"/>
+            <line x1="550" y1="126" x2="592" y2="160" stroke="#a49c8e" marker-end="url(#ar)"/>
+            <text x="600" y="228" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#8d877c">started, health-checked</text>
+            <text x="600" y="243" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#8d877c">and stopped by the app</text>
+
+            <rect x="8" y="282" width="386" height="126" rx="14" fill="#efeae0" stroke="#d9d4cb"/>
+            <text x="28" y="309" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="15" font-weight="600" fill="#171715">Your disk</text>
+            <text x="28" y="332" font-family="Cascadia Mono, Consolas, monospace" font-size="11.5" fill="#ec6a4a">%USERPROFILE%\ArkeStudio\</text>
+            <text x="28" y="354" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">worlds · queue · ledger · credentials · logs</text>
+            <text x="28" y="382" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#8d877c">the only durable truth. plain files, readable by hand.</text>
+            <line x1="300" y1="226" x2="250" y2="278" stroke="#a49c8e" marker-end="url(#ar)" marker-start="url(#ar)"/>
+
+            <rect x="430" y="282" width="402" height="126" rx="14" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="450" y="309" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="15" font-weight="600" fill="#171715">Cloud providers — only when you ask</text>
+            <text x="450" y="332" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">FAL · Higgsfield — pictures and video</text>
+            <text x="450" y="350" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">OpenAI · Anthropic — language</text>
+            <text x="450" y="368" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">ElevenLabs — voice</text>
+            <text x="450" y="393" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#8d877c">your keys, your accounts, your bill</text>
+            <line x1="470" y1="226" x2="530" y2="278" stroke="#ec6a4a" stroke-width="1.4" marker-end="url(#arc)"/>
+            <path d="M796 58 C 824 58 826 250 782 278" fill="none" stroke="#ec6a4a" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#arc)"/>
+          </svg>
+          <figcaption>Solid coral: Arke Studio's own job queue. Dashed coral: the harness reaching language providers itself.</figcaption>
+        </figure>
+
+        <div class="rule">
+          <b>The two coral arrows are not the same arrow.</b> OpenCode reaches language providers
+          itself, using keys Arke Studio hands it at start-up. The job queue calls image, video and
+          voice providers directly. These are two separate execution paths on purpose —
+          <a href="#paths">section seven</a>.
+        </div>
+      </section>
+
+      <!-- ================================================================= -->
+      <section class="section" id="clientserver">
+        <div class="section__head">
+          <div class="eyebrow">Section two · the question that always comes first</div>
+          <h2>Is this client/server?</h2>
+          <p class="lede">
+            Yes — genuinely, and on one machine. The client and the server are two real, separate
+            things that speak a real network protocol to each other. They are simply packaged and
+            shipped as one program, and they share a lifetime.
+          </p>
+        </div>
+
+        <p>
+          That is a deliberate decision, recorded in the foundation spec as decision D2: the
+          coordinator is embedded in the app <b>because it is the domain layer, not a service
+          anybody else talks to</b>. Giving it a lifecycle of its own would invent a class of
+          failure — <i>"the app is running but its server is not"</i> — that this product has no
+          use for.
+        </p>
+
+        <div class="grid grid--3">
+          <div class="card">
+            <div class="eyebrow">Not a metaphor</div>
+            <h4>Really a server</h4>
+            <p>
+              A Node HTTP server with a WebSocket server on it, bound to <code>127.0.0.1</code> on a
+              port chosen at start-up. It accepts connections, sequences frames per connection, and
+              broadcasts to all of them. Two windows would both get updates.
+            </p>
+          </div>
+          <div class="card">
+            <div class="eyebrow">A plain web app</div>
+            <h4>Really a client</h4>
+            <p>
+              An ordinary React single-page app. It reaches the coordinator only by sending JSON
+              and receiving JSON, and fetches images over plain HTTP. It has no filesystem access,
+              no credentials, and no rule it is trusted to enforce.
+            </p>
+          </div>
+          <div class="card">
+            <div class="eyebrow">No port, no login</div>
+            <h4>Not a service</h4>
+            <p>
+              Loopback only, on a port that changes every launch. No accounts, no authentication,
+              no sessions. The first message a client sends is <code>hello</code>, and there is
+              nothing to log in to. Quitting the app stops the server.
+            </p>
+          </div>
+        </div>
+
+        <h3>The proof it is real: the app already runs in a browser</h3>
+        <p>
+          This is not a claim about a possible refactor. Two commands run the system split apart
+          today, with a browser tab as the client:
+        </p>
+
+<pre><span class="t">Terminal one — the coordinator as its own process</span><b>npm run dev:coordinator</b>
+
+  <i>→ reads a real app root at .dev\root (seeded from fixtures the first time)</i>
+  <i>→ discovers OpenCode if it is installed, supervises it, degrades if not</i>
+  <i>→ listens on</i> ws://127.0.0.1:8791</pre>
+
+<pre><span class="t">Terminal two — the client as an ordinary web app</span><b>npm run dev</b>
+
+  <i>→ Vite dev server</i>
+  <i>→</i> window.arke <i>is absent, so the client falls back to a plain WebSocket</i>
+  <i>→ same frames, same commands, same coordinator</i></pre>
+
+        <p>
+          There is no mock in that arrangement. It is the same coordinator class, the same world
+          provider, the same accept gate, the same SQLite index, driven by the same message set.
+          The desktop app differs only in <i>who starts the coordinator</i> and <i>which extra host
+          abilities exist</i>.
+        </p>
+
+        <h3>What the split actually gives you</h3>
+        <table>
+          <thead>
+            <tr><th style="width:26%">If you wanted to…</th><th style="width:12%">Status</th><th>How much of it already works</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Run the UI in a browser instead of a window</td>
+              <td><span class="tag tag--new">works today</span></td>
+              <td>You lose the host-only gestures — dropping a file onto the composer, the
+                "choose a file" dialog, native notifications, the OS theme — because those need a
+                desktop shell, not a server. Everything else renders and behaves.</td>
+            </tr>
+            <tr>
+              <td>Build a second front end — a CLI, a plug-in, a phone app</td>
+              <td><span class="tag tag--new">ready</span></td>
+              <td>The contract is already the whole surface. A client is anything that can send
+                <b>123</b> kinds of command and fold <b>59</b> kinds of event. Both are Zod schemas
+                in one shared package, so a new client gets types and validation for free.</td>
+            </tr>
+            <tr>
+              <td>Run the coordinator headless — tests, automation, a service</td>
+              <td><span class="tag tag--new">works today</span></td>
+              <td>The tests rely on it. The coordinator is plain Node. Every Electron-specific
+                ability is an injected seam: the key cipher, the file picker, the encoder, the
+                updater, the sidecar, the "open this folder" call. Leave one out and that feature
+                says why it is unavailable instead of crashing.</td>
+            </tr>
+            <tr>
+              <td>Swap the writing harness, or add a provider</td>
+              <td><span class="tag tag--new">designed for</span></td>
+              <td>The harness sits behind an adapter interface whose capabilities are probed from
+                the harness's own API document rather than pinned to a version. Providers are a
+                registry of small HTTP clients, each declaring what it can do.</td>
+            </tr>
+            <tr>
+              <td>Put the coordinator on another machine, or share a world between people</td>
+              <td><span class="tag tag--no">not today</span></td>
+              <td>The wire is ready; the rest is not, and deliberately. Five things assume one
+                machine — below.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>And what it does not give you — the honest part</h3>
+        <p>
+          It is tempting to read "client/server" as "one config change from being a hosted
+          product." It is not, and the reasons are architectural rather than cosmetic.
+        </p>
+
+        <div class="steps">
+          <div class="step">
+            <h4>The filesystem is the only durable truth</h4>
+            <p>Not a design detail — the product promise. Worlds are folders you can open, copy and
+              back up. A remote coordinator would still work, but it would own <i>its</i> disk, not
+              yours, and that is a different product.</p>
+          </div>
+          <div class="step">
+            <h4>One writer per world, enforced by a lock file</h4>
+            <p>Concurrency is resolved by exclusion, not by merging. Two people editing one world
+              would need a real multi-writer model, which the versioning scheme — one monotonic
+              canon revision, one version per sheet — does not currently describe.</p>
+          </div>
+          <div class="step">
+            <h4>There is no authentication, and nothing to authorise against</h4>
+            <p>Any connection that says <code>hello</code> gets the full snapshot. That is correct
+              for loopback and completely wrong for anything else.</p>
+          </div>
+          <div class="step">
+            <h4>Keys are encrypted against <i>this</i> machine's OS</h4>
+            <p>Windows DPAPI, via Electron's <code>safeStorage</code>. The ciphertext is not
+              portable, by design. A shared coordinator would need a different secret story
+              entirely.</p>
+          </div>
+          <div class="step">
+            <h4>The helper processes are local children</h4>
+            <p>OpenCode and Voxa are spawned per app instance, given loopback ports, leashed to the
+              process, and reaped on exit. Voxa in particular exists <i>because</i> speech should
+              never leave the machine.</p>
+          </div>
+        </div>
+
+        <div class="rule">
+          <p><b>The useful way to hold it.</b> The client/server split is not there so the server
+          can move away. It is there so the UI can never be the thing that decides.</p>
+          <p>Every judgement — can this be accepted, what does it ripple into, what will it cost,
+          is that key valid — happens on the far side of a schema-checked wire, where it can be
+          tested without a browser and cannot be bypassed by the browser. Portability is a side
+          effect of that discipline, and a real one.</p>
+        </div>
+      </section>
+
+      <!-- ================================================================= -->
+      <section class="section" id="layers">
+        <div class="section__head">
+          <div class="eyebrow">Section three</div>
+          <h2>The layers.</h2>
+          <p class="lede">
+            Reading top to bottom: what you look at, what holds a copy of state, the wire, the
+            rules, and the things that persist or reach outward. One package — <b>contracts</b> —
+            runs down the whole side, because every layer speaks the same vocabulary.
+          </p>
+        </div>
+
+        <figure class="fig">
+          <svg viewBox="0 0 840 384" role="img" aria-label="Diagram: a stack of layers from screens at the top down to storage and outbound adapters, with the contracts package running down the left-hand side.">
+            <rect x="8" y="8" width="150" height="368" rx="14" fill="#11161a"/>
+            <text x="28" y="42" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="15" font-weight="600" fill="#ffffff">contracts</text>
+            <text x="28" y="64" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#cfcabf">Zod schemas.</text>
+            <text x="28" y="82" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#cfcabf">The world model,</text>
+            <text x="28" y="100" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#cfcabf">the commands,</text>
+            <text x="28" y="118" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#cfcabf">the events, the</text>
+            <text x="28" y="136" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#cfcabf">adapter interface.</text>
+            <text x="28" y="178" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#8d877c">Every layer to the</text>
+            <text x="28" y="196" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#8d877c">right imports it.</text>
+            <text x="28" y="214" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#8d877c">It imports nothing</text>
+            <text x="28" y="232" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#8d877c">of theirs.</text>
+            <text x="28" y="352" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#ec6a4a">~7,000 lines</text>
+
+            <rect x="178" y="8" width="654" height="56" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="198" y="32" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="14" font-weight="600" fill="#171715">Screens and components</text>
+            <text x="198" y="52" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">React 19 · router · the design-system token contract · no colour value written by hand</text>
+
+            <rect x="178" y="72" width="654" height="56" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="198" y="96" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="14" font-weight="600" fill="#171715">Client store</text>
+            <text x="198" y="116" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">One snapshot, then events folded into it by the same rules the coordinator uses</text>
+
+            <rect x="178" y="136" width="654" height="44" rx="12" fill="#11161a"/>
+            <text x="198" y="156" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="13.5" font-weight="600" fill="#ffffff">The wire — preload bridge, then WebSocket</text>
+            <text x="198" y="173" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#f6c4b6">sequenced · schema-validated on the way out and on the way in · the trust boundary</text>
+
+            <rect x="178" y="188" width="654" height="70" rx="12" fill="#efeae0" stroke="#d9d4cb"/>
+            <text x="198" y="212" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="14" font-weight="600" fill="#171715">Coordinator services</text>
+            <text x="198" y="232" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">accept gate · canon · sheets · references · productions · takes · world chat</text>
+            <text x="198" y="249" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">job queue · providers · spend ledger · artifacts · voice · setup · updates</text>
+
+            <rect x="178" y="266" width="318" height="66" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="198" y="290" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="14" font-weight="600" fill="#171715">Persistence</text>
+            <text x="198" y="310" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">world folder · .history · changes.jsonl</text>
+            <text x="198" y="326" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">.index (SQLite) · jobs.jsonl · ledger.jsonl</text>
+
+            <rect x="514" y="266" width="318" height="66" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="534" y="290" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="14" font-weight="600" fill="#171715">Outbound adapters</text>
+            <text x="534" y="310" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">harness adapter · provider HTTP clients</text>
+            <text x="534" y="326" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">Voxa sidecar client</text>
+
+            <rect x="178" y="340" width="654" height="36" rx="12" fill="#efeae0" stroke="#d9d4cb"/>
+            <text x="198" y="363" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">Host shell (Electron) — window, sandbox, key cipher, dialogs, notifications, updater, child supervision</text>
+          </svg>
+          <figcaption>The dark band is the trust boundary. Everything above it is untrusted; everything below decides.</figcaption>
+        </figure>
+
+        <p>
+          The one rule that keeps this honest: <b>the host shell is at the bottom, not the
+          middle.</b> The coordinator never imports Electron. Anything only a desktop shell can do
+          is passed in as a function when the coordinator is constructed — the cipher that encrypts
+          a key, the dialog that picks a file, the encoder that renders an export, the updater.
+          Leave one out and the feature reports why it is unavailable. That is exactly what makes
+          the headless and browser configurations above possible rather than aspirational.
+        </p>
+      </section>
+
+      <!-- ================================================================= -->
+      <section class="section" id="packages">
+        <div class="section__head">
+          <div class="eyebrow">Section four</div>
+          <h2>The packages, and which way the arrows point.</h2>
+          <p class="lede">
+            An npm-workspaces monorepo: six libraries and one app. Every arrow below means "depends
+            on", and every arrow points down. Nothing points back up, and nothing points sideways.
+          </p>
+        </div>
+
+        <figure class="fig">
+          <svg viewBox="0 0 840 372" role="img" aria-label="Diagram: apps/desktop depends on client, coordinator, providers, voice and the adapter; coordinator depends on the adapter; everything depends on contracts.">
+            <defs>
+              <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="#a49c8e"/>
+              </marker>
+            </defs>
+
+            <rect x="180" y="10" width="280" height="60" rx="12" fill="#efeae0" stroke="#d9d4cb"/>
+            <text x="200" y="34" font-family="Cascadia Mono, Consolas, monospace" font-size="12.5" font-weight="600" fill="#171715">apps/desktop</text>
+            <text x="200" y="54" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">Electron shell. Wires everything together.</text>
+
+            <rect x="20" y="112" width="180" height="60" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="38" y="136" font-family="Cascadia Mono, Consolas, monospace" font-size="12.5" font-weight="600" fill="#171715">client</text>
+            <text x="38" y="156" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">The React app.</text>
+
+            <rect x="228" y="112" width="232" height="60" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="246" y="136" font-family="Cascadia Mono, Consolas, monospace" font-size="12.5" font-weight="600" fill="#171715">coordinator</text>
+            <text x="246" y="156" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">Where every decision is made.</text>
+
+            <rect x="20" y="214" width="180" height="60" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="38" y="238" font-family="Cascadia Mono, Consolas, monospace" font-size="12.5" font-weight="600" fill="#171715">adapter-opencode</text>
+            <text x="38" y="258" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">The writing harness.</text>
+
+            <rect x="228" y="214" width="150" height="60" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="246" y="238" font-family="Cascadia Mono, Consolas, monospace" font-size="12.5" font-weight="600" fill="#171715">providers</text>
+            <text x="246" y="258" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">Cloud clients.</text>
+
+            <rect x="406" y="214" width="150" height="60" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="424" y="238" font-family="Cascadia Mono, Consolas, monospace" font-size="12.5" font-weight="600" fill="#171715">voice</text>
+            <text x="424" y="258" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">Voxa client.</text>
+
+            <rect x="20" y="308" width="536" height="52" rx="12" fill="#11161a"/>
+            <text x="38" y="332" font-family="Cascadia Mono, Consolas, monospace" font-size="12.5" font-weight="600" fill="#ffffff">contracts</text>
+            <text x="38" y="350" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#8d877c">The shared vocabulary. Imports nothing from this repository.</text>
+
+            <line x1="240" y1="72" x2="120" y2="108" stroke="#a49c8e" marker-end="url(#ar2)"/>
+            <line x1="330" y1="72" x2="330" y2="108" stroke="#a49c8e" marker-end="url(#ar2)"/>
+            <line x1="400" y1="72" x2="470" y2="210" stroke="#a49c8e" marker-end="url(#ar2)"/>
+            <line x1="380" y1="72" x2="300" y2="210" stroke="#a49c8e" marker-end="url(#ar2)"/>
+            <line x1="220" y1="72" x2="120" y2="210" stroke="#a49c8e" marker-end="url(#ar2)"/>
+            <line x1="260" y1="174" x2="150" y2="210" stroke="#a49c8e" marker-end="url(#ar2)"/>
+            <line x1="90" y1="174" x2="70" y2="304" stroke="#a49c8e" marker-end="url(#ar2)"/>
+            <line x1="380" y1="174" x2="400" y2="304" stroke="#a49c8e" marker-end="url(#ar2)"/>
+            <line x1="110" y1="276" x2="110" y2="304" stroke="#a49c8e" marker-end="url(#ar2)"/>
+            <line x1="300" y1="276" x2="290" y2="304" stroke="#a49c8e" marker-end="url(#ar2)"/>
+            <line x1="480" y1="276" x2="490" y2="304" stroke="#a49c8e" marker-end="url(#ar2)"/>
+
+            <rect x="596" y="112" width="236" height="162" rx="12" fill="rgba(45,123,122,0.07)" stroke="#a8d3ce"/>
+            <text x="616" y="139" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="13.5" font-weight="600" fill="#2d7b7a">Why one direction matters</text>
+            <text x="616" y="161" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">The coordinator can be built and</text>
+            <text x="616" y="178" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">tested without a browser. The client</text>
+            <text x="616" y="195" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">can be built without Electron. The</text>
+            <text x="616" y="212" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">contracts can be read on their own</text>
+            <text x="616" y="229" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">to learn the whole API.</text>
+            <text x="616" y="256" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#6f6a61">105 test files in the workspace</text>
+          </svg>
+        </figure>
+
+        <table>
+          <thead>
+            <tr><th style="width:20%">Package</th><th>What it owns</th><th style="width:11%">Rough size</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>packages/contracts</code></td>
+              <td>Zod schemas for every entity, every command a client may send, every event a
+                client may receive, and the harness adapter interface. Also the pure judgements
+                both sides share, so a cost estimate or a ripple signature cannot drift between
+                them.</td>
+              <td class="num">~7.0k lines</td>
+            </tr>
+            <tr>
+              <td><code>packages/coordinator</code></td>
+              <td>Everything that decides. The world on disk, the commit primitive, the accept
+                gate, canon retrieval and refusal, the SQLite index, the job queue, the spend
+                ledger, world chat, artifact filing and extraction, voice, setup, the child
+                supervisor and the transport.</td>
+              <td class="num">~23.4k lines</td>
+            </tr>
+            <tr>
+              <td><code>packages/client</code></td>
+              <td>The React app: screens, components, the token contract ported from the design
+                system, and one store that holds the coordinator's state and folds events into
+                it.</td>
+              <td class="num">~14.8k lines</td>
+            </tr>
+            <tr>
+              <td><code>packages/adapter-opencode</code></td>
+              <td>The writing harness adapter: session configuration, the agent roster, credential
+                environment, discovery of an installed or bundled OpenCode, and a capability probe
+                that reads the harness's own API document instead of pinning a version.</td>
+              <td class="num">~1.7k lines</td>
+            </tr>
+            <tr>
+              <td><code>packages/providers</code></td>
+              <td>One small HTTP client per provider (FAL, Higgsfield, OpenAI, Anthropic,
+                ElevenLabs, Ollama), each declaring what it can do; the shipped model manifest;
+                local-runtime detection.</td>
+              <td class="num">~1.9k lines</td>
+            </tr>
+            <tr>
+              <td><code>packages/voice</code></td>
+              <td>The client for the Voxa sidecar and the local voice catalogue. Deliberately
+                thin — the speech itself runs in the sidecar.</td>
+              <td class="num">~150 lines</td>
+            </tr>
+            <tr>
+              <td><code>apps/desktop</code></td>
+              <td>The Electron shell. Creates the sandboxed window, constructs the coordinator with
+                the host abilities plugged in, supervises the two children, owns the updater and
+                the theme.</td>
+              <td class="num">~1.8k lines</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ================================================================= -->
+      <section class="section" id="wire">
+        <div class="section__head">
+          <div class="eyebrow">Section five</div>
+          <h2>The wire between the two halves.</h2>
+          <p class="lede">
+            Only two kinds of thing ever come down: a <b>snapshot</b> — the whole state the client
+            should render — and an <b>event</b>. Both carry a sequence number that only ever
+            increases, counted per connection.
+          </p>
+        </div>
+
+<pre><span class="t">The entire downward protocol</span>type <b>Frame</b> =
+  | { kind: "snapshot"; seq: number; state: <b>ClientState</b> }
+  | { kind: "event";    seq: number; event: <b>DomainEvent</b> }</pre>
+
+        <figure class="fig">
+          <svg viewBox="0 0 840 344" role="img" aria-label="Sequence diagram: the window says hello, receives a snapshot then events, sends a command, receives an event; after a dropped connection it says hello again and receives a fresh snapshot.">
+            <defs>
+              <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L10 5 L0 10 z" fill="#5f5b53"/>
+              </marker>
+            </defs>
+            <rect x="80" y="8" width="180" height="38" rx="10" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="100" y="33" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="13.5" font-weight="600" fill="#171715">The window</text>
+            <rect x="560" y="8" width="200" height="38" rx="10" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="580" y="33" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="13.5" font-weight="600" fill="#171715">The coordinator</text>
+            <line x1="170" y1="52" x2="170" y2="330" stroke="#d9d4cb"/>
+            <line x1="660" y1="52" x2="660" y2="330" stroke="#d9d4cb"/>
+
+            <line x1="172" y1="76" x2="656" y2="76" stroke="#5f5b53" marker-end="url(#ar3)"/>
+            <text x="200" y="70" font-family="Cascadia Mono, Consolas, monospace" font-size="11" fill="#171715">hello { lastSeq }</text>
+
+            <line x1="658" y1="112" x2="174" y2="112" stroke="#5f5b53" marker-end="url(#ar3)"/>
+            <text x="200" y="106" font-family="Cascadia Mono, Consolas, monospace" font-size="11" fill="#ec6a4a">snapshot · seq 1</text>
+            <text x="360" y="106" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="11.5" fill="#6f6a61">the whole state, in one frame</text>
+
+            <line x1="658" y1="146" x2="174" y2="146" stroke="#5f5b53" marker-end="url(#ar3)"/>
+            <text x="200" y="140" font-family="Cascadia Mono, Consolas, monospace" font-size="11" fill="#171715">event · seq 2, 3, 4 …</text>
+            <text x="380" y="140" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="11.5" fill="#6f6a61">folded into the copy it holds</text>
+
+            <line x1="172" y1="182" x2="656" y2="182" stroke="#5f5b53" marker-end="url(#ar3)"/>
+            <text x="200" y="176" font-family="Cascadia Mono, Consolas, monospace" font-size="11" fill="#171715">proposal-accept { … }</text>
+            <text x="400" y="176" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="11.5" fill="#6f6a61">one of 123 commands</text>
+
+            <line x1="658" y1="216" x2="174" y2="216" stroke="#5f5b53" marker-end="url(#ar3)"/>
+            <text x="200" y="210" font-family="Cascadia Mono, Consolas, monospace" font-size="11" fill="#171715">event · seq 5</text>
+            <text x="330" y="210" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="11.5" fill="#6f6a61">the outcome, never a reply to the command</text>
+
+            <line x1="120" y1="248" x2="720" y2="248" stroke="#bdb6aa" stroke-dasharray="5 5"/>
+            <text x="290" y="242" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#8d877c">connection drops — the client retries, backing off to ten seconds</text>
+
+            <line x1="172" y1="284" x2="656" y2="284" stroke="#5f5b53" marker-end="url(#ar3)"/>
+            <text x="200" y="278" font-family="Cascadia Mono, Consolas, monospace" font-size="11" fill="#171715">hello { lastSeq: 5 }</text>
+
+            <line x1="658" y1="318" x2="174" y2="318" stroke="#5f5b53" marker-end="url(#ar3)"/>
+            <text x="200" y="312" font-family="Cascadia Mono, Consolas, monospace" font-size="11" fill="#ec6a4a">snapshot · seq 1</text>
+            <text x="360" y="312" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="11.5" fill="#6f6a61">a fresh one. never a partial replay.</text>
+          </svg>
+        </figure>
+
+        <h3>Five properties worth naming</h3>
+        <table>
+          <thead>
+            <tr><th style="width:26%">Property</th><th>What it means in practice</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Validated in both directions</td>
+              <td>The coordinator parses every incoming command against its schema and closes the
+                socket on a malformed one. It also validates every frame on the way <i>out</i>, so
+                a frame that fails its own schema never reaches a client. The client parses every
+                frame it receives and drops a bad one loudly. Version skew shows up as a clear
+                error rather than a subtly wrong screen.</td>
+            </tr>
+            <tr>
+              <td>Push, never poll</td>
+              <td>Nothing in the client asks "has anything changed?". Work that takes time — a
+                generation, a download, an authoring turn — reports itself as events as it
+                goes.</td>
+            </tr>
+            <tr>
+              <td>Commands are fire-and-forget</td>
+              <td>A command has no return value. Its outcome arrives as an event, which means the
+                same outcome reaches every connected client, and reconnecting mid-operation loses
+                nothing.</td>
+            </tr>
+            <tr>
+              <td>Reconnect means "start again"</td>
+              <td>Recorded as decision D4: a world is small enough to re-send, and a replay protocol
+                is a source of divergence bugs with no compensating benefit at this scale.</td>
+            </tr>
+            <tr>
+              <td>Images ride the same server</td>
+              <td>The coordinator's HTTP side serves <code>GET /media/&lt;world&gt;/&lt;file&gt;</code>,
+                read-only, no caching, with the resolver guarding against path traversal. That is
+                why pictures appear in a browser tab with no desktop shell involved.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ================================================================= -->
+      <section class="section" id="coordinator">
+        <div class="section__head">
+          <div class="eyebrow">Section six</div>
+          <h2>Inside the coordinator.</h2>
+          <p class="lede">
+            Not one object with a thousand methods. A set of services with one message loop in
+            front of them, and a small number of primitives underneath that everything else is
+            built from.
+          </p>
+        </div>
+
+        <div class="grid grid--3">
+          <div class="card">
+            <div class="eyebrow">world/commit.ts</div>
+            <h4>The commit primitive</h4>
+            <p>The only way a world file changes. Snapshot the outgoing version, write the new one
+              atomically, bump the version, append to the change log. Interruptible at any point
+              without losing both copies.</p>
+          </div>
+          <div class="card">
+            <div class="eyebrow">gate/proposals.ts</div>
+            <h4>The accept gate</h4>
+            <p>One path into the world. A proposal is materialised with the hashes it was drafted
+              against, previewed with its ripples, verified under the lock, and accepted as exactly
+              one commit — or discarded, leaving one log line.</p>
+          </div>
+          <div class="card">
+            <div class="eyebrow">read-model.ts</div>
+            <h4>The read model</h4>
+            <p>Folds world state and events into the shape the client renders. Pure: validation
+              happens at the boundaries, never here. The client has a copy of the same fold, which
+              is what keeps both sides in step.</p>
+          </div>
+          <div class="card">
+            <div class="eyebrow">index-db/</div>
+            <h4>The derived index</h4>
+            <p>SQLite per world, with a full-text table over canon. Structurally prevented from
+              becoming a source of truth — it is populated only from a scan of the folder. Delete
+              it and it rebuilds.</p>
+          </div>
+          <div class="card">
+            <div class="eyebrow">queue/</div>
+            <h4>The job queue</h4>
+            <p>Durable before the network, and never trusts silence. Every state change is written
+              down before the action it authorises, and a gap in observation is an unknown to
+              reconcile rather than a failure to retry.</p>
+          </div>
+          <div class="card">
+            <div class="eyebrow">supervisor.ts</div>
+            <h4>The supervisor</h4>
+            <p>One generic implementation for both children. Spawn, allocate a loopback port, probe
+              health, restart with backoff, stop gracefully, and never leave an orphan — even when
+              the app is force-killed.</p>
+          </div>
+        </div>
+
+        <h3>What the message loop does with a command</h3>
+        <div class="steps">
+          <div class="step">
+            <h4>Parse it</h4>
+            <p>Against the command schema. A malformed message is a client bug, and the socket
+              closes rather than the coordinator guessing.</p>
+          </div>
+          <div class="step">
+            <h4>Route it to a service</h4>
+            <p>Canon, sheets, the gate, productions, the queue, voice, artifacts, world chat,
+              providers, setup, updates.</p>
+          </div>
+          <div class="step">
+            <h4>Do the work, writing before acting</h4>
+            <p>Anything durable is on disk before the thing it authorises happens — the proposal
+              before the edit, the queued job before the network call.</p>
+          </div>
+          <div class="step">
+            <h4>Broadcast an event</h4>
+            <p>To every connected client, each with its own sequence number. The client that sent
+              the command learns the outcome the same way everyone else does.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================= -->
+      <section class="section" id="paths">
+        <div class="section__head">
+          <div class="eyebrow">Section seven</div>
+          <h2>The two execution paths.</h2>
+          <p class="lede">
+            This is the architectural distinction the specification exists to protect. Two
+            completely separate routes hang off the coordinator, and confusing them is the failure
+            mode the design guards against hardest.
+          </p>
+        </div>
+
+        <figure class="fig">
+          <svg viewBox="0 0 840 400" role="img" aria-label="Diagram: two lanes. The authoring path runs through OpenCode into a proposal and then the accept gate. The media path runs through the job queue to providers and lands takes.">
+            <defs>
+              <marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L10 5 L0 10 z" fill="#a49c8e"/>
+              </marker>
+            </defs>
+
+            <rect x="270" y="8" width="300" height="42" rx="12" fill="#11161a"/>
+            <text x="290" y="34" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="14" font-weight="600" fill="#ffffff">You ask for something</text>
+
+            <line x1="360" y1="52" x2="220" y2="76" stroke="#a49c8e" marker-end="url(#ar4)"/>
+            <line x1="480" y1="52" x2="620" y2="76" stroke="#a49c8e" marker-end="url(#ar4)"/>
+
+            <rect x="8" y="80" width="400" height="290" rx="14" fill="#efeae0" stroke="#d9d4cb"/>
+            <text x="28" y="104" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" letter-spacing="1.4" fill="#ec6a4a">THE AUTHORING PATH</text>
+            <text x="28" y="126" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="13" fill="#5f5b53">Words: worlds, sheets, canon, scenes.</text>
+
+            <rect x="28" y="142" width="364" height="46" rx="10" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="46" y="170" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12.5" fill="#171715">A proposal folder is made, holding what is in scope</text>
+
+            <rect x="28" y="200" width="364" height="46" rx="10" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="46" y="228" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12.5" fill="#171715">OpenCode runs in it — the only world it is shown</text>
+
+            <rect x="28" y="258" width="364" height="46" rx="10" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="46" y="286" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12.5" fill="#171715">Changed files become the proposal. Ripples computed.</text>
+
+            <rect x="28" y="316" width="364" height="42" rx="10" fill="#11161a"/>
+            <text x="46" y="343" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12.5" font-weight="600" fill="#ffffff">You accept — one commit into the world</text>
+
+            <line x1="210" y1="190" x2="210" y2="196" stroke="#a49c8e" marker-end="url(#ar4)"/>
+            <line x1="210" y1="248" x2="210" y2="254" stroke="#a49c8e" marker-end="url(#ar4)"/>
+            <line x1="210" y1="306" x2="210" y2="312" stroke="#a49c8e" marker-end="url(#ar4)"/>
+
+            <rect x="432" y="80" width="400" height="290" rx="14" fill="#efeae0" stroke="#d9d4cb"/>
+            <text x="452" y="104" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" letter-spacing="1.4" fill="#2d7b7a">THE MEDIA PATH</text>
+            <text x="452" y="126" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="13" fill="#5f5b53">Pictures, video, speech.</text>
+
+            <rect x="452" y="142" width="364" height="46" rx="10" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="470" y="170" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12.5" fill="#171715">The job is written down before any network call</text>
+
+            <rect x="452" y="200" width="364" height="46" rx="10" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="470" y="228" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12.5" fill="#171715">A provider is called. The cost enters the ledger.</text>
+
+            <rect x="452" y="258" width="364" height="46" rx="10" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="470" y="286" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12.5" fill="#171715">Takes land in the world as files. Uncited.</text>
+
+            <rect x="452" y="316" width="364" height="42" rx="10" fill="#11161a"/>
+            <text x="470" y="343" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12.5" font-weight="600" fill="#ffffff">You accept — one becomes the shot's answer</text>
+
+            <line x1="634" y1="190" x2="634" y2="196" stroke="#a49c8e" marker-end="url(#ar4)"/>
+            <line x1="634" y1="248" x2="634" y2="254" stroke="#a49c8e" marker-end="url(#ar4)"/>
+            <line x1="634" y1="306" x2="634" y2="312" stroke="#a49c8e" marker-end="url(#ar4)"/>
+
+            <text x="424" y="392" text-anchor="middle" font-family="Cascadia Mono, Consolas, monospace" font-size="11" fill="#8d877c">the harness never dispatches media · the queue never authors canon</text>
+          </svg>
+        </figure>
+
+        <p>
+          The two lanes end in the same word, but they mean different things. On the left, nothing
+          <i>exists</i> until you accept — the writing happened in a folder that is not the world.
+          On the right, the file exists the moment the provider returns it; what you are accepting
+          is that it becomes the shot's answer. Pretending otherwise would mean holding generated
+          media in limbo outside the world, which is worse.
+        </p>
+
+        <div class="note">
+          The right-hand lane carries one detail worth spelling out, because it is where money is
+          involved. A job is written down <b>with an idempotency key</b> before the provider is
+          called, and again when it moves to "submitting", also before the call. If the app dies in
+          that window, the job comes back in an unknown state and is never blindly re-sent:
+          providers that can be queried by that key are asked, providers that can list recent work
+          are searched, and providers that can do neither leave the job held for you to decide —
+          with the cost of a possible duplicate stated plainly.
+        </div>
+      </section>
+
+      <!-- ================================================================= -->
+      <section class="section" id="state">
+        <div class="section__head">
+          <div class="eyebrow">Section eight</div>
+          <h2>Where each kind of state lives.</h2>
+          <p class="lede">
+            There is no database of record. There are five homes, and the rule for each is
+            different.
+          </p>
+        </div>
+
+        <table>
+          <thead>
+            <tr><th style="width:18%">Home</th><th style="width:34%">What lives there</th><th>Rule</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>The world folder</td>
+              <td>Sheets, canon, productions, scenes, takes, references, artifacts.</td>
+              <td><b>The only durable truth.</b> Delete everything else and the world survives.
+                Readable and editable by hand.</td>
+            </tr>
+            <tr>
+              <td><code>.history/</code></td>
+              <td>A complete copy of every previous version of every versioned file.</td>
+              <td>Full snapshots, not diffs — because there is no version-control system
+                underneath, and a sheet is a few kilobytes. Restoring is a file copy.</td>
+            </tr>
+            <tr>
+              <td><code>changes.jsonl</code></td>
+              <td>One line per accepted change: what, from which version to which, which fields,
+                from what source, at what canon revision.</td>
+              <td>Append-only, never rewritten. It is the audit trail, the Activity feed's backing
+                store, and the answer to "how did this get here".</td>
+            </tr>
+            <tr>
+              <td><code>.index/world.db</code></td>
+              <td>Entities, citations, takes, jobs, ledger rows and a full-text table over canon.</td>
+              <td><b>A cache.</b> Deletable with no loss; rebuilt from a scan. No write path may
+                take a value from here and persist it into a world file.</td>
+            </tr>
+            <tr>
+              <td>App-level files</td>
+              <td><code>queue/jobs.jsonl</code>, <code>ledger.jsonl</code>, <code>config.json</code>,
+                <code>credentials.dat</code>, logs.</td>
+              <td>Outside every world, so exporting a world can never carry a key or another
+                world's spending.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Laid out on disk</h3>
+<pre><span class="t">Derived and staged parts marked</span><b>%USERPROFILE%\ArkeStudio\</b>
+  config.json            <i>routing defaults and alert thresholds — never keys</i>
+  credentials.dat        <i>your API keys, encrypted by the OS</i>
+  ledger.jsonl           <i>every penny spent, all worlds, append-only</i>
+  queue\jobs.jsonl       <i>every job ever queued, append-only</i>
+  logs\
+  <b>worlds\</b>
+    <b>the-undersong\</b>
+      world.json         <i>name, tone, genre, canon revision</i>
+      canon\  characters\  locations\  factions\
+                         <i>Markdown with YAML frontmatter, hand-readable</i>
+      references\        <i>identity kits and compiled model sheets</i>
+      artifacts\         <i>filed material, each with a sidecar of provenance</i>
+      productions\       <i>scenes, takes, the cut, exports</i>
+      changes.jsonl      <i>the audit trail</i>
+      .history\          <i>every previous version, in full</i>
+      .proposals\        <i>staged, not yet accepted</i>
+      .index\            <i>derived — safe to delete</i>
+  archive\               <i>worlds moved out of the library, still whole</i></pre>
+
+        <h3>Two version counters, not one</h3>
+        <p>
+          Canon has a single world-level revision number that advances once per accepted canon
+          change. Each sheet has its own version, independent of canon and of every other sheet.
+          Both exist for the same reason: something else cites them. A take records
+          <code>{ canonRevision: 42, sheets: { maren-kest: 4 } }</code>, and that record never
+          changes afterwards — which is what makes <i>"accepted takes stay on the version they were
+          made with"</i> and <i>"14 reference images predate this change"</i> computable rather
+          than decorative.
+        </p>
+      </section>
+
+      <!-- ================================================================= -->
+      <section class="section" id="accept">
+        <div class="section__head">
+          <div class="eyebrow">Section nine</div>
+          <h2>What happens when you accept something.</h2>
+          <p class="lede">
+            The most load-bearing sequence in the system, so it is worth following end to end.
+          </p>
+        </div>
+
+        <div class="steps">
+          <div class="step">
+            <h4>Intent</h4>
+            <p>You type into a form, or you talk it through. Either way the result is the same kind
+              of object.</p>
+          </div>
+          <div class="step">
+            <h4>A proposal is staged</h4>
+            <p>A folder under <code>.proposals/</code> holding the <i>complete proposed files</i>,
+              not patches. It records, per target, the version and content hash the drafting began
+              from.</p>
+          </div>
+          <div class="step">
+            <h4>Ripples are computed from the index</h4>
+            <p>What else this touches — which reference images predate it, which scene briefs
+              re-render, which productions pick it up. Advisory, and shown before you decide.</p>
+          </div>
+          <div class="step">
+            <h4>You accept</h4>
+            <p>Under the world lock, every target's hash is checked against the world as last
+              committed. If anything moved underneath, the accept refuses and says so rather than
+              overwriting.</p>
+          </div>
+          <div class="step">
+            <h4>One commit</h4>
+            <p>The outgoing file is copied to <code>.history/</code> first, the new file is written
+              atomically, the version bumps, and the canon revision bumps if canon changed.</p>
+            <div class="step__see">A crash mid-way leaves either the old file intact or the
+              snapshot beside the new one — never neither.</div>
+          </div>
+          <div class="step">
+            <h4>The trail is written and the index catches up</h4>
+            <p>One line in <code>changes.jsonl</code>; the index updated; an event pushed to every
+              connected client. Because proposals are whole files, accepting is a move — there is
+              no patch application to get wrong.</p>
+          </div>
+        </div>
+
+        <div class="rule rule--teal">
+          <b>The gate protects the authored record</b> — the facts a production cites. It does not
+          protect the audit trail, the job queue, the ledger or the index: those are the record
+          <i>of</i> gating, and gating them would be circular.
+        </div>
+      </section>
+
+      <!-- ================================================================= -->
+      <section class="section" id="processes">
+        <div class="section__head">
+          <div class="eyebrow">Section ten</div>
+          <h2>The processes, and keeping them honest.</h2>
+          <p class="lede">Three processes at most, and only one of them is required.</p>
+        </div>
+
+        <table>
+          <thead>
+            <tr><th style="width:14%">Process</th><th style="width:26%">What it is</th><th style="width:28%">How it is reached</th><th>If it is missing</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Arke Studio</td>
+              <td>The app: window, renderer and coordinator in one.</td>
+              <td>You launch it.</td>
+              <td>There is no app.</td>
+            </tr>
+            <tr>
+              <td>OpenCode</td>
+              <td>A file-editing agent, bundled with the installer — but an existing installation is
+                preferred and reported.</td>
+              <td>HTTP on a loopback port allocated at start-up. Health-checked at
+                <code>/api/health</code>.</td>
+              <td>Authoring switches off with a stated reason. Everything else works: browsing,
+                forms, generation, exports.</td>
+            </tr>
+            <tr>
+              <td>Voxa</td>
+              <td>A self-contained speech runtime — Kokoro for voices, Whisper for dictation.
+                Entirely local.</td>
+              <td>HTTP and WebSocket on a loopback port. Health-checked at <code>/health</code>,
+                including that its architecture matches this build.</td>
+              <td>Local voice and dictation switch off with a stated reason. Cloud voice, if
+                configured, still works.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Never leaving an orphan</h3>
+        <p>
+          A supervised child has to die with the app even when the app is killed and none of its
+          cleanup code runs at all. So every spawn is tethered three ways:
+        </p>
+        <div class="grid grid--3">
+          <div class="card">
+            <div class="eyebrow">Job object</div>
+            <h4>A kernel leash</h4>
+            <p>The child is bound to the app's lifetime by the operating system. If the app dies by
+              any means, the kernel takes the child with it.</p>
+          </div>
+          <div class="card">
+            <div class="eyebrow">Swept at next start</div>
+            <h4>A pidfile ledger</h4>
+            <p>Every spawn is recorded. The next launch reads that record and reaps anything still
+              running from a previous run.</p>
+          </div>
+          <div class="card">
+            <div class="eyebrow">For shell shims</div>
+            <h4>A descendant snapshot</h4>
+            <p>On Windows the process you spawned may be a wrapper, and the real work is its
+              grandchild. Once healthy, the live descendants are recorded too, so stopping can
+              reach past a dead wrapper.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================= -->
+      <section class="section" id="trust">
+        <div class="section__head">
+          <div class="eyebrow">Section eleven</div>
+          <h2>Trust boundaries.</h2>
+          <p class="lede">
+            Four boundaries, each doing what it can actually do — and one place where the residual
+            risk is stated rather than assumed away.
+          </p>
+        </div>
+
+        <figure class="fig">
+          <svg viewBox="0 0 840 316" role="img" aria-label="Diagram: nested boundaries. Your machine contains the trusted main process, which contains the sandboxed renderer and the confined harness working directory.">
+            <rect x="8" y="8" width="824" height="300" rx="16" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="28" y="34" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" letter-spacing="1.4" fill="#8d877c">YOUR MACHINE</text>
+
+            <rect x="28" y="48" width="784" height="240" rx="14" fill="#efeae0" stroke="#d9d4cb"/>
+            <text x="48" y="75" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="14" font-weight="600" fill="#171715">The trusted side — the main process</text>
+            <text x="48" y="95" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">Holds the keys in memory only for the length of a request. Reads and writes your files. Calls providers.</text>
+
+            <rect x="48" y="112" width="360" height="156" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="68" y="139" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="13.5" font-weight="600" fill="#2d7b7a">The renderer — sandboxed</text>
+            <text x="68" y="161" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">No Node. No Electron APIs. No filesystem.</text>
+            <text x="68" y="179" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">No credential, and no code path that reads one.</text>
+            <text x="68" y="197" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">No file path crosses in either direction.</text>
+            <text x="68" y="223" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#8d877c">it reaches the coordinator through one</text>
+            <text x="68" y="239" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#8d877c">typed object: connect, send, subscribe</text>
+            <text x="68" y="255" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#8d877c">— and nothing else</text>
+
+            <rect x="432" y="112" width="380" height="156" rx="12" fill="#fffefa" stroke="#d9d4cb"/>
+            <text x="452" y="139" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="13.5" font-weight="600" fill="#ec6a4a">The harness — confined, then checked</text>
+            <text x="452" y="161" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">Its working directory is the proposal, never the world.</text>
+            <text x="452" y="179" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">Shell, process and network tools are disabled.</text>
+            <text x="452" y="197" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">Reads happen through a read-only query surface</text>
+            <text x="452" y="215" font-family="Segoe UI Variable Text, Segoe UI, sans-serif" font-size="12" fill="#5f5b53">with no path parameter anywhere in it.</text>
+            <text x="452" y="241" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#b9483d">a stray write is detected at the gate and at</text>
+            <text x="452" y="257" font-family="Cascadia Mono, Consolas, monospace" font-size="10.5" fill="#b9483d">next open — not prevented. see below.</text>
+          </svg>
+        </figure>
+
+        <table>
+          <thead>
+            <tr><th style="width:22%">Boundary</th><th>What holds it</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Renderer ↔ everything else</td>
+              <td>Context isolation on, Node integration off, sandbox on. The renderer receives
+                exactly one object exposing connect, send and subscribe, plus a few host gestures
+                that deliberately hand over <i>nothing</i>: asking for a file picker returns
+                "artifacts now exist", never a path.</td>
+            </tr>
+            <tr>
+              <td>Keys</td>
+              <td>Encrypted by the OS and written outside every world folder, with the file's
+                permissions reset to you alone. Plaintext exists only in main-process memory, for
+                one request. Handed to the harness by environment variable at spawn, never written
+                into its configuration file.</td>
+            </tr>
+            <tr>
+              <td>Logs and diagnostics</td>
+              <td>Redaction is applied at the logging boundary, not at each call site — so a new
+                call site cannot leak by forgetting. Diagnostics bundles go through the same filter
+                and carry no world content.</td>
+            </tr>
+            <tr>
+              <td>The harness</td>
+              <td>Four layers: the world is never its working directory; escape-capable tools are
+                disabled; out-of-band writes are <i>detected</i> by hash comparison at accept; and
+                anything still missed is caught at next open by reconciliation.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="rule">
+          <b>Stated plainly, because the specification does.</b> An agent with shell access running
+          as you can, in principle, reach world files between commits. Arke Studio detects that and
+          preserves history; it does not prevent it. True prevention needs an operating-system
+          boundary around the harness process, which is the correct hardening and is recorded as
+          deferred — not as solved.
+        </div>
+      </section>
+
+      <!-- ================================================================= -->
+      <section class="section" id="costs">
+        <div class="section__head">
+          <div class="eyebrow">Section twelve</div>
+          <h2>What this architecture costs.</h2>
+          <p class="lede">
+            Every choice above buys something and gives something up. The trades, without spin.
+          </p>
+        </div>
+
+        <table>
+          <thead>
+            <tr><th style="width:30%">The choice</th><th>What it costs</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Files as the only truth, no database of record</td>
+              <td>Questions a database answers instantly need an index, which then needs
+                rebuilding, staleness detection and a rule that it can never become truth. Three
+                problems traded for one promise — that your worlds are yours and outlive this
+                app.</td>
+            </tr>
+            <tr>
+              <td>One writer per world</td>
+              <td>No collaboration, and a world open in a second instance is refused rather than
+                merged.</td>
+            </tr>
+            <tr>
+              <td>History as full snapshots</td>
+              <td>Disk. A sheet is a few kilobytes, so six versions cost about twenty-five, which is
+                the right trade against reimplementing merge and patch machinery with no
+                version-control system underneath.</td>
+            </tr>
+            <tr>
+              <td>Fresh snapshot on every reconnect</td>
+              <td>A little bandwidth on a loopback socket, in exchange for never debugging a
+                divergence caused by a replay protocol.</td>
+            </tr>
+            <tr>
+              <td>Coordinator embedded, not separate</td>
+              <td>You cannot point a second machine at it today. What you get instead is that "the
+                app is up but its server is down" is not a state that exists.</td>
+            </tr>
+            <tr>
+              <td>Two optional child processes</td>
+              <td>Every feature that depends on one needs a designed degraded state — visible,
+                disabled, and explaining itself. That is more work than letting things fail, and it
+                is why the app starts and stays usable when both are missing.</td>
+            </tr>
+            <tr>
+              <td>Schemas at every boundary</td>
+              <td>The same shape is declared once and enforced in several places, which costs a
+                little ceremony. It buys version skew that announces itself instead of corrupting a
+                screen.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ================================================================= -->
+      <section class="section" id="words">
+        <div class="section__head">
+          <div class="eyebrow">Section thirteen</div>
+          <h2>Words used above.</h2>
+        </div>
+
+        <table>
+          <tbody>
+            <tr><td style="width:22%">Coordinator</td><td>The half of the app that owns your files and makes every decision. Not on the internet.</td></tr>
+            <tr><td>Renderer</td><td>The window: the React app you look at and click.</td></tr>
+            <tr><td>Loopback / 127.0.0.1</td><td>Your own computer talking to itself. Never the internet.</td></tr>
+            <tr><td>Snapshot</td><td>The one complete picture of state a client receives when it connects.</td></tr>
+            <tr><td>Event</td><td>A small message saying one thing changed, sent to every connected client.</td></tr>
+            <tr><td>Frame</td><td>Either of those two, with a sequence number attached.</td></tr>
+            <tr><td>Schema</td><td>A written-down description of a message's exact shape, checked at runtime.</td></tr>
+            <tr><td>Proposal</td><td>A folder of complete proposed files, waiting for you to accept or discard.</td></tr>
+            <tr><td>Ripple</td><td>What else a change would touch, computed and shown before you decide.</td></tr>
+            <tr><td>Commit</td><td>The one operation that changes a world file: snapshot, write, bump, log.</td></tr>
+            <tr><td>The gate</td><td>The rule that authored facts enter only through an accept.</td></tr>
+            <tr><td>Harness</td><td>The separate program that does the writing when you talk it through.</td></tr>
+            <tr><td>Sidecar</td><td>The separate program that does speech, entirely on your machine.</td></tr>
+            <tr><td>Take</td><td>One generated result — an image, a clip, a line of speech — with its provenance.</td></tr>
+            <tr><td>Degrade</td><td>A feature switching itself off politely and saying why, instead of breaking.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <footer>
+        Arke Studio architecture reference &middot; the master specification is
+        <code>docs/specification.md</code> and the capability specs are
+        <code>docs/specifications/</code>, which remain the authority where this document and they
+        disagree &middot; the code-backed ledger of what every operation writes is
+        <code>docs/filesystem-operations.md</code> &middot; every claim, count and line figure here
+        was read back against the working tree on 2026-08-07.
+      </footer>
+    </div>
+  </body>
+</html>
