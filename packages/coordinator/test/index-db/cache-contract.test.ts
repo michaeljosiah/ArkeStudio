@@ -71,7 +71,7 @@ describe("the cache contract (R-1..R-4, D1)", () => {
     const version = (
       index.db.prepare("SELECT version FROM entities WHERE id = 'maren-kest'").get() as { version: number }
     ).version;
-    assert.equal(version, 5, "the index reflects the commit without a rescan (R-20)");
+    assert.equal(version, 6, "the index reflects the commit without a rescan (R-20)");
     await store.close();
 
     // Reopen: same fingerprint → no rebuild needed; the index still answers instantly.
@@ -81,7 +81,7 @@ describe("the cache contract (R-1..R-4, D1)", () => {
     assert.equal(
       (idx2.db.prepare("SELECT version FROM entities WHERE id = 'maren-kest'").get() as { version: number })
         .version,
-      5,
+      6,
     );
     await reopened.close();
   });
