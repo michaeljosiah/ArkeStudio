@@ -3764,6 +3764,14 @@ export class Coordinator {
         };
       },
       describeEntry: (context) => describeEntryContext(context, store.getBundle()),
+      onProgress: (conversationId, label) => {
+        this.emit({
+          at: new Date().toISOString(),
+          type: "world-chat.progress",
+          conversationId,
+          label,
+        });
+      },
       evidenceSources: (messages) => ({
         messages,
         bundle: store.getBundle(),
@@ -3817,6 +3825,10 @@ export class Coordinator {
       projectWorkspace(loaded, new Map(), {
         sheetName: (slug) => sheets.get(slug)?.name ?? null,
         sheetVersion: (slug) => sheets.get(slug)?.version ?? null,
+        // Asked of the runner, which is the only thing that knows a turn is happening now rather
+        // than having been abandoned by a crash. Read through the same accessor that made the
+        // runner, so a conversation mid-turn reports running even on the first projection.
+        liveRun: this.worldChatRunner(store).isRunning(loaded.id),
       }),
     );
     this.transport.broadcastSnapshot();

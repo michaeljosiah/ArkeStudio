@@ -24,10 +24,26 @@ export const BOUNDS = {
   registry: 16_000,
   recentTurns: 32_000,
   worldContext: 32_000,
+  /** Matches MAX_TEXT_PER_RUN_CHARS: what one run may read out of attachments in total (§19). */
+  attachments: 32_000,
 } as const;
 
 /** How many complete turns of history a run sees before summarisation takes over (§8.5). */
 export const RECENT_TURN_COUNT = 8;
+
+/**
+ * One attachment as the model needs to know it (§13.2).
+ *
+ * `text` is present only for what can honestly be read. An unreadable file is still named — the
+ * model must be able to say "I can see you attached a PNG and I cannot read it" rather than
+ * denying it exists, which is what silence produces.
+ */
+export interface ContextAttachment {
+  fileName: string;
+  kind: string;
+  readable: boolean;
+  text?: string;
+}
 
 export interface ContextInput {
   /**
@@ -43,6 +59,8 @@ export interface ContextInput {
   messages: readonly WorldChatMessage[];
   tombstones: readonly CandidateTombstone[];
   worldContext?: string;
+  /** Linked to this turn. Empty for a turn that handed nothing over. */
+  attachments?: readonly ContextAttachment[];
   currentUserMessage: string;
 }
 
@@ -53,6 +71,8 @@ export interface AssembledContext {
   registry: string;
   recentTurns: string;
   worldContext: string;
+  /** What was handed over this turn, named and — where readable — quoted. */
+  attachments: string;
   /** Structural keys and digests only — enough to not re-propose, not enough to reconstruct. */
   tombstones: string;
   currentUserMessage: string;
@@ -87,6 +107,33 @@ function renderTurns(messages: readonly WorldChatMessage[]): string {
 }
 
 /**
+ * What was handed over, inlined rather than left to a tool call (§13.2).
+ *
+ * The text is put in front of the model rather than only offered through `get_attachment_text`,
+ * and that is a deliberate departure from the obvious reading of the spec. Naming a file and
+ * trusting the model to go and fetch it has one failure mode, and it is the one a user actually
+ * hit: the model does not call the tool, then says it cannot see any attachment. Somebody who
+ * pasted a document and was told it does not exist has no way to tell a missing feature from a
+ * broken one, and no action that would fix it — they paste it again, and are told again.
+ *
+ * The tool remains, for reading further into something longer than the bound. It is the way to
+ * read *more*, not the only way to read at all.
+ *
+ * An unreadable attachment is still named, with what it is and that it cannot be read. Silence
+ * about it produces a denial, which is worse than a refusal: the file plainly went somewhere.
+ */
+function renderAttachments(attachments: readonly ContextAttachment[]): string {
+  return attachments
+    .map((a) => {
+      if (!a.readable || a.text === undefined) {
+        return `### ${a.fileName} (${a.kind})\nAttached, and cannot be read as text here. Say so plainly if it is relevant; do not guess at what it contains.`;
+      }
+      return `### ${a.fileName} (${a.kind})\n${a.text}`;
+    })
+    .join("\n\n");
+}
+
+/**
  * Tombstones travel as keys and digests, never as their original text (§8.5).
  *
  * The model needs to know not to re-propose something. It does not need to be reminded what the
@@ -115,6 +162,20 @@ export function assembleContext(input: ContextInput): AssembledContext {
   );
   const worldContext = take("worldContext", input.worldContext ?? "", BOUNDS.worldContext);
   const tombstones = renderTombstones(input.tombstones);
+  /**
+   * Trimmed from the *end*, unlike every other section.
+   *
+   * The others keep their most recent lines because a conversation's recent material is what is
+   * still being talked about. A document is the other way round: it was handed over whole and
+   * starts at its beginning, so keeping the tail would hand the model the last page of something
+   * it was never given the first page of.
+   */
+  const attachmentsText = renderAttachments(input.attachments ?? []);
+  const attachments =
+    attachmentsText.length <= BOUNDS.attachments
+      ? attachmentsText
+      : (trimmed.push("attachments"),
+        `${attachmentsText.slice(0, BOUNDS.attachments)}\n\n[Cut off here. Read further with get_attachment_text rather than guessing at the rest.]`);
 
   return {
     // Never trimmed: it is one short line, and it is the frame for everything else.
@@ -123,6 +184,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
     registry,
     recentTurns,
     worldContext,
+    attachments,
     tombstones,
     // Never trimmed. See the note at the top of this file.
     currentUserMessage: input.currentUserMessage,
@@ -132,6 +194,9 @@ export function assembleContext(input: ContextInput): AssembledContext {
       registry,
       recentTurns,
       worldContext,
+      // In the digest because two turns differing only by what was handed over are different
+      // turns, and the run record should not claim they had the same context.
+      attachments,
       tombstones,
       current: input.currentUserMessage,
     }),

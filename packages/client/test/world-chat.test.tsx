@@ -142,6 +142,77 @@ describe("starting a conversation", () => {
 
 
 /**
+ * The turn in flight (#70 §15.3), ported from opencode's `[spinner] Making edits · 12s`.
+ *
+ * Reported from the packaged build as "there is nothing indicating that the AI is thinking". It
+ * was worse than a missing indicator: `runStatus` could never be `running` at all, because the
+ * fold calls every unterminated run interrupted, so the composer never locked and Stop never
+ * appeared either. Silence for two minutes is indistinguishable from having sent nothing.
+ */
+describe("saying that the studio is working", () => {
+  const CV = "cv_01J8F3K2QW9VZX4N7M0RTYB6HC";
+
+  function renderWorking(over: Record<string, unknown> = {}): string {
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      world: {
+        ...FIXTURE_STATE.world!,
+        conversations: [
+          {
+            id: CV as never,
+            title: "The bells",
+            status: "open",
+            updatedAt: AT,
+            pointCount: 0,
+            openProposalCount: 0,
+            notCarried: [],
+          },
+        ],
+      },
+      worldChat: {
+        conversationId: CV,
+        status: "open",
+        messages: [],
+        hasMore: false,
+        seq: 1,
+        points: [],
+        attachments: [],
+        runStatus: "running",
+        runStartedAt: AT,
+        retrievalUnavailable: false,
+        ...over,
+      } as never,
+    });
+    return renderToString(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CV}`]}>
+        <App />
+      </MemoryRouter>,
+    ).replaceAll("<!-- -->", "");
+  }
+
+  it("shows a working line while a turn is in flight", () => {
+    const html = renderWorking();
+    assert.match(html, /fy-working/, "the whole complaint was that nothing appeared");
+    assert.match(html, /aria-live="polite"/, "and it is announced, once, rather than only drawn");
+  });
+
+  it("says a word rather than only spinning", () => {
+    assert.match(renderWorking(), /Thinking/, "a spinner with no words is a shrug");
+  });
+
+  it("offers Stop beside the thing it stops, and names the shortcut", () => {
+    const html = renderWorking();
+    assert.match(html, /fy-working__stop/);
+    assert.match(html, /esc/, "a keybinding nobody is told about is not a feature");
+  });
+
+  it("shows nothing at all once the turn is done", () => {
+    const html = renderWorking({ runStatus: null, runStartedAt: null });
+    assert.doesNotMatch(html, /fy-working/, "the line belongs to the turn, not to the screen");
+  });
+});
+
+/**
  * Handing a conversation a file (#70 §13.1, §13.2).
  *
  * The composer has always been able to take attachments — drag, paste, picker, chips — and World
@@ -178,6 +249,7 @@ describe("attaching a document to a conversation", () => {
         points: [],
         attachments: [],
         runStatus: null,
+        runStartedAt: null,
         retrievalUnavailable: false,
       } as never,
       ...over,
@@ -210,6 +282,7 @@ describe("attaching a document to a conversation", () => {
           { id: "wca_1", fileName: "undersong-draft.md", kind: "document", readability: "text-readable", promoted: false },
         ],
         runStatus: null,
+        runStartedAt: null,
         retrievalUnavailable: false,
       } as never,
     });
@@ -230,6 +303,7 @@ describe("attaching a document to a conversation", () => {
           { id: "wca_2", fileName: "brief.pdf", kind: "document", readability: "not-readable", promoted: false },
         ],
         runStatus: null,
+        runStartedAt: null,
         retrievalUnavailable: false,
       } as never,
     });
@@ -370,6 +444,7 @@ describe("arriving at a conversation the list has not caught up with", () => {
     seq: 1,
     hasMore: false,
     runStatus: null,
+    runStartedAt: null,
     retrievalUnavailable: false,
     messages: [],
     points: [],

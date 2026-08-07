@@ -422,6 +422,26 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /**
+   * What the studio is doing, while it is doing it (#70 §15.3).
+   *
+   * A turn takes as long as a model takes, and until this existed the screen showed nothing at
+   * all for the whole of it — which is exactly what having sent nothing looks like. Transient by
+   * design: it has no durable home and needs none, because a finished turn is described by its
+   * receipts and its reply, not by what it was doing halfway through.
+   *
+   * `label` is already the words to show. The raw tool summary never crosses this boundary: those
+   * strings name entities, and R-18 reserves that for coordinator-computed receipts.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("world-chat.progress"),
+      conversationId: z.string().min(1),
+      label: z.string().min(1).max(120),
+    })
+    .strict(),
+
   /** Export lifecycle (SPEC-013 R-21): progress, and a terminal status with the output path. */
   z
     .object({

@@ -1035,6 +1035,15 @@ export const WorldChatWorkspaceSchema = z
     /** Set while a turn is in flight, so the composer can say so. */
     runStatus: WorldChatRunStatusSchema.nullable().default(null),
     /**
+     * When the turn in flight began, so the screen can count up alongside it.
+     *
+     * Elapsed time is the one honest thing a waiting surface can offer: it cannot promise how
+     * long is left, but it can say how long it has been, which is what turns "is this broken?"
+     * into "this is taking a while". Sent rather than started client-side so it survives a
+     * reconnect mid-turn without restarting the clock.
+     */
+    runStartedAt: IsoDateTimeSchema.nullable().default(null),
+    /**
      * The turn that failed and left no reply, so the screen can say so and offer it again.
      *
      * `runStatus` cannot carry this: it is read from the *active* run, and a failed run stops

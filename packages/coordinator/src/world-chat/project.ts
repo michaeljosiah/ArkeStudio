@@ -65,9 +65,49 @@ function wouldCarry(candidate: WorldChangeCandidate): boolean {
   return candidate.settledness === "settled";
 }
 
+/**
+ * What the studio is doing, in the house register (§15.3, R-18).
+ *
+ * Mapped here rather than on the screen because R-18 is explicit that a rendered `tool.activity`
+ * string is not a thing the UI may show: those summaries name entities — "checked canon:
+ * CANON-002, CANON-007" — and a progress line is not a receipt. The receipts are their own
+ * surface, computed by the coordinator and shown when the turn lands. This is only ever the verb.
+ *
+ * Borrowed in shape from opencode's `computeStatusFromPart`, which maps the last streamed part to
+ * a short present-tense phrase. The vocabulary is this product's, because the tools are.
+ */
+const WORKING_LABELS: Record<string, string> = {
+  search_canon: "Searching canon",
+  search_sheets: "Searching the cast",
+  get_entry: "Reading canon",
+  get_sheet: "Reading a sheet",
+  list_entities: "Looking over the world",
+  related: "Checking what references it",
+  get_attachment_text: "Reading what you attached",
+};
+
+/** The resting label, before any tool has run. Never blank: a spinner with no words is a shrug. */
+export const THINKING_LABEL = "Thinking";
+
+/** The label for a turn that has started writing its reply. */
+export const WRITING_LABEL = "Writing";
+
+export function workingLabel(tool: string): string {
+  return WORKING_LABELS[tool] ?? "Checking the world";
+}
+
 export interface ProjectOptions {
   sheetName?: (slug: string) => string | null;
   sheetVersion?: (slug: string) => number | null;
+  /**
+   * A turn is in flight for this conversation right now (§15.3).
+   *
+   * Supplied by the caller because the fold cannot know it: on disk a live run and one abandoned
+   * by a crash are the same record — a start with no terminal event — so the fold calls both
+   * interrupted. Without this the screen never says the studio is thinking, never disables Send
+   * and never offers Stop, which is indistinguishable from having sent nothing at all.
+   */
+  liveRun?: boolean;
 }
 
 export function projectPoints(
@@ -157,7 +197,9 @@ export function projectWorkspace(
       readability: a.readability,
       promoted: a.promotedArtifactId !== undefined,
     })),
-    runStatus: loaded.activeRun?.status ?? null,
+    // The live signal wins over the fold's reading of the log — see ProjectOptions.liveRun.
+    runStatus: options.liveRun === true ? "running" : (loaded.activeRun?.status ?? null),
+    runStartedAt: options.liveRun === true ? (loaded.activeRun?.startedAt ?? null) : null,
     // A turn that failed says so, and says it in the words a person can act on. Without this the
     // screen is identical whether the studio answered, failed, or was never asked.
     ...(loaded.lastFailedRun
