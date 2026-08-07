@@ -14,7 +14,6 @@ import {
   type QueueCommand,
   type RankedVoice,
   type ReconcileAction,
-  type ReferenceAngle,
   type WorldChatContext,
   ulid,
 } from "@arke-studio/contracts";
@@ -1254,11 +1253,7 @@ export function useReconcileReport(): ReconcileAction[] | null {
   return useStore().reconcileReport;
 }
 
-// ---- SPEC-010: reference kits ----------------------------------------------
-
-export function establishLook(worldId: string, sheetId: string, count: number): void {
-  send({ kind: "establish-look", worldId, sheetId, count, requestId: queueRequest("establish-look") });
-}
+// ---- SPEC-010/017: reference kits ------------------------------------------
 
 export function chooseAnchor(
   worldId: string,
@@ -1389,32 +1384,6 @@ export function attachCharacterLook(
     | null,
 ): void {
   send({ kind: "attach-character-look", worldId, sheetId, lookId, scope });
-}
-
-export function lockTile(worldId: string, sheetId: string, angle: ReferenceAngle, name?: string): void {
-  send({ kind: "lock-tile", worldId, sheetId, angle, ...(name !== undefined ? { name } : {}) });
-}
-
-export function generateMissingTiles(worldId: string, sheetId: string, group: "head" | "body"): void {
-  send({
-    kind: "generate-missing-tiles",
-    worldId,
-    sheetId,
-    group,
-    requestId: queueRequest("generate-missing-tiles"),
-  });
-}
-
-export function regenerateTile(worldId: string, sheetId: string, angle: ReferenceAngle): void {
-  send({ kind: "regenerate-tile", worldId, sheetId, angle, requestId: queueRequest("regenerate-tile") });
-}
-
-export function compileGrid(worldId: string, sheetId: string): void {
-  send({ kind: "compile-grid", worldId, sheetId });
-}
-
-export function designateCompilation(worldId: string, sheetId: string, file: string): void {
-  send({ kind: "designate-compilation", worldId, sheetId, file });
 }
 
 export function setStyleOverride(worldId: string, sheetId: string, style: string | null): void {
