@@ -35,11 +35,14 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
   const higgsfield = deps.higgsfield ?? missingHiggsfieldRunner();
   return {
     fal: captureProviderClient("fal", (fetch) => new FalClient(fetch), fetchImpl, capture),
+    // The only client taking both seams: the CLI carries submit, poll and status, and the
+    // artifact bytes still arrive over HTTP. Both halves are instrumented.
     higgsfield: captureProviderClient(
       "higgsfield",
-      (fetch) => new HiggsfieldClient(higgsfield, fetch),
+      (fetch, run) => new HiggsfieldClient(run, fetch),
       fetchImpl,
       capture,
+      higgsfield,
     ),
     openai: captureProviderClient("openai", (fetch) => new OpenAiClient(fetch), fetchImpl, capture),
     anthropic: captureProviderClient("anthropic", (fetch) => new AnthropicClient(fetch), fetchImpl, capture),

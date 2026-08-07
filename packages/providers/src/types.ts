@@ -97,12 +97,17 @@ export interface ProviderCallCapture {
     provider: ProviderId;
     operation: string;
     context?: ProviderCallContext;
+    /** An HTTP verb, or "EXEC" for a provider driven as a subprocess. */
     method: string;
     endpoint: string;
     headers: Record<string, string>;
     body: unknown;
   }): Promise<string>;
-  finish(id: string, input: { status: number; headers: Record<string, string>; body: unknown }): Promise<void>;
+  /** `status` for HTTP, `exitCode` for a subprocess — whichever the call actually produced. */
+  finish(
+    id: string,
+    input: { status?: number; exitCode?: number | null; headers: Record<string, string>; body: unknown },
+  ): Promise<void>;
   fail(id: string, error: unknown): Promise<void>;
 }
 
