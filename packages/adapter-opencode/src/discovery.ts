@@ -63,12 +63,25 @@ async function versionOf(command: string, run: CommandRunner): Promise<string | 
 }
 
 /**
+ * How long a probe may take before we call it absent.
+ *
+ * A probe that runs out of time is indistinguishable from one that found nothing, so this budget
+ * decides how slow a machine has to be before the app declares an installed OpenCode missing.
+ * `where` walks every PATH entry and is the first process this module spawns, which on a cold or
+ * loaded box is the expensive one: it measures ~300ms on a developer machine and has been seen
+ * past 5s on a contended CI runner. Ten seconds matches the budget `versionOf` already allows,
+ * and waiting is the better failure — the alternative is telling somebody their harness is not
+ * installed because their machine was busy.
+ */
+const PROBE_TIMEOUT_MS = 10_000;
+
+/**
  * Resolve a PATH command to a spawnable absolute path. On Windows, `where` returns every
  * match; the extension-bearing entry (.cmd/.exe) is the one child_process can start.
  */
 async function resolveOnPath(command: string, run: CommandRunner): Promise<string | null> {
   const probe = process.platform === "win32" ? "where" : "which";
-  const result = await run(probe, [command], 5_000).catch(() => null);
+  const result = await run(probe, [command], PROBE_TIMEOUT_MS).catch(() => null);
   if (!result || result.status !== 0) return null;
   const lines = result.stdout
     .split(/\r?\n/)
