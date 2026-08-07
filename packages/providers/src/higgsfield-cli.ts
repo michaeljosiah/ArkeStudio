@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { CommandResult, CommandRunner } from "./types.js";
 
@@ -164,5 +164,92 @@ export function missingHiggsfieldRunner(): CommandRunner {
     code: null,
     stdout: "",
     stderr: "the Higgsfield CLI is not installed on this machine",
+  });
+}
+
+/**
+ * Who the CLI is signed in as. `account status` is the probe rather than `auth token`, for the
+ * same reason the client uses it: `auth token` prints the live token to stdout, and something
+ * that only needs a yes or no should not be handling a secret to get one.
+ */
+export async function higgsfieldWhoAmI(
+  command: string,
+  run: RawRunner = runRaw,
+): Promise<{ account: string | null }> {
+  const result = await run(command, ["account", "status", "--json", "--no-color"], PROBE_TIMEOUT_MS);
+  if (result.code !== 0) {
+    const said = result.stderr.trim().split(/\r?\n/, 1)[0]?.trim();
+    throw new Error(said && said.length > 0 ? said : "the Higgsfield CLI is not signed in");
+  }
+  try {
+    const body = JSON.parse(result.stdout) as { email?: unknown };
+    return { account: typeof body.email === "string" && body.email.length > 0 ? body.email : null };
+  } catch {
+    // Signed in, but the payload changed shape. That is not a reason to call it signed out.
+    return { account: null };
+  }
+}
+
+/**
+ * How long a browser login may stay open before we stop waiting. The CLI's own wait defaults
+ * to ten minutes; five is enough for a person who is actually at the machine, and a login left
+ * open longer than that is one somebody walked away from. Stopping only stops *us* waiting —
+ * the CLI, and the browser tab, are the user's to close.
+ */
+const SIGN_IN_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * Run `auth login` to completion. Nothing is scraped: the flow is OAuth 2.0 PKCE with a
+ * loopback callback, so the credential arrives on a socket rather than on stdin, and the exit
+ * code is the entire result. stdout is kept only to quote back a failure's first line, and is
+ * never parsed — an output format we do not depend on cannot break us when it changes.
+ *
+ * The callback port is left unset on purpose. The CLI picks its default and falls back when
+ * that port is taken, which is documented behaviour and strictly better than pinning one of
+ * our own and then having to handle the same collision ourselves.
+ */
+export async function higgsfieldSignIn(
+  command: string,
+  signal: AbortSignal,
+): Promise<{ code: number | null; detail: string | null }> {
+  const shim = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
+  const executable = shim ? (process.env["ComSpec"] ?? "cmd.exe") : command;
+  const args = ["auth", "login", "--no-color"];
+  const executableArgs = shim ? ["/d", "/c", "call", command, ...args] : args;
+  return new Promise((resolve) => {
+    let settled = false;
+    let output = "";
+    const child = spawn(executable, executableArgs, { windowsHide: true, shell: false });
+    const done = (code: number | null, detail: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      resolve({ code, detail });
+    };
+    const stop = () => {
+      if (process.platform === "win32" && child.pid !== undefined) {
+        execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }, () => {});
+      } else {
+        child.kill("SIGTERM");
+      }
+    };
+    const onAbort = () => {
+      stop();
+      done(null, "sign-in cancelled");
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => {
+      stop();
+      done(null, "the sign-in was still waiting after five minutes");
+    }, SIGN_IN_TIMEOUT_MS);
+    timer.unref?.();
+    child.stdout?.on("data", (chunk: Buffer) => (output += chunk.toString()));
+    child.stderr?.on("data", (chunk: Buffer) => (output += chunk.toString()));
+    child.on("error", (err) => done(null, err.message));
+    child.on("exit", (code) => {
+      const said = output.trim().split(/\r?\n/).filter(Boolean).pop()?.trim() ?? null;
+      done(code, code === 0 ? null : said);
+    });
   });
 }

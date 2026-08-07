@@ -15,6 +15,8 @@ export { createProviderClients, PROVIDER_DECLARATIONS, type ProviderClientDeps }
 export {
   discoverHiggsfield,
   higgsfieldRunner,
+  higgsfieldSignIn,
+  higgsfieldWhoAmI,
   missingHiggsfieldRunner,
   type DiscoveredHiggsfield,
   type HiggsfieldDiscoveryOptions,

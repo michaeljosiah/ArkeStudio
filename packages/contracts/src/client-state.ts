@@ -8,7 +8,7 @@ import { IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema } from "./job.js";
 import { ModelManifestSchema } from "./manifest.js";
 import { ProposalSchema, RipplePreviewSchema } from "./proposal.js";
-import { ProviderStatusSchema } from "./provider.js";
+import { ProviderStatusSchema, ProviderToolStatusSchema } from "./provider.js";
 import {
   LocalRuntimeStatusSchema,
   AppearanceSettingsSchema,
@@ -213,6 +213,12 @@ export const ClientStateSchema = z
         ledger: z.array(LedgerEntrySchema),
         /** Provider configuration as Settings renders it — never key material (SPEC-008 R-6). */
         providers: z.array(ProviderStatusSchema).default([]),
+        /**
+         * Providers whose credential lives in a tool we drive rather than in `credentials.dat`
+         * (issue #137). Empty until something is discovered, so a build with no such provider
+         * carries nothing.
+         */
+        providerTools: z.array(ProviderToolStatusSchema).default([]),
         /** The shipped model manifest, whole: pickers and estimates read it locally (R-15). */
         manifest: ModelManifestSchema.nullable().default(null),
         routing: z

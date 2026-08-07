@@ -33,6 +33,8 @@ import {
   createProviderClients,
   discoverHiggsfield,
   higgsfieldRunner,
+  higgsfieldSignIn,
+  higgsfieldWhoAmI,
   probeRuntime,
   SHIPPED_MANIFEST,
   type VoiceCatalogueClient,
@@ -667,6 +669,15 @@ async function initialize(): Promise<{ port: number }> {
     secretRegistry: providerSecrets,
     providerCalls,
     validators: providerClients,
+    // Higgsfield's credential is the CLI's, not ours: presence and sign-in are probes, and the
+    // login is a browser flow we start and wait on rather than a value anyone types (#137).
+    toolProbes: {
+      higgsfield: {
+        discover: () => discoverHiggsfield(bundledHiggsfield ? { bundledPath: bundledHiggsfield } : {}),
+        whoAmI: (command) => higgsfieldWhoAmI(command),
+        signIn: (command, signal) => higgsfieldSignIn(command, signal),
+      },
+    },
     manifest: SHIPPED_MANIFEST,
     probeRuntime: () => probeRuntime(appRoot),
     dispatchClients: providerClients,

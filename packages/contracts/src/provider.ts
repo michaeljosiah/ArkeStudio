@@ -139,6 +139,44 @@ export const CapabilityAvailabilitySchema = z
 export type CapabilityAvailability = z.infer<typeof CapabilityAvailabilitySchema>;
 
 // ---------------------------------------------------------------------------
+// Providers whose credential lives in a tool we drive (issue #137)
+// ---------------------------------------------------------------------------
+
+/**
+ * Four states, because they need four different answers. Absent is "install it"; signed-out is
+ * "sign in"; ready is "nothing to do"; and signing-in is a browser window the user is standing
+ * in front of, which is neither of the first two and must not read as either.
+ */
+export const ProviderToolStateSchema = z.enum(["absent", "signed-out", "signing-in", "ready"]);
+export type ProviderToolState = z.infer<typeof ProviderToolStateSchema>;
+
+/**
+ * One external tool as Settings renders it. `configured` on ProviderStatus answers *whether*
+ * this provider can work; this answers *why not, and what to do about it* — which for a
+ * credential we do not hold is the only question the app can actually help with.
+ */
+export const ProviderToolStatusSchema = z
+  .object({
+    provider: ProviderIdSchema,
+    state: ProviderToolStateSchema,
+    /** A basename only. Absolute executable paths never cross into renderer state (R-6). */
+    executableName: z.string().min(1).nullable(),
+    source: z.enum(["configured", "path", "bundled"]).nullable(),
+    version: z.string().min(1).nullable(),
+    /** Who the tool says it is signed in as, when it says. Never a token (R-6). */
+    account: z.string().min(1).nullable(),
+    /** The reason, whenever the state is one that owes you one — in the tool's own words. */
+    detail: z.string().min(1).nullable(),
+    /**
+     * What to type if the in-app sign-in cannot serve you. The command as documented, never a
+     * path we resolved: this is copied into a terminal, where PATH is the user's own.
+     */
+    signInCommand: z.string().min(1),
+  })
+  .strict();
+export type ProviderToolStatus = z.infer<typeof ProviderToolStatusSchema>;
+
+// ---------------------------------------------------------------------------
 // The provider client declarations (R-23, D8)
 // ---------------------------------------------------------------------------
 

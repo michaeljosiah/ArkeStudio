@@ -16,6 +16,7 @@ import {
   cancelJob,
   checkUpdates,
   chooseVoxaExecutable,
+  cancelProviderToolSignIn,
   clearCredential,
   clearVoxaExecutable,
   attachHostFiles,
@@ -42,7 +43,9 @@ import {
   restartVoxa,
   retryJobFinalization,
   resumeQueue,
+  refreshProviderTool,
   setCredential,
+  signInProviderTool,
   setBackgroundNotifications,
   setModelEnabled,
   setRoutingDefault,
@@ -1138,9 +1141,11 @@ export function SettingsLayout() {
 }
 
 /**
- * The providers a key is entered for, in the rail's order. What each one does is no longer a
- * hand-written note beside it: the pane reads the capabilities off the models that key reaches,
- * so a manifest change cannot leave the description behind.
+ * The providers configured here, in the rail's order. Most take a key; Higgsfield takes a
+ * sign-in through its own CLI instead (issue 137), which is a different row but the same
+ * pane — it is still a credential and a list of models. What each one does is not a
+ * hand-written note beside it: the pane reads the capabilities off the models that credential
+ * reaches, so a manifest change cannot leave the description behind.
  */
 const KEYED_PROVIDERS: Array<{ id: ProviderId }> = [
   { id: "fal" },
@@ -1181,6 +1186,95 @@ const CAPABILITY_LABEL: Record<Capability, string> = {
   "voice-clone": "Voice cloning",
   "voice-stt": "Dictation",
 };
+
+/**
+ * A provider whose credential is not ours to hold (issue 137). There is no key to paste: the
+ * tool signs itself in, and the only questions the app can answer are whether it is here and
+ * whether it is signed in. So the row is a state and the one action that changes it — plus the
+ * command to type, always visible rather than revealed by a failure, because the in-app button
+ * cannot serve every machine and finding that out at the moment it fails is too late.
+ */
+function ProviderToolLine({ id }: { id: ProviderId }) {
+  const { state } = useStore();
+  const [copied, setCopied] = useState(false);
+  // No published status means discovery has not reported — a build with no probe wired, or the
+  // moment before the first one lands. That is "we have not looked", which still owes the user
+  // a row and a command; rendering nothing would leave the pane with no credential line at all.
+  const tool = state?.app.providerTools.find((t) => t.provider === id) ?? {
+    provider: id,
+    state: "absent" as const,
+    executableName: null,
+    source: null,
+    version: null,
+    account: null,
+    detail: "the Higgsfield CLI has not been found on this machine",
+    signInCommand: "higgsfield auth login",
+  };
+  const label =
+    tool.state === "ready"
+      ? (tool.account ?? "signed in")
+      : tool.state === "signing-in"
+        ? "waiting for the browser…"
+        : tool.state === "absent"
+          ? "not installed"
+          : "signed out";
+  const copy = () => {
+    void navigator.clipboard?.writeText(tool.signInCommand);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <>
+      <div className="fy-prov__keyline">
+        <div className="fy-prov__eyebrow">SIGN-IN</div>
+        <div className="fy-set__field">
+          <span style={{ flex: 1 }}>{label}</span>
+          {tool.state === "signing-in" ? (
+            <button type="button" className="fy-set__link" onClick={() => cancelProviderToolSignIn(id)}>
+              Stop waiting
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="fy-set__link"
+              disabled={tool.state === "absent"}
+              onClick={() => signInProviderTool(id)}
+            >
+              {tool.state === "ready" ? "Sign in again" : "Sign in"}
+            </button>
+          )}
+          <button type="button" className="fy-set__link" onClick={() => refreshProviderTool(id)}>
+            Re-check
+          </button>
+        </div>
+      </div>
+      <div className="fy-set__why">
+        <span
+          className={cx(
+            "fy-set__dot",
+            tool.state === "ready" ? "fy-set__dot--ok" : tool.state === "signing-in" ? "" : "fy-set__dot--warn",
+          )}
+        />
+        <span>
+          {tool.detail ??
+            (tool.state === "ready"
+              ? `${tool.executableName ?? "the CLI"}${tool.version ? ` ${tool.version}` : ""}${
+                  tool.source === "bundled" ? " · fetched by Arke Studio" : " · found on this machine"
+                }`
+              : "")}
+        </span>
+      </div>
+      <div className="fy-set__note">
+        {tool.state === "absent" ? "Install it, then sign in: " : "Or sign in from a terminal: "}
+        <code>{tool.signInCommand}</code>{" "}
+        <button type="button" className="fy-set__link" onClick={copy}>
+          {copied ? "copied" : "Copy"}
+        </button>
+        {" · we will notice when it works."}
+      </div>
+    </>
+  );
+}
 
 /**
  * One provider's key, on one line under its name (design turn 40a). The name is the pane's own
@@ -1337,10 +1431,22 @@ function ProviderPane({ id }: { id: ProviderId }) {
         <span style={{ flex: 1 }} />
         <span className={cx("fy-set__dot", troubled ? "fy-set__dot--warn" : configured && "fy-set__dot--ok")} />
         <span className="fy-set__state">
-          {troubled ? "key rejected" : configured ? "connected" : "no key"}
+          {info.credential === "external"
+            ? troubled
+              ? "sign-in needed"
+              : configured
+                ? "connected"
+                : "not signed in"
+            : troubled
+              ? "key rejected"
+              : configured
+                ? "connected"
+                : "no key"}
         </span>
       </div>
-      <ProviderKeyLine id={id} />
+      {/* A provider is a credential and a list of models — but whose credential differs, and
+          the two need different rows: one takes a key, the other cannot be given one. */}
+      {info.credential === "external" ? <ProviderToolLine id={id} /> : <ProviderKeyLine id={id} />}
       <div className="fy-prov__modelshead">
         <div className="fy-prov__eyebrow">MODELS</div>
         <span style={{ flex: 1 }} />

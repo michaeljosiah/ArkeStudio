@@ -1188,6 +1188,22 @@ export function validateProvider(provider: ProviderId): void {
   send({ kind: "validate-provider", provider });
 }
 
+/**
+ * Providers whose credential lives in a tool we drive (issue 137). Signing in opens a browser
+ * and finishes minutes later, so nothing here waits: the row follows the emitted tool status.
+ */
+export function signInProviderTool(provider: ProviderId): void {
+  send({ kind: "sign-in-provider-tool", provider });
+}
+
+export function cancelProviderToolSignIn(provider: ProviderId): void {
+  send({ kind: "cancel-provider-tool-sign-in", provider });
+}
+
+export function refreshProviderTool(provider: ProviderId): void {
+  send({ kind: "refresh-provider-tool", provider });
+}
+
 /** Configure one agent. null clears that half back to what shipped. */
 export function setAgentConfig(agent: string, patch: { model?: string | null; brief?: string | null }): void {
   send({ kind: "set-agent-config", agent, ...patch });
