@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { installSampleWorld, SampleWorldUnavailable, sampleWorldAvailable } from "../../src/world/sample-world.js";
-import { readWorldMeta } from "../../src/world/scan.js";
+import { readWorldMeta, WorldOpenError } from "../../src/world/scan.js";
 import { tempDir } from "../tmp.js";
 import { FIXTURE_WORLD, WORLD_ID } from "./helpers.js";
 
@@ -65,12 +65,30 @@ describe("installing the sample world", () => {
     assert.equal(await readFile(join(FIXTURE_WORLD, "world.json"), "utf8"), before);
   });
 
-  it("leaves no staging area behind at all", async () => {
+  it("makes no scratch directory in the app root", async () => {
     // The app root is a folder people open from Settings; a stray dot-directory in it is a
-    // question they should never have to ask.
+    // question they should never have to ask. Nothing is staged now, so nothing is left.
     const root = await makeRoot();
     await installSampleWorld({ sourceDir: FIXTURE_WORLD, appRoot: root });
     await assert.rejects(stat(join(root, ".installing")));
+  });
+
+  it("copies in place, and a world without its gate file is not a world", async () => {
+    // The reason there is no rename: `world.json` is written last, and a directory lacking it
+    // fails `readWorldMeta` as not-a-world — which listWorlds already skips. Copying in place is
+    // therefore invisible until it is finished, and on Windows it avoids renaming a tree whose
+    // files a scanner may still hold open (EPERM).
+    const root = await makeRoot();
+    const { slug } = await installSampleWorld({ sourceDir: FIXTURE_WORLD, appRoot: root });
+    const dir = join(root, "worlds", slug);
+    assert.equal((await readWorldMeta(dir)).slug, slug, "the finished world opens");
+
+    await rm(join(dir, "world.json"));
+    await assert.rejects(readWorldMeta(dir), (err: unknown) => {
+      assert.ok(err instanceof WorldOpenError);
+      assert.equal(err.reason, "not-a-world", "an unfinished copy is skipped, not reported as damage");
+      return true;
+    });
   });
 
   it("does not carry the application's own scratch files across", async () => {
