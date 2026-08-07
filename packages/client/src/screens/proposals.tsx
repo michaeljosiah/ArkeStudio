@@ -2,9 +2,11 @@ import { useState } from "react";
 import { useParams } from "react-router";
 import type { StagedProposal } from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
-import { cx } from "../components/ui.js";
+import { Button, cx } from "../components/ui.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
+import { acceptProposal } from "../lib/store.js";
+import { explainNotCarried } from "../lib/not-carried.js";
 
 /**
  * Every proposal waiting on a decision, in one place.
@@ -65,6 +67,28 @@ export function ProposalsScreen() {
 
   // Grouped by where they came from, in first-seen order so the list does not reshuffle as
   // proposals resolve.
+  /**
+   * Accepting several at once is only safe when each would have been safe alone.
+   *
+   * So this refuses on the same grounds a single accept would: anything stale, conflicted,
+   * awaiting review after a rebase, or carrying a question nobody has answered. The reason is
+   * shown rather than the button simply being dead.
+   */
+  const blockingAcceptAll = ((): string | null => {
+    const pending = proposals.find((p) => p.proposal.pendingReview);
+    if (pending) return "One of these was rebased and needs a look first.";
+    const conflicted = proposals.find((p) =>
+      (p.proposal.conflicts ?? []).some((c) => c.resolution === undefined),
+    );
+    if (conflicted) return "One of these has a conflict to resolve first.";
+    const unanswered = proposals.find((p) => (p.proposal.openChoices ?? []).length > 0);
+    if (unanswered) return "One of these is still asking a question.";
+    return null;
+  })();
+
+  /** What the conversations behind these proposals could not carry (R-27d). */
+  const notCarried = world.conversations.flatMap((c) => c.notCarried ?? []);
+
   const groups: Array<{ origin: string; items: StagedProposal[] }> = [];
   for (const staged of proposals) {
     const origin = originOf(staged.proposal);
@@ -85,10 +109,29 @@ export function ProposalsScreen() {
           <div className="fy-proposals__head">
             <span className="fy-proposals__count">{proposals.length} waiting</span>
             <span className="fy-proposals__meta">
-              {changes} change{changes === 1 ? "" : "s"} across {entities} file
-              {entities === 1 ? "" : "s"}
+              {changes} change{changes === 1 ? "" : "s"} across {entities} entit
+              {entities === 1 ? "y" : "ies"}
             </span>
+            <Button
+              variant="primary"
+              disabled={blockingAcceptAll !== null}
+              title={blockingAcceptAll ?? undefined}
+              onClick={() => {
+                for (const staged of proposals) acceptProposal(worldId!, staged.proposal.id);
+              }}
+            >
+              Accept all {proposals.length}
+            </Button>
           </div>
+          {notCarried.length > 0 && (
+            <div className="fy-proposals__note">
+              {notCarried.map((n) => (
+                <div key={n.candidateId}>
+                  One point did not come with them — <strong>{n.summary}</strong>. {explainNotCarried(n.reason)}.
+                </div>
+              ))}
+            </div>
+          )}
           <div className="fy-proposals__body">
             <nav className="fy-proposals__list" aria-label="Proposals waiting">
               {groups.map((group) => (

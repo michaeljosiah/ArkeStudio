@@ -27,6 +27,17 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CSS = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
+/** The annotated design master, whose `dv-rule` notes are the binding ones (turn 41). */
+const DESIGN_MASTER = readFileSync(join(here, "../../../design-system/Arke Studio.dc.html"), "utf8");
+/** The width the master binds World Chat's split to — held in one place, so it cannot drift. */
+const BINDING_WIDTH = /Below <b>(\d+)px<\/b> the split becomes <b>one column<\/b>/.exec(DESIGN_MASTER)?.[1];
+
+/** The stylesheet's narrow block for World Chat, as written at the master's binding width. */
+function narrowBlock(): string | undefined {
+  return new RegExp(`@media \\(max-width: ${BINDING_WIDTH}px\\) \\{([^@]*fy-gate[^@]*?)\\n\\}`, "s").exec(
+    CSS,
+  )?.[1];
+}
 
 const CONVERSATION_ID = "cv_01J8F3K2QW9VZX4N7M0RTYB6HC";
 
@@ -43,6 +54,7 @@ function stateWithConversation(): ClientState {
           updatedAt: "2026-08-06T10:00:00Z",
           pointCount: 3,
           openProposalCount: 0,
+          notCarried: [],
         },
       ],
     },
@@ -188,6 +200,31 @@ describe("the transcript", () => {
         "and are not a sibling of the bubble",
       );
     }
+  });
+
+  it("collapses at the width the design system says it collapses at", () => {
+    // The binding width is the one number that lived only in the stylesheet, where nothing would
+    // have noticed it moving away from the drawn frame. Read it out of the master's own rule so
+    // the two cannot drift: change either side alone and this fails.
+    assert.ok(BINDING_WIDTH, "the master records World Chat's narrow binding width as a dv-rule");
+    assert.match(
+      CSS,
+      new RegExp(`@media \\(max-width: ${BINDING_WIDTH}px\\) \\{[^@]*\\.fy-chat__wrap \\.fy-gate\\b`),
+      `the stylesheet collapses World Chat at the master's ${BINDING_WIDTH}px`,
+    );
+  });
+
+  it("moves the rail beneath the conversation rather than over it", () => {
+    // 41c: one sheet, never a layer on a layer. A drawer would be the easy implementation and the
+    // wrong one — it hides the conversation behind the thing that describes it.
+    const narrow = narrowBlock();
+    assert.ok(narrow, "the narrow block exists");
+    assert.match(narrow, /\.fy-chat__wrap \.fy-gate \{[^}]*flex-direction:\s*column/, "one column");
+    assert.match(narrow, /\.fy-gate__side \{[^}]*width:\s*auto/, "the rail gives up its fixed width");
+    assert.ok(
+      !/position:\s*(fixed|absolute)/.test(narrow) && !/transform:/.test(narrow),
+      "and is laid out in flow — a drawer or overlay would be a layer on a layer",
+    );
   });
 
   it("heads the conversation with an eyebrow and an h1, as Genesis does", () => {

@@ -129,6 +129,7 @@ describe("the order of the conversation list", () => {
     updatedAt,
     pointCount,
     openProposalCount,
+    notCarried: [],
   });
 
   it("puts what is waiting at the gate above what is merely open", () => {

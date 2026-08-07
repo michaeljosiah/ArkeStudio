@@ -30,6 +30,14 @@ export const BOUNDS = {
 export const RECENT_TURN_COUNT = 8;
 
 export interface ContextInput {
+  /**
+   * What the conversation was opened about (#70 phase 6).
+   *
+   * Recorded on the conversation and given to every turn, because a conversation started from a
+   * character sheet is about that character from its first word — making somebody re-describe
+   * what they were looking at is the toll the entry points exist to remove.
+   */
+  entryContext?: string;
   summary?: string;
   candidates: readonly WorldChangeCandidate[];
   messages: readonly WorldChatMessage[];
@@ -39,6 +47,7 @@ export interface ContextInput {
 }
 
 export interface AssembledContext {
+  entryContext: string;
   summary: string;
   /** Live propositions, so the model can correct rather than repeat them. */
   registry: string;
@@ -108,6 +117,8 @@ export function assembleContext(input: ContextInput): AssembledContext {
   const tombstones = renderTombstones(input.tombstones);
 
   return {
+    // Never trimmed: it is one short line, and it is the frame for everything else.
+    entryContext: input.entryContext ?? "",
     summary,
     registry,
     recentTurns,
@@ -115,7 +126,15 @@ export function assembleContext(input: ContextInput): AssembledContext {
     tombstones,
     // Never trimmed. See the note at the top of this file.
     currentUserMessage: input.currentUserMessage,
-    digest: contentHash({ summary, registry, recentTurns, worldContext, tombstones, current: input.currentUserMessage }),
+    digest: contentHash({
+      entryContext: input.entryContext ?? "",
+      summary,
+      registry,
+      recentTurns,
+      worldContext,
+      tombstones,
+      current: input.currentUserMessage,
+    }),
     trimmed,
   };
 }
