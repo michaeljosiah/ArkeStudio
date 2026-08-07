@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { App } from "../src/App.js";
-import { __applyEventForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __connectionStatusForTest, __setStateForTest } from "../src/lib/store.js";
 import { SCREENS } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -22,6 +22,30 @@ function renderAt(path: string): string {
   );
 }
 
+/**
+ * Every `<button>` that opens while another is still open, as a slice of the outer one.
+ *
+ * A control inside a control is invalid HTML, and the browser's repair — closing the outer one
+ * at the inner tag — is not what the markup said, so React refuses to hydrate it. It cost the
+ * world picker its "Create a world" button: clickable by mouse, and absent from the
+ * accessibility tree because the parser had already thrown it out of the card.
+ */
+function nestedButtons(html: string): string[] {
+  const found: string[] = [];
+  const open: number[] = [];
+  const tags = /<button\b|<\/button>/g;
+  let tag: RegExpExecArray | null;
+  while ((tag = tags.exec(html)) !== null) {
+    if (tag[0] === "</button>") open.pop();
+    else {
+      // The outer tag is the offender; the inner one is usually a shared <Button>.
+      if (open.length > 0) found.push(html.slice(open[0]!, open[0]! + 90));
+      open.push(tag.index);
+    }
+  }
+  return found;
+}
+
 describe("screen inventory", () => {
   it("covers the full screen inventory (52 screens)", () => {
     assert.equal(SCREENS.length, 52);
@@ -38,6 +62,13 @@ describe("screen inventory", () => {
     });
   }
 
+  it("never nests one control inside another (SPEC-001 R-7)", () => {
+    for (const screen of SCREENS) {
+      const hits = nestedButtons(renderAt(screen.samplePath));
+      assert.equal(hits.length, 0, `${screen.id} nests a <button> inside — ${hits.join(" · ")}`);
+    }
+  });
+
   it("smoke-renders the root router", () => {
     const html = renderAt("/");
     // The launch screen, by what it is rather than by a wordmark: the reel, and — with nothing
@@ -50,6 +81,58 @@ describe("screen inventory", () => {
     assert.ok(html.includes("fy-launch__version"), "with the version under it");
     for (const chatter of ["Setting up your studio.", "One-time setup", "everything ready"]) {
       assert.ok(!html.includes(chatter), `"${chatter}" is not shown once there is nothing to wait for`);
+    }
+  });
+
+  it("waits behind one control on a launch with nothing to fetch", () => {
+    // Setup runs once. Every launch after it only waits for the coordinator to open, and the
+    // panel says so with the same control the whole way through — no title, no step line, no
+    // bar creeping under a sentence about a one-time download that already happened.
+    __connectionStatusForTest("connecting");
+    try {
+      const html = renderAt("/");
+      assert.ok(html.includes("Loading…"), "the door is there from the first frame, and says it is opening");
+      assert.ok(html.includes("fy-launch__version"), "with the version still under it");
+      assert.ok(!html.includes("fy-setupbar"), "nothing is being fetched, so there is no bar");
+      for (const chatter of ["Setting up your studio.", "One-time setup", "checking studio core"]) {
+        assert.ok(!html.includes(chatter), `"${chatter}" belongs to the launch that is actually setting up`);
+      }
+    } finally {
+      __connectionStatusForTest("open");
+    }
+  });
+
+  it("keeps the progress panel for the launch that is actually fetching", () => {
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        setup: {
+          running: true,
+          diskFreeMb: 100_000,
+          components: [
+            {
+              id: "voxa-kokoro",
+              displayName: "Kokoro voice",
+              purpose: "Speaks on this machine",
+              sizeMb: 88,
+              state: "downloading",
+              bytesDone: 44 * 1024 * 1024,
+              bytesTotal: 88 * 1024 * 1024,
+              bytesPerSecond: 2 * 1024 * 1024,
+            },
+          ],
+        },
+      },
+    });
+    try {
+      const html = renderAt("/");
+      assert.ok(html.includes("Setting up your studio."), "a real download still says what it is");
+      assert.ok(html.includes("fy-setupbar"), "and still shows how far along it is");
+      assert.ok(html.includes("downloading kokoro voice"), "in the product's words, one line");
+      assert.ok(html.includes("One-time setup"), "with the promise that this happens once");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
     }
   });
 
