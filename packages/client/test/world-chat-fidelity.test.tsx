@@ -127,8 +127,18 @@ describe("World Chat is built on the Genesis split", () => {
   it("inherits the design's binding measurements from that split", () => {
     // Asserted against the CSS the screen actually uses, so a change to either side fails here.
     assert.match(CSS, /\.fy-gate__main\s*\{[^}]*flex:\s*1\.2/, "left column is flex 1.2");
-    assert.match(CSS, /\.fy-gate__side\s*\{[^}]*width:\s*470px/s, "the rail is 470px");
     assert.match(CSS, /\.fy-gate__side\s*\{[^}]*background:\s*var\(--muted\)/s, "the rail sits on --muted");
+    /*
+     * 470 is World Chat's own number, and it is the whole width here rather than the content
+     * width: 41a sets box-sizing:border-box on this rail where the canvas is otherwise content-box,
+     * so the shared `fy-gate__side` carries the 534 the other gate screens render and the chat
+     * wrap states 470 for itself. Asserting the scoped rule is what keeps rule 2 honest.
+     */
+    assert.match(
+      CSS,
+      /\.fy-chat__wrap \.fy-gate__side\s*\{[^}]*width:\s*470px/s,
+      "the rail is 470px on World Chat",
+    );
   });
 
   /*

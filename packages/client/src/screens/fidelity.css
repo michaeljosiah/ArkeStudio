@@ -310,7 +310,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   transition: transform 0.35s var(--ease-out), box-shadow 0.35s var(--ease-out);
 }
 .fy-polaroid:hover { transform: rotate(0deg) translateY(-14px) !important; box-shadow: var(--shadow-xl); }
-.fy-polaroid__frame { width: 154px; height: 180px; }
+/*
+ * The frame fills the card's content box rather than stating 154px.
+ *
+ * This is the one card whose width is NOT re-derived from the canvas: 41a's polaroid renders 187
+ * wide, but rule 11 fixes "170px wide ... the width budget of that 147px line", and 170 as the
+ * whole width is what puts the role line at exactly 147. Keeping that leaves the content box at
+ * 152.7, which a literal 154 overhangs by a pixel; 100% tracks it and the 180 height — the part
+ * the rule actually pins — is untouched.
+ */
+.fy-polaroid__frame { width: 100%; height: 180px; }
 /*
  * Both lines are single-line and clipped. The frame and the padding are already fixed, so
  * pinning these two makes the card a constant 243px tall — the fan stays level no matter how
@@ -327,7 +336,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-polaroid__role { font: 400 11px/15px var(--font-sans); color: var(--muted-foreground); margin: 1px 3px 0; height: 15px; }
 
 .fy-worldcard {
-  width: 280px;
+  width: 306px;
   /*
    * One number for the real card and the dashed "New world" placeholder beside it, so the two
    * cannot drift apart. It is the sum of the pinned bands below (frame, name, logline, meta and
@@ -403,7 +412,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   display: flex;
   align-items: center;
   gap: 18px;
-  width: 420px;
+  width: 450px;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   padding: 14px;
@@ -599,7 +608,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 
 .fy-designcard {
-  width: 320px;
+  width: 342px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -692,7 +701,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-sheet__actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .fy-sheet__quiet { display: flex; gap: 4px; flex-wrap: wrap; }
 .fy-character-overview-tabs { position: absolute; top: 68px; right: 90px; z-index: 10; }
-.fy-overview-sheet { width: 320px; margin-top: 22px; padding: 0 0 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: var(--shadow-sm); text-align: left; cursor: pointer; overflow: hidden; }
+.fy-overview-sheet { width: 322px; margin-top: 22px; padding: 0 0 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: var(--shadow-sm); text-align: left; cursor: pointer; overflow: hidden; }
 .fy-overview-sheet > span { display: block; width: 320px; height: 168px; overflow: hidden; }
 .fy-overview-sheet strong { display: inline-block; margin: 9px 0 0 12px; font: 600 12px var(--font-sans); }
 .fy-overview-sheet small { float: right; margin: 11px 12px 0 0; font: 400 9px var(--font-mono); color: var(--success); }
@@ -707,7 +716,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 
 .fy-newworldcard {
-  width: 280px;
+  width: 283px;
   height: var(--fy-worldcard-h);
   border: 1.5px dashed var(--neutral-300);
   border-radius: var(--radius-card);
@@ -747,7 +756,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-prodwrap { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 
 .fy-prodrail {
-  width: 236px;
+  width: 265px;
   flex: none;
   border-right: 1px solid var(--border);
   padding: 20px 14px;
@@ -1014,13 +1023,13 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 /* generate workspace (11b) */
 .fy-gen { display: flex; flex: 1; min-height: 0; }
-.fy-gen__left { width: 392px; flex: none; border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px 22px; overflow-y: auto; }
+.fy-gen__left { width: 437px; flex: none; border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px 22px; overflow-y: auto; }
 .fy-gen__label { display: flex; align-items: baseline; gap: 8px; font: 600 12.5px var(--font-sans); margin: 16px 0 8px; }
 .fy-refstrip { display: flex; gap: 8px; flex: none; }
 .fy-refstrip__wide { width: 118px; height: 64px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex: none; }
-.fy-refstrip__tile { width: 48px; height: 64px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex: none; }
+.fy-refstrip__tile { width: 50px; height: 64px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex: none; }
 .fy-refstrip__add {
-  width: 48px;
+  width: 51px;
   height: 64px;
   border: 1.5px dashed var(--neutral-300);
   border-radius: 7px;
@@ -1103,7 +1112,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-scrub__fill { height: 100%; border-radius: 99px; background: var(--foreground); }
 .fy-gen__verdict { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex: none; flex-wrap: wrap; }
 
-.fy-gen__takes { width: 128px; flex: none; border-left: 1px solid var(--border); padding: 20px 12px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+.fy-gen__takes { width: 153px; flex: none; border-left: 1px solid var(--border); padding: 20px 12px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
 .fy-taketile { cursor: pointer; opacity: 0.75; transition: opacity 0.2s; background: transparent; border: none; padding: 0; }
 .fy-taketile:hover, .fy-taketile--active { opacity: 1; }
 .fy-taketile__frame { width: 100%; height: 58px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
@@ -1465,7 +1474,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   color: var(--muted-foreground);
 }
 .fy-story__side {
-  width: 470px;
+  width: 534px;
   flex: none;
   padding: 26px 32px;
   background: var(--muted);
@@ -1491,7 +1500,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 /* production cards (2c) */
 .fy-prodcards { display: flex; justify-content: center; gap: 30px; padding: 40px 0 46px; align-items: flex-start; flex-wrap: wrap; animation: fy-fade-up 0.7s var(--ease-out) 0.22s both; }
 .fy-prodcard {
-  width: 330px;
+  width: 332px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -2160,7 +2169,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-activity { display: flex; flex: 1; min-height: 0; }
 .fy-activity__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 28px 40px 24px; overflow-y: auto; }
 .fy-activity__side {
-  width: 330px;
+  width: 391px;
   flex: none;
   border-left: 1px solid var(--border);
   padding: 30px;
@@ -2290,7 +2299,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   display: flex;
   align-items: center;
   gap: 9px;
-  width: 460px;
+  width: 488px;
   max-width: 100%;
   margin: 22px auto 0;
   height: 42px;
@@ -2414,8 +2423,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-gate__main { flex: 1.2; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow: hidden; }
 .fy-gate__head { padding: 22px 36px 12px; flex: none; display: flex; align-items: flex-start; gap: 12px; animation: fy-fade-up 0.6s var(--ease-out) both; }
 .fy-gate__body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 36px 22px; display: flex; flex-direction: column; gap: 15px; animation: fy-fade-up 0.5s var(--ease-out) both; }
+/*
+ * 534px = the canvas's 470px of rail plus the 64px of padding it sits in.
+ *
+ * The canvas is content-box and this app is border-box, so 470 read off the source arrived as a
+ * 406px rail — 64px short on 10a, 12a, 18a, 27a and 28a. World Chat is the exception below: 41a
+ * sets box-sizing:border-box on its own rail, so there 470 really is the whole width, which is
+ * also the number its binding rule states.
+ */
 .fy-gate__side {
-  width: 470px;
+  width: 534px;
   flex: none;
   padding: 26px 32px;
   background: var(--muted);
@@ -2437,7 +2454,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-entry__title { margin: 10px 0 0; font: 650 38px/1.05 var(--font-sans); letter-spacing: -0.028em; }
 .fy-entry__body { font: 400 17px/1.65 var(--font-sans); margin-top: 18px; max-width: 640px; white-space: pre-wrap; }
 .fy-entry__side {
-  width: 400px;
+  width: 465px;
   flex: none;
   border-left: 1px solid var(--border);
   padding: 30px 32px;
@@ -2456,7 +2473,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 /* location detail (23b) */
 .fy-locdetail { display: flex; min-height: calc(100vh - 132px); }
 .fy-locdetail__hero { flex: 1.25; min-width: 0; padding: 26px 0 26px 44px; animation: fy-fade-up 0.6s var(--ease-out) both; }
-.fy-locdetail__side { width: 470px; flex: none; padding: 38px 44px 30px 36px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; animation: fy-fade-up 0.7s var(--ease-out) 0.12s both; }
+.fy-locdetail__side { width: 550px; flex: none; padding: 38px 44px 30px 36px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; animation: fy-fade-up 0.7s var(--ease-out) 0.12s both; }
 .fy-locdetail__name { margin: 0; font: 650 34px/1.05 var(--font-sans); letter-spacing: -0.028em; }
 .fy-facet__head { display: flex; align-items: center; gap: 8px; font: 600 13px var(--font-sans); }
 .fy-facet__body { font: 400 12.5px/1.6 var(--font-sans); color: var(--muted-foreground); margin-top: 4px; white-space: pre-wrap; }
@@ -2983,7 +3000,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
  * of `fy-gate`'s screens (10a/18a/27a/28a) carry no nav on the canvas and must not gain the gap.
  */
 .fy-chat__wrap .fy-gate__head { padding-top: 52px; align-items: flex-end; gap: 14px; }
-.fy-chat__wrap .fy-gate__side { padding-top: 52px; }
+/* 41a states box-sizing:border-box on this rail, so its 470 is the whole width — the one number
+   rule 2 names, and the only gate screen where the canvas means total rather than content. */
+.fy-chat__wrap .fy-gate__side { width: 470px; padding-top: 52px; }
 
 /*
  * What this conversation is about, as a chip beside the title rather than a line beneath it: the
