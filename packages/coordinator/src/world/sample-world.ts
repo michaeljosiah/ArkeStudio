@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, rename, rm, rmdir, stat } from "node:fs/promises";
+import { cp, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { ulid } from "@arke-studio/contracts";
 import { atomicWriteFile } from "./atomic.js";
@@ -57,10 +57,16 @@ export async function sampleWorldAvailable(sourceDir: string | null): Promise<bo
  * is not today, and a world stamped today whose change log starts months ago would be reporting
  * something untrue on its own overview.
  *
- * The copy is assembled outside `worlds/` and renamed in once its identity is its own. Done the
- * other way round there is a window — long, because it is megabytes of art — in which the
- * library holds two worlds claiming the same id, and a `listWorlds()` landing inside it would
- * index the wrong one.
+ * The copy lands directly in `worlds/<slug>` and `world.json` is written last, which is what
+ * makes a half-copied world invisible: `readWorldMeta` throws `not-a-world` without it, and
+ * `scanAllSummaries` already skips those rather than reporting them as corrupt. The identity is
+ * therefore never briefly duplicated, because until the final write there is no identity at all.
+ *
+ * An earlier version assembled the copy in `.installing/` and renamed it in. That is the tidier
+ * shape on paper and it fails on Windows: renaming a directory whose ninety-six files were
+ * written a moment ago hits EPERM whenever a scanner still holds one of them open. Retrying
+ * would have papered over it. Writing the gate file last removes the rename, and with it the
+ * whole failure mode.
  */
 export async function installSampleWorld(
   opts: InstallSampleWorldOptions,
@@ -86,35 +92,29 @@ export async function installSampleWorld(
   }
 
   const worldId = ulid();
-  const stagingRoot = join(appRoot, ".installing");
-  const staging = join(stagingRoot, worldId);
-  await mkdir(toExtendedLength(stagingRoot), { recursive: true });
+  await mkdir(toExtendedLength(worldsDir), { recursive: true });
+  const taken = await readdir(toExtendedLength(worldsDir)).catch(() => [] as string[]);
+  const slug = uniqueSlug(source.name, "world", taken);
+  const dir = join(worldsDir, slug);
 
   try {
-    await cp(sourceDir, staging, {
+    // Everything but the gate file. `world.json` is what makes a folder a world, so while these
+    // megabytes are in flight the directory is not one, and nothing that lists worlds can see it.
+    await cp(sourceDir, dir, {
       recursive: true,
-      filter: (src) => !NOT_THE_DOCUMENT.has(basename(src)),
+      filter: (src) => !NOT_THE_DOCUMENT.has(basename(src)) && basename(src) !== "world.json",
     });
 
-    // The slug is chosen against the library as it stands *now* — after the copy, so a world
-    // added while those megabytes were being written still cannot be collided with.
-    const taken = await readdir(toExtendedLength(worldsDir)).catch(() => [] as string[]);
-    const slug = uniqueSlug(source.name, "world", taken);
+    // Last, and only now: the world exists, with an identity of its own, in one atomic write.
     await atomicWriteFile(
-      join(staging, "world.json"),
+      join(dir, "world.json"),
       JSON.stringify({ ...source, worldId, slug }, null, 2) + "\n",
     );
-
-    await mkdir(toExtendedLength(worldsDir), { recursive: true });
-    await rename(toExtendedLength(staging), toExtendedLength(join(worldsDir, slug)));
-    // The app root is a folder people open (Settings · About · Open folder). `rmdir` and not
-    // `rm -r`: it removes the staging area only when nothing is in it, so a second install
-    // running alongside this one keeps the directory it is still writing into.
-    await rmdir(toExtendedLength(stagingRoot)).catch(() => {});
     return { worldId, slug, name: source.name };
   } catch (err) {
-    // A half-copied world must not be left where the next install would trip over it.
-    await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});
+    // A half-copied world has no world.json and is already invisible to the library, but it
+    // would still hold the slug against the next attempt. Remove it.
+    await rm(toExtendedLength(dir), { recursive: true, force: true }).catch(() => {});
     throw err;
   }
 }
