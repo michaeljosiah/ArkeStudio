@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { newId, type WorldChatStoredEvent } from "@arke-studio/contracts";
@@ -173,13 +173,20 @@ describe("a world snapshot carries the rows", () => {
     await conversation(world, "The bells and the lock");
 
     const { bundle, problems } = await scanWorld(world);
-    assert.equal(bundle.conversations.length, 1);
-    assert.equal(bundle.conversations[0]!.title, "The bells and the lock");
+    // Asserted by identity, not by count: the fixture world ships a conversation of its own,
+    // and a test about what a row carries should not also be a test of how many exist.
+    const row = bundle.conversations.find((c) => c.title === "The bells and the lock");
+    assert.ok(row, "the conversation just written is listed");
+    assert.ok(!("messages" in row), "the row carries counts, not transcripts");
     assert.deepEqual(problems, [], "a conversation is not world content and raises no problem");
   });
 
   it("leaves the field empty for a world that has never had one", async () => {
-    const { bundle } = await scanWorld(await makeTempWorld());
+    // The fixture ships one, so it is removed rather than counted around: this test is about
+    // the absent case, and a world that merely has fewer conversations is not that case.
+    const world = await makeTempWorld();
+    await rm(conversationsDir(world), { recursive: true, force: true });
+    const { bundle } = await scanWorld(world);
     assert.deepEqual(bundle.conversations, []);
   });
 });

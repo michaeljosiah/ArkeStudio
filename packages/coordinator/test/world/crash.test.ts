@@ -34,6 +34,14 @@ interface Prepared {
   oldSheet: string;
   oldCanon: string;
   newSheetBody: string;
+  /**
+   * Read off the fixture rather than written down here. This file asserts that recovery lands
+   * wholly on one side of a commit, which is a claim about *before and after*, not about any
+   * particular number — and hardcoding the numbers made a growing fixture look like a recovery
+   * bug nine times over.
+   */
+  baseRevision: number;
+  baseSheetVersion: number;
 }
 
 async function prepare(): Promise<Prepared> {
@@ -42,6 +50,10 @@ async function prepare(): Promise<Prepared> {
   const canonPath = "canon/CANON-002.md";
   const oldSheet = await readFile(join(dir, sheetPath), "utf8");
   const oldCanon = await readFile(join(dir, canonPath), "utf8");
+  const baseRevision = (
+    JSON.parse(await readFile(join(dir, "world.json"), "utf8")) as { canonRevision: number }
+  ).canonRevision;
+  const baseSheetVersion = Number(MarkdownFile.parse(oldSheet).data["version"]);
 
   const sheetDoc = MarkdownFile.parse(oldSheet);
   const newSheetBody = sheetDoc.body.replace("Salt-crusted braids", "Salt-white braids");
@@ -49,7 +61,7 @@ async function prepare(): Promise<Prepared> {
   const canonDoc = MarkdownFile.parse(oldCanon);
   canonDoc.setBody(canonDoc.body + "\nAmended under test.");
   const canonNew =
-    "---\nid: CANON-045\ntype: rule\ntitle: The test rule\nstatus: settled\nintroducedAt: 0\nlinks: []\n---\n\nA rule created mid-crash.\n";
+    "---\nid: CANON-072\ntype: rule\ntitle: The test rule\nstatus: settled\nintroducedAt: 0\nlinks: []\n---\n\nA rule created mid-crash.\n";
 
   const input: CommitInput = {
     kind: "mixed",
@@ -57,30 +69,33 @@ async function prepare(): Promise<Prepared> {
     files: [
       { path: sheetPath, action: "replace", content: sheetDoc.serialize(), baseHash: sha256(oldSheet) },
       { path: canonPath, action: "replace", content: canonDoc.serialize(), baseHash: sha256(oldCanon) },
-      { path: "canon/CANON-045.md", action: "create", content: canonNew, baseHash: null },
+      { path: "canon/CANON-072.md", action: "create", content: canonNew, baseHash: null },
     ],
   };
-  return { dir, input, oldSheet, oldCanon, newSheetBody };
+  return { dir, input, oldSheet, oldCanon, newSheetBody, baseRevision, baseSheetVersion };
 }
 
 async function assertConsistent(p: Prepared): Promise<"old" | "new"> {
   const world = JSON.parse(await readFile(join(p.dir, "world.json"), "utf8")) as { canonRevision: number };
   const sheet = await readFile(join(p.dir, "characters/maren-kest.md"), "utf8");
   const canon = await readFile(join(p.dir, "canon/CANON-002.md"), "utf8");
-  const created = await readFile(join(p.dir, "canon/CANON-045.md"), "utf8").catch(() => null);
+  const created = await readFile(join(p.dir, "canon/CANON-072.md"), "utf8").catch(() => null);
   const changes = await readChanges(join(p.dir, "changes.jsonl"));
   const commitLines = changes.filter((c) => c["source"] === "crash-test");
 
-  if (world.canonRevision === 43) {
+  if (world.canonRevision === p.baseRevision + 1) {
     // The new state — every part of it, not some (R-15).
     assert.ok(sheet.includes("Salt-white braids"), "sheet is new");
     assert.ok(canon.includes("Amended under test."), "canon is new");
     assert.ok(created !== null, "created entry exists");
     assert.equal(commitLines.length, 3, "the change log records the commit exactly once");
-    assert.ok(await readFile(join(p.dir, ".history/characters/maren-kest/v4.md"), "utf8"), "outgoing snapshot exists");
+    assert.ok(
+      await readFile(join(p.dir, `.history/characters/maren-kest/v${p.baseSheetVersion}.md`), "utf8"),
+      "outgoing snapshot exists",
+    );
     return "new";
   }
-  assert.equal(world.canonRevision, 42, "world.json is wholly old");
+  assert.equal(world.canonRevision, p.baseRevision, "world.json is wholly old");
   assert.equal(sheet, p.oldSheet, "sheet is byte-identical to before");
   assert.equal(canon, p.oldCanon, "canon is byte-identical to before");
   assert.equal(created, null, "no created entry");

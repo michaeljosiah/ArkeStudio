@@ -19,7 +19,7 @@ describe("scanWorld over the fixture corpus (T-18)", () => {
     const { bundle } = await scanWorld(FIXTURE_WORLD);
     const maren = bundle.sheets.find((s) => s.id === "maren-kest");
     assert.ok(maren);
-    assert.equal(maren.version, 4);
+    assert.equal(maren.version, 5);
     assert.equal(maren.status, "locked");
     assert.deepEqual(
       maren.sections.map((s) => s.heading),
@@ -31,13 +31,13 @@ describe("scanWorld over the fixture corpus (T-18)", () => {
 
   it("reads canon including the open thread and the timeline entry", async () => {
     const { bundle } = await scanWorld(FIXTURE_WORLD);
-    assert.equal(bundle.canon.length, 6);
+    assert.equal(bundle.canon.length, 33);
     const thread = bundle.canon.find((c) => c.id === "CANON-044");
     assert.equal(thread?.type, "thread");
     assert.equal(thread?.status, "open");
     assert.equal(bundle.canon.find((c) => c.type === "timeline")?.id, "CANON-031");
     assert.equal(bundle.canon.find((c) => c.id === "CANON-002")?.amendedAt, 42);
-    assert.equal(bundle.meta.canonRevision, 42);
+    assert.equal(bundle.meta.canonRevision, 104);
   });
 
   it("reads the production with takes, reviews and selections separated (§2.3.7)", async () => {
@@ -52,7 +52,7 @@ describe("scanWorld over the fixture corpus (T-18)", () => {
 
   it("reads the staged proposal and its advisory ripple preview", async () => {
     const { bundle } = await scanWorld(FIXTURE_WORLD);
-    assert.equal(bundle.proposals.length, 1);
+    assert.equal(bundle.proposals.length, 2);
     assert.equal(bundle.proposals[0]!.proposal.kind, "sheet-edit");
     assert.equal(bundle.proposals[0]!.ripple?.items.length, 4);
   });
