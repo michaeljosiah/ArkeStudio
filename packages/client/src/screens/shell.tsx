@@ -223,10 +223,29 @@ export function LaunchScreen() {
   const speed = active?.bytesPerSecond ?? null;
   const remaining = speed !== null && speed > 0 ? Math.round((totalBytes - doneBytes) / speed) : null;
 
+  // Setup happens once. Every launch after it detects the runtimes already on this machine,
+  // fetches nothing, and waits only for the coordinator to open — a few seconds with no
+  // progress worth reporting. A bar creeping under "Setting up your studio" is then a lie
+  // about what is happening and about how often it happens, so that panel is kept for the
+  // launch that is actually doing the work: something queued, downloading or installing.
+  const fetching = components.some(
+    (c) => c.state === "queued" || c.state === "downloading" || c.state === "installing",
+  );
+  const setupRun = downloading || fetching;
+
+  // The snapshot's version once there is a snapshot; the host's before that, so the one line
+  // this screen keeps is not an empty "v" for the length of the wait.
+  const version =
+    state?.app.version ?? (typeof window === "undefined" ? null : window.arke?.appVersion ?? null);
+  const enter = () => {
+    if (!settled || !state) return;
+    navigate(state.worlds.length === 0 ? "/first-run" : "/worlds", { replace: true });
+  };
+
   return (
     <div className="fy-app" data-screen="launch">
-      {/* The one screen without the two controls: nothing is configured yet, and the only thing
-          that has happened is the download this screen is already showing. */}
+      {/* The one screen without the two controls: there is no world open to act on yet, and
+          nothing has happened here that a control could take you back to. */}
       <AppChrome controls={false} divided={false} />
       <div className="fy-launch">
         <div className="fy-launch__reel">
@@ -244,22 +263,16 @@ export function LaunchScreen() {
           />
         </div>
         <div className="fy-launch__panel">
-          {/*
-            Once there is nothing left to fetch, the panel is a door and a version number.
-            The progress bar, the byte counts and the reassurance about where worlds live were
-            all answers to "what is it doing" — a question nobody is asking any more.
-          */}
-          {settled && startup?.status !== "failed" ? (
-            <div className="fy-launch__done">
-              <Button
-                variant="primary"
-                onClick={() => navigate(state!.worlds.length === 0 ? "/first-run" : "/worlds", { replace: true })}
-              >
-                Continue
-              </Button>
-              <span className="fy-launch__version">v{state?.app.version ?? ""}</span>
-            </div>
-          ) : (
+          {startup?.status === "failed" ? (
+            <Callout tone="danger" title="The studio could not start">
+              <div>{startup.detail}</div>
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <Button variant="primary" onClick={() => window.arke?.retryStartup?.()}>Retry</Button>
+                <Button variant="secondary" onClick={() => window.arke?.openDataFolder?.()}>Open data folder</Button>
+                <Button variant="ghost" onClick={() => window.arke?.quit?.()}>Quit</Button>
+              </div>
+            </Callout>
+          ) : setupRun && !settled ? (
             <>
           <div className="fy-launch__row">
             <span className="fy-launch__title">Setting up your studio.</span>
@@ -277,16 +290,7 @@ export function LaunchScreen() {
             <span style={{ flex: 1 }} />
             <span className="fy-mono">{remaining !== null ? aboutLeft(remaining) : ""}</span>
           </div>
-          {startup?.status === "failed" ? (
-            <Callout tone="danger" title="The studio could not start">
-              <div>{startup.detail}</div>
-              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <Button variant="primary" onClick={() => window.arke?.retryStartup?.()}>Retry</Button>
-                <Button variant="secondary" onClick={() => window.arke?.openDataFolder?.()}>Open data folder</Button>
-                <Button variant="ghost" onClick={() => window.arke?.quit?.()}>Quit</Button>
-              </div>
-            </Callout>
-          ) : connection === "closed" && startup?.status !== "initializing" && (
+          {connection === "closed" && startup?.status !== "initializing" && (
             <Callout tone="warning" title="Waiting for the coordinator">
               The app keeps retrying on its own. If this is a dev browser session, start it with
               `npm run dev:coordinator`.
@@ -305,6 +309,32 @@ export function LaunchScreen() {
               {ready ? "Continue in the background →" : "Setting up…"}
             </Button>
           </div>
+            </>
+          ) : (
+            /*
+              Nothing to fetch: one control and a version number, and the same control the whole
+              way through. The title, the step line, the bar and the byte counts all answered
+              "what is it doing" — on a launch that only waits for the coordinator, the honest
+              answer is "opening", which a button that says so already gives.
+            */
+            <>
+              {connection === "closed" && startup?.status !== "initializing" && (
+                <Callout tone="warning" title="Waiting for the coordinator">
+                  The app keeps retrying on its own. If this is a dev browser session, start it
+                  with `npm run dev:coordinator`.
+                </Callout>
+              )}
+              <div className="fy-launch__done">
+                <Button
+                  variant="primary"
+                  disabled={!settled}
+                  title={settled ? undefined : "Waiting for the studio to open"}
+                  onClick={enter}
+                >
+                  {settled ? "Continue" : "Loading…"}
+                </Button>
+                <span className="fy-launch__version">{version === null ? "" : `v${version}`}</span>
+              </div>
             </>
           )}
         </div>

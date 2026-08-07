@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { App } from "../src/App.js";
-import { __applyEventForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __connectionStatusForTest, __setStateForTest } from "../src/lib/store.js";
 import { SCREENS } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -50,6 +50,58 @@ describe("screen inventory", () => {
     assert.ok(html.includes("fy-launch__version"), "with the version under it");
     for (const chatter of ["Setting up your studio.", "One-time setup", "everything ready"]) {
       assert.ok(!html.includes(chatter), `"${chatter}" is not shown once there is nothing to wait for`);
+    }
+  });
+
+  it("waits behind one control on a launch with nothing to fetch", () => {
+    // Setup runs once. Every launch after it only waits for the coordinator to open, and the
+    // panel says so with the same control the whole way through — no title, no step line, no
+    // bar creeping under a sentence about a one-time download that already happened.
+    __connectionStatusForTest("connecting");
+    try {
+      const html = renderAt("/");
+      assert.ok(html.includes("Loading…"), "the door is there from the first frame, and says it is opening");
+      assert.ok(html.includes("fy-launch__version"), "with the version still under it");
+      assert.ok(!html.includes("fy-setupbar"), "nothing is being fetched, so there is no bar");
+      for (const chatter of ["Setting up your studio.", "One-time setup", "checking studio core"]) {
+        assert.ok(!html.includes(chatter), `"${chatter}" belongs to the launch that is actually setting up`);
+      }
+    } finally {
+      __connectionStatusForTest("open");
+    }
+  });
+
+  it("keeps the progress panel for the launch that is actually fetching", () => {
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        setup: {
+          running: true,
+          diskFreeMb: 100_000,
+          components: [
+            {
+              id: "voxa-kokoro",
+              displayName: "Kokoro voice",
+              purpose: "Speaks on this machine",
+              sizeMb: 88,
+              state: "downloading",
+              bytesDone: 44 * 1024 * 1024,
+              bytesTotal: 88 * 1024 * 1024,
+              bytesPerSecond: 2 * 1024 * 1024,
+            },
+          ],
+        },
+      },
+    });
+    try {
+      const html = renderAt("/");
+      assert.ok(html.includes("Setting up your studio."), "a real download still says what it is");
+      assert.ok(html.includes("fy-setupbar"), "and still shows how far along it is");
+      assert.ok(html.includes("downloading kokoro voice"), "in the product's words, one line");
+      assert.ok(html.includes("One-time setup"), "with the promise that this happens once");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
     }
   });
 
