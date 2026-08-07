@@ -256,6 +256,68 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       entryContext: WorldChatContextSchema.optional(),
     })
     .strict(),
+  /**
+   * #70 R-50 §15.1: delete a conversation permanently.
+   *
+   * The `requestId` names the tombstone the directory is renamed to, which is what makes a
+   * repeated Delete idempotent rather than a second deletion of something already gone. The
+   * coordinator rechecks the preconditions itself: the row carries a reason so the button can
+   * say why it is unavailable, but a row is a snapshot and a turn may have started since.
+   */
+  z
+    .object({
+      kind: z.literal("world-chat-delete"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      conversationId: ConversationIdSchema,
+    })
+    .strict(),
+  /**
+   * #70 §15.1: shelve a conversation, reversibly and losing nothing.
+   *
+   * The answer whenever Delete is refused, which is most of the time a conversation has done
+   * anything: proposals from its wrap-up outlive it and hold deletion open until they are
+   * decided. No `requestId` — appending the same lifecycle event twice folds to the same status.
+   */
+  z
+    .object({
+      kind: z.literal("world-chat-archive"),
+      worldId: UlidSchema,
+      conversationId: ConversationIdSchema,
+    })
+    .strict(),
+  /** #70 §15.1: take it back off the shelf. */
+  z
+    .object({
+      kind: z.literal("world-chat-unarchive"),
+      worldId: UlidSchema,
+      conversationId: ConversationIdSchema,
+    })
+    .strict(),
+  /**
+   * #70 §10.1.1, §13.1: hand a file to one conversation, privately.
+   *
+   * Host-mediated exactly as artifact filing is: the window holds the dropped File, the host
+   * resolves where it lives, and only the path crosses on this frame — the renderer never sees
+   * one (SPEC-001 R-9). What lands is conversation-private workspace, not a world artifact: a
+   * document dropped in to think out loud with has not been agreed to anything.
+   */
+  z
+    .object({
+      kind: z.literal("world-chat-attach"),
+      worldId: UlidSchema,
+      conversationId: ConversationIdSchema,
+      sourcePath: z.string().min(1),
+    })
+    .strict(),
+  /** #70 §13.1: the same gesture through the host's picker, for people who do not drag. */
+  z
+    .object({
+      kind: z.literal("world-chat-attach-files"),
+      worldId: UlidSchema,
+      conversationId: ConversationIdSchema,
+    })
+    .strict(),
   /** SPEC-005: stage a proposal and run an authoring agent inside it. */
   z
     .object({

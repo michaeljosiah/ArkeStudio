@@ -22,6 +22,7 @@ import { Loading } from "../components/loading.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { characterPortraitPath, Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
+import { DictationButton } from "../components/dictation.js";
 import { ExtractionOffer } from "../components/extraction-offer.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Wave } from "./production.js";
@@ -76,14 +77,12 @@ import {
   requestVoicePreview,
   readSheetSection,
   resolveExtraction,
-  transcribeDictation,
   useArtifactNotices,
   useImportReport,
   useAskResults,
   useAuthoring,
   useCanonRefs,
   useCanonSearches,
-  useDictation,
   usePermissions,
   useSheetRefs,
   useStore,
@@ -1558,75 +1557,6 @@ export function CharacterEditScreen() {
   );
 }
 
-/**
- * Push-to-talk dictation (SPEC-011 R-17, R-18): recorded here, transcribed on loopback by
- * whisper.cpp — audio never leaves the machine — and inserted as editable text, never
- * submitted. A mis-transcribed instruction that submits itself is a proposal nobody meant.
- */
-export function DictationButton({ onText }: { onText: (text: string) => void }) {
-  const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
-  const [requestId, setRequestId] = useState<string | null>(null);
-  const sidecar = useVoiceSidecar();
-  const { state } = useStore();
-  const dictation = useDictation();
-  const result = requestId ? dictation[requestId] : undefined;
-  useEffect(() => {
-    if (result?.text) {
-      onText(result.text);
-      setRequestId(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result?.text]);
-  const unavailable =
-    sidecar !== null && sidecar.state !== "ready"
-      ? state?.app.health.voice.status !== "healthy" || state?.app.voiceRuntime?.engineStatus.whisper.state !== "ready"
-      : false;
-  const start = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const rec = new MediaRecorder(stream);
-      const chunks: Blob[] = [];
-      rec.ondataavailable = (e) => chunks.push(e.data);
-      rec.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const id = `dict-${Date.now()}`;
-        setRequestId(id);
-        void new Blob(chunks, { type: rec.mimeType }).arrayBuffer().then((buf) => {
-          let binary = "";
-          const bytes = new Uint8Array(buf);
-          for (const b of bytes) binary += String.fromCharCode(b);
-          transcribeDictation(id, btoa(binary), rec.mimeType || "audio/webm");
-        });
-      };
-      rec.start();
-      setRecorder(rec);
-    } catch {
-      /* microphone denied — the button simply does nothing further */
-    }
-  };
-  return (
-    <span style={{ display: "inline-flex", gap: "var(--space-2)", alignItems: "center" }}>
-      <Button
-        variant="ghost"
-        disabled={unavailable}
-        title={unavailable ? (sidecar?.detail ?? "local voice is off") : "Audio is transcribed locally and never sent to a provider"}
-        onClick={() => {
-          if (recorder) {
-            recorder.stop();
-            setRecorder(null);
-          } else {
-            void start();
-          }
-        }}
-      >
-        {recorder ? "Stop · transcribe" : "🎤 Dictate"}
-      </Button>
-      {requestId && !result && <Loading inline label="transcribing locally…" />}
-      {result?.error && <span className="scr-field__hint">{result.error}</span>}
-    </span>
-  );
-}
-
 // ---- Reference kit / model sheet / voice ----------------------------------
 
 export function ReferenceKitScreen() {
@@ -2952,6 +2882,7 @@ export function CanonThreadScreen() {
               agentLabel="canon author"
               busy={chatRunning}
               busyLabel="drafting against the canon…"
+              onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
               {...(worldId === undefined ? {} : { onAttach: () => attachFiles(worldId) })}
               {...(worldId !== undefined && hostCanAttach()
                 ? {

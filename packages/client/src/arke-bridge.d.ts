@@ -38,9 +38,17 @@ export type ResolvedTheme = "light" | "dark";
 export type StartupState =
   { status: "initializing" } | { status: "ready" } | { status: "failed"; detail: string };
 
-/** A world to file into, or a genesis conversation that does not have one yet. */
+/**
+ * Where an attachment is going: a world to file into, a genesis conversation that does not have
+ * one yet, or one World Chat conversation, which keeps it privately rather than filing it.
+ *
+ * Each member is also the frame it becomes — the host appends the resolved `sourcePath` and sends
+ * the object as-is — so a new destination is a new member here and a matching `ClientMessage`.
+ */
 export type AttachTarget =
-  { kind: "file-artifact"; worldId: string } | { kind: "genesis-attach"; genesisId: string };
+  | { kind: "file-artifact"; worldId: string }
+  | { kind: "genesis-attach"; genesisId: string }
+  | { kind: "world-chat-attach"; worldId: string; conversationId: string };
 
 declare global {
   interface Window {

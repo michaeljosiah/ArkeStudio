@@ -325,3 +325,65 @@ describe("the transcript", () => {
     assert.ok(renderConversation().includes('aria-live="polite"'));
   });
 });
+
+/**
+ * The conversation list's row, once it gained controls (R-50, §15.1).
+ *
+ * The row was a bare link and is now a link with two buttons beside it, which is the shape most
+ * likely to break the thing it grew out of. Two properties are worth pinning rather than
+ * eyeballing: the link still takes the width the buttons do not, so a long title does not shove
+ * them off the row; and the controls are never revealed by hover alone, which would put deleting
+ * out of reach of touch and out of sight of anyone not already pointing at it.
+ */
+describe("the conversation row's controls", () => {
+  const rowBlock = /\.fy-chatlist__row \{([^}]*)\}/.exec(CSS)?.[1] ?? "";
+  const itemBlock = /\.fy-chatlist__row \.fy-chatlist__item \{([^}]*)\}/.exec(CSS)?.[1] ?? "";
+
+  it("lays the row out with the link taking the width the controls do not", () => {
+    assert.match(rowBlock, /display:\s*flex/);
+    assert.match(itemBlock, /flex:\s*1/);
+    assert.match(itemBlock, /min-width:\s*0/, "or a long title refuses to shrink and pushes them out");
+  });
+
+  it("keeps the controls visible without hover", () => {
+    const quiet = /\.fy-chatlist__acts \.ui-btn \{([^}]*)\}/.exec(CSS)?.[1] ?? "";
+    const opacity = /opacity:\s*([\d.]+)/.exec(quiet)?.[1];
+    assert.ok(opacity !== undefined, "the resting state is stated rather than left to the default");
+    assert.ok(
+      Number(opacity) > 0,
+      "quiet until wanted is fine; invisible until hovered is not — this is where deleting lives",
+    );
+  });
+
+  it("says the refusal in text, so it does not depend on a tooltip or on colour", () => {
+    assert.match(CSS, /\.fy-chatlist__blocked \{/);
+    const html = renderList();
+    assert.match(html, /Cannot delete/);
+  });
+
+  function renderList(): string {
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      world: {
+        ...FIXTURE_STATE.world!,
+        conversations: [
+          {
+            id: CONVERSATION_ID as never,
+            title: "The bells and the lock",
+            status: "open",
+            updatedAt: "2026-08-06T10:00:00Z",
+            pointCount: 3,
+            openProposalCount: 2,
+            deletionBlock: "unresolved-proposals",
+            notCarried: [],
+          },
+        ],
+      },
+    });
+    return renderToString(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat`]}>
+        <App />
+      </MemoryRouter>,
+    ).replaceAll("<!-- -->", "");
+  }
+});

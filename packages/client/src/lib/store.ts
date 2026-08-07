@@ -130,6 +130,13 @@ interface StoreState {
   voiceAudio: Record<string, Extract<DomainEvent, { type: "voice.audio" }>>;
   /** SPEC-011: dictation results by requestId — inserted as editable text, never submitted. */
   dictation: Record<string, { text: string | null; error: string | null }>;
+  /**
+   * Files World Chat would not take, by conversation (#70 §13.2).
+   *
+   * Kept here rather than in the workspace because nothing was written: a refused file has no
+   * durable home, so if this does not hold it the reason is lost the moment it arrives.
+   */
+  worldChatRefusals: Record<string, Array<{ name: string; reason: string }>>;
   voiceSidecar: { state: "not-started" | "downloading" | "unavailable" | "ready"; detail: string } | null;
   voiceRuntimeTest: {
     requestId: string;
@@ -193,6 +200,7 @@ let current: StoreState = {
   voicePreviews: {},
   voiceAudio: {},
   dictation: {},
+  worldChatRefusals: {},
   voiceSidecar: null,
   voiceRuntimeTest: null,
   mainPhotoAcceptance: {},
@@ -540,6 +548,7 @@ function handleFrame(json: string): void {
     let voicePreviews = current.voicePreviews;
     let voiceAudio = current.voiceAudio;
     let dictation = current.dictation;
+    let worldChatRefusals = current.worldChatRefusals;
     let voiceSidecar = current.voiceSidecar;
     let voiceRuntimeTest = current.voiceRuntimeTest;
     let mainPhotoAcceptance = current.mainPhotoAcceptance;
@@ -562,6 +571,16 @@ function handleFrame(json: string): void {
       voiceAudio = { ...voiceAudio, [event.requestId]: event };
     } else if (event.type === "dictation.result") {
       dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
+    } else if (event.type === "world-chat.attachment-refused") {
+      // The last few only: a refusal is news for a moment, not a list to work through — the same
+      // rule the composer applies to the ones it raises itself.
+      worldChatRefusals = {
+        ...worldChatRefusals,
+        [event.conversationId]: [
+          ...(worldChatRefusals[event.conversationId] ?? []).slice(-2),
+          { name: event.name, reason: event.reason },
+        ],
+      };
     } else if (event.type === "voice.sidecar") {
       voiceSidecar = { state: event.state, detail: event.detail };
     } else if (event.type === "voice.runtime-test") {
@@ -683,6 +702,7 @@ function handleFrame(json: string): void {
       voicePreviews,
       voiceAudio,
       dictation,
+      worldChatRefusals,
       voiceSidecar,
       voiceRuntimeTest,
       mainPhotoAcceptance,
@@ -1793,6 +1813,7 @@ export function __setStateForTest(state: ClientState): void {
     voicePreviews: {},
     voiceAudio: {},
     dictation: {},
+    worldChatRefusals: {},
     voiceSidecar: null,
     voiceRuntimeTest: null,
     mainPhotoAcceptance: {},
@@ -1886,6 +1907,48 @@ export function wrapUpWorldChat(
     conversationId,
     expectedConversationSeq,
   });
+}
+
+/**
+ * Delete a conversation permanently (R-50).
+ *
+ * The coordinator rechecks whether anything still depends on it and refuses if so, which is why
+ * this returns nothing to wait on: the row it came from is redrawn either way, still carrying the
+ * reason if there is one.
+ */
+export function deleteWorldChat(worldId: string, conversationId: string): void {
+  send({ kind: "world-chat-delete", worldId, requestId: crypto.randomUUID(), conversationId });
+}
+
+/** Ask the host's picker for documents to hand to this conversation, privately. */
+export function worldChatAttachFiles(worldId: string, conversationId: string): void {
+  send({ kind: "world-chat-attach-files", worldId, conversationId });
+}
+
+/**
+ * Where a dropped or pasted file goes: this conversation, not the world.
+ *
+ * Handed to the host rather than sent from here, because resolving a File to a path is the one
+ * thing the renderer must not do — see attachHostFiles.
+ */
+export function worldChatAttachTarget(worldId: string, conversationId: string): AttachTarget {
+  return { kind: "world-chat-attach", worldId, conversationId };
+}
+
+/** What this conversation would not take, so the composer can say so on a chip. */
+export function useWorldChatRefusals(conversationId: string | undefined): Array<{ name: string; reason: string }> {
+  const refusals = useStore().worldChatRefusals;
+  return conversationId ? (refusals[conversationId] ?? []) : [];
+}
+
+/** Shelve a conversation. Reversible, and loses nothing. */
+export function archiveWorldChat(worldId: string, conversationId: string): void {
+  send({ kind: "world-chat-archive", worldId, conversationId });
+}
+
+/** Take it back off the shelf. */
+export function unarchiveWorldChat(worldId: string, conversationId: string): void {
+  send({ kind: "world-chat-unarchive", worldId, conversationId });
 }
 
 /** Return a proposal to the conversation it came from, and reopen it. */

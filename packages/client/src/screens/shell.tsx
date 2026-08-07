@@ -798,6 +798,7 @@ export function NewWorldScreen() {
                     busy={chatRunning}
                     busyLabel="shaping the draft…"
                     onAttach={() => genesisAttachFiles(genesisId)}
+                    onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
                     {...(hostCanAttach()
                       ? {
                           onAttachFiles: (files: readonly File[]) => attachHostFiles(attachTarget, files),

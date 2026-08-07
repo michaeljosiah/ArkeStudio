@@ -4,6 +4,7 @@ import {
   newId,
   type ConversationId,
   type WorldChatContext,
+  type WorldChatDeletionBlock,
   type WorldChatLoaded,
   type WorldChatSummary,
 } from "@arke-studio/contracts";
@@ -26,13 +27,14 @@ import { conversationDir, conversationsDir, WorldChatStore } from "./store.js";
  */
 
 export class ConversationInUseError extends Error {
-  constructor(readonly reason: "active-run" | "wrap-up-in-flight" | "unresolved-proposals") {
+  constructor(readonly reason: WorldChatDeletionBlock) {
     super(REASONS[reason]);
     this.name = "ConversationInUseError";
   }
 }
 
-const REASONS = {
+/** The refusals, in the words the row shows before the button is pressed rather than after. */
+const REASONS: Record<WorldChatDeletionBlock, string> = {
   "active-run": "A turn is still running. Cancel it before deleting this conversation.",
   "wrap-up-in-flight": "This conversation is being turned into proposals. Wait for that to finish.",
   "unresolved-proposals":
@@ -133,27 +135,21 @@ export class WorldChatService {
    * Why this conversation cannot be deleted yet, or null when it can (R-50).
    *
    * Separate from `delete` so the reason can be shown before the button is pressed, rather than
-   * as an error after somebody has already decided.
+   * as an error after somebody has already decided. The answer itself comes from the fold, which
+   * is also what puts it on the summary row — the button and the refusal read the same value, so
+   * they cannot drift apart.
+   *
+   * The log cannot distinguish a run that is happening now from one abandoned by a crash — both
+   * are a start with no terminal event — so an open run blocks either way. That is not a
+   * compromise: startup recovery closes the abandoned ones before anyone can reach a delete
+   * button, so by the time this is asked, an open run really is a live one.
    */
   async blockedFromDeletion(id: ConversationId): Promise<ConversationInUseError["reason"] | null> {
     const store = this.store(id);
     const meta = await store.readMeta();
     if (!meta) return null;
     const { events } = await store.read();
-    const folded = foldConversation(meta.id, meta.createdAt, events);
-
-    // The log cannot distinguish a run that is happening now from one abandoned by a crash —
-    // both are a start with no terminal event — so an open run blocks either way. That is not a
-    // compromise: startup recovery closes the abandoned ones before anyone can reach a delete
-    // button, so by the time this is asked, an open run really is a live one.
-    if (folded.needsInterruptedRunRepair) return "active-run";
-    const intents = events.filter((e) => e.event.type === "wrapup.intent-recorded").length;
-    const settled = events.filter(
-      (e) => e.event.type === "wrapup.completed" || e.event.type === "wrapup.failed",
-    ).length;
-    if (intents > settled) return "wrap-up-in-flight";
-    if (folded.view.proposalIds.length > 0) return "unresolved-proposals";
-    return null;
+    return foldConversation(meta.id, meta.createdAt, events).view.deletionBlock;
   }
 
   /**

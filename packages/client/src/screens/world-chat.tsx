@@ -1,17 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import type { WorldChatSummary } from "@arke-studio/contracts";
+import type { WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
 import { Composer } from "../components/composer.js";
 import { EmptyState } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import {
+  archiveWorldChat,
+  attachHostFiles,
+  attachHostText,
   cancelWorldChat,
+  deleteWorldChat,
+  hostCanAttach,
   retryWorldChatTurn,
   createWorldChat,
   openWorldChat,
   sendWorldChat,
+  unarchiveWorldChat,
   useStore,
+  useWorldChatRefusals,
+  worldChatAttachFiles,
+  worldChatAttachTarget,
   wrapUpWorldChat,
 } from "../lib/store.js";
 
@@ -46,6 +55,19 @@ export function byPendingConsequence(a: WorldChatSummary, b: WorldChatSummary): 
   return b.updatedAt.localeCompare(a.updatedAt);
 }
 
+/**
+ * Why Delete is unavailable, in the length a row has room for (R-50).
+ *
+ * Said in text beside the disabled control rather than in a tooltip. A reason only a mouse can
+ * reach is not a reason, and this is the one place in the feature where the app says no to
+ * something the person plainly meant.
+ */
+const WHY_NOT_DELETABLE: Record<WorldChatDeletionBlock, string> = {
+  "active-run": "a turn is still running",
+  "wrap-up-in-flight": "it is being turned into proposals",
+  "unresolved-proposals": "its proposals are still waiting",
+};
+
 function whatItIsWaitingOn(row: WorldChatSummary): string {
   if (row.openProposalCount > 0) {
     return `${row.openProposalCount} proposal${row.openProposalCount === 1 ? "" : "s"} waiting on you`;
@@ -54,6 +76,84 @@ function whatItIsWaitingOn(row: WorldChatSummary): string {
   if (row.status === "archived") return "archived";
   if (row.pointCount === 0) return "open · nothing understood yet";
   return `open · ${row.pointCount} point${row.pointCount === 1 ? "" : "s"} understood`;
+}
+
+/**
+ * One row, and the two things that can be done to it from here.
+ *
+ * Archive sits beside Delete rather than behind it because Archive is the answer whenever Delete
+ * is refused — and Delete is refused for as long as a conversation's proposals are undecided,
+ * which is most of the time it has done anything at all. A list offering only the control that
+ * will not work is a list that reads as broken.
+ *
+ * Deleting confirms in place, two clicks and no dialog, as archiving a world does. The second
+ * click is the consent, and the sentence between them says what actually goes.
+ */
+function ConversationRow({ worldId, row }: { worldId: string; row: WorldChatSummary }) {
+  const [confirming, setConfirming] = useState(false);
+  const blocked = row.deletionBlock;
+
+  return (
+    <li className="fy-chatlist__row">
+      <Link to={`/w/${worldId}/chat/${row.id}`} className="fy-chatlist__item">
+        <span className="fy-chatlist__title">{row.title}</span>
+        <span
+          className={cx("fy-chatlist__sub", row.openProposalCount > 0 && "fy-chatlist__sub--waiting")}
+        >
+          {whatItIsWaitingOn(row)}
+        </span>
+      </Link>
+      {confirming ? (
+        <div className="fy-chatlist__confirm">
+          <span className="fy-chatlist__confirmsay">
+            Delete this conversation? Its transcript, everything it understood and anything
+            attached to it go for good, and proposals it produced can no longer be sent back here.
+          </span>
+          <span className="fy-chatlist__acts">
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                deleteWorldChat(worldId, row.id);
+                setConfirming(false);
+              }}
+            >
+              Delete
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>
+              Keep
+            </Button>
+          </span>
+        </div>
+      ) : (
+        <div className="fy-chatlist__acts">
+          {blocked && <span className="fy-chatlist__blocked">Cannot delete — {WHY_NOT_DELETABLE[blocked]}</span>}
+          {row.status === "archived" ? (
+            <Button variant="ghost" size="sm" onClick={() => unarchiveWorldChat(worldId, row.id)}>
+              Restore
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              title="Shelve it — nothing is deleted"
+              onClick={() => archiveWorldChat(worldId, row.id)}
+            >
+              Archive
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={blocked !== undefined}
+            onClick={() => setConfirming(true)}
+          >
+            Delete
+          </Button>
+        </div>
+      )}
+    </li>
+  );
 }
 
 export function WorldChatScreen() {
@@ -90,6 +190,8 @@ export function WorldChatScreen() {
   };
 
   const rows = useMemo(() => [...(world?.conversations ?? [])].sort(byPendingConsequence), [world?.conversations]);
+  const live = rows.filter((r) => r.status !== "archived");
+  const archived = rows.filter((r) => r.status === "archived");
 
   if (!world) return null;
 
@@ -120,23 +222,28 @@ export function WorldChatScreen() {
               {starting ? "Starting…" : "New conversation"}
             </Button>
           </div>
-          <ul className="fy-chatlist__items">
-            {rows.map((row) => (
-              <li key={row.id}>
-                <Link to={`/w/${worldId}/chat/${row.id}`} className="fy-chatlist__item">
-                  <span className="fy-chatlist__title">{row.title}</span>
-                  <span
-                    className={cx(
-                      "fy-chatlist__sub",
-                      row.openProposalCount > 0 && "fy-chatlist__sub--waiting",
-                    )}
-                  >
-                    {whatItIsWaitingOn(row)}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+          {live.length > 0 && (
+            <ul className="fy-chatlist__items">
+              {live.map((row) => (
+                <ConversationRow key={row.id} worldId={worldId!} row={row} />
+              ))}
+            </ul>
+          )}
+          {/* Archived conversations keep their own heading rather than sinking quietly to the
+              bottom of one list. Archiving has to visibly tidy, or nobody uses it — and it is the
+              only thing available while a conversation's proposals are still undecided. */}
+          {archived.length > 0 && (
+            <>
+              <h2 className="fy-chatlist__grouphead">
+                Archived · {archived.length}
+              </h2>
+              <ul className="fy-chatlist__items">
+                {archived.map((row) => (
+                  <ConversationRow key={row.id} worldId={worldId!} row={row} />
+                ))}
+              </ul>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -156,6 +263,16 @@ export function WorldChatConversationScreen() {
   const { state } = useStore();
   const navigate = useNavigate();
   const [draft, setDraft] = useState("");
+  /**
+   * Chips taken off the composer, for this visit only.
+   *
+   * Removing a chip means "stop referring to this", not "delete it" — the file stays in the
+   * conversation and anything already said about it stays checkable (§13.1). Held locally rather
+   * than durably because the store's unlink is scoped to a message, and these have not been sent
+   * with one yet; the same local dismissal the canon composer uses.
+   */
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const refusals = useWorldChatRefusals(conversationId);
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
@@ -203,11 +320,13 @@ export function WorldChatConversationScreen() {
    * An image can be attached and referred to; it cannot be quoted, and the chip should not
    * suggest otherwise (§13.2).
    */
-  const chips = (loaded?.attachments ?? []).map((a) => ({
-    id: a.id,
-    file: a.readability === "not-readable" ? `${a.fileName} · not readable in chat` : a.fileName,
-    kind: a.kind,
-  }));
+  const chips = (loaded?.attachments ?? [])
+    .filter((a) => !dismissed.includes(a.id))
+    .map((a) => ({
+      id: a.id,
+      file: a.readability === "not-readable" ? `${a.fileName} · not readable in chat` : a.fileName,
+      kind: a.kind,
+    }));
 
   return (
     <div data-screen="world-chat-conversation" className="fy-chat__wrap">
@@ -279,6 +398,26 @@ export function WorldChatConversationScreen() {
               busy={running}
               busyLabel="Thinking…"
               attachments={chips}
+              refusals={refusals}
+              // Appended to whatever is already typed, never sent: speaking gets you to a draft,
+              // and the draft is still corrected and sent by hand (SPEC-018 R-2, R-5).
+              onDictate={(text) => setDraft((prev) => (prev ? `${prev} ${text}` : text))}
+              {...(worldId && conversationId
+                ? { onAttach: () => worldChatAttachFiles(worldId, conversationId) }
+                : {})}
+              {...(worldId && conversationId && hostCanAttach()
+                ? {
+                    onAttachFiles: (files: readonly File[]) =>
+                      attachHostFiles(worldChatAttachTarget(worldId, conversationId), files),
+                    onAttachText: (text: string) =>
+                      attachHostText(
+                        worldChatAttachTarget(worldId, conversationId),
+                        text,
+                        "pasted-note.txt",
+                      ),
+                  }
+                : {})}
+              onRemoveAttachment={(id) => setDismissed((prev) => [...prev, id])}
               disabledReason={composerReason(state)}
             />
             {running && (

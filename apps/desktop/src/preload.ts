@@ -34,9 +34,14 @@ const startupListeners = new Set<(state: StartupState) => void>();
 /**
  * Where an attachment is going. The renderer names the destination, the host names the path —
  * neither knows the other's half, and the two only meet in the frame that leaves here.
+ *
+ * Each member is also the frame it becomes, so a new destination is a new member and a matching
+ * `ClientMessage`. World Chat's copy stays inside the conversation rather than being filed.
  */
 type AttachTarget =
-  { kind: "file-artifact"; worldId: string } | { kind: "genesis-attach"; genesisId: string };
+  | { kind: "file-artifact"; worldId: string }
+  | { kind: "genesis-attach"; genesisId: string }
+  | { kind: "world-chat-attach"; worldId: string; conversationId: string };
 
 type FrameListener = (frameJson: string) => void;
 type StatusListener = (status: "connecting" | "open" | "closed") => void;
