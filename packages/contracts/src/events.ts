@@ -404,6 +404,24 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /**
+   * A file World Chat would not take (#70 §13.2).
+   *
+   * Only the refusal travels. An attachment that lands is already in the conversation's own
+   * event log and arrives on the next workspace load, so announcing it here as well would give
+   * the screen two sources for one fact — and they would eventually disagree. A refusal has no
+   * such home: nothing was written, so if this does not say it, nothing does.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("world-chat.attachment-refused"),
+      conversationId: z.string().min(1),
+      name: z.string().min(1),
+      reason: z.string().min(1),
+    })
+    .strict(),
+
   /** Export lifecycle (SPEC-013 R-21): progress, and a terminal status with the output path. */
   z
     .object({

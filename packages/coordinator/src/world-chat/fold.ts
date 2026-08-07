@@ -55,6 +55,8 @@ export function foldConversation(
   let updatedAt = createdAt;
   let summary: string | undefined;
   let reopened = false;
+  /** An intent with no outcome after it. Last one wins, as wrapup-recovery reads it too. */
+  let wrapUpInFlight = false;
 
   const messages: WorldChatMessage[] = [];
   /** The log sequence each message arrived at, so paging can use a real cursor. */
@@ -171,14 +173,18 @@ export function foldConversation(
       }
       case "wrapup.intent-recorded":
         // Recorded but not applied: an intent is not an outcome, and a wrap-up that never
-        // completed must not leave the conversation looking closed.
+        // completed must not leave the conversation looking closed. It does hold deletion open,
+        // though — proposals may be halfway to existing.
+        wrapUpInFlight = true;
         break;
       case "wrapup.completed":
         status = "closed";
         for (const p of e.proposalIds) proposalIds.add(p);
         notCarried = e.notCarried;
+        wrapUpInFlight = false;
         break;
       case "wrapup.failed":
+        wrapUpInFlight = false;
         break;
       case "proposal.resolved": {
         // A proposal resolves once; a repeated reconciliation on startup is a no-op.
@@ -256,6 +262,16 @@ export function foldConversation(
     ...(summary ? { summary } : {}),
     proposalIds: [...proposalIds],
     notCarried,
+    // Computed here because this is the only place all three inputs exist at once, and because
+    // one answer is the point: the row that offers Delete and the command that refuses it must
+    // not be able to disagree.
+    deletionBlock: needsInterruptedRunRepair
+      ? "active-run"
+      : wrapUpInFlight
+        ? "wrap-up-in-flight"
+        : proposalIds.size > 0
+          ? "unresolved-proposals"
+          : null,
     problems,
   };
   return { view, problems, tombstones: [...tombstones.values()], needsInterruptedRunRepair };
@@ -295,5 +311,6 @@ export function summarise(view: WorldChatLoaded): WorldChatSummary {
     openProposalCount: view.proposalIds.length,
     ...(view.reopened ? { reopened: true } : {}),
     notCarried: view.notCarried,
+    ...(view.deletionBlock ? { deletionBlock: view.deletionBlock } : {}),
   };
 }

@@ -5,6 +5,7 @@ import { newId, type ConversationId } from "@arke-studio/contracts";
 import { ConversationInUseError, WorldChatService } from "../../src/world-chat/service.js";
 import { conversationsDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { discoverConversations } from "../../src/world-chat/discover.js";
+import { recoverConversations } from "../../src/world-chat/recovery.js";
 import { tempDir } from "../tmp.js";
 
 /**
@@ -149,6 +150,48 @@ describe("conversation lifecycle", () => {
       { type: "proposal.resolved", proposalId, outcome: "accepted", candidateIds: [] },
       { at: NOW() },
     );
+
+    assert.equal(await svc.blockedFromDeletion(id), null);
+    await svc.delete(id, "op-1");
+    assert.equal(await svc.load(id), null);
+  });
+
+  /**
+   * The reason has to reach the row, or the button cannot say why it is unavailable — and a
+   * Delete that looks available and then refuses is the same mistake as one that fails silently.
+   */
+  it("carries the reason onto the summary row, not only into the refusal", async () => {
+    const svc = await service();
+    const { id } = await svc.create({ title: "busy" });
+    await startRun(svc, id);
+
+    const { summaries } = await discoverConversations(svc.worldPath);
+    assert.equal(summaries[0]!.deletionBlock, "active-run");
+  });
+
+  it("leaves the row unmarked when nothing depends on the conversation", async () => {
+    const svc = await service();
+    await svc.create({ title: "free" });
+    const { summaries } = await discoverConversations(svc.worldPath);
+    assert.equal(summaries[0]!.deletionBlock, undefined);
+  });
+
+  /**
+   * The landmine under Delete.
+   *
+   * A run left `running` by a crash has no terminal event, so every reader folds it as
+   * interrupted for ever and the conversation reports itself in use. Without startup recovery it
+   * could never be deleted, and the reason given — "a turn is still running" — would be a lie
+   * about a process that died days ago. This is why the delete command and the recovery wiring
+   * had to land together.
+   */
+  it("becomes deletable once startup recovery has closed a crashed run", async () => {
+    const svc = await service();
+    const { id } = await svc.create({ title: "abandoned mid-turn" });
+    await startRun(svc, id);
+    assert.equal(await svc.blockedFromDeletion(id), "active-run", "before recovery it is stuck");
+
+    await recoverConversations(svc.worldPath, NOW);
 
     assert.equal(await svc.blockedFromDeletion(id), null);
     await svc.delete(id, "op-1");

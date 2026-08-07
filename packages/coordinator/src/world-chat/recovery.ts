@@ -15,6 +15,10 @@ import { conversationsDir, WorldChatStore } from "./store.js";
  * Idempotence is the whole difficulty. Recovery runs on every open, and appending a second
  * terminal event for the same run would make the log say the turn ended twice. The guard is the
  * fold itself: after one repair no run is `running`, so a second pass finds nothing to do.
+ *
+ * The caller owes one precondition this module cannot check: **the world must not already be
+ * open.** A run marked running is indistinguishable from a live one here, so running this against
+ * the open world would close a turn somebody is waiting on. Coordinator.openWorld holds that.
  */
 
 export interface RecoveryOutcome {

@@ -9,8 +9,10 @@ import {
   attachmentFileName,
   AttachmentError,
   blockedFromRemoval,
+  CHAT_DOCUMENT_EXTENSIONS,
   detectReadability,
   MAX_TEXT_READ_CHARS,
+  refuseUnreadable,
   WorldChatAttachmentStore,
 } from "../../src/world-chat/attachments.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
@@ -68,6 +70,45 @@ describe("attachment file names", () => {
   it("keeps the extension, because what may be read depends on it", () => {
     assert.equal(attachmentFileName("The Undersong draft.md"), "The-Undersong-draft.md");
     assert.equal(attachmentFileName("no-extension"), "no-extension.bin");
+  });
+});
+
+/**
+ * What World Chat will take, this round (§13.2, §23.2).
+ *
+ * The gate is deliberately narrower than the artifact path's: a conversation may only be handed
+ * what it can honestly read. A chip that looks attached while the reply cannot see the file is
+ * worse than a refusal, because the person carries on talking as though it had been read.
+ */
+describe("refusing what a conversation could not read", () => {
+  it("takes markdown and plain text", () => {
+    assert.equal(refuseUnreadable("draft.md", bytes("# The Undersong")), null);
+    assert.equal(refuseUnreadable("notes.txt", bytes("the bells again")), null);
+  });
+
+  it("names the kind it is refusing, rather than saying no", () => {
+    const image = refuseUnreadable("maren.png", bytes("not really a png"));
+    assert.match(image!, /image/, "so the person knows it is the kind and not the file");
+    assert.match(image!, /maren\.png/, "and which file it was");
+    assert.match(refuseUnreadable("take.wav", bytes("x"))!, /audio/);
+    assert.match(refuseUnreadable("archive.zip", bytes("x"))!, /not a document/);
+  });
+
+  /**
+   * PDF is a document by extension and unreadable in fact until an extraction step exists, so
+   * the bytes decide rather than the name — in both directions.
+   */
+  it("refuses a document whose bytes are not text", () => {
+    const pdf = refuseUnreadable("brief.pdf", new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x00, 0x01]));
+    assert.match(pdf!, /not readable as text/);
+  });
+
+  it("refuses a text file that is secretly binary", () => {
+    assert.ok(refuseUnreadable("notes.txt", new Uint8Array([0x00, 0x01, 0x02])));
+  });
+
+  it("offers only what it can read in the picker", () => {
+    assert.deepEqual([...CHAT_DOCUMENT_EXTENSIONS].sort(), ["md", "txt"]);
   });
 });
 

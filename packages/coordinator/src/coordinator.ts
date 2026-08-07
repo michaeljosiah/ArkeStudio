@@ -131,8 +131,10 @@ import { GenesisService } from "./harness/genesis.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
-import { WorldChatService } from "./world-chat/service.js";
+import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
 import { wrapUp, WrapUpError } from "./world-chat/wrapup.js";
+import { recoverConversations } from "./world-chat/recovery.js";
+import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
 import { titleFrom } from "./world-chat/title.js";
 import { describeEntryContext } from "./world-chat/entry-context.js";
 import { discoverConversations } from "./world-chat/discover.js";
@@ -141,7 +143,12 @@ import { WorldChatStore, conversationDir } from "./world-chat/store.js";
 import { WorldChatRunner } from "./world-chat/run.js";
 import { QueryLeaseRegistry } from "./world-chat/lease.js";
 import { WorldChatRetrieval } from "./world-chat/retrieval.js";
-import { WorldChatAttachmentStore } from "./world-chat/attachments.js";
+import {
+  AttachmentError,
+  CHAT_DOCUMENT_EXTENSIONS,
+  refuseUnreadable,
+  WorldChatAttachmentStore,
+} from "./world-chat/attachments.js";
 import { planFor } from "./world-chat/check-plan.js";
 import { createRunScratch, removeRunScratch } from "./world-chat/run-scratch.js";
 import { projectWorkspace } from "./world-chat/project.js";
@@ -658,14 +665,67 @@ export class Coordinator {
   }
 
   async openWorld(worldId: string): Promise<void> {
+    // Captured before the load, because recovery must not run on a world that was already open:
+    // it closes any run still marked running, and on the open world that could be a live turn
+    // rather than an abandoned one. Held here rather than trusted from the caller — the client
+    // does check, but a repair that can destroy live state should not depend on it.
+    const wasAlreadyOpen = this.opts.provider.openStore?.()?.worldId === worldId;
     await this.opts.provider.loadWorld(worldId);
     await this.jobQueue?.retryFinalizationsForWorld(worldId);
     const bundle =
       this.opts.provider.openStore?.()?.getBundle() ?? (await this.opts.provider.loadWorld(worldId));
     this.readModel.setWorld(bundle);
+    // Before the rows are broadcast, not after: recovery changes what several of them say.
+    const store = this.opts.provider.openStore?.();
+    if (store && !wasAlreadyOpen) await this.recoverWorldChat(store);
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();
+  }
+
+  /**
+   * Put right what a crash left behind, before anything can be done to it (#70 §7.2, phase 1).
+   *
+   * Two repairs, and both have to happen before the user can reach a control. A run left
+   * `running` has no terminal event, so every reader folds it as interrupted for ever and the
+   * conversation reports itself in use — it could never be deleted, and no honest reason could be
+   * given for that. A wrap-up left mid-flight has the same shape at the other end: proposals may
+   * or may not exist under an intent nobody is going to complete.
+   *
+   * Failure here must not stop a world opening. Neither repair is something the user asked for,
+   * and a world they cannot open is a far worse outcome than a conversation still awaiting one.
+   */
+  private async recoverWorldChat(store: WorldStore): Promise<void> {
+    const now = () => new Date().toISOString();
+    try {
+      const outcome = await recoverConversations(store.dir, now);
+      const gate = this.opts.provider.gate?.();
+      const wrapUps = gate ? await recoverWrapUps(store, gate, now) : { repaired: [] };
+      if (
+        outcome.repaired.length > 0 ||
+        outcome.sweptTombstones.length > 0 ||
+        wrapUps.repaired.length > 0
+      ) {
+        // Counts only. Conversation identities are operational state and do not enter the log
+        // (R-45, §18.2) — what a reader needs from this line is that repair happened at all.
+        void this.appLog?.append({
+          level: "info",
+          event: "world-chat.recovered",
+          runs: outcome.repaired.length,
+          tombstones: outcome.sweptTombstones.length,
+          wrapUps: wrapUps.repaired.length,
+        });
+      }
+      // Repairs are appended events, and nothing else would notice them: `.conversations` is
+      // outside the watcher, so the rows the scan produced a moment ago are already stale.
+      await this.refreshConversations(store);
+    } catch (err) {
+      void this.appLog?.append({
+        level: "warn",
+        event: "world-chat.recovery-failed",
+        reason: err instanceof Error ? err.name : "unknown",
+      });
+    }
   }
 
   /** Seed the SPEC-008 app-config slice: manifest, provider statuses, routing, spend, drift. */
@@ -1357,6 +1417,79 @@ export class Coordinator {
         });
         await this.refreshConversations(store);
         await this.openWorldChat(store, row.id);
+        return;
+      }
+      case "world-chat-delete": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        try {
+          await new WorldChatService(store.dir).delete(msg.conversationId, msg.requestId);
+        } catch (err) {
+          // A refusal is an answer, not a failure: the conversation is untouched and the row
+          // still says which dependency is holding it. Rechecked here rather than trusted from
+          // the row, because a turn may have started since that row was drawn.
+          void this.appLog?.append({
+            level: "warn",
+            event: "world-chat.delete-refused",
+            reason: err instanceof ConversationInUseError ? err.reason : "unknown",
+          });
+          await this.refreshConversations(store);
+          this.transport.broadcastSnapshot();
+          return;
+        }
+        // The screen the user is standing on may be the one just deleted. Releasing it here means
+        // they land on "that conversation is not here" rather than a transcript with no file.
+        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
+          this.readModel.setWorldChat(null);
+        }
+        await this.refreshConversations(store);
+        this.transport.broadcastSnapshot();
+        return;
+      }
+      case "world-chat-attach": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await this.attachToWorldChat(store, msg.conversationId, msg.sourcePath);
+        await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "world-chat-attach-files": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const pick = this.opts.pickFiles;
+        if (!pick) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "world-chat.attachment-refused",
+            conversationId: msg.conversationId,
+            name: "attaching",
+            reason: "this needs the desktop app — a browser session cannot open the file picker",
+          });
+          return;
+        }
+        // Only what a conversation can actually read is offered (§13.2). Cancelling the dialog
+        // is an answer: nothing is said and nothing happens.
+        const paths = await pick({ accept: CHAT_DOCUMENT_EXTENSIONS }).catch(() => [] as readonly string[]);
+        for (const sourcePath of paths) {
+          await this.attachToWorldChat(store, msg.conversationId, sourcePath);
+        }
+        await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "world-chat-archive":
+      case "world-chat-unarchive": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const service = new WorldChatService(store.dir);
+        if (msg.kind === "world-chat-archive") await service.archive(msg.conversationId);
+        else await service.unarchive(msg.conversationId);
+        await this.refreshConversations(store);
+        // Archiving loses nothing, so an open transcript stays open and simply reads as archived.
+        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
+          await this.openWorldChat(store, msg.conversationId);
+        } else {
+          this.transport.broadcastSnapshot();
+        }
         return;
       }
       case "draft-with-studio": {
@@ -3461,6 +3594,55 @@ export class Coordinator {
       kind: outcome.kind,
       outcome: "waiting",
     });
+  }
+
+  /**
+   * One file handed to a conversation, privately (#70 §13.1, §13.2).
+   *
+   * The readability gate comes before anything is written, so a refused file leaves nothing on
+   * disk to clean up. It is deliberately strict for now: World Chat may only be handed what it
+   * can honestly read, because a chip that looks attached while the reply cannot see it is worse
+   * than a refusal — the person carries on talking as though it had been read.
+   *
+   * Nothing is broadcast on success. The attachment is already durable in the conversation's own
+   * event log and arrives with the next workspace load; announcing it here as well would give the
+   * screen two sources for one fact.
+   */
+  private async attachToWorldChat(
+    store: WorldStore,
+    conversationId: ConversationId,
+    sourcePath: string,
+  ): Promise<void> {
+    const name = basename(sourcePath);
+    const refuse = (reason: string): void => {
+      this.emit({
+        at: new Date().toISOString(),
+        type: "world-chat.attachment-refused",
+        conversationId,
+        name,
+        reason,
+      });
+    };
+
+    let bytes: Uint8Array;
+    try {
+      bytes = await readFile(toExtendedLength(sourcePath));
+    } catch {
+      refuse("that file could not be read");
+      return;
+    }
+
+    const unreadable = refuseUnreadable(name, bytes);
+    if (unreadable) {
+      refuse(unreadable);
+      return;
+    }
+
+    try {
+      await new WorldChatAttachmentStore(store.dir).ingest(conversationId, { fileName: name, bytes });
+    } catch (err) {
+      refuse(err instanceof AttachmentError ? err.message : "it could not be attached");
+    }
   }
 
   /**

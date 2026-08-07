@@ -58,6 +58,20 @@ export type WorldChatConversationMeta = z.infer<typeof WorldChatConversationMeta
 export const WorldChatStatusSchema = z.enum(["open", "closed", "archived"]);
 export type WorldChatStatus = z.infer<typeof WorldChatStatusSchema>;
 
+/**
+ * Why a conversation cannot be deleted yet (R-50), or absent when it can be.
+ *
+ * Carried on the row rather than asked for on demand, because the reason has to be readable
+ * *before* the button is pressed. A Delete that looks available and then refuses is the same
+ * design mistake as one that vanishes without saying why.
+ */
+export const WorldChatDeletionBlockSchema = z.enum([
+  "active-run",
+  "wrap-up-in-flight",
+  "unresolved-proposals",
+]);
+export type WorldChatDeletionBlock = z.infer<typeof WorldChatDeletionBlockSchema>;
+
 /** What the conversation was opened about. Focus can change without losing what came before. */
 export const WorldChatContextSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("world") }).strict(),
@@ -753,6 +767,8 @@ export const WorldChatSummarySchema = z
     reopened: z.boolean().optional(),
     /** What its wrap-up could not carry, so the approvals screen can say so. */
     notCarried: z.array(WorldChatNotCarriedSchema).default([]),
+    /** Why deleting is refused for now (R-50). Absent when it can be deleted. */
+    deletionBlock: WorldChatDeletionBlockSchema.optional(),
   })
   .strict();
 export type WorldChatSummary = z.infer<typeof WorldChatSummarySchema>;
@@ -801,6 +817,15 @@ export const WorldChatLoadedSchema = z
     proposalIds: z.array(ProposalIdSchema),
     /** What its wrap-up could not carry; empty until one has happened. */
     notCarried: z.array(WorldChatNotCarriedSchema).default([]),
+    /**
+     * Why deleting is refused for now (R-50), or null when nothing depends on this conversation.
+     *
+     * Folded here rather than computed by the caller so that the row, the workspace and the
+     * command that actually refuses all read one answer. Two implementations of "is this in use"
+     * would eventually disagree, and the one that disagreed in the permissive direction would
+     * delete something somebody still needed.
+     */
+    deletionBlock: WorldChatDeletionBlockSchema.nullable().default(null),
     problems: z.array(WorldChatProblemSchema),
   })
   .strict();

@@ -117,6 +117,34 @@ function digest(bytes: Uint8Array): string {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 }
 
+/**
+ * What the picker offers World Chat, and why it is narrower than the artifact path's list.
+ *
+ * A conversation may only be handed what it can honestly read (§13.2). Images, audio and video
+ * would arrive as a chip the Studio could name but never open — multimodal understanding is
+ * explicitly deferred (§23.2) — and a chip that looks attached while the reply cannot see it is
+ * worse than a refusal, because the person goes on talking as though it had been read. PDF is a
+ * document by extension and unreadable in fact until an extraction step exists, so it is out too;
+ * the bytes decide, and `detectReadability` is what actually decides them.
+ */
+export const CHAT_DOCUMENT_EXTENSIONS: readonly string[] = ["md", "txt"];
+
+/**
+ * Whether this file can be handed to a conversation, or the sentence explaining why not.
+ *
+ * Checked before anything is written, so a refused file leaves nothing behind to clean up.
+ */
+export function refuseUnreadable(fileName: string, bytes: Uint8Array): string | null {
+  const kind = chatKind(fileName);
+  if (kind !== "document") {
+    return `World Chat can only read text for now, and ${fileName} is ${kind === "other" ? "not a document" : `${kind === "image" ? "an" : "a"} ${kind} file`}.`;
+  }
+  if (detectReadability(kind, bytes) !== "text-readable") {
+    return `${fileName} is not readable as text — World Chat cannot open it yet.`;
+  }
+  return null;
+}
+
 export interface IngestInput {
   fileName: string;
   bytes: Uint8Array;

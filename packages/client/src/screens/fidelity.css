@@ -1376,6 +1376,34 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-cx__attach:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
 .fy-cx__attach:disabled { opacity: 0.4; cursor: default; }
+/*
+ * The microphone, beside attach: the design master's note for World Chat binds this composer to
+ * Genesis's, "carrying attach and voice", so the two controls are one pair and wear one shape.
+ * No negative margin — that one is attach's, for sitting flush with the editor's left edge.
+ */
+.fy-cx__mic {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted-foreground);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-cx__mic:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+.fy-cx__mic:disabled { opacity: 0.4; cursor: default; }
+/*
+ * Listening is a filled control, not a pulsing one. Animation flattens entirely under
+ * prefers-reduced-motion, so a pulse and a resting mic would become the same still glyph exactly
+ * for the people least able to guess which it is — and the state carries a word beside it anyway
+ * (SPEC-018 R-16). The fill is the redundant cue, never the only one.
+ */
+.fy-cx__mic[data-listening] { background: var(--primary); color: var(--primary-foreground); }
+.fy-cx__mic[data-listening]:hover { background: var(--primary); color: var(--primary-foreground); }
 .fy-cx__bar { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 15px; }
 .fy-cx__left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
 .fy-cx__agent { font: 400 11px var(--font-mono); color: var(--muted-foreground); }
@@ -2994,6 +3022,42 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-chatlist__sub { font: 400 11.5px var(--font-mono); color: var(--muted-foreground); }
 /* A conversation owed a decision says so in the one place the eye already is. */
 .fy-chatlist__sub--waiting { color: var(--warning); }
+
+/*
+ * The row and its two controls. The link stays a link — the buttons are its siblings, not its
+ * children — so keyboard order is row, archive, delete and nothing has to swallow a click.
+ */
+.fy-chatlist__row { display: flex; align-items: center; gap: var(--space-2); border-radius: 8px; }
+.fy-chatlist__row .fy-chatlist__item { flex: 1; min-width: 0; }
+.fy-chatlist__acts { display: flex; align-items: center; gap: var(--space-1); flex: none; }
+/*
+ * Quiet until the row is wanted, but never hidden: revealing controls on hover alone puts them
+ * out of reach of touch and makes them undiscoverable, and this is where deleting lives.
+ */
+.fy-chatlist__acts .ui-btn { opacity: 0.55; transition: opacity 0.14s var(--ease-out); }
+.fy-chatlist__row:hover .ui-btn,
+.fy-chatlist__row:focus-within .ui-btn { opacity: 1; }
+.fy-chatlist__acts .ui-btn:disabled { opacity: 0.35; }
+/* Said in text, not a tooltip: a reason only a mouse can reach is not a reason (R-47). */
+.fy-chatlist__blocked { font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+.fy-chatlist__confirm {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 13px 16px;
+  border-radius: 8px;
+  background: var(--muted);
+}
+.fy-chatlist__confirmsay { flex: 1; min-width: 0; font: 400 12.5px/1.45 var(--font-sans); }
+.fy-chatlist__grouphead {
+  margin: 26px 0 8px;
+  padding-inline: 16px;
+  font: 400 11px var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
 
 /*
  * Clearing the floating nav. On the design canvas the pill nav is absolutely placed at top:56px

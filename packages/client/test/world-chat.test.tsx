@@ -5,7 +5,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { byPendingConsequence } from "../src/screens/world-chat.js";
@@ -140,6 +140,209 @@ describe("starting a conversation", () => {
   });
 });
 
+
+/**
+ * Handing a conversation a file (#70 §13.1, §13.2).
+ *
+ * The composer has always been able to take attachments — drag, paste, picker, chips — and World
+ * Chat passed it none of the handlers, so it could display attachments it had no way to create.
+ * What is worth pinning is the honesty of the refusal: an unreadable file must not land as a chip
+ * that looks attached, because the person then carries on talking as though it had been read.
+ */
+describe("attaching a document to a conversation", () => {
+  const CONVERSATION_ID = "cv_01J8F3K2QW9VZX4N7M0RTYB6HC";
+
+  function renderConversation(over: Partial<ClientState> = {}): string {
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      world: {
+        ...FIXTURE_STATE.world!,
+        conversations: [
+          {
+            id: CONVERSATION_ID as never,
+            title: "The bells",
+            status: "open",
+            updatedAt: AT,
+            pointCount: 0,
+            openProposalCount: 0,
+            notCarried: [],
+          },
+        ],
+      },
+      worldChat: {
+        conversationId: CONVERSATION_ID,
+        status: "open",
+        messages: [],
+        hasMore: false,
+        seq: 1,
+        points: [],
+        attachments: [],
+        runStatus: null,
+        retrievalUnavailable: false,
+      } as never,
+      ...over,
+    });
+    return renderToString(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CONVERSATION_ID}`]}>
+        <App />
+      </MemoryRouter>,
+    ).replaceAll("<!-- -->", "");
+  }
+
+  it("offers a way to attach at all", () => {
+    assert.match(
+      renderConversation(),
+      /fy-cx__attach/,
+      "the composer could show attachments it had no way to be given",
+    );
+  });
+
+  it("shows a readable document under its own name", () => {
+    const html = renderConversation({
+      worldChat: {
+        conversationId: CONVERSATION_ID,
+        status: "open",
+        messages: [],
+        hasMore: false,
+        seq: 1,
+        points: [],
+        attachments: [
+          { id: "wca_1", fileName: "undersong-draft.md", kind: "document", readability: "text-readable", promoted: false },
+        ],
+        runStatus: null,
+        retrievalUnavailable: false,
+      } as never,
+    });
+    assert.match(html, /undersong-draft\.md/);
+    assert.doesNotMatch(html, /not readable in chat/);
+  });
+
+  it("marks an unreadable attachment on its chip rather than letting it pass as read", () => {
+    const html = renderConversation({
+      worldChat: {
+        conversationId: CONVERSATION_ID,
+        status: "open",
+        messages: [],
+        hasMore: false,
+        seq: 1,
+        points: [],
+        attachments: [
+          { id: "wca_2", fileName: "brief.pdf", kind: "document", readability: "not-readable", promoted: false },
+        ],
+        runStatus: null,
+        retrievalUnavailable: false,
+      } as never,
+    });
+    assert.match(html, /not readable in chat/);
+  });
+
+  /**
+   * Driven through the real event rather than by setting state, because the refusal has no
+   * durable home: nothing was written, so the event is the only thing carrying it and the path
+   * from it to the chip is the thing worth testing.
+   */
+  it("says on a chip what it would not take, and why", () => {
+    renderConversation();
+    __applyEventForTest({
+      at: AT,
+      type: "world-chat.attachment-refused",
+      conversationId: CONVERSATION_ID,
+      name: "maren.png",
+      reason: "World Chat can only read text for now, and maren.png is an image file.",
+    } as never);
+    const html = renderToString(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CONVERSATION_ID}`]}>
+        <App />
+      </MemoryRouter>,
+    ).replaceAll("<!-- -->", "");
+
+    assert.match(html, /maren\.png/);
+    assert.match(html, /can only read text for now/, "a file that vanished silently would read as a bug");
+  });
+
+  it("keeps one conversation's refusals out of another's composer", () => {
+    renderConversation();
+    __applyEventForTest({
+      at: AT,
+      type: "world-chat.attachment-refused",
+      conversationId: "cv_01J8F3K2QW9VZX4N7M0RTYB6HZ",
+      name: "elsewhere.png",
+      reason: "World Chat can only read text for now.",
+    } as never);
+    const html = renderToString(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CONVERSATION_ID}`]}>
+        <App />
+      </MemoryRouter>,
+    ).replaceAll("<!-- -->", "");
+
+    assert.doesNotMatch(html, /elsewhere\.png/, "attachment linkage is scoped to one conversation (§13.1)");
+  });
+});
+
+/**
+ * Getting rid of a conversation (R-50, §15.1).
+ *
+ * The list was a set of bare links: a conversation could be started and never disposed of. The
+ * thing worth pinning is not that Delete exists but that it never stands alone — deletion is
+ * refused for as long as a conversation's proposals are undecided, which is most of the time it
+ * has done anything, and a row offering only the control that will not work reads as broken.
+ */
+describe("disposing of a conversation", () => {
+  function renderList(rows: unknown[]): string {
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      world: { ...FIXTURE_STATE.world!, conversations: rows as never },
+    });
+    return renderToString(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat`]}>
+        <App />
+      </MemoryRouter>,
+    ).replaceAll("<!-- -->", "");
+  }
+
+  const listed = (over: Partial<WorldChatSummary>) => ({
+    id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
+    title: "The bells",
+    status: "open",
+    updatedAt: AT,
+    pointCount: 1,
+    openProposalCount: 0,
+    notCarried: [],
+    ...over,
+  });
+
+  it("offers both, because archive is the answer whenever delete is refused", () => {
+    const html = renderList([listed({})]);
+    assert.match(html, /Archive/);
+    assert.match(html, /Delete/);
+  });
+
+  it("says why delete is unavailable, in text rather than a tooltip", () => {
+    const html = renderList([
+      listed({ openProposalCount: 2, deletionBlock: "unresolved-proposals" } as never),
+    ]);
+    assert.match(
+      html,
+      /Cannot delete — its proposals are still waiting/,
+      "a reason only a mouse can reach is not a reason",
+    );
+    assert.match(html, /disabled/, "and the control is genuinely unavailable, not merely explained");
+    assert.match(html, /Archive/, "while the thing that does work is still offered");
+  });
+
+  it("does not confirm before it is asked to — the row is not a warning", () => {
+    assert.doesNotMatch(renderList([listed({})]), /go for good/);
+  });
+
+  it("gives archived conversations their own heading rather than sinking them into the list", () => {
+    const html = renderList([
+      listed({ title: "still going" }),
+      listed({ id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HD", title: "shelved", status: "archived" }),
+    ]);
+    assert.match(html, /Archived · 1/, "archiving has to visibly tidy or nobody uses it");
+    assert.match(html, /Restore/, "and what was shelved can be taken back off the shelf");
+  });
+});
 
 /**
  * A conversation you have just made is not missing.
