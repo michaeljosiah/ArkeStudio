@@ -1837,6 +1837,44 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-themeswatch--dark .fy-themeswatch__lines i:first-child { background: var(--neutral-800); }
 .fy-themeswatch--dark .fy-themeswatch__lines i:last-child { background: var(--neutral-900); }
 .fy-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/*
+ * The turn in flight (#70 §15.3), after opencode's `[spinner] Making edits · 12s`.
+ *
+ * Sits in the transcript where the reply will land rather than on the composer, so the eye that
+ * has just sent something does not have to go looking for the evidence that it worked. No
+ * animation of its own: the house loader is the only moving thing here and it does not move
+ * either, so this reads identically with motion reduced.
+ */
+.fy-working {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px 0 6px;
+  font: 400 12.5px var(--font-mono);
+  color: var(--muted-foreground);
+}
+.fy-working__label { color: var(--foreground); }
+.fy-working__dot { opacity: 0.5; }
+/* Tabular figures: without them the row jitters sideways every second as digits change width. */
+.fy-working__elapsed { font-variant-numeric: tabular-nums; }
+.fy-working__stop {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: 400 11.5px var(--font-mono);
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-working__stop:hover { background: var(--accent); color: var(--foreground); }
+/* The shortcut is shown, not only bound — a keybinding nobody is told about is not a feature. */
+.fy-working__key { opacity: 0.6; font-size: 10px; }
 .fy-set__why { display: flex; align-items: center; gap: 7px; margin-top: 7px; }
 .fy-set__why span:last-child { font: 400 10.5px/1.5 var(--font-sans); color: var(--muted-foreground); }
 .fy-set__bar { height: 4px; border-radius: 999px; background: var(--muted); margin-top: 8px; overflow: hidden; }

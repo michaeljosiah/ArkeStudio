@@ -186,6 +186,52 @@ describe("a turn that ended without an answer", () => {
     assert.equal(context.lastFailure, undefined, "and not also as a failure");
   });
 
+  /**
+   * The other half of "nothing seems to happen", reported from the packaged build.
+   *
+   * A failed turn was made visible; a turn *in flight* still was not. On disk a live run and one
+   * abandoned by a crash are the same record — a start with no terminal event — so the fold calls
+   * both interrupted and `runStatus` was never once `running`. The screen therefore never said
+   * the studio was thinking, never disabled Send, and never offered Stop, for the whole two
+   * minutes somebody sat waiting. Only the runner knows the difference, so it has to say.
+   */
+  it("says a turn is running while it actually is", () => {
+    const turnId = newId("turn");
+    const events = [
+      {
+        type: "turn.started",
+        message: {
+          id: newId("msg"),
+          turnId,
+          role: "user",
+          text: "the bells",
+          attachmentIds: [],
+          createdAt: AT,
+        },
+        run: run(turnId, "running", { endedAt: undefined }),
+      },
+    ] as WorldChatStoredEvent[];
+
+    const { view } = foldConversation(
+      CV,
+      AT,
+      events.map(
+        (event, i) => ({ schemaVersion: 1, seq: i + 1, eventId: newId("wce"), at: AT, event }) as never,
+      ),
+    );
+
+    assert.equal(
+      projectWorkspace(view, new Map(), { liveRun: true }).runStatus,
+      "running",
+      "the log cannot tell live from crashed; the runner can, and it wins",
+    );
+    assert.equal(
+      projectWorkspace(view, new Map(), { liveRun: false }).runStatus,
+      "interrupted",
+      "and with no live run it is still the crash reading, which the restart repair owns",
+    );
+  });
+
   it("carries no world or message content in the detail it shows", () => {
     const { events } = unanswered("failed", "the studio took too long to answer");
     const { context } = project(events);

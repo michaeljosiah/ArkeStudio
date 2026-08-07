@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
 import { Composer } from "../components/composer.js";
+import { Working } from "../components/working.js";
 import { EmptyState } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
@@ -18,6 +19,7 @@ import {
   sendWorldChat,
   unarchiveWorldChat,
   useStore,
+  useWorldChatProgress,
   useWorldChatRefusals,
   worldChatAttachFiles,
   worldChatAttachTarget,
@@ -273,6 +275,7 @@ export function WorldChatConversationScreen() {
    */
   const [dismissed, setDismissed] = useState<string[]>([]);
   const refusals = useWorldChatRefusals(conversationId);
+  const progress = useWorldChatProgress(conversationId);
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
@@ -362,6 +365,20 @@ export function WorldChatConversationScreen() {
                   </div>
                 ))}
                 {/*
+                  The turn in flight, where its reply will be. In the transcript rather than on
+                  the composer because that is where the answer is going to appear, and it is
+                  where the eye already is after sending.
+                */}
+                {running && (
+                  <Working
+                    label={progress}
+                    startedAt={loaded?.runStartedAt ?? null}
+                    {...(worldId && conversationId
+                      ? { onStop: () => cancelWorldChat(worldId, conversationId) }
+                      : {})}
+                  />
+                )}
+                {/*
                   A turn that failed says so where the reply would have been. Silence here is
                   indistinguishable from never having asked, which is how a two-minute timeout
                   reads as "nothing happens".
@@ -420,15 +437,7 @@ export function WorldChatConversationScreen() {
               onRemoveAttachment={(id) => setDismissed((prev) => [...prev, id])}
               disabledReason={composerReason(state)}
             />
-            {running && (
-              <button
-                type="button"
-                className="fy-chat__cancel"
-                onClick={() => worldId && conversationId && cancelWorldChat(worldId, conversationId)}
-              >
-                Stop
-              </button>
-            )}
+            {/* Stop lives on the working line in the transcript now, beside what it would stop. */}
             <div className="fy-chat__composernote">
               world author · talking changes nothing until you wrap up
             </div>

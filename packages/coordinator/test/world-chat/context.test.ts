@@ -70,6 +70,65 @@ describe("context assembly", () => {
     assert.ok(context.recentTurns.length <= BOUNDS.recentTurns);
   });
 
+  /**
+   * Reported from the packaged build: a document was pasted, the chip appeared on the composer,
+   * and the Studio answered "I can't see an attached document" — twice. It was telling the truth.
+   * Nothing about the attachment ever reached the prompt, so the model had no way to know one
+   * existed, and no amount of asking again would have changed that.
+   */
+  it("puts what was handed over in front of the model", () => {
+    const context = assembleContext({
+      ...baseInput(),
+      attachments: [
+        { fileName: "pasted-note.txt", kind: "document", readable: true, text: "The drowned god sings." },
+      ],
+      currentUserMessage: "The attached document, can you see it?",
+    });
+    assert.match(context.attachments, /pasted-note\.txt/, "it is named");
+    assert.match(context.attachments, /The drowned god sings\./, "and its text is actually there");
+  });
+
+  it("names an attachment it cannot read rather than staying silent about it", () => {
+    const context = assembleContext({
+      ...baseInput(),
+      attachments: [{ fileName: "maren.png", kind: "image", readable: false }],
+    });
+    assert.match(context.attachments, /maren\.png/, "silence would make the model deny it exists");
+    assert.match(context.attachments, /cannot be read/);
+    assert.doesNotMatch(context.attachments, /do not guess[\s\S]*do not guess/, "said once");
+  });
+
+  it("is empty when nothing was handed over, so the prompt gains no empty section", () => {
+    assert.equal(assembleContext(baseInput()).attachments, "");
+  });
+
+  /**
+   * The opposite of every other section: a document was handed over whole and starts at its
+   * beginning, so keeping the tail would give the model the last page of something it never saw
+   * the first page of.
+   */
+  it("keeps the beginning of a document it has to cut, not the end", () => {
+    const body = `START-OF-DOCUMENT ${"x ".repeat(BOUNDS.attachments)} END-OF-DOCUMENT`;
+    const context = assembleContext({
+      ...baseInput(),
+      attachments: [{ fileName: "long.md", kind: "document", readable: true, text: body }],
+    });
+    assert.ok(context.attachments.length <= BOUNDS.attachments + 200, "bounded");
+    assert.match(context.attachments, /START-OF-DOCUMENT/);
+    assert.doesNotMatch(context.attachments, /END-OF-DOCUMENT/);
+    assert.ok(context.trimmed.includes("attachments"), "and it says it cut, rather than cutting quietly");
+    assert.match(context.attachments, /get_attachment_text/, "pointing at how to read the rest");
+  });
+
+  it("distinguishes two turns that differ only by what was attached", () => {
+    const without = assembleContext(baseInput()).digest;
+    const with_ = assembleContext({
+      ...baseInput(),
+      attachments: [{ fileName: "a.txt", kind: "document", readable: true, text: "something" }],
+    }).digest;
+    assert.notEqual(without, with_, "or a run record would claim they had the same context");
+  });
+
   it("says which sections it had to trim, rather than trimming quietly", () => {
     const context = assembleContext({ ...baseInput(), summary: "s".repeat(BOUNDS.summary + 1) });
     assert.deepEqual(context.trimmed, ["summary"]);

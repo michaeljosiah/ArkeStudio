@@ -136,6 +136,14 @@ interface StoreState {
    * durable home, so if this does not hold it the reason is lost the moment it arrives.
    */
   worldChatRefusals: Record<string, Array<{ name: string; reason: string }>>;
+  /**
+   * What the studio is doing right now, by conversation (#70 §15.3).
+   *
+   * Transient: it is cleared when the turn ends, and nothing is lost if it never arrives — the
+   * spinner falls back to its resting word. Kept out of the workspace because the workspace is a
+   * projection of the durable log, and this is deliberately not durable.
+   */
+  worldChatProgress: Record<string, string>;
   voiceSidecar: { state: "not-started" | "downloading" | "unavailable" | "ready"; detail: string } | null;
   voiceRuntimeTest: {
     requestId: string;
@@ -200,6 +208,7 @@ let current: StoreState = {
   voiceAudio: {},
   dictation: {},
   worldChatRefusals: {},
+  worldChatProgress: {},
   voiceSidecar: null,
   voiceRuntimeTest: null,
   mainPhotoAcceptance: {},
@@ -548,6 +557,7 @@ function handleFrame(json: string): void {
     let voiceAudio = current.voiceAudio;
     let dictation = current.dictation;
     let worldChatRefusals = current.worldChatRefusals;
+    let worldChatProgress = current.worldChatProgress;
     let voiceSidecar = current.voiceSidecar;
     let voiceRuntimeTest = current.voiceRuntimeTest;
     let mainPhotoAcceptance = current.mainPhotoAcceptance;
@@ -580,6 +590,8 @@ function handleFrame(json: string): void {
           { name: event.name, reason: event.reason },
         ],
       };
+    } else if (event.type === "world-chat.progress") {
+      worldChatProgress = { ...worldChatProgress, [event.conversationId]: event.label };
     } else if (event.type === "voice.sidecar") {
       voiceSidecar = { state: event.state, detail: event.detail };
     } else if (event.type === "voice.runtime-test") {
@@ -702,6 +714,7 @@ function handleFrame(json: string): void {
       voiceAudio,
       dictation,
       worldChatRefusals,
+      worldChatProgress,
       voiceSidecar,
       voiceRuntimeTest,
       mainPhotoAcceptance,
@@ -1797,6 +1810,7 @@ export function __setStateForTest(state: ClientState): void {
     voiceAudio: {},
     dictation: {},
     worldChatRefusals: {},
+    worldChatProgress: {},
     voiceSidecar: null,
     voiceRuntimeTest: null,
     mainPhotoAcceptance: {},
@@ -1922,6 +1936,12 @@ export function worldChatAttachTarget(worldId: string, conversationId: string): 
 export function useWorldChatRefusals(conversationId: string | undefined): Array<{ name: string; reason: string }> {
   const refusals = useStore().worldChatRefusals;
   return conversationId ? (refusals[conversationId] ?? []) : [];
+}
+
+/** What the studio is doing this second, or null when it is not doing anything. */
+export function useWorldChatProgress(conversationId: string | undefined): string | null {
+  const progress = useStore().worldChatProgress;
+  return conversationId ? (progress[conversationId] ?? null) : null;
 }
 
 /** Shelve a conversation. Reversible, and loses nothing. */

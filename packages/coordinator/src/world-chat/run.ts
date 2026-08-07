@@ -14,7 +14,8 @@ import {
   type WorldChatLoaded,
   type WorldChatRun,
 } from "@arke-studio/contracts";
-import { assembleContext } from "./context.js";
+import { assembleContext, type ContextAttachment } from "./context.js";
+import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
 import { deriveChecks, planFor } from "./check-plan.js";
 import { correctiveMessage, validateTurnResult, type TurnProblem } from "./turn-result.js";
 import type { EvidenceSources } from "./evidence.js";
@@ -83,6 +84,14 @@ export interface RunDeps {
   worldContext?: (view: WorldChatLoaded) => string;
   /** What the conversation was opened about, worded for the model (#70 phase 6). */
   describeEntry?: (context: NonNullable<WorldChatLoaded["entryContext"]>) => string;
+  /**
+   * What the studio is doing, while it is doing it (§15.3).
+   *
+   * Transient and fire-and-forget: nothing durable depends on it, and a turn that produced no
+   * progress at all is still a complete turn. Labels arrive already worded — the runner never
+   * hands a tool summary outwards.
+   */
+  onProgress?: (conversationId: ConversationId, label: string) => void;
   now: () => string;
   timeoutMs?: number;
 }
@@ -106,6 +115,7 @@ async function askOnce(
   prompt: string,
   timeoutMs: number,
   signal: AbortSignal,
+  onProgress?: (label: string) => void,
 ): Promise<string> {
   let finalText = "";
   const abort = new AbortController();
@@ -114,11 +124,23 @@ async function askOnce(
 
   const events = adapter.streamEvents(abort.signal);
   const collected = (async () => {
+    let writing = false;
     for await (const event of events) {
       if (!("sessionId" in event) || event.sessionId !== sessionId) continue;
       if (event.type === "message.completed") {
         finalText = event.text ?? "";
         return;
+      }
+      if (event.type === "tool.activity") {
+        // The tool, never its summary: the summary names entities, and that is what receipts are
+        // for (R-18). The verb is all a progress line is allowed to be.
+        onProgress?.(workingLabel(event.tool));
+        writing = false;
+      } else if (event.type === "message.delta" && !writing) {
+        // Said once per stretch of writing rather than per token: a label that changes on every
+        // delta is a strobe, and it would say the same word each time anyway.
+        writing = true;
+        onProgress?.(WRITING_LABEL);
       }
       if (event.type === "session.error") throw new Error(event.message);
     }
@@ -157,6 +179,19 @@ export class WorldChatRunner {
   private readonly cancelling = new Map<string, AbortController>();
 
   constructor(private readonly deps: RunDeps) {}
+
+  /**
+   * Whether a turn is in flight for this conversation, right now.
+   *
+   * The log cannot answer this. A run left `running` with no terminal event is what a live turn
+   * and a crashed one both look like on disk, so the fold calls every such run interrupted — which
+   * is right for a crash and wrong for the two minutes somebody is waiting for an answer. This
+   * map is the only thing that knows the difference, because it holds the abort controller of a
+   * turn that is actually happening.
+   */
+  isRunning(conversationId: ConversationId): boolean {
+    return this.cancelling.has(conversationId);
+  }
 
   /** Stop a run now. Local and immediate: the log says interrupted without waiting for a model. */
   cancel(conversationId: ConversationId): boolean {
@@ -247,6 +282,10 @@ export class WorldChatRunner {
     const { events } = await store.read();
     const meta = await store.readMeta();
     const view = foldConversation(conversationId, meta?.createdAt ?? at, events).view;
+    // What was handed over goes into the prompt (§13.2). Without this the model is never told an
+    // attachment exists, and answers "I can't see an attached document" — truthfully, from where
+    // it is standing, which is the worst kind of wrong answer to debug.
+    const handed = await this.readAttachments(view, attachmentIds);
     const assembled = assembleContext({
       ...(view.entryContext && this.deps.describeEntry
         ? { entryContext: this.deps.describeEntry(view.entryContext) }
@@ -256,6 +295,7 @@ export class WorldChatRunner {
       messages: view.messages,
       tombstones: tombstonesFrom(events),
       ...(this.deps.worldContext ? { worldContext: this.deps.worldContext(view) } : {}),
+      attachments: contextAttachments(view, attachmentIds, handed.text),
       currentUserMessage: text,
     });
 
@@ -293,8 +333,15 @@ export class WorldChatRunner {
       const session = await adapter.createSession({ purpose: "world-chat", cwd, agent: "world-builder" });
       const timeoutMs = this.deps.timeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
 
+      const progress = this.deps.onProgress
+        ? (label: string) => this.deps.onProgress?.(conversationId, label)
+        : undefined;
+      // Said before the model is even asked, so the screen has something the moment the message
+      // lands rather than after the first tool call — which may be twenty seconds in.
+      progress?.(THINKING_LABEL);
+
       const prompt = renderPrompt(assembled);
-      let raw = await askOnce(adapter, session.sessionId, prompt, timeoutMs, controller.signal);
+      let raw = await askOnce(adapter, session.sessionId, prompt, timeoutMs, controller.signal, progress);
 
       let outcome = await this.applyResult(store, conversationId, raw, runId, leaseToken, at, linked);
       if (!outcome.ok) {
@@ -309,12 +356,14 @@ export class WorldChatRunner {
           },
           { at: this.deps.now() },
         );
+        progress?.("Working it through again");
         raw = await askOnce(
           adapter,
           session.sessionId,
           correctiveMessage(outcome.problems),
           timeoutMs,
           controller.signal,
+          progress,
         );
         outcome = await this.applyResult(store, conversationId, raw, runId, leaseToken, at, linked);
       }
@@ -336,6 +385,31 @@ export class WorldChatRunner {
       this.cancelling.delete(conversationId);
       await this.deps.release({ conversationId, runId });
     }
+  }
+
+  /**
+   * The attachments this run may read, and their text.
+   *
+   * Only what the turn was given, and only what can honestly be read as text. An unreadable file
+   * is still attachable and linkable — the chat simply cannot quote it, and saying so is better
+   * than a quotation nobody can check (§13.2). Shared by the prompt and by evidence verification
+   * so a quotation is checked against exactly the bytes the model was shown.
+   */
+  private async readAttachments(
+    view: WorldChatLoaded,
+    allowed: readonly string[],
+  ): Promise<{ readable: WorldChatAttachment[]; text: Map<string, string> }> {
+    const readable = view.attachments.filter(
+      (a) => allowed.includes(a.id) && a.readability !== "not-readable",
+    );
+    const text = new Map<string, string>();
+    if (this.deps.readAttachmentText) {
+      for (const attachment of readable) {
+        const body = await this.deps.readAttachmentText(attachment).catch(() => null);
+        if (body !== null) text.set(attachment.id, body);
+      }
+    }
+    return { readable, text };
   }
 
   /**
@@ -364,19 +438,7 @@ export class WorldChatRunner {
     const messages = folded.messages;
     const checksByDraft = new Map<ModelCandidateDraft, CandidateChecks>();
 
-    // Only the attachments this run was given, and only the ones that can honestly be read as
-    // text. An unreadable file is still attachable and linkable — the chat simply cannot quote
-    // it, and saying so is better than a quotation nobody can check (§13.2).
-    const readable = folded.attachments.filter(
-      (a) => allowed.includes(a.id) && a.readability !== "not-readable",
-    );
-    const attachmentText = new Map<string, string>();
-    if (this.deps.readAttachmentText) {
-      for (const attachment of readable) {
-        const text = await this.deps.readAttachmentText(attachment).catch(() => null);
-        if (text !== null) attachmentText.set(attachment.id, text);
-      }
-    }
+    const { readable, text: attachmentText } = await this.readAttachments(folded, allowed);
 
     const outcome = validateTurnResult({
       raw,
@@ -476,6 +538,31 @@ function tombstonesFrom(
   return tombstones;
 }
 
+/**
+ * The attachments this turn was handed, as the prompt needs them.
+ *
+ * Unreadable ones are included deliberately. The model must be able to say "you attached a PNG
+ * and I cannot read it" — leaving it out entirely produces a flat denial that the file exists,
+ * which is what somebody who just attached it will read as the feature being broken.
+ */
+function contextAttachments(
+  view: WorldChatLoaded,
+  allowed: readonly string[],
+  text: ReadonlyMap<string, string>,
+): ContextAttachment[] {
+  return view.attachments
+    .filter((a) => allowed.includes(a.id))
+    .map((a) => {
+      const body = text.get(a.id);
+      return {
+        fileName: a.fileName,
+        kind: a.kind,
+        readable: a.readability !== "not-readable",
+        ...(body !== undefined ? { text: body } : {}),
+      };
+    });
+}
+
 function runFrom(events: ReadonlyArray<{ event: { type: string } }>, runId: RunId): WorldChatRun {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i]!.event as unknown as { run?: WorldChatRun };
@@ -512,6 +599,11 @@ ${assembled.entryContext}`);
   }
   if (assembled.worldContext) sections.push(`## From the world\n${assembled.worldContext}`);
   if (assembled.recentTurns) sections.push(`## Recent turns\n${assembled.recentTurns}`);
+  // Last before what they just said, because that is usually the sentence about it — "can you
+  // see the attached document" reads against the thing itself rather than across the world.
+  if (assembled.attachments) {
+    sections.push(`## What they handed you\n${assembled.attachments}`);
+  }
   sections.push(`## They just said\n${assembled.currentUserMessage}`);
   return sections.join("\n\n");
 }

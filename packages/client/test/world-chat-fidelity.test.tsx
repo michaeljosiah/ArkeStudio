@@ -63,6 +63,7 @@ function stateWithConversation(): ClientState {
       status: "open",
       hasMore: false,
       runStatus: null,
+      runStartedAt: null,
       retrievalUnavailable: false,
       attachments: [],
       seq: 4,
