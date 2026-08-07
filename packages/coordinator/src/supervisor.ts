@@ -53,7 +53,13 @@ export interface SupervisedSpec {
   env?: Record<string, string>;
   /** Path probed at http://127.0.0.1:<port>; 2xx → healthy. Default "/health". */
   healthPath?: string;
-  /** Optional protocol validation after a 2xx response; false means not ready yet. */
+  /**
+   * Optional protocol validation after a 2xx response.
+   *
+   * `false` means not ready yet — keep probing. `{ ok: false, reason }` means the contract is
+   * wrong, which is terminal: waiting cannot make a version mismatch compatible, so probing stops
+   * and the reason is reported straight away.
+   */
   validateHealth?: (
     response: Response,
   ) => boolean | { ok: boolean; reason?: string } | Promise<boolean | { ok: boolean; reason?: string }>;
@@ -368,7 +374,14 @@ export class ChildSupervisor extends EventEmitter {
           const validation = await this.spec.validateHealth(res);
           const ok = typeof validation === "boolean" ? validation : validation.ok;
           if (ok) return true;
-          if (typeof validation !== "boolean" && validation.reason) this.healthFailure = validation.reason;
+          if (typeof validation !== "boolean" && validation.reason) {
+            // A stated incompatibility is an answer, not an absence. Continuing to probe would
+            // spend the whole readiness budget re-learning it, and then report the timeout
+            // instead of the reason — which is exactly backwards for someone trying to find out
+            // what is wrong.
+            this.healthFailure = validation.reason;
+            return false;
+          }
         }
       } catch {
         /* not up yet */
