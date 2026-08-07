@@ -191,7 +191,9 @@ export interface ProposalGateNotice {
     | "pending-review"
     | "unresolved-conflicts"
     | "target-retired"
-    | "invalid";
+    | "invalid"
+    /** #70 SS11.4.1: an in-place edit whose outcome is unknown; accepting is not offered. */
+    | "draft-unresolved";
   detail?: string;
   authoritativeSignature?: string;
 }
@@ -204,6 +206,7 @@ const NOTICE_TITLES: Record<ProposalGateNotice["reason"], string> = {
   "unresolved-conflicts": "Conflicted fields await a choice",
   "target-retired": "The target was retired",
   invalid: "A field is over its limit",
+  "draft-unresolved": "An edit to this proposal did not finish",
 };
 
 export function ProposalPanel({

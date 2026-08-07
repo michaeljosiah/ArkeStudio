@@ -154,6 +154,11 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
         "target-retired",
         /** Authored content broke a bound the gate enforces, e.g. an over-long role (SPEC-007 R-18). */
         "invalid",
+        /**
+         * #70 §11.4.1: an in-place edit left a journal record that cannot be read, so what the
+         * proposal's files now say is unknown. Accepting is refused rather than guessed.
+         */
+        "draft-unresolved",
       ]),
       detail: z.string().optional(),
       /** On needs-reconfirm: the authoritative set and its signature to echo back (R-10). */

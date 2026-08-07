@@ -3042,6 +3042,19 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
  */
 .fy-chat__receipts { margin-top: 8px; font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
 
+/* A turn that failed, where its reply would have been. Quiet: this is the app apologising, not
+   an alarm, and the conversation above it is still perfectly good. */
+.fy-chat__failed {
+  align-self: flex-start; max-width: 620px; display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--muted);
+}
+.fy-chat__failedtext { font: 400 12.5px/1.5 var(--font-sans); color: var(--muted-foreground); }
+.fy-chat__retry {
+  flex: none; background: none; border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 12px; font: 400 11px var(--font-mono); color: var(--foreground); cursor: pointer;
+}
+.fy-chat__retry:hover { background: var(--background); }
+
 .fy-chat__composer { flex: none; padding: 14px 36px 22px; }
 .fy-chat__composernote { font: 400 10.5px var(--font-mono); color: var(--neutral-400); margin-top: 10px; }
 

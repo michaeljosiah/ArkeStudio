@@ -42,6 +42,11 @@ export interface OpenCodeAdapterOptions {
 interface TrackedSession {
   purpose: CreateSessionInput["purpose"];
   cwd?: string;
+  /**
+   * The roster agent this session was created with, remembered because every prompt has to
+   * repeat it. See `turnBody`.
+   */
+  agent?: string;
 }
 
 /**
@@ -117,7 +122,11 @@ export class OpenCodeAdapter implements HarnessAdapter {
       sessionId = res.id ?? "";
     }
     if (!sessionId) throw new Error("OpenCode did not return a session id");
-    this.sessions.set(sessionId, { purpose: input.purpose, ...(input.cwd ? { cwd: input.cwd } : {}) });
+    this.sessions.set(sessionId, {
+      purpose: input.purpose,
+      ...(input.cwd ? { cwd: input.cwd } : {}),
+      ...(input.agent ? { agent: input.agent } : {}),
+    });
     this.trace("session.created", { sessionId, agent: input.agent ?? null, baseUrl: this.opts.baseUrl() });
     this.push({ type: "session.created", sessionId });
     return { sessionId };
@@ -131,9 +140,25 @@ export class OpenCodeAdapter implements HarnessAdapter {
    * reply, so the agent loop sees no new input and exits at step 0 — every turn after the first
    * dies in silence. The server assigns the id; our correlation id stays on this side of the
    * wire, where the receipts always used it anyway.
+   *
+   * THE AGENT, deliberately, on every prompt. Naming it at session creation is not enough:
+   * OpenCode resolves the agent per message and falls back to its own default — `build`, a
+   * coding agent — for any prompt that does not say otherwise. The failure that follows is
+   * silent and looks nothing like its cause. Asked to talk about a world, `build` reads the
+   * request as a task, delegates to the real agent as a *subagent* in a child session where
+   * `task` is denied, and nothing ever completes: no reply, no error, just a turn that runs
+   * until the timeout takes it. Our own trace said `agent: world-builder` the whole time,
+   * because that is what we asked for at creation.
    */
-  private turnBody(input: SendMessageInput): { parts: Array<{ type: "text"; text: string }> } {
-    return { parts: input.parts.map((p) => ({ type: "text" as const, text: p.text })) };
+  private turnBody(input: SendMessageInput): {
+    parts: Array<{ type: "text"; text: string }>;
+    agent?: string;
+  } {
+    const agent = this.sessions.get(input.sessionId)?.agent;
+    return {
+      parts: input.parts.map((p) => ({ type: "text" as const, text: p.text })),
+      ...(agent ? { agent } : {}),
+    };
   }
 
   /** Fire-and-watch (the only mode authoring uses): completion arrives on the event stream. */

@@ -42,7 +42,9 @@ export interface GateNotice {
     | "pending-review"
     | "unresolved-conflicts"
     | "target-retired"
-    | "invalid";
+    | "invalid"
+    /** #70 SS11.4.1: an in-place edit whose outcome is unknown, so accepting is not offered. */
+    | "draft-unresolved";
   detail?: string;
   authoritativeSignature?: string;
 }
@@ -1861,6 +1863,14 @@ export function sendWorldChat(
 /** Stop the turn in flight. */
 export function cancelWorldChat(worldId: string, conversationId: string): void {
   send({ kind: "world-chat-cancel", worldId, conversationId });
+}
+
+/**
+ * Run a failed turn again. No second message: they already said it once, and retyping it to
+ * recover from our timeout would be the app charging them for its own failure.
+ */
+export function retryWorldChatTurn(worldId: string, conversationId: string, turnId: string): void {
+  send({ kind: "world-chat-retry-turn", worldId, requestId: crypto.randomUUID(), conversationId, turnId });
 }
 
 /** Turn the conversation into proposals and close it. */

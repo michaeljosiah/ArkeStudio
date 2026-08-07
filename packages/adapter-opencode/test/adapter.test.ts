@@ -216,6 +216,32 @@ describe("the live adapter over the stub server", () => {
     assert.ok(!body.location?.directory?.includes("\\"), "no backslash reaches the wire");
   });
 
+  it("names the agent on the prompt, not only at session creation", async () => {
+    // The bug this pins cost a silent two-minute timeout with no error anywhere. OpenCode
+    // resolves the agent per message: a prompt that does not name one runs under `build`, its
+    // coding agent, which reads "talk about my world" as a task and delegates to the real agent
+    // as a subagent in a child session where `task` is denied. Nothing completes and nothing
+    // fails — and our own trace still says the session was created as `world-builder`, because
+    // it was. Only the prompt body tells the truth, so that is what this reads.
+    const session = await adapter.createSession({ purpose: "world-chat", agent: "world-builder" });
+    await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: "the bells" }] });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const prompt = stub.lastRequest(/prompt_async$/);
+    assert.ok(prompt, "the prompt reached the wire");
+    assert.equal((prompt.body as { agent?: string }).agent, "world-builder");
+  });
+
+  it("leaves the agent off a prompt for a session that never named one", async () => {
+    const session = await adapter.createSession({ purpose: "authoring" });
+    await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: "draft it" }] });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const prompt = stub.lastRequest(/prompt_async$/);
+    assert.ok(prompt, "the prompt reached the wire");
+    assert.ok(!("agent" in (prompt.body as object)), "no agent invented where the caller named none");
+  });
+
   it("streams a scripted turn: tool activity, delta, completion — and filters foreign sessions", async () => {
     const session = await adapter.createSession({ purpose: "authoring", agent: "sheet-editor" });
     const seen: HarnessEvent[] = [];

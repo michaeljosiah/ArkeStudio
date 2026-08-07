@@ -103,6 +103,14 @@ export const ProposalSchema = z
      */
     draftRevision: z.number().int().min(1).default(1),
     /**
+     * The request id of the edit that produced this revision (#70 §11.4.1).
+     *
+     * A refused edit is retried by the screen that lost, and the retry must be the same edit
+     * rather than a second one. Recorded on the manifest because the journal is gone by the time
+     * the retry arrives — the whole point of the journal is that it does not outlive the edit.
+     */
+    lastDraftRequestId: z.string().min(1).optional(),
+    /**
      * Which propositions became this proposal.
      *
      * Explains the draft; it never governs acceptance. The proposed files and the captured bases

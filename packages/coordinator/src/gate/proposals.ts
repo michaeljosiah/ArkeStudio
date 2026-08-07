@@ -15,12 +15,20 @@ import {
   type RipplePreview,
 } from "@arke-studio/contracts";
 import { ripplesForCanonEntry, ripplesForSheet } from "../index-db/queries.js";
-import { atomicWriteFile } from "../world/atomic.js";
+import { atomicWriteFile, renameWithRetry } from "../world/atomic.js";
 import { appendChanges } from "../world/change-writer.js";
 import { classify, type CommitFileInput, type CommitResult } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { MarkdownFile, sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
+import {
+  draftStagingPath,
+  readDraftOperations,
+  removeDraftOperation,
+  writeDraftRecord,
+  type DraftOperation,
+} from "./draft-journal.js";
+import { applyFieldEdit, safeFieldEditMessage } from "./field-edit.js";
 import { applyResolution, mergeMarkdown } from "./merge.js";
 
 /**
@@ -28,6 +36,47 @@ import { applyResolution, mergeMarkdown } from "./merge.js";
  * bases, edited, previewed with computed ripples, verified under the lock, and accepted as
  * exactly one SPEC-002 commit — or discarded, leaving one log line.
  */
+
+export interface UpdateFieldInput {
+  proposalId: string;
+  requestId: string;
+  path: string;
+  field: string;
+  value: string;
+  expectedDraftRevision: number;
+}
+
+export type UpdateFieldOutcome =
+  | { status: "updated"; proposal: Proposal }
+  /** Somebody else moved it on. Carries what it now is, so the screen can reload rather than guess. */
+  | { status: "stale"; currentDraftRevision: number }
+  | { status: "unknown-target" }
+  | { status: "rejected"; message: string }
+  /** An edit whose outcome cannot be determined; nothing may proceed until a person deals with it. */
+  | { status: "draft-unresolved"; records: string[] };
+
+export type DraftRecovery = {
+  status: "settled" | "blocked";
+  unreadable: string[];
+  rolledForward: number;
+  dropped: number;
+};
+
+/**
+ * Thrown by the paths that have no outcome type to carry a refusal.
+ *
+ * Rebase and resolve-conflict both write the proposal's files, so neither may run over an edit
+ * whose outcome is unknown; unlike accept, they have nowhere to return that fact politely.
+ */
+export class DraftUnresolvedError extends Error {
+  constructor(
+    readonly proposalId: string,
+    readonly records: string[],
+  ) {
+    super(`${proposalId} has an unresolved in-place edit; its journal must be dealt with first`);
+    this.name = "DraftUnresolvedError";
+  }
+}
 
 export type AcceptOutcome =
   | { status: "accepted"; result: CommitResult }
@@ -37,6 +86,8 @@ export type AcceptOutcome =
   | { status: "pending-review" }
   | { status: "unresolved-conflicts"; count: number }
   | { status: "target-retired"; paths: string[] }
+  /** An in-place edit whose outcome could not be determined; accepting past it is not offered. */
+  | { status: "draft-unresolved"; records: string[] }
   | { status: "invalid"; problems: Array<{ path: string; message: string }> };
 
 export interface StageInput {
@@ -233,6 +284,132 @@ export class ProposalManager {
     });
   }
 
+  /**
+   * Change one reviewed field in place, through the recoverable draft journal (§11.4.1).
+   *
+   * The revision check is the point. Two windows on one proposal, or a person editing while a
+   * send-back lands, must not silently combine into a third version neither of them read: the
+   * losing edit is refused and told what the current revision is, so the screen can reload and
+   * show what it now actually says.
+   */
+  async updateField(input: UpdateFieldInput): Promise<UpdateFieldOutcome> {
+    return this.store.gateOp(async () => {
+      const dir = this.proposalDir(input.proposalId);
+
+      // Any earlier operation finishes before this one is judged, so the revision it checks
+      // against is the settled one rather than a value mid-flight.
+      const recovery = await this.recoverDrafts(input.proposalId);
+      if (recovery.status === "blocked") return { status: "draft-unresolved", records: recovery.unreadable };
+
+      const proposal = await this.readManifest(input.proposalId);
+
+      // A retry of an edit that already landed is that edit, not a second one.
+      if (proposal.lastDraftRequestId === input.requestId) return { status: "updated", proposal };
+
+      if (proposal.draftRevision !== input.expectedDraftRevision) {
+        return { status: "stale", currentDraftRevision: proposal.draftRevision };
+      }
+      if (!proposal.targets.some((t) => t.path === input.path)) {
+        return { status: "unknown-target" };
+      }
+
+      const current = await this.readProposalFile(input.proposalId, input.path);
+      if (current === null) return { status: "unknown-target" };
+
+      const edited = applyFieldEdit(input.path, current, input.field, input.value);
+      if (!edited.ok) return { status: "rejected", message: safeFieldEditMessage(edited.problem) };
+
+      // An edit never adds a target or a base: the set of targets was fixed at wrap-up, so the
+      // next manifest differs from the current one by its revision alone.
+      const nextManifest: Proposal = {
+        ...proposal,
+        draftRevision: proposal.draftRevision + 1,
+        lastDraftRequestId: input.requestId,
+      };
+
+      const op: DraftOperation = {
+        operationId: newId("dop"),
+        requestId: input.requestId,
+        proposalId: input.proposalId,
+        expectedDraftRevision: input.expectedDraftRevision,
+        currentDraftRevision: proposal.draftRevision,
+        nextDraftRevision: nextManifest.draftRevision,
+        state: "prepared",
+        files: [{ path: input.path, content: edited.content }],
+        nextManifest: ProposalSchema.parse(nextManifest) as Record<string, unknown>,
+        at: this.store.now(),
+      };
+
+      // 1. the prepared record, before anything authoritative moves.
+      await writeDraftRecord(dir, op);
+      // 2. every next file, beside the journal rather than over the target.
+      for (const file of op.files) {
+        await atomicWriteFile(draftStagingPath(dir, op.operationId, file.path), file.content);
+      }
+      // 3. past here the targets may move, so recovery may only go forward.
+      await writeDraftRecord(dir, { ...op, state: "committing" });
+      // 4-7.
+      await this.commitDraft(dir, { ...op, state: "committing" });
+      return { status: "updated", proposal: nextManifest };
+    });
+  }
+
+  /**
+   * Steps 4-7, written so that running them twice is the same as running them once.
+   *
+   * Recovery calls this without knowing how far the original attempt got, so every step either
+   * moves the world to the recorded next state or finds it already there.
+   */
+  private async commitDraft(dir: string, op: DraftOperation): Promise<void> {
+    for (const file of op.files) {
+      const staged = draftStagingPath(dir, op.operationId, file.path);
+      const target = join(dir, fromPortable(file.path));
+      try {
+        // 4. rename, not copy: the target is never briefly half-written.
+        await renameWithRetry(staged, target);
+      } catch (err) {
+        // Already renamed by an earlier attempt. The record's contents are the authority on what
+        // the target should say, so a missing staging file is only acceptable when it does.
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        const landed = await readFile(toExtendedLength(target), "utf8").catch(() => null);
+        if (landed !== file.content) throw err;
+      }
+    }
+    // 5. the manifest, carrying the next revision, wholesale.
+    const next = ProposalSchema.parse(op.nextManifest);
+    await this.writeManifest(next);
+    // 6. the preview follows the files it describes.
+    await this.refreshPreview(next);
+    // 7. nothing is left to roll forward.
+    await removeDraftOperation(dir, op);
+  }
+
+  /**
+   * Roll this proposal's journal to a settled state (§11.4.1).
+   *
+   * A committing operation goes forward, because its targets may already have moved. A
+   * prepared-only one is dropped, because none of them have. A record that will not parse blocks:
+   * an operation whose outcome nobody can determine is exactly what must not be accepted past.
+   */
+  async recoverDrafts(proposalId: string): Promise<DraftRecovery> {
+    const dir = this.proposalDir(proposalId);
+    const { operations, unreadable } = await readDraftOperations(dir);
+    if (unreadable.length > 0) return { status: "blocked", unreadable, rolledForward: 0, dropped: 0 };
+
+    let rolledForward = 0;
+    let dropped = 0;
+    for (const op of operations) {
+      if (op.state === "committing") {
+        await this.commitDraft(dir, op);
+        rolledForward += 1;
+      } else {
+        await removeDraftOperation(dir, op);
+        dropped += 1;
+      }
+    }
+    return { status: "settled", unreadable: [], rolledForward, dropped };
+  }
+
   /** Discard: the directory goes, reservations stay burned, one log line remains (R-4, D9). */
   async discard(proposalId: string): Promise<void> {
     await this.store.gateOp(async () => {
@@ -254,6 +431,11 @@ export class ProposalManager {
 
   async accept(proposalId: string, opts: { confirmRipples?: string } = {}): Promise<AcceptOutcome> {
     return this.store.gateOp(async () => {
+      // §11.4.1: recover first, then refuse while anything remains unresolved. Accepting past an
+      // edit whose outcome is unknown would write a version of the file that nobody reviewed.
+      const recovery = await this.recoverDrafts(proposalId);
+      if (recovery.status === "blocked") return { status: "draft-unresolved", records: recovery.unreadable };
+
       const proposal = await this.readManifest(proposalId);
 
       if (proposal.pendingReview) return { status: "pending-review" };
@@ -358,6 +540,11 @@ export class ProposalManager {
   /** Field-level three-way rebase (R-6, R-7): new bases, merged files, recomputed preview. */
   async rebase(proposalId: string): Promise<{ conflicts: ProposalConflict[] }> {
     return this.store.gateOp(async () => {
+      // §11.4.1: a rebase merges against the proposal's files, so an edit half-applied to them
+      // would be merged into the world's history as though it had been reviewed.
+      const recovery = await this.recoverDrafts(proposalId);
+      if (recovery.status === "blocked") throw new DraftUnresolvedError(proposalId, recovery.unreadable);
+
       const proposal = await this.readManifest(proposalId);
       const conflicts: ProposalConflict[] = [];
       const targets: Proposal["targets"] = [];
@@ -411,6 +598,10 @@ export class ProposalManager {
   /** A human chose a side for one conflicted field (R-6, D4). */
   async resolveConflict(proposalId: string, path: string, field: string, choice: "mine" | "theirs"): Promise<void> {
     await this.store.gateOp(async () => {
+      // §11.4.1: resolving writes the proposal file, so it must not run over an edit in flight.
+      const recovery = await this.recoverDrafts(proposalId);
+      if (recovery.status === "blocked") throw new DraftUnresolvedError(proposalId, recovery.unreadable);
+
       const proposal = await this.readManifest(proposalId);
       const conflict = (proposal.conflicts ?? []).find((c) => c.path === path && c.field === field);
       if (!conflict) throw new Error(`no conflict on ${path}#${field}`);
