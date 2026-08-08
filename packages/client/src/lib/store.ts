@@ -1220,6 +1220,11 @@ export function refreshProviderTool(provider: ProviderId): void {
   send({ kind: "refresh-provider-tool", provider });
 }
 
+/** Which account the provider bills. null hands billing back to the personal context. */
+export function selectProviderWorkspace(provider: ProviderId, workspaceId: string | null): void {
+  send({ kind: "select-provider-workspace", provider, workspaceId });
+}
+
 /** Configure one agent. null clears that half back to what shipped. */
 export function setAgentConfig(agent: string, patch: { model?: string | null; brief?: string | null }): void {
   send({ kind: "set-agent-config", agent, ...patch });

@@ -6,7 +6,7 @@ import { FalClient } from "../src/clients/fal.js";
 import { HiggsfieldClient } from "../src/clients/higgsfield.js";
 import { OllamaClient } from "../src/clients/ollama.js";
 import { OpenAiClient } from "../src/clients/openai.js";
-import { lazyHiggsfieldRunner } from "../src/higgsfield-cli.js";
+import { higgsfieldSelectWorkspace, higgsfieldWorkspaces, lazyHiggsfieldRunner } from "../src/higgsfield-cli.js";
 import { ProviderAuthError, type CommandRunner, type FetchLike } from "../src/types.js";
 
 /** A fetch fake: route → {status, body}. Anything unrouted throws (network unreachable). */
@@ -620,5 +620,71 @@ describe("the CLI can arrive after the app has started (issue 137)", () => {
     // And once bound it stays bound: discovery is not re-run on every call.
     await runner(["account", "status"]);
     assert.equal(probes, 2);
+  });
+});
+
+describe("which account the provider bills (issue 137)", () => {
+  /** The shape `workspace list --json` really returns, taken from a live account. */
+  const LIVE = JSON.stringify([
+    {
+      id: "92d16af0-3eee-4d61-9632-8ef1f2ab9771",
+      name: null,
+      plan_type: "ultimate",
+      credits: 0.5,
+      is_selected: true,
+      user_role: "owner",
+    },
+  ]);
+
+  it("maps the CLI's field names, and keeps a personal account's null name", async () => {
+    const rows = await higgsfieldWorkspaces("hf", async () => ({ code: 0, stdout: LIVE, stderr: "" }));
+    assert.deepEqual(rows, [
+      {
+        id: "92d16af0-3eee-4d61-9632-8ef1f2ab9771",
+        // Null, not the id: a personal context has no name, and printing a UUID at somebody
+        // is not a better answer than saying so.
+        name: null,
+        plan: "ultimate",
+        credits: 0.5,
+        role: "owner",
+        selected: true,
+      },
+    ]);
+  });
+
+  it("treats an unreadable listing as no picker, never as a fault", async () => {
+    const failed = await higgsfieldWorkspaces("hf", async () => ({ code: 1, stdout: "", stderr: "nope" }));
+    assert.deepEqual(failed, []);
+    const garbage = await higgsfieldWorkspaces("hf", async () => ({ code: 0, stdout: "not json", stderr: "" }));
+    assert.deepEqual(garbage, []);
+    const wrongShape = await higgsfieldWorkspaces("hf", async () => ({ code: 0, stdout: '{"a":1}', stderr: "" }));
+    assert.deepEqual(wrongShape, []);
+    // A row with no id cannot be selected, so it is dropped rather than shown unusable.
+    const noId = await higgsfieldWorkspaces("hf", async () => ({ code: 0, stdout: '[{"name":"x"}]', stderr: "" }));
+    assert.deepEqual(noId, []);
+  });
+
+  it("unset is its own verb — clearing is not setting an empty id", async () => {
+    const seen: string[][] = [];
+    const run = async (_c: string, args: readonly string[]) => {
+      seen.push([...args]);
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    await higgsfieldSelectWorkspace("hf", "ws-1", run);
+    await higgsfieldSelectWorkspace("hf", null, run);
+    assert.deepEqual(seen[0]?.slice(0, 3), ["workspace", "set", "ws-1"]);
+    assert.deepEqual(seen[1]?.slice(0, 2), ["workspace", "unset"]);
+  });
+
+  it("a refused change says what the tool said", async () => {
+    await assert.rejects(
+      () =>
+        higgsfieldSelectWorkspace("hf", "ws-1", async () => ({
+          code: 1,
+          stdout: "",
+          stderr: "you are not a member of that workspace",
+        })),
+      /not a member/,
+    );
   });
 });

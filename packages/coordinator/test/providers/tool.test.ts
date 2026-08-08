@@ -102,3 +102,84 @@ describe("a provider whose credential is not ours (issue #137)", () => {
     assert.equal((await svc.refresh()).signInCommand, "higgsfield auth login");
   });
 });
+
+/**
+ * Which account pays (issue 137). One credential can reach several, and a generation billed to
+ * the wrong one is not recoverable — so the selection is read from the tool, shown, and set
+ * through it, never assumed.
+ *
+ * The live account this was built against has exactly one workspace, so the multi-account paths
+ * below are the only coverage they have.
+ */
+const PERSONAL = { id: "ws-personal", name: null, plan: "ultimate", credits: 0.5, role: "owner", selected: true };
+const STUDIO = { id: "ws-studio", name: "Studio", plan: "team", credits: 120, role: "admin", selected: false };
+
+describe("which account the provider bills (issue 137)", () => {
+  it("reads the accounts once the sign-in is known good", async () => {
+    const { svc } = service({
+      whoAmI: async () => ({ account: "someone@example.test" }),
+      listWorkspaces: async () => [PERSONAL, STUDIO],
+    });
+    const status = await svc.refresh();
+    assert.equal(status.workspaces.length, 2);
+    assert.equal(status.workspaces.find((w) => w.selected)?.id, "ws-personal");
+  });
+
+  it("a tool that cannot list accounts is not thereby signed out", async () => {
+    const { svc } = service({
+      whoAmI: async () => ({ account: "someone@example.test" }),
+      listWorkspaces: async () => {
+        throw new Error("workspace listing is unavailable");
+      },
+    });
+    const status = await svc.refresh();
+    // No picker, but the session is fine and the provider still works.
+    assert.equal(status.state, "ready");
+    assert.deepEqual(status.workspaces, []);
+  });
+
+  it("re-reads after setting, because the tool is the authority on what it selected", async () => {
+    let selected = "ws-personal";
+    const { svc } = service({
+      whoAmI: async () => ({ account: "someone@example.test" }),
+      listWorkspaces: async () =>
+        [PERSONAL, STUDIO].map((w) => ({ ...w, selected: w.id === selected })),
+      selectWorkspace: async (_command, id) => {
+        selected = id ?? "ws-personal";
+      },
+    });
+    await svc.refresh();
+    const status = await svc.selectWorkspace("ws-studio");
+    assert.equal(status.workspaces.find((w) => w.selected)?.id, "ws-studio");
+  });
+
+  it("a set that fails leaves the tool's own words and the tool's own answer", async () => {
+    const { svc } = service({
+      whoAmI: async () => ({ account: "someone@example.test" }),
+      listWorkspaces: async () => [PERSONAL, STUDIO],
+      selectWorkspace: async () => {
+        throw new Error("you are not a member of that workspace");
+      },
+    });
+    const status = await svc.selectWorkspace("ws-studio");
+    assert.match(status.detail!, /not a member/);
+    // The listing, not our optimism, decides what is selected afterwards.
+    assert.equal(status.workspaces.find((w) => w.selected)?.id, "ws-personal");
+  });
+
+  it("clears the accounts when the session goes, so a stale list cannot name a payer", async () => {
+    let signedIn = true;
+    const { svc } = service({
+      whoAmI: async () => {
+        if (!signedIn) throw new Error("Session expired");
+        return { account: "someone@example.test" };
+      },
+      listWorkspaces: async () => [PERSONAL, STUDIO],
+    });
+    assert.equal((await svc.refresh()).workspaces.length, 2);
+    signedIn = false;
+    const status = await svc.refresh();
+    assert.equal(status.state, "signed-out");
+    assert.deepEqual(status.workspaces, []);
+  });
+});

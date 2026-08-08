@@ -44,6 +44,7 @@ import {
   retryJobFinalization,
   resumeQueue,
   refreshProviderTool,
+  selectProviderWorkspace,
   setCredential,
   signInProviderTool,
   setBackgroundNotifications,
@@ -90,6 +91,7 @@ import {
   type ProviderId,
   type ProviderCallRecord,
   type ProviderStatus,
+  type ProviderWorkspace,
 } from "@arke-studio/contracts";
 
 /** Shell screens: launch, first run, world picker, new world, settings, activity (§2.9). */
@@ -1235,6 +1237,73 @@ const CAPABILITY_LABEL: Record<Capability, string> = {
  */
 const TOOL_COMPONENT: Partial<Record<ProviderId, string>> = { higgsfield: "higgsfield-cli" };
 
+/** A personal account has no name; saying so beats printing a UUID at somebody. */
+function workspaceLabel(workspace: ProviderWorkspace): string {
+  const name = workspace.name ?? "Personal account";
+  const parts = [name];
+  if (workspace.plan) parts.push(workspace.plan);
+  if (workspace.credits !== null) {
+    // The provider's own unit. Converting to money would mean inventing a rate we do not know.
+    parts.push(`${workspace.credits} credit${workspace.credits === 1 ? "" : "s"}`);
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * Which account pays. One credential can reach several, and a generation billed to the wrong
+ * one is not recoverable — so the choice is made here, in advance, rather than discovered on an
+ * invoice. With a single account there is nothing to choose and the row just names it, because
+ * "which account paid for that" should never need asking afterwards.
+ */
+function ProviderWorkspaceLine({
+  id,
+  workspaces,
+}: {
+  id: ProviderId;
+  workspaces: readonly ProviderWorkspace[];
+}) {
+  if (workspaces.length === 0) return null;
+  const selected = workspaces.find((w) => w.selected) ?? null;
+  return (
+    <>
+      <div className="fy-prov__keyline">
+        <div className="fy-prov__eyebrow">BILLS TO</div>
+        {workspaces.length === 1 ? (
+          <div className="fy-set__field">
+            <span style={{ flex: 1 }}>{workspaceLabel(workspaces[0]!)}</span>
+          </div>
+        ) : (
+          <div className="fy-set__field">
+            <select
+              className="fy-set__input"
+              aria-label="Billing account"
+              value={selected?.id ?? ""}
+              onChange={(e) => selectProviderWorkspace(id, e.target.value === "" ? null : e.target.value)}
+            >
+              {/* An explicit entry for "no workspace", because `workspace unset` is a real
+                  choice — it returns billing to the personal account rather than clearing it. */}
+              <option value="">Personal account</option>
+              {workspaces
+                .filter((w) => w.name !== null)
+                .map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {workspaceLabel(w)}
+                  </option>
+                ))}
+            </select>
+          </div>
+        )}
+      </div>
+      {workspaces.length > 1 && selected === null && (
+        <div className="fy-set__why">
+          <span className="fy-set__dot fy-set__dot--warn" />
+          <span>This sign-in reaches {workspaces.length} accounts and none is selected — choose which one pays.</span>
+        </div>
+      )}
+    </>
+  );
+}
+
 function ProviderToolLine({ id }: { id: ProviderId }) {
   const { state } = useStore();
   const setup = useSetup();
@@ -1258,6 +1327,7 @@ function ProviderToolLine({ id }: { id: ProviderId }) {
     source: null,
     version: null,
     account: null,
+    workspaces: [],
     detail: "the Higgsfield CLI has not been found on this machine",
     signInCommand: "higgsfield auth login",
   };
@@ -1325,6 +1395,7 @@ function ProviderToolLine({ id }: { id: ProviderId }) {
               : "")}
         </span>
       </div>
+      <ProviderWorkspaceLine id={id} workspaces={tool.workspaces} />
       <div className="fy-set__note">
         {tool.state === "absent" ? "Install it, then sign in: " : "Or sign in from a terminal: "}
         <code>{tool.signInCommand}</code>{" "}
