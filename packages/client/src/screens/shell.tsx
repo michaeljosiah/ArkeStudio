@@ -24,6 +24,7 @@ import {
   archiveWorld,
   createSheetFromSentence,
   createWorld,
+  deleteJob,
   genesisAttachFiles,
   genesisChat,
   genesisDiscard,
@@ -2320,6 +2321,7 @@ export function ActivityScreen() {
   const [scope, setScope] = useState<"active" | "all">("active");
   const [inspectedJobId, setInspectedJobId] = useState<string | null>(null);
   const [inspectAllCalls, setInspectAllCalls] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const activeWorldId = state?.world?.meta.worldId ?? null;
   // The alert threshold, set where it is reported (26a). Closed until asked for: the note says
   // what the alert is, and most visits to this screen are not about changing it.
@@ -2486,6 +2488,34 @@ export function ActivityScreen() {
                 <span className="scr-field__hint">failed — retry from its production's dispatch dialog</span>
               )}
               <Button variant="ghost" onClick={() => setInspectedJobId(job.id)}>Provider calls</Button>
+              {/* Two clicks and no dialog, like archiving a world: the second click is the consent,
+                  and the words say what survives it. Offered only where the state permits it
+                  (R-13) — work still finishing, or a finalization the user can still retry, is
+                  not history yet. */}
+              {jobActions(job).includes("delete") &&
+                (confirmingDelete === job.id ? (
+                  <>
+                    <span className="scr-field__hint">
+                      Remove from this history? The ledger entry and anything it produced stay — spend does not
+                      move.
+                    </span>
+                    <Button
+                      onClick={() => {
+                        deleteJob(job.id);
+                        setConfirmingDelete(null);
+                      }}
+                    >
+                      Delete
+                    </Button>
+                    <Button variant="ghost" onClick={() => setConfirmingDelete(null)}>
+                      Keep
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="ghost" onClick={() => setConfirmingDelete(job.id)}>
+                    Delete
+                  </Button>
+                ))}
             </div>
           ))}
           {(inspectedJobId || inspectAllCalls) && (

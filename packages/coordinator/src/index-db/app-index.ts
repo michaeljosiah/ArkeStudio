@@ -212,9 +212,14 @@ export class AppIndex {
     const jobLines = await readChanges(jobsPath);
     const ledgerLines = await readChanges(ledgerPath);
     const jobs: Job[] = [];
+    // A tombstone anywhere in the log removes that id for good — there is no un-delete — so the
+    // ids are collected first and their rows skipped, whatever order the replay meets them in.
+    const deleted = new Set<string>();
     for (const line of jobLines) {
       const parsed = JobSchema.safeParse(line);
-      if (parsed.success) jobs.push(parsed.data);
+      if (!parsed.success) continue;
+      if (parsed.data.deletedAt !== undefined) deleted.add(parsed.data.id);
+      jobs.push(parsed.data);
     }
     const entries: LedgerEntry[] = [];
     for (const line of ledgerLines) {
@@ -223,7 +228,8 @@ export class AppIndex {
     }
     this.db.transaction(() => {
       this.db.exec("DELETE FROM jobs; DELETE FROM ledger;");
-      for (const job of jobs) this.upsertJob(job);
+      for (const job of jobs) if (!deleted.has(job.id)) this.upsertJob(job);
+      // The ledger is replayed whole: a deleted row is history the user dropped, not spend undone.
       for (const entry of entries) this.appendLedger(entry);
     })();
   }

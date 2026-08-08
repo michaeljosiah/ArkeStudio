@@ -170,6 +170,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("job.updated"), job: JobSchema }).strict(),
   /** A succeeded job's artifacts and coordinator follow-on are ready for use. */
   z.object({ ...base, type: z.literal("job.ready"), job: JobSchema }).strict(),
+  /** The user dropped a finished job from Activity's history (SPEC-014 R-13). The id, not a row. */
+  z.object({ ...base, type: z.literal("job.deleted"), jobId: JobIdSchema }).strict(),
 
   /** One correlated acknowledgement after all durable enqueue attempts for a user action. */
   z

@@ -161,6 +161,13 @@ export class ReadModel {
         this.state = { ...this.state, app: { ...this.state.app, jobs } };
         return;
       }
+      case "job.deleted": {
+        this.state = {
+          ...this.state,
+          app: { ...this.state.app, jobs: this.state.app.jobs.filter((j) => j.id !== event.jobId) },
+        };
+        return;
+      }
       case "ledger.appended": {
         this.state = {
           ...this.state,

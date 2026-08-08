@@ -596,6 +596,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("list-provider-calls"), jobId: JobIdSchema.nullable() }).strict(),
   z.object({ kind: z.literal("retry-job-finalization"), jobId: z.string().min(1) }).strict(),
   /**
+   * Drop a finished job from Activity's history (SPEC-014 R-13). Ignored for anything the state
+   * cannot perform it on — non-terminal work is cancelled, not deleted. The ledger entry and any
+   * landed files stay: this removes a row, not what it produced or what it cost.
+   */
+  z.object({ kind: z.literal("delete-job"), jobId: z.string().min(1) }).strict(),
+  /**
    * SPEC-009 R-4/D4: resolve a job held as needs-reconciliation. "resubmit" accepts the stated
    * duplicate risk; "discard" abandons the attempt (its ledger entry still lands, R-15).
    */

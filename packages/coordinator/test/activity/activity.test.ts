@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
+  canDeleteJob,
   computeNeedsYou,
   computeRunning,
   jobActions,
@@ -242,10 +243,44 @@ describe("actions offered only where the state permits (R-13, D10, §3.2)", () =
     assert.deepEqual(jobActions(job({ status: "queued" })), ["cancel"]);
     assert.deepEqual(jobActions(job({ status: "submitting" })), ["cancel"]);
     assert.deepEqual(jobActions(job({ status: "running" })), ["watch", "cancel"]);
-    assert.deepEqual(jobActions(job({ status: "failed" })), ["retry"]);
+    assert.deepEqual(jobActions(job({ status: "failed" })), ["retry", "delete"]);
     assert.deepEqual(jobActions(job({ status: "needs-reconciliation" })), ["resolve"]);
-    assert.deepEqual(jobActions(job({ status: "succeeded" })), [], "no cancel on a completed job");
-    assert.deepEqual(jobActions(job({ status: "cancelled" })), []);
+    assert.deepEqual(jobActions(job({ status: "succeeded" })), ["delete"], "no cancel on a completed job");
+    assert.deepEqual(jobActions(job({ status: "cancelled" })), ["delete"]);
+  });
+
+  it("offers delete only on finished work that owes the user nothing", () => {
+    // In flight: the action for this state is cancel, and offering both would be the D10 lie.
+    for (const status of ["queued", "submitting", "running", "needs-reconciliation"] as const) {
+      assert.ok(!canDeleteJob(job({ status })), `${status} is not history yet`);
+      assert.ok(!jobActions(job({ status })).includes("delete"));
+    }
+    // Finished, and its result already prepared — or never needing preparation.
+    assert.ok(canDeleteJob(job({ status: "succeeded" })));
+    assert.ok(
+      canDeleteJob(
+        job({
+          status: "succeeded",
+          finalization: { status: "complete", error: null, updatedAt: "2026-08-01T10:01:00Z" },
+        }),
+      ),
+    );
+    // Still preparing: it draws as running work, so a delete here would remove a live row.
+    assert.ok(
+      !canDeleteJob(
+        job({
+          status: "succeeded",
+          finalization: { status: "pending", error: null, updatedAt: "2026-08-01T10:01:00Z" },
+        }),
+      ),
+    );
+    // Failed preparation: a class-1 needs-you entry carrying a retry the user has not answered.
+    const unprepared = job({
+      status: "succeeded",
+      finalization: { status: "failed", error: "not ready", updatedAt: "2026-08-01T10:01:00Z" },
+    });
+    assert.ok(!canDeleteJob(unprepared));
+    assert.equal(computeNeedsYou(baseState({ jobs: [unprepared] })).length, 1, "it is still on the queue");
   });
 });
 

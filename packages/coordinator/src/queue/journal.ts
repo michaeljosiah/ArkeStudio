@@ -43,12 +43,16 @@ export class JobJournal {
     });
   }
 
-  /** Fold to current state: the latest record per job id, in first-seen (FIFO) order. */
+  /**
+   * Fold to current state: the latest record per job id, in first-seen (FIFO) order. A row whose
+   * latest record carries `deletedAt` folds away entirely — the user dropped it from Activity, and
+   * a deletion is expressed as an appended record like every other transition.
+   */
   async readFolded(): Promise<Job[]> {
     const history = await this.readHistory();
     const byId = new Map<string, Job>();
     for (const job of history) byId.set(job.id, job);
-    return [...byId.values()];
+    return [...byId.values()].filter((job) => job.deletedAt === undefined);
   }
 
   /** Every valid durable row, for conservative migration of unsafe legacy retry histories. */

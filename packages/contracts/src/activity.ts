@@ -275,7 +275,18 @@ export function computeRunning(
 // Actions per state (R-13, D10): never offered when the state cannot perform it
 // ---------------------------------------------------------------------------
 
-export type JobAction = "watch" | "cancel" | "retry" | "resolve";
+export type JobAction = "watch" | "cancel" | "retry" | "resolve" | "delete";
+
+/**
+ * Whether the user may drop this job from Activity's history. Terminal only — work still in
+ * flight is cancelled, not deleted — and never while finalization is pending or failed, because
+ * a pending one is still working and a failed one is a class-1 needs-you item with a retry on it.
+ * Deleting either would remove an entry the user still has a decision to make about (D1, D10).
+ */
+export function canDeleteJob(job: Job): boolean {
+  if (job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled") return false;
+  return job.finalization?.status !== "pending" && job.finalization?.status !== "failed";
+}
 
 export function jobActions(job: Job): JobAction[] {
   switch (job.status) {
@@ -285,12 +296,14 @@ export function jobActions(job: Job): JobAction[] {
     case "running":
       return ["watch", "cancel"];
     case "failed":
-      return ["retry"];
+      return canDeleteJob(job) ? ["retry", "delete"] : ["retry"];
     case "needs-reconciliation":
       return ["resolve"];
     case "succeeded":
     case "cancelled":
-      return []; // a cancel on a completed job is the small dishonesty (D10)
+      // A cancel on a completed job is the small dishonesty (D10); a delete is not — the work is
+      // over, and the row is the user's own history to keep or drop.
+      return canDeleteJob(job) ? ["delete"] : [];
   }
 }
 

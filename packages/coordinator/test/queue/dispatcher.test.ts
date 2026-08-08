@@ -1068,3 +1068,73 @@ describe("no credential holds the lane rather than failing the work", () => {
     h.queue.dispose();
   });
 });
+
+describe("deleting a finished job from Activity's history (SPEC-014 R-13)", () => {
+  it("drops the row, keeps the ledger entry, and stays gone across a restart", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    const spentBefore = h.ledger.entries.length;
+
+    await h.queue.delete(job.id);
+    assert.equal(foldedJob(h, job.id), undefined, "the row leaves the queue's view");
+    assert.equal(h.ledger.entries.length, spentBefore, "what was spent stays spent");
+    assert.ok(
+      h.events.some((e) => e.type === "job.deleted" && e.jobId === job.id),
+      "the deletion is pushed, not polled for",
+    );
+
+    // The journal is append-only: the tombstone is a record, not a rewrite.
+    const lines = (await readFile(h.journalPath, "utf8")).trim().split("\n");
+    const rows = lines.map((line) => JSON.parse(line) as Job).filter((row) => row.id === job.id);
+    assert.ok(rows.length > 1, "earlier records are still there");
+    assert.ok(rows.at(-1)!.deletedAt, "the last record is the tombstone");
+
+    h.queue.dispose();
+    const revived = h.revive();
+    const report = await revived.queue.start();
+    assert.equal(foldedJob(revived, job.id), undefined, "recovery does not resurrect it");
+    assert.equal(report.length, 0, "a deleted row is nothing to reconcile");
+    revived.queue.dispose();
+  });
+
+  it("refuses work that is still in flight — that is a cancel, not a delete", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.pollState = "running"; // never finishes: the job sits in flight for the whole test
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "running");
+
+    await h.queue.delete(job.id);
+    assert.equal(foldedJob(h, job.id)?.status, "running", "the job is untouched");
+    assert.ok(!h.events.some((e) => e.type === "job.deleted"));
+
+    // Cancel is the action this state does permit, and then the row can go.
+    await h.queue.cancel(job.id);
+    await h.queue.delete(job.id);
+    assert.equal(foldedJob(h, job.id), undefined);
+    h.queue.dispose();
+  });
+
+  it("refuses a job whose finalization still owes the user an outcome", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.artifacts = [{ name: "main.png", contentType: "image/png", data: pngBytes() }];
+    const h = await makeHarness({ fake }, { onTerminal: () => { throw new Error("preparation failed"); } });
+    await h.queue.start();
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      target: { kind: "main-photo-candidate", id: "kestrel/main" },
+      capability: "image",
+      landing: { dir: "references/kestrel/candidates" },
+    });
+    await until(() => foldedJob(h, job.id)?.finalization?.status === "failed");
+
+    await h.queue.delete(job.id);
+    assert.ok(foldedJob(h, job.id), "a failed finalization is a needs-you item with a retry on it");
+    assert.ok(!h.events.some((e) => e.type === "job.deleted"));
+    h.queue.dispose();
+  });
+});
