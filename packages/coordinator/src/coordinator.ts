@@ -3556,6 +3556,10 @@ export class Coordinator {
         await this.jobQueue?.retryFinalization(msg.jobId);
         return;
       }
+      case "delete-job": {
+        await this.jobQueue?.delete(msg.jobId);
+        return;
+      }
       case "resolve-held-job": {
         await this.jobQueue?.resolveHeld(msg.jobId, msg.decision);
         return;

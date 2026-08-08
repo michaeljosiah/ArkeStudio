@@ -279,6 +279,9 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       else jobs[i] = event.job;
       return { ...state, app: { ...state.app, jobs } };
     }
+    case "job.deleted":
+      // The row leaves Activity; its ledger entry stays, so spend does not move.
+      return { ...state, app: { ...state.app, jobs: state.app.jobs.filter((j) => j.id !== event.jobId) } };
     case "ledger.appended":
       return { ...state, app: { ...state.app, ledger: [...state.app.ledger, event.entry] } };
     case "provider.status":
@@ -1294,6 +1297,11 @@ export function cancelJob(jobId: string): void {
 
 export function retryJobFinalization(jobId: string): void {
   send({ kind: "retry-job-finalization", jobId });
+}
+
+/** Drop a finished job from Activity's history. The ledger entry and landed files stay. */
+export function deleteJob(jobId: string): void {
+  send({ kind: "delete-job", jobId });
 }
 
 /** Resolve a held (needs-reconciliation) job: accept the duplicate risk, or abandon. */

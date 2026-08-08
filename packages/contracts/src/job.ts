@@ -75,6 +75,12 @@ export const JobSchema = z
     /** Domain follow-on after provider success, durable and retryable without another charge. */
     finalization: JobFinalizationSchema.optional(),
     error: z.string().nullable().default(null),
+    /**
+     * The user removed this job from Activity's history. A deletion is a record like any other
+     * transition — the journal stays append-only, and the fold drops the id rather than the file
+     * losing lines. The ledger entry is untouched: what was spent stays spent (SPEC-008 R-15).
+     */
+    deletedAt: IsoDateTimeSchema.optional(),
     createdAt: IsoDateTimeSchema,
     updatedAt: IsoDateTimeSchema,
   })

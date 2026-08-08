@@ -1,6 +1,7 @@
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import {
+  canDeleteJob,
   credentialKindOf,
   formatMicroUsd,
   PROVIDERS,
@@ -149,7 +150,11 @@ const FOLLOW_ON_TARGETS = new Set([
   "voice-preview",
 ]);
 
-/** Fold current state, prior state, and durable submission count in one history pass. */
+/**
+ * Fold current state, prior state, and durable submission count in one history pass. A job whose
+ * latest record carries `deletedAt` is dropped: the user removed it from Activity, and recovery
+ * has nothing to do with a row that no longer exists. Its ledger entry is unaffected.
+ */
 export function foldJobHistory(history: Iterable<Job>): Array<{ job: Job; prior: Job | undefined }> {
   const byId = new Map<string, { latest: Job; prior: Job | undefined; submitting: number }>();
   for (const row of history) {
@@ -166,10 +171,12 @@ export function foldJobHistory(history: Iterable<Job>): Array<{ job: Job; prior:
       });
     }
   }
-  return [...byId.values()].map(({ latest, prior, submitting }) => ({
-    job: submitting > latest.attempt ? { ...latest, attempt: submitting } : latest,
-    prior,
-  }));
+  return [...byId.values()]
+    .filter(({ latest }) => latest.deletedAt === undefined)
+    .map(({ latest, prior, submitting }) => ({
+      job: submitting > latest.attempt ? { ...latest, attempt: submitting } : latest,
+      prior,
+    }));
 }
 
 function landedName(job: Job, artifact: DispatchArtifact, index: number): string {
@@ -767,6 +774,27 @@ export class JobQueue {
     // A cancelled job still writes a ledger entry (R-15, D10).
     await this.terminalize(job, "cancelled", null);
     this.emitQueueStatus(job.provider);
+  }
+
+  // ---- deletion from history (SPEC-014 R-13) -------------------------------
+
+  /**
+   * Drop a finished job from Activity's history. Journal first, like every other transition (D1):
+   * the tombstone is a full row carrying `deletedAt`, so the file stays append-only and the fold
+   * stops returning the id. Refused for anything `canDeleteJob` says the state cannot perform —
+   * work in flight is cancelled, not deleted, and an unfinished finalization still owes the user
+   * an outcome. The ledger entry and any landed files are untouched: this removes a row, not what
+   * it produced or what it cost.
+   */
+  async delete(jobId: string): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (!job || !canDeleteJob(job)) return;
+    const tombstone: Job = { ...job, deletedAt: this.clock(), updatedAt: this.clock() };
+    if (this.disposed) return;
+    await this.journal.append(tombstone);
+    if (this.disposed) return; // killed mid-write: the journal decides on recovery
+    this.jobs.delete(jobId);
+    this.opts.emit({ at: this.clock(), type: "job.deleted", jobId: tombstone.id });
   }
 
   // ---- reconciliation (§2.5) and start-up (R-18) ---------------------------
