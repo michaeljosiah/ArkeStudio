@@ -517,6 +517,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("sign-in-provider-tool"), provider: ProviderIdSchema }).strict(),
   z.object({ kind: z.literal("cancel-provider-tool-sign-in"), provider: ProviderIdSchema }).strict(),
   z.object({ kind: z.literal("refresh-provider-tool"), provider: ProviderIdSchema }).strict(),
+  /** Which account the provider bills. null hands billing back to the personal context. */
+  z
+    .object({
+      kind: z.literal("select-provider-workspace"),
+      provider: ProviderIdSchema,
+      workspaceId: z.string().min(1).nullable(),
+    })
+    .strict(),
   /** SPEC-008 R-20: a routing default is a concrete model, displayed as its provider (D1). */
   z
     .object({

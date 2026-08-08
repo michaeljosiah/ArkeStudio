@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import type { ProviderWorkspace } from "@arke-studio/contracts";
 import type { CommandResult, CommandRunner } from "./types.js";
 
 /**
@@ -210,6 +211,69 @@ export async function higgsfieldWhoAmI(
   } catch {
     // Signed in, but the payload changed shape. That is not a reason to call it signed out.
     return { account: null };
+  }
+}
+
+/**
+ * The accounts this sign-in can bill, as `workspace list --json` reports them:
+ *
+ *   [{ id, name, plan_type, credits, is_selected, user_role }]
+ *
+ * `name` is null for a personal account context — the one `workspace unset` returns to — so it
+ * is carried through as null rather than papered over with the id.
+ *
+ * An empty list is a legitimate answer and not an error. So is a failure: a tool that cannot
+ * say which accounts exist has not thereby become signed out, and this must not be able to
+ * downgrade a working session (the caller treats it as "no picker", never as a fault).
+ */
+export async function higgsfieldWorkspaces(
+  command: string,
+  run: RawRunner = runRaw,
+): Promise<ProviderWorkspace[]> {
+  const result = await run(command, ["workspace", "list", "--json", "--no-color"], PROBE_TIMEOUT_MS);
+  if (result.code !== 0) return [];
+  let rows: unknown;
+  try {
+    rows = JSON.parse(result.stdout);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(rows)) return [];
+  const out: ProviderWorkspace[] = [];
+  for (const row of rows) {
+    if (row === null || typeof row !== "object") continue;
+    const item = row as Record<string, unknown>;
+    if (typeof item["id"] !== "string" || item["id"].length === 0) continue;
+    out.push({
+      id: item["id"],
+      name: typeof item["name"] === "string" && item["name"].length > 0 ? item["name"] : null,
+      plan: typeof item["plan_type"] === "string" && item["plan_type"].length > 0 ? item["plan_type"] : null,
+      credits: typeof item["credits"] === "number" && Number.isFinite(item["credits"]) ? item["credits"] : null,
+      role: typeof item["user_role"] === "string" && item["user_role"].length > 0 ? item["user_role"] : null,
+      selected: item["is_selected"] === true,
+    });
+  }
+  return out;
+}
+
+/**
+ * Choose which account pays, or hand billing back to the personal context with `unset`. The
+ * result is not trusted: the caller re-reads the list, because the tool is the authority on
+ * what it actually selected and a set that half-worked would otherwise show as done.
+ */
+export async function higgsfieldSelectWorkspace(
+  command: string,
+  workspaceId: string | null,
+  run: RawRunner = runRaw,
+): Promise<void> {
+  const args =
+    workspaceId === null
+      ? ["workspace", "unset", "--no-color"]
+      : ["workspace", "set", workspaceId, "--no-color"];
+  const result = await run(command, args, PROBE_TIMEOUT_MS);
+  if (result.code !== 0) {
+    const said = result.stderr.trim().split(/\r?\n/, 1)[0]?.trim();
+    throw new Error(said && said.length > 0 ? said : "the Higgsfield CLI would not change the billing account");
   }
 }
 

@@ -1942,6 +1942,12 @@ export class Coordinator {
         await this.revalidateToolProvider(msg.provider);
         return;
       }
+      case "select-provider-workspace": {
+        const tool = this.providerTools.get(msg.provider);
+        if (!tool) return;
+        await tool.selectWorkspace(msg.workspaceId);
+        return;
+      }
       case "cancel-provider-tool-sign-in": {
         this.providerTools.get(msg.provider)?.cancelSignIn();
         return;

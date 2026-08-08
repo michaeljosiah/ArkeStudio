@@ -151,6 +151,28 @@ export const ProviderToolStateSchema = z.enum(["absent", "signed-out", "signing-
 export type ProviderToolState = z.infer<typeof ProviderToolStateSchema>;
 
 /**
+ * An account the provider can bill against. One credential can reach several, and which one
+ * pays is a choice the tool holds — so it is read, shown and set, never assumed.
+ *
+ * `credits` is the provider's own denomination, not money. It is deliberately not converted:
+ * we do not know what a credit costs on a given plan, and a figure in dollars that we invented
+ * would be worse than one in the units the provider actually bills in (R-14 is about our own
+ * arithmetic, not about restating someone else's).
+ */
+export const ProviderWorkspaceSchema = z
+  .object({
+    id: z.string().min(1),
+    /** Null for a personal account context — a real answer, not a missing name. */
+    name: z.string().min(1).nullable(),
+    plan: z.string().min(1).nullable(),
+    credits: z.number().nullable(),
+    role: z.string().min(1).nullable(),
+    selected: z.boolean(),
+  })
+  .strict();
+export type ProviderWorkspace = z.infer<typeof ProviderWorkspaceSchema>;
+
+/**
  * One external tool as Settings renders it. `configured` on ProviderStatus answers *whether*
  * this provider can work; this answers *why not, and what to do about it* — which for a
  * credential we do not hold is the only question the app can actually help with.
@@ -159,6 +181,12 @@ export const ProviderToolStatusSchema = z
   .object({
     provider: ProviderIdSchema,
     state: ProviderToolStateSchema,
+    /**
+     * Every account this sign-in can bill. Empty until signed in, and often exactly one — the
+     * picker only matters when it is not, but the selected one is worth showing either way,
+     * because "which account paid for that" should never need asking after the fact.
+     */
+    workspaces: z.array(ProviderWorkspaceSchema).default([]),
     /** A basename only. Absolute executable paths never cross into renderer state (R-6). */
     executableName: z.string().min(1).nullable(),
     source: z.enum(["configured", "path", "bundled"]).nullable(),

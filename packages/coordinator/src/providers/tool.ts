@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import type { ProviderId, ProviderToolStatus } from "@arke-studio/contracts";
+import type { ProviderId, ProviderToolStatus, ProviderWorkspace } from "@arke-studio/contracts";
 import type { AppLog } from "../app-log.js";
 
 /**
@@ -28,6 +28,13 @@ export interface ToolProbe {
    * what a non-zero one means, because only the tool knows why.
    */
   signIn(command: string, signal: AbortSignal): Promise<{ code: number | null; detail: string | null }>;
+  /**
+   * Which accounts this sign-in can bill. Never rejects: a tool that cannot say has not thereby
+   * become signed out, and an empty list only means there is no choice to offer.
+   */
+  listWorkspaces?(command: string): Promise<ProviderWorkspace[]>;
+  /** Choose which account pays; null hands billing back to the personal context. */
+  selectWorkspace?(command: string, workspaceId: string | null): Promise<void>;
 }
 
 const SIGN_IN_COMMAND = "higgsfield auth login";
@@ -49,6 +56,7 @@ export class ProviderToolService {
       source: null,
       version: null,
       account: null,
+      workspaces: [],
       detail: null,
       signInCommand: SIGN_IN_COMMAND,
     };
@@ -86,6 +94,7 @@ export class ProviderToolService {
         source: null,
         version: null,
         account: null,
+        workspaces: [],
         detail: "the Higgsfield CLI is not on this machine",
       });
       return this.status;
@@ -98,12 +107,18 @@ export class ProviderToolService {
     };
     try {
       const { account } = await this.probe.whoAmI(found.command);
-      this.set({ ...shared, state: "ready", account, detail: null });
+      // Read after the sign-in is known good, and never allowed to fail the probe: not knowing
+      // which accounts exist is a missing picker, not a broken session.
+      const workspaces = this.probe.listWorkspaces
+        ? await this.probe.listWorkspaces(found.command).catch(() => [])
+        : [];
+      this.set({ ...shared, state: "ready", account, workspaces, detail: null });
     } catch (err) {
       this.set({
         ...shared,
         state: "signed-out",
         account: null,
+        workspaces: [],
         detail: err instanceof Error ? err.message : String(err),
       });
     }
@@ -141,6 +156,7 @@ export class ProviderToolService {
       this.set({
         state: "signed-out",
         account: null,
+        workspaces: [],
         detail: detail ?? (controller.signal.aborted ? "sign-in cancelled" : "sign-in did not complete"),
       });
       return this.status;
@@ -150,6 +166,36 @@ export class ProviderToolService {
     } finally {
       this.running = null;
     }
+  }
+
+  /**
+   * Choose which account pays. `null` hands billing back to the personal context.
+   *
+   * The outcome is re-probed rather than assumed: the tool is the authority on what it actually
+   * selected, and this is the one setting here that decides whose money is spent — a picker
+   * showing a choice the tool did not make would be the worst kind of wrong.
+   */
+  async selectWorkspace(workspaceId: string | null): Promise<ProviderToolStatus> {
+    if (!this.probe.selectWorkspace) return this.status;
+    const found = await this.probe.discover().catch(() => null);
+    if (!found) return this.probeNow();
+    let failure: string | null = null;
+    try {
+      await this.probe.selectWorkspace(found.command, workspaceId);
+      void this.log?.append({
+        kind: "provider.tool-workspace-selected",
+        provider: this.provider,
+        workspaceId,
+      });
+    } catch (err) {
+      failure = err instanceof Error ? err.message : String(err);
+    }
+    // Re-read either way: the selection may or may not have moved, and only the listing knows
+    // which. The reason is re-applied *after*, because a successful probe clears `detail` — so
+    // setting it before this would have made a refused change look like a silent revert.
+    await this.probeNow();
+    if (failure !== null) this.set({ detail: failure });
+    return this.status;
   }
 
   /** Stop waiting on a login the user has abandoned. The browser tab is theirs to close. */
