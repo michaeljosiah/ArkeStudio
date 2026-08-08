@@ -25,6 +25,7 @@ import {
   type LedgerEntry,
   type ModelManifest,
   type ProviderId,
+  type ProviderToolStatus,
   type QueueCommand,
   type RuntimeProbes,
   type VoiceCandidate,
@@ -47,6 +48,7 @@ import {
   setPromptOverride,
 } from "./productions/ops.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
+import { ProviderToolService, type ToolProbe } from "./providers/tool.js";
 import { ProviderCallStore } from "./providers/call-store.js";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "./queue/dispatcher.js";
 import { enqueueInputs } from "./queue/acknowledge.js";
@@ -210,6 +212,11 @@ export interface CoordinatorOptions {
   providerCalls?: ProviderCallStore;
   /** SPEC-008: per-provider key validators, injected from @arke-studio/providers. */
   validators?: Partial<Record<ProviderId, KeyValidator>>;
+  /**
+   * Providers whose credential lives in a tool we drive rather than in `credentials.dat`
+   * (issue #137). Absent in tests and in any build with no such provider.
+   */
+  toolProbes?: Partial<Record<ProviderId, ToolProbe>>;
   /** SPEC-008: the shipped model manifest. */
   manifest?: ModelManifest;
   /** SPEC-008: local runtime probing, injected so tests measure nothing. */
@@ -307,6 +314,8 @@ export class Coordinator {
   private readonly appLog: AppLog | null;
   private readonly credentials: CredentialStore | null;
   private readonly providerService: ProviderService;
+  /** One per provider whose credential is external (issue #137); empty when none are wired. */
+  private readonly providerTools = new Map<ProviderId, ProviderToolService>();
   private readonly ledger: LedgerFile | null;
   private readonly appSettings: AppSettingsFile | null;
   /** SPEC-009: the dispatch engine. Null without an app root, clients and a ledger. */
@@ -326,6 +335,13 @@ export class Coordinator {
         ? new CredentialStore(join(opts.appRoot, "credentials.dat"), opts.cipher, this.secrets)
         : null;
     this.providerService = new ProviderService(this.credentials, opts.validators ?? {}, this.appLog);
+    for (const [id, probe] of Object.entries(opts.toolProbes ?? {})) {
+      if (!probe) continue;
+      this.providerTools.set(
+        id as ProviderId,
+        new ProviderToolService(id as ProviderId, probe, (status) => this.emitToolStatus(status), this.appLog),
+      );
+    }
     this.ledger = opts.appRoot ? new LedgerFile(join(opts.appRoot, "ledger.jsonl")) : null;
     this.appSettings = opts.appRoot ? new AppSettingsFile(join(opts.appRoot, "settings.json")) : null;
     this.jobQueue =
@@ -728,9 +744,41 @@ export class Coordinator {
     }
   }
 
+  /**
+   * Publish the whole tool set, never a patch — the same rule provider.status follows, and for
+   * the same reason: a renderer that merges patches can hold a state no coordinator ever had.
+   */
+  private emitToolStatus(_changed: ProviderToolStatus): void {
+    this.emit({
+      at: new Date().toISOString(),
+      type: "provider.tool-status",
+      tools: [...this.providerTools.values()].map((tool) => tool.current()),
+    });
+  }
+
+  /**
+   * A tool's sign-in state decides whether its provider is configured at all, so the two are
+   * re-derived together: signing in has to switch the provider on, and a token going stale has
+   * to switch it off, without either needing its own button.
+   */
+  private async revalidateToolProvider(provider: ProviderId): Promise<void> {
+    await this.providerService.validate(provider);
+    this.emit({
+      at: new Date().toISOString(),
+      type: "provider.status",
+      providers: this.providerService.list(),
+    });
+  }
+
   /** Seed the SPEC-008 app-config slice: manifest, provider statuses, routing, spend, drift. */
   private async seedAppConfig(): Promise<void> {
     await this.providerService.init();
+    // Discovery before the first paint, so Settings opens on the real answer rather than on
+    // "not installed" that corrects itself a moment later.
+    for (const [provider, tool] of this.providerTools) {
+      await tool.refresh();
+      if (tool.current().state === "ready") await this.providerService.validate(provider);
+    }
     const manifest = this.opts.manifest ?? null;
     const settings = this.appSettings ? await this.appSettings.load() : null;
     // Read once here so the first session of the run already carries the user's choices —
@@ -741,6 +789,7 @@ export class Coordinator {
     this.readModel.seedAppConfig({
       manifest,
       providers: this.providerService.list(),
+      providerTools: [...this.providerTools.values()].map((tool) => tool.current()),
       ...(settings && manifest
         ? { routing: { defaults: settings.routing, faults: routingFaults(settings, manifest) } }
         : {}),
@@ -1874,6 +1923,27 @@ export class Coordinator {
           type: "provider.status",
           providers: this.providerService.list(),
         });
+        return;
+      }
+      case "refresh-provider-tool": {
+        const tool = this.providerTools.get(msg.provider);
+        if (!tool) return;
+        await tool.refresh();
+        await this.revalidateToolProvider(msg.provider);
+        return;
+      }
+      case "sign-in-provider-tool": {
+        const tool = this.providerTools.get(msg.provider);
+        if (!tool) return;
+        // The service publishes each state change through its own callback, so the browser
+        // window and its outcome both reach the renderer without this awaiting anything the
+        // user is still standing in front of.
+        await tool.signIn();
+        await this.revalidateToolProvider(msg.provider);
+        return;
+      }
+      case "cancel-provider-tool-sign-in": {
+        this.providerTools.get(msg.provider)?.cancelSignIn();
         return;
       }
       case "set-routing-default": {

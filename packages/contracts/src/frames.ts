@@ -509,6 +509,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("clear-credential"), provider: ProviderIdSchema }).strict(),
   /** SPEC-008 R-3: probe per capability; the answer is what the key unlocks, not that it authenticates. */
   z.object({ kind: z.literal("validate-provider"), provider: ProviderIdSchema }).strict(),
+  /**
+   * Providers whose credential lives in a tool we drive (issue #137). Signing in opens a
+   * browser and can take minutes, so it is three messages rather than one: start it, stop
+   * waiting on it, and re-ask where things stand.
+   */
+  z.object({ kind: z.literal("sign-in-provider-tool"), provider: ProviderIdSchema }).strict(),
+  z.object({ kind: z.literal("cancel-provider-tool-sign-in"), provider: ProviderIdSchema }).strict(),
+  z.object({ kind: z.literal("refresh-provider-tool"), provider: ProviderIdSchema }).strict(),
   /** SPEC-008 R-20: a routing default is a concrete model, displayed as its provider (D1). */
   z
     .object({

@@ -28,6 +28,7 @@ export class ReadModel {
         jobs: [],
         ledger: [],
         providers: [],
+        providerTools: [],
         manifest: null,
         routing: { defaults: {}, faults: [] },
         models: { disabled: [] },
@@ -58,6 +59,7 @@ export class ReadModel {
         ClientState["app"],
         | "manifest"
         | "providers"
+        | "providerTools"
         | "routing"
         | "models"
         | "spend"
@@ -168,6 +170,10 @@ export class ReadModel {
       }
       case "provider.status": {
         this.state = { ...this.state, app: { ...this.state.app, providers: event.providers } };
+        return;
+      }
+      case "provider.tool-status": {
+        this.state = { ...this.state, app: { ...this.state.app, providerTools: event.tools } };
         return;
       }
       case "routing.changed": {

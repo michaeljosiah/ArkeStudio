@@ -15,6 +15,7 @@ const STATE: ClientState = {
     jobs: [],
     ledger: [],
     providers: [],
+    providerTools: [],
     manifest: null,
     routing: { defaults: {}, faults: [] },
     models: { disabled: [] },
