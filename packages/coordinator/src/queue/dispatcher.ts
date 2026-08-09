@@ -5,6 +5,8 @@ import {
   credentialKindOf,
   formatMicroUsd,
   PROVIDERS,
+  REFERENCE_FINALIZATION_TARGETS,
+  REPLAYABLE_FINALIZATION_TARGETS,
   ulid,
   type Capability,
   type ClientDeclarations,
@@ -134,13 +136,6 @@ const FORMAT_PRESERVING_IMAGE_TARGETS = new Set([
   "character-look",
   "reference-tile",
 ]);
-const REFERENCE_FINALIZATION_TARGETS = new Set([
-  "main-photo-candidate",
-  "establish-candidate",
-  "character-sheet",
-  "character-look",
-]);
-const REPLAYABLE_FINALIZATION_TARGETS = new Set([...REFERENCE_FINALIZATION_TARGETS, "voice-preview"]);
 const FOLLOW_ON_TARGETS = new Set([
   ...REFERENCE_FINALIZATION_TARGETS,
   "reference-tile",
@@ -815,7 +810,7 @@ export class JobQueue {
           job.status === "succeeded" &&
           ledgerJobIds.has(job.id) &&
           this.needsReplayableFinalization(job) &&
-          job.finalization?.status !== "complete"
+          this.finalizationUnsettled(job)
         ) {
           await this.retryFinalization(job.id);
         } else if (job.status === "succeeded" && job.finalization?.status === "pending") {
@@ -959,6 +954,18 @@ export class JobQueue {
     return REPLAYABLE_FINALIZATION_TARGETS.has(job.target.kind) && job.landedFiles?.[0] !== undefined;
   }
 
+  /**
+   * A finalization nobody has an answer for yet: never attempted (a legacy row carries no record
+   * of one) or interrupted mid-flight by a crash. Both are worth replaying unasked. One that has
+   * already failed is not — it is a needs-you row carrying its own retry (`canDeleteJob`), and a
+   * permanent cause replays identically every launch and every world open, refilling the app log
+   * with an outcome the user has already been told about.
+   */
+  private finalizationUnsettled(job: Job): boolean {
+    const status = job.finalization?.status;
+    return status === undefined || status === "pending";
+  }
+
   private async completeFinalization(job: Job): Promise<void> {
     const completed: Job = {
       ...job,
@@ -1015,7 +1022,7 @@ export class JobQueue {
         job.worldId === worldId &&
         job.status === "succeeded" &&
         this.needsReplayableFinalization(job) &&
-        job.finalization?.status !== "complete",
+        this.finalizationUnsettled(job),
     );
     for (const job of jobs) await this.retryFinalization(job.id);
   }

@@ -33,6 +33,31 @@ export const JobTargetSchema = z
   .strict();
 export type JobTarget = z.infer<typeof JobTargetSchema>;
 
+/**
+ * Reference kits assembled from a landed artifact: finalization copies the file into a take and
+ * records its provenance.
+ */
+export const REFERENCE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
+  "main-photo-candidate",
+  "establish-candidate",
+  "character-sheet",
+  "character-look",
+]);
+
+/**
+ * Finalizations the queue may replay: re-running one touches no provider and spends nothing, so a
+ * failed one can always be handed back to the user as a retry.
+ *
+ * Every kind listed here MUST be offered `retry-finalization` by `computeNeedsYou`. A failed
+ * finalization is undeletable by `canDeleteJob` — deliberately, since it still owes the user an
+ * outcome — so a replayable kind with no retry action strands the row in Needs You forever with
+ * nothing the user can do about it. The two lists are asserted equal in the activity tests.
+ */
+export const REPLAYABLE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
+  ...REFERENCE_FINALIZATION_TARGETS,
+  "voice-preview",
+]);
+
 export const JobFinalizationSchema = z
   .object({
     status: z.enum(["pending", "complete", "failed"]),

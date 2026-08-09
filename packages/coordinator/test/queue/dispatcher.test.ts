@@ -344,6 +344,48 @@ describe("reference finalization after provider success", () => {
     h2.queue.dispose();
   });
 
+  it("does not replay a failed finalization on restart or world open", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.artifacts = [{ name: "sheet.png", contentType: "image/png", data: pngBytes() }];
+    let finalizations = 0;
+    const h = await makeHarness(
+      { fake },
+      {
+        onTerminal: () => {
+          finalizations += 1;
+          // A permanent cause — the dispatch predates the provenance the take is built from.
+          throw new Error("reference take finalization produced no take");
+        },
+      },
+    );
+    await h.queue.start();
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      capability: "image",
+      target: { kind: "character-sheet", id: "maren-kest/permanent" },
+      landing: { dir: "references/maren-kest/incoming", name: "sheet.png" },
+    });
+    await until(() => foldedJob(h, job.id)?.finalization?.status === "failed");
+    assert.equal(finalizations, 1);
+
+    // A cause that cannot resolve itself must not re-run every time the world opens…
+    await h.queue.retryFinalizationsForWorld(job.worldId);
+    assert.equal(finalizations, 1, "world open does not replay a failed finalization");
+
+    // …nor on every launch, which is what filled the app log with one line per job per start.
+    h.queue.dispose();
+    const h2 = h.revive();
+    await h2.queue.start();
+    assert.equal(finalizations, 1, "restart does not replay a failed finalization");
+    assert.equal(fake.submitCount, 1);
+    assert.equal(h2.ledger.entries.length, 1);
+
+    // The user's own retry is still honoured — the row keeps its action.
+    await h2.queue.retryFinalization(job.id);
+    assert.equal(finalizations, 2, "an explicit retry still runs");
+    h2.queue.dispose();
+  });
+
   it("repairs a legacy succeeded reference job on startup without provider activity", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
     let finalizations = 0;
