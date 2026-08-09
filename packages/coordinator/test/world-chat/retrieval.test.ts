@@ -222,6 +222,30 @@ describe("leased attachment reads", () => {
     assert.ok(total <= 32_000, `read ${total} characters, over the per-run bound`);
     h.index?.close();
   });
+
+  /**
+   * The budget caps how much a run reads, not where from — `offset` is free. So the passages a
+   * run was served are the only honest account of what it may quote, and re-reading a prefix at
+   * verification time can never reproduce one taken from deep in a long document.
+   */
+  it("remembers the passages a run was served, so a quotation can be checked against them", async () => {
+    const h = await harness();
+    const big = await h.attachments.ingestText(h.conversationId, `${"x".repeat(50_000)}THE-DEEP-PART`);
+    h.known.set(big.id, big);
+    const { result } = await h.retrieval.call(h.mint([big.id]).token, "get_attachment_text", {
+      id: big.id,
+      offset: 50_000,
+    });
+    const served = (result as { text: string }).text;
+    assert.ok(served.includes("THE-DEEP-PART"));
+
+    assert.deepEqual(h.retrieval.textReadBy(h.runId).get(big.id), [served]);
+
+    // And it does not outlive the run, or one run could quote what another read.
+    h.retrieval.forgetRun(h.runId);
+    assert.equal(h.retrieval.textReadBy(h.runId).size, 0);
+    h.index?.close();
+  });
 });
 
 async function rpc(url: string, method: string, params?: Record<string, unknown>) {

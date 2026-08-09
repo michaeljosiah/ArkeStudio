@@ -38,8 +38,16 @@ export interface EvidenceSources {
   messages: readonly WorldChatMessage[];
   bundle: WorldBundle;
   attachments: readonly WorldChatAttachment[];
-  /** Text of any attachment that may be quoted, keyed by attachment id. */
-  attachmentText: ReadonlyMap<string, string>;
+  /**
+   * The passages of each attachment that may be quoted, keyed by attachment id.
+   *
+   * Ranges rather than one string, because a document is not read whole: the model is shown its
+   * opening inline and may page into the rest through `get_attachment_text`, from any offset.
+   * Holding them separately keeps two things true that a concatenation would lose — a quotation
+   * is checked against text the model actually read, and it cannot be assembled across a seam
+   * between passages that were never adjacent.
+   */
+  attachmentText: ReadonlyMap<string, readonly string[]>;
 }
 
 function refLabel(evidence: Extract<CandidateEvidence, { kind: "world" }>): string {
@@ -140,8 +148,8 @@ export function verifyEvidence(evidence: CandidateEvidence, sources: EvidenceSou
       if (attachment.contentHash !== evidence.contentHash) {
         return [{ kind: "attachment-content-changed", attachmentId: evidence.attachmentId }];
       }
-      const text = sources.attachmentText.get(evidence.attachmentId);
-      if (text === undefined || !text.includes(evidence.quote)) {
+      const passages = sources.attachmentText.get(evidence.attachmentId);
+      if (passages === undefined || !passages.some((text) => text.includes(evidence.quote))) {
         return [
           {
             kind: "attachment-quote-not-found",

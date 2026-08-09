@@ -14,7 +14,6 @@ import {
   type WorldChatLoaded,
   type WorldChatRun,
 } from "@arke-studio/contracts";
-import { MAX_TEXT_PER_RUN_CHARS } from "./attachments.js";
 import { assembleContext, type ContextAttachment } from "./context.js";
 import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
 import { deriveChecks, planFor } from "./check-plan.js";
@@ -68,19 +67,24 @@ export interface RunDeps {
   /** The world half of evidence verification; the conversation half comes from the fold. */
   evidenceSources: (messages: readonly WorldChatMessage[]) => EvidenceSources;
   /**
-   * The first `maxChars` of a readable attachment, or null.
+   * The opening of a readable attachment, as the prompt inlines it, or null.
    *
    * Needed so an attachment quotation can be verified against the bytes it claims to come from.
    * Without it every such quotation fails, which is worse than not offering attachments at all:
    * the Studio would read a document through the tool and then be unable to cite it.
-   *
-   * `maxChars` exists because the prompt and the verifier want different amounts. One
-   * `get_attachment_text` call is capped well below what a whole run may read, so a model that
-   * pages through a long document can legitimately quote text far past the inlined opening —
-   * and a verifier holding only that opening would reject the quotation as absent from a
-   * document it is sitting in. The verifier therefore asks for the whole run budget.
    */
-  readAttachmentText?: (attachment: WorldChatAttachment, maxChars?: number) => Promise<string | null>;
+  readAttachmentText?: (attachment: WorldChatAttachment) => Promise<string | null>;
+  /**
+   * The passages this run pulled through `get_attachment_text`, per attachment.
+   *
+   * The other half of what a quotation may be checked against. The prompt inlines only a
+   * document's opening, while the tool will serve a passage from any offset — the run budget
+   * caps how much text is read, not where it is read from — so a model may quite properly quote
+   * something a megabyte in. Re-reading a prefix at verification time cannot reach it, and a
+   * turn rejected for quoting what it correctly read is the failure this whole path keeps
+   * producing. Absent, only the inlined opening is quotable.
+   */
+  attachmentReadsFor?: (runId: RunId) => ReadonlyMap<string, readonly string[]>;
   /**
    * The focused slice of accepted world state a run may see (§8.5).
    *
@@ -305,6 +309,7 @@ export class WorldChatRunner {
         : {}),
       ...(view.summary !== undefined ? { summary: view.summary } : {}),
       candidates: view.candidates,
+      groups: view.groups,
       // Without the filter a retry shows the message twice — once in the recent turns (it is in
       // the log by then) and once as what they just said — and a model that notices the
       // duplication spends its attention on it.
@@ -415,7 +420,6 @@ export class WorldChatRunner {
   private async readAttachments(
     view: WorldChatLoaded,
     allowed: readonly string[],
-    maxChars?: number,
   ): Promise<{ readable: WorldChatAttachment[]; text: Map<string, string> }> {
     const readable = view.attachments.filter(
       (a) => allowed.includes(a.id) && a.readability !== "not-readable",
@@ -423,11 +427,31 @@ export class WorldChatRunner {
     const text = new Map<string, string>();
     if (this.deps.readAttachmentText) {
       for (const attachment of readable) {
-        const body = await this.deps.readAttachmentText(attachment, maxChars).catch(() => null);
+        const body = await this.deps.readAttachmentText(attachment).catch(() => null);
         if (body !== null) text.set(attachment.id, body);
       }
     }
     return { readable, text };
+  }
+
+  /**
+   * Everything this run may have quoted from: the openings it was shown, and the passages it
+   * asked for. Kept as separate ranges so a quotation cannot be assembled across the join
+   * between two passages that are not adjacent in the document.
+   */
+  private quotableAttachmentText(
+    readable: readonly WorldChatAttachment[],
+    inlined: ReadonlyMap<string, string>,
+    runId: RunId,
+  ): Map<string, readonly string[]> {
+    const served = this.deps.attachmentReadsFor?.(runId) ?? new Map<string, readonly string[]>();
+    const quotable = new Map<string, readonly string[]>();
+    for (const attachment of readable) {
+      const opening = inlined.get(attachment.id);
+      const passages = [...(opening !== undefined ? [opening] : []), ...(served.get(attachment.id) ?? [])];
+      if (passages.length > 0) quotable.set(attachment.id, passages);
+    }
+    return quotable;
   }
 
   /**
@@ -456,13 +480,8 @@ export class WorldChatRunner {
     const messages = folded.messages;
     const checksByDraft = new Map<ModelCandidateDraft, CandidateChecks>();
 
-    // The whole run budget, not the inlined opening: the model may have paged deeper through
-    // get_attachment_text, and a quotation from further in is still a quotation from this file.
-    const { readable, text: attachmentText } = await this.readAttachments(
-      folded,
-      allowed,
-      MAX_TEXT_PER_RUN_CHARS,
-    );
+    const { readable, text: inlined } = await this.readAttachments(folded, allowed);
+    const attachmentText = this.quotableAttachmentText(readable, inlined, runId);
 
     const outcome = validateTurnResult({
       raw,

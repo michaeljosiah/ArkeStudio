@@ -1,4 +1,5 @@
 import type {
+  CandidateGroup,
   CandidateTombstone,
   WorldChangeCandidate,
   WorldChatMessage,
@@ -64,6 +65,8 @@ export interface ContextInput {
   entryContext?: string;
   summary?: string;
   candidates: readonly WorldChangeCandidate[];
+  /** Live groups, so an operation on one can name it. Empty when nothing has been grouped. */
+  groups?: readonly CandidateGroup[];
   messages: readonly WorldChatMessage[];
   tombstones: readonly CandidateTombstone[];
   worldContext?: string;
@@ -113,11 +116,26 @@ function trimToBound(text: string, bound: number): { text: string; trimmed: bool
   return { text: boundary === -1 ? cut : cut.slice(boundary + 1), trimmed: true };
 }
 
-function renderRegistry(candidates: readonly WorldChangeCandidate[]): string {
-  return candidates
+/**
+ * The live propositions and groups, each with the id and revision an operation must name.
+ *
+ * Groups are here for the same reason candidates are: `update` and `withdraw` on a group carry a
+ * `grp_...` id and its expected revision, and an id that is nowhere in the prompt can only be
+ * guessed at. Without them the model could create groups and never touch one again — every
+ * correction to an existing group rejected as naming something that does not exist.
+ */
+function renderRegistry(
+  candidates: readonly WorldChangeCandidate[],
+  groups: readonly CandidateGroup[],
+): string {
+  const lines = candidates
     .filter((c) => c.status === "live")
-    .map((c) => `- [${c.id} r${c.revision}] (${c.classification}, ${c.settledness}) ${c.title}`)
-    .join("\n");
+    .map((c) => `- [${c.id} r${c.revision}] (${c.classification}, ${c.settledness}) ${c.title}`);
+  const groupLines = groups
+    .filter((g) => g.status === "live")
+    .map((g) => `- [${g.id} r${g.revision}] (group of ${g.members.length}) ${g.title}`);
+  if (groupLines.length === 0) return lines.join("\n");
+  return [...lines, "", "Groups:", ...groupLines].join("\n");
 }
 
 /**
@@ -190,7 +208,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
   };
 
   const summary = take("summary", input.summary ?? "", BOUNDS.summary);
-  const registry = take("registry", renderRegistry(input.candidates), BOUNDS.registry);
+  const registry = take("registry", renderRegistry(input.candidates, input.groups ?? []), BOUNDS.registry);
   const recentTurns = take(
     "recentTurns",
     renderTurns(input.messages.slice(-RECENT_TURN_COUNT * 2)),

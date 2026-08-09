@@ -206,6 +206,34 @@ describe("context assembly", () => {
     assert.ok(!context.recentTurns.includes(reply.id), "nothing the Studio said is evidence");
   });
 
+  /**
+   * A group operation names a grp_... id and its expected revision. Rendering only candidates
+   * meant the model could create a group and then never touch one again: every update or
+   * withdrawal would have to guess an id, and a guessed id is refused.
+   */
+  it("shows live groups with the id and revision an operation has to name", () => {
+    const group = {
+      id: newId("grp"),
+      conversationId: newId("cv"),
+      revision: 3,
+      title: "Maren's upbringing lands together",
+      rationale: "One change, two propositions.",
+      members: [
+        { candidateId: newId("cand"), revision: 1 },
+        { candidateId: newId("cand"), revision: 1 },
+      ],
+      atomic: true as const,
+      status: "live" as const,
+    };
+    const context = assembleContext({ ...baseInput(), groups: [group] });
+    assert.match(context.registry, new RegExp(`\\[${group.id} r3\\]`));
+    assert.match(context.registry, /group of 2/);
+  });
+
+  it("says nothing about groups when there are none, rather than an empty heading", () => {
+    assert.ok(!assembleContext(baseInput()).registry.includes("Groups:"));
+  });
+
   it("carries retractions as keys, not as the text that was retracted", () => {
     const tombstone: CandidateTombstone = {
       candidateId: newId("cand") as CandidateId,

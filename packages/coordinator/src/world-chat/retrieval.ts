@@ -84,10 +84,23 @@ export interface RetrievalDeps {
   now?: () => string;
 }
 
+const NO_RANGES: ReadonlyMap<string, readonly string[]> = new Map();
+
 export class WorldChatRetrieval {
   private readonly now: () => string;
   /** Text read per run, so one run cannot pull a whole library through a bounded tool (§19). */
   private readonly textSpentByRun = new Map<string, number>();
+  /**
+   * The exact text this run was served, per attachment, so a quotation can be checked against
+   * what was actually read (§5.8).
+   *
+   * The budget bounds how many characters a run may take, not where in a file it may take them
+   * from: `offset` is free, so a run can legitimately read a passage half a megabyte into a
+   * document. Verification cannot reconstruct that by re-reading a prefix — there is no prefix
+   * long enough — so the ranges are kept as they are served. It also makes the evidence rule
+   * exact rather than approximate: a quotation is verifiable when the model actually read it.
+   */
+  private readonly textReadByRun = new Map<string, Map<string, string[]>>();
 
   constructor(private readonly deps: RetrievalDeps) {
     this.now = deps.now ?? (() => new Date().toISOString());
@@ -270,6 +283,11 @@ export class WorldChatRetrieval {
           ...(requested !== undefined ? { limit: Math.min(requested, remaining) } : { limit: remaining }),
         });
         this.textSpentByRun.set(lease.runId, spent + read.text.length);
+        if (read.text.length > 0) {
+          const byAttachment = this.textReadByRun.get(lease.runId) ?? new Map<string, string[]>();
+          byAttachment.set(attachment.id, [...(byAttachment.get(attachment.id) ?? []), read.text]);
+          this.textReadByRun.set(lease.runId, byAttachment);
+        }
 
         return {
           result: read,
@@ -287,8 +305,14 @@ export class WorldChatRetrieval {
     }
   }
 
+  /** What this run read out of each attachment, in the order it was served. */
+  textReadBy(runId: string): ReadonlyMap<string, readonly string[]> {
+    return this.textReadByRun.get(runId) ?? NO_RANGES;
+  }
+
   /** Called when a run ends, so its text budget does not outlive it. */
   forgetRun(runId: string): void {
     this.textSpentByRun.delete(runId);
+    this.textReadByRun.delete(runId);
   }
 }

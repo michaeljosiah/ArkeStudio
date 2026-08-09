@@ -76,6 +76,8 @@ interface RunnerOptions {
   adapter: HarnessAdapter;
   onPrepare?: (ids: readonly ChatAttachmentId[]) => void;
   onRead?: (id: string) => void;
+  /** Passages get_attachment_text served this run, as the retrieval layer records them. */
+  served?: ReadonlyMap<string, readonly string[]>;
 }
 
 function runnerFor(options: RunnerOptions): WorldChatRunner {
@@ -94,21 +96,11 @@ function runnerFor(options: RunnerOptions): WorldChatRunner {
       attachments: [],
       attachmentText: new Map(),
     }),
-    // Paged like the coordinator's own, because one readText is capped well below a run's budget.
-    readAttachmentText: async (a, maxChars) => {
+    readAttachmentText: async (a) => {
       options.onRead?.(a.id);
-      const ceiling = maxChars ?? MAX_TEXT_READ_CHARS;
-      let text = "";
-      while (text.length < ceiling) {
-        const read = await options.attachments.readText(a, {
-          offset: text.length,
-          limit: ceiling - text.length,
-        });
-        text += read.text;
-        if (!read.truncated || read.text.length === 0) break;
-      }
-      return text;
+      return (await options.attachments.readText(a)).text;
     },
+    attachmentReadsFor: () => options.served ?? new Map<string, readonly string[]>(),
     now: NOW,
   });
 }
@@ -178,12 +170,12 @@ describe("reading an attachment", () => {
   });
 
   /**
-   * A run may read far more of a document than one `get_attachment_text` call returns, by paging
-   * with offsets. Verification that loaded only the first page would reject a quotation from any
-   * later one — deterministically, and for a quote the model really did read, out of the file it
-   * really came from.
+   * The prompt inlines a document's opening; `get_attachment_text` will serve a passage from any
+   * offset, because the run budget caps how much text is read rather than where it is read from.
+   * So a model can quite properly quote something far past the opening — and verification that
+   * re-read a prefix could never reach it, however long a prefix it read.
    */
-  it("verifies a quotation from deeper in the document than one read returns", async () => {
+  it("verifies a quotation from a passage the tool served, not just the inlined opening", async () => {
     const c = await conversation("arke-att-deep-");
     const buried = "the bells were cast from whale bone";
     const doc = await c.attachments.ingestText(
@@ -191,18 +183,40 @@ describe("reading an attachment", () => {
       `${"filler. ".repeat(MAX_TEXT_READ_CHARS / 4)}${buried}`,
       "long.txt",
     );
-    assert.ok(
-      (await c.attachments.readText(doc)).truncated,
-      "the fixture has to be longer than one read, or it proves nothing",
-    );
+    const inlined = await c.attachments.readText(doc);
+    assert.ok(inlined.truncated, "the fixture must outrun one read, or it proves nothing");
+    assert.ok(!inlined.text.includes(buried), "and the quote must lie outside what is inlined");
 
     const runner = runnerFor({
       ...c,
       adapter: fakeAdapter([citing(c.freshStore(), doc.id, doc.contentHash, buried)]),
+      served: new Map([[doc.id, [`...${buried}...`]]]),
     });
 
     const outcome = await runner.send(c.freshStore(), c.conversationId, "read my notes", [doc.id]);
     assert.equal(outcome.status, "completed");
+  });
+
+  /** The other side of it: reading a document does not make the rest of it quotable. */
+  it("refuses a quotation from a passage this run never read", async () => {
+    const c = await conversation("arke-att-unread-");
+    const buried = "the bells were cast from whale bone";
+    const doc = await c.attachments.ingestText(
+      c.conversationId,
+      `${"filler. ".repeat(MAX_TEXT_READ_CHARS / 4)}${buried}`,
+      "long.txt",
+    );
+
+    const runner = runnerFor({
+      ...c,
+      adapter: fakeAdapter([
+        citing(c.freshStore(), doc.id, doc.contentHash, buried),
+        citing(c.freshStore(), doc.id, doc.contentHash, buried),
+      ]),
+    });
+
+    const outcome = await runner.send(c.freshStore(), c.conversationId, "read my notes", [doc.id]);
+    assert.equal(outcome.status, "failed", "it is in the file, but nothing this run read contains it");
   });
 
   it("refuses a quotation the document does not contain", async () => {
