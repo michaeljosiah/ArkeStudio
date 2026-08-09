@@ -601,6 +601,39 @@ export interface DispatchWarnings {
    * a 22s shot quietly dispatched as a 15s clip is paid-for footage that cannot cover it.
    */
   overlongShots: Array<{ shotId: string; number: number; durationSec: number; longestSec: number }>;
+  /**
+   * The scene was drafted under one model family's guidance and is being dispatched to another
+   * (SPEC-019 R-21, D26). Null when they agree, when the scene records no skill, or when there
+   * is nothing to compare.
+   *
+   * Recording the skill on the draft is not enough on its own: SPEC-008 R-21 lets any dispatch
+   * override the routed model, so a scene written for one family reaches another without the
+   * drafting rule ever being broken. This is where that shows up.
+   */
+  skillFamilyMismatch: { draftedFor: string; dispatchingTo: string | null; skillId: string } | null;
+}
+
+/**
+ * Does the guidance this scene was written under match the model about to shoot it (R-21)?
+ *
+ * A scene with no recorded skill never mismatches — it was drafted under general guidance, which
+ * is guidance for no family in particular and therefore wrong for none. A model with no declared
+ * family does mismatch a scene that has one: shots written to one family's conventions are being
+ * sent somewhere those conventions are not known to apply, and that is worth a sentence before
+ * money moves.
+ */
+export function skillFamilyMismatch(
+  scene: Scene,
+  model: ManifestModel,
+): DispatchWarnings["skillFamilyMismatch"] {
+  const drafted = scene.draftedWith;
+  if (drafted === undefined) return null;
+  if (model.family === drafted.family) return null;
+  return {
+    draftedFor: drafted.family,
+    dispatchingTo: model.family ?? null,
+    skillId: drafted.skillId,
+  };
 }
 
 export interface ScenePlanInput {
@@ -865,6 +898,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     retiredCitations: resolved.cast.filter((c) => c.retired).map((c) => c.sheet.name),
     unknownMentions: resolved.unknown,
     overlongShots,
+    skillFamilyMismatch: skillFamilyMismatch(scene, model),
     overriddenStale: scene.shots
       .map((s) => ({ shotId: s.id, number: s.number, against: overrideStaleAgainst(s, sheets) }))
       .filter((s) => s.against.length > 0),

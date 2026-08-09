@@ -1141,6 +1141,19 @@ export function DispatchDialogScreen() {
         key: `ov-${o.shotId}`,
         text: `shot ${o.number}'s prompt is overridden and ${o.against.map((a) => `${a.sheetId} moved v${a.from}→v${a.to}`).join(", ")} — the override will not pick that up`,
       });
+    // SPEC-019 R-21: the routed model can be overridden per dispatch, long after the scene was
+    // drafted. Named rather than blocking — the shots are still shots, they were just written to
+    // another family's conventions, and only the user knows whether that matters here.
+    if (warnings.skillFamilyMismatch) {
+      const { draftedFor, dispatchingTo } = warnings.skillFamilyMismatch;
+      warningRows.push({
+        key: "skill-family",
+        text:
+          dispatchingTo === null
+            ? `these shots were drafted for ${draftedFor}; ${model?.displayName ?? "this model"} declares no family, so that guidance may not apply`
+            : `these shots were drafted for ${draftedFor} and this dispatch goes to ${dispatchingTo}`,
+      });
+    }
   }
 
   return (

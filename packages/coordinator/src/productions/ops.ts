@@ -185,6 +185,7 @@ export async function draftSceneSkeleton(
   const slug = slugify(input.brief.split(/[.!?\n]/)[0] ?? "scene").slice(0, 40) || `scene-${number}`;
   const file = `${String(number).padStart(2, "0")}-${slug}`;
   const path = `productions/${input.productionId}/scenes/${file}.json`;
+  const skill = input.skill ?? null;
   const skeleton: Scene = {
     id: `sc_${String(number).padStart(2, "0")}`,
     number,
@@ -192,9 +193,14 @@ export async function draftSceneSkeleton(
     title: input.brief.split(/[.!?\n]/)[0]?.trim() ?? `Scene ${number}`,
     status: "draft",
     version: 1,
+    // Written into the skeleton rather than stamped at accept, so it travels the ordinary
+    // proposal path and lands with the scene (R-21). The proposal record (R-19) explains the
+    // draft; this is what dispatch compares against months later, when the proposal is gone.
+    ...(skill !== null
+      ? { draftedWith: { skillId: skill.id, version: skill.version, family: skill.family } }
+      : {}),
     shots: [],
   };
-  const skill = input.skill ?? null;
   const proposal = await gate.stage({
     kind: "scene-draft",
     summary: `Scene ${number}: ${skeleton.title}`,

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   bindReferences,
   bindingPreamble,
+  skillFamilyMismatch,
   boundFiles,
   composePrompt,
   derivedNegatives,
@@ -1071,6 +1072,114 @@ describe("SPEC-019 skills on the draft they shaped (R-19, R-20)", () => {
     assert.equal(staged.skill, undefined, "absent is an ordinary record, not a missing field");
     // The fallback is stated but never blocking: the draft still went out.
     assert.ok(draft.instruction.includes("Fill the shots array"));
+    await store.close();
+  });
+});
+
+describe("SPEC-019 skill-family mismatch at dispatch (R-21, T-14)", () => {
+  const drafted = { skillId: "seedance-scene-drafting", version: 1, family: "seedance" };
+  const seedance = { ...VIDEO_MODEL, family: "seedance" };
+
+  it("says nothing when the scene and the model agree", () => {
+    const scene: Scene = {
+      id: "sc_1", number: 1, slug: "s", title: "S", status: "draft", version: 1,
+      draftedWith: drafted, shots: [shot(1, 4)],
+    };
+    assert.equal(skillFamilyMismatch(scene, seedance), null);
+  });
+
+  it("names the mismatch when a dispatch overrides the routed model to another family", () => {
+    const scene: Scene = {
+      id: "sc_1", number: 1, slug: "s", title: "S", status: "draft", version: 1,
+      draftedWith: drafted, shots: [shot(1, 4)],
+    };
+    const other = { ...VIDEO_MODEL, id: "veo-3.1", displayName: "Veo 3.1", family: "veo" };
+    assert.deepEqual(skillFamilyMismatch(scene, other), {
+      draftedFor: "seedance",
+      dispatchingTo: "veo",
+      skillId: "seedance-scene-drafting",
+    });
+  });
+
+  it("names it when the target declares no family at all", () => {
+    const scene: Scene = {
+      id: "sc_1", number: 1, slug: "s", title: "S", status: "draft", version: 1,
+      draftedWith: drafted, shots: [shot(1, 4)],
+    };
+    // Shots written to one family's conventions, sent where those conventions are not known to
+    // apply. Silence here would be indistinguishable from agreement.
+    assert.deepEqual(skillFamilyMismatch(scene, VIDEO_MODEL), {
+      draftedFor: "seedance",
+      dispatchingTo: null,
+      skillId: "seedance-scene-drafting",
+    });
+  });
+
+  it("a scene drafted under general guidance never mismatches", () => {
+    const scene: Scene = {
+      id: "sc_1", number: 1, slug: "s", title: "S", status: "draft", version: 1,
+      shots: [shot(1, 4)],
+    };
+    assert.equal(skillFamilyMismatch(scene, seedance), null, "guidance for no family is wrong for none");
+    assert.equal(skillFamilyMismatch(scene, VIDEO_MODEL), null);
+  });
+
+  it("reaches the dialog through the plan, and does not block it", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const scene: Scene = { ...production.scenes[0]!, draftedWith: drafted };
+    const other = { ...VIDEO_MODEL, id: "veo-3.1", displayName: "Veo 3.1", family: "veo" };
+    const plan = planScene(
+      {
+        world: bundle.meta,
+        artDirection: bundle.artDirection,
+        productionId: production.meta.id,
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene,
+        selections: production.selections,
+        model: other,
+      },
+      "per-shot",
+    );
+    assert.equal(plan.warnings.skillFamilyMismatch?.draftedFor, "seedance");
+    assert.equal(plan.warnings.skillFamilyMismatch?.dispatchingTo, "veo");
+    assert.ok(plan.shots.length > 0, "a warning names, it never blocks (SPEC-012 D12)");
+
+    const matched = planScene(
+      {
+        world: bundle.meta,
+        artDirection: bundle.artDirection,
+        productionId: production.meta.id,
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene,
+        selections: production.selections,
+        model: { ...VIDEO_MODEL, family: "seedance" },
+      },
+      "per-shot",
+    );
+    assert.equal(matched.warnings.skillFamilyMismatch, null);
+    await store.close();
+  });
+
+  it("survives the draft: the skill lands on the scene, not only on the proposal", async () => {
+    const { store, gate } = await open();
+    const production = store.getBundle().productions[0]!;
+    const draft = await draftSceneSkeleton(store, gate, {
+      productionId: production.meta.id,
+      brief: "The tide turns",
+      skill: { id: "seedance-scene-drafting", version: 1, family: "seedance" },
+    });
+    // The proposal's target is the scene file, so what dispatch reads months later is what was
+    // staged here — the proposal itself is long gone by then.
+    const staged = await gate.readManifest(draft.proposalId);
+    const target = staged.targets.find((entry) => entry.path === draft.path);
+    assert.ok(target, "the scene file is the proposal's target");
+    const content = await readFile(join(store.dir, ".proposals", draft.proposalId, ...draft.path.split("/")), "utf8");
+    const parsed = SceneSchema.parse(JSON.parse(content));
+    assert.deepEqual(parsed.draftedWith, { skillId: "seedance-scene-drafting", version: 1, family: "seedance" });
     await store.close();
   });
 });

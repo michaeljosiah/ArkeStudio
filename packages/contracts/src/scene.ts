@@ -75,6 +75,25 @@ export const SceneSchema = z
       .strict()
       .optional(),
     board: SceneBoardSchema.optional(),
+    /**
+     * The authoring skill this scene was drafted under (SPEC-019 R-19, R-21).
+     *
+     * Provenance, in the same spirit as a prompt override's recorded sheet versions: it explains
+     * how the shots came to be written and is what R-21 compares against at dispatch, because
+     * SPEC-008 R-21 lets any dispatch override the routed model — so a scene written for one
+     * family can be sent to another without anything else noticing.
+     *
+     * Optional, and absent is an ordinary record rather than a missing one: a scene drafted by
+     * hand, or under general guidance because the family ships no skill, simply has none.
+     */
+    draftedWith: z
+      .object({
+        skillId: z.string().min(1),
+        version: z.number().int().min(1),
+        family: z.string().min(1),
+      })
+      .strict()
+      .optional(),
     shots: z.array(ShotSchema),
   })
   .strict();
