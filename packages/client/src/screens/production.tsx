@@ -108,6 +108,9 @@ export function ProductionLayout() {
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const exportsState = useExports();
+  // The rail is the format's (design 54a): a surface the format cannot use is not present,
+  // not greyed. A story production has nothing to dispatch, so its rail never says so.
+  const isStory = production?.meta.format === "story";
   const cut = production ? deriveCut(production) : null;
   const audioCount =
     (world?.artifacts.filter((a) => a.kind === "audio").length ?? 0) +
@@ -116,17 +119,23 @@ export function ProductionLayout() {
   const exportCount = Object.values(exportsState).filter((e) => e.productionId === prodId).length;
   const stillCount = production?.takes.filter((t) => t.kind === "frame" || t.kind === "still").length ?? 0;
   const base = `/w/${worldId}/p/${prodId}`;
-  const item = (slug: string, label: string, count?: string) => (
+  const item = (slug: string, label: string, count?: string, end?: boolean) => (
     <NavLink
       key={slug || "dash"}
       to={`${base}${slug ? `/${slug}` : ""}`}
-      end={slug === ""}
+      end={end ?? slug === ""}
       className={({ isActive }) => cx("fy-prodrail__item", isActive && "fy-prodrail__item--active")}
     >
       {label}
       {count !== undefined && <span className="fy-prodrail__count">{count}</span>}
     </NavLink>
   );
+  // The switch card counts what the format counts: seconds of cut for video, chapters for story.
+  const switchSub = production
+    ? isStory
+      ? `story · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
+      : `${production.meta.format}${cut ? ` · ${seconds(cut.totalSec - cut.uncoveredSec)} cut` : ""}`
+    : "";
   return (
     <div className="fy-app">
       <AppChrome
@@ -141,24 +150,34 @@ export function ProductionLayout() {
           <button type="button" className="fy-prodrail__switch" onClick={() => navigate(`/w/${worldId}/productions`)}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-prodrail__switchname">{production?.meta.title ?? "…"}</div>
-              <div className="fy-prodrail__switchsub">
-                {production ? `${production.meta.format}${cut ? ` · ${seconds(cut.totalSec - cut.uncoveredSec)} cut` : ""}` : ""}
-              </div>
+              <div className="fy-prodrail__switchsub">{switchSub}</div>
             </div>
             <ChevronRight size={14} />
           </button>
           {item("", "Dashboard")}
-          {item("story", "Story", production?.story ? `v${production.story.version}` : "—")}
-          {item("scenes", "Scenes", String(production?.scenes.length ?? 0))}
-          <NavLink to={`${base}/scenes/new`} className="fy-prodrail__sub">
-            <Plus size={12} />
-            New scene
-          </NavLink>
-          {item("generate", "Generate", String(production?.takes.length ?? 0))}
-          {item("cut", "Cut", cut ? seconds(cut.totalSec) : "0:00")}
-          {item("audio", "Audio", String(audioCount))}
-          {item("exports", "Exports", String(exportCount))}
-          {item("stills", "Stills", String(stillCount))}
+          {isStory ? (
+            <>
+              {/* Story ends where Chapters begins, so the two never light together. */}
+              {item("story", "Story", production?.story ? `v${production.story.version}` : "—", true)}
+              {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
+              {item("audio", "Audio", String(audioCount))}
+              {item("exports", "Exports", String(exportCount))}
+            </>
+          ) : (
+            <>
+              {item("story", "Story", production?.story ? `v${production.story.version}` : "—")}
+              {item("scenes", "Scenes", String(production?.scenes.length ?? 0))}
+              <NavLink to={`${base}/scenes/new`} className="fy-prodrail__sub">
+                <Plus size={12} />
+                New scene
+              </NavLink>
+              {item("generate", "Generate", String(production?.takes.length ?? 0))}
+              {item("cut", "Cut", cut ? seconds(cut.totalSec) : "0:00")}
+              {item("audio", "Audio", String(audioCount))}
+              {item("exports", "Exports", String(exportCount))}
+              {item("stills", "Stills", String(stillCount))}
+            </>
+          )}
           <div className="fy-prodrail__spacer" />
           <NavLink to={`/w/${worldId}`} className="fy-prodrail__foot">
             <ChevronLeft size={13} />
@@ -184,6 +203,83 @@ export function ProductionDashboardScreen() {
       <Screen id="production-dashboard">
         <EmptyState title="Opening production…" />
       </Screen>
+    );
+  }
+  // The dashboard resumes the format's unit of work (design 54a). For story that is the
+  // chapter, and nothing here mentions shots, takes, clips or dispatch.
+  if (production.meta.format === "story") {
+    const chapters = production.chapters;
+    const drafted = chapters.filter((c) => (c.words ?? 0) > 0);
+    const totalWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
+    const inHand = chapters.find((c) => !c.words) ?? null;
+    const inHandIdx = inHand ? chapters.indexOf(inHand) : -1;
+    // The design shows the neighbourhood of the chapter in hand, not the whole book —
+    // the chapter tree is one click away for that.
+    const windowStart =
+      inHandIdx >= 0 ? Math.max(0, Math.min(inHandIdx - 1, chapters.length - 4)) : Math.max(0, chapters.length - 4);
+    const nearby = chapters.slice(windowStart, windowStart + 4);
+    return (
+      <div className="fy-prodmain" data-screen="production-dashboard">
+        <div className="fy-h1row">
+          <h1 className="fy-h1">{chapters.length === 0 ? "Day one." : "Here's where you left off."}</h1>
+          <span className="fy-h1row__meta">
+            {chapters.length === 0
+              ? "the spine comes first"
+              : `${drafted.length} chapter${drafted.length === 1 ? "" : "s"} drafted${
+                  inHand ? ` · chapter ${String(inHand.number).padStart(2, "0")} in hand` : ""
+                } · ${totalWords.toLocaleString()} words`}
+          </span>
+        </div>
+        <div className="fy-threadcard" style={{ flex: "none" }}>
+          <div className="fy-threadcard__head">
+            <span className="fy-threadcard__label">
+              {chapters.length === 0
+                ? "THE SPINE COMES FIRST"
+                : inHand
+                  ? `IN HAND · CHAPTER ${inHand.number} OF ${chapters.length}`
+                  : `ALL ${chapters.length} CHAPTERS DRAFTED`}
+            </span>
+          </div>
+          <div className="fy-threadcard__title">
+            {chapters.length === 0 ? "Find the spine together" : (inHand?.title ?? "Nothing waits on you")}
+          </div>
+          <div className="fy-threadcard__sub">
+            {chapters.length === 0
+              ? "Talk the story into an overview; chapters hang beneath it."
+              : inHand
+                ? `${inHand.status}${production.story ? ` · against the overview at v${production.story.version}` : ""}`
+                : "Every chapter has words. The overview steers whatever comes next."}
+          </div>
+          <div className="fy-threadcard__actions">
+            <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story`)}>
+              {chapters.length === 0 ? "Open Story" : "Continue in Story"}
+            </Button>
+          </div>
+        </div>
+        {chapters.length > 0 && (
+          <div>
+            <div className="fy-listhead">
+              Chapters
+              <span
+                style={{ cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3, fontWeight: 500, fontSize: "12.5px" }}
+                onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)}
+              >
+                All {chapters.length} chapter{chapters.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            {nearby.map((c) => (
+              <div key={c.id} className="fy-listrow">
+                <span className="fy-mono">{String(c.number).padStart(2, "0")}</span>
+                <span className="fy-listrow__text" style={{ font: "600 13px var(--font-sans)" }}>
+                  {c.title}
+                </span>
+                <Badge tone="outline">v{c.version}</Badge>
+                <span className="fy-mono">{c.words ? `${c.words.toLocaleString()} words` : c.status}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     );
   }
   const dayOne = isDayOne(production);
