@@ -57,7 +57,6 @@ import {
   ProductionLayout,
   SceneDetailScreen,
   ScenesScreen,
-  StillsScreen,
   StoryScreen,
   VoiceLineDialogScreen,
 } from "./screens/production.js";
@@ -170,7 +169,8 @@ export function App() {
           <Route path="cut" element={<CutScreen />} />
           <Route path="audio" element={<AudioScreen />} />
           <Route path="exports" element={<ExportsScreen />} />
-          <Route path="stills" element={<StillsScreen />} />
+          {/* Stills is a lens on Generate now (design 55a); the old address keeps working. */}
+          <Route path="stills" element={<Navigate to="../generate?view=stills" replace />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

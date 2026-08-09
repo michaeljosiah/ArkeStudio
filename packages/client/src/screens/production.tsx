@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { NavLink, Outlet, useNavigate, useParams } from "react-router";
+import { NavLink, Outlet, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   assemblePrompt,
   deriveCut,
@@ -117,7 +117,6 @@ export function ProductionLayout() {
     (production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue")
       .length ?? 0);
   const exportCount = Object.values(exportsState).filter((e) => e.productionId === prodId).length;
-  const stillCount = production?.takes.filter((t) => t.kind === "frame" || t.kind === "still").length ?? 0;
   const base = `/w/${worldId}/p/${prodId}`;
   const item = (slug: string, label: string, count?: string, end?: boolean) => (
     <NavLink
@@ -171,11 +170,11 @@ export function ProductionLayout() {
                 <Plus size={12} />
                 New scene
               </NavLink>
+              {/* Stills is a lens on Generate now (design 55a), not a rail destination. */}
               {item("generate", "Generate", String(production?.takes.length ?? 0))}
               {item("cut", "Cut", cut ? seconds(cut.totalSec) : "0:00")}
               {item("audio", "Audio", String(audioCount))}
               {item("exports", "Exports", String(exportCount))}
-              {item("stills", "Stills", String(stillCount))}
             </>
           )}
           <div className="fy-prodrail__spacer" />
@@ -409,20 +408,9 @@ export function ProductionDashboardScreen() {
               ))}
             </div>
           </div>
+          {/* The pending queue is stated once, in the card above, which links to where it is
+              decided (design 55). Re-listing the same takes here was a second copy to keep true. */}
           <div className="fy-dashrow">
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="fy-listhead">Needs you</div>
-              {pending.length === 0 && <div className="fy-mono">nothing — the queue is quiet</div>}
-              {pending.slice(0, 4).map((t) => (
-                <div key={t.id} className="fy-listrow">
-                  <span className="fy-dot fy-dot--warn" />
-                  <span className="fy-listrow__text">
-                    {t.coversShots.map((s) => s.replace("sh_", "shot ")).join(", ")} · take back from {t.model}
-                  </span>
-                  <span className="fy-mono">{t.kind}</span>
-                </div>
-              ))}
-            </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-listhead">Activity</div>
               {recentDecided.length === 0 && <div className="fy-mono">no decisions yet</div>}
@@ -862,6 +850,10 @@ export function GenerateScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const { state } = useStore();
   const navigate = useNavigate();
+  // The workspace's second lens (design 55a): the same frame/still takes, seen as a set.
+  // Deep-linkable — the retired /stills address redirects here with the lens on.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const contactLens = searchParams.get("view") === "stills";
   const shots = production?.scenes.flatMap((s) => s.shots) ?? [];
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [selectedTakeId, setSelectedTakeId] = useState<string | null>(null);
@@ -897,6 +889,18 @@ export function GenerateScreen() {
       .slice(0, 2);
   })();
 
+  if (contactLens) {
+    return (
+      <ContactSheet
+        production={production}
+        worldSlug={world?.meta.slug}
+        worldId={worldId}
+        prodId={prodId}
+        onShotLens={() => setSearchParams({}, { replace: true })}
+        onScene={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}
+      />
+    );
+  }
   return (
     <div className="fy-gen" data-screen="generate-workspace">
       <div className="fy-gen__left">
@@ -905,6 +909,9 @@ export function GenerateScreen() {
             <span className="fy-seg__item fy-seg__item--active">Shot</span>
             <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}>
               Scene
+            </button>
+            <button type="button" className="fy-seg__item" onClick={() => setSearchParams({ view: "stills" }, { replace: true })}>
+              Contact sheet
             </button>
           </span>
           <select
@@ -1798,9 +1805,26 @@ export function ExportsScreen() {
 
 // ---- Stills contact sheet --------------------------------------------------
 
-export function StillsScreen() {
-  const { worldId, prodId } = useParams();
-  const { world, production } = useProduction(worldId, prodId);
+/**
+ * Generate's second lens (design 55a): the frame/still takes as a set, decided one at a time.
+ * This was a rail destination of its own; a take is decided where it was made, so the contact
+ * sheet now lives inside the workspace and the seg is the way between the lenses.
+ */
+function ContactSheet({
+  production,
+  worldSlug,
+  worldId,
+  prodId,
+  onShotLens,
+  onScene,
+}: {
+  production: ReturnType<typeof useProduction>["production"];
+  worldSlug: string | undefined;
+  worldId: string | undefined;
+  prodId: string | undefined;
+  onShotLens: () => void;
+  onScene: () => void;
+}) {
   const stills = useMemo(
     () => production?.takes.filter((t) => t.kind === "frame" || t.kind === "still") ?? [],
     [production],
@@ -1809,9 +1833,17 @@ export function StillsScreen() {
   return (
     <div className="fy-prodmain" data-screen="stills-contact-sheet">
       <div className="fy-h1row">
-        <h1 className="fy-h1">Stills</h1>
+        <span className="fy-seg">
+          <button type="button" className="fy-seg__item" onClick={onShotLens}>
+            Shot
+          </button>
+          <button type="button" className="fy-seg__item" onClick={onScene}>
+            Scene
+          </button>
+          <span className="fy-seg__item fy-seg__item--active">Contact sheet</span>
+        </span>
         <span className="fy-h1row__meta">
-          {stills.length} frame{stills.length === 1 ? "" : "s"} on the contact sheet — judged as a set, accepted one at a time
+          {stills.length} frame{stills.length === 1 ? "" : "s"} — judged as a set, accepted one at a time
         </span>
       </div>
       {stills.length === 0 ? (
@@ -1825,7 +1857,7 @@ export function StillsScreen() {
               <div key={take.id} className="fy-shotcard">
                 <div className="fy-shotcard__frame">
                   <Portrait
-                    worldSlug={world?.meta.slug}
+                    worldSlug={worldSlug}
                     path={takeMediaPath(production!.meta.id, take) ?? ""}
                     label={shotId?.replace("sh_", "shot ") ?? take.id}
                     radius={0}

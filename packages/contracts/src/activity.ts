@@ -148,6 +148,11 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
           worldId: world.meta.worldId,
           actions: ["review"],
           ref: take.id,
+          // A take is decided where it was made (design 55): Review lands in the production's
+          // Generate, on the contact-sheet lens when the take is a frame or a still.
+          reviewPath: `/w/${world.meta.worldId}/p/${production.meta.id}/generate${
+            take.kind === "frame" || take.kind === "still" ? "?view=stills" : ""
+          }`,
         });
       }
     }

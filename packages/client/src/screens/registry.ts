@@ -70,5 +70,5 @@ export const SCREENS: ScreenEntry[] = [
   { id: "cut", samplePath: `${P}/cut` },
   { id: "audio", samplePath: `${P}/audio` },
   { id: "exports", samplePath: `${P}/exports` },
-  { id: "stills-contact-sheet", samplePath: `${P}/stills` },
+  { id: "stills-contact-sheet", samplePath: `${P}/generate?view=stills` },
 ];
