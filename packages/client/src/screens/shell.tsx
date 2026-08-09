@@ -83,6 +83,7 @@ import {
   deriveCapabilityAvailability,
   formatMicroUsd,
   jobActions,
+  jobOrigin,
   modelCapabilityCopy,
   modelPriceCopy,
   PROVIDERS as PROVIDER_TABLE,
@@ -2498,9 +2499,23 @@ export function ActivityScreen() {
           {recent.slice(0, 20).map((job) => (
             <div key={job.id} className="fy-activityrow" style={{ display: "block" }}>
               <JobRow job={job} />
-              {jobActions(job).includes("retry") && (
-                <span className="scr-field__hint">failed — retry from its production's dispatch dialog</span>
-              )}
+              {/* Where this one is re-run from, which is not one place (issue 226). The row used
+                  to name the production's dispatch dialog under every failure, including the
+                  reference work that belongs to no production and has no such dialog. */}
+              {jobActions(job).includes("retry") &&
+                (() => {
+                  const origin = jobOrigin(job);
+                  return origin ? (
+                    <>
+                      <span className="scr-field__hint">failed — run it again from {origin.where}</span>
+                      <Button variant="ghost" onClick={() => navigate(origin.path)}>
+                        {origin.label}
+                      </Button>
+                    </>
+                  ) : (
+                    <span className="scr-field__hint">failed — run it again from wherever you started it</span>
+                  );
+                })()}
               <Button variant="ghost" onClick={() => setInspectedJobId(job.id)}>Provider calls</Button>
               {/* Two clicks and no dialog, like archiving a world: the second click is the consent,
                   and the words say what survives it. Offered only where the state permits it
