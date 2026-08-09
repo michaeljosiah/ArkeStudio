@@ -263,7 +263,7 @@ export function WorldChatScreen() {
 export function WorldChatConversationScreen() {
   const { worldId, conversationId } = useParams();
   useOpenWorldGuard(worldId);
-  const { state } = useStore();
+  const { state, connection } = useStore();
   const navigate = useNavigate();
   const [draft, setDraft] = useState("");
   /**
@@ -307,6 +307,9 @@ export function WorldChatConversationScreen() {
    * was empty, which is indistinguishable from a button that does nothing. Closing is the
    * coordinator's own signal that every proposal is durable (R-42a), so it is the thing to wait
    * for. The wait is a few file writes, not a model call.
+   *
+   * The connection ends the wait too. Neither answer can cross a socket that has gone, and a wait
+   * with nothing left to answer it is the failure this whole change is about.
    */
   const closed = loaded?.status === "closed";
   useEffect(() => {
@@ -314,10 +317,10 @@ export function WorldChatConversationScreen() {
     if (closed) {
       setWrappingUp(false);
       navigate(`/w/${worldId}/proposals`);
-    } else if (wrapUpRefusal) {
+    } else if (wrapUpRefusal || connection !== "open") {
       setWrappingUp(false);
     }
-  }, [wrappingUp, closed, wrapUpRefusal, worldId, navigate]);
+  }, [wrappingUp, closed, wrapUpRefusal, connection, worldId, navigate]);
 
   if (!world) return null;
   /**
@@ -528,12 +531,15 @@ export function WorldChatConversationScreen() {
               disabled={carried === 0 || loaded === null || running || wrappingUp}
               onClick={() => {
                 if (!worldId || !loaded) return;
-                setWrappingUp(true);
-                wrapUpWorldChat(worldId, conversationId!, loaded.seq);
+                // Waiting only on a command that was actually sent. A press made after the socket
+                // dropped transmits nothing, and nothing can then arrive to end the wait — the
+                // button would sit on "Turning this into proposals…" for the rest of the session.
+                //
                 // No confirmation sheet, and no navigation yet either: an earlier design had a
                 // sheet here that said less than the screen it stood in front of, and the version
                 // after it left for the proposals before knowing there were any. The effect above
                 // goes when the conversation closes.
+                if (wrapUpWorldChat(worldId, conversationId!, loaded.seq)) setWrappingUp(true);
               }}
             >
               {wrappingUp ? "Turning this into proposals…" : "Turn this into proposals"}

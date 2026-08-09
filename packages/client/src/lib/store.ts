@@ -1961,12 +1961,18 @@ export function retryWorldChatTurn(worldId: string, conversationId: string, turn
   send({ kind: "world-chat-retry-turn", worldId, requestId: crypto.randomUUID(), conversationId, turnId });
 }
 
-/** Turn the conversation into proposals and close it. */
+/**
+ * Turn the conversation into proposals and close it.
+ *
+ * Returns whether the command actually went out. The screen waits on the answer to this, and a
+ * command that was never transmitted has nothing to wait for — reporting that here is what keeps
+ * a press made a moment after the socket dropped from looking like one that is still working.
+ */
 export function wrapUpWorldChat(
   worldId: string,
   conversationId: string,
   expectedConversationSeq: number,
-): void {
+): boolean {
   // A fresh attempt clears the last refusal rather than standing beside it. The reason on screen
   // has to belong to the press the person just made, and the screen waits on this being absent to
   // know the new attempt has not come back yet.
@@ -1975,7 +1981,7 @@ export function wrapUpWorldChat(
     delete cleared[conversationId];
     emitChange({ ...current, worldChatWrapUpRefusals: cleared });
   }
-  send({
+  return send({
     kind: "world-chat-wrap-up",
     worldId,
     requestId: crypto.randomUUID(),

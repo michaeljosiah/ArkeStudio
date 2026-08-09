@@ -5,7 +5,12 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __applyEventForTest, __setStateForTest } from "../src/lib/store.js";
+import {
+  __applyEventForTest,
+  __connectionStatusForTest,
+  __setStateForTest,
+  wrapUpWorldChat,
+} from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { byPendingConsequence } from "../src/screens/world-chat.js";
@@ -580,6 +585,22 @@ describe("a wrap-up that was refused", () => {
     const html = render();
     assert.match(html, /fy-panel__refused/, "the reason has somewhere to be shown");
     assert.match(html, /moved on while you were looking at it/);
+  });
+
+  /*
+   * The screen enters its waiting state on the strength of this, so a command that never left
+   * must say so. Otherwise a press made a moment after the socket dropped starts a wait that
+   * nothing can end: no conversation closes, no refusal arrives, and the button reads "Turning
+   * this into proposals…" for the rest of the session — the same silence, one layer up.
+   */
+  it("says when the command could not be sent at all", () => {
+    openConversation();
+    __connectionStatusForTest("closed");
+    try {
+      assert.equal(wrapUpWorldChat(FIXTURE_WORLD_ID, CV, 1), false);
+    } finally {
+      __connectionStatusForTest("open");
+    }
   });
 
   it("keeps one conversation's refusal off another's rail", () => {
