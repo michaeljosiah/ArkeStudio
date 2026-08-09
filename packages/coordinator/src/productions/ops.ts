@@ -9,6 +9,7 @@ import {
   dispatchDuration,
   estimateMicroUsd,
   parseMentions,
+  passStructure,
   planScene,
   sceneImageOutput,
   SceneSchema,
@@ -542,6 +543,13 @@ export function composeDispatches(
       model: model.id,
       params: {
         prompt: composePrompt({
+          // The shape of the clip, said in the prompt and not only in the parameters — the cuts
+          // below are only where we say they are if the model divides the clip where we do.
+          structure: passStructure({
+            shotCount: pass.plan.length,
+            askedSec: passSeconds,
+            aspect: world.productions.find((p) => p.meta.id === productionId)?.meta.aspect,
+          }),
           preamble: bindingPreamble(passReferencePlan.bound),
           body: passBody,
           // From the plan, not recomputed here: the dialog showed these and the dispatch has to
