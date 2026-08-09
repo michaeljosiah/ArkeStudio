@@ -1,7 +1,7 @@
 import { copyFile, mkdir, readFile, rm, rmdir, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { ulid, type Job, type LedgerEntry, type ReviewDecision, type Take } from "@arke-studio/contracts";
-import { atomicWriteFile } from "../world/atomic.js";
+import { atomicWriteFile, renameWithRetry } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
@@ -12,14 +12,38 @@ import type { WorldStore } from "../world/store.js";
  * Idempotent because finalization is replayable: a retry from Activity, and the main-photo
  * accept path's own recovery call, both re-enter this with the take already written. Copying
  * again would fail once the staging copy is gone, stranding a row whose media is already there.
+ *
+ * The copy stages and renames, like every other write here (SPEC-002 R-13), and that is what
+ * makes the skip safe: a destination that exists is a destination that was renamed into place,
+ * so it is whole. Copying straight to the target would leave a partial file behind if the
+ * process died mid-write — and the next pass would take that partial file for a finished one,
+ * skip the copy, then delete the intact staging source. That is a corrupt take, from a crash
+ * the old copy-every-time code survived.
  */
 async function placeMedia(from: string, to: string): Promise<void> {
   const already = await stat(toExtendedLength(to)).then(
-    (s) => s.isFile() && s.size > 0,
+    (s) => s.isFile(),
     () => false,
   );
   if (already) return;
-  await copyFile(toExtendedLength(from), toExtendedLength(to));
+  const tmp = join(dirname(to), `.tmp-${ulid()}`);
+  await copyFile(toExtendedLength(from), toExtendedLength(tmp));
+  try {
+    await renameWithRetry(tmp, to);
+  } catch (err) {
+    await rm(toExtendedLength(tmp), { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+/**
+ * The two directories reference generation actually lands in, for one sheet. Named in full
+ * rather than sniffed for a path segment: a sheet called "Incoming" slugs to `incoming`, and a
+ * check for *any* segment of that name would match `references/incoming/candidates/…` and
+ * delete the candidate the user is still choosing from.
+ */
+function stagingDirsFor(sheetId: string): string[] {
+  return [`references/${sheetId}/incoming`, `references/${sheetId}/looks/incoming`];
 }
 
 /**
@@ -37,14 +61,14 @@ async function placeMedia(from: string, to: string): Promise<void> {
  * a take at all, so it never reaches this function. Deleting after take.json is written, rather
  * than moving before it, means the worst a crash can do is leave the duplicate we had before.
  */
-async function discardStagingCopy(worldDir: string, landed: string): Promise<void> {
-  const segments = landed.replace(/\\/g, "/").split("/");
-  if (!segments.includes("incoming")) return;
-  const absolute = join(worldDir, landed);
-  await rm(toExtendedLength(absolute), { force: true }).catch(() => {});
+async function discardStagingCopy(worldDir: string, sheetId: string, landed: string): Promise<void> {
+  const path = landed.replace(/\\/g, "/");
+  const dir = path.slice(0, path.lastIndexOf("/"));
+  if (!stagingDirsFor(sheetId).includes(dir)) return;
+  await rm(toExtendedLength(join(worldDir, path)), { force: true }).catch(() => {});
   // And the staging directory itself when it empties. rmdir refuses a non-empty one, so a
   // sibling still waiting to be finalized keeps it; the next landing re-creates it either way.
-  await rmdir(toExtendedLength(dirname(absolute))).catch(() => {});
+  await rmdir(toExtendedLength(join(worldDir, dir))).catch(() => {});
 }
 
 function kindFor(job: Job): Take["kind"] | null {
@@ -110,7 +134,7 @@ export async function recordReferenceTake(store: WorldStore, job: Job, ledgerEnt
     await atomicWriteFile(join(dir, "take.json"), JSON.stringify(take, null, 2) + "\n");
     // Last, and only once the take is durable: until take.json exists the staging copy is the
     // only copy that anything can find.
-    await discardStagingCopy(store.dir, landed);
+    await discardStagingCopy(store.dir, sheetId, landed);
     return take;
   });
 }

@@ -354,19 +354,27 @@ export function jobOrigin(job: Job): JobOrigin | null {
     // one request from its siblings — the generation key, the candidate number, the voice.
     const sheetId = job.target.id?.split("/")[0] ?? "";
     if (sheetId.length === 0) return null;
+    // Reading a sheet's Essence or Appearance aloud is queued as a voice preview too, but it
+    // did not start in the voice picker and cannot be re-run there: that screen auditions and
+    // assigns voices, and has no way to ask for this paragraph again. The sheet does.
+    if (job.target.kind === "voice-preview" && job.params["purpose"] === "sheet-section") {
+      return { path: `/w/${job.worldId}/cast/${sheetId}`, label: "Character", where: "the character's own page" };
+    }
     const { segment, label, where } = reference;
     return { path: `/w/${job.worldId}/cast/${sheetId}/${segment}`, label, where };
   }
   if (job.target.kind === "world-image") {
     return { path: `/w/${job.worldId}`, label: "World", where: "the world's own screen" };
   }
-  // Shots, scene passes, storyboards and lines are the production's, and its dispatch dialog is
-  // the one the original hint meant. Without a production there is no dialog to name.
+  // Shots, scene passes, storyboards and lines are the production's. A line is the exception
+  // among them: it has its own dialog, and the shot dispatch dialog carries no dialogue or
+  // delivery controls, so sending a failed line there would be the same dead end again.
   if (job.productionId !== undefined) {
+    const line = job.target.kind === "voice-line";
     return {
-      path: `/w/${job.worldId}/p/${job.productionId}/generate/dispatch`,
-      label: "Dispatch",
-      where: "its production's dispatch dialog",
+      path: `/w/${job.worldId}/p/${job.productionId}/generate/${line ? "voice-line" : "dispatch"}`,
+      label: line ? "Voice line" : "Dispatch",
+      where: line ? "its production's voice-line dialog" : "its production's dispatch dialog",
     };
   }
   return null;

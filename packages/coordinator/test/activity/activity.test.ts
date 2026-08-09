@@ -263,6 +263,17 @@ describe("actions offered only where the state permits (R-13, D10, §3.2)", () =
     assert.equal(cast("reference-tile", "timi-j/head-front")?.path, `/w/${WORLD}/cast/timi-j/kit`);
     assert.equal(cast("establish-candidate", "timi-j/1")?.path, `/w/${WORLD}/cast/timi-j/kit`);
     assert.equal(cast("voice-preview", "timi-j/elevenlabs/rachel")?.path, `/w/${WORLD}/cast/timi-j/voice`);
+    // A section read is queued as a voice preview but did not start in the picker, and cannot
+    // be re-run there — that screen auditions and assigns voices, and has no way to ask for
+    // this paragraph again.
+    const sectionRead = jobOrigin(
+      job({
+        status: "failed",
+        target: { kind: "voice-preview", id: "timi-j/elevenlabs/rachel" },
+        params: { purpose: "sheet-section", sectionHeading: "Essence" },
+      }),
+    );
+    assert.equal(sectionRead?.path, `/w/${WORLD}/cast/timi-j`);
     // Every reference kind the queue can finalize is one Activity can route home, or the row it
     // leaves behind is the dead end this issue was about.
     for (const kind of REFERENCE_FINALIZATION_TARGETS) {
@@ -272,6 +283,12 @@ describe("actions offered only where the state permits (R-13, D10, §3.2)", () =
     const shot = jobOrigin(job({ status: "failed", productionId: "saltlight", target: { kind: "shot", id: "sh_12" } }));
     assert.equal(shot?.path, `/w/${WORLD}/p/saltlight/generate/dispatch`);
     assert.match(shot!.where, /production/);
+    // Except a line, which has a dialog of its own. The shot dispatch dialog carries no
+    // dialogue or delivery controls, so sending a failed line there is the same dead end.
+    const line = jobOrigin(
+      job({ status: "failed", productionId: "saltlight", target: { kind: "voice-line", id: "sh_12" } }),
+    );
+    assert.equal(line?.path, `/w/${WORLD}/p/saltlight/generate/voice-line`);
     // A world's key art is dispatched from the world screen, and nothing else claims it.
     assert.equal(jobOrigin(job({ target: { kind: "world-image", id: WORLD } }))?.path, `/w/${WORLD}`);
     // Nothing to name beats naming the wrong place: a production-less job of an unknown kind,

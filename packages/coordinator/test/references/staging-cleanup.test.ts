@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { WORLD_EXPORT_EXCLUDED } from "../../src/takes/export.js";
 import { recordReferenceTake, recordUploadedReferenceTake } from "../../src/references/takes.js";
@@ -126,6 +126,51 @@ describe("a finalized reference take stores its image once (issue 231)", () => {
     const take = await recordUploadedReferenceTake(store, "maren-kest", candidate);
     assert.equal(await readFile(join(dir, candidate), "utf8"), "my-own-photo", "their file stays theirs");
     assert.ok(await exists(join(dir, "references", "maren-kest", "takes", take.id, take.media!)));
+    await store.close();
+  });
+
+  it("leaves a sheet whose own slug is `incoming` alone", async () => {
+    // A sheet named "Incoming" slugs to `incoming`, so its candidates land at
+    // references/incoming/candidates/. A cleanup that looked for any path segment called
+    // `incoming` would match that and delete the picture the user is choosing from.
+    const { dir, store } = await open();
+    const landed = "references/incoming/candidates/main-photo-g5-1.png";
+    await mkdir(join(dir, "references", "incoming", "candidates"), { recursive: true });
+    await writeFile(join(dir, landed), "candidate-bytes");
+
+    const take = await recordReferenceTake(
+      store,
+      {
+        ...jobFor("main-photo-candidate", "incoming/g5/1", landed),
+        params: {
+          prompt: "a portrait",
+          references: [],
+          provenance: { canonRevision: 42, sheets: { incoming: 4 }, artDirectionVersion: 3 },
+        },
+      } as never,
+    );
+    assert.ok(take);
+    assert.equal(await readFile(join(dir, landed), "utf8"), "candidate-bytes", "the candidate survives");
+    await store.close();
+  });
+
+  it("leaves nothing at the destination when the copy cannot finish", async () => {
+    // The skip-if-present shortcut is only safe while a present file is a whole one. The media
+    // stages to .tmp-<ulid> and renames, so the destination appears whole or not at all — where
+    // copying straight to the target would leave a partial file after a crash mid-write, which
+    // the next pass would take for finished, skip, and then delete the intact source behind.
+    // A copy that cannot finish stands in for that crash: it must leave the take empty, so a
+    // replay copies again rather than adopting a stub.
+    const { dir, store } = await open();
+    const landed = "references/maren-kest/incoming/character-sheet-g6.png";
+    const job = jobFor("character-sheet", "maren-kest/g6", landed);
+    await mkdir(join(dir, "references", "maren-kest", "incoming"), { recursive: true });
+    // No file at `landed`: the copy fails.
+    await assert.rejects(() => recordReferenceTake(store, job as never));
+
+    const takeDir = join(dir, "references", "maren-kest", "takes", `tk_${job.id.slice(3)}`);
+    const left = await readdir(takeDir).catch(() => [] as string[]);
+    assert.deepEqual(left, [], "no stub media, no take.json, and no temporary file left to be mistaken for either");
     await store.close();
   });
 
