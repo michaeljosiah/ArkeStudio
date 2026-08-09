@@ -8,9 +8,6 @@ import { Portrait } from "../components/portrait.js";
 import { shortDate } from "../lib/format.js";
 import { acceptProposal, discardProposal, setArtDirection, useWorld } from "../lib/store.js";
 
-const PROPOSED_DESCRIPTION =
-  "Editorial maritime illustration on weathered paper. Dry-brush pigment and charcoal contours; slate and sea-glass blue with one lantern-orange accent; broad graphic shadows, loose fog and visible grain.";
-
 function splitDescription(description: string): { title: string; body: string } {
   const first = /^(.+?[.!?])(?:\s+|$)(.*)$/s.exec(description.trim());
   if (!first) return { title: description.trim(), body: description.trim() };
@@ -197,7 +194,9 @@ export function ArtDirectionProposalScreen() {
   const { worldId } = useParams();
   const navigate = useNavigate();
   const world = useWorld();
-  const [description, setDescription] = useState(PROPOSED_DESCRIPTION);
+  // Null is "untouched": the box then shows the world's current words, since a draft of a
+  // change starts from what the look already is — never from another world's sample copy.
+  const [description, setDescription] = useState<string | null>(null);
   // Null is "your own words", which is where this screen starts: the world already has a look,
   // and the words in the box are a draft of the change, not a preset's.
   const [presetId, setPresetId] = useState<string | null>(null);
@@ -208,7 +207,8 @@ export function ArtDirectionProposalScreen() {
   const staged = world.proposals.find((item) => item.proposal.kind === "art-direction");
   const proposed = staged?.artDirection;
   const nextVersion = direction.version + 1;
-  const shownDescription = proposed?.description ?? description;
+  const draft = description ?? direction.description;
+  const shownDescription = proposed?.description ?? draft;
   const cancel = () => {
     if (staged) discardProposal(world.meta.worldId, staged.proposal.id);
     navigate(`/w/${world.meta.worldId}/art-direction`);
@@ -275,9 +275,11 @@ export function ArtDirectionProposalScreen() {
           </button>
         </div>
         <div className="fy-artproposal__seedline">
-          {presetId === null
-            ? "your own words · nothing was seeded"
-            : "the preset seeded these words · your edits win"}
+          {presetId !== null
+            ? "the preset seeded these words · your edits win"
+            : description === null
+              ? "the current look's words · edit them to draft the change"
+              : "your own words · nothing was seeded"}
         </div>
         <div className="fy-artproposal__buttons">
           <Button variant="ghost" onClick={cancel}>
@@ -290,9 +292,9 @@ export function ArtDirectionProposalScreen() {
               edit on screen and says so, rather than discarding it behind a page change. */}
           <Button
             variant="primary"
-            disabled={Boolean(staged) || description.trim().length === 0}
+            disabled={Boolean(staged) || draft.trim().length === 0}
             onClick={() => {
-              if (setArtDirection(world.meta.worldId, description, direction.masterLook ?? null)) {
+              if (setArtDirection(world.meta.worldId, draft, direction.masterLook ?? null)) {
                 navigate(`/w/${world.meta.worldId}/art-direction`);
               } else {
                 setSendFailed(true);
