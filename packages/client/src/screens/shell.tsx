@@ -1489,7 +1489,11 @@ function ProviderKeyLine({ id }: { id: ProviderId }) {
       {status?.fault && (
         <div className="fy-set__why">
           <span className="fy-set__dot fy-set__dot--warn" />
-          <span>{status.fault} — the work was not the problem; the credential was.</span>
+          {/* The reassurance is only true while a key is stored: then a fault is that key
+              failing in use, and the generation it interrupted was not at fault. With nothing
+              stored the fault is about the store itself (issue 227), and pointing at the
+              credential would send the user to try a different key. */}
+          <span>{status.fault}{stored ? " — the work was not the problem; the credential was." : ""}</span>
         </div>
       )}
       <ProbeChips status={status} />
