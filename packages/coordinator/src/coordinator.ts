@@ -150,6 +150,7 @@ import { WorldChatRetrieval } from "./world-chat/retrieval.js";
 import {
   AttachmentError,
   CHAT_DOCUMENT_EXTENSIONS,
+  MAX_TEXT_READ_CHARS,
   refuseUnreadable,
   WorldChatAttachmentStore,
 } from "./world-chat/attachments.js";
@@ -3919,9 +3920,25 @@ export class Coordinator {
         attachments: [],
         attachmentText: new Map(),
       }),
-      readAttachmentText: async (attachment) => {
-        const read = await attachments.readText(attachment).catch(() => null);
-        return read?.text ?? null;
+      /**
+       * Read in pages, because one `readText` is capped at MAX_TEXT_READ_CHARS however much is
+       * asked for. The verifier asks for the whole run budget: a model that paged through a long
+       * document may quote text past the first page, and checking that quotation against page one
+       * alone would reject it as absent from the very file it came out of.
+       */
+      readAttachmentText: async (attachment, maxChars) => {
+        const ceiling = maxChars ?? MAX_TEXT_READ_CHARS;
+        let text = "";
+        while (text.length < ceiling) {
+          const read = await attachments
+            .readText(attachment, { offset: text.length, limit: ceiling - text.length })
+            .catch(() => null);
+          // A failure on the first page is "cannot read"; on a later one, what was read stands.
+          if (!read) return text.length > 0 ? text : null;
+          text += read.text;
+          if (!read.truncated || read.text.length === 0) break;
+        }
+        return text;
       },
       now: () => new Date().toISOString(),
     });

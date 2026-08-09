@@ -3,6 +3,7 @@ import {
   newId,
   WorldChatTurnResultSchema,
   type CandidateChecks,
+  type CandidateEvidence,
   type CandidateGroup,
   type CandidateGroupId,
   type CandidateId,
@@ -72,6 +73,30 @@ function problem(code: string, safeMessage: string): TurnProblem {
   return { code, safeMessage };
 }
 
+const NO_EVIDENCE: readonly CandidateEvidence[] = [];
+
+/**
+ * What a corrective turn may cost (§8.4).
+ *
+ * The turn budget is the reason for each of these. A correction is meant to be smaller than the
+ * thing it corrects; one that grows with the size of a malformed answer would let a bad result
+ * spend the retry's context on its own faults, which is the failure the bounds exist to prevent.
+ */
+const MAX_KEYS_NAMED = 8;
+const MAX_PROBLEM_CHARS = 300;
+const MAX_CORRECTIVE_CHARS = 4_000;
+
+/** Whether these reasons include the one that cannot be substituted (§8.4, and wrap-up's gate). */
+function hasIntentEvidence(evidence: readonly CandidateEvidence[]): boolean {
+  return evidence.some((e) => e.kind === "message" && e.purpose === "intent");
+}
+
+/** The verified intent a revision inherits from the proposition it revises. */
+function intentEvidenceOf(existing: WorldChangeCandidate | undefined): readonly CandidateEvidence[] {
+  if (!existing) return NO_EVIDENCE;
+  return existing.evidence.filter((e) => e.kind === "message" && e.purpose === "intent");
+}
+
 /**
  * One schema issue as a line the model can act on.
  *
@@ -96,10 +121,16 @@ function schemaIssueLine(issue: z.ZodIssue): string {
         : `${path} must be ${issue.expected}, not ${issue.received}`;
     case z.ZodIssueCode.invalid_literal:
       return `${path} must be exactly ${JSON.stringify(issue.expected)}`;
-    case z.ZodIssueCode.unrecognized_keys:
-      return `${path} has unknown field${issue.keys.length === 1 ? "" : "s"}: ${issue.keys
-        .map((k) => k.slice(0, 60))
-        .join(", ")}`;
+    case z.ZodIssueCode.unrecognized_keys: {
+      // Zod puts every unknown key in one issue, so an object with a thousand of them would
+      // otherwise become a corrective prompt the size of the answer it is rejecting — spending
+      // the one retry's context on a list nobody needs to read past the first few of.
+      const shown = issue.keys.slice(0, MAX_KEYS_NAMED).map((k) => k.slice(0, 60));
+      const rest = issue.keys.length - shown.length;
+      return `${path} has unknown field${issue.keys.length === 1 ? "" : "s"}: ${shown.join(", ")}${
+        rest > 0 ? `, and ${rest} more` : ""
+      }`;
+    }
     case z.ZodIssueCode.invalid_union_discriminator:
     case z.ZodIssueCode.invalid_enum_value:
       return `${path} must be one of ${issue.options.map((o) => JSON.stringify(o)).join(" | ")}`;
@@ -146,7 +177,7 @@ export function parseTurnResult(raw: string): { ok: true; value: WorldChatTurnRe
   const parsed = WorldChatTurnResultSchema.safeParse(json);
   if (!parsed.success) {
     const lines = [...new Set(parsed.error.issues.map(schemaIssueLine))];
-    return { ok: false, problems: lines.map((line) => problem("schema", line)) };
+    return { ok: false, problems: lines.map((line) => problem("schema", truncate(line, MAX_PROBLEM_CHARS))) };
   }
   return { ok: true, value: parsed.data };
 }
@@ -196,17 +227,32 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
     }
   }
 
-  // Step 5: evidence, and step 6: receipts.
-  const drafts = result.candidateOperations.flatMap((op) =>
-    op.op === "create" || op.op === "update" ? [op.candidate] : op.op === "split" ? op.replacements : [],
-  );
-  for (const draft of drafts) {
+  /**
+   * Step 5: evidence, and step 6: receipts.
+   *
+   * A draft that revises an existing proposition carries that proposition's verified intent with
+   * it. Without this, correcting something said more than eight turns ago is impossible to
+   * express: the original message has left the context window, the registry shows only titles and
+   * ids, and the words in front of the model are a `correction` rather than the original ask — so
+   * a required intent citation could not be written, and both the turn and its one retry would
+   * fail on a proposition the user was actively trying to fix.
+   */
+  const drafts = result.candidateOperations.flatMap((op) => {
+    if (op.op === "create") return [{ draft: op.candidate, inherited: NO_EVIDENCE }];
+    if (op.op === "update") return [{ draft: op.candidate, inherited: intentEvidenceOf(byId.get(op.candidateId)) }];
+    if (op.op === "split") {
+      const inherited = intentEvidenceOf(byId.get(op.candidateId));
+      return op.replacements.map((draft) => ({ draft, inherited }));
+    }
+    return [];
+  });
+  for (const { draft, inherited } of drafts) {
     for (const evidenceProblem of verifyAllEvidence(draft.evidence, input.evidenceSources)) {
       problems.push(problem(evidenceProblem.kind, safeEvidenceMessage(evidenceProblem)));
     }
     if (draft.evidence.length === 0) {
       problems.push(problem("no-evidence", "Every proposition needs evidence of what it is based on."));
-    } else if (!draft.evidence.some((e) => e.kind === "message" && e.purpose === "intent")) {
+    } else if (!hasIntentEvidence(draft.evidence) && inherited.length === 0) {
       /**
        * Intent is the one piece that cannot be substituted, and it is checked here rather than
        * only at wrap-up (`hasIntentEvidence` in readiness.ts).
@@ -297,9 +343,10 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
       case "split": {
         const existing = byId.get(op.candidateId)!;
         candidates.push({ ...existing, status: "superseded", revision: existing.revision + 1, updatedAt: at });
+        const inherited = intentEvidenceOf(existing);
         for (const replacement of op.replacements) {
           const id = newId("cand") as CandidateId;
-          candidates.push({ ...fresh(id, replacement, input, at), splitFrom: existing.id });
+          candidates.push({ ...fresh(id, replacement, input, at, inherited), splitFrom: existing.id });
         }
         break;
       }
@@ -350,6 +397,7 @@ function fresh(
   draft: ModelCandidateDraft,
   input: ValidateInput,
   at: string,
+  inheritedIntent: readonly CandidateEvidence[] = NO_EVIDENCE,
 ): WorldChangeCandidate {
   // `checkReceiptIds` is model-facing only. It is what the model says it read, and it is dropped
   // here because the stored candidate carries `checks` instead — the coordinator's own findings.
@@ -357,6 +405,10 @@ function fresh(
   // difference between them is exactly what must not be blurred (§8.3.1).
   const { title, rationale, settledness, evidence, checkReceiptIds, ...payload } = draft;
   void checkReceiptIds;
+  // Intent travels with the proposition, not with the turn that last touched it: the original ask
+  // is still why this exists, and wrap-up refuses anything that cannot show one. A revision that
+  // states its own intent keeps it; only a revision that does not inherits.
+  const reasons = hasIntentEvidence(evidence) ? [...evidence] : [...inheritedIntent, ...evidence];
   return {
     ...(payload as object),
     id,
@@ -367,8 +419,8 @@ function fresh(
     subject: subjectOf(draft),
     title,
     rationale,
-    sourceMessageIds: [...new Set(evidence.filter((e) => e.kind === "message").map((e) => e.messageId))],
-    evidence: [...evidence],
+    sourceMessageIds: [...new Set(reasons.filter((e) => e.kind === "message").map((e) => e.messageId))],
+    evidence: reasons,
     checks: input.checksFor(draft),
     createdAt: at,
     updatedAt: at,
@@ -389,7 +441,7 @@ function snapshot(
   revision: number,
 ): WorldChangeCandidate {
   return {
-    ...fresh(existing.id, draft, input, at),
+    ...fresh(existing.id, draft, input, at, intentEvidenceOf(existing)),
     revision,
     createdAt: existing.createdAt,
     ...(existing.groupId !== undefined ? { groupId: existing.groupId } : {}),
@@ -459,12 +511,17 @@ function dedupeProblems(problems: readonly TurnProblem[]): TurnProblem[] {
  * return the third one.
  */
 export function correctiveMessage(problems: readonly TurnProblem[]): string {
-  const lines = problems.slice(0, 8).map((p) => `- ${p.safeMessage}`);
-  return [
+  const lines = problems.slice(0, 8).map((p) => `- ${truncate(p.safeMessage, MAX_PROBLEM_CHARS)}`);
+  const message = [
     "The previous result was not accepted:",
     ...lines,
     "",
     "Return the complete result again, as a single JSON object matching the required shape.",
     'The exact shape, with examples, is under "The result shape, exactly" in your instructions.',
   ].join("\n");
+  return truncate(message, MAX_CORRECTIVE_CHARS);
+}
+
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }

@@ -153,6 +153,77 @@ describe("the evidence a proposition may stand on", () => {
     assert.match(correctiveMessage(outcome.problems), /"purpose": "intent"/);
   });
 
+  /**
+   * The correction case the intent rule would otherwise make impossible: the original ask has
+   * fallen out of the eight-turn window, the registry shows only ids and titles, and the words in
+   * front of the model are a correction rather than the original ask. The proposition's own
+   * verified intent is what carries it — and it must survive into the new snapshot, or wrap-up
+   * drops the very thing the user was trying to fix.
+   */
+  it("lets a correction inherit the intent of the proposition it revises", async () => {
+    const message = guideMessage();
+    const original: ModelCandidateDraft = structuredClone(WORLD_CHAT_SHAPE_EXAMPLES.drafts["canon.create"]);
+    original.evidence = [{ ...WORLD_CHAT_SHAPE_EXAMPLES.evidence.message, messageId: message.id }];
+    original.checkReceiptIds = [];
+
+    const created = validateTurnResult(
+      await validateInput(message, {
+        reply: "Noted.",
+        candidateOperations: [{ op: "create", temporaryId: "t1", candidate: original }],
+        groupOperations: [],
+      }),
+    );
+    assert.ok(created.ok, created.ok ? "" : created.problems.map((p) => p.code).join(", "));
+    const existing = created.turn.candidates[0]!;
+
+    // A later turn: the original message is long gone, and this correction cites only itself.
+    const later: WorldChatMessage = {
+      id: newId("msg") as MessageId,
+      turnId: newId("turn") as TurnId,
+      role: "user",
+      text: "Actually it was her grandmother.",
+      attachmentIds: [],
+      createdAt: AT,
+    };
+    const revision: ModelCandidateDraft = structuredClone(WORLD_CHAT_SHAPE_EXAMPLES.drafts["canon.create"]);
+    revision.evidence = [
+      {
+        kind: "message",
+        messageId: later.id,
+        quote: later.text,
+        start: 0,
+        end: later.text.length,
+        purpose: "correction",
+      },
+    ];
+    revision.checkReceiptIds = [];
+
+    const input = await validateInput(later, {
+      reply: "Changed.",
+      candidateOperations: [
+        { op: "update", candidateId: existing.id, expectedRevision: existing.revision, candidate: revision },
+      ],
+      groupOperations: [],
+    });
+    const outcome = validateTurnResult({ ...input, existing: [existing] });
+
+    assert.equal(
+      outcome.ok,
+      true,
+      outcome.ok ? "" : outcome.problems.map((p) => p.code).join(", "),
+    );
+    if (!outcome.ok) return;
+    const updated = outcome.turn.candidates[0]!;
+    assert.ok(
+      updated.evidence.some((e) => e.kind === "message" && e.purpose === "intent"),
+      "the original ask is still why this exists, so wrap-up can still carry it",
+    );
+    assert.ok(
+      updated.evidence.some((e) => e.kind === "message" && e.purpose === "correction"),
+      "and the correction is recorded beside it",
+    );
+  });
+
   /** Citing its own reply would let a proposition bootstrap from the Studio's earlier inference. */
   it("refuses evidence that quotes the Studio rather than the user", async () => {
     const message = guideMessage();
@@ -238,5 +309,23 @@ describe("an answer shaped the way the live model actually guessed", () => {
 
     assert.ok(!corrective.includes("SECRET-SPAN"), "a failing value is never echoed back");
     assert.ok(!corrective.includes("SECRET-BODY"), "whatever field it arrived under");
+  });
+
+  /**
+   * Zod puts every unknown key in a single issue. Concatenated whole, a junk object would make a
+   * corrective prompt the size of the answer it rejects — the retry's context spent on its own
+   * error message, which is the opposite of what a bounded turn is for.
+   */
+  it("stays small when the answer is enormous", async () => {
+    const junk: Record<string, unknown> = { reply: "hi", candidateOperations: [], groupOperations: [] };
+    for (let i = 0; i < 2_000; i++) junk[`unexpected_field_number_${i}`] = i;
+
+    const outcome = validateTurnResult(await validateInput(guideMessage(), junk));
+    assert.equal(outcome.ok, false);
+    if (outcome.ok) return;
+
+    const corrective = correctiveMessage(outcome.problems);
+    assert.ok(corrective.length <= 4_000, `corrective was ${corrective.length} characters`);
+    assert.match(corrective, /and \d+ more/, "and it says how much it did not list");
   });
 });

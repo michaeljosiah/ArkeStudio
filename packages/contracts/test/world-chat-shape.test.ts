@@ -104,4 +104,10 @@ describe("the rendered guide", () => {
     assert.match(guide, /What they handed you/, "the section that prints them");
     assert.match(guide, /Copy both exactly/);
   });
+
+  it("says where a world citation's version, hash and receipt id come from", () => {
+    assert.match(guide, /checkReceiptId/, "the citation block beside every tool result");
+    assert.match(guide, /citable/);
+    assert.match(guide, /Never invent one/, "an invented receipt is refused as foreign");
+  });
 });

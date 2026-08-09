@@ -1360,7 +1360,7 @@ candidateId and expectedRevision come from "What you have already understood" �
 - classification: one of ${WorldChangeClassificationSchema.options.join(" | ")}
 - title: one plain sentence in the user's register. rationale: one or two more if needed.
 - settledness: one of ${SettlednessSchema.options.join(" | ")}
-- checkReceiptIds: ids (check_...) returned by arke-world tool calls you made this turn; [] when you made none. Never carry one over from an earlier turn.
+- checkReceiptIds: the checkReceiptId values from the citation blocks of arke-world calls you made this turn; [] when you made none. Never invent one and never carry one over from an earlier turn — a receipt from another turn is refused.
 
 ### The payload each classification requires
 
@@ -1389,7 +1389,7 @@ ${JSON.stringify(exampleMessageEvidence)}
 
 Supporting evidence — the world (only something you read through the arke-world tools this turn):
 ${JSON.stringify(exampleWorldEvidence)}
-- Copy observedVersion and contentHash exactly from the tool's response.
+- Every arke-world result comes with a second block: {"checkReceiptId": "check_...", "citable": [{"ref": ..., "observedVersion": N, "contentHash": "sha256:..."}]}. Copy ref, observedVersion and contentHash from there, exactly. If a read returned no citable entry, you did not read anything you may quote.
 - purpose is one of ${WorldEvidencePurposeSchema.options.join(" | ")}
 
 Supporting evidence — an attachment you were handed:

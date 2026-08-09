@@ -14,6 +14,7 @@ import {
   type WorldChatLoaded,
   type WorldChatRun,
 } from "@arke-studio/contracts";
+import { MAX_TEXT_PER_RUN_CHARS } from "./attachments.js";
 import { assembleContext, type ContextAttachment } from "./context.js";
 import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
 import { deriveChecks, planFor } from "./check-plan.js";
@@ -67,13 +68,19 @@ export interface RunDeps {
   /** The world half of evidence verification; the conversation half comes from the fold. */
   evidenceSources: (messages: readonly WorldChatMessage[]) => EvidenceSources;
   /**
-   * The text of a readable attachment, or null.
+   * The first `maxChars` of a readable attachment, or null.
    *
    * Needed so an attachment quotation can be verified against the bytes it claims to come from.
    * Without it every such quotation fails, which is worse than not offering attachments at all:
    * the Studio would read a document through the tool and then be unable to cite it.
+   *
+   * `maxChars` exists because the prompt and the verifier want different amounts. One
+   * `get_attachment_text` call is capped well below what a whole run may read, so a model that
+   * pages through a long document can legitimately quote text far past the inlined opening —
+   * and a verifier holding only that opening would reject the quotation as absent from a
+   * document it is sitting in. The verifier therefore asks for the whole run budget.
    */
-  readAttachmentText?: (attachment: WorldChatAttachment) => Promise<string | null>;
+  readAttachmentText?: (attachment: WorldChatAttachment, maxChars?: number) => Promise<string | null>;
   /**
    * The focused slice of accepted world state a run may see (§8.5).
    *
@@ -408,6 +415,7 @@ export class WorldChatRunner {
   private async readAttachments(
     view: WorldChatLoaded,
     allowed: readonly string[],
+    maxChars?: number,
   ): Promise<{ readable: WorldChatAttachment[]; text: Map<string, string> }> {
     const readable = view.attachments.filter(
       (a) => allowed.includes(a.id) && a.readability !== "not-readable",
@@ -415,7 +423,7 @@ export class WorldChatRunner {
     const text = new Map<string, string>();
     if (this.deps.readAttachmentText) {
       for (const attachment of readable) {
-        const body = await this.deps.readAttachmentText(attachment).catch(() => null);
+        const body = await this.deps.readAttachmentText(attachment, maxChars).catch(() => null);
         if (body !== null) text.set(attachment.id, body);
       }
     }
@@ -448,7 +456,13 @@ export class WorldChatRunner {
     const messages = folded.messages;
     const checksByDraft = new Map<ModelCandidateDraft, CandidateChecks>();
 
-    const { readable, text: attachmentText } = await this.readAttachments(folded, allowed);
+    // The whole run budget, not the inlined opening: the model may have paged deeper through
+    // get_attachment_text, and a quotation from further in is still a quotation from this file.
+    const { readable, text: attachmentText } = await this.readAttachments(
+      folded,
+      allowed,
+      MAX_TEXT_PER_RUN_CHARS,
+    );
 
     const outcome = validateTurnResult({
       raw,

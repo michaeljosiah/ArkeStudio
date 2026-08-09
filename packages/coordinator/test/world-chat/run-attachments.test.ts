@@ -8,7 +8,7 @@ import {
   type WorldBundle,
   type WorldChatMessage,
 } from "@arke-studio/contracts";
-import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
+import { MAX_TEXT_READ_CHARS, WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { WorldChatRunner } from "../../src/world-chat/run.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
@@ -94,9 +94,20 @@ function runnerFor(options: RunnerOptions): WorldChatRunner {
       attachments: [],
       attachmentText: new Map(),
     }),
-    readAttachmentText: async (a) => {
+    // Paged like the coordinator's own, because one readText is capped well below a run's budget.
+    readAttachmentText: async (a, maxChars) => {
       options.onRead?.(a.id);
-      return (await options.attachments.readText(a)).text;
+      const ceiling = maxChars ?? MAX_TEXT_READ_CHARS;
+      let text = "";
+      while (text.length < ceiling) {
+        const read = await options.attachments.readText(a, {
+          offset: text.length,
+          limit: ceiling - text.length,
+        });
+        text += read.text;
+        if (!read.truncated || read.text.length === 0) break;
+      }
+      return text;
     },
     now: NOW,
   });
@@ -164,6 +175,34 @@ describe("reading an attachment", () => {
     const outcome = await runner.send(c.freshStore(), c.conversationId, "read my notes", [doc.id]);
     assert.equal(outcome.status, "completed");
     assert.deepEqual(scoped[0], [doc.id], "the lease was scoped to exactly the document handed over");
+  });
+
+  /**
+   * A run may read far more of a document than one `get_attachment_text` call returns, by paging
+   * with offsets. Verification that loaded only the first page would reject a quotation from any
+   * later one — deterministically, and for a quote the model really did read, out of the file it
+   * really came from.
+   */
+  it("verifies a quotation from deeper in the document than one read returns", async () => {
+    const c = await conversation("arke-att-deep-");
+    const buried = "the bells were cast from whale bone";
+    const doc = await c.attachments.ingestText(
+      c.conversationId,
+      `${"filler. ".repeat(MAX_TEXT_READ_CHARS / 4)}${buried}`,
+      "long.txt",
+    );
+    assert.ok(
+      (await c.attachments.readText(doc)).truncated,
+      "the fixture has to be longer than one read, or it proves nothing",
+    );
+
+    const runner = runnerFor({
+      ...c,
+      adapter: fakeAdapter([citing(c.freshStore(), doc.id, doc.contentHash, buried)]),
+    });
+
+    const outcome = await runner.send(c.freshStore(), c.conversationId, "read my notes", [doc.id]);
+    assert.equal(outcome.status, "completed");
   });
 
   it("refuses a quotation the document does not contain", async () => {

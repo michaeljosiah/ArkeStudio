@@ -279,6 +279,37 @@ describe("the served surface", () => {
     h.index?.close();
   });
 
+  /**
+   * World evidence needs an observedVersion and a contentHash, and checkReceiptIds needs a
+   * check_... id. None of the three is part of the entity, so serialising only the result asked
+   * the model to cite values it had never been shown — and an invented one fails verification and
+   * takes the whole turn with it. The receipt always held them; now they travel back beside it.
+   */
+  it("hands the model the citation metadata its evidence has to carry", async () => {
+    const { h, server } = await serve(true);
+    const token = h.mint().token;
+    const res = await rpc(server.leasedUrl(token)!, "tools/call", {
+      name: "get_sheet",
+      arguments: { id: "maren-kest" },
+    });
+    const content = (res.body as { result: { content: Array<{ text: string }> } }).result.content;
+
+    const entity = JSON.parse(content[0]!.text) as { id: string };
+    assert.equal(entity.id, "maren-kest", "the result stays first and unchanged");
+
+    const cite = JSON.parse(content[1]!.text) as {
+      checkReceiptId: string;
+      citable: Array<{ ref: unknown; observedVersion: number; contentHash: string }>;
+    };
+    assert.match(cite.checkReceiptId, /^check_/, "so checkReceiptIds can name a real receipt");
+    assert.equal(cite.citable.length, 1);
+    assert.match(cite.citable[0]!.contentHash, /^sha256:/);
+    assert.equal(typeof cite.citable[0]!.observedVersion, "number");
+
+    await server.stop();
+    h.index?.close();
+  });
+
   it("rejects a malformed lease path instead of quietly serving the ambient world", async () => {
     const { h, server } = await serve(true);
     const res = await rpc(`${server.url()}/not-a-real-token`, "tools/list");
