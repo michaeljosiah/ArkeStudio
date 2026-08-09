@@ -1666,6 +1666,25 @@
         font-size: 12px;
       }
 
+      .superseded {
+        margin-top: 26px;
+        padding: 20px 24px;
+        border: 1px dashed var(--line-strong);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.5);
+      }
+
+      .superseded .eyebrow {
+        color: var(--teal);
+      }
+
+      .superseded p {
+        margin: 8px 0 0;
+        max-width: 760px;
+        font-size: 14px;
+        color: var(--ink-soft);
+      }
+
       .callout {
         display: grid;
         grid-template-columns: 0.35fr 1fr;
@@ -1952,7 +1971,7 @@
         <a href="#graph">Graph</a>
         <a href="#architecture">Architecture</a>
       </nav>
-      <div class="topmeta">feature brief / production story workspace / rev 3 / 2026-08-07</div>
+      <div class="topmeta">feature brief / production story workspace / rev 4 / 2026-08-09</div>
     </header>
 
     <main class="shell">
@@ -2356,70 +2375,14 @@
           </p>
         </div>
 
-        <div class="visual">
-          <div class="visual__bar">
-            <i class="dot"></i><i class="dot"></i><i class="dot"></i
-            ><span>Concept screen - final SpecOne product frame still requires design approval</span>
-          </div>
-          <div class="create-screen">
-            <div class="create-screen__art">
-              <img
-                src="../../design-system/assets/banner-video.png"
-                alt="Storm-lit film production imagery"
-              />
-              <div class="create-screen__caption">
-                <h3>Video</h3>
-                <p>Boards and shots, generated with the same cast, Canon, and look the world already owns.</p>
-              </div>
-            </div>
-            <div class="create-form">
-              <div class="eyebrow">New production / step 2 of 2</div>
-              <h3>What kind of video?</h3>
-              <p>
-                Profiles set useful defaults. The values below are proposed product decisions, not current
-                persisted fields.
-              </p>
-              <div class="choice-grid">
-                <div class="choice"><b>Short film</b><span>One linear work, scenes into a cut.</span></div>
-                <div class="choice">
-                  <b>Music video</b><span>Music-led timing, visual motifs, performance.</span>
-                </div>
-                <div class="choice active">
-                  <b>Micro-drama series</b
-                  ><span>Creates the Series foundation and a Season 1 Video production together.</span>
-                </div>
-              </div>
-              <div class="field">
-                <div class="field-label" id="title-label">Series title</div>
-                <div class="input" role="textbox" aria-labelledby="title-label">Wrong Era</div>
-              </div>
-              <div class="field">
-                <div class="field-label" id="idea-label">Tell Arke the idea as you would tell a friend</div>
-                <div class="textarea" role="textbox" aria-labelledby="idea-label">
-                  A time traveller keeps getting sent to the wrong era because her new dispatcher cheated
-                  through academy. Seven short episodes. Every mistake should force her deeper into the place
-                  she was told not to touch.
-                </div>
-              </div>
-              <div class="profile-row">
-                <span class="chip active">9:16 vertical</span>
-                <span class="chip active">7 episodes</span>
-                <span class="chip active">45-75s each</span>
-                <span class="chip active">hook in 3s</span>
-                <span class="chip active">cliffhanger required</span>
-              </div>
-              <div class="defaults">
-                <div class="default"><b>Recurring cast</b><span>small / reusable</span></div>
-                <div class="default"><b>Locations</b><span>reuse before expand</span></div>
-                <div class="default"><b>Export</b><span>shorts + tiktok</span></div>
-                <div class="default"><b>Story view</b><span>episode board first</span></div>
-              </div>
-              <div class="screen-note">
-                <span class="btn">Create Series + Season 1</span
-                ><small>Opens Season 1 Day One. Nothing generates yet.</small>
-              </div>
-            </div>
-          </div>
+        <div class="superseded">
+          <span class="eyebrow">Superseded &middot; now drawn in the design master</span>
+          <p>
+            The concept screen that stood here has been replaced by turn <b>47</b>, which draws
+            the create dialog and its profile step in the application&#8217;s own tokens and records the numbers it binds. A sketch in this
+            document&#8217;s visual language argued the shape; the turn decides it, and two drawings of one screen
+            is how a design drifts. See <code>design-system/Arke Studio.dc.html</code><a href="#t47"></a>.
+          </p>
         </div>
       </section>
 
@@ -2436,70 +2399,14 @@
           </p>
         </div>
 
-        <div class="visual">
-          <div class="visual__bar">
-            <i class="dot"></i><i class="dot"></i><i class="dot"></i
-            ><span>Concept screen built from prototype 33a Day One</span>
-          </div>
-          <div class="dayone">
-            <aside class="rail">
-              <div class="rail__title"><b>Wrong Era</b><span>video / micro-drama / day one</span></div>
-              <nav>
-                <div class="active">Dashboard</div>
-                <div>Story <span style="margin-left: auto">-</span></div>
-                <div>Scenes <span style="margin-left: auto">0</span></div>
-                <div>Generate <span style="margin-left: auto">0</span></div>
-                <div>Cut <span style="margin-left: auto">0:00</span></div>
-                <div>Audio <span style="margin-left: auto">0</span></div>
-                <div>Exports <span style="margin-left: auto">0</span></div>
-              </nav>
-            </aside>
-            <div class="dayone__main">
-              <div class="eyebrow">Wrong Era / Season 1 / the first creative decision</div>
-              <h3>Day one. The world walked in with you.</h3>
-              <p>
-                Nothing has been generated. The world is already here, and the micro-drama profile knows what
-                a useful first conversation looks like.
-              </p>
-              <div class="cta-row">
-                <span class="btn">Shape Season 1</span><span class="btn secondary">Draft episode one</span>
-              </div>
-              <div class="inherit-card">
-                <div>
-                  <div class="eyebrow">Arrives with the world</div>
-                  <div class="faces" style="margin-top: 12px">
-                    <img src="../../design-system/assets/char-maren.png" alt="Character reference" />
-                    <img src="../../design-system/assets/char-odile.png" alt="Character reference" />
-                    <img src="../../design-system/assets/char-sereth.png" alt="Character reference" />
-                    <img src="../../design-system/assets/char-bray.png" alt="Character reference" />
-                  </div>
-                </div>
-                <div class="inherit-card__facts">
-                  <span class="chip">41 Canon entries</span><span class="chip">4 locations</span
-                  ><span class="chip">Tone / dry bureaucratic sci-fi</span
-                  ><span class="chip">Art direction v3</span>
-                </div>
-              </div>
-              <div class="seed-grid">
-                <article class="seed">
-                  <span class="eyebrow">Proposed profile prompt</span
-                  ><b>What is the fastest possible hook?</b>
-                  <p>A new micro-drama profile could add this production-scoped starting prompt.</p>
-                </article>
-                <article class="seed">
-                  <span class="eyebrow">World thread</span><b>Who governs temporal mistakes?</b>
-                  <p>A world fact if accepted; a production question until then.</p>
-                </article>
-                <article class="seed">
-                  <span class="eyebrow">From another production</span><b>The failed jump nobody followed</b>
-                  <p>
-                    SPEC-012 R-3 requires this seed source. Only the canon-thread half ships today, so this
-                    card is proposed work, not inherited work.
-                  </p>
-                </article>
-              </div>
-            </div>
-          </div>
+        <div class="superseded">
+          <span class="eyebrow">Superseded &middot; now drawn in the design master</span>
+          <p>
+            The concept screen that stood here has been replaced by turn <b>43</b>, which draws
+            day one and its two seed sources in the application&#8217;s own tokens and records the numbers it binds. A sketch in this
+            document&#8217;s visual language argued the shape; the turn decides it, and two drawings of one screen
+            is how a design drifts. See <code>design-system/Arke Studio.dc.html</code><a href="#t43"></a>.
+          </p>
         </div>
       </section>
 
@@ -2580,63 +2487,14 @@
           </p>
         </div>
 
-        <div class="arc-grid" aria-label="Season arc grid across episodes">
-          <table>
-            <thead>
-              <tr>
-                <th>Season lane</th>
-                <th>Episode 1</th>
-                <th>Episode 2</th>
-                <th>Episode 3</th>
-                <th>Episode 4</th>
-                <th>Episode 5</th>
-                <th>Episode 6</th>
-                <th>Episode 7 / Finale</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Lola gets home</td>
-                <td class="setup">first wrong jump</td>
-                <td>trapped in history</td>
-                <td>wrong retrieval</td>
-                <td class="turn">chooses to intervene</td>
-                <td>arena setback</td>
-                <td>route home opens</td>
-                <td class="payoff">returns changed</td>
-              </tr>
-              <tr>
-                <td>Eddie becomes capable</td>
-                <td class="setup">failure</td>
-                <td>spots a pattern</td>
-                <td>one small win</td>
-                <td class="turn">discovers sabotage</td>
-                <td>risk becomes personal</td>
-                <td>acts without the manual</td>
-                <td class="payoff">acts deliberately</td>
-              </tr>
-              <tr>
-                <td>The system is manipulated</td>
-                <td class="setup">odd console trace</td>
-                <td>second anomaly</td>
-                <td>signal splits</td>
-                <td class="turn">operator revealed</td>
-                <td>sabotage escalates</td>
-                <td>false resolution</td>
-                <td class="payoff">ending twist earned</td>
-              </tr>
-              <tr>
-                <td>Production pressure</td>
-                <td>launch bay</td>
-                <td>London street</td>
-                <td>launch bay reuse</td>
-                <td>one new era</td>
-                <td>arena + tiger</td>
-                <td>launch bay + inserts</td>
-                <td>shared sets + finale</td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="superseded">
+          <span class="eyebrow">Superseded &middot; now drawn in the design master</span>
+          <p>
+            The concept screen that stood here has been replaced by turn <b>48b</b>, which draws
+            the arc grid in the application&#8217;s own tokens and records the numbers it binds. A sketch in this
+            document&#8217;s visual language argued the shape; the turn decides it, and two drawings of one screen
+            is how a design drifts. See <code>design-system/Arke Studio.dc.html</code><a href="#t48"></a>.
+          </p>
         </div>
 
         <div class="thesis">
@@ -2688,131 +2546,14 @@
           </p>
         </div>
 
-        <div class="visual">
-          <div class="visual__bar">
-            <i class="dot"></i><i class="dot"></i><i class="dot"></i
-            ><span>Concept screen built from prototype 10b Story overview</span>
-          </div>
-          <div class="workspace">
-            <div class="chat">
-              <div class="chat__head">
-                <div class="eyebrow">Story / Season 1 / micro-drama</div>
-                <h3>Find the season engine together.</h3>
-              </div>
-              <div class="chatlog">
-                <div class="bubble user">
-                  Seven episodes. Lola should land in a different era every time, but each mistake must make
-                  the next one worse. At the end Eddie learns the failures were deliberate.
-                </div>
-                <div class="bubble studio">
-                  That gives the series a clean repeatable engine and Season 1 a distinct arc. The ending
-                  twist needs earlier traces so it feels earned. I have drafted seven episode cards and three
-                  season lanes, but episode one needs context before London can work as episode two.
-                  <div class="receipt">
-                    checked: Series foundation / Lola + Eddie sheets / Season 1 ending / no world facts
-                    changed
-                  </div>
-                </div>
-                <div class="bubble user">
-                  Make episode one the dispatcher mistake. Push London to episode two. Keep the launch bay
-                  boring, like a parking garage, not glossy sci-fi.
-                </div>
-                <div class="bubble studio">
-                  I have updated the draft, not the live production: utilitarian, fluorescent, municipal.
-                  Episode one ends when the console flashes 1888. London is proposed as episode two; no scene
-                  file was overwritten.
-                  <div class="receipt">
-                    draft only: overview candidate / direction candidate / episode-order candidate / 2 scene
-                    placeholders
-                  </div>
-                </div>
-              </div>
-              <div class="composer">
-                Keep shaping Season 1... &nbsp; / &nbsp; scope: Series foundation + Season 1 + 7 episode cards
-              </div>
-            </div>
-            <aside class="storyrail">
-              <div class="railhead">
-                <div class="eyebrow">Structured season draft</div>
-                <h3>Wrong Era / Season 1</h3>
-                <div class="rail-tabs">
-                  <span>Season</span><span class="active">Episodes</span><span>Arcs</span
-                  ><span>Direction</span><span>Graph</span>
-                </div>
-              </div>
-              <div class="episode-board">
-                <article class="episode active">
-                  <div class="episode__top"><span>EP 01</span><span>58s / proposed</span></div>
-                  <h4>The manual</h4>
-                  <p>Eddie's first shift. Lola asks for two years. He enters two centuries.</p>
-                  <div class="beat">HOOK / "Wait, why are you here?"</div>
-                  <div class="beat cliff">CLIFF / 1888 flashes on the console</div>
-                </article>
-                <article class="episode">
-                  <div class="episode__top"><span>EP 02</span><span>64s / proposed</span></div>
-                  <h4>The peculiar jacket</h4>
-                  <p>Victorian London. H. G. Wells notices what no one else can explain.</p>
-                  <div class="beat">HOOK / wrong century, no communicator</div>
-                  <div class="beat cliff">CLIFF / the pickpocket steals it</div>
-                </article>
-                <article class="episode">
-                  <div class="episode__top"><span>EP 03</span><span>61s / needs payoff</span></div>
-                  <h4>The wrong return</h4>
-                  <p>Eddie finally locks a signal and brings back the pickpocket instead.</p>
-                  <div class="beat">HOOK / someone arrives in the bay</div>
-                  <div class="beat cliff">CLIFF / it is not Lola</div>
-                </article>
-                <article class="episode">
-                  <div class="episode__top"><span>EP 04</span><span>placeholder</span></div>
-                  <h4>The plague road</h4>
-                  <p>A route exists; scene intent is not yet accepted.</p>
-                </article>
-                <article class="episode">
-                  <div class="episode__top"><span>EP 05</span><span>placeholder</span></div>
-                  <h4>The arena</h4>
-                  <p>A gladiator seems impossible. Lola must engage rather than hide.</p>
-                </article>
-                <article class="episode">
-                  <div class="episode__top"><span>EP 06</span><span>placeholder</span></div>
-                  <h4>The route home</h4>
-                  <p>Eddie appears to solve the pattern, but the clean route is a trap.</p>
-                </article>
-                <article class="episode">
-                  <div class="episode__top"><span>EP 07</span><span>finale placeholder</span></div>
-                  <h4>The deliberate mistake</h4>
-                  <p>Lola returns changed; Eddie proves the failures were designed. Season 2 opens.</p>
-                  <div class="beat cliff">FINAL TURN / the real operator is still connected</div>
-                </article>
-              </div>
-              <div class="episode-health">
-                <div class="metric"><b>7</b><span>episodes</span></div>
-                <div class="metric"><b>5</b><span>hooks placed</span></div>
-                <div class="metric"><b>4</b><span>cliffhangers</span></div>
-                <div class="metric"><b>2</b><span>payoffs missing</span></div>
-              </div>
-              <div class="proposal-strip" aria-label="Detected production changes awaiting review">
-                <div class="proposal-strip__head">
-                  Detected season changes
-                  <span>profile settings accepted at creation; story changes are draft</span>
-                </div>
-                <ul>
-                  <li>Series foundation: preserve the repeatable wrong-era engine</li>
-                  <li>Season architecture: sabotage reveal, arc lanes, ending state</li>
-                  <li>Accepted profile context: vertical, 45-75 seconds, hook and cliffhanger checks</li>
-                  <li>Episode order: insert dispatcher mistake before London</li>
-                  <li>Direction: utilitarian municipal sci-fi, avoid glossy surfaces</li>
-                </ul>
-                <div class="proposal-strip__actions">
-                  <span class="mini-btn">Review fields</span><span class="mini-btn">Keep exploring</span
-                  ><span class="mini-btn primary">Stage season proposal</span>
-                </div>
-                <div class="receipt">
-                  next: review proposal diff and ripples, then Accept - staging alone changes no accepted
-                  story file
-                </div>
-              </div>
-            </aside>
-          </div>
+        <div class="superseded">
+          <span class="eyebrow">Superseded &middot; now drawn in the design master</span>
+          <p>
+            The concept screen that stood here has been replaced by turn <b>44 and 45</b>, which draws
+            the Story workspace and the season board in the application&#8217;s own tokens and records the numbers it binds. A sketch in this
+            document&#8217;s visual language argued the shape; the turn decides it, and two drawings of one screen
+            is how a design drifts. See <code>design-system/Arke Studio.dc.html</code><a href="#t44"></a>.
+          </p>
         </div>
 
         <div class="callout">
@@ -3341,6 +3082,13 @@
               a blocking unknown in the last revision and is now a bounded extension: the conversation layer
               landed, world-scoped.
             </p>
+            <p style="margin: -6px 0 16px; color: var(--ink-soft); font-size: 12px">
+              <b>Designed</b> is a third state, and the ledger above does not show it &#8212; it records only
+              what the code does. Items <b>1, 2, 3, 6 and 7</b> are drawn in the design master as turns
+              43&ndash;48 and clickable in the Prototype. They are unbuilt, but nobody has to invent them:
+              the frames, the numbers and the reasoning already exist. Read <code>not built</code> in the
+              ledger as <em>not built yet</em>, not as <em>not decided</em>.
+            </p>
             <ol>
               <li>
                 <b>Ship the creation handoff.</b
@@ -3521,7 +3269,7 @@
     </main>
 
     <footer class="footer shell">
-      Arke Studio feature brief, revision 3. Grounded in the current production routes, SPEC-012, issue #70's
+      Arke Studio feature brief, revision 4. Grounded in the current production routes, SPEC-012, issue #70's
       shipped conversation architecture, prototype frames 6a / 33a / 10b / 9a / 34e / 35c, and the
       micro-drama research transcript. This document proposes the connective experience; it does not claim
       the Series, Season, Episode, Scene script, profile, graph, or generation-storyboard models are
@@ -3530,6 +3278,10 @@
       records two rows that flipped, one issue that took up a finding, and one claim of its own — that
       vertical export was missing — that was simply wrong. Corrections are made in the text rather than
       appended as notes, because a brief that keeps its errors at the end stops being read from the front.
+      Revision 4 removes four concept screens that turns 43&ndash;48 have since drawn properly: a sketch and a
+      frame competing to specify one screen is how a design drifts, and the frame wins. This document argues
+      and audits; <code>story-workspace.html</code> is the companion that explains how the feature works, what
+      it writes to disk, and what a morning of using it looks like.
     </footer>
   </body>
 </html>
