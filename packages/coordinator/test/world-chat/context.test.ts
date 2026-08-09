@@ -40,12 +40,16 @@ function message(role: "user" | "studio", text: string): WorldChatMessage {
   };
 }
 
+/** Stable across calls: two baseInput() contexts must digest identically. */
+const CURRENT_MESSAGE_ID = newId("msg") as MessageId;
+
 function baseInput() {
   return {
     candidates: [],
     messages: [] as WorldChatMessage[],
     tombstones: [] as CandidateTombstone[],
     currentUserMessage: "and the bells?",
+    currentUserMessageId: CURRENT_MESSAGE_ID,
   };
 }
 
@@ -140,6 +144,22 @@ describe("context assembly", () => {
       messages: [message("user", "the oldest thing said"), message("user", "the newest thing said")],
     });
     assert.match(context.recentTurns, /the newest thing said/);
+  });
+
+  /**
+   * Message evidence requires a messageId, and the model can only cite what it is shown. The
+   * first live turn failed on exactly this: the prompt rendered bare "User:" lines, so there was
+   * no valid id anywhere in the model's world, and every citation of the conversation was an
+   * invention the validator rejected.
+   */
+  it("renders every message with the id evidence has to cite", () => {
+    const said = message("user", "the tide answers the bells");
+    const context = assembleContext({ ...baseInput(), messages: [said] });
+    assert.ok(
+      context.recentTurns.includes(`User [${said.id}]: the tide answers the bells`),
+      "the id is beside the words, where a citation needs it",
+    );
+    assert.equal(context.currentUserMessageId, CURRENT_MESSAGE_ID);
   });
 
   it("carries retractions as keys, not as the text that was retracted", () => {

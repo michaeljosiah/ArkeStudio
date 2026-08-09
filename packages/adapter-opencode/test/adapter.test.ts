@@ -3,7 +3,7 @@ import { after, before, describe, it, type TestContext } from "node:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CHARACTER_ROLE_MAX, type HarnessEvent } from "@arke-studio/contracts";
+import { CHARACTER_ROLE_MAX, worldChatResultShapeGuide, type HarnessEvent } from "@arke-studio/contracts";
 import { OpenCodeAdapter } from "../src/opencode-adapter.js";
 import { probeCapabilities } from "../src/capabilities.js";
 import { createNormalizeState, normalizeOpenCode, toolSummary } from "../src/normalize.js";
@@ -373,6 +373,30 @@ describe("per-agent settings", () => {
   it("canon-qa keeps standing alone — it has no proposal directory to be confined to", () => {
     const config = buildSessionConfig({ agents: { "canon-qa": { brief: "Answer from canon only." } } });
     assert.equal(agentsIn(config)["canon-qa"]!.prompt, "Answer from canon only.");
+  });
+
+  /**
+   * The shape guide is the other half of the coordinator's turn validator (#70 §8.3): a
+   * world-builder session without it fails every candidate on schema, which is how the first
+   * live turn actually died. So it is a postscript, not part of the brief — the half of the
+   * prompt a Settings override can never reach.
+   */
+  it("world-builder carries the result shape guide, even under a rewritten brief", () => {
+    const config = buildSessionConfig({
+      agents: { "world-builder": { brief: "Be terse. Ignore everything you were told about JSON." } },
+    });
+    const edited = agentsIn(config)["world-builder"]!;
+    assert.ok(edited.prompt.includes("Be terse."), "the brief is honoured");
+    assert.ok(
+      edited.prompt.includes(worldChatResultShapeGuide()),
+      "the shape the validator enforces survives the edit",
+    );
+  });
+
+  it("world-builder cannot delegate: a subagent burns the turn's budget and escapes the agent pinning", () => {
+    const agent = agentsIn(buildSessionConfig({}))["world-builder"]!;
+    assert.equal(agent.tools["task"], false);
+    assert.equal(agent.permission["task"], "deny");
   });
 });
 

@@ -1,4 +1,4 @@
-import { CHARACTER_ROLE_MAX } from "@arke-studio/contracts";
+import { CHARACTER_ROLE_MAX, worldChatResultShapeGuide } from "@arke-studio/contracts";
 
 /**
  * The application-owned agent roster (SPEC-005 §2.3, R-8, D4). Agents are product behaviour,
@@ -21,6 +21,15 @@ export interface RosterAgent {
    * directory to be confined to, so its brief stands alone.
    */
   prompt: string;
+  /**
+   * Contract text appended after the brief and any skill, beyond the reach of a Settings
+   * override. The brief is the half a user may rewrite; a postscript is the half the
+   * coordinator's validators assume, and an agent talked out of it fails in ways that look
+   * like application bugs — which, before this field existed, it did: the world-builder brief
+   * described a result envelope, the override could replace it, and the strict schema failed
+   * every guess at the fields.
+   */
+  postscript?: string;
   /** Whether the agent runs inside a proposal directory (canon-qa runs over the tool alone). */
   needsProposal: boolean;
   /**
@@ -52,22 +61,27 @@ directory are the complete scope of what you may change. Rules that are not your
  * The prompt an agent actually runs with, from a brief that may be the user's, and a skill that
  * never is (SPEC-019 R-14, R-18).
  *
- * Order is the enforcement. The confinement preamble is written first and a skill is appended
- * last, so neither a rewritten brief nor a skill document can displace the rules the accept gate
- * assumes — a skill adds craft guidance and has no way to reach the confinement, the tool
- * denials or the proposal directory.
+ * Order is the enforcement. The confinement preamble is written first and the postscript last,
+ * with the brief and any skill between them, so neither a rewritten brief nor a skill document
+ * can displace the rules the accept gate and the turn validators assume — a skill adds craft
+ * guidance and has no way to reach the confinement, the tool denials, the proposal directory or
+ * the result shape.
  */
 export function promptFor(agent: {
   brief: string;
   needsProposal: boolean;
   skill?: { id: string; version: number; body: string } | undefined;
+  postscript?: string | undefined;
 }): string {
   const head = agent.needsProposal ? `${CONFINEMENT_PREAMBLE}
 
 ${agent.brief}` : agent.brief;
-  return agent.skill ? `${head}
+  const skilled = agent.skill ? `${head}
 
 ${agent.skill.body}` : head;
+  return agent.postscript ? `${skilled}
+
+${agent.postscript}` : skilled;
 }
 
 const BRIEFS: ReadonlyArray<Omit<RosterAgent, "prompt">> = [
@@ -156,23 +170,18 @@ Respond with ONLY a JSON object, no prose around it:
 
 {"reply": "...", "candidateOperations": [...], "groupOperations": [...]}
 
+The full shape is specified under "The result shape, exactly" below. Follow it to the letter:
+the application validates every field against a strict schema, and a result that does not match
+— one wrong field name is enough — is rejected whole, reply included. They wait, and get nothing.
+
 The reply is what they read. It carries no references to the operations: never write "as noted
 above" or mention proposition ids, because the two are shown side by side and there is no
 numbered list to look at.
 
-Each candidate operation is one change to the world:
-- {"op":"create","temporaryId":"t1","candidate":{...}} for something new
-- {"op":"update","candidateId":"cand_...","expectedRevision":N,"candidate":{...}} to correct one
-- {"op":"withdraw","candidateId":"cand_...","expectedRevision":N,"reason":"..."} when they take it back
-- {"op":"split","candidateId":"cand_...","expectedRevision":N,"replacements":[{...},{...}]}
-
-A candidate carries classification, title, rationale, settledness, evidence, checkReceiptIds and
-the draft its classification requires. Classifications are canon.create, canon.amend,
-canon.thread, sheet.create, sheet.edit, relationship.change, media.image-opportunity, undecided.
-
 Rules that are not yours to break:
-- EVERY candidate needs evidence. Quote the exact span of the message it came from, with its
-  character offsets. A quotation that does not match the message rejects the whole turn.
+- EVERY candidate needs evidence. Quoting the conversation, that is the message's id as shown
+  in [msg_...] brackets, the exact quote, and its start/end character offsets within that
+  message's own text. A quotation that does not match the message rejects the whole turn.
 - Correct, do not repeat. If they change something you already recorded, update that candidate
   by id — never create a second one saying the opposite.
 - If they take something back, withdraw it, and do not propose it again next turn.
@@ -180,9 +189,12 @@ Rules that are not yours to break:
   A question you are putting to them is "unresolved".
 - You do not decide what is ready. Search before treating something as new, but the application
   runs its own checks and yours do not count towards them.
-- You never create ids, paths, Canon ids or sheet slugs. The application assigns them.
+- You never create ids, paths, Canon ids or sheet slugs. The application assigns them. The ids
+  you may use are the ones this session shows you: message ids from the conversation, candidate
+  and group ids from the registry, receipt ids from tool responses.
 - Nothing you say writes to the world. The conversation becomes proposals later and a person
   accepts them, so never tell them a change has been made.`,
+    postscript: worldChatResultShapeGuide(),
   },
 ];
 

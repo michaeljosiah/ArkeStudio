@@ -187,6 +187,9 @@ export type WorldChatRun = z.infer<typeof WorldChatRunSchema>;
  * source before the turn is accepted, so a proposition can never cite something that was not
  * said or is no longer there.
  */
+const MessageEvidencePurposeSchema = z.enum(["intent", "settledness", "correction"]);
+const WorldEvidencePurposeSchema = z.enum(["supports", "amendment-target", "duplicate", "context"]);
+
 export const CandidateEvidenceSchema = z.discriminatedUnion("kind", [
   z
     .object({
@@ -195,7 +198,7 @@ export const CandidateEvidenceSchema = z.discriminatedUnion("kind", [
       quote: z.string().min(1).max(2000),
       start: z.number().int().min(0),
       end: z.number().int().min(0),
-      purpose: z.enum(["intent", "settledness", "correction"]),
+      purpose: MessageEvidencePurposeSchema,
     })
     .strict(),
   z
@@ -207,7 +210,7 @@ export const CandidateEvidenceSchema = z.discriminatedUnion("kind", [
       contentHash: Sha256Schema,
       field: z.string().max(120).optional(),
       quote: z.string().min(1).max(2000),
-      purpose: z.enum(["supports", "amendment-target", "duplicate", "context"]),
+      purpose: WorldEvidencePurposeSchema,
     })
     .strict(),
   z
@@ -961,11 +964,17 @@ export type ModelGroupOperation = z.infer<typeof ModelGroupOperationSchema>;
  * The bounds are hard. They are not a guess at what a model will do; they are what this app will
  * accept, so that one turn cannot become a wall of propositions nobody can review.
  */
+export const TURN_RESULT_BOUNDS = {
+  reply: 8_000,
+  candidateOperations: 12,
+  groupOperations: 6,
+} as const;
+
 export const WorldChatTurnResultSchema = z
   .object({
-    reply: z.string().max(8000),
-    candidateOperations: z.array(ModelCandidateOperationSchema).max(12),
-    groupOperations: z.array(ModelGroupOperationSchema).max(6),
+    reply: z.string().max(TURN_RESULT_BOUNDS.reply),
+    candidateOperations: z.array(ModelCandidateOperationSchema).max(TURN_RESULT_BOUNDS.candidateOperations),
+    groupOperations: z.array(ModelGroupOperationSchema).max(TURN_RESULT_BOUNDS.groupOperations),
   })
   .strict();
 export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
@@ -1083,3 +1092,314 @@ export const WorldChatWorkspaceSchema = z
   })
   .strict();
 export type WorldChatWorkspace = z.infer<typeof WorldChatWorkspaceSchema>;
+
+// ---------------------------------------------------------------------------
+// The result shape, as the model is told it (#70 §8.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Worked examples of everything a turn result may contain, beside the schemas they must satisfy.
+ *
+ * These exist because the first live turn of World Chat failed, twice, deterministically: the
+ * brief described the envelope and left the model to guess field names, and the strict schemas
+ * reject a guess. The examples are the other half of the contract — the brief renders them into
+ * the prompt via `worldChatResultShapeGuide`, and `satisfies` plus the drift tests hold them to
+ * the schemas, so the shape the model is shown cannot quietly stop being the shape we accept.
+ *
+ * The ids are real-shaped and deliberately memorable-nonsense: a model that copies one verbatim
+ * instead of using an id from its context produces evidence that fails verification, which is
+ * the failure we can diagnose, rather than a schema failure, which stalled the whole feature.
+ */
+const EXAMPLE_ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+
+const exampleMessageEvidence = {
+  kind: "message",
+  messageId: `msg_${EXAMPLE_ULID}`,
+  quote: "Her aunt raised her, not her mother.",
+  start: 0,
+  end: 36,
+  purpose: "intent",
+} satisfies CandidateEvidence;
+
+const exampleWorldEvidence = {
+  kind: "world",
+  ref: { kind: "sheet", sheetKind: "character", sheetId: "maren-kest" },
+  observedVersion: 4,
+  contentHash: "sha256:3b7daae90a80",
+  field: "Essence",
+  quote: "keeper of the drowned verse",
+  purpose: "supports",
+} satisfies CandidateEvidence;
+
+const exampleAttachmentEvidence = {
+  kind: "attachment",
+  attachmentId: `wca_${EXAMPLE_ULID}`,
+  contentHash: "sha256:2d76945ae1c8",
+  quote: "the bells only ring at slack water",
+  line: 12,
+  purpose: "supports",
+} satisfies CandidateEvidence;
+
+const exampleCanonCreateDraft = {
+  classification: "canon.create",
+  title: "Maren was raised by her aunt",
+  rationale: "Stated directly, as settled fact.",
+  settledness: "settled",
+  evidence: [exampleMessageEvidence],
+  checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  draft: {
+    type: "lore",
+    title: "Maren's upbringing",
+    statement: "Maren Kest was raised by her aunt, not her mother.",
+    links: [],
+  },
+} satisfies ModelCandidateDraft;
+
+const exampleDrafts = {
+  "canon.create": exampleCanonCreateDraft,
+  "canon.amend": {
+    classification: "canon.amend",
+    target: { kind: "canon", entryId: "CANON-012" },
+    title: "The bells ring at slack water, not at dusk",
+    rationale: "They corrected the earlier timing.",
+    settledness: "settled",
+    evidence: [exampleMessageEvidence],
+    checkReceiptIds: [],
+    draft: { statement: "The harbour bells ring only at slack water." },
+  },
+  "canon.thread": {
+    classification: "canon.thread",
+    title: "Who tends the bells?",
+    rationale: "Raised but not decided.",
+    settledness: "unresolved",
+    evidence: [exampleMessageEvidence],
+    checkReceiptIds: [],
+    draft: {
+      title: "Bell-tending",
+      question: "Who tends the harbour bells, and what does it cost them?",
+      consideredEntryIds: ["CANON-012"],
+    },
+  },
+  "sheet.create": {
+    classification: "sheet.create",
+    title: "Maren's aunt becomes a character",
+    rationale: "Named as the person who raised her.",
+    settledness: "tentative",
+    evidence: [exampleMessageEvidence],
+    checkReceiptIds: [],
+    draft: {
+      type: "character",
+      name: "Sera Kest",
+      role: "Tide-caller",
+      canonRules: [],
+      links: [],
+      sections: [{ heading: "Essence", body: "The aunt who raised Maren after the drowning year." }],
+    },
+  },
+  "sheet.edit": {
+    classification: "sheet.edit",
+    target: { kind: "sheet", sheetKind: "character", sheetId: "maren-kest" },
+    title: "Maren's upbringing moves into her sheet",
+    rationale: "Her history section should carry it.",
+    settledness: "settled",
+    evidence: [exampleMessageEvidence],
+    checkReceiptIds: [],
+    draft: {
+      sections: [{ heading: "History", body: "Raised by her aunt Sera after the drowning year." }],
+    },
+  },
+  "relationship.change": {
+    classification: "relationship.change",
+    title: "Maren and Sera are family",
+    rationale: "The upbringing implies the tie.",
+    settledness: "settled",
+    evidence: [exampleMessageEvidence],
+    checkReceiptIds: [],
+    draft: {
+      from: { kind: "sheet", sheetId: "maren-kest" },
+      to: { kind: "sheet", sheetId: "sera-kest" },
+      linkAction: "add",
+      proseEdits: [
+        {
+          sheet: { kind: "sheet", sheetId: "maren-kest" },
+          sectionHeading: "Ties",
+          body: "Sera Kest, the aunt who raised her.",
+          reason: "The new tie needs a line in her sheet.",
+        },
+      ],
+    },
+  },
+  "media.image-opportunity": {
+    classification: "media.image-opportunity",
+    title: "Maren at the slack-water bells",
+    rationale: "The scene they described wants an image.",
+    settledness: "tentative",
+    evidence: [exampleMessageEvidence],
+    checkReceiptIds: [],
+    draft: {
+      target: { kind: "sheet", sheetKind: "character", sheetId: "maren-kest" },
+      purpose: "character-look",
+      brief: "Maren at the harbour rail at slack water, bells above her, late light.",
+      reason: "The conversation settled her look; an image would hold it.",
+      dependencies: [],
+    },
+  },
+  undecided: {
+    classification: "undecided",
+    title: "The drowning year needs a home",
+    rationale: "Mentioned twice, never placed.",
+    settledness: "unresolved",
+    evidence: [exampleMessageEvidence],
+    checkReceiptIds: [],
+    draft: {
+      question: "Is the drowning year a canon event, or one character's history?",
+      plausibleActions: ["canon.create", "sheet.edit"],
+      possibleTargets: [{ kind: "sheet", sheetKind: "character", sheetId: "maren-kest" }],
+    },
+  },
+} satisfies Record<WorldChangeClassification, ModelCandidateDraft>;
+
+const exampleOperations = {
+  create: { op: "create", temporaryId: "t1", candidate: exampleCanonCreateDraft },
+  update: {
+    op: "update",
+    candidateId: `cand_${EXAMPLE_ULID}`,
+    expectedRevision: 2,
+    candidate: exampleDrafts["canon.amend"],
+  },
+  withdraw: {
+    op: "withdraw",
+    candidateId: `cand_${EXAMPLE_ULID}`,
+    expectedRevision: 2,
+    reason: "They took it back.",
+  },
+  split: {
+    op: "split",
+    candidateId: `cand_${EXAMPLE_ULID}`,
+    expectedRevision: 2,
+    replacements: [exampleDrafts["canon.create"], exampleDrafts["canon.thread"]],
+  },
+} satisfies Record<string, ModelCandidateOperation>;
+
+const exampleTurnResult = {
+  reply:
+    "Noted — her aunt raised her, and I've kept the question of who tends the bells open until you decide.",
+  candidateOperations: [
+    { op: "create", temporaryId: "t1", candidate: exampleDrafts["canon.create"] },
+    { op: "create", temporaryId: "t2", candidate: exampleDrafts["canon.thread"] },
+  ],
+  groupOperations: [],
+} satisfies WorldChatTurnResult;
+
+const exampleGroupOperation = {
+  op: "create",
+  temporaryId: "g1",
+  title: "Maren's upbringing lands together",
+  rationale: "The fact and the sheet edit describe one change.",
+  members: [{ temporaryId: "t1" }, { temporaryId: "t2" }],
+} satisfies ModelGroupOperation;
+
+/** Exported for the drift tests, which hold every example to the schema it claims to satisfy. */
+export const WORLD_CHAT_SHAPE_EXAMPLES = {
+  evidence: {
+    message: exampleMessageEvidence,
+    world: exampleWorldEvidence,
+    attachment: exampleAttachmentEvidence,
+  },
+  drafts: exampleDrafts,
+  operations: exampleOperations,
+  groupOperation: exampleGroupOperation,
+  turnResult: exampleTurnResult,
+} as const;
+
+/** One classification's payload line: what sits beside the common fields, shown as real JSON. */
+function draftPayloadLine(classification: WorldChangeClassification): string {
+  const example = exampleDrafts[classification] as ModelCandidateDraft & { target?: unknown };
+  const payload = {
+    classification,
+    ...(example.target !== undefined ? { target: example.target } : {}),
+    draft: example.draft,
+  };
+  return JSON.stringify(payload);
+}
+
+/**
+ * The result shape as the model is told it, rendered from the same objects the tests validate.
+ *
+ * Written into the world-builder prompt by the adapter, after the brief and beyond the reach of
+ * any Settings override — the shape is what the coordinator accepts, not a preference. Every JSON
+ * line in here is an example object from above, so a schema change that invalidates one fails
+ * compilation and the drift tests before it can reach a prompt.
+ */
+export function worldChatResultShapeGuide(): string {
+  return `## The result shape, exactly
+
+Return one JSON object and nothing else — no prose around it, no markdown fences:
+
+{"reply": "...", "candidateOperations": [...], "groupOperations": [...]}
+
+reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}; both are [] when there is nothing to record.
+
+A complete result:
+${JSON.stringify(exampleTurnResult, null, 1)}
+
+### Candidate operations
+
+op is one of create | update | withdraw | split.
+
+- update: ${JSON.stringify(exampleOperations.update)}
+- withdraw: ${JSON.stringify(exampleOperations.withdraw)}
+- split carries "replacements": an array of at least two complete candidates, shaped exactly like create's.
+
+candidateId and expectedRevision come from "What you have already understood" — the registry lists each as [cand_... rN]. temporaryId is yours to invent ("t1", "t2", ...) and only means anything inside this one result.
+
+### Every candidate
+
+{"classification": ..., "title": ..., "rationale": ..., "settledness": ..., "evidence": [...], "checkReceiptIds": [...], ...}
+
+- classification: one of ${WorldChangeClassificationSchema.options.join(" | ")}
+- title: one plain sentence in the user's register. rationale: one or two more if needed.
+- settledness: one of ${SettlednessSchema.options.join(" | ")}
+- checkReceiptIds: ids (check_...) returned by arke-world tool calls you made this turn; [] when you made none. Never carry one over from an earlier turn.
+
+### The payload each classification requires
+
+- ${draftPayloadLine("canon.create")}
+  (type is one of ${CanonEntryTypeSchema.options.join(" | ")})
+- ${draftPayloadLine("canon.amend")}
+  (target names the entry; the draft carries only the fields that change)
+- ${draftPayloadLine("canon.thread")}
+- ${draftPayloadLine("sheet.create")}
+  (type is one of ${SheetKindSchema.options.join(" | ")})
+- ${draftPayloadLine("sheet.edit")}
+  (target names the sheet; the draft carries only the fields that change)
+- ${draftPayloadLine("relationship.change")}
+- ${draftPayloadLine("media.image-opportunity")}
+- ${draftPayloadLine("undecided")}
+
+### Evidence
+
+Every candidate cites at least one piece of evidence, and every piece is verified before the turn lands.
+
+Quoting the conversation:
+${JSON.stringify(exampleMessageEvidence)}
+- messageId is the id shown in brackets in the conversation — [msg_...]. Never invent one.
+- start and end are 0-based character offsets into that message's text alone (never into this prompt), end exclusive. The quote must equal exactly the text between them.
+- purpose is one of ${MessageEvidencePurposeSchema.options.join(" | ")}
+
+Quoting the world (only something you read through the arke-world tools this turn):
+${JSON.stringify(exampleWorldEvidence)}
+- Copy observedVersion and contentHash exactly from the tool's response.
+- purpose is one of ${WorldEvidencePurposeSchema.options.join(" | ")}
+
+Quoting an attachment you were handed:
+${JSON.stringify(exampleAttachmentEvidence)}
+
+### Group operations
+
+A group says "these land together or not at all". members has at least two entries, each {"temporaryId": "..."} or {"candidateId": "cand_...", "revision": N}.
+
+${JSON.stringify(exampleGroupOperation)}
+
+update and withdraw name the group instead: {"op": "update", "groupId": "grp_...", "expectedRevision": N, ...} with the same title, rationale and members; {"op": "withdraw", "groupId": "grp_...", "expectedRevision": N, "reason": "..."}.`;
+}

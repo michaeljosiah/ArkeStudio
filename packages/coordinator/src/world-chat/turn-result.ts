@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   newId,
   WorldChatTurnResultSchema,
@@ -72,6 +73,56 @@ function problem(code: string, safeMessage: string): TurnProblem {
 }
 
 /**
+ * One schema issue as a line the model can act on.
+ *
+ * The rule this follows: expected values are the schema's own and safe to state; received values
+ * are the model's and are not, because what it sent may carry world content. So a wrong field is
+ * named by its path and what belongs there — never by echoing what arrived. The exceptions are
+ * type names ("string", "undefined"), which describe shape rather than content, and messages
+ * zod carries for `invalid_string` and `custom` issues, which are authored in the schema itself.
+ *
+ * This replaced a bare list of failing paths, which was watched failing live: told to "check
+ * candidateOperations.0.candidate.draft.type", the model guessed a value, and the guess was
+ * wrong too. A path without what belongs at it spends the one corrective turn on a coin toss.
+ */
+function schemaIssueLine(issue: z.ZodIssue): string {
+  const path = issue.path.join(".") || "(root)";
+  switch (issue.code) {
+    case z.ZodIssueCode.invalid_type:
+      // For an enum field zod's `expected` is the joined options, so a missing `type` reads
+      // "required: expected 'rule' | 'lore' | …" — the answer travels with the complaint.
+      return issue.received === "undefined"
+        ? `${path} is required: expected ${issue.expected}`
+        : `${path} must be ${issue.expected}, not ${issue.received}`;
+    case z.ZodIssueCode.invalid_literal:
+      return `${path} must be exactly ${JSON.stringify(issue.expected)}`;
+    case z.ZodIssueCode.unrecognized_keys:
+      return `${path} has unknown field${issue.keys.length === 1 ? "" : "s"}: ${issue.keys
+        .map((k) => k.slice(0, 60))
+        .join(", ")}`;
+    case z.ZodIssueCode.invalid_union_discriminator:
+    case z.ZodIssueCode.invalid_enum_value:
+      return `${path} must be one of ${issue.options.map((o) => JSON.stringify(o)).join(" | ")}`;
+    case z.ZodIssueCode.invalid_union:
+      return `${path} matches none of the allowed shapes for that field`;
+    case z.ZodIssueCode.too_small: {
+      const unit = issue.type === "string" ? " characters" : issue.type === "array" ? " items" : "";
+      if (unit && (issue.minimum === 1 || issue.minimum === 1n)) return `${path} must not be empty`;
+      return `${path} needs at least ${issue.minimum}${unit}`;
+    }
+    case z.ZodIssueCode.too_big: {
+      const unit = issue.type === "string" ? " characters" : issue.type === "array" ? " items" : "";
+      return `${path} allows at most ${issue.maximum}${unit}`;
+    }
+    case z.ZodIssueCode.invalid_string:
+    case z.ZodIssueCode.custom:
+      return `${path}: ${issue.message}`;
+    default:
+      return `${path} does not match the required shape`;
+  }
+}
+
+/**
  * Parse the model's message as the strict turn-result schema.
  *
  * Separate from the rest so a malformed message fails before anything else is attempted — there
@@ -84,23 +135,18 @@ export function parseTurnResult(raw: string): { ok: true; value: WorldChatTurnRe
   } catch {
     return {
       ok: false,
-      problems: [problem("not-json", "The reply was not valid JSON. Return the complete result again as JSON.")],
+      problems: [
+        problem(
+          "not-json",
+          "The reply was not valid JSON. Return the complete result again as one JSON object — no prose around it, no markdown fences.",
+        ),
+      ],
     };
   }
   const parsed = WorldChatTurnResultSchema.safeParse(json);
   if (!parsed.success) {
-    // Issue paths are structural (field names and indexes), so they are safe to echo. Values
-    // are not included: a value that failed validation may be world content.
-    const paths = [...new Set(parsed.error.issues.map((i) => i.path.join(".") || "(root)"))].slice(0, 8);
-    return {
-      ok: false,
-      problems: [
-        problem(
-          "schema",
-          `The result did not match the required shape. Check these fields and return the complete result again: ${paths.join(", ")}.`,
-        ),
-      ],
-    };
+    const lines = [...new Set(parsed.error.issues.map(schemaIssueLine))];
+    return { ok: false, problems: lines.map((line) => problem("schema", line)) };
   }
   return { ok: true, value: parsed.data };
 }
@@ -402,5 +448,6 @@ export function correctiveMessage(problems: readonly TurnProblem[]): string {
     ...lines,
     "",
     "Return the complete result again, as a single JSON object matching the required shape.",
+    'The exact shape, with examples, is under "The result shape, exactly" in your instructions.',
   ].join("\n");
 }

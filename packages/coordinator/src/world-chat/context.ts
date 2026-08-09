@@ -62,6 +62,15 @@ export interface ContextInput {
   /** Linked to this turn. Empty for a turn that handed nothing over. */
   attachments?: readonly ContextAttachment[];
   currentUserMessage: string;
+  /**
+   * The durable id of the message being answered, shown to the model beside the text.
+   *
+   * Message evidence requires a messageId, and the model can only cite an id it has been shown —
+   * the first live turn of World Chat failed on exactly this: the schema demanded an id the
+   * prompt never rendered, so no answer could ever validate. On a retry this is the original
+   * message's id, because that is the record the evidence must verify against.
+   */
+  currentUserMessageId: string;
 }
 
 export interface AssembledContext {
@@ -76,6 +85,7 @@ export interface AssembledContext {
   /** Structural keys and digests only — enough to not re-propose, not enough to reconstruct. */
   tombstones: string;
   currentUserMessage: string;
+  currentUserMessageId: string;
   /** What identifies this exact context, recorded on the run (§5.3). */
   digest: string;
   /** Sections that had to be trimmed, so the trimming is never silent. */
@@ -102,8 +112,17 @@ function renderRegistry(candidates: readonly WorldChangeCandidate[]): string {
     .join("\n");
 }
 
+/**
+ * Each line opens with the message's durable id, because evidence has to cite one.
+ *
+ * The id is product identity, not model output: the model copies it into a `messageId` field,
+ * and evidence verification then checks the quote against that exact message. Without the ids
+ * here there is nothing valid to copy, and every citation of the conversation is an invention.
+ */
 function renderTurns(messages: readonly WorldChatMessage[]): string {
-  return messages.map((m) => `${m.role === "user" ? "User" : "Studio"}: ${m.text}`).join("\n\n");
+  return messages
+    .map((m) => `${m.role === "user" ? "User" : "Studio"} [${m.id}]: ${m.text}`)
+    .join("\n\n");
 }
 
 /**
@@ -188,6 +207,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
     tombstones,
     // Never trimmed. See the note at the top of this file.
     currentUserMessage: input.currentUserMessage,
+    currentUserMessageId: input.currentUserMessageId,
     digest: contentHash({
       entryContext: input.entryContext ?? "",
       summary,
@@ -199,6 +219,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
       attachments,
       tombstones,
       current: input.currentUserMessage,
+      currentId: input.currentUserMessageId,
     }),
     trimmed,
   };

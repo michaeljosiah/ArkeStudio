@@ -282,6 +282,12 @@ export class WorldChatRunner {
     const { events } = await store.read();
     const meta = await store.readMeta();
     const view = foldConversation(conversationId, meta?.createdAt ?? at, events).view;
+    // On a retry the words being asked again are already in the log under their original id, and
+    // that id is the one evidence must cite — the fresh `message` above is never appended then.
+    const original = existingTurnId
+      ? view.messages.find((m) => m.turnId === existingTurnId && m.role === "user")
+      : undefined;
+    const currentMessage = original ?? message;
     // What was handed over goes into the prompt (§13.2). Without this the model is never told an
     // attachment exists, and answers "I can't see an attached document" — truthfully, from where
     // it is standing, which is the worst kind of wrong answer to debug.
@@ -292,11 +298,15 @@ export class WorldChatRunner {
         : {}),
       ...(view.summary !== undefined ? { summary: view.summary } : {}),
       candidates: view.candidates,
-      messages: view.messages,
+      // Without the filter a retry shows the message twice — once in the recent turns (it is in
+      // the log by then) and once as what they just said — and a model that notices the
+      // duplication spends its attention on it.
+      messages: view.messages.filter((m) => m.id !== currentMessage.id),
       tombstones: tombstonesFrom(events),
       ...(this.deps.worldContext ? { worldContext: this.deps.worldContext(view) } : {}),
       attachments: contextAttachments(view, attachmentIds, handed.text),
       currentUserMessage: text,
+      currentUserMessageId: currentMessage.id,
     });
 
     const run: WorldChatRun = {
@@ -352,7 +362,7 @@ export class WorldChatRunner {
         await store.append(
           {
             type: "run.retry-started",
-            run: { ...run, safeDetail: outcome.problems.map((p) => p.code).join(",").slice(0, 500) },
+            run: { ...run, safeDetail: [...new Set(outcome.problems.map((p) => p.code))].join(",").slice(0, 500) },
           },
           { at: this.deps.now() },
         );
@@ -604,6 +614,7 @@ ${assembled.entryContext}`);
   if (assembled.attachments) {
     sections.push(`## What they handed you\n${assembled.attachments}`);
   }
-  sections.push(`## They just said\n${assembled.currentUserMessage}`);
+  // The id on its own line, so the text below it is unambiguously what offsets index into.
+  sections.push(`## They just said\n[${assembled.currentUserMessageId}]\n${assembled.currentUserMessage}`);
   return sections.join("\n\n");
 }
