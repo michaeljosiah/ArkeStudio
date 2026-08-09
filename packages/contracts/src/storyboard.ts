@@ -1,6 +1,6 @@
 import { assembleBlocks } from "./planning.js";
 import type { ManifestModel } from "./manifest.js";
-import type { Scene, Shot } from "./scene.js";
+import type { Scene, Selections, Shot } from "./scene.js";
 import type { Sheet, WorldMeta } from "./world.js";
 
 /**
@@ -133,4 +133,86 @@ export function storyboardUsable(scene: Scene): { usable: boolean; reason: strin
     };
   }
   return { usable: true, reason: null };
+}
+
+
+// ---------------------------------------------------------------------------
+// Which pictures steer this dispatch (SPEC-019 R-26, D30)
+// ---------------------------------------------------------------------------
+
+export type ReferenceSteering =
+  | {
+      mode: "keyframes";
+      frames: Array<{ shotId: string; number: number; takeId: string }>;
+      statement: string;
+    }
+  | { mode: "storyboard"; file: string; statement: string }
+  | { mode: "none"; statement: string };
+
+/** The frame a shot would contribute, pinned first, then whatever take it currently uses. */
+function frameFor(shotId: string, selections: Selections): string | null {
+  const selection = selections[shotId];
+  return selection?.startFrameTakeId ?? selection?.acceptedTakeId ?? null;
+}
+
+/**
+ * Keyframes or a storyboard, decided rather than picked (R-26, D30).
+ *
+ * The two are not alternatives on aesthetics: storyboard input is documented as *loose* — a
+ * high-level plot reference the output need not match — while keyframe input is *aligned*.
+ * Nobody should have to know which is stricter, so the preference is automatic.
+ *
+ * But "every shot has a frame" is not sufficient on its own, and this is the gap that is easy to
+ * miss. A scene can have a frame per shot and still hold more shots than the model's reference
+ * cap, at which point the budget truncates the sequence and the dispatch carries some shots'
+ * keyframes and not others. **A partial sequence is worse than none**: the model aligns to the
+ * frames it received and invents the shots it did not, with nothing saying which is which. So
+ * the whole sequence has to survive intact or keyframes are not chosen at all.
+ *
+ * Whatever is decided, the statement says why — including the fallback, because a choice made
+ * silently is one nobody can correct.
+ */
+export function chooseReferenceSteering(input: {
+  scene: Scene;
+  shots?: Shot[];
+  selections: Selections;
+  model: ManifestModel;
+}): ReferenceSteering {
+  const shots = input.shots ?? input.scene.shots;
+  const board = storyboardUsable(input.scene);
+  const boardFile = input.scene.storyboard?.file ?? null;
+  const fallback = (why: string): ReferenceSteering =>
+    board.usable && boardFile !== null
+      ? { mode: "storyboard", file: boardFile, statement: `storyboard — ${why}` }
+      : { mode: "none", statement: `no reference images — ${why}, and ${board.reason}` };
+
+  if (shots.length === 0) return fallback("this dispatch covers no shots");
+
+  const missing = shots.filter((shot) => frameFor(shot.id, input.selections) === null);
+  if (missing.length > 0) {
+    return fallback(
+      `shot${missing.length === 1 ? "" : "s"} ${missing.map((shot) => shot.number).join(", ")} ${
+        missing.length === 1 ? "has" : "have"
+      } no frame, so a keyframe sequence would be incomplete`,
+    );
+  }
+
+  const cap = input.model.accepts.referenceImages;
+  if (shots.length > cap) {
+    return fallback(
+      `${shots.length} shots exceed ${input.model.displayName}'s ${cap} reference image${
+        cap === 1 ? "" : "s"
+      }, so a keyframe sequence would be truncated`,
+    );
+  }
+
+  return {
+    mode: "keyframes",
+    frames: shots.map((shot) => ({
+      shotId: shot.id,
+      number: shot.number,
+      takeId: frameFor(shot.id, input.selections)!,
+    })),
+    statement: `keyframes — every shot has a frame and all ${shots.length} fit ${input.model.displayName}'s reference budget`,
+  };
 }

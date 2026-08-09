@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  chooseReferenceSteering,
   planStoryboard,
   storyboardUsable,
   SceneSchema,
@@ -229,5 +230,88 @@ describe("storyboard landing and acceptance (R-25, R-27)", () => {
   it("says a scene with no board cannot steer one", () => {
     assert.equal(storyboardUsable(sceneWith([shot(1, "x")])).usable, false);
     assert.match(storyboardUsable(sceneWith([shot(1, "x")])).reason!, /no storyboard/);
+  });
+});
+
+describe("which pictures steer the dispatch (R-26, R-27, T-17, T-18)", () => {
+  const board = (accepted: boolean, sceneVersion: number) => ({
+    file: "storyboards/sc_01-v1.png",
+    sceneVersion,
+    panels: ["sh_1", "sh_2"],
+    drawnAt: CLOCK(),
+    sourceJobId: "jb_0001",
+    accepted,
+  });
+  const twoShots = [shot(1, "a"), shot(2, "b")];
+  const framed = { sh_1: { startFrameTakeId: "tk_1" }, sh_2: { acceptedTakeId: "tk_2" } } as never;
+
+  it("prefers keyframes when every shot has a frame and the whole sequence fits", () => {
+    const scene = sceneWith(twoShots);
+    const choice = chooseReferenceSteering({ scene, selections: framed, model: TARGET });
+    assert.equal(choice.mode, "keyframes");
+    assert.equal(choice.mode === "keyframes" && choice.frames.length, 2);
+    // A pinned start frame wins over the currently accepted take, matching the board compiler.
+    assert.equal(choice.mode === "keyframes" && choice.frames[0]!.takeId, "tk_1");
+    assert.match(choice.statement, /keyframes/);
+  });
+
+  it("falls back to the storyboard when a shot has no frame, and says which", () => {
+    const scene: Scene = { ...sceneWith(twoShots), storyboard: board(true, 1) };
+    const partial = { sh_1: { startFrameTakeId: "tk_1" } } as never;
+    const choice = chooseReferenceSteering({ scene, selections: partial, model: TARGET });
+    assert.equal(choice.mode, "storyboard");
+    assert.match(choice.statement, /shot 2 has no frame/);
+    assert.match(choice.statement, /incomplete/);
+  });
+
+  it("refuses keyframes when the sequence would be truncated by the budget", () => {
+    // The gap that is easy to miss: a frame per shot, and still more shots than the cap. A
+    // partial sequence is worse than none — the model aligns to what it got and invents the rest.
+    const many = [1, 2, 3, 4].map((n) => shot(n, `beat ${n}`));
+    const scene: Scene = { ...sceneWith(many), storyboard: board(true, 1) };
+    const all = Object.fromEntries(many.map((s) => [s.id, { startFrameTakeId: `tk_${s.number}` }])) as never;
+    const choice = chooseReferenceSteering({ scene, selections: all, model: TARGET });
+    assert.equal(choice.mode, "storyboard", "TARGET accepts 2 reference images; 4 shots cannot all travel");
+    assert.match(choice.statement, /4 shots exceed/);
+    assert.match(choice.statement, /truncated/);
+  });
+
+  it("blocks a stale board from steering and says to redraw it", () => {
+    // T-17: the scene moved on, so the panels describe shots that have been edited.
+    const scene: Scene = { ...sceneWith(twoShots, 3), storyboard: board(true, 1) };
+    const choice = chooseReferenceSteering({ scene, selections: {}, model: TARGET });
+    assert.equal(choice.mode, "none");
+    assert.match(choice.statement, /drawn from v1 and the scene is at v3/);
+    assert.match(choice.statement, /redraw it/);
+  });
+
+  it("blocks an unaccepted board, and states both reasons when nothing can steer", () => {
+    const scene: Scene = { ...sceneWith(twoShots), storyboard: board(false, 1) };
+    const choice = chooseReferenceSteering({ scene, selections: {}, model: TARGET });
+    assert.equal(choice.mode, "none");
+    assert.match(choice.statement, /no frame/, "why keyframes were not available");
+    assert.match(choice.statement, /not been accepted/, "and why the board was not either");
+  });
+
+  it("reaches the dialog through the plan", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const { planScene } = await import("@arke-studio/contracts");
+    const plan = planScene(
+      {
+        world: bundle.meta,
+        artDirection: bundle.artDirection,
+        productionId: production.meta.id,
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene: production.scenes[0]!,
+        selections: production.selections,
+        model: TARGET,
+      },
+      "per-shot",
+    );
+    assert.ok(plan.steering.statement.length > 0, "the choice is always stated");
+    await store.close();
   });
 });

@@ -1180,6 +1180,24 @@ export function DispatchDialogScreen() {
             </Button>
           ))}
         </div>
+        {/* SPEC-019 R-26: which pictures steer this dispatch, and why. Stated, never offered as a
+            choice — storyboard input is loose where keyframe input aligns, and knowing which is
+            stricter should not be a prerequisite for getting the better one. When neither is
+            available the statement carries both reasons, including a stale board's redraw (R-27). */}
+        {plans && (
+          <Callout
+            tone={plans.perShot.steering.mode === "none" ? "warning" : undefined}
+            title={
+              plans.perShot.steering.mode === "keyframes"
+                ? "Steered by keyframes"
+                : plans.perShot.steering.mode === "storyboard"
+                  ? "Steered by the storyboard"
+                  : "No reference images steer this scene"
+            }
+          >
+            {plans.perShot.steering.statement}
+          </Callout>
+        )}
         {world && model && (
           <Callout title={`World look · v${world.artDirection.version}`}>
             Inherited from this world and carried in the prompt. {model.accepts.referenceImages === 0

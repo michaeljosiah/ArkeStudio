@@ -9,6 +9,7 @@ import {
   type ManifestModel,
   type SizeTier,
 } from "./manifest.js";
+import { chooseReferenceSteering, type ReferenceSteering } from "./storyboard.js";
 import type { Scene, Shot } from "./scene.js";
 import type { Selections } from "./scene.js";
 import type { Sheet, WorldMeta } from "./world.js";
@@ -689,6 +690,12 @@ export interface ScenePlan {
   /** Stills: the tier those estimates assumed, for the output spec the jobs carry. */
   tier?: SizeTier;
   totalEstimatedMicroUsd: number;
+  /**
+   * Which pictures steer this dispatch, and why (SPEC-019 R-26). Stated rather than offered as a
+   * choice: storyboard input is loose where keyframe input aligns, and nobody should have to know
+   * which is stricter in order to get the better one.
+   */
+  steering: ReferenceSteering;
   warnings: DispatchWarnings;
 }
 
@@ -912,6 +919,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
     ...(input.tier !== undefined ? { tier: input.tier } : {}),
     totalEstimatedMicroUsd: mode === "whole-scene" ? wholeSceneTotal : perShotTotal,
+    steering: chooseReferenceSteering({ scene, selections, model }),
     warnings,
   };
 }
