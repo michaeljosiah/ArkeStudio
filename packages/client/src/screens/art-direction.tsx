@@ -201,6 +201,7 @@ export function ArtDirectionProposalScreen() {
   // Null is "your own words", which is where this screen starts: the world already has a look,
   // and the words in the box are a draft of the change, not a preset's.
   const [presetId, setPresetId] = useState<string | null>(null);
+  const [sendFailed, setSendFailed] = useState(false);
   if (!world || world.meta.worldId !== worldId) return null;
 
   const direction = world.artDirection;
@@ -284,18 +285,29 @@ export function ArtDirectionProposalScreen() {
           </Button>
           {/* The human's own action (the assign-voice rule): typing the look and being asked to
               approve your own typing was two steps for one decision. An agent's staged change
-              still reviews in the aside; this button is for the person, so it just applies. */}
+              still reviews in the aside; this button is for the person, so it just applies.
+              Navigation only follows a send that happened — a disconnected studio keeps the
+              edit on screen and says so, rather than discarding it behind a page change. */}
           <Button
             variant="primary"
             disabled={Boolean(staged) || description.trim().length === 0}
             onClick={() => {
-              setArtDirection(world.meta.worldId, description, direction.masterLook ?? null);
-              navigate(`/w/${world.meta.worldId}/art-direction`);
+              if (setArtDirection(world.meta.worldId, description, direction.masterLook ?? null)) {
+                navigate(`/w/${world.meta.worldId}/art-direction`);
+              } else {
+                setSendFailed(true);
+              }
             }}
           >
             {staged ? "Change staged by the agent" : `Set the look · v${nextVersion}`}
           </Button>
         </div>
+        {sendFailed && (
+          <div className="fy-artproposal__seedline" role="alert">
+            The studio is disconnected — nothing was changed. Your words are still here; try again
+            when the coordinator is back.
+          </div>
+        )}
       </main>
       <aside className="fy-artproposal__ripple">
         <div className="fy-artproposal__eyebrow">RIPPLES</div>

@@ -986,9 +986,13 @@ export function stageArtDirectionChange(
   });
 }
 
-/** The human's own action (the assign-voice rule): applies at once, versioned, never staged. */
-export function setArtDirection(worldId: string, description: string, masterLook?: string | null): void {
-  send({
+/**
+ * The human's own action (the assign-voice rule): applies at once, versioned, never staged.
+ * Returns whether the command was actually sent — a disconnected studio must not read as a
+ * change made, or the caller navigates away over a lost edit.
+ */
+export function setArtDirection(worldId: string, description: string, masterLook?: string | null): boolean {
+  return send({
     kind: "set-art-direction",
     worldId,
     description,
