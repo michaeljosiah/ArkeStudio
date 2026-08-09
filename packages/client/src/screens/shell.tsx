@@ -909,14 +909,27 @@ export function NewWorldScreen() {
               </>
             ) : (
               <>
+            {/*
+              Placeholders say the shape of an answer, never an answer (issue 230). Every field
+              here used to hold the sample world's real values — "The Undersong", its logline,
+              its genre, Maren Kest, The Vigil — sitting exactly where the user's own words go,
+              so an entirely empty form looked filled in and Begin read as ready to press. They
+              also anchored the author to one world's genre and naming at the moment they were
+              meant to be inventing their own, and made that world's fiction feel like part of
+              the app rather than one example among the worlds they could write.
+            */}
             <div>
               <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>Name</div>
-              <Input placeholder="The Undersong" value={name} onChange={(e) => setName(e.target.value)} />
+              <Input
+                placeholder="What this world is called"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
             </div>
             <div>
               <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>Logline</div>
               <Textarea
-                placeholder="A coastal city where a drowned god still sings, and some people can hear it."
+                placeholder="One sentence about this world"
                 value={logline}
                 onChange={(e) => setLogline(e.target.value)}
                 style={{ minHeight: 52 }}
@@ -947,7 +960,7 @@ export function NewWorldScreen() {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>Genre</div>
-                <Input placeholder="Coastal fantasy" value={genre} onChange={(e) => setGenre(e.target.value)} />
+                <Input placeholder="A genre" value={genre} onChange={(e) => setGenre(e.target.value)} />
               </div>
             </div>
             <div style={{ display: "flex", gap: 14 }}>
@@ -955,8 +968,10 @@ export function NewWorldScreen() {
                 <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>
                   First character <span className="fy-mono">optional</span>
                 </div>
+                {/* The separator is load-bearing — parseSeed splits on it — so the shape has to
+                    teach it where the example used to demonstrate it. */}
                 <Input
-                  placeholder="Maren Kest · tide-caller, the last one"
+                  placeholder="Their name · one line about them"
                   value={firstCharacter}
                   onChange={(e) => setFirstCharacter(e.target.value)}
                 />
@@ -971,7 +986,7 @@ export function NewWorldScreen() {
                   First location <span className="fy-mono">optional</span>
                 </div>
                 <Input
-                  placeholder="The Vigil · the lighthouse that listens back"
+                  placeholder="Its name · one line about it"
                   value={firstLocation}
                   onChange={(e) => setFirstLocation(e.target.value)}
                 />
