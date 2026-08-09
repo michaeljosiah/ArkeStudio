@@ -61,11 +61,486 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
     <div style="font:400 13px/1.65 var(--font-sans);color:var(--dv-ink-body)">Sample world invented to make the design honest: <strong>The Undersong</strong>, a coastal fantasy where a drowned god still sings beneath the harbour. Every image area is a live drop target: drag your own art onto any placeholder and it sticks. Chrome stays neutral monochrome (the design system's contract) so the creator's imagery carries all the colour. Motion: choreographed entrances, ambient drift on resting cards, tilt-to-straighten on hover. Below: the app’s screens in flow order (home → world → cast → sheet → canon → artifacts → productions → dispatch), followed by an archive of earlier explorations.</div>
   </div>
 </section>
+<section class="dv-turn" id="t53">
+<div class="dv-thd"><a class="dv-tid" href="#t53">53</a><span class="dv-tname">Cutting it back &middot; fewer screens, fewer concepts, and controls that show they can be changed (supersedes <a class="dv-oid" href="#47a">47a</a>, <a class="dv-oid" href="#43b">43b</a>, <a class="dv-oid" href="#46a">46a</a>, <a class="dv-oid" href="#46b">46b</a>, <a class="dv-oid" href="#51a">51a</a> and the whole of <a class="dv-oid" href="#t52">turn 52</a>)</span> (superseded by <a class="dv-oid" href="#53e">53e</a>: the board carries the price now)</div>
+<div class="dv-opts">
+<div class="dv-opt" id="53a">
+<div class="dv-olabel"><a class="dv-oid" href="#53a">53a</a>Step two &middot; a banner each, and four defaults that look like the dropdowns they are</div>
+<div class="dv-card" style="width:1360px">
+<div data-screen-label="53a Step two &middot; three kinds, and defaults you can see are changeable" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);position:relative;overflow:hidden">
+  <div style="position:absolute;inset:0;filter:blur(7px) saturate(.8);opacity:.4"><img src="assets/banner-video.png" alt="" style="display:block;width:100%;height:100%;object-fit:cover"></div>
+  <div style="position:absolute;inset:0;background:color-mix(in srgb, var(--background) 72%, transparent)"></div>
+  <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+    <div style="width:880px;box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-xl);padding:24px 28px;animation:fadeUp .5s var(--ease-out) both">
+      <div style="display:flex;align-items:baseline;gap:10px">
+        <div style="font:650 21px var(--font-sans);letter-spacing:-0.02em">What kind of video?</div>
+        <span style="flex:1"></span>
+        <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">step 2 of 2</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:12px;margin-top:16px">
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:10px;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="height:128px;border-radius:8px;overflow:hidden;background:var(--muted)"><image-slot id="t53-vp-film" shape="rect" radius="8" placeholder="Short film banner"></image-slot></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:11px;padding:0 3px"><span style="width:13px;height:13px;border-radius:99px;border:1px solid var(--neutral-400);flex:none;box-sizing:border-box"></span><span style="font:600 13.5px var(--font-sans)">Short film</span></div>
+          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:5px;padding:0 3px">One linear work, scenes into a cut.</div>
+        </div>
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:10px;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="height:128px;border-radius:8px;overflow:hidden;background:var(--muted)"><image-slot id="t53-vp-music" shape="rect" radius="8" placeholder="Music video banner"></image-slot></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:11px;padding:0 3px"><span style="width:13px;height:13px;border-radius:99px;border:1px solid var(--neutral-400);flex:none;box-sizing:border-box"></span><span style="font:600 13.5px var(--font-sans)">Music video</span></div>
+          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:5px;padding:0 3px">Music-led timing, motifs, performance.</div>
+        </div>
+        <div style="box-sizing:border-box;border:1.5px solid var(--foreground);border-radius:12px;padding:9.5px;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="height:128px;border-radius:8px;overflow:hidden;background:var(--muted)"><image-slot id="t53-vp-micro" shape="rect" radius="8" placeholder="Micro-drama series banner"></image-slot></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:11px;padding:0 3px"><span style="width:13px;height:13px;border-radius:99px;border:4.5px solid var(--foreground);flex:none;box-sizing:border-box"></span><span style="font:600 13.5px var(--font-sans)">Micro-drama series</span></div>
+          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:5px;padding:0 3px">Episodes with a season around them.</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:flex-end;gap:10px;margin-top:20px">
+<div style="flex:1;min-width:0;box-sizing:border-box">
+            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">FRAME</div>
+            <div style="box-sizing:border-box;margin-top:5px;display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:9px;padding:8px 11px;background:var(--background);box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+              <span style="flex:1;min-width:0;font:400 12.5px var(--font-sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">9:16 vertical</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground);flex:none"><path d="m6 9 6 6 6-6"></path></svg>
+            </div>
+          </div>
+<div style="flex:1;min-width:0;box-sizing:border-box">
+            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">EPISODES</div>
+            <div style="box-sizing:border-box;margin-top:5px;display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:9px;padding:8px 11px;background:var(--background);box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+              <span style="flex:1;min-width:0;font:400 12.5px var(--font-sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">7</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground);flex:none"><path d="m6 9 6 6 6-6"></path></svg>
+            </div>
+          </div>
+<div style="flex:1;min-width:0;box-sizing:border-box">
+            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">EPISODE LENGTH</div>
+            <div style="box-sizing:border-box;margin-top:5px;display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:9px;padding:8px 11px;background:var(--background);box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+              <span style="flex:1;min-width:0;font:400 12.5px var(--font-sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">45&ndash;75s</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground);flex:none"><path d="m6 9 6 6 6-6"></path></svg>
+            </div>
+          </div>
+<div style="flex:1;min-width:0;box-sizing:border-box">
+            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">ENDING</div>
+            <div style="box-sizing:border-box;margin-top:5px;display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:9px;padding:8px 11px;background:var(--background);box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+              <span style="flex:1;min-width:0;font:400 12.5px var(--font-sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Cliffhanger</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground);flex:none"><path d="m6 9 6 6 6-6"></path></svg>
+            </div>
+          </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;margin-top:22px">
+        <span style="font:400 11px var(--font-mono);color:var(--neutral-400);flex:1;min-width:0">defaults &middot; change them here or later</span>
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="ghost" size="lg" hint-size="80px,40px">Back</x-import>
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="200px,40px">Create and open it</x-import>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+<div class="dv-opt" id="53b">
+<div class="dv-olabel"><a class="dv-oid" href="#53b">53b</a>The production, empty &middot; nothing to read, one thing to do</div>
+<div class="dv-card" style="width:1360px">
+<div data-screen-label="53b The production, empty &middot; a place to start writing" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
+  <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
+    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Undertow &middot; music video</span></div>
+    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;padding:0 6px"><span style="font:650 15px var(--font-sans);letter-spacing:-.02em">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
+    <div style="flex:1;min-width:0;text-align:right"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span></div>
+  </div>
+  <div style="display:flex;flex:1;min-height:0">
+    <div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px">
+      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)">
+        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Undertow</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">music video</div></div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
+      </div>
+      <div style="height:14px"></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Dashboard</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Story<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">&middot;</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:00</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Audio<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Exports<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
+      <div style="flex:1"></div>
+      <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 30px;overflow:hidden">
+      <div style="width:720px;max-width:100%;box-sizing:border-box;animation:fadeUp .6s var(--ease-out) both">
+        <h1 style="margin:0;font:650 30px/1.15 var(--font-sans);letter-spacing:-0.03em">Undertow</h1>
+        <div style="font:400 14px/1.6 var(--font-sans);color:var(--muted-foreground);margin-top:9px">Nothing written yet. Say what happens, and the first scene takes shape here.</div>
+        <div style="display:flex;margin-top:20px">
+<div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:15px 16px;box-shadow:var(--shadow-xs);cursor:text" style-hover="border-color:var(--neutral-400)">
+          <span style="flex:1;font:400 14px var(--font-sans);color:var(--text-placeholder)">A salvage crew finds something the water left behind&hellip;</span>
+          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></span>
+          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span>
+          <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#8629; send</span>
+        </div>
+        </div>
+        <div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:9px">talking writes nothing &middot; you accept what you keep</div>
+        <div style="display:flex;gap:12px;margin-top:26px">
+          <div style="box-sizing:border-box;flex:1;min-width:0;border:1px solid var(--border);border-radius:11px;padding:13px 15px;cursor:pointer;background:var(--background);box-shadow:var(--shadow-xs);transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+            <div style="font:600 13px var(--font-sans)">Write the first scene</div>
+            <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Straight to a scene you can shoot.</div>
+          </div>
+          <div style="box-sizing:border-box;flex:1;min-width:0;border:1px solid var(--border);border-radius:11px;padding:13px 15px;cursor:pointer;background:var(--background);box-shadow:var(--shadow-xs);transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+            <div style="font:600 13px var(--font-sans)">Shape the whole thing first</div>
+            <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Decide what it is before writing any of it.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+<div class="dv-opt" id="53c">
+<div class="dv-olabel"><a class="dv-oid" href="#53c">53c</a>The episode &middot; promise, then scenes, with nothing in between</div>
+<div class="dv-card" style="width:1360px">
+<div data-screen-label="53c The episode &middot; its promise, then its scenes" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
+  <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
+    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Bell Watch &middot; season 1 &middot; episode 3</span></div>
+    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;padding:0 6px"><span style="font:650 15px var(--font-sans);letter-spacing:-.02em">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
+    <div style="flex:1;min-width:0;text-align:right"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span></div>
+  </div>
+  <div style="display:flex;flex:1;min-height:0">
+    <div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px">
+      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)">
+        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Bell Watch</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">season 1 &middot; 7 episodes</div></div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
+      </div>
+      <div style="height:14px"></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Story<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Season 1</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Episode 3</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">5</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:00</span></div>
+      <div style="flex:1"></div>
+      <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
+    </div>
+    <div style="width:654px;box-sizing:border-box;flex:none;min-width:0;display:flex;flex-direction:column;padding:24px 26px 0;overflow:hidden">
+      <div style="flex:none;animation:fadeUp .6s var(--ease-out) both">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">SEASON 1</span>
+          <span style="font:400 10px var(--font-mono);color:var(--neutral-400)">&middot; EPISODE 3 OF 7</span>
+        </div>
+        <h1 style="margin:7px 0 0;font:650 25px/1.1 var(--font-sans);letter-spacing:-0.025em">The missing night</h1>
+      </div>
+      <div style="flex:1;min-height:0;overflow:hidden;margin-top:18px;display:flex;flex-direction:column;gap:14px">
+        <div style="animation:fadeUp .7s var(--ease-out) .05s both">
+          <div style="font:400 13.5px/1.65 var(--font-sans)">This one opens well and stops. They reach the street the ledger says is missing, and then the episode has nowhere to leave the audience.</div>
+          <div style="font:400 10px var(--font-mono);color:var(--neutral-400);margin-top:7px">&#10003; read episode 2 &middot; read 3 accepted scenes &middot; nothing written</div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;animation:fadeUp .7s var(--ease-out) .12s both"><div style="max-width:430px;box-sizing:border-box;background:var(--secondary);border-radius:13px;padding:11px 14px;font:400 13px/1.6 var(--font-sans)">The street is there. It is the houses that are wrong &mdash; numbers that skip.</div></div>
+        <div style="animation:fadeUp .7s var(--ease-out) .2s both">
+          <div style="font:400 13.5px/1.65 var(--font-sans)">Then the closing state is that the Quarter has been edited, not that a night went missing. That pays off the ledger in episode 2, and it needs two scenes you do not have: the answer from inside the door, and the count coming out right when it should not.</div>
+          <div style="font:400 10px var(--font-mono);color:var(--neutral-400);margin-top:7px">&#10003; checked CANON-018 &middot; no world fact changed &middot; nothing written</div>
+        </div>
+      </div>
+      <div style="flex:none;border-top:1px solid var(--border);padding:11px 0;display:flex;align-items:center;gap:12px">
+<div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:11px 15px;box-shadow:var(--shadow-xs);cursor:text" style-hover="border-color:var(--neutral-400)">
+          <span style="flex:1;font:400 13px var(--font-sans);color:var(--text-placeholder)">Keep breaking episode 3&hellip;</span>
+          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></span>
+          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span>
+          <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#8629; send</span>
+        </div>
+      </div>
+      <div style="flex:none;font:400 10px var(--font-mono);color:var(--neutral-400);padding-bottom:9px">story author &middot; in context: season 1, episodes 2 and 4, 5 scenes &middot; talking changes nothing</div>
+    </div>
+    <div style="width:470px;box-sizing:border-box;flex:none;border-left:1px solid var(--border);background:var(--muted);display:flex;flex-direction:column;padding:22px 22px 0;overflow:hidden">
+      <div style="flex:none;display:flex;align-items:baseline;gap:9px">
+        <div style="font:600 14px var(--font-sans)">Episode 3, as it stands</div>
+        <span style="flex:1"></span>
+        <span style="font:400 9.5px var(--font-mono);color:var(--success)">2 changes</span>
+      </div>
+      <div style="flex:none;box-sizing:border-box;border:1px solid var(--border);border-radius:11px;background:var(--background);padding:12px 14px;margin-top:12px;box-shadow:var(--shadow-xs)">
+        <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">THE PROMISE</div>
+        <div style="display:flex;gap:9px;margin-top:9px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);width:44px;flex:none;padding-top:2px">OPENS</span><span style="font:400 12px/1.55 var(--font-sans);flex:1;min-width:0">They go back to the night the ledger skips.</span></div>
+        <div style="display:flex;gap:9px;margin-top:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);width:44px;flex:none;padding-top:2px">TURN</span><span style="font:400 12px/1.55 var(--font-sans);flex:1;min-width:0">The street is there and the house numbers are not.<span style="font:400 9px var(--font-mono);color:var(--success);margin-left:6px">new</span></span></div>
+        <div style="display:flex;gap:9px;margin-top:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);width:44px;flex:none;padding-top:2px">CLOSES</span><span style="font:400 12px/1.55 var(--font-sans);flex:1;min-width:0">The Quarter has been edited, and someone did it.<span style="font:400 9px var(--font-mono);color:var(--success);margin-left:6px">new</span></span></div>
+      </div>
+      <div style="flex:none;display:flex;align-items:baseline;gap:8px;margin-top:16px">
+        <span style="font:600 12.5px var(--font-sans)">Scenes</span>
+        <span style="font:400 10px var(--font-mono);color:var(--neutral-400)">in order</span>
+        <span style="flex:1"></span>
+        <span style="font:400 10px var(--font-mono);color:var(--neutral-400)">5</span>
+      </div>
+      <div style="flex:1;min-height:0;overflow:hidden;margin-top:9px;display:flex;flex-direction:column;gap:7px">
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--background);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SC 07</span><span style="font:600 12.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">The wrong street</span></div>
+          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Odile counts the houses aloud and gets it wrong twice.</div>
+          <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:6px">accepted &middot; 4 shots</div>
+        </div>
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--background);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SC 08</span><span style="font:600 12.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">The blank door</span></div>
+          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:4px">They find the door that has no number at all.</div>
+          <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:6px">accepted &middot; 3 shots</div>
+        </div>
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--background);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SC 09</span><span style="font:600 12.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">What the door was for</span></div>
+          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Odile reads the ledger out and it does not match the street.</div>
+          <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:6px">accepted &middot; 2 shots</div>
+        </div>
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--background);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SC 11</span><span style="font:600 12.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">The answer from inside</span><span style="font:400 9px var(--font-mono);color:var(--success)">new</span></div>
+          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Maren rings, and the answer comes from inside it.</div>
+          <div style="font:400 9.5px var(--font-mono);color:var(--warning);margin-top:6px">no script yet</div>
+        </div>
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--background);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SC 12</span><span style="font:600 12.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">The count, again</span><span style="font:400 9px var(--font-mono);color:var(--success)">new</span></div>
+          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:4px">The count comes out right, and it should not.</div>
+          <div style="font:400 9.5px var(--font-mono);color:var(--warning);margin-top:6px">no script yet</div>
+        </div>
+      </div>
+      <div style="flex:none;border-top:1px solid var(--border);padding:12px 0 14px;display:flex;align-items:center;gap:10px">
+        <span style="font:400 10px var(--font-mono);color:var(--neutral-400);flex:1;min-width:0">one episode, one proposal</span>
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="210px,40px">Turn this into a proposal</x-import>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+<div class="dv-opt" id="53d">
+<div class="dv-olabel"><a class="dv-oid" href="#53d">53d</a>The board &middot; one shot selected, prompt and settings editable in place</div>
+<div class="dv-card" style="width:1360px">
+<div data-screen-label="53d The board &middot; one shot selected, and everything about it editable" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
+  <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
+    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Bell Watch &middot; ep 3 &middot; scene 11 &middot; board</span></div>
+    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;padding:0 6px"><span style="font:650 15px var(--font-sans);letter-spacing:-.02em">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
+    <div style="flex:1;min-width:0;text-align:right"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span></div>
+  </div>
+  <div style="display:flex;flex:1;min-height:0">
+    <div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px">
+      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)">
+        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Bell Watch</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">season 1 &middot; 9:16 vertical</div></div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
+      </div>
+      <div style="height:14px"></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Story<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">5</span></div>
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;background:var(--accent);font:500 12px var(--font-sans);cursor:pointer">11 &middot; The answer from inside</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:13</span></div>
+      <div style="flex:1"></div>
+      <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
+    </div>
+    <div style="width:654px;box-sizing:border-box;flex:none;min-width:0;display:flex;flex-direction:column;padding:24px 26px 0;overflow:hidden">
+      <div style="flex:none;display:flex;align-items:flex-end;gap:12px;animation:fadeUp .6s var(--ease-out) both">
+        <div style="flex:1;min-width:0">
+          <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">SCENE 11 &middot; BOARD</div>
+          <h1 style="margin:7px 0 0;font:650 23px/1.1 var(--font-sans);letter-spacing:-0.025em">Pick a panel to change it</h1>
+        </div>
+        <div style="display:flex;gap:3px">
+          <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Script</span>
+          <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Coverage</span>
+          <span style="padding:5px 10px;border-radius:7px;background:var(--secondary);font:500 11.5px var(--font-sans)">Board</span>
+          <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Takes</span>
+        </div>
+      </div>
+      <div style="flex:none;display:flex;align-items:center;gap:12px;margin-top:10px">
+        <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">4 shots &middot; 17s &middot; 9:16</span>
+        <span style="flex:1"></span>
+        <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">nothing sent yet</span>
+      </div>
+      <div style="flex:none;margin-top:12px;display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:10px;animation:fadeUp .7s var(--ease-out) .1s both">
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="height:246px;flex:none;overflow:hidden;background:var(--muted)"><img src="assets/scene4-shot12.png" alt="Wide, the door" style="display:block;width:100%;height:100%;object-fit:cover"></div>
+          <div style="padding:7px 9px 9px">
+            <div style="display:flex;align-items:baseline;gap:6px"><span style="font:400 9px var(--font-mono);color:var(--neutral-400)">SH 1</span><span style="flex:1"></span><span style="font:400 9px var(--font-mono);color:var(--neutral-400)">4s</span></div>
+            <div style="font:600 11px var(--font-sans);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Wide, the door</div>
+          </div>
+        </div>
+        <div style="box-sizing:border-box;border:2px solid var(--primary);border-radius:10px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="height:246px;flex:none;overflow:hidden;background:var(--muted)"><img src="assets/scene4-shot13.png" alt="Two-shot at the door" style="display:block;width:100%;height:100%;object-fit:cover"></div>
+          <div style="padding:7px 9px 9px">
+            <div style="display:flex;align-items:baseline;gap:6px"><span style="font:400 9px var(--font-mono);color:var(--neutral-400)">SH 2</span><span style="flex:1"></span><span style="font:400 9px var(--font-mono);color:var(--neutral-400)">6s</span></div>
+            <div style="font:600 11px var(--font-sans);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Two-shot at the door</div>
+          </div>
+        </div>
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="height:246px;flex:none;overflow:hidden;background:var(--muted)"><img src="assets/scene4-shot14.png" alt="Close, Maren" style="display:block;width:100%;height:100%;object-fit:cover"></div>
+          <div style="padding:7px 9px 9px">
+            <div style="display:flex;align-items:baseline;gap:6px"><span style="font:400 9px var(--font-mono);color:var(--neutral-400)">SH 3</span><span style="flex:1"></span><span style="font:400 9px var(--font-mono);color:var(--neutral-400)">4s</span></div>
+            <div style="font:600 11px var(--font-sans);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Close, Maren</div>
+          </div>
+        </div>
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="height:246px;flex:none;overflow:hidden;background:var(--muted)"><div style="height:100%;display:flex;align-items:center;justify-content:center"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);letter-spacing:.1em">NO FRAME YET</span></div></div>
+          <div style="padding:7px 9px 9px">
+            <div style="display:flex;align-items:baseline;gap:6px"><span style="font:400 9px var(--font-mono);color:var(--neutral-400)">SH 4</span><span style="flex:1"></span><span style="font:400 9px var(--font-mono);color:var(--neutral-400)">4s</span></div>
+            <div style="font:600 11px var(--font-sans);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">The empty street</div>
+          </div>
+        </div>
+      </div>
+      <div style="flex:1"></div>
+      <div style="flex:none;display:flex;align-items:center;gap:12px">
+<div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:11px 15px;box-shadow:var(--shadow-xs);cursor:text" style-hover="border-color:var(--neutral-400)">
+          <span style="flex:1;font:400 13px var(--font-sans);color:var(--text-placeholder)">Shot 3 is doing the same thing as shot 2&hellip;</span>
+          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></span>
+          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span>
+          <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#8629; send</span>
+        </div>
+      </div>
+      <div style="flex:none;border-top:1px solid var(--border);margin-top:11px;padding:11px 0 14px;display:flex;align-items:center;gap:12px">
+        <div style="flex:1;min-width:0"><div style="font:600 15px var(--font-mono)">$5.46</div><div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:2px">whole scene &middot; 18s asked &middot; 4 requests</div></div>
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="210px,40px">Generate 4 shots &middot; $5.46</x-import>
+      </div>
+    </div>
+    <div style="width:470px;box-sizing:border-box;flex:none;border-left:1px solid var(--border);background:var(--muted);display:flex;flex-direction:column;padding:22px 22px 0;overflow:hidden">
+      <div style="flex:none;display:flex;align-items:baseline;gap:8px">
+        <span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 2</span>
+        <span style="font:600 14px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Two-shot at the door</span>
+        <span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">covers D01, A02</span>
+      </div>
+      <div style="flex:none;display:flex;align-items:baseline;gap:8px;margin-top:16px">
+        <span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">PROMPT</span>
+        <span style="flex:1"></span>
+        <span style="font:400 9.5px var(--font-mono);color:var(--muted-foreground);cursor:pointer;text-decoration:underline;text-underline-offset:3px">Reset to assembled</span>
+      </div>
+      <div style="flex:none;box-sizing:border-box;border:1.5px solid var(--primary);border-radius:11px;background:var(--background);padding:12px 14px;margin-top:7px;box-shadow:var(--shadow-xs)">
+        <div style="font:400 12.5px/1.65 var(--font-sans)">Painterly, tidal, restrained. The blank door &mdash; a doorway with no number, brick to either side, night. Maren (dark hair cropped short, salt-worn coat) and Odile (grey plait, ink on her fingers) at the door. Medium two-shot, static.<span style="display:inline-block;width:1.5px;height:14px;background:var(--primary);vertical-align:-2px;margin-left:2px"></span></div>
+      </div>
+      <div style="flex:none;font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:7px">edited &middot; was assembled from art direction v3, the location sheet and 2 character sheets</div>
+      <div style="flex:none;display:flex;gap:10px;margin-top:16px">
+<div style="flex:1;min-width:0;box-sizing:border-box">
+            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">MODEL</div>
+            <div style="box-sizing:border-box;margin-top:5px;display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:9px;padding:8px 11px;background:var(--background);box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+              <span style="flex:1;min-width:0;font:400 12.5px var(--font-sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">seedance 2.0</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground);flex:none"><path d="m6 9 6 6 6-6"></path></svg>
+            </div>
+          </div>
+<div style="flex:1;min-width:0;box-sizing:border-box">
+            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">SIZE</div>
+            <div style="box-sizing:border-box;margin-top:5px;display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:9px;padding:8px 11px;background:var(--background);box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+              <span style="flex:1;min-width:0;font:400 12.5px var(--font-sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">720p &middot; 9:16</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground);flex:none"><path d="m6 9 6 6 6-6"></path></svg>
+            </div>
+          </div>
+      </div>
+      <div style="flex:none;display:flex;gap:10px;margin-top:11px">
+<div style="flex:1;min-width:0;box-sizing:border-box">
+            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">LENGTH</div>
+            <div style="box-sizing:border-box;margin-top:5px;display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:9px;padding:8px 11px;background:var(--background);box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+              <span style="flex:1;min-width:0;font:400 12.5px var(--font-sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">6s</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground);flex:none"><path d="m6 9 6 6 6-6"></path></svg>
+            </div>
+          </div>
+<div style="flex:1;min-width:0;box-sizing:border-box">
+            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">REFERENCES</div>
+            <div style="box-sizing:border-box;margin-top:5px;display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:9px;padding:8px 11px;background:var(--background);box-shadow:var(--shadow-xs);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+              <span style="flex:1;min-width:0;font:400 12.5px var(--font-sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">3 of 4 carried</span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground);flex:none"><path d="m6 9 6 6 6-6"></path></svg>
+            </div>
+          </div>
+      </div>
+      <div style="flex:none;font:400 9.5px var(--font-mono);color:var(--warning);margin-top:9px">Odile's sheet is a sketch &middot; the 4th reference does not fit this route</div>
+      <div style="flex:1"></div>
+      <div style="flex:none;border-top:1px solid var(--border);padding:12px 0 14px;display:flex;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-mono)">$1.82</div><div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:2px">this shot only</div></div>
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="lg" hint-size="180px,40px">Generate this shot</x-import>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+</div>
+<div class="dv-opt" id="53e">
+<div class="dv-olabel"><a class="dv-oid" href="#53e">53e</a>The board at rest &middot; every shot priced on the surface that already shows them</div>
+<div class="dv-card" style="width:1360px">
+<div data-screen-label="53e The board at rest &middot; the whole scene, priced, nothing selected" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
+  <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
+    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Bell Watch &middot; ep 3 &middot; scene 11 &middot; board</span></div>
+    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;padding:0 6px"><span style="font:650 15px var(--font-sans);letter-spacing:-.02em">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
+    <div style="flex:1;min-width:0;text-align:right"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span></div>
+  </div>
+  <div style="display:flex;flex:1;min-height:0">
+    <div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px">
+      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)">
+        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Bell Watch</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">season 1 &middot; 9:16 vertical</div></div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
+      </div>
+      <div style="height:14px"></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Story<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">5</span></div>
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;background:var(--accent);font:500 12px var(--font-sans);cursor:pointer">11 &middot; The answer from inside</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:13</span></div>
+      <div style="flex:1"></div>
+      <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:24px 30px 0;overflow:hidden">
+      <div style="flex:none;display:flex;align-items:flex-end;gap:14px;animation:fadeUp .6s var(--ease-out) both">
+        <div style="flex:1;min-width:0">
+          <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">SCENE 11 &middot; BOARD &middot; NOTHING SENT YET</div>
+          <h1 style="margin:7px 0 0;font:650 25px/1.1 var(--font-sans);letter-spacing:-0.025em">Four shots, and what they will cost</h1>
+        </div>
+        <div style="display:flex;gap:3px">
+          <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Script</span>
+          <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Coverage</span>
+          <span style="padding:5px 10px;border-radius:7px;background:var(--secondary);font:500 11.5px var(--font-sans)">Board</span>
+          <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Takes</span>
+        </div>
+      </div>
+      <div style="flex:none;display:flex;align-items:center;gap:14px;margin-top:11px">
+        <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">4 shots &middot; 17s owned &middot; 18s asked &middot; 9:16</span>
+        <span style="font:400 10.5px var(--font-mono);color:var(--success)">up to date with the script</span>
+        <span style="flex:1"></span>
+        <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">click a panel to change it</span>
+      </div>
+      <div style="flex:1;min-height:0;overflow:hidden;margin-top:12px;display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:12px;align-content:start;animation:fadeUp .7s var(--ease-out) .1s both">
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="height:400px;flex:none;overflow:hidden;background:var(--muted)"><img src="assets/scene4-shot12.png" alt="Wide, the door" style="display:block;width:100%;height:100%;object-fit:cover"></div>
+          <div style="padding:9px 12px 11px">
+            <div style="display:flex;align-items:baseline;gap:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 1</span><span style="font:600 12px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Wide, the door</span><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">4s</span></div>
+            <div style="display:flex;align-items:baseline;gap:7px;margin-top:4px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);flex:1;min-width:0">covers A01</span><span style="font:400 9.5px var(--font-mono);color:var(--muted-foreground)">$1.21</span></div>
+          </div>
+        </div>
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="height:400px;flex:none;overflow:hidden;background:var(--muted)"><img src="assets/scene4-shot13.png" alt="Two-shot at the door" style="display:block;width:100%;height:100%;object-fit:cover"></div>
+          <div style="padding:9px 12px 11px">
+            <div style="display:flex;align-items:baseline;gap:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 2</span><span style="font:600 12px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Two-shot at the door</span><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">6s</span></div>
+            <div style="display:flex;align-items:baseline;gap:7px;margin-top:4px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);flex:1;min-width:0">covers D01, A02</span><span style="font:400 9.5px var(--font-mono);color:var(--muted-foreground)">$1.82</span></div>
+          </div>
+        </div>
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="height:400px;flex:none;overflow:hidden;background:var(--muted)"><img src="assets/scene4-shot14.png" alt="Close, Maren" style="display:block;width:100%;height:100%;object-fit:cover"></div>
+          <div style="padding:9px 12px 11px">
+            <div style="display:flex;align-items:baseline;gap:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 3</span><span style="font:600 12px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Close, Maren</span><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">4s asked</span></div>
+            <div style="display:flex;align-items:baseline;gap:7px;margin-top:4px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);flex:1;min-width:0">covers D02</span><span style="font:400 9.5px var(--font-mono);color:var(--muted-foreground)">$1.21</span></div>
+          </div>
+        </div>
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
+          <div style="height:400px;flex:none;overflow:hidden;background:var(--muted)"><div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px"><span style="font:400 10px var(--font-mono);color:var(--neutral-400);letter-spacing:.1em">NO FRAME YET</span><span style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);max-width:180px;text-align:center">The gap is the shot. It holds its place in the read.</span></div></div>
+          <div style="padding:9px 12px 11px">
+            <div style="display:flex;align-items:baseline;gap:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 4</span><span style="font:600 12px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">The empty street</span><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">4s</span></div>
+            <div style="display:flex;align-items:baseline;gap:7px;margin-top:4px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);flex:1;min-width:0">covers A03</span><span style="font:400 9.5px var(--font-mono);color:var(--muted-foreground)">$1.21</span></div>
+          </div>
+        </div>
+      </div>
+      <div style="flex:none;box-sizing:border-box;border:1px solid var(--warning);border-radius:10px;background:color-mix(in srgb, var(--warning) 8%, transparent);padding:9px 13px;margin-top:12px;display:flex;align-items:baseline;gap:11px">
+        <span style="font:400 9.5px var(--font-mono);color:var(--warning);letter-spacing:.08em;flex:none">BEFORE YOU SPEND</span>
+        <span style="font:400 11.5px/1.5 var(--font-sans);flex:1;min-width:0">A04 and A05 have no shot, so the end of the scene will be missing. Odile is a sketch, not a locked sheet. Neither stops you.</span>
+        <span style="font:400 11.5px var(--font-sans);cursor:pointer;text-decoration:underline;text-underline-offset:3px;flex:none">Add a shot</span>
+      </div>
+      <div style="flex:none;display:flex;align-items:center;gap:12px;margin-top:12px">
+<div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:11px 15px;box-shadow:var(--shadow-xs);cursor:text" style-hover="border-color:var(--neutral-400)">
+          <span style="flex:1;font:400 13px var(--font-sans);color:var(--text-placeholder)">Shot 3 is doing the same thing as shot 2&hellip;</span>
+          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></span>
+          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span>
+          <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#8629; send</span>
+        </div>
+      </div>
+      <div style="flex:none;border-top:1px solid var(--border);margin-top:11px;padding:11px 0 14px;display:flex;align-items:center;gap:12px">
+        <div style="flex:1;min-width:0"><div style="font:600 15px var(--font-mono)">$5.46</div><div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:2px">whole scene &middot; 4 requests &middot; compiling the board is free, this is not</div></div>
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="lg" hint-size="140px,40px">Export sheet</x-import>
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="210px,40px">Generate 4 shots &middot; $5.46</x-import>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+<p class="dv-rule"><b>Binding.</b> <b>Build the plain version first, and add to it only once the plain version has been used.</b> Every rule below is that one applied.<br><b>A default must look like a control.</b> On <a class="dv-oid" href="#53a">53a</a> the profile's defaults are dropdowns with their own labels, not printed values with a chevron glued on, because a value the user cannot tell is editable is a value they will not edit. Each of the three kinds carries <b>a banner</b>, so the choice is made by looking rather than by reading. What was cut is the point of the screen: no summary grid, no idea field, no paragraph explaining that a profile only sets defaults &#8212; the controls say it. <b>Step two asks two things: which kind, and the handful of numbers that differ between them.</b><br><b>An empty production is a place to start writing, not a briefing.</b> <a class="dv-oid" href="#53b">53b</a> drops the day-one framing, the world inventory and both seed rails. The world is not announced because <b>the production is already inside it</b> &#8212; the rail says so and nothing else needs to. What is left is a heading, a composer and two ways in. <b>Seeds return only when the plain path has been used and found wanting</b>; a suggestion engine on an empty page is a guess about a workflow nobody has run yet.<br><b>Beats are gone.</b> An episode is <b>its promise and its scenes</b>, and a scene's own one-line description is the brief. The indirection beats added &#8212; a named unit of change that scenes were cited against &#8212; bought a many-to-many map that <b>a five-scene episode does not need</b>, and it cost a whole screen (<a class="dv-oid" href="#46b">46b</a>) to explain. <a class="dv-oid" href="#53c">53c</a> is <b>one episode screen where there were two</b>: the conversation on the left, the promise and the scenes in order on the right. <b>A script belongs to a scene</b> and to nothing above it.<br><b>The board is where a shot is changed.</b> Selecting a panel opens it in place: the prompt is <b>an editable field, not a printed one</b>, and the model, size, length and references are the same dropdowns as everywhere else. An edited prompt <b>says it was edited and offers the assembled one back</b>, because the assembled version is regenerated from a world that keeps moving and a hand-written one is not. The board carries <b>the whole-scene total</b> as well as the per-shot one, so there is no separate screen to visit before spending.<br><b>The board is the only surface a scene is spent from.</b> <a class="dv-oid" href="#t52">Turn 52</a>&#8217;s separate plan is retired: it showed the same four shots, the same coverage and the same prices as the board, one screen earlier, and a second place to read the same thing is a second place to keep correct. What the plan was right about moves onto the board and stays: <b>the warning bar</b> in the words of the specific thing that is wrong, <b>the blocks no shot covers</b> with one action to fix them, and <b>the whole-scene estimate</b> against seconds owned and seconds asked. At rest the board is <b>the surface</b> &#8212; four across, scene order, every panel priced. With one shot open it is <b>the split</b>, which is the same rule every other pair in this workspace follows: comparison earns the surface, authoring one object keeps the split.</p>
+<p class="dv-next">Try next: &#8220;the board once takes exist, and whether editing a prompt still belongs there&#8221; &middot; &#8220;an episode of twenty scenes, and where the flat list stops working&#8221; &middot; &#8220;step two for a format with only one kind&#8221; &middot; &#8220;the empty production for someone on their fourth, not their first&#8221;</p>
+</section>
 <section class="dv-turn" id="t52">
 <div class="dv-thd"><a class="dv-tid" href="#t52">52</a><span class="dv-tname">The scene plan &middot; every shot showing what it will send, what it covers and what it costs, before a penny moves (supersedes the warning list in <a class="dv-oid" href="#14b">14b</a>)</span></div>
 <div class="dv-opts">
 <div class="dv-opt" id="52a">
-<div class="dv-olabel"><a class="dv-oid" href="#52a">52a</a>The plan &middot; four shots, their script, and the end of the scene still uncovered</div>
+<div class="dv-olabel"><a class="dv-oid" href="#52a">52a</a>The plan &middot; four shots, their script, and the end of the scene still uncovered (superseded by <a class="dv-oid" href="#53e">53e</a>: the board is the one surface)</div>
 <div class="dv-card" style="width:1360px">
 <div data-screen-label="52a The plan &middot; before a penny moves" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
   <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
@@ -183,7 +658,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 </div>
 </div>
 <div class="dv-opt" id="52b">
-<div class="dv-olabel"><a class="dv-oid" href="#52b">52b</a>One shot open &middot; the prompt, and where every line of it came from</div>
+<div class="dv-olabel"><a class="dv-oid" href="#52b">52b</a>One shot open &middot; the prompt, and where every line of it came from (superseded by <a class="dv-oid" href="#53d">53d</a>: the shot opens on the board, and is editable there)</div>
 <div class="dv-card" style="width:1360px">
 <div data-screen-label="52b One shot open &middot; the prompt and its sources" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
   <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
@@ -790,12 +1265,12 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
       <div style="padding:26px 34px 10px;flex:none;animation:fadeUp .6s var(--ease-out) both">
         <div style="display:flex;align-items:center;gap:8px">
           <span style="display:inline-flex;align-items:center;gap:6px;font:400 11px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="color:var(--foreground)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Episode 3</span>
-          <span style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">&middot; SCENE 11 &middot; BEAT 3</span>
+          <span style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">&middot; SCENE 11</span>
         </div>
         <h1 style="margin:8px 0 0;font:650 26px/1.1 var(--font-sans);letter-spacing:-0.025em">The answer from inside</h1>
       </div>
       <div style="flex:1;min-height:0;overflow:hidden;padding:8px 34px;display:flex;flex-direction:column;gap:13px;animation:fadeUp .7s var(--ease-out) .1s both">
-        <div style="align-self:flex-start;max-width:450px;background:var(--secondary);border-radius:14px 14px 14px 4px;padding:12px 15px;font:400 13px/1.6 var(--font-sans)">Beat three said Maren rings and the answer comes from inside. I have written it as seven blocks. The silence before the answer is its own block, because the shot that holds it will not be the shot that breaks it.<div style="margin-top:8px;font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#10003; read episode 3 &middot; read The Vigil &middot; nothing written</div>
+        <div style="align-self:flex-start;max-width:450px;background:var(--secondary);border-radius:14px 14px 14px 4px;padding:12px 15px;font:400 13px/1.6 var(--font-sans)">The scene says Maren rings and the answer comes from inside. I have written it as seven blocks. The silence before the answer is its own block, because the shot that holds it will not be the shot that breaks it.<div style="margin-top:8px;font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#10003; read episode 3 &middot; read The Vigil &middot; nothing written</div>
         </div>
         <div style="align-self:flex-end;max-width:380px;background:var(--primary);color:var(--primary-foreground);border-radius:14px 14px 4px 14px;padding:11px 15px;font:400 13px/1.55 var(--font-sans)">Odile should say it, not think it. And she keeps writing until the very last line.</div>
         <div style="align-self:flex-start;max-width:450px;background:var(--secondary);border-radius:14px 14px 14px 4px;padding:12px 15px;font:400 13px/1.6 var(--font-sans)">Then her line moves up before the ring and the last block is her stopping. No shots exist yet, so nothing has to be re-covered &#8212; this is the cheapest moment to change it.<div style="margin-top:8px;font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#10003; 7 blocks &middot; 0 shots &middot; nothing written</div>
@@ -808,7 +1283,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
           <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span>
           <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#8629; send</span>
         </div>
-        <div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:9px">scene author &middot; in context: episode 3, beat 3, The Vigil, 6 cast sheets &middot; talking changes nothing</div>
+        <div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:9px">scene author &middot; in context: episode 3, The Vigil, 6 cast sheets &middot; talking changes nothing</div>
       </div>
     </div>
     <div style="width:470px;box-sizing:border-box;flex:none;padding:22px 28px 0;background:var(--muted);display:flex;flex-direction:column;overflow:hidden;animation:fadeUp .7s var(--ease-out) .15s both">
