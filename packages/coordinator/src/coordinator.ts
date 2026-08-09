@@ -7,6 +7,7 @@ import {
   JobSchema,
   LedgerEntrySchema,
   type ClientMessage,
+  type Capability,
   type ClientState,
   type DomainEvent,
   type HarnessAdapter,
@@ -15,6 +16,7 @@ import {
   CutFileSchema,
   deriveCut,
   estimateMicroUsd,
+  modelForCapability,
   gateLocalRuntimes,
   planScene,
   previewLineFor,
@@ -64,7 +66,7 @@ import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachm
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
-import { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
+import { acceptTake, audioDesignFor, rejectTake, saveAudioTracks } from "./takes/review.js";
 import {
   normalizeSpeechText,
   authoritativeSheetSpeech,
@@ -196,6 +198,8 @@ export interface CoordinatorOptions {
     buildConfig: (input: {
       worldQueryUrl?: string;
       agents?: Record<string, { model?: string; brief?: string }>;
+      /** SPEC-019 R-16: selects the authoring skill the session's agents run with. */
+      skillFamily?: string;
     }) => Record<string, unknown>;
     agentForPurpose: (purpose: "authoring" | "drafting" | "extraction" | "ask" | "art-prompt") => string;
     /**
@@ -204,6 +208,15 @@ export interface CoordinatorOptions {
      * original — it never needs to know how a prompt is assembled.
      */
     roster?: ReadonlyArray<{ name: string; description: string; brief: string }>;
+    /**
+     * The shipped skill registry (SPEC-019 R-14, R-15). Injected like the roster so the
+     * dependency stays one-way: the coordinator resolves a family and asks for a document, and
+     * never learns how one is written or where it is stored.
+     */
+    skillFor?: (
+      purpose: "scene-drafting" | "storyboard",
+      family: string | undefined,
+    ) => { id: string; version: number; family: string } | null;
   };
   /** SPEC-008: credential cipher (Electron safeStorage in the desktop; a fake in tests). */
   cipher?: Cipher;
@@ -300,8 +313,33 @@ export class Coordinator {
   private readonly reading = new Map<string, AbortController>();
   /** Session config builder with the user's agent settings folded in. */
   private readonly buildConfig: ((input: { worldQueryUrl?: string }) => Record<string, unknown>) | undefined;
+
+  /**
+   * The authoring skill for a purpose, chosen by the family of the model that would actually do
+   * the work (SPEC-019 R-16). Null whenever anything is missing — no registry, no manifest, no
+   * routed model, or a family that ships no document — because every one of those is the same
+   * ordinary outcome: draft under general guidance and say so (R-20).
+   */
+  private async skillForPurpose(
+    purpose: "scene-drafting" | "storyboard",
+    capability: Capability,
+  ): Promise<{ id: string; version: number; family: string } | null> {
+    const resolve = this.opts.authoring?.skillFor;
+    if (!resolve || !this.opts.manifest) return null;
+    const settings = this.appSettings ? await this.appSettings.load() : null;
+    const model = modelForCapability(this.opts.manifest, settings?.routing, capability);
+    return resolve(purpose, model?.family);
+  }
   /** Per-agent model and brief overrides, as last read from settings. */
   private agentOverrides: Record<string, { model?: string; brief?: string }> | undefined;
+
+  /**
+   * The model family the next authoring session drafts for (SPEC-019 R-16), cached the way the
+   * agent overrides are: read when settings are read, so a session started later in the run
+   * carries the routing the user actually has. Undefined means no skill is injected and the
+   * agents draft under general guidance (R-20).
+   */
+  private skillFamily: string | undefined;
   private appearanceWrite = Promise.resolve();
   private voiceModelsChanged = false;
   private started = false;
@@ -437,7 +475,12 @@ export class Coordinator {
     // captured, so changing a model in Settings applies to the next session, not the next run.
     const configure = opts.authoring?.buildConfig;
     this.buildConfig = configure
-      ? (input) => configure({ ...input, ...(this.agentOverrides ? { agents: this.agentOverrides } : {}) })
+      ? (input) =>
+          configure({
+            ...input,
+            ...(this.agentOverrides ? { agents: this.agentOverrides } : {}),
+            ...(this.skillFamily !== undefined ? { skillFamily: this.skillFamily } : {}),
+          })
       : undefined;
     this.grants = opts.appRoot ? new GrantStore(opts.appRoot) : null;
     this.authoring =
@@ -784,6 +827,9 @@ export class Coordinator {
     // Read once here so the first session of the run already carries the user's choices —
     // not the second, after something happened to touch settings.
     this.agentOverrides = settings?.agents;
+    this.skillFamily = manifest
+      ? modelForCapability(manifest, settings?.routing, "video")?.family
+      : undefined;
     this.refreshAgents(settings?.agents ?? {});
     const entries = this.ledger ? await this.ledger.readAll() : [];
     this.readModel.seedAppConfig({
@@ -1967,6 +2013,10 @@ export class Coordinator {
           });
         }
         const settings = await this.appSettings.load();
+        // The family the next authoring session drafts for follows the routed model (R-16).
+        this.skillFamily = this.opts.manifest
+          ? modelForCapability(this.opts.manifest, settings.routing, "video")?.family
+          : undefined;
         this.emit({
           at: new Date().toISOString(),
           type: "routing.changed",
@@ -2132,6 +2182,10 @@ export class Coordinator {
           const draft = await draftSceneSkeleton(store, gate, {
             productionId: msg.productionId,
             brief: msg.brief,
+            // Shots are drafted for the model that will shoot them (SPEC-019 R-16). The routed
+            // video model names its family; a family with no skill drafts under general
+            // guidance, and the scope line says which happened (R-20).
+            skill: await this.skillForPurpose("scene-drafting", "video"),
           });
           this.emit({
             at: new Date().toISOString(),
@@ -2297,6 +2351,9 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "The scene or selected model is no longer available.");
           return;
         }
+        // The negatives derive from the production's audio design (SPEC-019 R-9, R-11): a cut
+        // that composes its own score means the model must not lay music under every clip.
+        const audioDesign = await audioDesignFor(store, production.meta.id);
         // Recompute the plan server-side — the request the dialog showed is the one executed.
         const plan = planScene(
           {
@@ -2308,6 +2365,7 @@ export class Coordinator {
             scene,
             selections: production.selections,
             model,
+            audioDesign,
             ...(msg.resolution !== undefined ? { resolution: msg.resolution } : {}),
             ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
           },

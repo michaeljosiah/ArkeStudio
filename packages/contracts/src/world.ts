@@ -157,6 +157,15 @@ export const ProductionSchema = z
     status: z.string().min(1),
     /** Optional production-specific visual language; the world surface names this exception. */
     styleOverride: z.string().min(1).optional(),
+    /**
+     * The aspect this production delivers in, e.g. "16:9" (SPEC-019 R-36, D29).
+     *
+     * On the production and not on art direction, which is one world-level record: a world
+     * routinely holds a 16:9 film and a 9:16 cut of the same material, and a world-scoped aspect
+     * cannot express both without one production silently changing the other's. Absent means the
+     * world's default applies.
+     */
+    aspect: z.string().min(1).optional(),
     created: IsoDateTimeSchema,
     updated: IsoDateTimeSchema,
   })

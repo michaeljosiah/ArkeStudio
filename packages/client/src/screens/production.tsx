@@ -1002,6 +1002,7 @@ function GeneratePromptEditor({
     <>
       <div className="fy-gen__label" style={{ marginTop: 16 }}>
         Prompt <span className="fy-mono">assembled from the world, edit freely</span>
+
         <span
           style={{ marginLeft: "auto", font: "400 11px var(--font-sans)", color: "var(--muted-foreground)", cursor: "pointer" }}
           onClick={() => {
@@ -1023,6 +1024,39 @@ function GeneratePromptEditor({
         onChange={(e) => setDraft(e.target.value)}
         style={{ minHeight: 120, font: "400 12.5px/1.65 var(--font-sans)" }}
       />
+      {/* What the planner composes, the planner keeps (SPEC-019 R-3, R-13, D3/D4). An override
+          replaces the body above and nothing else: the binding preamble and the negatives are
+          added at dispatch, and a user debugging drifted identity or burned-in titles needs to
+          see that they exist. The preamble's real text needs a chosen model — it names the
+          images that model's budget actually carries — so it is described here and shown in
+          full where the plan exists. */}
+      <div
+        style={{
+          marginTop: 8,
+          padding: "8px 10px",
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          font: "400 11.5px/1.6 var(--font-sans)",
+          color: "var(--muted-foreground)",
+        }}
+      >
+        Added at dispatch, not editable here: a numbered line per reference image naming its
+        subject and what it references, and — for video —{" "}
+        <span className="fy-mono">no subtitles</span>
+        {shot.audio?.kind === "silence" ? (
+          <>
+            {" "}
+            and <span className="fy-mono">no audio</span>
+          </>
+        ) : (
+          <>
+            {" "}
+            (plus <span className="fy-mono">no background music</span> where the cut carries its own
+            score)
+          </>
+        )}
+        .
+      </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
         <span className="fy-mono">edits stay on this shot · the canon doesn't change from here</span>
         <span className="fy-h1row__push" />
@@ -1107,6 +1141,27 @@ export function DispatchDialogScreen() {
         key: `ov-${o.shotId}`,
         text: `shot ${o.number}'s prompt is overridden and ${o.against.map((a) => `${a.sheetId} moved v${a.from}→v${a.to}`).join(", ")} — the override will not pick that up`,
       });
+    // SPEC-019 R-42: subjects past the model's reliable range are carried anyway and said so —
+    // dropping a character the user wrote into the shot is the worse failure.
+    if (warnings.subjectsOverRange) {
+      warningRows.push({
+        key: "subjects",
+        text: `${warnings.subjectsOverRange.carried} subjects is past the ${warnings.subjectsOverRange.reliableTo} this model holds apart reliably — all are carried, and the take may be less stable`,
+      });
+    }
+    // SPEC-019 R-21: the routed model can be overridden per dispatch, long after the scene was
+    // drafted. Named rather than blocking — the shots are still shots, they were just written to
+    // another family's conventions, and only the user knows whether that matters here.
+    if (warnings.skillFamilyMismatch) {
+      const { draftedFor, dispatchingTo } = warnings.skillFamilyMismatch;
+      warningRows.push({
+        key: "skill-family",
+        text:
+          dispatchingTo === null
+            ? `these shots were drafted for ${draftedFor}; ${model?.displayName ?? "this model"} declares no family, so that guidance may not apply`
+            : `these shots were drafted for ${draftedFor} and this dispatch goes to ${dispatchingTo}`,
+      });
+    }
   }
 
   return (
@@ -1133,6 +1188,32 @@ export function DispatchDialogScreen() {
             </Button>
           ))}
         </div>
+        {/* SPEC-019 R-43, D37: the one condition here that is not merely named. A payload over
+            the transport's ceiling is a request the client already refuses, so committing it
+            would buy a certain failure — the dispatch buttons go away rather than warn. */}
+        {plans?.perShot.warnings.payloadOverflow && (
+          <Callout tone="danger" title="Too much to send">
+            {plans.perShot.warnings.payloadOverflow.notice}
+          </Callout>
+        )}
+        {/* SPEC-019 R-26: which pictures steer this dispatch, and why. Stated, never offered as a
+            choice — storyboard input is loose where keyframe input aligns, and knowing which is
+            stricter should not be a prerequisite for getting the better one. When neither is
+            available the statement carries both reasons, including a stale board's redraw (R-27). */}
+        {plans && (
+          <Callout
+            tone={plans.perShot.steering.mode === "none" ? "warning" : undefined}
+            title={
+              plans.perShot.steering.mode === "keyframes"
+                ? "Steered by keyframes"
+                : plans.perShot.steering.mode === "storyboard"
+                  ? "Steered by the storyboard"
+                  : "No reference images steer this scene"
+            }
+          >
+            {plans.perShot.steering.statement}
+          </Callout>
+        )}
         {world && model && (
           <Callout title={`World look · v${world.artDirection.version}`}>
             Inherited from this world and carried in the prompt. {model.accepts.referenceImages === 0
@@ -1181,7 +1262,7 @@ export function DispatchDialogScreen() {
             nothing is re-routed for you.
           </Callout>
         )}
-        {plans && overlong.length === 0 && (
+        {plans && overlong.length === 0 && !plans.perShot.warnings.payloadOverflow && (
           <div style={{ display: "flex", gap: 14 }}>
             <div className="fy-boardcard" style={{ flex: 1 }}>
               <div className="fy-boardcard__head">Per shot</div>

@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  assemblePassBlocks,
+  bindingPreamble,
+  boundFiles,
+  composePrompt,
   dispatchDuration,
   estimateMicroUsd,
   parseMentions,
@@ -12,6 +16,7 @@ import {
   type ArtifactSidecar,
   type ManifestModel,
   type ProductionBundle,
+  type ProposalSkill,
   type Scene,
   type ScenePlan,
   type Shot,
@@ -144,12 +149,35 @@ export interface SceneDraft {
   /** The retrieval-scope statement the drafting agent is given. */
   scope: string;
   instruction: string;
+  /**
+   * The authoring skill this draft is being shaped under, or null when the target family has
+   * none (SPEC-019 R-20). Null is an ordinary outcome and the scope line says so, because a
+   * fallback nobody is told about is indistinguishable from a fallback that misfired.
+   */
+  skill: ProposalSkill | null;
 }
 
 export async function draftSceneSkeleton(
   store: WorldStore,
-  gate: { stage(input: { kind: "scene-draft"; summary: string; source: string; targets: Array<{ path: string; content: string }> }): Promise<{ id: string }> },
-  input: { productionId: string; brief: string },
+  gate: {
+    stage(input: {
+      kind: "scene-draft";
+      summary: string;
+      source: string;
+      targets: Array<{ path: string; content: string }>;
+      skill?: ProposalSkill;
+    }): Promise<{ id: string }>;
+  },
+  input: {
+    productionId: string;
+    brief: string;
+    /**
+     * The skill resolved for the production's target model family, from the shipped registry.
+     * Passed in rather than looked up here: the registry lives in the adapter package and the
+     * dependency runs one way (SPEC-005 D5).
+     */
+    skill?: { id: string; version: number; family: string } | null;
+  },
 ): Promise<SceneDraft> {
   const bundle = store.getBundle();
   const production = bundle.productions.find((p) => p.meta.id === input.productionId);
@@ -157,6 +185,7 @@ export async function draftSceneSkeleton(
   const slug = slugify(input.brief.split(/[.!?\n]/)[0] ?? "scene").slice(0, 40) || `scene-${number}`;
   const file = `${String(number).padStart(2, "0")}-${slug}`;
   const path = `productions/${input.productionId}/scenes/${file}.json`;
+  const skill = input.skill ?? null;
   const skeleton: Scene = {
     id: `sc_${String(number).padStart(2, "0")}`,
     number,
@@ -164,6 +193,12 @@ export async function draftSceneSkeleton(
     title: input.brief.split(/[.!?\n]/)[0]?.trim() ?? `Scene ${number}`,
     status: "draft",
     version: 1,
+    // Written into the skeleton rather than stamped at accept, so it travels the ordinary
+    // proposal path and lands with the scene (R-21). The proposal record (R-19) explains the
+    // draft; this is what dispatch compares against months later, when the proposal is gone.
+    ...(skill !== null
+      ? { draftedWith: { skillId: skill.id, version: skill.version, family: skill.family } }
+      : {}),
     shots: [],
   };
   const proposal = await gate.stage({
@@ -171,13 +206,22 @@ export async function draftSceneSkeleton(
     summary: `Scene ${number}: ${skeleton.title}`,
     source: "chat:studio",
     targets: [{ path, content: JSON.stringify(skeleton, null, 2) + "\n" }],
+    // Recorded on the proposal the skill shaped (R-19), the same discipline as provenance at
+    // dispatch — two scenes drafted under different guidance differ for a recoverable reason.
+    ...(skill !== null ? { skill } : {}),
   });
   const characters = bundle.sheets.filter((s) => s.type === "character" && s.retired !== true).length;
+  // Whichever way it went, the scope line says it (R-20). A fallback nobody is told about looks
+  // exactly like a fallback that misfired, and the difference matters when the shots read oddly.
+  const guidance =
+    skill !== null
+      ? ` · drafting guidance: ${skill.id}@v${skill.version} (${skill.family})`
+      : " · drafting guidance: general — no skill ships for this model family";
   const scope = `drafts with: ${bundle.meta.name} · canon v${bundle.meta.canonRevision}${
     bundle.meta.tone ? ` · tone: ${bundle.meta.tone}` : ""
-  } · ${characters} character${characters === 1 ? "" : "s"} available`;
+  } · ${characters} character${characters === 1 ? "" : "s"} available${guidance}`;
   const instruction = `${scope}\n\nDraft scene ${number} in ${path} from this brief: "${input.brief}". Fill the shots array: each shot needs id ("sh_" + number), number, title, description with @mentions for every character and the location, camera, audio, durationSec. Propose an inherits block (location, timeOfDay, tone). Check canon for anything the brief touches and keep every line consistent with it. Do not touch any other file.`;
-  return { proposalId: proposal.id, path, scope, instruction };
+  return { proposalId: proposal.id, path, scope, instruction, skill };
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +361,30 @@ export async function exportBoard(
   return file;
 }
 
+/**
+ * Raw byte sizes for every reference a plan could carry (SPEC-019 R-43, T-24).
+ *
+ * Planning is pure and cannot stat a file, so the sizes are measured here and handed in. A file
+ * that cannot be read counts as zero rather than failing the whole dialog: an unreadable
+ * reference is a different problem, and it surfaces where references are resolved.
+ */
+export async function referenceByteSizes(store: WorldStore, files: readonly string[]): Promise<Record<string, number>> {
+  const sizes: Record<string, number> = {};
+  for (const file of new Set(files)) {
+    try {
+      sizes[file] = (await stat(toExtendedLength(join(store.dir, fromPortable(file))))).size;
+    } catch {
+      sizes[file] = 0;
+    }
+  }
+  return sizes;
+}
+
+/** The aspect this production delivers in, falling back to the world's default (R-36, D29). */
+export function productionAspect(production: ProductionBundle, worldDefault?: string): string | undefined {
+  return production.meta.aspect ?? worldDefault;
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch composition (T-18): the plan becomes SPEC-009 requests, verbatim
 // ---------------------------------------------------------------------------
@@ -414,8 +482,11 @@ export function composeDispatches(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: entry.prompt.text,
-        references: entry.references.filter((r) => r.file !== null).map((r) => r.file),
+        // Preamble + overridable body + derived negatives (SPEC-019 R-3, R-13). The array below
+        // comes from the same bound records the preamble numbers, so the stated order and the
+        // sent order are one structure rather than two that can drift (R-2, D2).
+        prompt: composePrompt(entry.parts),
+        references: boundFiles(entry.bound),
         // The length the plan priced, which is the length the route can actually be asked for.
         // Sending the raw shot seconds meant the job asked for something no route accepts, and
         // the client then had nothing to translate.
@@ -433,11 +504,35 @@ export function composeDispatches(
   return plan.pack.passes.map((pass) => {
     const shotsInPass = pass.plan.map((p) => plan.shots.find((s) => s.shot.id === p.shotId)!);
     const passReferencePlan = plan.passReferences.find((candidate) => candidate.passIndex === pass.index)!;
-    const references = passReferencePlan.references.filter((reference) => reference.file !== null).map((reference) => reference.file!);
+    const references = boundFiles(passReferencePlan.bound);
     const passSeconds = askedSeconds(model, pass.durationSec, `scene pass ${pass.index}`);
     if (references.length > model.accepts.referenceImages) {
       throw new Error(`scene pass ${pass.index} exceeds ${model.displayName}'s reference limit`);
     }
+    // One clip, composed once (SPEC-019 R-5, R-6). Joining each shot's whole prompt restated the
+    // world's art direction twice per shot; the summary, the standing description and the
+    // persistent constraint now belong to the pass, and a shot contributes only its beat.
+    const passBlocks = assemblePassBlocks({
+      world: world.meta,
+      sheets: world.sheets,
+      scene,
+      entries: shotsInPass.map((entry) => ({ shot: entry.shot, prompt: entry.prompt })),
+      ...(world.artDirection.description !== undefined
+        ? { artDirection: world.artDirection.description }
+        : {}),
+      carriedSheetIds: new Set(passReferencePlan.bound.map((reference) => reference.sheetId)),
+    });
+    const passBody = [
+      passBlocks.summary,
+      passBlocks.standing,
+      passBlocks.beats
+        .map((beat) => `[shot ${beat.shot.number} · ${beat.shot.durationSec ?? 4}s] ${beat.text}`)
+        .join("\n"),
+      passBlocks.persistent,
+    ]
+      .map((block) => block.trim())
+      .filter((block) => block.length > 0)
+      .join("\n\n");
     return {
       worldId,
       productionId,
@@ -446,9 +541,13 @@ export function composeDispatches(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: shotsInPass
-          .map((s) => `[shot ${s.shot.number} · ${s.shot.durationSec ?? 4}s] ${s.prompt.text}`)
-          .join("\n"),
+        prompt: composePrompt({
+          preamble: bindingPreamble(passReferencePlan.bound),
+          body: passBody,
+          // From the plan, not recomputed here: the dialog showed these and the dispatch has to
+          // be the same request (R-9).
+          negatives: passReferencePlan.negatives,
+        }),
         references,
         durationSec: passSeconds,
         ...sizeParams(model, plan),

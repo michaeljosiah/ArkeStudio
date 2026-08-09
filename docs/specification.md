@@ -1852,6 +1852,7 @@ Capability specs break out of this document in dependency order. Each becomes it
 | SPEC-016 | First run, onboarding and packaging | all |
 | SPEC-017 | World art direction, and the two-image character kit | 010 · amends 010 |
 | SPEC-018 | Voice mode — speaking to the studio | 004, 005, 011 |
+| SPEC-019 | Long-form video, bound references, skills and locked-parameter tasks | 005, 008, 009, 010, 012, 013, 017 · amends 010, 012 |
 
 **Phase 1 — prove the loop.** 001 → 002 → 003 → 004 → 005 → 007. A world can be created, a
 sheet drafted by an agent, ripple-checked and accepted, with history and an index behind it.

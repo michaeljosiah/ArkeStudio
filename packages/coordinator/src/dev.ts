@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   agentForPurpose,
+  skillFor,
   buildSessionConfig,
   discoverOpenCode,
   OpenCodeAdapter,
@@ -99,7 +100,7 @@ const coordinator = new Coordinator({
   // Settings · Sample world is a working surface here and not a dead one (SPEC-016 R-6).
   sampleWorldPath: join(fixturesRoot, "worlds", "the-undersong"),
   setup: nodeSetupDeps(),
-  authoring: { buildConfig: buildSessionConfig, agentForPurpose, roster: ROSTER },
+  authoring: { buildConfig: buildSessionConfig, agentForPurpose, roster: ROSTER, skillFor },
   // The dev coordinator carries the app's own preset speakers so the voice picker has a
   // catalogue to show without a sidecar or a provider key. No cloud sources: unkeyed
   // providers contribute nothing anyway, and dev should never reach for one.

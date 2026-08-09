@@ -78,6 +78,17 @@ export const ProposalOpenChoiceSchema = z
   .strict();
 export type ProposalOpenChoice = z.infer<typeof ProposalOpenChoiceSchema>;
 
+/** The skill a draft was shaped under, recorded on the proposal it shaped (SPEC-019 R-19). */
+export const ProposalSkillSchema = z
+  .object({
+    id: z.string().min(1),
+    version: z.number().int().min(1),
+    /** The model family the guidance was written for, which R-21 compares against at dispatch. */
+    family: z.string().min(1),
+  })
+  .strict();
+export type ProposalSkill = z.infer<typeof ProposalSkillSchema>;
+
 export const ProposalSchema = z
   .object({
     id: ProposalIdSchema,
@@ -127,6 +138,18 @@ export const ProposalSchema = z
      * it would change and everything else stays acceptable.
      */
     openChoices: z.array(ProposalOpenChoiceSchema).optional(),
+    /**
+     * The authoring skill in force when this draft was shaped (SPEC-019 R-19).
+     *
+     * Same discipline as provenance at dispatch: a scene drafted under one version of a family's
+     * guidance and one drafted under the next differ for a reason that is otherwise
+     * unrecoverable. Explains the draft and never governs acceptance — the gate's authority is
+     * still the proposed files and the captured bases.
+     *
+     * Absent means the draft was made under general guidance, which is an ordinary outcome
+     * (R-20) and not a missing field.
+     */
+    skill: ProposalSkillSchema.optional(),
   })
   .strict();
 export type Proposal = z.infer<typeof ProposalSchema>;
