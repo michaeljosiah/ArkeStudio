@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import {
   type CandidateId,
   type ConversationId,
@@ -90,10 +91,42 @@ export interface WrapUpInput {
   now: () => string;
 }
 
+/**
+ * The conversations being wrapped up by this process, right now.
+ *
+ * The durable check below cannot see these. An intent is only appended after the pre-flight has
+ * passed, so two frames arriving together both read a log with no open intent, both agree there
+ * is nothing in the way, and both go on to stage a set of proposals for the same propositions.
+ * The transport starts a handler per frame without waiting for the one before it — the same shape
+ * as the append race this change fixes a layer down.
+ *
+ * A Set is enough because the question and the claim are one synchronous step: nothing is awaited
+ * between them, so no second call can arrive in between. The durable check remains the one that
+ * matters across a restart, where this is empty and the log is all there is.
+ */
+const inFlight = new Set<string>();
+
 export async function wrapUp(input: WrapUpInput): Promise<WrapUpResult> {
   // Built through the shared helper rather than spelled out here, so this store reaches the same
   // per-directory writer as every other one on this conversation (see `writerFor`).
-  const log = new WorldChatStore(conversationDir(input.store.dir, input.conversationId));
+  const dir = conversationDir(input.store.dir, input.conversationId);
+  const claim = resolve(dir);
+  if (inFlight.has(claim)) {
+    throw new WrapUpError(
+      "in-flight",
+      "This conversation is already being turned into proposals. Wait for that to finish.",
+    );
+  }
+  inFlight.add(claim);
+  try {
+    return await wrapUpOnce(dir, input);
+  } finally {
+    inFlight.delete(claim);
+  }
+}
+
+async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult> {
+  const log = new WorldChatStore(dir);
   const meta = await log.readMeta();
   if (!meta) throw new WrapUpError("stale", "That conversation is no longer here.");
 

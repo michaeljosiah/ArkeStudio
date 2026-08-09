@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
 import { Composer } from "../components/composer.js";
@@ -308,16 +308,21 @@ export function WorldChatConversationScreen() {
    * coordinator's own signal that every proposal is durable (R-42a), so it is the thing to wait
    * for. The wait is a few file writes, not a model call.
    *
-   * The connection ends the wait too. Neither answer can cross a socket that has gone, and a wait
-   * with nothing left to answer it is the failure this whole change is about.
+   * The connection ends the *waiting look* but not the errand. A socket that drops mid-wrap-up
+   * takes the answer with it, and leaving the button on "Turning this into proposals…" for the
+   * rest of the session is the failure this whole change is about — but the coordinator may well
+   * have finished, and the closed workspace that proves it arrives on the next connection. So the
+   * asking is remembered in a ref that no reconnection clears, and the button is freed meanwhile.
    */
   const closed = loaded?.status === "closed";
+  const asked = useRef(false);
   useEffect(() => {
-    if (!wrappingUp || !worldId) return;
-    if (closed) {
+    if (!worldId) return;
+    if (asked.current && closed) {
+      asked.current = false;
       setWrappingUp(false);
       navigate(`/w/${worldId}/proposals`);
-    } else if (wrapUpRefusal || connection !== "open") {
+    } else if (wrappingUp && (wrapUpRefusal || connection !== "open")) {
       setWrappingUp(false);
     }
   }, [wrappingUp, closed, wrapUpRefusal, connection, worldId, navigate]);
@@ -478,7 +483,9 @@ export function WorldChatConversationScreen() {
                * closed. The coordinator does not refuse it, so the screen must not offer it.
                */
               disabledReason={
-                wrappingUp ? "This conversation is being turned into proposals." : composerReason(state)
+                wrappingUp
+                  ? "This conversation is being turned into proposals."
+                  : (composerReason(state) ?? closedReason(loaded?.status))
               }
             />
             {/* Stop lives on the working line in the transcript now, beside what it would stop. */}
@@ -554,7 +561,9 @@ export function WorldChatConversationScreen() {
                 // sheet here that said less than the screen it stood in front of, and the version
                 // after it left for the proposals before knowing there were any. The effect above
                 // goes when the conversation closes.
-                if (wrapUpWorldChat(worldId, conversationId!, loaded.seq)) setWrappingUp(true);
+                if (!wrapUpWorldChat(worldId, conversationId!, loaded.seq)) return;
+                asked.current = true;
+                setWrappingUp(true);
               }}
             >
               {wrappingUp ? "Turning this into proposals…" : "Turn this into proposals"}
@@ -644,5 +653,18 @@ function composerReason(state: ReturnType<typeof useStore>["state"]): string | u
   if (state.app.health.harness.status !== "healthy") {
     return "Chat needs OpenCode running. Everything already understood is still here.";
   }
+  return undefined;
+}
+
+/**
+ * A conversation that has been wrapped up takes nothing more (§11.3).
+ *
+ * Its propositions are proposals now, and a message arriving after the fact would be in the
+ * transcript but in nothing the transcript produced — read back later as though it had been
+ * considered. Send-back is how a closed conversation is reopened, and it is on the proposal.
+ */
+function closedReason(status: string | undefined): string | undefined {
+  if (status === "closed") return "This conversation was turned into proposals. Send one back to carry on.";
+  if (status === "archived") return "This conversation is archived. Restore it to carry on.";
   return undefined;
 }

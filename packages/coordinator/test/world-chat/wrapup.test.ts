@@ -357,6 +357,35 @@ describe("what wrap-up refuses", () => {
     assert.equal((await w.ours()).length, 0, "and stages nothing while it refuses");
   });
 
+  /*
+   * Two frames arriving together. The durable guard cannot catch this on its own: an intent is
+   * only appended once the pre-flight has passed, so both reads see a log with nothing in the way
+   * and both would go on to stage a set of proposals for the same propositions.
+   */
+  it("stages one set of proposals when two wrap-ups arrive at once", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [candidate()]);
+
+    const both = await Promise.allSettled(
+      ["req-a", "req-b"].map((requestId) =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId,
+          expectedConversationSeq: seq,
+          now: NOW,
+        }),
+      ),
+    );
+
+    assert.equal(both.filter((r) => r.status === "fulfilled").length, 1, "exactly one of them ran");
+    const refused = both.find((r) => r.status === "rejected");
+    assert.ok(refused?.status === "rejected" && refused.reason instanceof WrapUpError);
+    assert.equal((await w.ours()).length, 1, "and one set of proposals exists, not two");
+  });
+
   it("refuses a conversation that moved on while it was being read", async () => {
     const w = await world();
     const seq = await withCandidates(w.log, [candidate()]);

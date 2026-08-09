@@ -107,6 +107,45 @@ describe("world chat store", () => {
     );
   });
 
+  it("re-checks a tail it may itself have torn, however often it has checked before", async () => {
+    const s = await store();
+    await s.append(message("ours"), { at: AT });
+
+    // A write that puts down part of its line and then fails leaves exactly what a crash leaves —
+    // but the process carries on, and this store has already spent its one repair. Without that
+    // being reconsidered the retry extends the fragment, and the two halves become one line that
+    // nothing can read while the append reports success.
+    const probe = await open(s.eventsPath, "r");
+    const handles = Object.getPrototypeOf(probe) as { appendFile: (data: string) => Promise<void> };
+    await probe.close();
+    const real = handles.appendFile;
+    handles.appendFile = async function (this: unknown, data: string) {
+      await real.call(this, data.slice(0, 30));
+      throw new Error("no room left on the device");
+    };
+    try {
+      await assert.rejects(() => s.append(message("cut in half"), { at: AT }));
+    } finally {
+      handles.appendFile = real;
+    }
+
+    await s.append(message("after"), { at: AT });
+    const { events, problems } = await new WorldChatStore(s.dir).read();
+    assert.ok(
+      events.every((e) => typeof e.seq === "number"),
+      "every line still parses — the fragment was cut, not extended",
+    );
+    assert.ok(
+      events.some((e) => JSON.stringify(e).includes("after")),
+      "and the record written after it is there",
+    );
+    assert.deepEqual(
+      problems.filter((p) => p.kind === "interior-corruption"),
+      [],
+      "with no half-record left in the middle of the log",
+    );
+  });
+
   it("has the bytes on disk before the append resolves", async () => {
     const s = await store();
     await s.append(message("her aunt taught her the bells"), { at: AT });

@@ -1973,21 +1973,22 @@ export function wrapUpWorldChat(
   conversationId: string,
   expectedConversationSeq: number,
 ): boolean {
-  // A fresh attempt clears the last refusal rather than standing beside it. The reason on screen
-  // has to belong to the press the person just made, and the screen waits on this being absent to
-  // know the new attempt has not come back yet.
-  if (current.worldChatWrapUpRefusals[conversationId] !== undefined) {
-    const cleared = { ...current.worldChatWrapUpRefusals };
-    delete cleared[conversationId];
-    emitChange({ ...current, worldChatWrapUpRefusals: cleared });
-  }
-  return send({
+  const sent = send({
     kind: "world-chat-wrap-up",
     worldId,
     requestId: crypto.randomUUID(),
     conversationId,
     expectedConversationSeq,
   });
+  // A fresh attempt clears the last refusal rather than standing beside it, but only once one has
+  // actually gone: a press that transmitted nothing has no answer coming to replace it, and
+  // taking the old reason away would leave the screen saying nothing about either.
+  if (sent && current.worldChatWrapUpRefusals[conversationId] !== undefined) {
+    const cleared = { ...current.worldChatWrapUpRefusals };
+    delete cleared[conversationId];
+    emitChange({ ...current, worldChatWrapUpRefusals: cleared });
+  }
+  return sent;
 }
 
 /**

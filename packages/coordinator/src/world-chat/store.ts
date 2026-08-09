@@ -61,6 +61,12 @@ interface Writer {
   queue: WriteQueue;
   /** The tail this process last saw. A mismatch means somebody else wrote to the file. */
   tail: Tail | null;
+  /**
+   * An append failed where it may already have put bytes down, so the end of the file is not
+   * known to be a whole record. The next append re-checks it however many times this process has
+   * checked before — see `repairTail`.
+   */
+  uncertain: boolean;
 }
 
 /**
@@ -91,7 +97,7 @@ function writerFor(dir: string): Writer {
   const key = resolve(dir);
   const existing = writers.get(key);
   if (existing) return existing;
-  const created: Writer = { queue: new WriteQueue(), tail: null };
+  const created: Writer = { queue: new WriteQueue(), tail: null, uncertain: false };
   writers.set(key, created);
   return created;
 }
@@ -154,15 +160,21 @@ export class WorldChatStore {
   }
 
   /**
-   * Truncate a torn final line, once per process.
+   * Truncate a torn final line, once per store — and again after an append that may have torn one.
    *
    * A crash mid-append leaves bytes that are not a record. Keeping them would corrupt the next
    * append by merging two half-lines into one plausible-looking record, which is worse than
    * losing the incomplete one.
+   *
+   * A crash is not the only way to get one. An `appendFile` that writes part of its line and then
+   * fails leaves exactly the same bytes while the process carries on, and the store that wrote
+   * them has already spent its one check — so without `uncertain` the retry would extend the
+   * fragment and report success over a line nothing can read.
    */
   private async repairTail(problems: WorldChatProblem[]): Promise<void> {
-    if (this.repaired) return;
+    if (this.repaired && !this.writer.uncertain) return;
     this.repaired = true;
+    this.writer.uncertain = false;
     let raw: string;
     try {
       raw = await readFile(toExtendedLength(this.eventsPath), "utf8");
@@ -275,6 +287,9 @@ export class WorldChatStore {
           };
         } catch (err) {
           this.writer.tail = null;
+          // And the end of the file may now be half a record, so the next append checks before it
+          // extends — whoever makes it, and however many times this store has checked already.
+          this.writer.uncertain = true;
           throw err;
         }
         result = { envelope, deduplicated: false };
