@@ -1999,7 +1999,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
             <sc-if value="{{ shotsTab }}" hint-placeholder-val="{{ true }}"><span style="padding:5px 14px;border-radius:7px;background:var(--background);box-shadow:var(--shadow-xs);font:500 12px var(--font-sans)">Shots</span><span style="padding:5px 14px;border-radius:7px;font:400 12px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="color:var(--foreground)" onClick="{{ showBoard }}">Board</span></sc-if>
             <sc-if value="{{ boardTab }}" hint-placeholder-val="{{ false }}"><span style="padding:5px 14px;border-radius:7px;font:400 12px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="color:var(--foreground)" onClick="{{ showShots }}">Shots</span><span style="padding:5px 14px;border-radius:7px;background:var(--background);box-shadow:var(--shadow-xs);font:500 12px var(--font-sans)">Board</span></sc-if>
           </span>
-          <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="sm" onClick="{{ go.sceneplan }}" hint-size="136px,32px">Generate scene…</x-import>
+          <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="sm" onClick="{{ go.sceneboard }}" hint-size="136px,32px">Generate scene…</x-import>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center">
           <span style="font:400 11px var(--font-mono);color:var(--neutral-400)">every shot inherits:</span>
@@ -2727,7 +2727,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.episodeboard }}">Story<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer" onClick="{{ go.scenes }}">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">4</span></div>
       <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;background:var(--accent);font:500 12px var(--font-sans);cursor:pointer">11 &middot; The answer from inside</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.sceneplan }}">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.sceneboard }}">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:00</span></div>
       <div style="flex:1"></div>
       <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)" onClick="{{ go.world }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
@@ -2801,7 +2801,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.episodeboard }}">Story<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer" onClick="{{ go.scenes }}">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">4</span></div>
       <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;background:var(--accent);font:500 12px var(--font-sans);cursor:pointer">11 &middot; The answer from inside</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.sceneplan }}">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.sceneboard }}">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
       <div style="flex:1"></div>
       <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)" onClick="{{ go.world }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
     </div>
@@ -2890,7 +2890,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.episodeboard }}">Story<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer" onClick="{{ go.scenes }}">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">4</span></div>
       <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;background:var(--accent);font:500 12px var(--font-sans);cursor:pointer">11 &middot; The answer from inside</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.sceneplan }}">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.sceneboard }}">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
       <div style="flex:1"></div>
       <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)" onClick="{{ go.world }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
     </div>
@@ -2948,7 +2948,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 </div>
 </sc-if>
 <sc-if value="{{ s.sceneboard }}" hint-placeholder-val="{{ false }}">
-<div data-screen-label="51a Compiled &middot; the scene in order" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
+<div data-screen-label="53e The board at rest &middot; the whole scene, priced, nothing selected" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
   <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
     <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Bell Watch &middot; ep 3 &middot; scene 11 &middot; board</span></div>
     <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;padding:0 6px;cursor:pointer" onClick="{{ go.home }}"><span style="font:650 15px var(--font-sans);letter-spacing:-.02em">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
@@ -2961,20 +2961,20 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
       </div>
       <div style="height:14px"></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.dashboard }}">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.episodeboard }}">Story<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer" onClick="{{ go.scenes }}">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">4</span></div>
-      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;background:var(--accent);font:500 12px var(--font-sans);cursor:pointer">11 &middot; The answer from inside</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.sceneplan }}">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:13</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.dayone }}">Dashboard</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.story }}">Story<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer" onClick="{{ go.scenes }}">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">5</span></div>
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;background:var(--accent);font:500 12px var(--font-sans);cursor:pointer" onClick="{{ go.scenescript }}">11 &middot; The answer from inside</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.generate }}">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.cut }}">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:13</span></div>
       <div style="flex:1"></div>
       <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)" onClick="{{ go.world }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
     </div>
     <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:24px 30px 0;overflow:hidden">
-      <div style="display:flex;align-items:flex-end;gap:14px;flex:none;animation:fadeUp .6s var(--ease-out) both">
+      <div style="flex:none;display:flex;align-items:flex-end;gap:14px;animation:fadeUp .6s var(--ease-out) both">
         <div style="flex:1;min-width:0">
-          <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">SCENE 11 &middot; BOARD &middot; COMPILED FROM v3</div>
-          <h1 style="margin:7px 0 0;font:650 25px/1.1 var(--font-sans);letter-spacing:-0.025em">Four panels, one still empty</h1>
+          <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">SCENE 11 &middot; BOARD &middot; NOTHING SENT YET</div>
+          <h1 style="margin:7px 0 0;font:650 25px/1.1 var(--font-sans);letter-spacing:-0.025em">Four shots, and what they will cost</h1>
         </div>
         <div style="display:flex;gap:3px">
           <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer" onClick="{{ go.scenescript }}">Script</span>
@@ -2984,53 +2984,58 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
         </div>
       </div>
       <div style="flex:none;display:flex;align-items:center;gap:14px;margin-top:11px">
-        <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">4 shots &middot; 17s &middot; 9:16</span>
+        <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">4 shots &middot; 17s owned &middot; 18s asked &middot; 9:16</span>
         <span style="font:400 10.5px var(--font-mono);color:var(--success)">up to date with the script</span>
         <span style="flex:1"></span>
-        <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">compiling is local and free &middot; it files nothing</span>
+        <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">click a panel to change it</span>
       </div>
-      <div style="flex:1;min-height:0;overflow:hidden;margin-top:13px;display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:12px;align-content:start;animation:fadeUp .7s var(--ease-out) .1s both">
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column" onClick="{{ go.sceneboardshot }}" style-hover="border-color:var(--neutral-400)">
+      <div style="flex:1;min-height:0;overflow:hidden;margin-top:12px;display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:12px;align-content:start;animation:fadeUp .7s var(--ease-out) .1s both">
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" onClick="{{ go.sceneboardshot }}" style-hover="border-color:var(--neutral-400)">
           <div style="height:400px;flex:none;overflow:hidden;background:var(--muted)"><img src="assets/scene4-shot12.png" alt="Wide, the door" style="display:block;width:100%;height:100%;object-fit:cover"></div>
           <div style="padding:9px 12px 11px">
             <div style="display:flex;align-items:baseline;gap:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 1</span><span style="font:600 12px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Wide, the door</span><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">4s</span></div>
-            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:4px">covers A01</div>
+            <div style="display:flex;align-items:baseline;gap:7px;margin-top:4px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);flex:1;min-width:0">covers A01</span><span style="font:400 9.5px var(--font-mono);color:var(--muted-foreground)">$1.21</span></div>
           </div>
         </div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column" onClick="{{ go.sceneboardshot }}" style-hover="border-color:var(--neutral-400)">
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" onClick="{{ go.sceneboardshot }}" style-hover="border-color:var(--neutral-400)">
           <div style="height:400px;flex:none;overflow:hidden;background:var(--muted)"><img src="assets/scene4-shot13.png" alt="Two-shot at the door" style="display:block;width:100%;height:100%;object-fit:cover"></div>
           <div style="padding:9px 12px 11px">
             <div style="display:flex;align-items:baseline;gap:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 2</span><span style="font:600 12px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Two-shot at the door</span><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">6s</span></div>
-            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:4px">covers D01, A02</div>
+            <div style="display:flex;align-items:baseline;gap:7px;margin-top:4px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);flex:1;min-width:0">covers D01, A02</span><span style="font:400 9.5px var(--font-mono);color:var(--muted-foreground)">$1.82</span></div>
           </div>
         </div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column" onClick="{{ go.sceneboardshot }}" style-hover="border-color:var(--neutral-400)">
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" onClick="{{ go.sceneboardshot }}" style-hover="border-color:var(--neutral-400)">
           <div style="height:400px;flex:none;overflow:hidden;background:var(--muted)"><img src="assets/scene4-shot14.png" alt="Close, Maren" style="display:block;width:100%;height:100%;object-fit:cover"></div>
           <div style="padding:9px 12px 11px">
-            <div style="display:flex;align-items:baseline;gap:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 3</span><span style="font:600 12px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Close, Maren</span><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">3s</span></div>
-            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:4px">covers D02</div>
+            <div style="display:flex;align-items:baseline;gap:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 3</span><span style="font:600 12px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Close, Maren</span><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">4s asked</span></div>
+            <div style="display:flex;align-items:baseline;gap:7px;margin-top:4px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);flex:1;min-width:0">covers D02</span><span style="font:400 9.5px var(--font-mono);color:var(--muted-foreground)">$1.21</span></div>
           </div>
         </div>
-        <div style="box-sizing:border-box;border:1px dashed var(--neutral-400);border-radius:11px;overflow:hidden;background:var(--background);display:flex;flex-direction:column">
-          <div style="height:400px;flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;background:var(--muted)">
-            <span style="font:400 10px var(--font-mono);color:var(--neutral-400);letter-spacing:.1em">NO FRAME YET</span>
-            <span style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);max-width:170px;text-align:center">The gap is the shot. It holds its place in the read.</span>
-          </div>
+        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" onClick="{{ go.sceneboardshot }}" style-hover="border-color:var(--neutral-400)">
+          <div style="height:400px;flex:none;overflow:hidden;background:var(--muted)"><div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px"><span style="font:400 10px var(--font-mono);color:var(--neutral-400);letter-spacing:.1em">NO FRAME YET</span><span style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);max-width:180px;text-align:center">The gap is the shot. It holds its place in the read.</span></div></div>
           <div style="padding:9px 12px 11px">
             <div style="display:flex;align-items:baseline;gap:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 4</span><span style="font:600 12px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">The empty street</span><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">4s</span></div>
-            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:4px">covers A03</div>
+            <div style="display:flex;align-items:baseline;gap:7px;margin-top:4px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);flex:1;min-width:0">covers A03</span><span style="font:400 9.5px var(--font-mono);color:var(--muted-foreground)">$1.21</span></div>
           </div>
         </div>
       </div>
-      <div style="flex:none;border-top:1px solid var(--border);padding:11px 0;display:flex;align-items:center;gap:12px">
-        <div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:11px 15px;box-shadow:var(--shadow-xs);cursor:text" style-hover="border-color:var(--neutral-400)">
+      <div style="flex:none;box-sizing:border-box;border:1px solid var(--warning);border-radius:10px;background:color-mix(in srgb, var(--warning) 8%, transparent);padding:9px 13px;margin-top:12px;display:flex;align-items:baseline;gap:11px">
+        <span style="font:400 9.5px var(--font-mono);color:var(--warning);letter-spacing:.08em;flex:none">BEFORE YOU SPEND</span>
+        <span style="font:400 11.5px/1.5 var(--font-sans);flex:1;min-width:0">A04 and A05 have no shot, so the end of the scene will be missing. Odile is a sketch, not a locked sheet. Neither stops you.</span>
+        <span style="font:400 11.5px var(--font-sans);cursor:pointer;text-decoration:underline;text-underline-offset:3px;flex:none" onClick="{{ go.scenecoverage }}">Add a shot</span>
+      </div>
+      <div style="flex:none;display:flex;align-items:center;gap:12px;margin-top:12px">
+<div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:11px 15px;box-shadow:var(--shadow-xs);cursor:text" style-hover="border-color:var(--neutral-400)">
           <span style="flex:1;font:400 13px var(--font-sans);color:var(--text-placeholder)">Shot 3 is doing the same thing as shot 2&hellip;</span>
           <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></span>
           <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span>
           <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#8629; send</span>
         </div>
-        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="lg" onClick="{{ go.sceneboard }}" hint-size="120px,40px">Recompile</x-import>
-        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" onClick="{{ go.artifacts }}" hint-size="150px,40px">Export sheet</x-import>
+      </div>
+      <div style="flex:none;border-top:1px solid var(--border);margin-top:11px;padding:11px 0 14px;display:flex;align-items:center;gap:12px">
+        <div style="flex:1;min-width:0"><div style="font:600 15px var(--font-mono)">$5.46</div><div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:2px">whole scene &middot; 4 requests &middot; compiling the board is free, this is not</div></div>
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="lg" hint-size="140px,40px" onClick="{{ go.exports }}">Export sheet</x-import>
+        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="210px,40px" onClick="{{ go.generate }}">Generate 4 shots &middot; $5.46</x-import>
       </div>
     </div>
   </div>
@@ -3054,7 +3059,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.episodeboard }}">Story<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer" onClick="{{ go.scenes }}">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">4</span></div>
       <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;background:var(--accent);font:500 12px var(--font-sans);cursor:pointer">11 &middot; The answer from inside</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.sceneplan }}">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.sceneboard }}">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
       <div style="flex:1"></div>
       <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)" onClick="{{ go.world }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
     </div>
@@ -3152,6 +3157,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
         </div>
         <div style="display:flex;gap:3px">
           <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer" onClick="{{ go.scenescript }}">Script</span>
+          <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer" onClick="{{ go.scenecoverage }}">Coverage</span>
           <span style="padding:5px 10px;border-radius:7px;background:var(--secondary);font:500 11.5px var(--font-sans)">Board</span>
           <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer" onClick="{{ go.generate }}">Takes</span>
         </div>
@@ -3253,198 +3259,6 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
       <div style="flex:none;border-top:1px solid var(--border);padding:12px 0 14px;display:flex;align-items:center;gap:10px">
         <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-mono)">$1.82</div><div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:2px">this shot only</div></div>
         <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="lg" hint-size="180px,40px" onClick="{{ go.generate }}">Generate this shot</x-import>
-      </div>
-    </div>
-  </div>
-</div>
-</sc-if>
-<sc-if value="{{ s.sceneplan }}" hint-placeholder-val="{{ false }}">
-<div data-screen-label="52a The plan &middot; before a penny moves" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
-  <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
-    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Bell Watch &middot; ep 3 &middot; scene 11 &middot; generate</span></div>
-    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;padding:0 6px;cursor:pointer" onClick="{{ go.home }}"><span style="font:650 15px var(--font-sans);letter-spacing:-.02em">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
-    <div style="flex:1;min-width:0;text-align:right"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.proposals }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.activity }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.settings }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span></div>
-  </div>
-  <div style="display:flex;flex:1;min-height:0">
-    <div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px">
-      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)" onClick="{{ go.productions }}">
-        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Bell Watch</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">season 1 &middot; 9:16 vertical</div></div>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
-      </div>
-      <div style="height:14px"></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.dashboard }}">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.episodeboard }}">Story<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.scenes }}">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">4</span></div>
-      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;font:400 12px var(--font-sans);color:var(--muted-foreground);cursor:pointer" onClick="{{ go.scenescript }}">11 &middot; The answer from inside</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:00</span></div>
-      <div style="flex:1"></div>
-      <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)" onClick="{{ go.world }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
-    </div>
-    <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:24px 30px 0;overflow:hidden">
-      <div style="display:flex;align-items:flex-end;gap:14px;flex:none;animation:fadeUp .6s var(--ease-out) both">
-        <div style="flex:1;min-width:0">
-          <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">SCENE 11 &middot; THE PLAN &middot; NOTHING SENT YET</div>
-          <h1 style="margin:7px 0 0;font:650 25px/1.1 var(--font-sans);letter-spacing:-0.025em">What each shot will send, and what it will cost</h1>
-        </div>
-        <div style="text-align:right">
-          <div style="font:650 22px var(--font-sans);letter-spacing:-.02em">$5.46</div>
-          <div style="font:400 10px var(--font-mono);color:var(--neutral-400);margin-top:2px">18s asked &middot; 17s owned &middot; 4 requests</div>
-        </div>
-      </div>
-      <div style="box-sizing:border-box;flex:none;margin-top:12px;border:1px solid var(--warning);border-radius:11px;padding:10px 15px;background:color-mix(in srgb, var(--warning) 7%, var(--background));display:flex;align-items:center;gap:12px">
-        <span style="font:400 10px var(--font-mono);color:var(--neutral-400);flex:none">BEFORE YOU SPEND</span>
-        <span style="font:400 12.5px/1.5 var(--font-sans);flex:1">A04 and A05 have no shot, so the end of the scene will be missing. Odile is a sketch, not a locked sheet. Neither stops you.</span>
-      </div>
-      <div style="flex:1;min-height:0;overflow:hidden;margin-top:12px;display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:12px;align-content:start;animation:fadeUp .7s var(--ease-out) .1s both">
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)" onClick="{{ go.sceneplanshot }}">
-          <div style="padding:11px 13px 9px;border-bottom:1px solid var(--border)">
-            <div style="display:flex;align-items:baseline;gap:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 1</span><span style="font:600 12.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Wide, the door</span></div>
-            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:4px">4s &middot; $1.21</div>
-          </div>
-          <div style="padding:10px 13px;background:var(--muted);flex:1">
-            <div style="font:400 9px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">COVERS A01</div>
-            <div style="font:400 11.5px/1.5 var(--font-sans);margin-top:5px">Maren sets the handbell against the doorframe and waits.</div>
-          </div>
-          <div style="padding:9px 13px 11px">
-            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">seedance 2.0 &middot; 720p</div>
-            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">2 refs &middot; Maren, the door</div>
-          </div>
-        </div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)" onClick="{{ go.sceneplanshot }}">
-          <div style="padding:11px 13px 9px;border-bottom:1px solid var(--border)">
-            <div style="display:flex;align-items:baseline;gap:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 2</span><span style="font:600 12.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Two-shot at the door</span></div>
-            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:4px">6s &middot; $1.82</div>
-          </div>
-          <div style="padding:10px 13px;background:var(--muted);flex:1">
-            <div style="font:400 9px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">COVERS D01, A02</div>
-            <div style="font:400 11.5px/1.5 var(--font-sans);margin-top:5px"><b style="font-weight:600">ODILE:</b> Ring it properly. Like the watch.</div>
-            <div style="font:400 11.5px/1.5 var(--font-sans);margin-top:4px">She rings. Three, then two.</div>
-          </div>
-          <div style="padding:9px 13px 11px">
-            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">seedance 2.0 &middot; 720p</div>
-            <div style="font:400 9.5px var(--font-mono);color:var(--warning);margin-top:3px">3 refs &middot; 1 dropped</div>
-          </div>
-        </div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)" onClick="{{ go.sceneplanshot }}">
-          <div style="padding:11px 13px 9px;border-bottom:1px solid var(--border)">
-            <div style="display:flex;align-items:baseline;gap:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 3</span><span style="font:600 12.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Close, Maren</span></div>
-            <div style="font:400 9.5px var(--font-mono);color:var(--warning);margin-top:4px">3s planned &middot; 4s asked &middot; $1.21</div>
-          </div>
-          <div style="padding:10px 13px;background:var(--muted);flex:1">
-            <div style="font:400 9px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">COVERS D02</div>
-            <div style="font:400 11.5px/1.5 var(--font-sans);margin-top:5px"><b style="font-weight:600">MAREN:</b> That is the watch.</div>
-          </div>
-          <div style="padding:9px 13px 11px">
-            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">seedance 2.0 &middot; 720p</div>
-            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">4s is the shortest this route makes</div>
-          </div>
-        </div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;background:var(--background);box-shadow:var(--shadow-xs);display:flex;flex-direction:column;cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)" onClick="{{ go.sceneplanshot }}">
-          <div style="padding:11px 13px 9px;border-bottom:1px solid var(--border)">
-            <div style="display:flex;align-items:baseline;gap:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 4</span><span style="font:600 12.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">The empty street</span></div>
-            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:4px">4s &middot; $1.21</div>
-          </div>
-          <div style="padding:10px 13px;background:var(--muted);flex:1">
-            <div style="font:400 9px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">COVERS A03</div>
-            <div style="font:400 11.5px/1.5 var(--font-sans);margin-top:5px">Nothing comes back. The street holds its breath.</div>
-          </div>
-          <div style="padding:9px 13px 11px">
-            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">seedance 2.0 &middot; 720p</div>
-            <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">1 ref &middot; the street</div>
-          </div>
-        </div>
-      </div>
-      <div style="box-sizing:border-box;flex:none;margin-top:10px;border:1px dashed var(--destructive);border-radius:11px;padding:11px 15px;display:flex;align-items:center;gap:12px">
-        <span style="font:400 10px var(--font-mono);color:var(--destructive);flex:none">A04, A05 &middot; NO SHOT</span>
-        <span style="font:400 12px/1.5 var(--font-sans);color:var(--muted-foreground);flex:1">Then it does. Three, then two &mdash; from the other side of the door. / Odile stops writing.</span>
-        <span style="font:400 11.5px var(--font-sans);cursor:pointer;text-decoration:underline;text-underline-offset:3px" onClick="{{ go.scenecoverage }}">Add a shot</span>
-      </div>
-      <div style="flex:none;border-top:1px solid var(--border);padding:11px 0;display:flex;align-items:center;gap:12px">
-        <div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:11px 15px;box-shadow:var(--shadow-xs);cursor:text" style-hover="border-color:var(--neutral-400)">
-          <span style="flex:1;font:400 13px var(--font-sans);color:var(--text-placeholder)">Make shot 2 tighter on the bell&hellip;</span>
-          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></span>
-          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span>
-          <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#8629; send</span>
-        </div>
-        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" onClick="{{ go.generate }}" hint-size="210px,40px">Generate 4 shots &middot; $5.46</x-import>
-      </div>
-    </div>
-  </div>
-</div>
-</sc-if>
-<sc-if value="{{ s.sceneplanshot }}" hint-placeholder-val="{{ false }}">
-<div data-screen-label="52b One shot open &middot; the prompt and its sources" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
-  <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
-    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Bell Watch &middot; ep 3 &middot; scene 11 &middot; generate &middot; shot 2</span></div>
-    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;padding:0 6px;cursor:pointer" onClick="{{ go.home }}"><span style="font:650 15px var(--font-sans);letter-spacing:-.02em">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
-    <div style="flex:1;min-width:0;text-align:right"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.proposals }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.activity }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)" onClick="{{ go.settings }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span></div>
-  </div>
-  <div style="display:flex;flex:1;min-height:0">
-    <div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px">
-      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)" onClick="{{ go.productions }}">
-        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Bell Watch</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">season 1 &middot; 9:16 vertical</div></div>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
-      </div>
-      <div style="height:14px"></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.dashboard }}">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.episodeboard }}">Story<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer" onClick="{{ go.scenes }}">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">4</span></div>
-      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;font:400 12px var(--font-sans);color:var(--muted-foreground);cursor:pointer" onClick="{{ go.scenescript }}">11 &middot; The answer from inside</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
-      <div style="flex:1"></div>
-      <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)" onClick="{{ go.world }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
-    </div>
-    <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:20px 30px 0;overflow:hidden">
-      <div style="flex:none;display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:12px;animation:fadeUp .6s var(--ease-out) both">
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:9px 12px;background:var(--background);cursor:pointer;opacity:.6" onClick="{{ go.sceneplan }}"><div style="display:flex;align-items:baseline;gap:6px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 1</span><span style="font:600 11.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Wide, the door</span></div><div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">A01 &middot; 4s &middot; $1.21</div></div>
-        <div style="box-sizing:border-box;border:1.5px solid var(--foreground);border-radius:10px;padding:9px 12px;background:var(--secondary);cursor:pointer"><div style="display:flex;align-items:baseline;gap:6px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 2</span><span style="font:600 11.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Two-shot at the door</span></div><div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">D01, A02 &middot; 6s &middot; $1.82</div></div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:9px 12px;background:var(--background);cursor:pointer;opacity:.6" onClick="{{ go.sceneplan }}"><div style="display:flex;align-items:baseline;gap:6px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 3</span><span style="font:600 11.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Close, Maren</span></div><div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">D02 &middot; 4s &middot; $1.21</div></div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:9px 12px;background:var(--background);cursor:pointer;opacity:.6" onClick="{{ go.sceneplan }}"><div style="display:flex;align-items:baseline;gap:6px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SH 4</span><span style="font:600 11.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">The empty street</span></div><div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">A03 &middot; 4s &middot; $1.21</div></div>
-      </div>
-      <div style="flex:1;min-height:0;overflow:hidden;margin-top:14px;display:flex;gap:16px;animation:fadeUp .7s var(--ease-out) .1s both">
-        <div style="flex:1;min-width:0;display:flex;flex-direction:column">
-          <div style="font:600 13px var(--font-sans)">What shot 2 will send</div>
-          <div style="font:400 11px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Nobody typed this. It is built from the world, and every line says where it came from.</div>
-          <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;background:var(--background);box-shadow:var(--shadow-xs);margin-top:10px;overflow:hidden">
-            <div style="display:flex;border-bottom:1px solid var(--border)"><div style="width:118px;flex:none;box-sizing:border-box;padding:9px 12px;background:var(--muted);font:400 9px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">STYLE</div><div style="flex:1;padding:9px 12px;font:400 12px/1.5 var(--font-sans)">Painterly, tidal, restrained. Slate and sea-glass, one warm practical light.<span style="display:block;font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">art direction v3</span></div></div>
-            <div style="display:flex;border-bottom:1px solid var(--border)"><div style="width:118px;flex:none;box-sizing:border-box;padding:9px 12px;background:var(--muted);font:400 9px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">LOCATION</div><div style="flex:1;padding:9px 12px;font:400 12px/1.5 var(--font-sans)">The blank door &mdash; a doorway with no number, brick to either side.<span style="display:block;font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">scene inherits &middot; location sheet, Look</span></div></div>
-            <div style="display:flex;border-bottom:1px solid var(--border)"><div style="width:118px;flex:none;box-sizing:border-box;padding:9px 12px;background:var(--muted);font:400 9px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">TIME</div><div style="flex:1;padding:9px 12px;font:400 12px/1.5 var(--font-sans)">night<span style="display:block;font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">scene inherits</span></div></div>
-            <div style="display:flex;border-bottom:1px solid var(--border)"><div style="width:118px;flex:none;box-sizing:border-box;padding:9px 12px;background:var(--muted);font:400 9px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">ACTION</div><div style="flex:1;padding:9px 12px;font:400 12px/1.5 var(--font-sans)">Maren (dark hair cropped short, salt-worn coat) and Odile (grey plait, ink on her fingers) at the door.<span style="display:block;font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">shot description &middot; @maren-kest v5, @odile-marrow v2</span></div></div>
-            <div style="display:flex;border-bottom:1px solid var(--border)"><div style="width:118px;flex:none;box-sizing:border-box;padding:9px 12px;background:var(--muted);font:400 9px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">CAMERA</div><div style="flex:1;padding:9px 12px;font:400 12px/1.5 var(--font-sans)">Medium two-shot, static<span style="display:block;font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">shot</span></div></div>
-            <div style="display:flex"><div style="width:118px;flex:none;box-sizing:border-box;padding:9px 12px;background:var(--muted);font:400 9px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">AUDIO</div><div style="flex:1;padding:9px 12px;font:400 12px/1.5 var(--font-sans)">dialogue: &#8220;Ring it properly. Like the watch.&#8221;<span style="display:block;font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">script block D01</span></div></div>
-          </div>
-          <div style="display:flex;align-items:center;gap:9px;margin-top:10px">
-            <span style="font:400 11.5px var(--font-sans);cursor:pointer;text-decoration:underline;text-underline-offset:3px" onClick="{{ go.scenescript }}">Write this one myself</span>
-            <span style="font:400 10px/1.5 var(--font-mono);color:var(--neutral-400);flex:1">your words replace the assembled prompt for this shot only &middot; you will be told when a sheet moves past it</span>
-          </div>
-        </div>
-        <div style="width:330px;box-sizing:border-box;flex:none;display:flex;flex-direction:column">
-          <div style="font:600 13px var(--font-sans)">What travels with it</div>
-          <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;background:var(--background);box-shadow:var(--shadow-xs);margin-top:10px;padding:12px 14px">
-            <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 9.5px var(--font-mono);color:var(--success);width:58px;flex:none">CARRIED</span><span style="font:400 12px/1.5 var(--font-sans);flex:1">Maren &mdash; model sheet v5<span style="display:block;font:400 9.5px var(--font-mono);color:var(--neutral-400)">designated &middot; primary</span></span></div>
-            <div style="display:flex;align-items:baseline;gap:8px;margin-top:8px"><span style="font:400 9.5px var(--font-mono);color:var(--success);width:58px;flex:none">CARRIED</span><span style="font:400 12px/1.5 var(--font-sans);flex:1">The blank door &mdash; scoped look<span style="display:block;font:400 9.5px var(--font-mono);color:var(--neutral-400)">location &middot; primary</span></span></div>
-            <div style="display:flex;align-items:baseline;gap:8px;margin-top:8px"><span style="font:400 9.5px var(--font-mono);color:var(--warning);width:58px;flex:none">DROPPED</span><span style="font:400 12px/1.5 var(--font-sans);flex:1">Odile &mdash; main photo<span style="display:block;font:400 9.5px var(--font-mono);color:var(--neutral-400)">over this route&#8217;s limit of 2</span></span></div>
-            <div style="border-top:1px solid var(--border);margin-top:11px;padding-top:9px;font:400 10.5px/1.55 var(--font-sans);color:var(--muted-foreground)">Odile is still named in the words. Only her picture did not fit.</div>
-          </div>
-          <div style="font:600 13px var(--font-sans);margin-top:14px">Settings</div>
-          <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:11px;background:var(--background);box-shadow:var(--shadow-xs);margin-top:10px;padding:4px 0">
-            <div style="display:flex;align-items:center;padding:8px 14px"><span style="font:400 11px var(--font-mono);color:var(--neutral-400);flex:1">model</span><span style="font:400 12px var(--font-sans)">Seedance 2.0 &#8964;</span></div>
-            <div style="display:flex;align-items:center;padding:8px 14px;border-top:1px solid var(--border)"><span style="font:400 11px var(--font-mono);color:var(--neutral-400);flex:1">size</span><span style="font:400 12px var(--font-sans)">720p &middot; 9:16 &#8964;</span></div>
-            <div style="display:flex;align-items:center;padding:8px 14px;border-top:1px solid var(--border)"><span style="font:400 11px var(--font-mono);color:var(--neutral-400);flex:1">length</span><span style="font:400 12px var(--font-sans)">6s &#8964;</span></div>
-            <div style="display:flex;align-items:center;padding:8px 14px;border-top:1px solid var(--border)"><span style="font:400 11px var(--font-mono);color:var(--neutral-400);flex:1">this shot</span><span style="font:600 12px var(--font-sans)">$1.82</span></div>
-          </div>
-        </div>
-      </div>
-      <div style="flex:none;border-top:1px solid var(--border);padding:11px 0;display:flex;align-items:center;gap:12px">
-        <div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:11px 15px;box-shadow:var(--shadow-xs);cursor:text" style-hover="border-color:var(--neutral-400)">
-          <span style="flex:1;font:400 13px var(--font-sans);color:var(--text-placeholder)">Tighter, and let the bell fill the frame&hellip;</span>
-          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></span>
-          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span>
-          <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#8629; send</span>
-        </div>
-        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="lg" onClick="{{ go.generate }}" hint-size="180px,40px">Generate this shot</x-import>
-        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" onClick="{{ go.generate }}" hint-size="210px,40px">Generate 4 shots &middot; $5.46</x-import>
       </div>
     </div>
   </div>
@@ -5458,7 +5272,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 class Component extends DCLogic {
   state = { screen: 'home', audioOn: false, audioPlaying: false, audioClip: 'sereth', setupDone: false, canonAsk: false, photoOpen: false, graphSel: 'scene', playStep: 0, playEnd: 'song', fixed: false, played: false, xpView: 'exp', xpStep: 0, ncMode: 'sentence', naMode: 'write', naKind: 'image', locMode: 'chat', genModel: 'seedance', sheetMode: 'chat', canonNewMode: 'chat', sceneTab: 'shots', sheetStyle: 'board', genMode: 'chat', settingsTab: 'providers', sheetGenerated: false, mainPhotoPromoted: false, mainPhotoPromptExpanded: false, mainPhotoUploadRef: false, mainPhotoWorldRef: false, mainPhotoCount: 4, mainPhotoCandidatesGenerated: false, mainPhotoCandidate: 1, mainPhotoPromotedCandidate: 1, lookType: 'costume', lookMode: 'close', lookPromptExpanded: false, looksGenerated: false, worldLookVersion: 3, artStyle: 'painterly', propStyle: 'editorial', imgModel: 'gpt-image-2', imgSize: '2K', imgPicker: false, availNb2: true, availNbPro: true, availFlux: true, availSeed: false, discovery: false, availGpt2: true, availGpt52: true, provSel: 'fal', themePref: 'system' };
   renderVals() {
-    const names = ['home','artdirection','artdirectionedit','artstyle','artstylewords','settings','activity','factions','sheetedit','world','locations','location','cut','audio','exports','roster','sheet','reference','mainphotogen','morelooks','voicepicker','voicemode','canon','artifacts','productions','newchar','sketch','newprod','dashboard','scenes','newscene','generate','newlocation','canondraft','canonnew','canonentry','story','genesis','sheetgen','voiceline','dayone','gametype','gamedayone','gamestory','gamedash','graph','gamestate','gamehealth','repair','promote','playtest','moviesub','xpdash','xpgraph','clip','ixedit','budget','player','publish','worldnew','newartifact','artgen','worldchat','proposals','storynew','episodeboard','episode','scenescript','scenecoverage','scenecoverageafter','sceneboard','sceneboardstale','sceneplan','sceneplanshot','videoprofile','season','seasonarcs','direction','sceneboardshot'];
+    const names = ['home','artdirection','artdirectionedit','artstyle','artstylewords','settings','activity','factions','sheetedit','world','locations','location','cut','audio','exports','roster','sheet','reference','mainphotogen','morelooks','voicepicker','voicemode','canon','artifacts','productions','newchar','sketch','newprod','dashboard','scenes','newscene','generate','newlocation','canondraft','canonnew','canonentry','story','genesis','sheetgen','voiceline','dayone','gametype','gamedayone','gamestory','gamedash','graph','gamestate','gamehealth','repair','promote','playtest','moviesub','xpdash','xpgraph','clip','ixedit','budget','player','publish','worldnew','newartifact','artgen','worldchat','proposals','storynew','episodeboard','episode','scenescript','scenecoverage','scenecoverageafter','sceneboard','sceneboardstale','videoprofile','season','seasonarcs','direction','sceneboardshot'];
     const s = {}, go = {};
     for (const n of names) { s[n] = this.state.screen === n; go[n] = () => this.setState({ screen: n, canonAsk: false, photoOpen: false }); }
     go.mainphotogen = () => this.setState({ screen: 'mainphotogen', canonAsk: false, mainPhotoPromptExpanded: false, mainPhotoUploadRef: false, mainPhotoWorldRef: false, mainPhotoCount: 4, mainPhotoCandidatesGenerated: false, mainPhotoCandidate: this.state.mainPhotoPromotedCandidate, looksGenerated: false });
