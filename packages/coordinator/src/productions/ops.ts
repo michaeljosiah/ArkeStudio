@@ -113,6 +113,10 @@ export async function saveChapter(
   const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
   const doc = MarkdownFile.parse(live);
   doc.setBody(body);
+  // The summary's word count follows the prose it summarises: every surface that reads
+  // `words` (the chapter tree, the story dashboard) would otherwise report the count the
+  // chapter had when it was last stamped by hand, indefinitely.
+  doc.setData({ words: body.trim() === "" ? 0 : body.trim().split(/\s+/).length });
   await store.commit({
     kind: "chapter-save",
     source: "editor",

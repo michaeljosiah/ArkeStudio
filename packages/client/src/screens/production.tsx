@@ -259,12 +259,13 @@ export function ProductionDashboardScreen() {
           <div>
             <div className="fy-listhead">
               Chapters
-              <span
-                style={{ cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3, fontWeight: 500, fontSize: "12.5px" }}
+              <button
+                type="button"
+                className="fy-linkbtn"
                 onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)}
               >
                 All {chapters.length} chapter{chapters.length === 1 ? "" : "s"}
-              </span>
+              </button>
             </div>
             {nearby.map((c) => (
               <div key={c.id} className="fy-listrow">
@@ -380,12 +381,10 @@ export function ProductionDashboardScreen() {
           <div>
             <div className="fy-listhead">
               Latest clips
-              <span
-                style={{ cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3, fontWeight: 500, fontSize: "12.5px" }}
-                onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}
-              >
+              {/* The same keyboard rule as the chapter link: a destination is a button, not a span. */}
+              <button type="button" className="fy-linkbtn" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
                 All {production.takes.length} takes
-              </span>
+              </button>
             </div>
             <div className="fy-cliprow">
               {latest.map((t) => (
@@ -1607,22 +1606,33 @@ export function AudioScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
+  // Spoken lines live on shots and their Generate is the voice-line dispatch — a video affair.
+  // A story production keeps this pane for its audio artifacts alone (design 54a: nothing on a
+  // story screen mentions shots or dispatch); narration comes later, as its own design.
+  const isStory = production?.meta.format === "story";
   const linked = world?.artifacts.filter((a) => a.kind === "audio") ?? [];
-  const voLines =
-    production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue") ?? [];
+  const voLines = isStory
+    ? []
+    : (production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue") ??
+      []);
   const speakerOf = (id: string | undefined) => world?.sheets.find((c) => c.id === id);
   return (
     <div className="fy-prodmain" data-screen="audio" style={{ minHeight: "100%" }}>
       <div className="fy-h1row">
         <h1 className="fy-h1">Audio</h1>
         <span className="fy-h1row__meta">
-          {voLines.length} spoken line{voLines.length === 1 ? "" : "s"} · {linked.length} audio artifact{linked.length === 1 ? "" : "s"} · voices come from the sheets
+          {isStory
+            ? `${linked.length} audio artifact${linked.length === 1 ? "" : "s"} · filed with the world, linkable to chapters`
+            : `${voLines.length} spoken line${voLines.length === 1 ? "" : "s"} · ${linked.length} audio artifact${linked.length === 1 ? "" : "s"} · voices come from the sheets`}
         </span>
         <span className="fy-h1row__push" />
-        <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/voice-line`)}>
-          Generate voice line…
-        </Button>
+        {!isStory && (
+          <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/voice-line`)}>
+            Generate voice line…
+          </Button>
+        )}
       </div>
+      {!isStory && (
       <div>
         <div className="fy-eyebrow-sm" style={{ margin: "0 0 2px" }}>
           DIALOGUE
@@ -1656,9 +1666,10 @@ export function AudioScreen() {
           );
         })}
       </div>
+      )}
       <div>
         <div className="fy-eyebrow-sm" style={{ margin: "0 0 2px" }}>
-          BEDS AND STEMS
+          {isStory ? "AUDIO ARTIFACTS" : "BEDS AND STEMS"}
         </div>
         {linked.length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>no audio artifacts yet — imports land here</div>}
         {linked.map((a) => (
@@ -1712,6 +1723,10 @@ export function ExportsScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const exportsState = useExports();
+  // A story has no cut to render, and a manuscript exporter does not exist yet — so this pane
+  // offers neither rather than a zero-length video (design 54a). It stays on the story rail
+  // because the world folder export lives here, and the chapters travel whole inside it.
+  const isStory = production?.meta.format === "story";
   const cut = production ? deriveCut(production) : null;
   const mine = Object.entries(exportsState).filter(([, e]) => e.productionId === prodId);
   const [preset, setPreset] = useState<keyof typeof PRESETS>("review-cut");
@@ -1725,8 +1740,14 @@ export function ExportsScreen() {
     <div className="fy-prodmain" data-screen="exports" style={{ minHeight: "100%" }}>
       <div className="fy-h1row">
         <h1 className="fy-h1">Exports</h1>
-        <span className="fy-h1row__meta">renders of the cut · the cut itself stays the source</span>
+        <span className="fy-h1row__meta">
+          {isStory
+            ? "the chapters travel in the world folder · a manuscript export is designed, not yet built"
+            : "renders of the cut · the cut itself stays the source"}
+        </span>
       </div>
+      {!isStory && (
+      <>
       <div>
         <div className="fy-eyebrow-sm" style={{ margin: "0 0 2px" }}>
           DELIVERED
@@ -1789,6 +1810,14 @@ export function ExportsScreen() {
           </Button>
         </div>
       </div>
+      </>
+      )}
+      {isStory && (
+        <EmptyState
+          title="No manuscript export yet"
+          hint="Chapters live in the world folder as ordinary Markdown; the export below carries them whole."
+        />
+      )}
       <div className="fy-scenefoot">
         <span className="fy-mono">
           world export: a folder that reopens identically elsewhere — history kept, caches and locks stay behind · lands
