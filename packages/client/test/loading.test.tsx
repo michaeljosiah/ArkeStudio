@@ -29,15 +29,24 @@ describe("the house loader", () => {
     assert.ok(alone.includes("fy-loading__mark") && inline.includes("fy-loading__mark"), "not a second drawing");
   });
 
-  it("declares a stopped state rather than inheriting one", () => {
-    // The nearly-shipped bug: the global reduced-motion rule only shortens the animation, and the
-    // mark's base style is a gradient offset behind clipped text. Stopped mid-ramp, one side of
-    // the letter stays pale — a half-faded loader for the person who asked for less motion. The
-    // resting state has to be written, and this is what keeps it written.
-    const i = CSS.indexOf("@media (prefers-reduced-motion: reduce) {\n  .fy-loading__mark");
+  it("declares a reduced-motion state that still says something is happening", () => {
+    // Two shipped bugs guard this rule. First: the global reduced-motion flatten only shortens
+    // the animation, and the mark's base style is a gradient offset behind clipped text —
+    // stopped mid-ramp, one side of the letter stays pale. Second (build test, 2026-08-09):
+    // a perfectly still A reads as a hang, and Windows "animation effects off" reports reduced
+    // motion for the whole app — so the sweep goes, but a slow opacity pulse stays, because the
+    // loader is often the only signal that paid work is in flight.
+    const i = CSS.indexOf("@media (prefers-reduced-motion: reduce)");
     assert.ok(i > 0, "the loader has its own reduced-motion rule");
-    const block = CSS.slice(i, CSS.indexOf("}", CSS.indexOf(".fy-loading__mark", i)));
+    const markInMedia = CSS.indexOf(".fy-loading__mark", i);
+    assert.ok(markInMedia > 0, "and it addresses the mark");
+    const block = CSS.slice(markInMedia, CSS.indexOf("}", markInMedia));
     assert.ok(block.includes("background: none"), "the gradient is cleared, not left part-way along");
     assert.ok(block.includes("color: var(--foreground)"), "and the letter is solid");
+    assert.ok(
+      block.includes("fy-loading-pulse") && block.includes("!important"),
+      "and it pulses — the global flatten is !important, so this must be too",
+    );
+    assert.ok(CSS.includes("@keyframes fy-loading-pulse"), "the pulse keyframes exist");
   });
 });

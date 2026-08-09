@@ -509,6 +509,16 @@ export function ReplaceMainPhotoScreen() {
   const [uploaded, setUploaded] = useState(false);
   const [worldRef, setWorldRef] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  // The click itself flips the panel (the WorldKeyArt pattern): between the press and the
+  // first job event there is a round trip, and a panel that waits for it says "Ready when
+  // you are" to somebody who just spent money. Cleared when the queue answers either way;
+  // the timeout is the backstop for an enqueue that was refused without a job.
+  const [asking, setAsking] = useState(false);
+  useEffect(() => {
+    if (!asking) return;
+    const timer = setTimeout(() => setAsking(false), 20_000);
+    return () => clearTimeout(timer);
+  }, [asking]);
 
   useEffect(() => {
     setPrompt(mainPhotoPromptFor(sheet));
@@ -553,6 +563,10 @@ export function ReplaceMainPhotoScreen() {
       job.target.id?.startsWith(`${sheetId}/`) &&
       (!["succeeded", "failed", "cancelled"].includes(job.status) || job.finalization?.status === "pending"),
   ).length;
+  const generating = asking || generatingPreviews > 0;
+  useEffect(() => {
+    if (asking && generatingPreviews > 0) setAsking(false);
+  }, [asking, generatingPreviews]);
   // The chosen model decides what can travel, so it decides what this screen shows travelling.
   // A silent downgrade from image identity to text description is the failure the bar exists to
   // prevent, and it has to be visible where the references are, not only in the bar's own line.
@@ -635,23 +649,28 @@ export function ReplaceMainPhotoScreen() {
             onCancel={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}
             primaryLabel="Generate previews"
             primaryDisabled={!prompt.trim()}
-            onPrimary={(chosen) =>
+            onPrimary={(chosen) => {
+              setAsking(true);
               generateMainPhoto(world.meta.worldId, sheetId, prompt.trim(), count, refs, {
                 modelId: chosen.model.id,
                 ...(chosen.tier !== undefined ? { tier: chosen.tier } : {}),
-              })
-            }
+              });
+            }}
           />
         </section>
         <section className="fy-mainphoto-dialog__results">
           <header>
             <span>PREVIEWS</span>
-            <strong>{generatingPreviews > 0 ? "generating" : candidates.length ? "ready" : "waiting"}</strong>
+            <strong>{generating ? "generating" : candidates.length ? "ready" : "waiting"}</strong>
           </header>
-          {candidates.length === 0 && generatingPreviews > 0 ? (
+          {candidates.length === 0 && generating ? (
             <div className="fy-mainphoto-dialog__empty">
               <Loading
-                label={`Generating ${generatingPreviews} preview${generatingPreviews === 1 ? "" : "s"} of ${sheet.name}`}
+                label={
+                  generatingPreviews > 0
+                    ? `Generating ${generatingPreviews} preview${generatingPreviews === 1 ? "" : "s"} of ${sheet.name}`
+                    : `Generating previews of ${sheet.name}`
+                }
                 size={44}
               />
               <span>You can leave this page. Previews land here and in Activity.</span>
