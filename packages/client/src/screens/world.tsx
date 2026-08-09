@@ -1050,14 +1050,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           {essence && readableProse("Essence", essence.body, <p className="fy-sheet__lead">{essence.body}</p>)}
         </div>
         <div className="fy-sheet__actions">
-          {isCharacter && (
-            <>
-              <Button variant="primary" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}>
-                Reference
-              </Button>
-              <Button onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/looks`)}>More looks</Button>
-            </>
-          )}
+          {/* Reference, More looks and Voice live in the tab row (design 54): a destination
+              appears once per screen, so this row keeps only what the tabs do not offer. */}
           <Button onClick={() => navigate(`/w/${worldId}/${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${sheet.id}/edit`)}>
             Edit the sheet
           </Button>

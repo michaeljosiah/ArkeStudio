@@ -305,9 +305,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:12px;margin-top:22px">
-        <span style="display:inline-flex;cursor:pointer" onClick="{{ go.reference }}"><x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="112px,40px">Reference</x-import></span>
-        <span style="display:inline-flex;cursor:pointer" onClick="{{ go.morelooks }}"><x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="lg" hint-size="112px,40px">More looks</x-import></span>
-        <span style="display:inline-flex;cursor:pointer" onClick="{{ go.sheetedit }}"><x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="ghost" size="lg" hint-size="130px,40px">Edit the sheet</x-import></span>
+        <span style="display:inline-flex;cursor:pointer" onClick="{{ go.sheetedit }}"><x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" variant="outline" size="lg" hint-size="130px,40px">Edit the sheet</x-import></span>
       </div>
       <div style="margin-top:20px;max-width:620px">
         <div style="display:flex;align-items:baseline;gap:10px"><span style="font:500 10.5px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">FROM THIS SHEET · 23 ARTIFACTS</span><span style="flex:1"></span><span style="font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="color:var(--foreground)" onClick="{{ go.artifacts }}">All artifacts</span></div>
