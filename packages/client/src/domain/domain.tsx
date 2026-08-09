@@ -176,7 +176,7 @@ export function RippleList({ ripple }: { ripple: RipplePreview | null }) {
       ))}
       {!ripple.governing && (
         <li className="dom-ripples__note">
-          Preview only — ripples are recomputed at accept, under the world lock.
+          Preview only — ripples are recomputed at accept.
         </li>
       )}
     </ul>

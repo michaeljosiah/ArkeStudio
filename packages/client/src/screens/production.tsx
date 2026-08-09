@@ -1153,8 +1153,8 @@ function GeneratePromptEditor({
         )}
         .
       </div>
+      {/* "Save override" says the edit is this shot's alone — the legend that repeated it is gone (design 54). */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-        <span className="fy-mono">edits stay on this shot · the canon doesn't change from here</span>
         <span className="fy-h1row__push" />
         <Button
           disabled={value.trim() === assembled || value.trim().length === 0}
@@ -1685,11 +1685,8 @@ export function AudioScreen() {
           </div>
         ))}
       </div>
+      {/* Every row already names its sheet and voice — the legend that re-taught it is gone (design 54). */}
       <div className="fy-scenefoot">
-        <span className="fy-mono">
-          a character's voice is part of their sheet — retakes keep the voice, only the read changes · nothing is mixed
-          destructively
-        </span>
         <span className="fy-h1row__push" />
         <span
           style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)", cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3 }}
@@ -1778,7 +1775,7 @@ export function ExportsScreen() {
           </div>
         )}
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
-          <span className="fy-mono">renders locally when the machine allows · one encode, no provider call</span>
+          <span className="fy-mono">renders locally · no provider call</span>
           <span className="fy-h1row__push" />
           <Button variant="primary" onClick={() => worldId && prodId && exportCut(worldId, prodId, preset)}>
             Export · {seconds(cut?.totalSec)}
@@ -1814,7 +1811,7 @@ export function StillsScreen() {
       <div className="fy-h1row">
         <h1 className="fy-h1">Stills</h1>
         <span className="fy-h1row__meta">
-          {stills.length} frames on the contact sheet — judged as a set, accepted one at a time
+          {stills.length} frame{stills.length === 1 ? "" : "s"} on the contact sheet — judged as a set, accepted one at a time
         </span>
       </div>
       {stills.length === 0 ? (

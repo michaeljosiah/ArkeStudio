@@ -792,7 +792,6 @@ export function CharacterLooksScreen() {
               })
             }
           />
-          <p className="fy-looks-note">Explorations do not automatically join the identity package.</p>
         </section>
         <section className="fy-looks-results">
           {images.length === 0 ? (

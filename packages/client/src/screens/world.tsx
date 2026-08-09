@@ -1227,7 +1227,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         </Section>
       )}
       {(sheet.links.length > 0 || (refs?.incomingLinks.length ?? 0) > 0) && (
-        <Section title="Linked" aside={<span>outgoing authored here; incoming from the index</span>}>
+        <Section title="Linked">
           <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
             {sheet.links.map((link) => {
               const other = world.sheets.find((s) => s.id === link);
@@ -1254,7 +1254,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         </Section>
       )}
       {refs && (
-        <Section title="From this sheet" aside={<span>computed from the index, never stored</span>}>
+        <Section title="From this sheet">
           <div className="lay-stats">
             <div className="lay-stats__item">
               <div className="lay-stats__value">{refs.tiles}</div>

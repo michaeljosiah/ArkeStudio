@@ -1744,7 +1744,7 @@ export function SettingsAppearanceScreen() {
           </label>
         ))}
       </fieldset>
-      <div className="fy-set__note">currently using {resolved} · stored for the application, never in a world</div>
+      <div className="fy-set__note">currently using {resolved}</div>
       {/*
        * The two themes, side by side. Fixed swatches rather than a live preview of the current
        * one: the point is to show what the choice above would look like, and a card that followed
@@ -1975,10 +1975,7 @@ export function SettingsLocalRuntimeScreen() {
           )}
         </div>
       ))}
-      <div className="fy-set__note">
-        models download once, meter never · what this machine cannot run stays visible, disabled,
-        with the reason
-      </div>
+      <div className="fy-set__note">models download once, meter never</div>
 
       <div className="fy-set__eyebrow">SUPERVISED RUNTIMES</div>
       <div className="fy-set__row">
@@ -2068,8 +2065,7 @@ export function SettingsWhoDoesWhatScreen() {
         );
       })}
       <div className="fy-set__note">
-        defaults for new work · any production can override per dispatch, and the override travels
-        with that dispatch alone
+        defaults for new work · any production can override per dispatch
         {manifest ? ` · manifest v${manifest.manifestVersion}` : ""}
       </div>
       <button

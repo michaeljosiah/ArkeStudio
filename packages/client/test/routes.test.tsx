@@ -352,7 +352,8 @@ describe("screen inventory", () => {
 
     const looks = renderAt(`${base}/looks`);
     assert.ok(looks.includes("Optional visual exploration, outside the identity package."));
-    assert.ok(looks.includes("Explorations do not automatically join the identity package."));
+    // The note that restated this line under the form is gone (design 54): the lede says it once.
+    assert.ok(!looks.includes("Explorations do not automatically join the identity package."));
   });
 
   it("shows the routed image model and the same non-zero batch estimate on every character dialog", () => {
