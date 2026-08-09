@@ -10,6 +10,7 @@ import {
   type Proposal,
   type ProposalConflict,
   type ProposalOpenChoice,
+  type ProposalSkill,
   type WorldChatProposalOrigin,
   type RippleItem,
   type RipplePreview,
@@ -104,6 +105,8 @@ export interface StageInput {
   worldChatOrigins?: WorldChatProposalOrigin[];
   /** #70: questions blocking this proposal's acceptance and no other (R-34c). */
   openChoices?: ProposalOpenChoice[];
+  /** SPEC-019 R-19: the authoring skill this draft was shaped under, when there was one. */
+  skill?: ProposalSkill;
 }
 
 const PROPOSALS_DIR = ".proposals";
@@ -196,6 +199,7 @@ export class ProposalManager {
         draftRevision: 1,
         ...(input.worldChatOrigins ? { worldChatOrigins: input.worldChatOrigins } : {}),
         ...(input.openChoices ? { openChoices: input.openChoices } : {}),
+        ...(input.skill ? { skill: input.skill } : {}),
       };
       await this.writeManifest(proposal);
       await this.refreshPreview(proposal);

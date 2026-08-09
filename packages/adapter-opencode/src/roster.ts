@@ -48,11 +48,26 @@ directory are the complete scope of what you may change. Rules that are not your
 - Do not touch the version or updated fields; the application stamps them.
 - When you are done, stop. Do not summarise your changes into new files.`;
 
-/** The prompt an agent actually runs with, from a brief that may be the user's. */
-export function promptFor(agent: { brief: string; needsProposal: boolean }): string {
-  return agent.needsProposal ? `${CONFINEMENT_PREAMBLE}
+/**
+ * The prompt an agent actually runs with, from a brief that may be the user's, and a skill that
+ * never is (SPEC-019 R-14, R-18).
+ *
+ * Order is the enforcement. The confinement preamble is written first and a skill is appended
+ * last, so neither a rewritten brief nor a skill document can displace the rules the accept gate
+ * assumes — a skill adds craft guidance and has no way to reach the confinement, the tool
+ * denials or the proposal directory.
+ */
+export function promptFor(agent: {
+  brief: string;
+  needsProposal: boolean;
+  skill?: { id: string; version: number; body: string } | undefined;
+}): string {
+  const head = agent.needsProposal ? `${CONFINEMENT_PREAMBLE}
 
 ${agent.brief}` : agent.brief;
+  return agent.skill ? `${head}
+
+${agent.skill.body}` : head;
 }
 
 const BRIEFS: ReadonlyArray<Omit<RosterAgent, "prompt">> = [

@@ -16,6 +16,7 @@ import {
   type ArtifactSidecar,
   type ManifestModel,
   type ProductionBundle,
+  type ProposalSkill,
   type Scene,
   type ScenePlan,
   type Shot,
@@ -148,12 +149,35 @@ export interface SceneDraft {
   /** The retrieval-scope statement the drafting agent is given. */
   scope: string;
   instruction: string;
+  /**
+   * The authoring skill this draft is being shaped under, or null when the target family has
+   * none (SPEC-019 R-20). Null is an ordinary outcome and the scope line says so, because a
+   * fallback nobody is told about is indistinguishable from a fallback that misfired.
+   */
+  skill: ProposalSkill | null;
 }
 
 export async function draftSceneSkeleton(
   store: WorldStore,
-  gate: { stage(input: { kind: "scene-draft"; summary: string; source: string; targets: Array<{ path: string; content: string }> }): Promise<{ id: string }> },
-  input: { productionId: string; brief: string },
+  gate: {
+    stage(input: {
+      kind: "scene-draft";
+      summary: string;
+      source: string;
+      targets: Array<{ path: string; content: string }>;
+      skill?: ProposalSkill;
+    }): Promise<{ id: string }>;
+  },
+  input: {
+    productionId: string;
+    brief: string;
+    /**
+     * The skill resolved for the production's target model family, from the shipped registry.
+     * Passed in rather than looked up here: the registry lives in the adapter package and the
+     * dependency runs one way (SPEC-005 D5).
+     */
+    skill?: { id: string; version: number; family: string } | null;
+  },
 ): Promise<SceneDraft> {
   const bundle = store.getBundle();
   const production = bundle.productions.find((p) => p.meta.id === input.productionId);
@@ -170,18 +194,28 @@ export async function draftSceneSkeleton(
     version: 1,
     shots: [],
   };
+  const skill = input.skill ?? null;
   const proposal = await gate.stage({
     kind: "scene-draft",
     summary: `Scene ${number}: ${skeleton.title}`,
     source: "chat:studio",
     targets: [{ path, content: JSON.stringify(skeleton, null, 2) + "\n" }],
+    // Recorded on the proposal the skill shaped (R-19), the same discipline as provenance at
+    // dispatch — two scenes drafted under different guidance differ for a recoverable reason.
+    ...(skill !== null ? { skill } : {}),
   });
   const characters = bundle.sheets.filter((s) => s.type === "character" && s.retired !== true).length;
+  // Whichever way it went, the scope line says it (R-20). A fallback nobody is told about looks
+  // exactly like a fallback that misfired, and the difference matters when the shots read oddly.
+  const guidance =
+    skill !== null
+      ? ` · drafting guidance: ${skill.id}@v${skill.version} (${skill.family})`
+      : " · drafting guidance: general — no skill ships for this model family";
   const scope = `drafts with: ${bundle.meta.name} · canon v${bundle.meta.canonRevision}${
     bundle.meta.tone ? ` · tone: ${bundle.meta.tone}` : ""
-  } · ${characters} character${characters === 1 ? "" : "s"} available`;
+  } · ${characters} character${characters === 1 ? "" : "s"} available${guidance}`;
   const instruction = `${scope}\n\nDraft scene ${number} in ${path} from this brief: "${input.brief}". Fill the shots array: each shot needs id ("sh_" + number), number, title, description with @mentions for every character and the location, camera, audio, durationSec. Propose an inherits block (location, timeOfDay, tone). Check canon for anything the brief touches and keep every line consistent with it. Do not touch any other file.`;
-  return { proposalId: proposal.id, path, scope, instruction };
+  return { proposalId: proposal.id, path, scope, instruction, skill };
 }
 
 // ---------------------------------------------------------------------------

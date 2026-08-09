@@ -23,6 +23,7 @@ import {
 } from "@arke-studio/coordinator";
 import {
   agentForPurpose,
+  skillFor,
   buildSessionConfig,
   ROSTER,
   credentialEnv,
@@ -672,7 +673,7 @@ async function initialize(): Promise<{ port: number }> {
     // this build honestly has none; the dev coordinator points at the repo fixture instead, and
     // that is where the feature is exercised from source.
     sampleWorldPath: app.isPackaged ? join(process.resourcesPath, "sample-world") : null,
-    authoring: { buildConfig: buildSessionConfig, agentForPurpose, roster: ROSTER },
+    authoring: { buildConfig: buildSessionConfig, agentForPurpose, roster: ROSTER, skillFor },
     cipher,
     secretRegistry: providerSecrets,
     providerCalls,

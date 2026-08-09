@@ -137,6 +137,15 @@ export const ManifestModelSchema = z
     limits: ModelLimitsSchema,
     pricing: PricingSchema,
     /**
+     * The model family this row belongs to, e.g. "seedance" (SPEC-019 R-16). Models in one
+     * family answer the same prompting conventions, so it is the family — not the row — that a
+     * skill is written for and selected by. Optional: a row with no family gets no skill and
+     * drafts under general guidance, which R-20 requires be a stated fallback rather than a
+     * failure. Deliberately not derived from the id, because ids are route names and two routes
+     * of one family disagree about them ("seedance-2.0", "seedance-2.0-fast").
+     */
+    family: z.string().min(1).optional(),
+    /**
      * Enabled from a provider's catalogue rather than shipped with a verified description. The
      * price is real — nothing unpriced can be enabled — but what it accepts was never checked,
      * so it runs at the floor: no references, no frames, the provider's default size. Marked

@@ -1,4 +1,5 @@
 import { promptFor, ROSTER } from "./roster.js";
+import { skillFor, type Skill } from "./skills.js";
 
 /**
  * Session configuration written by Studio (SPEC-005 R-5, R-6, R-10, D5).
@@ -60,6 +61,27 @@ export interface SessionConfigInput {
    * gate assumes, and an agent talked out of them fails in ways that look like our bugs.
    */
   agents?: Record<string, { model?: string; brief?: string }>;
+  /**
+   * The target model family for this session, which selects the authoring skill (SPEC-019 R-16).
+   * Absent, or a family with no skill, means the agents draft under general guidance — a stated
+   * fallback rather than a failure (R-20), stated by the caller that knows it happened.
+   */
+  skillFamily?: string;
+}
+
+/**
+ * Which roster agents take which skill. An agent that answers rather than authors takes none:
+ * a skill shapes what is drafted, and there is nothing drafted here to shape (R-17).
+ */
+const SKILLED_AGENTS: Record<string, Parameters<typeof skillFor>[0]> = {
+  "scene-writer": "scene-drafting",
+  "art-director": "storyboard",
+};
+
+/** The skill a given agent runs with in this session, or null. Exported for the record (R-19). */
+export function skillForAgent(agentName: string, family: string | undefined): Skill | null {
+  const purpose = SKILLED_AGENTS[agentName];
+  return purpose === undefined ? null : skillFor(purpose, family);
 }
 
 /** The opencode.json object written into a session's working directory. */
@@ -67,9 +89,17 @@ export function buildSessionConfig(input: SessionConfigInput): Record<string, un
   const agent: Record<string, unknown> = {};
   for (const member of ROSTER) {
     const override = input.agents?.[member.name];
+    // The skill comes from the shipped registry, never from the Settings override: a brief
+    // replaces what the agent is for, and craft guidance the output quality depends on is not
+    // something to lose by editing an unrelated field (R-14, D12).
+    const skill = skillForAgent(member.name, input.skillFamily);
     agent[member.name] = {
       description: member.description,
-      prompt: override?.brief ? promptFor({ ...member, brief: override.brief }) : member.prompt,
+      prompt: promptFor({
+        ...member,
+        ...(override?.brief !== undefined ? { brief: override.brief } : {}),
+        ...(skill !== null ? { skill } : {}),
+      }),
       // Deny shell/network tools per agent; documented as risk reduction (R-10). The harness
       // honouring its own config is assumed; detection at accept is the layer that holds.
       tools: member.readOnly ? { ...READ_ONLY_TOOLS } : { ...DENIED_TOOLS },

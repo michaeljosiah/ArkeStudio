@@ -106,6 +106,7 @@ const CURATED = {
   "bytedance/seedance-2.0/text-to-video": {
     id: "seedance-2.0",
     capability: "video",
+    family: "seedance",
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     limits: {
       maxDurationSec: 15,
@@ -117,6 +118,7 @@ const CURATED = {
   "bytedance/seedance-2.0/fast/text-to-video": {
     id: "seedance-2.0-fast",
     capability: "video",
+    family: "seedance",
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     // The fast route tops out at 720p — its schema offers 480p and 720p only. It was listed at
     // 1080p, a size it cannot make, which the picker offered and the price list charged for.
@@ -280,6 +282,10 @@ for (const [route, curated] of Object.entries(CURATED)) {
     accepts: curated.accepts,
     limits: limitsFor(curated),
     pricing,
+    // SPEC-019 R-16: the family selects the authoring skill. Curated, not derived from the id —
+    // ids are route names and one family's routes disagree about them ("seedance-2.0" and
+    // "seedance-2.0-fast" are one family). A row without one drafts under general guidance.
+    ...(curated.family ? { family: curated.family } : {}),
   });
   endpoints[curated.id] = route;
   // An edit route is only emitted when the model also declares it accepts references, so the

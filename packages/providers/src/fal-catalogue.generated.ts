@@ -149,6 +149,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "id": "seedance-2.0",
     "provider": "fal",
     "capability": "video",
+    "family": "seedance",
     "displayName": "Seedance 2.0 Text to Video API",
     "accepts": {
       "referenceImages": 0,
@@ -193,6 +194,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "id": "seedance-2.0-fast",
     "provider": "fal",
     "capability": "video",
+    "family": "seedance",
     "displayName": "Seedance 2.0 Fast Text to Video",
     "accepts": {
       "referenceImages": 0,

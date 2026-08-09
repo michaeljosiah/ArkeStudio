@@ -27,6 +27,7 @@ import {
   composeDispatches,
   createChapter,
   createProduction,
+  draftSceneSkeleton,
   exportBoard,
   landBoard,
   reorderChapters,
@@ -1030,6 +1031,46 @@ describe("SPEC-019 derived negatives (R-9..R-13, D8..D10)", () => {
         "the preamble leads, ahead of the overridden body",
       );
     }
+    await store.close();
+  });
+});
+
+describe("SPEC-019 skills on the draft they shaped (R-19, R-20)", () => {
+  const SKILL = { id: "seedance-scene-drafting", version: 1, family: "seedance" };
+
+  it("records the skill on the proposal, and says which guidance drafted the scene", async () => {
+    const { store, gate } = await open();
+    const production = store.getBundle().productions[0]!;
+    const draft = await draftSceneSkeleton(store, gate, {
+      productionId: production.meta.id,
+      brief: "The tide turns at the harbour mouth",
+      skill: SKILL,
+    });
+    assert.deepEqual(draft.skill, SKILL);
+    assert.match(draft.scope, /seedance-scene-drafting@v1/);
+    assert.match(draft.scope, /\(seedance\)/);
+
+    // On the proposal itself, so it survives the session that made it (R-19).
+    const staged = await gate.readManifest(draft.proposalId);
+    assert.deepEqual(staged.skill, SKILL);
+    await store.close();
+  });
+
+  it("says so when no skill ships for the family, rather than failing or borrowing one", async () => {
+    const { store, gate } = await open();
+    const production = store.getBundle().productions[0]!;
+    const draft = await draftSceneSkeleton(store, gate, {
+      productionId: production.meta.id,
+      brief: "A quiet scene",
+      skill: null,
+    });
+    assert.equal(draft.skill, null);
+    assert.match(draft.scope, /general — no skill ships for this model family/);
+
+    const staged = await gate.readManifest(draft.proposalId);
+    assert.equal(staged.skill, undefined, "absent is an ordinary record, not a missing field");
+    // The fallback is stated but never blocking: the draft still went out.
+    assert.ok(draft.instruction.includes("Fill the shots array"));
     await store.close();
   });
 });
