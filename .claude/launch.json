@@ -5,13 +5,15 @@
       "name": "client",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--workspace", "@arke-studio/client"],
-      "port": 5173
+      "port": 5173,
+      "autoPort": true
     },
     {
       "name": "coordinator",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--workspace", "@arke-studio/coordinator"],
-      "port": 8791
+      "port": 8791,
+      "autoPort": true
     }
   ]
 }

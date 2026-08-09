@@ -28,7 +28,14 @@ const repoRoot = resolve(here, "../../..");
 const fixturesRoot = join(repoRoot, "fixtures");
 const devRoot = process.env["ARKE_STUDIO_ROOT"] ?? join(repoRoot, ".dev", "root");
 
-const DEV_PORT = 8791;
+// 8791 unless something already holds it — a second checkout, or another agent's dev
+// coordinator. The launcher passes the port it assigned through PORT, and the client reaches
+// a moved coordinator through VITE_ARKE_WS, which its store already reads. An empty PORT is
+// not a request for port 0 — Number("") is 0, and binding there leaves the client with
+// nothing to connect to.
+const requestedPort = process.env["PORT"]?.trim();
+const parsedPort = requestedPort ? Number(requestedPort) : Number.NaN;
+const DEV_PORT = Number.isInteger(parsedPort) && parsedPort >= 0 ? parsedPort : 8791;
 
 async function seed(): Promise<void> {
   const worldsDir = join(devRoot, "worlds");

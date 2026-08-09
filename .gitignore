@@ -22,5 +22,10 @@ apps/desktop/build-resources/
 # Local dev scratch (dev coordinator change log, etc.)
 .dev/
 
+# Per-machine env overrides — VITE_ARKE_WS when a dev coordinator moved off 8791, and
+# anything else local. Never the committed configuration.
+.env.local
+.env.*.local
+
 # Local system documentation — generated for this machine, not shipped.
 docs/system/
