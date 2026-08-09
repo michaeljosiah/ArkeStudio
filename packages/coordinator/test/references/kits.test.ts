@@ -756,7 +756,18 @@ describe("kit mutations through the one commit primitive", () => {
     assert.equal(accepted.anchorFile, "head-front.png");
     assert.equal(compilationIsStale((await readKit(store, "maren-kest"))!.kit, accepted, 5), true);
 
-    const second = await recordReferenceTake(store, { ...job, id: "jb_01J8E0000000000000000000JA" } as never);
+    // Its own landing, because that is what a second job has: the landing names carry the
+    // generation key precisely so two requests never write over one another. The directory is
+    // re-created here for the same reason the dispatcher re-creates it — the first take took
+    // its staging copy with it and left nothing behind (issue 231).
+    const secondLanded = "references/maren-kest/incoming/character-sheet-ga.png";
+    await mkdir(join(dir, "references", "maren-kest", "incoming"), { recursive: true });
+    await writeFile(join(dir, secondLanded), "second-generated-sheet-bytes");
+    const second = await recordReferenceTake(store, {
+      ...job,
+      id: "jb_01J8E0000000000000000000JA",
+      landedFiles: [secondLanded],
+    } as never);
     assert.ok(second);
     await recordReferenceReview(store, second, "reject", { field: "identity", note: "profile drifted" });
     const final = store.getBundle();
