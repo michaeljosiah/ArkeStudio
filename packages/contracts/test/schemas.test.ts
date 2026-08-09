@@ -4,16 +4,21 @@ import {
   ArtifactSidecarSchema,
   ArtDirectionRecordSchema,
   AppSettingsSchema,
+  canDeleteJob,
   CanonEntrySchema,
   ChangeRecordSchema,
   CHARACTER_ROLE_MAX,
   ClientMessageSchema,
   ClientStateSchema,
+  computeNeedsYou,
   DomainEventSchema,
   FrameSchema,
   HarnessEventSchema,
   JobSchema,
   LedgerEntrySchema,
+  REPLAYABLE_FINALIZATION_TARGETS,
+  type ClientState,
+  type Job,
   ProposalSchema,
   ReferenceKitSchema,
   ReviewDecisionSchema,
@@ -471,6 +476,51 @@ describe("jobs and ledger", () => {
       actualSource: "provider-reported",
     };
     assert.deepEqual(LedgerEntrySchema.parse(entry), entry);
+  });
+});
+
+describe("a failed finalization always leaves the user a way out", () => {
+  const failed = (kind: string): Job => ({
+    id: newId("jb"),
+    idempotencyKey: ulid(),
+    worldId: WORLD_ID,
+    target: { kind },
+    capability: "image",
+    provider: "openai",
+    model: "gpt-image-2",
+    params: {},
+    estimatedMicroUsd: 1,
+    status: "succeeded",
+    providerJobId: null,
+    attempt: 1,
+    error: null,
+    finalization: { status: "failed", error: "could not be prepared", updatedAt: "2026-07-30T14:02:04Z" },
+    createdAt: "2026-07-30T14:01:00Z",
+    updatedAt: "2026-07-30T14:02:04Z",
+  });
+
+  const needsYouFor = (kind: string) =>
+    computeNeedsYou({
+      app: { jobs: [failed(kind)], queues: [] },
+      world: null,
+      worlds: [],
+    } as unknown as ClientState).filter((entry) => entry.kind === "job-finalization-failed");
+
+  // The queue stopped auto-replaying failed finalizations, so the row's only escape is its own
+  // retry — and canDeleteJob refuses to delete it. A replayable kind without the action strands.
+  for (const kind of REPLAYABLE_FINALIZATION_TARGETS) {
+    it(`offers retry-finalization for ${kind}, which canDeleteJob will not let the user drop`, () => {
+      const [entry] = needsYouFor(kind);
+      assert.ok(entry, `${kind} should raise a needs-you entry`);
+      assert.deepEqual(entry.actions, ["retry-finalization"]);
+      assert.equal(canDeleteJob(failed(kind)), false);
+    });
+  }
+
+  it("leaves a kind the queue cannot replay without a retry it would never honour", () => {
+    const [entry] = needsYouFor("shot");
+    assert.ok(entry);
+    assert.deepEqual(entry.actions, []);
   });
 });
 

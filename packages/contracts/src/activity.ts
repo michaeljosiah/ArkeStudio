@@ -1,6 +1,7 @@
 import type { ClientState } from "./client-state.js";
 import type { Job } from "./job.js";
 import type { LedgerEntry } from "./job.js";
+import { REPLAYABLE_FINALIZATION_TARGETS } from "./job.js";
 import { PROVIDERS } from "./provider.js";
 
 /**
@@ -57,9 +58,9 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
   // Class 1 — unresolved spend: only the user can decide (D3). Global and precise (R-6).
   for (const job of state.app.jobs) {
     if (job.finalization?.status === "failed") {
-      const retryable = ["main-photo-candidate", "establish-candidate", "character-sheet", "character-look"].includes(
-        job.target.kind,
-      );
+      // Every kind the queue can replay gets the action, or the row strands: a failed
+      // finalization cannot be deleted, so an entry with no retry has no way out at all.
+      const retryable = REPLAYABLE_FINALIZATION_TARGETS.has(job.target.kind);
       entries.push({
         urgency: 1,
         kind: "job-finalization-failed",

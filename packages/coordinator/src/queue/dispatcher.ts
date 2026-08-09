@@ -5,6 +5,8 @@ import {
   credentialKindOf,
   formatMicroUsd,
   PROVIDERS,
+  REFERENCE_FINALIZATION_TARGETS,
+  REPLAYABLE_FINALIZATION_TARGETS,
   ulid,
   type Capability,
   type ClientDeclarations,
@@ -134,13 +136,6 @@ const FORMAT_PRESERVING_IMAGE_TARGETS = new Set([
   "character-look",
   "reference-tile",
 ]);
-const REFERENCE_FINALIZATION_TARGETS = new Set([
-  "main-photo-candidate",
-  "establish-candidate",
-  "character-sheet",
-  "character-look",
-]);
-const REPLAYABLE_FINALIZATION_TARGETS = new Set([...REFERENCE_FINALIZATION_TARGETS, "voice-preview"]);
 const FOLLOW_ON_TARGETS = new Set([
   ...REFERENCE_FINALIZATION_TARGETS,
   "reference-tile",
