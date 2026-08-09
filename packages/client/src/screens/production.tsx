@@ -37,6 +37,7 @@ import {
   setPromptOverride,
   useExports,
   useStore,
+  useWorld,
 } from "../lib/store.js";
 
 /** Production screens (§2.9), composed to the prototype frames 11a/14a/11b/24a/25a/25b/10b. */
@@ -803,7 +804,10 @@ export function SceneDetailScreen() {
 export function NewSceneScreen() {
   const { worldId, prodId } = useParams();
   const navigate = useNavigate();
+  const world = useWorld();
   const [brief, setBrief] = useState("");
+  // The example brief names one of this world's own cast, not the sample world's.
+  const exampleName = world?.sheets[0]?.name ?? "Someone";
   return (
     <div className="fy-prodmain" data-screen="new-scene">
       <div className="fy-h1row">
@@ -815,7 +819,7 @@ export function NewSceneScreen() {
         <div className="scr-field">
           <label className="scr-field__label">What happens</label>
           <Textarea
-            placeholder="Maren takes the dusk watch alone; the verse rises a season early…"
+            placeholder={`${exampleName} keeps the night watch alone; what they feared arrives a season early…`}
             value={brief}
             onChange={(e) => setBrief(e.target.value)}
           />
