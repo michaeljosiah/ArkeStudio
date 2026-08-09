@@ -52,8 +52,200 @@ export function resolveCast(description: string, sheets: Sheet[]): ResolvedCast 
 }
 
 // ---------------------------------------------------------------------------
-// Prompt assembly (R-14, R-15, R-16, D6, D7)
+// Prompt assembly (SPEC-012 R-14..R-16; SPEC-019 R-5..R-8, D5..D7)
 // ---------------------------------------------------------------------------
+
+/**
+ * One statement, terminated once. Assembly used to join fragments with ". " until they looked
+ * like sentences, which produced `dusk. Maren crosses` and the `..` cleanup that chased it
+ * (SPEC-019 R-7). Terminating each part and giving blocks their own paragraph is what fixes
+ * that; the parts themselves stay as authored.
+ *
+ * Deliberately NOT capitalised. Upper-casing the first letter of authored text turns
+ * "iPhone-style handheld" into "IPhone-style handheld" — quietly corrupting a camera note to
+ * make a fragment look like prose. Where the phrasing is ours, the capital is written in.
+ */
+function sentence(text: string): string {
+  const trimmed = text.trim().replace(/[.\s]+$/, "");
+  if (trimmed.length === 0) return "";
+  return `${trimmed}.`;
+}
+
+/** The first clause of a named section, which is how a sheet's prose enters a prompt. */
+function firstClause(sheet: Sheet, heading: string): string | null {
+  const body = sheet.sections.find((s) => s.heading === heading)?.body;
+  const clause = body?.split(/[.!?]/)[0]?.trim();
+  return clause !== undefined && clause.length > 0 ? clause : null;
+}
+
+function styleFor(world: WorldMeta, artDirection?: string): string {
+  return (
+    artDirection ??
+    [world.tone, world.genre].filter((s): s is string => typeof s === "string" && s.length > 0).join(", ")
+  );
+}
+
+/**
+ * The blocks of an assembled prompt (R-5). Kept separate rather than pre-joined so that the
+ * dispatch dialog can show them, the tests can assert on one without matching the rest, and the
+ * trailing constraints stay distinguishable from the beats they must not be interleaved with.
+ */
+export interface PromptBlocks {
+  /** Art direction, cast, place, time and the event — what the clip is. */
+  summary: string;
+  /** What is true for the whole clip: location look, and prose for subjects carrying no image. */
+  standing: string;
+  /** The shot's own action. */
+  body: string;
+  /** This shot's camera and audio direction — part of the beat, in a pass. */
+  direction: string;
+  /**
+   * Art direction restated as what must not drift. Stated once per clip and never per beat
+   * (R-6): a four-shot pass repeating the world's look four times spends the model's attention
+   * arguing with itself about which mention is authoritative.
+   */
+  persistent: string;
+}
+
+export interface AssembleInput {
+  world: WorldMeta;
+  sheets: Sheet[];
+  scene: Scene;
+  shot: Shot;
+  artDirection?: string;
+  /**
+   * Sheets whose reference image this dispatch actually carries. Their prose appearance clause
+   * is dropped, because the image is the stronger carrier and restating the description competes
+   * with it (R-8, D7). Absent — a preview with no model chosen — every clause is kept, which is
+   * the fullest form and never the wrong one.
+   */
+  carriedSheetIds?: ReadonlySet<string>;
+}
+
+/** The four blocks, before they are joined (R-5). */
+export function assembleBlocks(input: AssembleInput): PromptBlocks {
+  const { world, sheets, scene, shot } = input;
+  const carried = input.carriedSheetIds ?? new Set<string>();
+  const { cast } = resolveCast(shot.description, sheets);
+  const style = styleFor(world, input.artDirection);
+  const location =
+    scene.inherits?.location !== undefined
+      ? sheets.find((s) => s.id === scene.inherits!.location)
+      : undefined;
+
+  // 1 — summary: what the clip is, led by the art direction (R-6).
+  const who = cast.map((c) => c.sheet.name);
+  const whoClause =
+    who.length === 0
+      ? ""
+      : who.length === 1
+        ? who[0]!
+        : `${who.slice(0, -1).join(", ")} and ${who[who.length - 1]!}`;
+  const where = [location?.name, scene.inherits?.timeOfDay].filter((s): s is string => !!s).join(", ");
+  const summary = [
+    sentence(style),
+    whoClause && where ? sentence(`${whoClause} at ${where}`) : sentence(whoClause || where),
+    sentence(shot.title),
+  ]
+    .filter((s) => s.length > 0)
+    .join(" ");
+
+  // 2 — standing: true for the whole clip. A subject whose image travels contributes nothing
+  // here; a sketch citation contributes its appearance once, rather than at every mention.
+  const standingParts: string[] = [];
+  if (location) {
+    const look = firstClause(location, "Look");
+    standingParts.push(sentence(look ? `${location.name} — ${look}` : location.name));
+  }
+  for (const { sheet } of cast) {
+    if (carried.has(sheet.id)) continue;
+    const appearance = firstClause(sheet, "Appearance");
+    if (appearance) standingParts.push(sentence(`${sheet.name} — ${appearance}`));
+  }
+  const standing = standingParts.filter((s) => s.length > 0).join(" ");
+
+  // 3 — body: the shot's direction, mentions resolved to names. The appearance clause is not
+  // inlined here at all now: it is said once above, or carried as an image, never both.
+  let description = shot.description;
+  for (const { sheet } of cast) description = description.replaceAll(`@${sheet.id}`, sheet.name);
+  const body = sentence(description);
+
+  // 4 — direction: this shot's camera and audio. Per-beat, so in a pass it travels with the beat.
+  const directionParts: string[] = [];
+  if (shot.camera) directionParts.push(sentence(shot.camera));
+  if (shot.audio?.kind && shot.audio.kind !== "silence") {
+    directionParts.push(
+      sentence(shot.audio.line ? `${shot.audio.kind}: "${shot.audio.line}"` : shot.audio.kind),
+    );
+  }
+  const direction = directionParts.filter((s) => s.length > 0).join(" ");
+
+  // 5 — persistent: what must not drift, once at the end (R-6).
+  const persistent = style ? sentence(`Throughout: ${style}`) : "";
+
+  return { summary, standing, body, direction, persistent };
+}
+
+/** The blocks joined, one paragraph each, empty ones omitted rather than emitted (R-7). */
+export function joinBlocks(blocks: PromptBlocks): string {
+  return [blocks.summary, blocks.standing, blocks.body, blocks.direction, blocks.persistent]
+    .map((block) => block.trim())
+    .filter((block) => block.length > 0)
+    .join("\n\n");
+}
+
+/**
+ * A whole-scene pass, composed as one clip rather than as several prompts stapled together
+ * (R-5, R-6). The summary, the standing description and the persistent constraint are stated
+ * once for the pass; each shot contributes only its beat. Joining per-shot prompts instead
+ * restated the world's art direction twice per shot, which is what D6 exists to prevent.
+ *
+ * An overridden shot contributes its override verbatim as the beat: the override owns the
+ * direction, and there are no blocks to take apart.
+ */
+export function assemblePassBlocks(input: {
+  world: WorldMeta;
+  sheets: Sheet[];
+  scene: Scene;
+  entries: ReadonlyArray<{ shot: Shot; prompt: { text: string; overridden: boolean } }>;
+  artDirection?: string;
+  carriedSheetIds?: ReadonlySet<string>;
+}): { summary: string; standing: string; beats: Array<{ shot: Shot; text: string }>; persistent: string } {
+  const blocksFor = (shot: Shot): PromptBlocks =>
+    assembleBlocks({
+      world: input.world,
+      sheets: input.sheets,
+      scene: input.scene,
+      shot,
+      ...(input.artDirection !== undefined ? { artDirection: input.artDirection } : {}),
+      ...(input.carriedSheetIds !== undefined ? { carriedSheetIds: input.carriedSheetIds } : {}),
+    });
+  const first = input.entries[0];
+  const lead = first ? blocksFor(first.shot) : null;
+  // The standing description is the union across the pass, deduplicated: one location look, and
+  // each uncarried subject named once however many beats they appear in.
+  const standing: string[] = [];
+  for (const entry of input.entries) {
+    for (const line of blocksFor(entry.shot).standing.split(/(?<=\.)\s+/)) {
+      const trimmed = line.trim();
+      if (trimmed.length > 0 && !standing.includes(trimmed)) standing.push(trimmed);
+    }
+  }
+  const beats = input.entries.map((entry) => {
+    if (entry.prompt.overridden) return { shot: entry.shot, text: entry.prompt.text };
+    const blocks = blocksFor(entry.shot);
+    return {
+      shot: entry.shot,
+      text: [blocks.body, blocks.direction].filter((b) => b.length > 0).join(" "),
+    };
+  });
+  return {
+    summary: lead?.summary ?? "",
+    standing: standing.join(" "),
+    beats,
+    persistent: lead?.persistent ?? "",
+  };
+}
 
 /** The assembled form: cited sheets, the scene's location, the tone, the shot's direction. */
 export function assemblePrompt(
@@ -62,58 +254,40 @@ export function assemblePrompt(
   scene: Scene,
   shot: Shot,
   artDirection?: string,
+  carriedSheetIds?: ReadonlySet<string>,
 ): string {
-  const { cast } = resolveCast(shot.description, sheets);
-  const parts: string[] = [];
-  const style =
-    artDirection ??
-    [world.tone, world.genre].filter((s): s is string => typeof s === "string" && s.length > 0).join(", ");
-  if (style) parts.push(style);
-  const location =
-    scene.inherits?.location !== undefined
-      ? sheets.find((s) => s.id === scene.inherits!.location)
-      : undefined;
-  if (location) {
-    const look = location.sections
-      .find((s) => s.heading === "Look")
-      ?.body.split(/[.!?]/)[0]
-      ?.trim();
-    parts.push(look ? `${location.name} — ${look}` : location.name);
-  }
-  if (scene.inherits?.timeOfDay) parts.push(scene.inherits.timeOfDay);
-  // The description with mentions replaced by name + a clause of appearance.
-  let description = shot.description;
-  for (const { sheet } of cast) {
-    const appearance = sheet.sections
-      .find((s) => s.heading === "Appearance")
-      ?.body.split(/[.!?]/)[0]
-      ?.trim();
-    description = description.replaceAll(
-      `@${sheet.id}`,
-      appearance ? `${sheet.name} (${appearance})` : sheet.name,
-    );
-  }
-  parts.push(description.trim());
-  if (shot.camera) parts.push(shot.camera);
-  if (shot.audio?.kind && shot.audio.kind !== "silence") {
-    parts.push(shot.audio.line ? `${shot.audio.kind}: "${shot.audio.line}"` : shot.audio.kind);
-  }
-  return parts
-    .filter((p) => p.length > 0)
-    .join(". ")
-    .replace(/\.\./g, ".");
+  return joinBlocks(
+    assembleBlocks({
+      world,
+      sheets,
+      scene,
+      shot,
+      ...(artDirection !== undefined ? { artDirection } : {}),
+      ...(carriedSheetIds !== undefined ? { carriedSheetIds } : {}),
+    }),
+  );
 }
 
-/** What the dispatch will actually say: the override when present, else the assembled form. */
+/**
+ * The overridable body: the override when present, else the assembled form.
+ *
+ * This is the *body* only. The binding preamble and the derived negatives are composed at
+ * dispatch and sit outside it (SPEC-019 R-3, R-13, D3) — an override is what a user writes for a
+ * hard shot, and a hard shot is the one with the most cast in it and still a video dispatch.
+ */
 export function promptFor(
   world: WorldMeta,
   sheets: Sheet[],
   scene: Scene,
   shot: Shot,
   artDirection?: string,
+  carriedSheetIds?: ReadonlySet<string>,
 ): { text: string; overridden: boolean } {
   if (shot.promptOverride) return { text: shot.promptOverride.text, overridden: true };
-  return { text: assemblePrompt(world, sheets, scene, shot, artDirection), overridden: false };
+  return {
+    text: assemblePrompt(world, sheets, scene, shot, artDirection, carriedSheetIds),
+    overridden: false,
+  };
 }
 
 /** Cited sheets that advanced past the override's recorded versions (R-16, D7). */
@@ -194,6 +368,160 @@ export interface AttachmentDecision {
   mode: "designated" | "main-photo" | "scoped-look" | "sketch-citation";
   role: "primary" | "secondary";
   staleGap: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Reference binding (SPEC-019 R-1..R-4, D1, D2)
+// ---------------------------------------------------------------------------
+
+/**
+ * A carried asset, numbered. The index is the position the asset occupies in the transmitted
+ * array, and the preamble is generated from these same records — one structure, so the stated
+ * order and the sent order cannot drift (R-2, D2). Two representations of one ordering will
+ * disagree eventually, and the disagreement presents as the model confusing two characters.
+ */
+export interface BoundReference {
+  /** 1-based, matching the transmitted array's order. */
+  index: number;
+  sheetId: string;
+  /** Display name of the subject, so the prompt binds to a name rather than a slug. */
+  subject: string;
+  file: string;
+  kind: "image";
+  /** What this asset is a reference *for*, from its attachment mode (R-4). */
+  rolePhrase: string;
+  /** For a second reference on a subject already bound: the index that first bound it. */
+  sameSubjectAs: number | null;
+}
+
+/**
+ * What an asset is a reference for, in words (R-4). A model sheet, a main photo and a scoped
+ * look are three different claims, and the vendor guidance asks specifically that the part of an
+ * asset being referenced is named rather than left to be inferred.
+ */
+function rolePhraseFor(sheet: Sheet, decision: AttachmentDecision): string {
+  if (sheet.type === "location") return "location reference — environment and composition";
+  if (sheet.type === "faction") return "faction reference — insignia, dress and materials";
+  if (decision.role === "secondary") return "additional reference for the same subject";
+  switch (decision.mode) {
+    case "scoped-look":
+      return "subject reference — appearance as they look in this production";
+    case "main-photo":
+      return "subject reference — appearance identity, from the main photo";
+    default:
+      return "subject reference — appearance identity";
+  }
+}
+
+/**
+ * Number the assets that will actually travel, in the order they will travel. Decisions with no
+ * file never took a slot and never get an index — the prompt must not cite an image that is not
+ * in the request.
+ */
+export function bindReferences(
+  decisions: readonly AttachmentDecision[],
+  sheets: readonly Sheet[],
+): BoundReference[] {
+  const bound: BoundReference[] = [];
+  for (const decision of decisions) {
+    if (decision.file === null) continue;
+    const sheet = sheets.find((s) => s.id === decision.sheetId);
+    if (sheet === undefined) continue;
+    const first = bound.find((b) => b.sheetId === decision.sheetId);
+    bound.push({
+      index: bound.length + 1,
+      sheetId: decision.sheetId,
+      subject: sheet.name,
+      file: decision.file,
+      kind: "image",
+      rolePhrase: rolePhraseFor(sheet, decision),
+      sameSubjectAs: first ? first.index : null,
+    });
+  }
+  return bound;
+}
+
+/** The files to transmit, in the order the preamble numbers them (R-2). */
+export function boundFiles(bound: readonly BoundReference[]): string[] {
+  return bound.map((reference) => reference.file);
+}
+
+/**
+ * The preamble: every carried asset named, numbered and given a role (R-1). Composed at dispatch
+ * and never part of the overridable body (R-3, D3).
+ */
+export function bindingPreamble(bound: readonly BoundReference[]): string | null {
+  if (bound.length === 0) return null;
+  const lines = bound.map((reference) => {
+    const label = `Image ${reference.index}: ${reference.subject}`;
+    return reference.sameSubjectAs !== null
+      ? `${label} — ${reference.rolePhrase}, same subject as image ${reference.sameSubjectAs}.`
+      : `${label} — ${reference.rolePhrase}.`;
+  });
+  return [
+    "Reference assets, by upload order:",
+    ...lines,
+    "Keep each subject consistent with its own reference images throughout; do not blend subjects or repeat one as another.",
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Derived negatives (SPEC-019 R-9..R-13, D8..D10)
+// ---------------------------------------------------------------------------
+
+export interface AudioDesign {
+  /** The cut composes a score track, so the model must not lay music under every clip (R-11). */
+  scoreTrack: boolean;
+}
+
+export interface NegativeInput {
+  capability: string;
+  shot?: Shot;
+  audioDesign?: AudioDesign;
+}
+
+/**
+ * The negatives, derived from the production rather than authored per shot (R-9, D10). A
+ * per-shot negative is a per-shot thing to forget, and the failure stays silent until an export
+ * has titles burned into the picture.
+ */
+export function derivedNegatives(input: NegativeInput): string | null {
+  if (input.capability !== "video") return null;
+  // Always. A take is immutable, so burned-in text is damage with no version of the take without
+  // it; no surface asks for subtitles and the cut renders its own titles (R-10, D8).
+  const parts = ["No subtitles."];
+  if (input.shot?.audio?.kind === "silence") {
+    parts.push("No audio.");
+  } else if (input.audioDesign?.scoreTrack === true) {
+    // Score only. Environmental and action sound belong to the shot and replacing them would
+    // mean sourcing foley for every clip (R-11, D9).
+    parts.push("No background music — environmental and action sound only.");
+  }
+  return parts.join(" ");
+}
+
+// ---------------------------------------------------------------------------
+// Final composition: what the planner composes, the planner keeps (D3)
+// ---------------------------------------------------------------------------
+
+export interface PromptParts {
+  /** Machine-composed, outside the override (R-3). */
+  preamble: string | null;
+  /** The override when present, else the assembled blocks (SPEC-012 R-15). */
+  body: string;
+  /** Machine-composed, appended after the body, outside the override (R-13). */
+  negatives: string | null;
+}
+
+/**
+ * The text that actually goes over the wire. The override owns the direction; the preamble
+ * describes the payload and the negatives describe the delivery, and neither is authored intent.
+ */
+export function composePrompt(parts: PromptParts): string {
+  return [parts.preamble, parts.body, parts.negatives]
+    .map((part) => part?.trim() ?? "")
+    .filter((part) => part.length > 0)
+    .join("\n\n");
 }
 
 export function attachmentFor(
@@ -287,12 +615,21 @@ export interface ScenePlanInput {
   tier?: SizeTier;
   productionId?: string;
   artDirection?: ResolvedArtDirection;
+  /**
+   * The production's audio design, which is where the score negative comes from (R-11). Absent
+   * means no score track is known, and only the subtitle negative is emitted.
+   */
+  audioDesign?: AudioDesign;
 }
 
 export interface ShotDispatchPlan {
   shot: Shot;
   prompt: { text: string; overridden: boolean };
   references: AttachmentDecision[];
+  /** The carried assets, numbered in transmission order (R-2). */
+  bound: BoundReference[];
+  /** Preamble, overridable body and negatives, kept apart so only the body is editable (R-3, R-13). */
+  parts: PromptParts;
   budget: BudgetResult;
   estimatedMicroUsd: number;
 }
@@ -300,7 +637,15 @@ export interface ShotDispatchPlan {
 export interface ScenePlan {
   mode: "per-shot" | "whole-scene";
   shots: ShotDispatchPlan[];
-  passReferences: Array<{ passIndex: number; references: AttachmentDecision[]; budget: BudgetResult }>;
+  passReferences: Array<{
+    passIndex: number;
+    references: AttachmentDecision[];
+    budget: BudgetResult;
+    /** The pass's carried assets, numbered in transmission order (R-2). */
+    bound: BoundReference[];
+    /** The clip's derived negatives, computed here so the dialog and the dispatch agree (R-9). */
+    negatives: string | null;
+  }>;
   pack: PackResult;
   /**
    * The size these estimates were computed at, carried so the jobs composed from this plan run
@@ -402,10 +747,32 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
               ...(output.resolution !== undefined ? { resolution: output.resolution } : {}),
             });
           })();
+    // Bound first, because what travels decides what the prose still has to say: a subject whose
+    // image is carried loses its appearance clause (R-8), and only carried assets get numbered.
+    const bound = bindReferences(references, sheets);
+    const prompt = promptFor(
+      world,
+      sheets,
+      scene,
+      shot,
+      input.artDirection?.description,
+      new Set(bound.map((reference) => reference.sheetId)),
+    );
+    const parts: PromptParts = {
+      preamble: bindingPreamble(bound),
+      body: prompt.text,
+      negatives: derivedNegatives({
+        capability: model.capability,
+        shot,
+        ...(input.audioDesign !== undefined ? { audioDesign: input.audioDesign } : {}),
+      }),
+    };
     return {
       shot,
-      prompt: promptFor(world, sheets, scene, shot, input.artDirection?.description),
+      prompt,
       references,
+      bound,
+      parts,
       budget,
       estimatedMicroUsd: estimate,
     };
@@ -429,7 +796,18 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
             { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id },
           ),
         );
-        return { passIndex: pass.index, references, budget };
+        return {
+          passIndex: pass.index,
+          references,
+          budget,
+          bound: bindReferences(references, sheets),
+          // A pass is one clip, so its negatives are the clip's: no per-shot silence, because
+          // several shots' audio directions share the same output.
+          negatives: derivedNegatives({
+            capability: model.capability,
+            ...(input.audioDesign !== undefined ? { audioDesign: input.audioDesign } : {}),
+          }),
+        };
       })
     : [];
   const wholeSceneTotal =

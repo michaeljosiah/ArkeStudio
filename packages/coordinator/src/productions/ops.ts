@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  assemblePassBlocks,
+  bindingPreamble,
+  boundFiles,
+  composePrompt,
   dispatchDuration,
   estimateMicroUsd,
   parseMentions,
@@ -414,8 +418,11 @@ export function composeDispatches(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: entry.prompt.text,
-        references: entry.references.filter((r) => r.file !== null).map((r) => r.file),
+        // Preamble + overridable body + derived negatives (SPEC-019 R-3, R-13). The array below
+        // comes from the same bound records the preamble numbers, so the stated order and the
+        // sent order are one structure rather than two that can drift (R-2, D2).
+        prompt: composePrompt(entry.parts),
+        references: boundFiles(entry.bound),
         // The length the plan priced, which is the length the route can actually be asked for.
         // Sending the raw shot seconds meant the job asked for something no route accepts, and
         // the client then had nothing to translate.
@@ -433,11 +440,35 @@ export function composeDispatches(
   return plan.pack.passes.map((pass) => {
     const shotsInPass = pass.plan.map((p) => plan.shots.find((s) => s.shot.id === p.shotId)!);
     const passReferencePlan = plan.passReferences.find((candidate) => candidate.passIndex === pass.index)!;
-    const references = passReferencePlan.references.filter((reference) => reference.file !== null).map((reference) => reference.file!);
+    const references = boundFiles(passReferencePlan.bound);
     const passSeconds = askedSeconds(model, pass.durationSec, `scene pass ${pass.index}`);
     if (references.length > model.accepts.referenceImages) {
       throw new Error(`scene pass ${pass.index} exceeds ${model.displayName}'s reference limit`);
     }
+    // One clip, composed once (SPEC-019 R-5, R-6). Joining each shot's whole prompt restated the
+    // world's art direction twice per shot; the summary, the standing description and the
+    // persistent constraint now belong to the pass, and a shot contributes only its beat.
+    const passBlocks = assemblePassBlocks({
+      world: world.meta,
+      sheets: world.sheets,
+      scene,
+      entries: shotsInPass.map((entry) => ({ shot: entry.shot, prompt: entry.prompt })),
+      ...(world.artDirection.description !== undefined
+        ? { artDirection: world.artDirection.description }
+        : {}),
+      carriedSheetIds: new Set(passReferencePlan.bound.map((reference) => reference.sheetId)),
+    });
+    const passBody = [
+      passBlocks.summary,
+      passBlocks.standing,
+      passBlocks.beats
+        .map((beat) => `[shot ${beat.shot.number} · ${beat.shot.durationSec ?? 4}s] ${beat.text}`)
+        .join("\n"),
+      passBlocks.persistent,
+    ]
+      .map((block) => block.trim())
+      .filter((block) => block.length > 0)
+      .join("\n\n");
     return {
       worldId,
       productionId,
@@ -446,9 +477,13 @@ export function composeDispatches(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: shotsInPass
-          .map((s) => `[shot ${s.shot.number} · ${s.shot.durationSec ?? 4}s] ${s.prompt.text}`)
-          .join("\n"),
+        prompt: composePrompt({
+          preamble: bindingPreamble(passReferencePlan.bound),
+          body: passBody,
+          // From the plan, not recomputed here: the dialog showed these and the dispatch has to
+          // be the same request (R-9).
+          negatives: passReferencePlan.negatives,
+        }),
         references,
         durationSec: passSeconds,
         ...sizeParams(model, plan),

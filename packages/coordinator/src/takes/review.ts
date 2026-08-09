@@ -1,6 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ProductionBundle, ReviewDecision, Selections } from "@arke-studio/contracts";
+import {
+  CutFileSchema,
+  type AudioDesign,
+  type ProductionBundle,
+  type ReviewDecision,
+  type Selections,
+} from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
@@ -111,6 +117,25 @@ export async function rejectTake(
     ],
   });
   return decision;
+}
+
+/**
+ * The production's audio design, as dispatch needs it (SPEC-019 R-11). Only one question is
+ * asked of `cut.json` here: does this cut compose its own score? If it does, the model must not
+ * lay music under every clip, because the take would arrive with music baked into audio that
+ * cannot be separated from it. A production with no cut file yet composes no score.
+ */
+export async function audioDesignFor(store: WorldStore, productionId: string): Promise<AudioDesign> {
+  const existing = await readOr(store, `productions/${productionId}/cut.json`, "");
+  if (!existing.existed) return { scoreTrack: false };
+  try {
+    const cut = CutFileSchema.parse(JSON.parse(existing.raw));
+    return { scoreTrack: cut.audio.some((track) => track.kind === "score" && track.entries.length > 0) };
+  } catch {
+    // An unreadable cut file is not a reason to refuse a dispatch, and treating it as "no score"
+    // only ever adds music the user can still remove — the reverse would bake it in.
+    return { scoreTrack: false };
+  }
 }
 
 /** Save the audio tracks — the only thing cut.json holds (R-16, R-17). */

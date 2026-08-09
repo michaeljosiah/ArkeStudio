@@ -64,7 +64,7 @@ import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachm
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
-import { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
+import { acceptTake, audioDesignFor, rejectTake, saveAudioTracks } from "./takes/review.js";
 import {
   normalizeSpeechText,
   authoritativeSheetSpeech,
@@ -2297,6 +2297,9 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "The scene or selected model is no longer available.");
           return;
         }
+        // The negatives derive from the production's audio design (SPEC-019 R-9, R-11): a cut
+        // that composes its own score means the model must not lay music under every clip.
+        const audioDesign = await audioDesignFor(store, production.meta.id);
         // Recompute the plan server-side — the request the dialog showed is the one executed.
         const plan = planScene(
           {
@@ -2308,6 +2311,7 @@ export class Coordinator {
             scene,
             selections: production.selections,
             model,
+            audioDesign,
             ...(msg.resolution !== undefined ? { resolution: msg.resolution } : {}),
             ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
           },

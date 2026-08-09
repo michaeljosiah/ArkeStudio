@@ -1002,6 +1002,7 @@ function GeneratePromptEditor({
     <>
       <div className="fy-gen__label" style={{ marginTop: 16 }}>
         Prompt <span className="fy-mono">assembled from the world, edit freely</span>
+
         <span
           style={{ marginLeft: "auto", font: "400 11px var(--font-sans)", color: "var(--muted-foreground)", cursor: "pointer" }}
           onClick={() => {
@@ -1023,6 +1024,39 @@ function GeneratePromptEditor({
         onChange={(e) => setDraft(e.target.value)}
         style={{ minHeight: 120, font: "400 12.5px/1.65 var(--font-sans)" }}
       />
+      {/* What the planner composes, the planner keeps (SPEC-019 R-3, R-13, D3/D4). An override
+          replaces the body above and nothing else: the binding preamble and the negatives are
+          added at dispatch, and a user debugging drifted identity or burned-in titles needs to
+          see that they exist. The preamble's real text needs a chosen model — it names the
+          images that model's budget actually carries — so it is described here and shown in
+          full where the plan exists. */}
+      <div
+        style={{
+          marginTop: 8,
+          padding: "8px 10px",
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          font: "400 11.5px/1.6 var(--font-sans)",
+          color: "var(--muted-foreground)",
+        }}
+      >
+        Added at dispatch, not editable here: a numbered line per reference image naming its
+        subject and what it references, and — for video —{" "}
+        <span className="fy-mono">no subtitles</span>
+        {shot.audio?.kind === "silence" ? (
+          <>
+            {" "}
+            and <span className="fy-mono">no audio</span>
+          </>
+        ) : (
+          <>
+            {" "}
+            (plus <span className="fy-mono">no background music</span> where the cut carries its own
+            score)
+          </>
+        )}
+        .
+      </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
         <span className="fy-mono">edits stay on this shot · the canon doesn't change from here</span>
         <span className="fy-h1row__push" />
