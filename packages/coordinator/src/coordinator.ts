@@ -1510,11 +1510,22 @@ export class Coordinator {
           });
         } catch (err) {
           // The refusal is the answer: nothing was written, and the conversation is still open
-          // and still says what it understood.
-          void this.appLog?.append({
-            level: "warn",
-            event: "world-chat.wrap-up-refused",
-            reason: err instanceof WrapUpError ? err.reason : "unknown",
+          // and still says what it understood. It is said to the screen as well as to the log,
+          // because the person is standing in front of the button that did nothing, and a reason
+          // only the log can see is not a reason they were given.
+          const reason = err instanceof WrapUpError ? err.reason : "unknown";
+          void this.appLog?.append({ level: "warn", event: "world-chat.wrap-up-refused", reason });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "world-chat.wrap-up-refused",
+            conversationId: msg.conversationId,
+            reason,
+            // Every WrapUpError message is already written for a person to read; anything else
+            // is ours to explain and not theirs to decode.
+            detail:
+              err instanceof WrapUpError
+                ? err.message
+                : "This could not be turned into proposals, so nothing was written.",
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);

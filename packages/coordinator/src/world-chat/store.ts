@@ -1,6 +1,6 @@
 import { open, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   WorldChatConversationMetaSchema,
   WorldChatEventEnvelopeSchema,
@@ -18,8 +18,9 @@ import { toExtendedLength } from "../world/paths.js";
  * One conversation's durable record: `.conversations/<cv>/events.jsonl` (#70 §4.2–§4.3).
  *
  * The shape follows the job journal — a WriteQueue serialises writers, a torn final line is
- * repaired once, and a line that will not parse is skipped rather than thrown. Two things go
- * further, both because this log is the only copy of what was said:
+ * repaired once, and a line that will not parse is skipped rather than thrown. The queue belongs
+ * to the directory rather than to the instance, because callers build a store per call; see
+ * `writerFor`. Two things go further, both because this log is the only copy of what was said:
  *
  *   · **fsync before reporting success.** The journal lets the OS decide when bytes reach the
  *     disk. Here an append resolves only after the data is actually down, because the caller's
@@ -49,6 +50,52 @@ function sha256(text: string): string {
   return `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
 }
 
+/** What the tail of a log looked like the last time this process wrote to it. */
+interface Tail {
+  size: number;
+  digest: string;
+  seq: number;
+}
+
+interface Writer {
+  queue: WriteQueue;
+  /** The tail this process last saw. A mismatch means somebody else wrote to the file. */
+  tail: Tail | null;
+}
+
+/**
+ * One writer per conversation directory, rather than one per `WorldChatStore`.
+ *
+ * An append reads the file to find the last sequence number and then writes seq + 1, so two
+ * appends that overlap read the same tail and claim the same number. A queue held on the instance
+ * only prevents that if every writer shares the instance — and they do not. A store is built per
+ * call at nine sites, and the coordinator starts a handler per client frame without waiting for
+ * the one before it, so dropping three files into a conversation at once ran three appends at
+ * once. Two of them read the same tail and both wrote seq 16.
+ *
+ * A duplicated sequence is not a cosmetic dent in the log. It is permanent: from then on the
+ * file holds one more record than its highest sequence number, and anything comparing the two —
+ * wrap-up did — refuses the conversation for the rest of its life.
+ *
+ * The tail is shared for the same reason. Held per instance it goes stale the moment another
+ * instance appends, and the next append through the first one reports a foreign write that never
+ * happened.
+ *
+ * Keyed by resolved path so the two spellings in use — `join(...)` and a template with forward
+ * slashes — reach the same writer. One small record per conversation opened, which is bounded by
+ * what a session visits.
+ */
+const writers = new Map<string, Writer>();
+
+function writerFor(dir: string): Writer {
+  const key = resolve(dir);
+  const existing = writers.get(key);
+  if (existing) return existing;
+  const created: Writer = { queue: new WriteQueue(), tail: null };
+  writers.set(key, created);
+  return created;
+}
+
 export interface AppendResult {
   envelope: WorldChatEventEnvelope;
   /** True when a matching requestId had already been applied and nothing new was written. */
@@ -61,12 +108,18 @@ export interface ReadResult {
 }
 
 export class WorldChatStore {
-  private readonly queue = new WriteQueue();
-  /** The tail this writer last saw. A mismatch means somebody else wrote to the file. */
-  private tail: { size: number; digest: string; seq: number } | null = null;
+  /** Shared with every other store on this directory — see `writerFor`. */
+  private readonly writer: Writer;
+  /**
+   * Repair is still per instance, and deliberately so: a fresh store on an existing directory is
+   * how a restart meets a log that a crash tore, and that reading has to survive one having been
+   * built earlier in the same process.
+   */
   private repaired = false;
 
-  constructor(readonly dir: string) {}
+  constructor(readonly dir: string) {
+    this.writer = writerFor(dir);
+  }
 
   get eventsPath(): string {
     return join(this.dir, EVENTS_FILE);
@@ -129,7 +182,7 @@ export class WorldChatStore {
   }
 
   /** Current tail facts, straight from disk. */
-  private async inspectTail(): Promise<{ size: number; digest: string; seq: number }> {
+  private async inspectTail(): Promise<Tail> {
     let raw = "";
     try {
       raw = await readFile(toExtendedLength(this.eventsPath), "utf8");
@@ -161,7 +214,7 @@ export class WorldChatStore {
     options: { at: string; requestId?: string } = { at: new Date().toISOString() },
   ): Promise<AppendResult> {
     let result!: AppendResult;
-    return this.queue
+    return this.writer.queue
       .enqueue(async () => {
         const problems: WorldChatProblem[] = [];
         await mkdir(toExtendedLength(this.dir), { recursive: true });
@@ -176,7 +229,8 @@ export class WorldChatStore {
         }
 
         const current = await this.inspectTail();
-        if (this.tail && (current.size !== this.tail.size || current.digest !== this.tail.digest)) {
+        const seen = this.writer.tail;
+        if (seen && (current.size !== seen.size || current.digest !== seen.digest)) {
           throw new ConversationIntegrityError({
             kind: "foreign-write",
             detail:
@@ -205,7 +259,7 @@ export class WorldChatStore {
           await handle.close();
         }
 
-        this.tail = {
+        this.writer.tail = {
           size: current.size + Buffer.byteLength(line, "utf8"),
           digest: sha256((await readFile(toExtendedLength(this.eventsPath), "utf8")) as string),
           seq: envelope.seq,
@@ -218,7 +272,7 @@ export class WorldChatStore {
   /** Every complete, valid event, with any problems reading them named rather than swallowed. */
   async read(): Promise<ReadResult> {
     const problems: WorldChatProblem[] = [];
-    await this.queue.enqueue(() => this.repairTail(problems));
+    await this.writer.queue.enqueue(() => this.repairTail(problems));
     return this.readParsed(problems);
   }
 
@@ -281,7 +335,7 @@ export class WorldChatStore {
 
   /** Wait for in-flight writes, for shutdown and for tests that assert on the file. */
   drain(): Promise<void> {
-    return this.queue.drain();
+    return this.writer.queue.drain();
   }
 }
 

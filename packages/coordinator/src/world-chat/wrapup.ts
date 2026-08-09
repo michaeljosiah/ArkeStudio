@@ -10,7 +10,7 @@ import type { WorldStore } from "../world/store.js";
 import { foldConversation } from "./fold.js";
 import { canonIdsNeeded, materialiseCandidate, MaterialiseError, planIdentities } from "./materialise.js";
 import { evaluateReadiness, type NotCarried } from "./readiness.js";
-import { WorldChatStore } from "./store.js";
+import { conversationDir, WorldChatStore } from "./store.js";
 
 /**
  * Turning a conversation into proposals, once (#70 §11.3).
@@ -90,14 +90,23 @@ export interface WrapUpInput {
 }
 
 export async function wrapUp(input: WrapUpInput): Promise<WrapUpResult> {
-  const log = new WorldChatStore(conversationDirOf(input.store, input.conversationId));
+  // Built through the shared helper rather than spelled out here, so this store reaches the same
+  // per-directory writer as every other one on this conversation (see `writerFor`).
+  const log = new WorldChatStore(conversationDir(input.store.dir, input.conversationId));
   const meta = await log.readMeta();
   if (!meta) throw new WrapUpError("stale", "That conversation is no longer here.");
 
   const { events } = await log.read();
   // Refused outright rather than silently re-planned: what is written must be what the person
   // was last shown in the panel, not whatever arrived while they were deciding.
-  if (events.length !== input.expectedConversationSeq) {
+  //
+  // Against the last sequence number, because that is the number the panel was given: the fold
+  // reports the seq it last read, not how many lines it read to get there. Comparing the count
+  // instead held only while the numbers ran 1..N unbroken, so a log that had ever been written
+  // by two writers at once could never be wrapped up again — the count stayed permanently ahead
+  // of the sequence, and every attempt came back stale with nothing to act on.
+  const lastSeq = events.length > 0 ? events[events.length - 1]!.seq : 0;
+  if (lastSeq !== input.expectedConversationSeq) {
     throw new WrapUpError(
       "stale",
       "This conversation moved on while you were looking at it. Open it again and wrap up from there.",
@@ -237,8 +246,4 @@ export async function wrapUp(input: WrapUpInput): Promise<WrapUpResult> {
     mediaIdeaIds: mediaIdeas.map((c) => c.id),
     openChoices,
   };
-}
-
-function conversationDirOf(store: WorldStore, conversationId: ConversationId): string {
-  return `${store.dir}/.conversations/${conversationId}`;
 }

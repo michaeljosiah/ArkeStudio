@@ -21,6 +21,7 @@ import {
   useStore,
   useWorldChatProgress,
   useWorldChatRefusals,
+  useWorldChatWrapUpRefusal,
   worldChatAttachFiles,
   worldChatAttachTarget,
   wrapUpWorldChat,
@@ -275,6 +276,9 @@ export function WorldChatConversationScreen() {
    */
   const [dismissed, setDismissed] = useState<string[]>([]);
   const refusals = useWorldChatRefusals(conversationId);
+  const wrapUpRefusal = useWorldChatWrapUpRefusal(conversationId);
+  /** Set while a wrap-up is in flight, so the button cannot be pressed twice into the same log. */
+  const [wrappingUp, setWrappingUp] = useState(false);
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
@@ -293,6 +297,27 @@ export function WorldChatConversationScreen() {
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
   // Gated on the run's own start so a label from the previous turn is not shown for this one.
   const progress = useWorldChatProgress(conversationId, loaded?.runStartedAt ?? null);
+
+  /**
+   * Go to the proposals once there are proposals to go to.
+   *
+   * This used to navigate on the click itself. That reads well when the wrap-up works and lies
+   * when it does not: the coordinator can refuse — the conversation moved on, nothing is settled
+   * enough, a change would not write — and the screen had already left for an approvals list that
+   * was empty, which is indistinguishable from a button that does nothing. Closing is the
+   * coordinator's own signal that every proposal is durable (R-42a), so it is the thing to wait
+   * for. The wait is a few file writes, not a model call.
+   */
+  const closed = loaded?.status === "closed";
+  useEffect(() => {
+    if (!wrappingUp || !worldId) return;
+    if (closed) {
+      setWrappingUp(false);
+      navigate(`/w/${worldId}/proposals`);
+    } else if (wrapUpRefusal) {
+      setWrappingUp(false);
+    }
+  }, [wrappingUp, closed, wrapUpRefusal, worldId, navigate]);
 
   if (!world) return null;
   /**
@@ -500,17 +525,29 @@ export function WorldChatConversationScreen() {
             <Button
               variant="primary"
               size="lg"
-              disabled={carried === 0 || loaded === null || running}
+              disabled={carried === 0 || loaded === null || running || wrappingUp}
               onClick={() => {
                 if (!worldId || !loaded) return;
+                setWrappingUp(true);
                 wrapUpWorldChat(worldId, conversationId!, loaded.seq);
-                // Straight to the proposals, with no step in between: the earlier design had a
-                // confirmation sheet here that said less than the screen it stood in front of.
-                navigate(`/w/${worldId}/proposals`);
+                // No confirmation sheet, and no navigation yet either: an earlier design had a
+                // sheet here that said less than the screen it stood in front of, and the version
+                // after it left for the proposals before knowing there were any. The effect above
+                // goes when the conversation closes.
               }}
             >
-              Turn this into proposals
+              {wrappingUp ? "Turning this into proposals…" : "Turn this into proposals"}
             </Button>
+            {/*
+              A refused wrap-up is the one thing this rail must not swallow. Nothing was written,
+              so the panel above is unchanged and says nothing about it — without this line the
+              press leaves no trace at all.
+            */}
+            {wrapUpRefusal && !wrappingUp && (
+              <div className="fy-panel__refused" role="status">
+                {wrapUpRefusal}
+              </div>
+            )}
             <div className="fy-panel__caption">
               {carried === 0
                 ? "Nothing is settled enough to propose yet."

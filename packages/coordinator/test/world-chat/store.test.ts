@@ -54,6 +54,26 @@ describe("world chat store", () => {
     assert.equal(problems.length, 0);
   });
 
+  it("gives every append its own sequence, even from stores built separately", async () => {
+    const s = await store();
+    // Three files dropped into a conversation at once is three client frames, three handlers
+    // started without waiting for the one before, and three stores built on the same directory.
+    // Each append reads the tail to find its number, so unserialised they read the same tail and
+    // claimed the same number — which is how a real conversation ended up with two seq 16s and
+    // could never be wrapped up again.
+    const concurrent = [new WorldChatStore(s.dir), new WorldChatStore(s.dir), new WorldChatStore(s.dir)];
+    await Promise.all(concurrent.map((w, i) => w.append(message(`file ${i}`), { at: AT })));
+
+    const { events, problems } = await new WorldChatStore(s.dir).read();
+    assert.equal(events.length, 3);
+    assert.deepEqual(
+      events.map((e) => e.seq),
+      [1, 2, 3],
+      "one sequence number per record, however many stores were holding the file",
+    );
+    assert.deepEqual(problems, [], "and no writer mistook another's append for a foreign one");
+  });
+
   it("has the bytes on disk before the append resolves", async () => {
     const s = await store();
     await s.append(message("her aunt taught her the bells"), { at: AT });

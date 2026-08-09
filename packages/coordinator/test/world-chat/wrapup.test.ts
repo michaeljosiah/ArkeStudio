@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
@@ -14,6 +14,7 @@ import { evaluateReadiness } from "../../src/world-chat/readiness.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
 import { WorldStore } from "../../src/world/store.js";
+import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
 
 /**
@@ -118,7 +119,10 @@ async function withCandidates(
     },
     { at: AT },
   );
-  return (await log.read()).events.length;
+  // The number the panel is given, and so the number the client hands back — the last sequence,
+  // not how many lines it took to reach it.
+  const { events } = await log.read();
+  return events[events.length - 1]!.seq;
 }
 
 function failsToMaterialise(): WorldChangeCandidate {
@@ -271,6 +275,50 @@ describe("what wrap-up refuses", () => {
     );
     assert.deepEqual(await w.ours(), [], "and stages nothing");
     await w.store.close();
+  });
+
+  it("still wraps up a log an older race left with a repeated sequence number", async () => {
+    const w = await world();
+    // Closed by the sweep rather than at the end of the test: an open store holds the event loop,
+    // so an assertion failing before the close hangs the file instead of reporting.
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [candidate()]);
+
+    /*
+     * Appends were once serialised per store instance rather than per conversation, so two that
+     * overlapped read the same tail and wrote the same number. The damage outlives the race: from
+     * then on the file holds one more record than its highest sequence, forever. Wrap-up compared
+     * the count against the sequence the panel was shown, so every attempt on such a conversation
+     * came back stale — a button that did nothing, with the reason only in a log file.
+     *
+     * Copied into a second conversation because this log was written by something else: appending
+     * over the top of one this process has already written is a foreign write, and rightly caught.
+     */
+    const lines = (await readFile(w.log.eventsPath, "utf8")).split("\n").filter(Boolean);
+    const damaged = lines.map((line) => JSON.parse(line) as { seq: number });
+    damaged[damaged.length - 1]!.seq = damaged[damaged.length - 2]!.seq;
+
+    const twin = newId("cv") as ConversationId;
+    const twinLog = new WorldChatStore(conversationDir(w.dir, twin));
+    await twinLog.create(twin, AT);
+    await writeFile(twinLog.eventsPath, damaged.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
+
+    const { events } = await twinLog.read();
+    const lastSeq = events[events.length - 1]!.seq;
+    assert.equal(lastSeq, seq - 1, "the repeat costs the log a number it never gets back");
+    assert.equal(events.length, lastSeq + 1, "one more record than the highest sequence — the real shape");
+
+    const result = await wrapUp({
+      store: w.store,
+      gate: w.gate,
+      conversationId: twin,
+      requestId: "req-repeated-seq",
+      // What the panel showed, which is the last sequence and not the number of records.
+      expectedConversationSeq: lastSeq,
+      now: NOW,
+    });
+
+    assert.equal(result.proposalIds.length, 1);
   });
 
   it("refuses a conversation that moved on while it was being read", async () => {
