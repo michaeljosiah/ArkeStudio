@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { WORLD_EXPORT_EXCLUDED } from "../../src/takes/export.js";
 import { recordReferenceTake, recordUploadedReferenceTake } from "../../src/references/takes.js";
@@ -171,6 +171,50 @@ describe("a finalized reference take stores its image once (issue 231)", () => {
     const takeDir = join(dir, "references", "maren-kest", "takes", `tk_${job.id.slice(3)}`);
     const left = await readdir(takeDir).catch(() => [] as string[]);
     assert.deepEqual(left, [], "no stub media, no take.json, and no temporary file left to be mistaken for either");
+    await store.close();
+  });
+
+  it("finishes a cleanup the first pass did not", async () => {
+    // The unlink can lose to a scanner holding the file, and the process can exit between
+    // take.json and the unlink. Both used to leave the duplicate for good: a replay saw the
+    // take already recorded and returned without looking. Standing the staging copy back up
+    // beside a recorded take is that state.
+    const { dir, store } = await open();
+    const landed = "references/maren-kest/incoming/character-sheet-g7.png";
+    const incoming = join(dir, "references", "maren-kest", "incoming");
+    await mkdir(incoming, { recursive: true });
+    await writeFile(join(dir, landed), "sheet-bytes");
+    const job = jobFor("character-sheet", "maren-kest/g7", landed);
+
+    const first = await recordReferenceTake(store, job as never);
+    assert.ok(first);
+    await mkdir(incoming, { recursive: true });
+    await writeFile(join(dir, landed), "sheet-bytes");
+
+    const again = await recordReferenceTake(store, job as never);
+    assert.equal(again?.id, first.id, "the same take, not a second one");
+    assert.equal(await exists(join(dir, landed)), false, "and the duplicate it left behind is gone");
+    await store.close();
+  });
+
+  it("keeps the staging copy when it is the only copy left", async () => {
+    // A take.json whose media has gone missing is the one case where the staging copy is all
+    // there is. This is the last code in a position to notice, so it declines to tidy.
+    const { dir, store } = await open();
+    const landed = "references/maren-kest/incoming/character-sheet-g8.png";
+    const incoming = join(dir, "references", "maren-kest", "incoming");
+    await mkdir(incoming, { recursive: true });
+    await writeFile(join(dir, landed), "sheet-bytes");
+    const job = jobFor("character-sheet", "maren-kest/g8", landed);
+
+    const first = await recordReferenceTake(store, job as never);
+    assert.ok(first);
+    await rm(join(dir, "references", "maren-kest", "takes", first.id, first.media!));
+    await mkdir(incoming, { recursive: true });
+    await writeFile(join(dir, landed), "sheet-bytes");
+
+    await recordReferenceTake(store, job as never);
+    assert.equal(await readFile(join(dir, landed), "utf8"), "sheet-bytes", "the last copy stays");
     await store.close();
   });
 

@@ -1,7 +1,7 @@
 import { copyFile, mkdir, readFile, rm, rmdir, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { ulid, type Job, type LedgerEntry, type ReviewDecision, type Take } from "@arke-studio/contracts";
-import { atomicWriteFile, renameWithRetry } from "../world/atomic.js";
+import { atomicWriteFile, renameWithRetry, withTransientRetry } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
@@ -65,10 +65,42 @@ async function discardStagingCopy(worldDir: string, sheetId: string, landed: str
   const path = landed.replace(/\\/g, "/");
   const dir = path.slice(0, path.lastIndexOf("/"));
   if (!stagingDirsFor(sheetId).includes(dir)) return;
-  await rm(toExtendedLength(join(worldDir, path)), { force: true }).catch(() => {});
+  // Through the shared backoff: this file was being read a moment ago, and a scanner still
+  // holding it fails the unlink EPERM for an instant. Swallowing that on the first attempt
+  // left the duplicate for good.
+  await withTransientRetry(() => rm(toExtendedLength(join(worldDir, path)), { force: true })).catch(() => {});
   // And the staging directory itself when it empties. rmdir refuses a non-empty one, so a
   // sibling still waiting to be finalized keeps it; the next landing re-creates it either way.
   await rmdir(toExtendedLength(join(worldDir, dir))).catch(() => {});
+}
+
+/**
+ * The cleanup a replay owes (issue 231, Codex round 2).
+ *
+ * Both early returns hand back a take that already exists — and used to hand it back without
+ * looking at the staging copy. If the process exited between take.json and the unlink, or the
+ * unlink lost to a held handle, the duplicate was there for good: nothing would ever try
+ * again. A finalization retry from Activity, and the main-photo accept path's recovery call,
+ * now finish the job the first pass did not.
+ *
+ * Guarded on the take's own media being there, because that is what makes dropping the other
+ * copy safe. A take.json whose media has gone missing is the one case where the staging copy is
+ * the only copy left, and this is the last code that would ever be in a position to notice.
+ */
+async function discardStagingCopyForRecorded(
+  store: WorldStore,
+  take: Take,
+  sheetId: string,
+  landed: string,
+): Promise<void> {
+  if (!take.media) return;
+  const stored = join(store.dir, "references", sheetId, "takes", take.id, take.media);
+  const present = await stat(toExtendedLength(stored)).then(
+    (s) => s.isFile(),
+    () => false,
+  );
+  if (!present) return;
+  await discardStagingCopy(store.dir, sheetId, landed);
 }
 
 function kindFor(job: Job): Take["kind"] | null {
@@ -84,7 +116,10 @@ export async function recordReferenceTake(store: WorldStore, job: Job, ledgerEnt
   const sheetId = job.target.id?.split("/")[0];
   if (!kind || !landed || !sheetId) return null;
   const existing = store.getBundle().referenceTakes.find((take) => take.jobId === job.id);
-  if (existing) return existing;
+  if (existing) {
+    await discardStagingCopyForRecorded(store, existing, sheetId, landed);
+    return existing;
+  }
   const frozen = job.params["provenance"] as
     | { canonRevision?: number; sheets?: Record<string, number>; artDirectionVersion?: number; anchorFile?: string }
     | undefined;
@@ -127,7 +162,10 @@ export async function recordReferenceTake(store: WorldStore, job: Job, ledgerEnt
   };
   return store.gateOp(async () => {
     const duplicate = store.getBundle().referenceTakes.find((take) => take.jobId === job.id);
-    if (duplicate) return duplicate;
+    if (duplicate) {
+      await discardStagingCopyForRecorded(store, duplicate, sheetId, landed);
+      return duplicate;
+    }
     const dir = join(store.dir, "references", sheetId, "takes", id);
     await mkdir(toExtendedLength(dir), { recursive: true });
     await placeMedia(join(store.dir, landed), join(dir, media));
