@@ -156,6 +156,26 @@ describe("context assembly", () => {
     assert.match(context.attachments, /get_attachment_text/, "pointing at how to read the rest");
   });
 
+  /**
+   * Spending the budget in document order loses the last document's heading first — its name,
+   * id and hash — so the one the model is told least about is also the only one it cannot go
+   * and read, because `get_attachment_text` needs the id that just fell off the end.
+   */
+  it("keeps every attachment's identity when several long documents are handed over", () => {
+    const many = Array.from({ length: 5 }, (_, i) =>
+      attachment({ fileName: `doc-${i}.txt`, text: "x".repeat(BOUNDS.attachments) }),
+    );
+    const context = assembleContext({ ...baseInput(), attachments: many });
+
+    assert.ok(context.attachments.length <= BOUNDS.attachments, "still inside the bound");
+    for (const doc of many) {
+      assert.ok(context.attachments.includes(doc.fileName), `${doc.fileName} is named`);
+      assert.ok(context.attachments.includes(doc.id), `${doc.fileName} keeps the id the tool needs`);
+      assert.ok(context.attachments.includes(doc.contentHash), `${doc.fileName} keeps its hash`);
+    }
+    assert.ok(context.trimmed.includes("attachments"), "and it says it cut, rather than cutting quietly");
+  });
+
   it("distinguishes two turns that differ only by what was attached", () => {
     const without = assembleContext(baseInput()).digest;
     const with_ = assembleContext({

@@ -181,18 +181,41 @@ function renderTurns(messages: readonly WorldChatMessage[]): string {
  * An unreadable attachment is still named, with what it is and that it cannot be read. Silence
  * about it produces a denial, which is worse than a refusal: the file plainly went somewhere.
  */
-function renderAttachments(attachments: readonly ContextAttachment[]): string {
-  return attachments
-    .map((a) => {
-      // The identity line is what makes a quotation of this document citable at all; it is
-      // printed for unreadable files too, so an image can still be referred to by id.
-      const head = `### ${a.fileName} (${a.kind})\nattachmentId: ${a.id}\ncontentHash: ${a.contentHash}`;
-      if (!a.readable || a.text === undefined) {
-        return `${head}\nAttached, and cannot be read as text here. Say so plainly if it is relevant; do not guess at what it contains.`;
-      }
-      return `${head}\n${a.text}`;
-    })
-    .join("\n\n");
+const CUT_NOTE = "[Cut off here. Read further with get_attachment_text rather than guessing at the rest.]";
+
+/**
+ * The budget is shared out per document rather than spent in order.
+ *
+ * Cutting the concatenation at a total bound spends it first-come: five documents with long
+ * openings and the fifth one's heading falls off the end — name, id and hash with it. That is
+ * the worst thing to lose, because the id is what `get_attachment_text` needs, so the one
+ * document the model was told least about is also the only one it cannot go and read. Every
+ * attachment now keeps its identity and a share of the text.
+ */
+function renderAttachments(
+  attachments: readonly ContextAttachment[],
+  budget: number,
+): { text: string; trimmed: boolean } {
+  if (attachments.length === 0) return { text: "", trimmed: false };
+  const share = Math.floor(budget / attachments.length);
+  let trimmed = false;
+  const blocks = attachments.map((a) => {
+    // The identity line is what makes a quotation of this document citable at all; it is
+    // printed for unreadable files too, so an image can still be referred to by id.
+    const head = `### ${a.fileName} (${a.kind})\nattachmentId: ${a.id}\ncontentHash: ${a.contentHash}`;
+    if (!a.readable || a.text === undefined) {
+      return `${head}\nAttached, and cannot be read as text here. Say so plainly if it is relevant; do not guess at what it contains.`;
+    }
+    // Less the newline after the heading, the blank line before the note, and the blank line
+    // that joins this block to the next — a share that ignored them would overrun the bound.
+    const room = Math.max(0, share - head.length - CUT_NOTE.length - 5);
+    if (a.text.length <= room) return `${head}\n${a.text}`;
+    trimmed = true;
+    // The beginning, as before: a document was handed over whole and starts at its start, so
+    // keeping the tail would give the model the last page of something it never saw page one of.
+    return `${head}\n${a.text.slice(0, room)}\n\n${CUT_NOTE}`;
+  });
+  return { text: blocks.join("\n\n"), trimmed };
 }
 
 /**
@@ -225,19 +248,16 @@ export function assembleContext(input: ContextInput): AssembledContext {
   const worldContext = take("worldContext", input.worldContext ?? "", BOUNDS.worldContext);
   const tombstones = renderTombstones(input.tombstones);
   /**
-   * Trimmed from the *end*, unlike every other section.
+   * Cut per document and from the *end* of each, unlike every other section.
    *
    * The others keep their most recent lines because a conversation's recent material is what is
    * still being talked about. A document is the other way round: it was handed over whole and
    * starts at its beginning, so keeping the tail would hand the model the last page of something
    * it was never given the first page of.
    */
-  const attachmentsText = renderAttachments(input.attachments ?? []);
-  const attachments =
-    attachmentsText.length <= BOUNDS.attachments
-      ? attachmentsText
-      : (trimmed.push("attachments"),
-        `${attachmentsText.slice(0, BOUNDS.attachments)}\n\n[Cut off here. Read further with get_attachment_text rather than guessing at the rest.]`);
+  const rendered = renderAttachments(input.attachments ?? [], BOUNDS.attachments);
+  if (rendered.trimmed) trimmed.push("attachments");
+  const attachments = rendered.text;
 
   return {
     // Never trimmed: it is one short line, and it is the frame for everything else.

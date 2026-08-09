@@ -224,6 +224,74 @@ describe("the evidence a proposition may stand on", () => {
     );
   });
 
+  /**
+   * `String.slice` counts UTF-16 code units, so one emoji before the span puts a code-point
+   * count out by one. The words really were said; failing the turn — and its retry, which has no
+   * better way to guess the convention — would cost the user their answer over arithmetic.
+   */
+  it("accepts a real quotation whose offsets were counted in code points, and stores it corrected", async () => {
+    const text = "🌊 Her aunt raised her, not her mother.";
+    const message: WorldChatMessage = {
+      id: newId("msg") as MessageId,
+      turnId: newId("turn") as TurnId,
+      role: "user",
+      text,
+      attachmentIds: [],
+      createdAt: AT,
+    };
+    const quote = "Her aunt raised her";
+    const codeUnits = text.indexOf(quote);
+    const codePoints = [...text].findIndex((_, i) => [...text].slice(i).join("").startsWith(quote));
+    assert.equal(codeUnits, codePoints + 1, "the emoji is exactly the off-by-one this is about");
+
+    const draft: ModelCandidateDraft = structuredClone(WORLD_CHAT_SHAPE_EXAMPLES.drafts["canon.create"]);
+    draft.evidence = [
+      {
+        kind: "message",
+        messageId: message.id,
+        quote,
+        start: codePoints,
+        end: codePoints + quote.length,
+        purpose: "intent",
+      },
+    ];
+    draft.checkReceiptIds = [];
+
+    const outcome = validateTurnResult(
+      await validateInput(message, {
+        reply: "Noted.",
+        candidateOperations: [{ op: "create", temporaryId: "t1", candidate: draft }],
+        groupOperations: [],
+      }),
+    );
+
+    assert.equal(outcome.ok, true, outcome.ok ? "" : outcome.problems.map((p) => p.code).join(", "));
+    if (!outcome.ok) return;
+    const stored = outcome.turn.candidates[0]!.evidence[0]!;
+    assert.equal(stored.kind, "message");
+    if (stored.kind !== "message") return;
+    assert.equal(stored.start, codeUnits, "the record is stored exact, not as it arrived");
+    assert.equal(text.slice(stored.start, stored.end), quote);
+  });
+
+  it("still refuses a quotation that is nowhere in the message, however its offsets look", async () => {
+    const message = guideMessage();
+    const draft: ModelCandidateDraft = structuredClone(WORLD_CHAT_SHAPE_EXAMPLES.drafts["canon.create"]);
+    draft.evidence = [
+      { kind: "message", messageId: message.id, quote: "her grandmother raised her", start: 0, end: 26, purpose: "intent" },
+    ];
+    draft.checkReceiptIds = [];
+
+    const outcome = validateTurnResult(
+      await validateInput(message, {
+        reply: "Noted.",
+        candidateOperations: [{ op: "create", temporaryId: "t1", candidate: draft }],
+        groupOperations: [],
+      }),
+    );
+    assert.equal(outcome.ok, false, "forgiving the offsets must not forgive inventing the words");
+  });
+
   /** Citing its own reply would let a proposition bootstrap from the Studio's earlier inference. */
   it("refuses evidence that quotes the Studio rather than the user", async () => {
     const message = guideMessage();

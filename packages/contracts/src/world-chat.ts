@@ -1327,6 +1327,92 @@ function draftPayloadLine(classification: WorldChangeClassification): string {
   return JSON.stringify(payload);
 }
 
+const DRAFT_PAYLOADS = {
+  "canon.create": CanonCreatePayload,
+  "canon.amend": CanonAmendPayload,
+  "canon.thread": CanonThreadPayload,
+  "sheet.create": SheetCreatePayload,
+  "sheet.edit": SheetEditPayload,
+  "relationship.change": RelationshipChangePayload,
+  "media.image-opportunity": ImageOpportunityPayload,
+  undecided: UndecidedPayload,
+} as const satisfies Record<WorldChangeClassification, { draft: z.ZodTypeAny }>;
+
+/** The object under a draft schema, past any `.refine()` wrapping it. */
+function draftObject(schema: z.ZodTypeAny): z.ZodObject<z.ZodRawShape> | null {
+  let inner = schema;
+  while (inner instanceof z.ZodEffects) inner = inner.innerType();
+  return inner instanceof z.ZodObject ? inner : null;
+}
+
+/** An object shape as a short signature: `{kind:"canon", entryId}`. */
+function shapeSignature(schema: z.ZodTypeAny): string {
+  const object = draftObject(schema);
+  if (!object) return "value";
+  const keys = Object.entries(object.shape).map(([key, field]) =>
+    field instanceof z.ZodLiteral ? `${key}:${JSON.stringify(field.value)}` : key,
+  );
+  return `{${keys.join(", ")}}`;
+}
+
+/**
+ * One field, described from its own schema.
+ *
+ * The examples show a shape; this says what else that shape may contain. One instance cannot:
+ * the `sheet.edit` example happens to carry `sections`, so a model asked to rename a sheet or
+ * clear its role learns nothing from it and has to guess a field name — which is the
+ * whole-turn rejection this guide exists to prevent, one level further in.
+ */
+function unwrapField(schema: z.ZodTypeAny): { inner: z.ZodTypeAny; optional: boolean; nullable: boolean } {
+  let inner = schema;
+  let optional = false;
+  let nullable = false;
+  for (;;) {
+    if (inner instanceof z.ZodOptional) {
+      optional = true;
+      inner = inner.unwrap();
+      continue;
+    }
+    if (inner instanceof z.ZodNullable) {
+      nullable = true;
+      inner = inner.unwrap();
+      continue;
+    }
+    break;
+  }
+  return { inner, optional, nullable };
+}
+
+/** The type alone, with no "optional" tail — so it can be nested inside "array of …". */
+function fieldType(schema: z.ZodTypeAny): string {
+  const { inner } = unwrapField(schema);
+  if (inner instanceof z.ZodEnum) return (inner.options as string[]).map((o) => JSON.stringify(o)).join(" | ");
+  if (inner instanceof z.ZodLiteral) return JSON.stringify(inner.value);
+  if (inner instanceof z.ZodString) return "string";
+  if (inner instanceof z.ZodNumber) return "number";
+  if (inner instanceof z.ZodBoolean) return "boolean";
+  if (inner instanceof z.ZodArray) return `array of ${fieldType(inner.element)}`;
+  if (inner instanceof z.ZodUnion) {
+    return (inner.options as z.ZodTypeAny[]).map(shapeSignature).join(" or ");
+  }
+  if (inner instanceof z.ZodObject) return shapeSignature(inner);
+  return "value";
+}
+
+function describeField(schema: z.ZodTypeAny): string {
+  const { optional, nullable } = unwrapField(schema);
+  return `${fieldType(schema)}${nullable ? ", or null to clear it" : ""}${optional ? ", optional" : ""}`;
+}
+
+/** Every field a classification's draft accepts, not only the ones its example happens to use. */
+function draftFieldCatalogue(classification: WorldChangeClassification): string {
+  const object = draftObject(DRAFT_PAYLOADS[classification].draft);
+  if (!object) return "";
+  return Object.entries(object.shape)
+    .map(([key, field]) => `${key} (${describeField(field as z.ZodTypeAny)})`)
+    .join("; ");
+}
+
 /**
  * The result shape as the model is told it, rendered from the same objects the tests validate.
  *
@@ -1353,7 +1439,8 @@ op is one of create | update | withdraw | split.
 
 - update: ${JSON.stringify(exampleOperations.update)}
 - withdraw: ${JSON.stringify(exampleOperations.withdraw)}
-- split carries "replacements": an array of at least two complete candidates, shaped exactly like create's.
+- split: ${JSON.stringify(exampleOperations.split)}
+  (replacements holds at least two complete candidates, each shaped exactly like create's)
 
 candidateId and expectedRevision come from "What you have already understood" — the registry lists each as [cand_... rN]. temporaryId is yours to invent ("t1", "t2", ...) and only means anything inside this one result.
 
@@ -1368,20 +1455,27 @@ candidateId and expectedRevision come from "What you have already understood" �
 
 ### The payload each classification requires
 
+Each classification below shows one complete example, then every field its draft accepts — the example is one instance, not the limit of what you may send. A field marked optional may be left out; one marked "or null to clear it" may be set to null to remove what is there. No other field is accepted, and one unknown field rejects the whole turn.
+
 - ${draftPayloadLine("canon.create")}
-  (type is one of ${CanonEntryTypeSchema.options.join(" | ")})
+  fields: ${draftFieldCatalogue("canon.create")}
 - ${draftPayloadLine("canon.amend")}
-  (target names the entry; the draft carries only the fields that change)
+  target names the entry being amended; the draft carries only what changes, and must carry at least one thing.
+  fields: ${draftFieldCatalogue("canon.amend")}
 - ${draftPayloadLine("canon.thread")}
+  fields: ${draftFieldCatalogue("canon.thread")}
 - ${draftPayloadLine("sheet.create")}
-  (type is one of ${SheetKindSchema.options.join(" | ")})
+  fields: ${draftFieldCatalogue("sheet.create")}
 - ${draftPayloadLine("sheet.edit")}
-  (target names the sheet; the draft carries only the fields that change)
+  target names the sheet; the draft carries only what changes. A sheet's version, status, retirement and voice are deliberately absent — those have their own workflows and cannot be reached from here.
+  fields: ${draftFieldCatalogue("sheet.edit")}
 - ${draftPayloadLine("relationship.change")}
-  (linkAction is one of ${LinkActionSchema.options.join(" | ")}; proseEdits carries the complete new body of each section it touches, never an instruction to append)
+  proseEdits carries the complete new body of each section it touches, never an instruction to append.
+  fields: ${draftFieldCatalogue("relationship.change")}
 - ${draftPayloadLine("media.image-opportunity")}
-  (purpose is one of ${ImagePurposeSchema.options.join(" | ")})
+  fields: ${draftFieldCatalogue("media.image-opportunity")}
 - ${draftPayloadLine("undecided")}
+  fields: ${draftFieldCatalogue("undecided")}
 
 ### Evidence
 
@@ -1390,7 +1484,7 @@ EVERY candidate must cite at least one message quotation with "purpose": "intent
 The required intent quotation:
 ${JSON.stringify(exampleMessageEvidence)}
 - messageId is a user message's id, shown in brackets beside their words — [msg_...]. Never invent one, and never cite your own replies: your lines carry no id because nothing you said is evidence of what they want.
-- start and end are 0-based character offsets into that message's text alone (never into this prompt), end exclusive. The quote must equal exactly the text between them.
+- start and end are 0-based offsets into that message's text alone (never into this prompt), end exclusive, counted in UTF-16 code units — the units JavaScript's string indexing uses, in which an emoji or other non-BMP character counts as two, not one. Get the quote exactly right and a small miscount is forgiven; get the quote wrong and the turn is not.
 - purpose is one of ${MessageEvidencePurposeSchema.options.join(" | ")}. Use "intent" for the ask itself, "settledness" for the words that decided it, "correction" for the words that changed it.
 
 Supporting evidence — the world (only something you read through the arke-world tools this turn):

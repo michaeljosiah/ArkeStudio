@@ -16,7 +16,12 @@ import {
   type WorldChatCheckReceipt,
   type WorldChatTurnResult,
 } from "@arke-studio/contracts";
-import { verifyAllEvidence, safeEvidenceMessage, type EvidenceSources } from "./evidence.js";
+import {
+  normaliseEvidence,
+  safeEvidenceMessage,
+  verifyAllEvidence,
+  type EvidenceSources,
+} from "./evidence.js";
 import { findByStructure, payloadDigest, structuralKey, suppressedByTombstone } from "./identity.js";
 
 /**
@@ -421,7 +426,9 @@ function fresh(
   // Intent travels with the proposition, not with the turn that last touched it: the original ask
   // is still why this exists, and wrap-up refuses anything that cannot show one. A revision that
   // states its own intent keeps it; only a revision that does not inherits.
-  const reasons = hasIntentEvidence(evidence) ? [...evidence] : [...inheritedIntent, ...evidence];
+  const cited = hasIntentEvidence(evidence) ? [...evidence] : [...inheritedIntent, ...evidence];
+  // Stored with the offsets pointing where the words actually are, not where they were said to be.
+  const reasons = normaliseEvidence(cited, input.messages);
   return {
     ...(payload as object),
     id,

@@ -118,6 +118,27 @@ describe("the rendered guide", () => {
     }
   });
 
+  /**
+   * An example is one instance, not the limit of the shape. Without the catalogue, a model asked
+   * to rename a sheet or clear its role reads a sheet.edit example carrying only `sections` and
+   * has to guess a field name — the whole-turn rejection this guide exists to prevent.
+   */
+  it("lists every field a draft accepts, not only the ones its example uses", () => {
+    for (const field of ["name", "role", "billing", "region", "canonRules", "links", "sections"]) {
+      assert.ok(guide.includes(field), `sheet.edit field ${field} is named`);
+    }
+    assert.match(guide, /or null to clear it/, "and says which may be nulled rather than omitted");
+    assert.match(guide, /optional/);
+  });
+
+  it("renders the split operation whole, since one wrong field rejects the turn", () => {
+    assert.ok(guide.includes(JSON.stringify(WORLD_CHAT_SHAPE_EXAMPLES.operations.split)));
+  });
+
+  it("says which units an offset is counted in", () => {
+    assert.match(guide, /UTF-16 code units/, "String.slice indexes code units, not code points");
+  });
+
   it("says where a world citation's version, hash and receipt id come from", () => {
     assert.match(guide, /checkReceiptId/, "the citation block beside every tool result");
     assert.match(guide, /citable/);
