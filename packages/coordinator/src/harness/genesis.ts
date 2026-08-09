@@ -8,6 +8,7 @@ import {
 } from "@arke-studio/contracts";
 import { GENESIS_ATTACHMENTS_DIR, sandboxAttachments } from "../artifacts/genesis-attachments.js";
 import { atomicWriteFile } from "../world/atomic.js";
+import { THINKING_LABEL, WRITING_LABEL, workingLabel } from "../world-chat/project.js";
 
 /**
  * Genesis conversations (prototype 12a): a world that does not exist yet is shaped in a
@@ -167,6 +168,11 @@ export class GenesisService {
     const usage = (this.adapter as { usageTokens?: (id: string) => number }).usageTokens;
     let replyText = "";
 
+    // The turn in flight, one verb at a time — the same working surface world chat has.
+    // Without it the genesis chat sat silent for a whole model turn, which reads as broken.
+    const progress = (label: string) => this.emit({ at: at(), type: "genesis.progress", genesisId, label });
+    let writing = false;
+
     try {
       const events = this.adapter.streamEvents(abort.signal);
       const handover = await this.handoverNote(dir, genesisId);
@@ -174,10 +180,22 @@ export class GenesisService {
         sessionId,
         parts: [{ type: "text", text: `${firstTurn ? `${PROTOCOL}\n\n` : ""}${text}${handover}` }],
       });
+      progress(THINKING_LABEL);
 
       for await (const event of events) {
         if (!("sessionId" in event) || event.sessionId !== sessionId) continue;
+        if (event.type === "tool.activity") {
+          // The tool, never its summary — the verb is all a progress line is allowed to be.
+          progress(workingLabel(event.tool));
+          writing = false;
+        }
         if (event.type === "message.delta") {
+          if (!writing) {
+            // Once per stretch of writing, not per token: a label that changes on every delta
+            // is a strobe, and it would say the same word each time anyway.
+            writing = true;
+            progress(WRITING_LABEL);
+          }
           replyText = event.text;
         } else if (event.type === "message.completed") {
           replyText = event.text;

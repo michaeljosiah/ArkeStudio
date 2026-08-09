@@ -424,6 +424,7 @@ const state: ClientState = {
     ],
     problems: [],
     keyArtCandidate: null,
+    hasKeyArt: true,
     externalEdits: [],
     stale: false,
   },

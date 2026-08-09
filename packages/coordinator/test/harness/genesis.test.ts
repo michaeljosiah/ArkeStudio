@@ -232,6 +232,74 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     assert.equal(adapter.created.length, 2, "a released conversation starts fresh");
   });
 
+  it("surfaces the turn in flight, verb by verb — thinking, the tool, then writing", async () => {
+    // The first conversation anyone has with the studio must never sit silent for a whole
+    // model turn: a quiet stretch is indistinguishable from a hang.
+    const dir = await tempDir("arke-genesis-");
+    const events: DomainEvent[] = [];
+    const subscribers = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null }>();
+    const push = (event: HarnessEvent) => {
+      for (const sub of subscribers) {
+        sub.queue.push(event);
+        sub.wake?.();
+        sub.wake = null;
+      }
+    };
+    const adapter: HarnessAdapter = {
+      id: "prog",
+      capabilities: () => new Set([]),
+      readiness: () => ({ ready: true }),
+      async createSession() {
+        return { sessionId: "gen_prog" };
+      },
+      async sendMessage(input) {
+        return { sessionId: input.sessionId, correlationId: "c" };
+      },
+      async dispatchAsync(input) {
+        void (async () => {
+          push({ type: "tool.activity", sessionId: input.sessionId, tool: "webfetch", summary: "fetched a page" });
+          push({ type: "message.delta", sessionId: input.sessionId, text: "Named" });
+          push({ type: "message.delta", sessionId: input.sessionId, text: "Named it" });
+          push({ type: "message.completed", sessionId: input.sessionId, text: "Named it The Undersong." });
+        })();
+        return { sessionId: input.sessionId, correlationId: "c" };
+      },
+      streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {
+        const sub: { queue: HarnessEvent[]; wake: (() => void) | null } = { queue: [], wake: null };
+        subscribers.add(sub);
+        return {
+          [Symbol.asyncIterator]() {
+            return (async function* () {
+              try {
+                while (!signal?.aborted) {
+                  const next = sub.queue.shift();
+                  if (next) {
+                    yield next;
+                    continue;
+                  }
+                  await new Promise<void>((resolve) => {
+                    signal?.addEventListener("abort", () => resolve(), { once: true });
+                    sub.wake = resolve;
+                  });
+                }
+              } finally {
+                subscribers.delete(sub);
+              }
+            })();
+          },
+        };
+      },
+    };
+    const genesis = new GenesisService(adapter, (e) => events.push(e), {
+      buildConfig: () => buildSessionConfig({}),
+    });
+    await genesis.run(dir, "gen-prog", "A coastal city.");
+    const labels = events.filter((e) => e.type === "genesis.progress").map((e) => (e.type === "genesis.progress" ? e.label : ""));
+    assert.equal(labels[0], "Thinking", "the resting label lands before any tool runs");
+    assert.ok(labels.includes("Writing"), "a stretch of writing says so once");
+    assert.equal(labels.filter((l) => l === "Writing").length, 1, "once per stretch, not per token");
+  });
+
   it("asks for the draft when the agent only talks, and writes it here", async () => {
     // What a real model does most of the time: answer the question, ignore the file. Measured
     // against OpenCode 1.18.10 — nought for four before this path existed.

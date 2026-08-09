@@ -640,6 +640,18 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   /**
+   * The genesis turn in flight, one verb at a time — the same working surface world chat has.
+   * The label arrives already worded; the client never invents one.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("genesis.progress"),
+      genesisId: z.string().min(1),
+      label: z.string().min(1),
+    })
+    .strict(),
+  /**
    * The world-so-far, as the agent maintains it in the sandbox's draft.json after each turn.
    * Everything here is proposed; nothing exists until "Begin in this world" walks it through
    * the ordinary creation gates.

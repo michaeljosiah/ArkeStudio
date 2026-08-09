@@ -6,7 +6,7 @@ import { seedFrom } from "../lib/art-styles.js";
 import { Button } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
 import { shortDate } from "../lib/format.js";
-import { acceptProposal, discardProposal, stageArtDirectionChange, useWorld } from "../lib/store.js";
+import { acceptProposal, discardProposal, setArtDirection, useWorld } from "../lib/store.js";
 
 const PROPOSED_DESCRIPTION =
   "Editorial maritime illustration on weathered paper. Dry-brush pigment and charcoal contours; slate and sea-glass blue with one lantern-orange accent; broad graphic shadows, loose fog and visible grain.";
@@ -125,6 +125,20 @@ export function ArtDirectionScreen() {
             </p>
           </div>
         </div>
+      ) : world.hasKeyArt ? (
+        /* The accepted key art stands in while no master look is set. The user made and
+           accepted this image; a page about the world's visual language that refuses to show
+           the world's one image reads as a bug, not a distinction. */
+        <div className="fy-artdirection__master">
+          {directionImage(world.meta.slug, "world-art.png", `${world.meta.name} key art`, 0)}
+          <div className="fy-artdirection__master-caption">
+            <div>
+              <strong>World key art</strong>
+              <span>standing in</span>
+            </div>
+            <p>the master look is not set — Make it concrete below to author the shared look</p>
+          </div>
+        </div>
       ) : (
         <div className="fy-artdirection__master fy-artdirection__master--empty">
           <div className="fy-artdirection__empty-mark">NO MASTER LOOK</div>
@@ -187,6 +201,7 @@ export function ArtDirectionProposalScreen() {
   // Null is "your own words", which is where this screen starts: the world already has a look,
   // and the words in the box are a draft of the change, not a preset's.
   const [presetId, setPresetId] = useState<string | null>(null);
+  const [sendFailed, setSendFailed] = useState(false);
   if (!world || world.meta.worldId !== worldId) return null;
 
   const direction = world.artDirection;
@@ -268,15 +283,31 @@ export function ArtDirectionProposalScreen() {
           <Button variant="ghost" onClick={cancel}>
             Cancel
           </Button>
+          {/* The human's own action (the assign-voice rule): typing the look and being asked to
+              approve your own typing was two steps for one decision. An agent's staged change
+              still reviews in the aside; this button is for the person, so it just applies.
+              Navigation only follows a send that happened — a disconnected studio keeps the
+              edit on screen and says so, rather than discarding it behind a page change. */}
           <Button
+            variant="primary"
             disabled={Boolean(staged) || description.trim().length === 0}
-            onClick={() =>
-              stageArtDirectionChange(world.meta.worldId, description, direction.masterLook ?? null)
-            }
+            onClick={() => {
+              if (setArtDirection(world.meta.worldId, description, direction.masterLook ?? null)) {
+                navigate(`/w/${world.meta.worldId}/art-direction`);
+              } else {
+                setSendFailed(true);
+              }
+            }}
           >
-            {staged ? "Change reviewed" : "Review change"}
+            {staged ? "Change staged by the agent" : `Set the look · v${nextVersion}`}
           </Button>
         </div>
+        {sendFailed && (
+          <div className="fy-artproposal__seedline" role="alert">
+            The studio is disconnected — nothing was changed. Your words are still here; try again
+            when the coordinator is back.
+          </div>
+        )}
       </main>
       <aside className="fy-artproposal__ripple">
         <div className="fy-artproposal__eyebrow">RIPPLES</div>

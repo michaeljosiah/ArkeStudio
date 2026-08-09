@@ -40,7 +40,10 @@ export function ArtStyleGrid({
            * is a grid rather than a dropdown.
            */}
           <span className="fy-styles__frame">
-            <img src={`/art-styles/${preset.id}.svg`} alt="" aria-hidden="true" />
+            {/* Relative, not absolute: the packaged app loads from file://, where a leading
+                slash resolves to the filesystem root and every preview 404s. Same lesson as
+                the setup reel (shell.tsx SETUP_REEL). */}
+            <img src={`./art-styles/${preset.id}.svg`} alt="" aria-hidden="true" />
             <span className="fy-styles__tick" aria-hidden="true">
               <Check size={12} />
             </span>

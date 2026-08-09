@@ -7,7 +7,7 @@ import { Archive, ChevronDown, ChevronRight, Plus, Sparkle, X } from "../compone
 import { AgentsPanel } from "./agents.js";
 import { AppChrome } from "../components/chrome.js";
 import type { StartupState } from "../arke-bridge.js";
-import { Loading } from "../components/loading.js";
+import { Working } from "../components/working.js";
 import { Portrait } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
 import { shortDateTime } from "../lib/format.js";
@@ -879,11 +879,10 @@ export function NewWorldScreen() {
                     {turn.text}
                   </div>
                 ))}
-                {chatRunning && (
-                  <div className="fy-bubble--gate">
-                    <Loading inline label="shaping the draft…" />
-                  </div>
-                )}
+                {/* The turn in flight, verb by verb — the same working surface world chat has.
+                    A silent stretch while the model reads and writes is indistinguishable from
+                    a hang, and this is the first conversation anyone has with the studio. */}
+                {chatRunning && <Working label={g?.working ?? null} startedAt={g?.runStartedAt ?? null} />}
                 {g?.status === "failed" && g.detail && <div className="fy-mono">the last turn failed — {g.detail}</div>}
                 <div style={{ marginTop: "auto" }}>
                   <Composer

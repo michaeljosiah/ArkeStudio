@@ -375,3 +375,51 @@ A paused film frame of a drowned canal city with two large glowing choice button
 
 **Interact** (`ms-interact`) — reaching into the film
 A fingertip touching the surface of a glowing film frame from outside it, ripples spreading across the image where it touches, three faint circular target rings over bronze bells inside the scene, a small clean UI caption reading "Quiet the bells" with a thin 8-second timer bar, minimal sans-serif UI type, painterly cinematic concept art, muted palette with one warm accent, soft volumetric fog, filmic lighting, high detail, no watermark, no border
+
+---
+
+## Art style previews, "How should this world look?" (38c / 53a / the art-direction propose screen)
+
+The nine cards in the style grid promise **the same harbour, nine treatments** — one scene rendered nine ways, so the author compares the treatment and never the subject. Placeholder SVGs ship today at `packages/client/public/art-styles/<id>.svg`; these prompts produce the real set.
+
+### Delivery contract
+
+- One image per style, **identical scene and framing** across all nine — the whole point of the grid is that only the treatment changes.
+- Square masters (1024×1024 or larger); the card crops with `cover`.
+- Deliver as `<id>.png` into `packages/client/public/art-styles/` (the picker's extension flips from `.svg` to `.png` in one line when the set lands).
+- No text, no watermark, no border, no people's faces (a face here competes with the character sheets).
+
+### The shared scene
+
+Every prompt begins with the same scene clause:
+
+> A small stone harbour at dusk, one lantern-lit boat moored by a weathered quay, bell tower on the headland behind, mist coming in off the water —
+
+…and ends with the style clause below. Nothing else varies.
+
+**Painterly realism** (`painterly-realism.png`)
+— weathered realism with visible brushwork, natural light, a restrained palette, soft edges that still carry weight
+
+**Cinematic photoreal** (`cinematic-photoreal.png`)
+— photographic realism lensed and lit like film, motivated light with deep falloff, shallow depth of field, colour graded rather than saturated
+
+**Ink and wash** (`ink-and-wash.png`)
+— brushed ink contour over washed tone, few values, generous empty space, the paper grain left showing through
+
+**Watercolour storybook** (`watercolour-storybook.png`)
+— watercolour on warm paper, soft bleeds and blooming edges, a light hand with detail, pencil under-drawing left visible
+
+**Graphic novel** (`graphic-novel.png`)
+— heavy contour line with flat fills, hard-edged shadow shapes, a tight palette, texture carried by hatching rather than gradient
+
+**Cel animation** (`cel-animation.png`)
+— clean animation line over flat colour, two-tone shading, simplified forms, painted background softer than the foreground shapes
+
+**Editorial print** (`editorial-print.png`)
+— screen-printed poster flatness, three inks, visible halftone, shapes that read before any detail does
+
+**Analogue photo** (`analogue-photo.png`)
+— faded film emulsion, soft highlight bloom, muted chemistry in the shadows, visible grain and a slight colour shift
+
+**Tactile miniature** (`tactile-miniature.png`)
+— the scene rebuilt from stop-motion materials photographed for real: felt, wood, wire and clay, macro depth of field, practical lighting with honest shadows

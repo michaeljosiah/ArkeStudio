@@ -152,8 +152,12 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
  * a resting state inherited rather than hand-written.
  */
 @keyframes fy-sweep {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
+  from { background-position: 130% 0; }
+  to { background-position: -130% 0; }
+}
+@keyframes fy-loading-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 .fy-loading {
   display: flex;
@@ -177,7 +181,10 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: fy-sweep 1.9s var(--ease-out) infinite;
+  /* Linear, not eased: the ease-out curve crossed the glyph in the first half-second and then
+     parked the band off-glyph for the rest of each cycle, so the mark read as a static pale A —
+     precisely when it was the only signal that anything was happening. */
+  animation: fy-sweep 1.6s linear infinite;
 }
 .fy-loading--inline .fy-loading__mark { font-size: 15px; }
 .fy-loading__label { font: 400 12px var(--font-mono); color: var(--muted-foreground); }
@@ -190,10 +197,18 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
  * worse than no loader, so the stopped state is written: a solid letter, no gradient at all.
  */
 @media (prefers-reduced-motion: reduce) {
+  /*
+   * Reduced motion, not no information. The loader is often the ONLY signal that paid work is
+   * in flight, and Windows "animation effects off" reports reduced motion for the whole app —
+   * a perfectly still A there reads as a hang, which is the bug this loader exists to prevent.
+   * So the sweep goes (it is decoration) and a slow, small opacity pulse stays (it is the
+   * information). !important because the global flatten in globals.css is !important too.
+   */
   .fy-loading__mark {
     background: none;
     color: var(--foreground);
     -webkit-text-fill-color: currentColor;
+    animation: fy-loading-pulse 2.4s ease-in-out infinite !important;
   }
 }
 

@@ -169,16 +169,19 @@ export function CharacterReferenceScreen() {
         !world.referenceReviews.some((review) => review.takeId === take.id),
     )
     .sort((a, b) => (b.completedAt ?? b.dispatchedAt).localeCompare(a.completedAt ?? a.dispatchedAt));
+  // Same scoping rules as the main-photo watch below: this world only (sheet slugs recur
+  // across worlds), and a job held for reconciliation is not generating.
   const latestSheetJob = [...(state?.app.jobs ?? [])]
     .filter(
       (job) =>
+        job.worldId === world.meta.worldId &&
         job.target.kind === "character-sheet" &&
         job.target.id?.startsWith(`${sheetId}/`),
     )
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
   const sheetFinalization = latestSheetJob?.finalization?.status !== "complete" ? latestSheetJob?.finalization : undefined;
   const runningSheet = latestSheetJob
-    ? !["succeeded", "failed", "cancelled"].includes(latestSheetJob.status) ||
+    ? !["succeeded", "failed", "cancelled", "needs-reconciliation"].includes(latestSheetJob.status) ||
       latestSheetJob.finalization?.status === "pending"
     : false;
   const reviewTake = pendingSheetTakes[0] ?? null;
@@ -315,17 +318,18 @@ export function GenerateCharacterSheetScreen() {
   const photo = kit ? mainPhotoFor(kit) : null;
   const chosenModel = shownImageModel(state, choice.modelId);
   const referencesAsText = !carriesIdentity(chosenModel);
-  const pendingSheetTakes = world.referenceTakes
-    .filter(
-      (take) =>
-        take.kind === "sheet" &&
-        take.reference?.sheetId === sheetId &&
-        !world.referenceReviews.some((review) => review.takeId === take.id),
-    )
+  // ALL of this sheet's composite takes, reviewed or not. The auto-accept at finalization
+  // (the human's-own-action rule) reviews the take the moment it lands, so a screen that only
+  // watched the unreviewed set would show "Generating…" forever over a sheet already in.
+  const sheetTakes = world.referenceTakes
+    .filter((take) => take.kind === "sheet" && take.reference?.sheetId === sheetId)
     .sort((a, b) => (b.completedAt ?? b.dispatchedAt).localeCompare(a.completedAt ?? a.dispatchedAt));
   const generatedTake = requested
-    ? pendingSheetTakes.find((take) => !earlierTakeIds.current.has(take.id)) ?? null
+    ? sheetTakes.find((take) => !earlierTakeIds.current.has(take.id)) ?? null
     : null;
+  const generatedAccepted =
+    generatedTake !== null &&
+    world.referenceReviews.some((review) => review.takeId === generatedTake.id && review.decision === "accept");
   const generatedPath = generatedTake
     ? `references/${sheetId}/takes/${generatedTake.id}/${generatedTake.media}`
     : null;
@@ -349,7 +353,26 @@ export function GenerateCharacterSheetScreen() {
                 <p>{dispatchError}</p>
                 <Button variant="primary" onClick={() => setRequested(false)}>Back to generation settings</Button>
               </div>
+            ) : generatedPath && generatedTake && generatedAccepted ? (
+              <>
+                {/* The human's own action: the composite the user asked for landed already
+                    designated, so there is nothing to approve — only somewhere to go. */}
+                <div className="fy-sheet-dialog__generated-image">
+                  <CharacterSheetPreview worldSlug={world.meta.slug} path={generatedPath} characterName={sheet.name} />
+                </div>
+                <div className="fy-sheet-dialog__result-actions">
+                  <div>
+                    <strong>Your character sheet is in</strong>
+                    <p>It is already part of {sheet.name}’s reference set. Regenerate from there any time.</p>
+                  </div>
+                  <Button variant="primary" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}>
+                    Back to the reference set
+                  </Button>
+                </div>
+              </>
             ) : generatedPath && generatedTake ? (
+              /* A take that somehow arrived unreviewed — an older world, or the auto-accept's
+                 guards declined — keeps the explicit decision. */
               <>
                 <div className="fy-sheet-dialog__generated-image">
                   <CharacterSheetPreview worldSlug={world.meta.slug} path={generatedPath} characterName={sheet.name} />
@@ -469,7 +492,9 @@ export function GenerateCharacterSheetScreen() {
             primaryLabel="Generate"
             primaryDisabled={!photo || !carriesIdentity(chosenModel)}
             onPrimary={(chosen) => {
-              earlierTakeIds.current = new Set(pendingSheetTakes.map((take) => take.id));
+              // Seeded from ALL takes, reviewed included — a previously accepted composite must
+              // not read as this request's result.
+              earlierTakeIds.current = new Set(sheetTakes.map((take) => take.id));
               const requestId = generateCharacterSheet(
                 world.meta.worldId,
                 sheetId,
@@ -509,6 +534,16 @@ export function ReplaceMainPhotoScreen() {
   const [uploaded, setUploaded] = useState(false);
   const [worldRef, setWorldRef] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  // The click itself flips the panel (the WorldKeyArt pattern): between the press and the
+  // first job event there is a round trip, and a panel that waits for it says "Ready when
+  // you are" to somebody who just spent money. Cleared when the queue answers either way;
+  // the timeout is the backstop for an enqueue that was refused without a job.
+  const [asking, setAsking] = useState(false);
+  useEffect(() => {
+    if (!asking) return;
+    const timer = setTimeout(() => setAsking(false), 20_000);
+    return () => clearTimeout(timer);
+  }, [asking]);
 
   useEffect(() => {
     setPrompt(mainPhotoPromptFor(sheet));
@@ -544,6 +579,23 @@ export function ReplaceMainPhotoScreen() {
   }));
   const candidates = [...uploadedCandidates, ...generatedCandidates];
   const selectedCandidate = candidates.find((candidate) => candidate.key === selected) ?? null;
+  // Previews in flight, the same way the kit page watches sheet jobs. Without this the panel
+  // said "Ready when you are" while the money was already being spent — indistinguishable
+  // from having pressed nothing.
+  // Scoped to THIS world — sheet slugs recur across worlds — and a job held for
+  // reconciliation is not generating: nothing runs until the user answers in Activity.
+  const generatingPreviews = (state?.app.jobs ?? []).filter(
+    (job) =>
+      job.worldId === world.meta.worldId &&
+      job.target.kind === "main-photo-candidate" &&
+      job.target.id?.startsWith(`${sheetId}/`) &&
+      (!["succeeded", "failed", "cancelled", "needs-reconciliation"].includes(job.status) ||
+        job.finalization?.status === "pending"),
+  ).length;
+  const generating = asking || generatingPreviews > 0;
+  useEffect(() => {
+    if (asking && generatingPreviews > 0) setAsking(false);
+  }, [asking, generatingPreviews]);
   // The chosen model decides what can travel, so it decides what this screen shows travelling.
   // A silent downgrade from image identity to text description is the failure the bar exists to
   // prevent, and it has to be visible where the references are, not only in the bar's own line.
@@ -626,20 +678,33 @@ export function ReplaceMainPhotoScreen() {
             onCancel={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}
             primaryLabel="Generate previews"
             primaryDisabled={!prompt.trim()}
-            onPrimary={(chosen) =>
+            onPrimary={(chosen) => {
+              setAsking(true);
               generateMainPhoto(world.meta.worldId, sheetId, prompt.trim(), count, refs, {
                 modelId: chosen.model.id,
                 ...(chosen.tier !== undefined ? { tier: chosen.tier } : {}),
-              })
-            }
+              });
+            }}
           />
         </section>
         <section className="fy-mainphoto-dialog__results">
           <header>
             <span>PREVIEWS</span>
-            <strong>{candidates.length ? "ready" : "waiting"}</strong>
+            <strong>{generating ? "generating" : candidates.length ? "ready" : "waiting"}</strong>
           </header>
-          {candidates.length === 0 ? (
+          {candidates.length === 0 && generating ? (
+            <div className="fy-mainphoto-dialog__empty">
+              <Loading
+                label={
+                  generatingPreviews > 0
+                    ? `Generating ${generatingPreviews} preview${generatingPreviews === 1 ? "" : "s"} of ${sheet.name}`
+                    : `Generating previews of ${sheet.name}`
+                }
+                size={44}
+              />
+              <span>You can leave this page. Previews land here and in Activity.</span>
+            </div>
+          ) : candidates.length === 0 ? (
             <div className="fy-mainphoto-dialog__empty">
               <strong>Ready when you are</strong>
               <span>The selected world look carries as treatment, never subject.</span>

@@ -126,6 +126,19 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       masterLook: z.string().min(1).nullable().optional(),
     })
     .strict(),
+  /**
+   * The human's own action (the assign-voice rule): a look the user set on the art-direction
+   * screen applies at once — versioned, rippled, recorded in history — but is never staged as
+   * a proposal for the same person to accept. Agents keep staging.
+   */
+  z
+    .object({
+      kind: z.literal("set-art-direction"),
+      worldId: UlidSchema,
+      description: z.string().trim().min(1).max(4000),
+      masterLook: z.string().min(1).nullable().optional(),
+    })
+    .strict(),
   /** SPEC-004: gate decisions. confirmRipples carries the authoritative signature on re-confirm (R-10). */
   z
     .object({

@@ -906,6 +906,31 @@ export class Coordinator {
           : undefined;
         const take = await recordReferenceTake(store, job, ledgerEntry);
         if (!take) throw new Error("reference take finalization produced no take");
+        // The human's own action rule (frames.ts, assign-voice): a composite the user asked for
+        // lands designated — there is no review step for the person who pressed the button.
+        // Sheet generation has no agent path today; if one arrives, it must stage instead.
+        // Failure leaves the take pending, and the review strip still knows how to offer it.
+        if (job.target.kind === "character-sheet" && take.media) {
+          const sheetId = job.target.id?.split("/")[0];
+          const bundle = store.getBundle();
+          const sheet = sheetId ? bundle.sheets.find((s) => s.id === sheetId) : undefined;
+          const alreadyReviewed = bundle.referenceReviews.some((review) => review.takeId === take.id);
+          const frozen = job.params["provenance"] as
+            | { sheets?: Record<string, number>; anchorFile?: string }
+            | undefined;
+          const sheetVersion = sheetId ? frozen?.sheets?.[sheetId] : undefined;
+          if (sheet && sheetId && !alreadyReviewed && frozen?.anchorFile && sheetVersion !== undefined) {
+            const review = referenceReviewDecision(store.now(), take, "accept");
+            await acceptCharacterSheet(store, sheet, {
+              file: `takes/${take.id}/${take.media}`,
+              takeId: take.id,
+              sheetVersion,
+              anchorFile: frozen.anchorFile,
+              artDirectionVersion: take.provenance.artDirectionVersion ?? bundle.artDirection.version,
+              review,
+            }).catch(() => {});
+          }
+        }
       }
       if (
         (job.target.kind === "shot" ||
@@ -1232,6 +1257,22 @@ export class Coordinator {
             worldId: msg.worldId,
             proposalId: proposal.id,
           });
+        } catch {
+          /* the refreshed snapshot is authoritative */
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "set-art-direction": {
+        // The human's own action (the assign-voice rule): stage and accept in one motion, so
+        // the history and ripples are identical to a reviewed change — the only thing removed
+        // is the proposal waiting on the person who just typed it. If the accept refuses, the
+        // staged proposal is left standing rather than the work lost.
+        const gate = this.opts.provider.gate?.();
+        if (!gate) return;
+        try {
+          const proposal = await gate.stageArtDirectionChange(msg.description, msg.masterLook);
+          await gate.accept(proposal.id, {});
         } catch {
           /* the refreshed snapshot is authoritative */
         }
