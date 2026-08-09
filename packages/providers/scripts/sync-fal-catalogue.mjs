@@ -107,6 +107,17 @@ const CURATED = {
     id: "seedance-2.0",
     capability: "video",
     family: "seedance",
+    // SPEC-019 T-1: on this provider a task mode is a ROUTE, not a field — text-to-video,
+    // image-to-video and reference-to-video are siblings and the endpoint decides the task. No
+    // sentinel is declared for the locked ratio: 2.0's spelling for it is unverified, and
+    // omitting the parameter is the safe reading of "send no chosen value". The 2.5 rows, whose
+    // sentinel is "auto" and whose aspect range is continuous, land with the next catalogue sync.
+    modes: {
+      generate: { locked: [] },
+      "first-frame": { route: "bytedance/seedance-2.0/image-to-video", locked: ["aspect"] },
+      "first-and-last-frame": { route: "bytedance/seedance-2.0/image-to-video", locked: ["aspect"] },
+      "keyframe-sequence": { route: "bytedance/seedance-2.0/reference-to-video", locked: [] },
+    },
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     limits: {
       maxDurationSec: 15,
@@ -122,6 +133,17 @@ const CURATED = {
     id: "seedance-2.0-fast",
     capability: "video",
     family: "seedance",
+    // SPEC-019 T-1: on this provider a task mode is a ROUTE, not a field — text-to-video,
+    // image-to-video and reference-to-video are siblings and the endpoint decides the task. No
+    // sentinel is declared for the locked ratio: 2.0's spelling for it is unverified, and
+    // omitting the parameter is the safe reading of "send no chosen value". The 2.5 rows, whose
+    // sentinel is "auto" and whose aspect range is continuous, land with the next catalogue sync.
+    modes: {
+      generate: { locked: [] },
+      "first-frame": { route: "bytedance/seedance-2.0/fast/image-to-video", locked: ["aspect"] },
+      "first-and-last-frame": { route: "bytedance/seedance-2.0/fast/image-to-video", locked: ["aspect"] },
+      "keyframe-sequence": { route: "bytedance/seedance-2.0/fast/reference-to-video", locked: [] },
+    },
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     // The fast route tops out at 720p — its schema offers 480p and 720p only. It was listed at
     // 1080p, a size it cannot make, which the picker offered and the price list charged for.
@@ -292,6 +314,12 @@ for (const [route, curated] of Object.entries(CURATED)) {
     // ids are route names and one family's routes disagree about them ("seedance-2.0" and
     // "seedance-2.0-fast" are one family). A row without one drafts under general guidance.
     ...(curated.family ? { family: curated.family } : {}),
+    // SPEC-019 R-32: a task mode is a route on this provider, not a field. Sentinels are data
+    // because the vendor API and this aggregator spell the same idea differently ("-1"/"adaptive"
+    // vs "auto"). A row with no modes supports generate only, which is what every row meant
+    // before this existed.
+    ...(curated.modes ? { modes: curated.modes } : {}),
+    ...(curated.aspectRange ? { aspectRange: curated.aspectRange } : {}),
   });
   endpoints[curated.id] = route;
   // An edit route is only emitted when the model also declares it accepts references, so the

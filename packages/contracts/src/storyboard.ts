@@ -216,3 +216,56 @@ export function chooseReferenceSteering(input: {
     statement: `keyframes — every shot has a frame and all ${shots.length} fit ${input.model.displayName}'s reference budget`,
   };
 }
+
+
+// ---------------------------------------------------------------------------
+// Keyframe-sequence dispatch (SPEC-019 R-46..R-48, T-27, T-28)
+// ---------------------------------------------------------------------------
+
+export interface KeyframeSequence {
+  /** The frames to carry, in shot order — index is the position in the transmitted array. */
+  frames: Array<{ index: number; shotId: string; number: number; takeId: string }>;
+  /** Shots with no accepted or pinned frame, named before commit (R-47). */
+  missing: Array<{ shotId: string; number: number }>;
+  /** The line that states the ordering to the model (R-46). */
+  statement: string;
+  /** Whether this sequence may be dispatched at all. */
+  ok: boolean;
+}
+
+/**
+ * The ordered keyframes for a scene (R-46, R-47, D32).
+ *
+ * Only an accepted or pinned frame qualifies, which makes the accept gate the thing that decides
+ * what steers generation. A shot with neither is named and the sequence does **not** close the
+ * gap: closing it silently would produce a sequence missing a shot the user believes is in it,
+ * and the model would align to the frames it received and invent the rest.
+ */
+export function keyframeSequence(input: {
+  shots: readonly Shot[];
+  selections: Selections;
+}): KeyframeSequence {
+  const frames: KeyframeSequence["frames"] = [];
+  const missing: KeyframeSequence["missing"] = [];
+  for (const shot of input.shots) {
+    const takeId = frameFor(shot.id, input.selections);
+    if (takeId === null) {
+      missing.push({ shotId: shot.id, number: shot.number });
+      continue;
+    }
+    frames.push({ index: frames.length + 1, shotId: shot.id, number: shot.number, takeId });
+  }
+  const ok = missing.length === 0 && frames.length > 0;
+  return {
+    frames,
+    missing,
+    ok,
+    statement: ok
+      ? `Use images 1 to ${frames.length} in order as keyframes, one per shot, in the order given.`
+      : missing.length > 0
+        ? `shot${missing.length === 1 ? "" : "s"} ${missing.map((entry) => entry.number).join(", ")} ${
+            missing.length === 1 ? "has" : "have"
+          } no accepted frame — a keyframe sequence would be missing ${missing.length === 1 ? "it" : "them"}`
+        : "this dispatch covers no shots",
+  };
+}

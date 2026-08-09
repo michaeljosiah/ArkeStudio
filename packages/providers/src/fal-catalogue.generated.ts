@@ -150,6 +150,28 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "provider": "fal",
     "capability": "video",
     "family": "seedance",
+
+    "modes": {
+      "generate": {
+        "locked": []
+      },
+      "first-frame": {
+        "route": "bytedance/seedance-2.0/image-to-video",
+        "locked": [
+          "aspect"
+        ]
+      },
+      "first-and-last-frame": {
+        "route": "bytedance/seedance-2.0/image-to-video",
+        "locked": [
+          "aspect"
+        ]
+      },
+      "keyframe-sequence": {
+        "route": "bytedance/seedance-2.0/reference-to-video",
+        "locked": []
+      }
+    },
     "displayName": "Seedance 2.0 Text to Video API",
     "accepts": {
       "referenceImages": 0,
@@ -196,6 +218,28 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "provider": "fal",
     "capability": "video",
     "family": "seedance",
+
+    "modes": {
+      "generate": {
+        "locked": []
+      },
+      "first-frame": {
+        "route": "bytedance/seedance-2.0/fast/image-to-video",
+        "locked": [
+          "aspect"
+        ]
+      },
+      "first-and-last-frame": {
+        "route": "bytedance/seedance-2.0/fast/image-to-video",
+        "locked": [
+          "aspect"
+        ]
+      },
+      "keyframe-sequence": {
+        "route": "bytedance/seedance-2.0/fast/reference-to-video",
+        "locked": []
+      }
+    },
     "displayName": "Seedance 2.0 Fast Text to Video",
     "accepts": {
       "referenceImages": 0,

@@ -142,6 +142,24 @@ export const ReferenceKitSchema = z
     styleOverride: z.string().optional(),
     /** Optional exploration; never dispatches unless attached to a production or scene. */
     looks: z.array(CharacterLookSchema).optional(),
+    /**
+     * The one audio asset that represents this character's voice (SPEC-019 R-45, D31).
+     *
+     * SPEC-011 assigns a provider voice *identity* to the sheet (R-11) and produces a voice take
+     * per dialogue line (R-16); neither is a canonical sample to transmit. So one is nominated,
+     * exactly as a model sheet's designated compilation is nominated among many. A character
+     * with none carries no audio reference, and the absence is stated rather than resolved by
+     * picking a take at random.
+     */
+    designatedVoiceSample: z
+      .object({
+        file: z.string().min(1),
+        source: z.enum(["cloning-recording", "voice-take"]),
+        sourceTakeId: TakeIdSchema.optional(),
+        designatedAt: IsoDateTimeSchema,
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type ReferenceKit = z.infer<typeof ReferenceKitSchema>;
@@ -218,4 +236,11 @@ export function designatedCompilation(kit: ReferenceKit): Compilation | null {
   const accepted = kit.compilations.filter((c) => c.accepted);
   if (accepted.length === 0) return null;
   return accepted.reduce((a, b) => (b.compiledAt > a.compiledAt ? b : a));
+}
+
+
+/** The voice sample that would travel with this character, or null (SPEC-019 R-45). */
+export function designatedVoiceSample(kit: ReferenceKit | null): { file: string } | null {
+  const sample = kit?.designatedVoiceSample;
+  return sample ? { file: `references/${kit!.sheetId}/${sample.file}` } : null;
 }

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   assemblePassBlocks,
@@ -359,6 +359,30 @@ export async function exportBoard(
     });
   });
   return file;
+}
+
+/**
+ * Raw byte sizes for every reference a plan could carry (SPEC-019 R-43, T-24).
+ *
+ * Planning is pure and cannot stat a file, so the sizes are measured here and handed in. A file
+ * that cannot be read counts as zero rather than failing the whole dialog: an unreadable
+ * reference is a different problem, and it surfaces where references are resolved.
+ */
+export async function referenceByteSizes(store: WorldStore, files: readonly string[]): Promise<Record<string, number>> {
+  const sizes: Record<string, number> = {};
+  for (const file of new Set(files)) {
+    try {
+      sizes[file] = (await stat(toExtendedLength(join(store.dir, fromPortable(file))))).size;
+    } catch {
+      sizes[file] = 0;
+    }
+  }
+  return sizes;
+}
+
+/** The aspect this production delivers in, falling back to the world's default (R-36, D29). */
+export function productionAspect(production: ProductionBundle, worldDefault?: string): string | undefined {
+  return production.meta.aspect ?? worldDefault;
 }
 
 // ---------------------------------------------------------------------------

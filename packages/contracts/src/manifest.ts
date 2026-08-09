@@ -119,6 +119,16 @@ export const ModelLimitsSchema = z
      * row without one states no cap, and the plan draws every shot.
      */
     storyboardPanels: z.number().int().min(1).optional(),
+    /**
+     * How many distinct subjects this model holds apart reliably (SPEC-019 R-42). A *range*, not
+     * a cap: past it stability drops, and the budget warns rather than truncating — dropping a
+     * character the user wrote into the shot is a worse failure than a shakier take they retry.
+     */
+    reliableSubjects: z.number().int().min(1).optional(),
+    /** Aggregate seconds of video reference this model accepts across all clips (R-40, R-41). */
+    maxReferenceVideoSec: z.number().min(0).optional(),
+    /** Aggregate seconds of audio reference this model accepts across all clips (R-40, R-41). */
+    maxReferenceAudioSec: z.number().min(0).optional(),
   })
   .strict();
 export type ModelLimits = z.infer<typeof ModelLimitsSchema>;
@@ -134,6 +144,59 @@ export function tiersFor(model: { limits: ModelLimits }): SizeTier[] {
 export function nativeResolution(model: { limits: ModelLimits }, tier: SizeTier): string | undefined {
   return model.limits.tiers?.[tier];
 }
+
+// ---------------------------------------------------------------------------
+// Task modes and their locked parameters (SPEC-019 R-32..R-36, D25, D26)
+// ---------------------------------------------------------------------------
+
+export const TaskModeSchema = z.enum([
+  "generate",
+  "edit",
+  "continue",
+  "first-frame",
+  "first-and-last-frame",
+  "keyframe-sequence",
+]);
+export type TaskMode = z.infer<typeof TaskModeSchema>;
+
+/** Output parameters a mode can take out of the user's hands by deriving them from its input. */
+export const LockedParameterSchema = z.enum(["aspect", "duration", "resolution"]);
+export type LockedParameter = z.infer<typeof LockedParameterSchema>;
+
+/**
+ * What one mode costs a model in control.
+ *
+ * `route` is the point of the whole shape: T-1 established that on this aggregator a task mode is
+ * a *route*, not a field — text-to-video, image-to-video and reference-to-video are siblings, and
+ * which one a request lands on decides what it does. The catalogue already models that for the
+ * `/edit` sibling.
+ *
+ * `sentinels` is the second lesson. The vendor API spells a locked duration `-1` and a locked
+ * ratio `adaptive`; the aggregator spells both `"auto"`. Two surfaces onto one model already
+ * disagree, so the spelling is data rather than a constant somebody has to find.
+ */
+export const TaskModeSpecSchema = z
+  .object({
+    /** The provider route this mode dispatches to, when it is not the model's default. */
+    route: z.string().min(1).optional(),
+    /** Parameters this mode derives from its input; a dispatch must not send a chosen value. */
+    locked: z.array(LockedParameterSchema).default([]),
+    /** What to send in a locked parameter's place, where the route requires something. */
+    sentinels: z.record(LockedParameterSchema, z.string().min(1)).optional(),
+    /**
+     * How far the output duration may exceed the input's, in seconds. Priced at the top (R-38):
+     * a figure that can come in under is honest where one that can come in over is not.
+     */
+    durationToleranceSec: z.number().min(0).optional(),
+  })
+  .strict();
+export type TaskModeSpec = z.infer<typeof TaskModeSpecSchema>;
+
+/** The aspect ratios a model accepts as a continuous range, rather than an enumeration (R-36). */
+export const AspectRangeSchema = z
+  .object({ min: z.number().positive(), max: z.number().positive() })
+  .strict();
+export type AspectRange = z.infer<typeof AspectRangeSchema>;
 
 export const ManifestModelSchema = z
   .object({
@@ -153,6 +216,13 @@ export const ManifestModelSchema = z
      * of one family disagree about them ("seedance-2.0", "seedance-2.0-fast").
      */
     family: z.string().min(1).optional(),
+    /**
+     * The task modes this model supports, and what each one locks (R-32). A model with no entry
+     * supports `generate` only — which is what every row said implicitly before this existed.
+     */
+    modes: z.record(TaskModeSchema, TaskModeSpecSchema).optional(),
+    /** A continuous aspect range, where the model accepts one instead of a fixed list (R-36). */
+    aspectRange: AspectRangeSchema.optional(),
     /**
      * Enabled from a provider's catalogue rather than shipped with a verified description. The
      * price is real — nothing unpriced can be enabled — but what it accepts was never checked,
@@ -500,4 +570,57 @@ export function passesForDuration(model: ManifestModel, durationSec: number): nu
   const cap = model.limits.maxDurationSec;
   if (cap === undefined || durationSec <= 0) return durationSec > 0 ? 1 : 0;
   return Math.ceil(durationSec / cap);
+}
+
+
+// ---------------------------------------------------------------------------
+// Mode queries (SPEC-019 R-32..R-35)
+// ---------------------------------------------------------------------------
+
+const GENERATE_ONLY: TaskModeSpec = { locked: [] };
+
+/** What this model does in a mode, or null when it does not support it at all. */
+export function modeSpec(model: ManifestModel, mode: TaskMode): TaskModeSpec | null {
+  if (model.modes === undefined) return mode === "generate" ? GENERATE_ONLY : null;
+  return model.modes[mode] ?? null;
+}
+
+export function supportsMode(model: ManifestModel, mode: TaskMode): boolean {
+  return modeSpec(model, mode) !== null;
+}
+
+/** Parameters a dispatch in this mode must NOT send a chosen value for (R-33). */
+export function lockedParameters(model: ManifestModel, mode: TaskMode): LockedParameter[] {
+  return modeSpec(model, mode)?.locked ?? [];
+}
+
+export function locksParameter(model: ManifestModel, mode: TaskMode, parameter: LockedParameter): boolean {
+  return lockedParameters(model, mode).includes(parameter);
+}
+
+/** What goes over the wire in a locked parameter's place, when the route wants something. */
+export function sentinelFor(
+  model: ManifestModel,
+  mode: TaskMode,
+  parameter: LockedParameter,
+): string | null {
+  return modeSpec(model, mode)?.sentinels?.[parameter] ?? null;
+}
+
+/**
+ * Why a mode is unavailable, in words, or null when it is available (R-34, D26).
+ *
+ * SPEC-008's rule for size tiers, on a new axis: an absent mode reads as a missing product
+ * capability, a disabled one with a reason teaches something about the model.
+ */
+export function modeUnavailableReason(model: ManifestModel, mode: TaskMode): string | null {
+  if (supportsMode(model, mode)) return null;
+  return `${model.displayName} has no ${mode.replace(/-/g, " ")} route`;
+}
+
+/** Whether an aspect ratio is reachable on this model, by range or by enumeration. */
+export function aspectAllowed(model: ManifestModel, ratio: number): boolean {
+  const range = model.aspectRange;
+  if (range) return ratio >= range.min && ratio <= range.max;
+  return model.limits.aspects === undefined || model.limits.aspects.length === 0;
 }

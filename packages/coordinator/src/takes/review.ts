@@ -7,6 +7,7 @@ import {
   type ReviewDecision,
   type Selections,
 } from "@arke-studio/contracts";
+import { supersededBy } from "../productions/continuation.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
@@ -48,7 +49,17 @@ export async function acceptTake(
   };
 
   const map = JSON.parse(selections.raw) as Selections;
-  const next: Selections = { ...map, [input.shotId]: { ...map[input.shotId], acceptedTakeId: decision.takeId } };
+  let next: Selections = { ...map, [input.shotId]: { ...map[input.shotId], acceptedTakeId: decision.takeId } };
+
+  // SPEC-019 R-54, D36: anything built by extending the take this shot was using is no longer
+  // describing the cut. Marking it is not enough — the cut is derived from selections, so a take
+  // that is only flagged stays in the picture while the record says it does not. Clearing the
+  // selection makes SPEC-013 R-15 render a labelled gap for free. Nothing is deleted: the take
+  // keeps its media, its provenance and its own review decisions, because a reselection is one
+  // the user may undo a minute later and paid-for footage should not die for it.
+  for (const { shotId } of supersededBy({ changedShotId: input.shotId, selections: map, takes: production.takes })) {
+    next = { ...next, [shotId]: { ...next[shotId], acceptedTakeId: null } };
+  }
 
   // Continuity (R-12, D8): the accepted take's final frame seeds the FOLLOWING shot. For a
   // pass segment the frame source is the pass, not the segment — a coinciding boundary must

@@ -1,6 +1,12 @@
 import { compilationIsStale, designatedCompilation, mainPhotoFor, type ReferenceKit } from "./reference.js";
 import type { ResolvedArtDirection } from "./art-direction.js";
-import { referenceBudget, type BudgetCandidate, type BudgetResult } from "./reference-budget.js";
+import {
+  payloadVerdict,
+  referenceBudget,
+  type BudgetCandidate,
+  type BudgetResult,
+  type PayloadVerdict,
+} from "./reference-budget.js";
 import {
   dispatchDuration,
   estimateMicroUsd,
@@ -479,6 +485,16 @@ export interface NegativeInput {
   capability: string;
   shot?: Shot;
   audioDesign?: AudioDesign;
+  /**
+   * Raw byte size of each attachable reference file, measured by the caller (SPEC-019 R-43).
+   *
+   * Planning stays pure — it cannot stat a file — so the sizes are supplied. Absent means the
+   * payload cannot be checked here, and the check falls back to the transport, which is the
+   * situation R-43 exists to end rather than one it can fix on its own.
+   */
+  referenceBytes?: Record<string, number>;
+  /** The transport's inline ceiling in bytes, when the caller knows it. */
+  payloadCeilingBytes?: number;
 }
 
 /**
@@ -612,6 +628,14 @@ export interface DispatchWarnings {
    * drafting rule ever being broken. This is where that shows up.
    */
   skillFamilyMismatch: { draftedFor: string; dispatchingTo: string | null; skillId: string } | null;
+  /**
+   * References totalling more than the transport will carry (R-43, D37). Unlike everything else
+   * here this one is not merely named: a request over the ceiling is one the client already
+   * refuses, so the dialog must not let it be committed.
+   */
+  payloadOverflow: PayloadVerdict | null;
+  /** Subjects past the model's stated reliable range — carried anyway, and said so (R-42). */
+  subjectsOverRange: BudgetResult["subjectsOverRange"];
 }
 
 /**
@@ -654,6 +678,16 @@ export interface ScenePlanInput {
    * means no score track is known, and only the subtitle negative is emitted.
    */
   audioDesign?: AudioDesign;
+  /**
+   * Raw byte size of each attachable reference file, measured by the caller (SPEC-019 R-43).
+   *
+   * Planning stays pure — it cannot stat a file — so the sizes are supplied. Absent means the
+   * payload cannot be checked here, and the check falls back to the transport, which is the
+   * situation R-43 exists to end rather than one it can fix on its own.
+   */
+  referenceBytes?: Record<string, number>;
+  /** The transport's inline ceiling in bytes, when the caller knows it. */
+  payloadCeilingBytes?: number;
 }
 
 export interface ShotDispatchPlan {
@@ -906,6 +940,19 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     unknownMentions: resolved.unknown,
     overlongShots,
     skillFamilyMismatch: skillFamilyMismatch(scene, model),
+    subjectsOverRange: sceneBudget.subjectsOverRange,
+    payloadOverflow: (() => {
+      const sizes = input.referenceBytes;
+      const ceiling = input.payloadCeilingBytes;
+      if (sizes === undefined || ceiling === undefined) return null;
+      const carried =
+        mode === "whole-scene"
+          ? passReferences.flatMap((pass) => pass.bound.map((reference) => reference.file))
+          : shots.flatMap((entry) => entry.bound.map((reference) => reference.file));
+      const raw = [...new Set(carried)].reduce((total, file) => total + (sizes[file] ?? 0), 0);
+      const verdict = payloadVerdict(raw, ceiling);
+      return verdict.over ? verdict : null;
+    })(),
     overriddenStale: scene.shots
       .map((s) => ({ shotId: s.id, number: s.number, against: overrideStaleAgainst(s, sheets) }))
       .filter((s) => s.against.length > 0),

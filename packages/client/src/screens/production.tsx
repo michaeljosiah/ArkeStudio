@@ -1141,6 +1141,14 @@ export function DispatchDialogScreen() {
         key: `ov-${o.shotId}`,
         text: `shot ${o.number}'s prompt is overridden and ${o.against.map((a) => `${a.sheetId} moved v${a.from}→v${a.to}`).join(", ")} — the override will not pick that up`,
       });
+    // SPEC-019 R-42: subjects past the model's reliable range are carried anyway and said so —
+    // dropping a character the user wrote into the shot is the worse failure.
+    if (warnings.subjectsOverRange) {
+      warningRows.push({
+        key: "subjects",
+        text: `${warnings.subjectsOverRange.carried} subjects is past the ${warnings.subjectsOverRange.reliableTo} this model holds apart reliably — all are carried, and the take may be less stable`,
+      });
+    }
     // SPEC-019 R-21: the routed model can be overridden per dispatch, long after the scene was
     // drafted. Named rather than blocking — the shots are still shots, they were just written to
     // another family's conventions, and only the user knows whether that matters here.
@@ -1180,6 +1188,14 @@ export function DispatchDialogScreen() {
             </Button>
           ))}
         </div>
+        {/* SPEC-019 R-43, D37: the one condition here that is not merely named. A payload over
+            the transport's ceiling is a request the client already refuses, so committing it
+            would buy a certain failure — the dispatch buttons go away rather than warn. */}
+        {plans?.perShot.warnings.payloadOverflow && (
+          <Callout tone="danger" title="Too much to send">
+            {plans.perShot.warnings.payloadOverflow.notice}
+          </Callout>
+        )}
         {/* SPEC-019 R-26: which pictures steer this dispatch, and why. Stated, never offered as a
             choice — storyboard input is loose where keyframe input aligns, and knowing which is
             stricter should not be a prerequisite for getting the better one. When neither is
@@ -1246,7 +1262,7 @@ export function DispatchDialogScreen() {
             nothing is re-routed for you.
           </Callout>
         )}
-        {plans && overlong.length === 0 && (
+        {plans && overlong.length === 0 && !plans.perShot.warnings.payloadOverflow && (
           <div style={{ display: "flex", gap: 14 }}>
             <div className="fy-boardcard" style={{ flex: 1 }}>
               <div className="fy-boardcard__head">Per shot</div>
