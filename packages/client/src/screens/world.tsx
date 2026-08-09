@@ -100,17 +100,19 @@ export function WorldLayout() {
   useOpenWorldGuard(worldId);
   const { state } = useStore();
   const world = state?.world;
+  // One Cast tab for the world's three kinds of sheet (design 54c). The ledgers keep their
+  // addresses — /cast, /locations, /factions — and a chip row on each moves between them, so
+  // the tab lights on all three.
   const nav = [
     ["", "Overview"],
     ["art-direction", "Art direction"],
-    ["cast", "Characters"],
-    ["locations", "Locations"],
-    ["factions", "Factions"],
+    ["cast", "Cast"],
     ["canon", "Canon"],
     ["chat", "World Chat"],
     ["artifacts", "Artifacts"],
     ["productions", "Productions"],
   ] as const;
+  const onSheets = /\/(cast|locations|factions)(\/|$)/.test(location.pathname);
   if (
     location.pathname.endsWith("/art-direction/propose") ||
     location.pathname.endsWith("/main-photo") ||
@@ -140,7 +142,9 @@ export function WorldLayout() {
               key={slug}
               to={`/w/${worldId}${slug ? `/${slug}` : ""}`}
               end={slug === ""}
-              className={({ isActive }) => cx("fy-pillnav__item", isActive && "fy-pillnav__item--active")}
+              className={({ isActive }) =>
+                cx("fy-pillnav__item", (isActive || (slug === "cast" && onSheets)) && "fy-pillnav__item--active")
+              }
             >
               {label}
             </NavLink>
@@ -478,6 +482,39 @@ export function WorldOverviewScreen() {
 
 // ---- Sheet list screens ----------------------------------------------------
 
+/**
+ * The sheet-kind switch (design 54c): one Cast tab in the chrome, three ledgers behind it.
+ * Each ledger keeps its own address and presentation; this row is how you move between them,
+ * with the counts carried so an empty kind says so before you visit it.
+ */
+function SheetKindNav({ active }: { active: Sheet["type"] }) {
+  const { worldId } = useParams();
+  const world = useWorld();
+  const count = (t: Sheet["type"]) => world?.sheets.filter((s) => s.type === t && s.retired !== true).length ?? 0;
+  const items = [
+    ["character", "Characters", "cast"],
+    ["location", "Locations", "locations"],
+    ["faction", "Factions", "factions"],
+  ] as const;
+  return (
+    <nav className="fy-sheetkinds" aria-label="Kind of sheet">
+      <div className="fy-seg">
+        {items.map(([type, label, slug]) =>
+          type === active ? (
+            <span key={type} className="fy-seg__item fy-seg__item--active" aria-current="page">
+              {label} · {count(type)}
+            </span>
+          ) : (
+            <NavLink key={type} to={`/w/${worldId}/${slug}`} className="fy-seg__item">
+              {label} · {count(type)}
+            </NavLink>
+          ),
+        )}
+      </div>
+    </nav>
+  );
+}
+
 /** The ledger layout (prototype 1d): one featured portrait, the rest as quiet rows. */
 function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
   kind: Sheet["type"];
@@ -524,6 +561,7 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
           New {kind}
         </Button>
       </div>
+      <SheetKindNav active={kind} />
       {sheets.length === 0 ? (
         <div style={{ paddingTop: 140 }}>
           <EmptyState title={`No ${kind}s yet`} hint={hint} />
@@ -675,6 +713,7 @@ export function LocationsScreen() {
           New location
         </Button>
       </div>
+      <SheetKindNav active="location" />
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {places.length} place{places.length === 1 ? "" : "s"}
@@ -720,6 +759,7 @@ export function FactionsScreen() {
     s.sections.find((x) => x.heading.toLowerCase().includes(heading))?.body ?? null;
   return (
     <div data-screen="factions">
+      <SheetKindNav active="faction" />
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {factions.length} faction{factions.length === 1 ? "" : "s"}
@@ -1050,14 +1090,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           {essence && readableProse("Essence", essence.body, <p className="fy-sheet__lead">{essence.body}</p>)}
         </div>
         <div className="fy-sheet__actions">
-          {isCharacter && (
-            <>
-              <Button variant="primary" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}>
-                Reference
-              </Button>
-              <Button onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/looks`)}>More looks</Button>
-            </>
-          )}
+          {/* Reference, More looks and Voice live in the tab row (design 54): a destination
+              appears once per screen, so this row keeps only what the tabs do not offer. */}
           <Button onClick={() => navigate(`/w/${worldId}/${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${sheet.id}/edit`)}>
             Edit the sheet
           </Button>
@@ -1193,7 +1227,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         </Section>
       )}
       {(sheet.links.length > 0 || (refs?.incomingLinks.length ?? 0) > 0) && (
-        <Section title="Linked" aside={<span>outgoing authored here; incoming from the index</span>}>
+        <Section title="Linked">
           <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
             {sheet.links.map((link) => {
               const other = world.sheets.find((s) => s.id === link);
@@ -1220,7 +1254,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         </Section>
       )}
       {refs && (
-        <Section title="From this sheet" aside={<span>computed from the index, never stored</span>}>
+        <Section title="From this sheet">
           <div className="lay-stats">
             <div className="lay-stats__item">
               <div className="lay-stats__value">{refs.tiles}</div>

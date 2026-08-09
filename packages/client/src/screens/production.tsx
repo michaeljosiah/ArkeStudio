@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { NavLink, Outlet, useNavigate, useParams } from "react-router";
+import { NavLink, Outlet, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   assemblePrompt,
   deriveCut,
@@ -108,25 +108,33 @@ export function ProductionLayout() {
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const exportsState = useExports();
+  // The rail is the format's (design 54a): a surface the format cannot use is not present,
+  // not greyed. A story production has nothing to dispatch, so its rail never says so.
+  const isStory = production?.meta.format === "story";
   const cut = production ? deriveCut(production) : null;
   const audioCount =
     (world?.artifacts.filter((a) => a.kind === "audio").length ?? 0) +
     (production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue")
       .length ?? 0);
   const exportCount = Object.values(exportsState).filter((e) => e.productionId === prodId).length;
-  const stillCount = production?.takes.filter((t) => t.kind === "frame" || t.kind === "still").length ?? 0;
   const base = `/w/${worldId}/p/${prodId}`;
-  const item = (slug: string, label: string, count?: string) => (
+  const item = (slug: string, label: string, count?: string, end?: boolean) => (
     <NavLink
       key={slug || "dash"}
       to={`${base}${slug ? `/${slug}` : ""}`}
-      end={slug === ""}
+      end={end ?? slug === ""}
       className={({ isActive }) => cx("fy-prodrail__item", isActive && "fy-prodrail__item--active")}
     >
       {label}
       {count !== undefined && <span className="fy-prodrail__count">{count}</span>}
     </NavLink>
   );
+  // The switch card counts what the format counts: seconds of cut for video, chapters for story.
+  const switchSub = production
+    ? isStory
+      ? `story · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
+      : `${production.meta.format}${cut ? ` · ${seconds(cut.totalSec - cut.uncoveredSec)} cut` : ""}`
+    : "";
   return (
     <div className="fy-app">
       <AppChrome
@@ -141,24 +149,34 @@ export function ProductionLayout() {
           <button type="button" className="fy-prodrail__switch" onClick={() => navigate(`/w/${worldId}/productions`)}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-prodrail__switchname">{production?.meta.title ?? "…"}</div>
-              <div className="fy-prodrail__switchsub">
-                {production ? `${production.meta.format}${cut ? ` · ${seconds(cut.totalSec - cut.uncoveredSec)} cut` : ""}` : ""}
-              </div>
+              <div className="fy-prodrail__switchsub">{switchSub}</div>
             </div>
             <ChevronRight size={14} />
           </button>
           {item("", "Dashboard")}
-          {item("story", "Story", production?.story ? `v${production.story.version}` : "—")}
-          {item("scenes", "Scenes", String(production?.scenes.length ?? 0))}
-          <NavLink to={`${base}/scenes/new`} className="fy-prodrail__sub">
-            <Plus size={12} />
-            New scene
-          </NavLink>
-          {item("generate", "Generate", String(production?.takes.length ?? 0))}
-          {item("cut", "Cut", cut ? seconds(cut.totalSec) : "0:00")}
-          {item("audio", "Audio", String(audioCount))}
-          {item("exports", "Exports", String(exportCount))}
-          {item("stills", "Stills", String(stillCount))}
+          {isStory ? (
+            <>
+              {/* Story ends where Chapters begins, so the two never light together. */}
+              {item("story", "Story", production?.story ? `v${production.story.version}` : "—", true)}
+              {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
+              {item("audio", "Audio", String(audioCount))}
+              {item("exports", "Exports", String(exportCount))}
+            </>
+          ) : (
+            <>
+              {item("story", "Story", production?.story ? `v${production.story.version}` : "—")}
+              {item("scenes", "Scenes", String(production?.scenes.length ?? 0))}
+              <NavLink to={`${base}/scenes/new`} className="fy-prodrail__sub">
+                <Plus size={12} />
+                New scene
+              </NavLink>
+              {/* Stills is a lens on Generate now (design 55a), not a rail destination. */}
+              {item("generate", "Generate", String(production?.takes.length ?? 0))}
+              {item("cut", "Cut", cut ? seconds(cut.totalSec) : "0:00")}
+              {item("audio", "Audio", String(audioCount))}
+              {item("exports", "Exports", String(exportCount))}
+            </>
+          )}
           <div className="fy-prodrail__spacer" />
           <NavLink to={`/w/${worldId}`} className="fy-prodrail__foot">
             <ChevronLeft size={13} />
@@ -184,6 +202,84 @@ export function ProductionDashboardScreen() {
       <Screen id="production-dashboard">
         <EmptyState title="Opening production…" />
       </Screen>
+    );
+  }
+  // The dashboard resumes the format's unit of work (design 54a). For story that is the
+  // chapter, and nothing here mentions shots, takes, clips or dispatch.
+  if (production.meta.format === "story") {
+    const chapters = production.chapters;
+    const drafted = chapters.filter((c) => (c.words ?? 0) > 0);
+    const totalWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
+    const inHand = chapters.find((c) => !c.words) ?? null;
+    const inHandIdx = inHand ? chapters.indexOf(inHand) : -1;
+    // The design shows the neighbourhood of the chapter in hand, not the whole book —
+    // the chapter tree is one click away for that.
+    const windowStart =
+      inHandIdx >= 0 ? Math.max(0, Math.min(inHandIdx - 1, chapters.length - 4)) : Math.max(0, chapters.length - 4);
+    const nearby = chapters.slice(windowStart, windowStart + 4);
+    return (
+      <div className="fy-prodmain" data-screen="production-dashboard">
+        <div className="fy-h1row">
+          <h1 className="fy-h1">{chapters.length === 0 ? "Day one." : "Here's where you left off."}</h1>
+          <span className="fy-h1row__meta">
+            {chapters.length === 0
+              ? "the spine comes first"
+              : `${drafted.length} chapter${drafted.length === 1 ? "" : "s"} drafted${
+                  inHand ? ` · chapter ${String(inHand.number).padStart(2, "0")} in hand` : ""
+                } · ${totalWords.toLocaleString()} words`}
+          </span>
+        </div>
+        <div className="fy-threadcard" style={{ flex: "none" }}>
+          <div className="fy-threadcard__head">
+            <span className="fy-threadcard__label">
+              {chapters.length === 0
+                ? "THE SPINE COMES FIRST"
+                : inHand
+                  ? `IN HAND · CHAPTER ${inHand.number} OF ${chapters.length}`
+                  : `ALL ${chapters.length} CHAPTERS DRAFTED`}
+            </span>
+          </div>
+          <div className="fy-threadcard__title">
+            {chapters.length === 0 ? "Find the spine together" : (inHand?.title ?? "Nothing waits on you")}
+          </div>
+          <div className="fy-threadcard__sub">
+            {chapters.length === 0
+              ? "Talk the story into an overview; chapters hang beneath it."
+              : inHand
+                ? `${inHand.status}${production.story ? ` · against the overview at v${production.story.version}` : ""}`
+                : "Every chapter has words. The overview steers whatever comes next."}
+          </div>
+          <div className="fy-threadcard__actions">
+            <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story`)}>
+              {chapters.length === 0 ? "Open Story" : "Continue in Story"}
+            </Button>
+          </div>
+        </div>
+        {chapters.length > 0 && (
+          <div>
+            <div className="fy-listhead">
+              Chapters
+              <button
+                type="button"
+                className="fy-linkbtn"
+                onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)}
+              >
+                All {chapters.length} chapter{chapters.length === 1 ? "" : "s"}
+              </button>
+            </div>
+            {nearby.map((c) => (
+              <div key={c.id} className="fy-listrow">
+                <span className="fy-mono">{String(c.number).padStart(2, "0")}</span>
+                <span className="fy-listrow__text" style={{ font: "600 13px var(--font-sans)" }}>
+                  {c.title}
+                </span>
+                <Badge tone="outline">v{c.version}</Badge>
+                <span className="fy-mono">{c.words ? `${c.words.toLocaleString()} words` : c.status}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     );
   }
   const dayOne = isDayOne(production);
@@ -285,12 +381,10 @@ export function ProductionDashboardScreen() {
           <div>
             <div className="fy-listhead">
               Latest clips
-              <span
-                style={{ cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3, fontWeight: 500, fontSize: "12.5px" }}
-                onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}
-              >
+              {/* The same keyboard rule as the chapter link: a destination is a button, not a span. */}
+              <button type="button" className="fy-linkbtn" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
                 All {production.takes.length} takes
-              </span>
+              </button>
             </div>
             <div className="fy-cliprow">
               {latest.map((t) => (
@@ -313,20 +407,9 @@ export function ProductionDashboardScreen() {
               ))}
             </div>
           </div>
+          {/* The pending queue is stated once, in the card above, which links to where it is
+              decided (design 55). Re-listing the same takes here was a second copy to keep true. */}
           <div className="fy-dashrow">
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="fy-listhead">Needs you</div>
-              {pending.length === 0 && <div className="fy-mono">nothing — the queue is quiet</div>}
-              {pending.slice(0, 4).map((t) => (
-                <div key={t.id} className="fy-listrow">
-                  <span className="fy-dot fy-dot--warn" />
-                  <span className="fy-listrow__text">
-                    {t.coversShots.map((s) => s.replace("sh_", "shot ")).join(", ")} · take back from {t.model}
-                  </span>
-                  <span className="fy-mono">{t.kind}</span>
-                </div>
-              ))}
-            </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-listhead">Activity</div>
               {recentDecided.length === 0 && <div className="fy-mono">no decisions yet</div>}
@@ -766,6 +849,10 @@ export function GenerateScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const { state } = useStore();
   const navigate = useNavigate();
+  // The workspace's second lens (design 55a): the same frame/still takes, seen as a set.
+  // Deep-linkable — the retired /stills address redirects here with the lens on.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const contactLens = searchParams.get("view") === "stills";
   const shots = production?.scenes.flatMap((s) => s.shots) ?? [];
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [selectedTakeId, setSelectedTakeId] = useState<string | null>(null);
@@ -801,6 +888,18 @@ export function GenerateScreen() {
       .slice(0, 2);
   })();
 
+  if (contactLens) {
+    return (
+      <ContactSheet
+        production={production}
+        worldSlug={world?.meta.slug}
+        worldId={worldId}
+        prodId={prodId}
+        onShotLens={() => setSearchParams({}, { replace: true })}
+        onScene={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}
+      />
+    );
+  }
   return (
     <div className="fy-gen" data-screen="generate-workspace">
       <div className="fy-gen__left">
@@ -809,6 +908,9 @@ export function GenerateScreen() {
             <span className="fy-seg__item fy-seg__item--active">Shot</span>
             <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}>
               Scene
+            </button>
+            <button type="button" className="fy-seg__item" onClick={() => setSearchParams({ view: "stills" }, { replace: true })}>
+              Contact sheet
             </button>
           </span>
           <select
@@ -1057,8 +1159,8 @@ function GeneratePromptEditor({
         )}
         .
       </div>
+      {/* "Save override" says the edit is this shot's alone — the legend that repeated it is gone (design 54). */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-        <span className="fy-mono">edits stay on this shot · the canon doesn't change from here</span>
         <span className="fy-h1row__push" />
         <Button
           disabled={value.trim() === assembled || value.trim().length === 0}
@@ -1504,22 +1606,33 @@ export function AudioScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
+  // Spoken lines live on shots and their Generate is the voice-line dispatch — a video affair.
+  // A story production keeps this pane for its audio artifacts alone (design 54a: nothing on a
+  // story screen mentions shots or dispatch); narration comes later, as its own design.
+  const isStory = production?.meta.format === "story";
   const linked = world?.artifacts.filter((a) => a.kind === "audio") ?? [];
-  const voLines =
-    production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue") ?? [];
+  const voLines = isStory
+    ? []
+    : (production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue") ??
+      []);
   const speakerOf = (id: string | undefined) => world?.sheets.find((c) => c.id === id);
   return (
     <div className="fy-prodmain" data-screen="audio" style={{ minHeight: "100%" }}>
       <div className="fy-h1row">
         <h1 className="fy-h1">Audio</h1>
         <span className="fy-h1row__meta">
-          {voLines.length} spoken line{voLines.length === 1 ? "" : "s"} · {linked.length} audio artifact{linked.length === 1 ? "" : "s"} · voices come from the sheets
+          {isStory
+            ? `${linked.length} audio artifact${linked.length === 1 ? "" : "s"} · filed with the world, linkable to chapters`
+            : `${voLines.length} spoken line${voLines.length === 1 ? "" : "s"} · ${linked.length} audio artifact${linked.length === 1 ? "" : "s"} · voices come from the sheets`}
         </span>
         <span className="fy-h1row__push" />
-        <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/voice-line`)}>
-          Generate voice line…
-        </Button>
+        {!isStory && (
+          <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/voice-line`)}>
+            Generate voice line…
+          </Button>
+        )}
       </div>
+      {!isStory && (
       <div>
         <div className="fy-eyebrow-sm" style={{ margin: "0 0 2px" }}>
           DIALOGUE
@@ -1553,9 +1666,10 @@ export function AudioScreen() {
           );
         })}
       </div>
+      )}
       <div>
         <div className="fy-eyebrow-sm" style={{ margin: "0 0 2px" }}>
-          BEDS AND STEMS
+          {isStory ? "AUDIO ARTIFACTS" : "BEDS AND STEMS"}
         </div>
         {linked.length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>no audio artifacts yet — imports land here</div>}
         {linked.map((a) => (
@@ -1589,11 +1703,8 @@ export function AudioScreen() {
           </div>
         ))}
       </div>
+      {/* Every row already names its sheet and voice — the legend that re-taught it is gone (design 54). */}
       <div className="fy-scenefoot">
-        <span className="fy-mono">
-          a character's voice is part of their sheet — retakes keep the voice, only the read changes · nothing is mixed
-          destructively
-        </span>
         <span className="fy-h1row__push" />
         <span
           style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)", cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3 }}
@@ -1612,6 +1723,10 @@ export function ExportsScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const exportsState = useExports();
+  // A story has no cut to render, and a manuscript exporter does not exist yet — so this pane
+  // offers neither rather than a zero-length video (design 54a). It stays on the story rail
+  // because the world folder export lives here, and the chapters travel whole inside it.
+  const isStory = production?.meta.format === "story";
   const cut = production ? deriveCut(production) : null;
   const mine = Object.entries(exportsState).filter(([, e]) => e.productionId === prodId);
   const [preset, setPreset] = useState<keyof typeof PRESETS>("review-cut");
@@ -1625,8 +1740,14 @@ export function ExportsScreen() {
     <div className="fy-prodmain" data-screen="exports" style={{ minHeight: "100%" }}>
       <div className="fy-h1row">
         <h1 className="fy-h1">Exports</h1>
-        <span className="fy-h1row__meta">renders of the cut · the cut itself stays the source</span>
+        <span className="fy-h1row__meta">
+          {isStory
+            ? "the chapters travel in the world folder · a manuscript export is designed, not yet built"
+            : "renders of the cut · the cut itself stays the source"}
+        </span>
       </div>
+      {!isStory && (
+      <>
       <div>
         <div className="fy-eyebrow-sm" style={{ margin: "0 0 2px" }}>
           DELIVERED
@@ -1682,13 +1803,21 @@ export function ExportsScreen() {
           </div>
         )}
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
-          <span className="fy-mono">renders locally when the machine allows · one encode, no provider call</span>
+          <span className="fy-mono">renders locally · no provider call</span>
           <span className="fy-h1row__push" />
           <Button variant="primary" onClick={() => worldId && prodId && exportCut(worldId, prodId, preset)}>
             Export · {seconds(cut?.totalSec)}
           </Button>
         </div>
       </div>
+      </>
+      )}
+      {isStory && (
+        <EmptyState
+          title="No manuscript export yet"
+          hint="Chapters live in the world folder as ordinary Markdown; the export below carries them whole."
+        />
+      )}
       <div className="fy-scenefoot">
         <span className="fy-mono">
           world export: a folder that reopens identically elsewhere — history kept, caches and locks stay behind · lands
@@ -1705,9 +1834,26 @@ export function ExportsScreen() {
 
 // ---- Stills contact sheet --------------------------------------------------
 
-export function StillsScreen() {
-  const { worldId, prodId } = useParams();
-  const { world, production } = useProduction(worldId, prodId);
+/**
+ * Generate's second lens (design 55a): the frame/still takes as a set, decided one at a time.
+ * This was a rail destination of its own; a take is decided where it was made, so the contact
+ * sheet now lives inside the workspace and the seg is the way between the lenses.
+ */
+function ContactSheet({
+  production,
+  worldSlug,
+  worldId,
+  prodId,
+  onShotLens,
+  onScene,
+}: {
+  production: ReturnType<typeof useProduction>["production"];
+  worldSlug: string | undefined;
+  worldId: string | undefined;
+  prodId: string | undefined;
+  onShotLens: () => void;
+  onScene: () => void;
+}) {
   const stills = useMemo(
     () => production?.takes.filter((t) => t.kind === "frame" || t.kind === "still") ?? [],
     [production],
@@ -1716,9 +1862,17 @@ export function StillsScreen() {
   return (
     <div className="fy-prodmain" data-screen="stills-contact-sheet">
       <div className="fy-h1row">
-        <h1 className="fy-h1">Stills</h1>
+        <span className="fy-seg">
+          <button type="button" className="fy-seg__item" onClick={onShotLens}>
+            Shot
+          </button>
+          <button type="button" className="fy-seg__item" onClick={onScene}>
+            Scene
+          </button>
+          <span className="fy-seg__item fy-seg__item--active">Contact sheet</span>
+        </span>
         <span className="fy-h1row__meta">
-          {stills.length} frames on the contact sheet — judged as a set, accepted one at a time
+          {stills.length} frame{stills.length === 1 ? "" : "s"} — judged as a set, accepted one at a time
         </span>
       </div>
       {stills.length === 0 ? (
@@ -1732,7 +1886,7 @@ export function StillsScreen() {
               <div key={take.id} className="fy-shotcard">
                 <div className="fy-shotcard__frame">
                   <Portrait
-                    worldSlug={world?.meta.slug}
+                    worldSlug={worldSlug}
                     path={takeMediaPath(production!.meta.id, take) ?? ""}
                     label={shotId?.replace("sh_", "shot ") ?? take.id}
                     radius={0}

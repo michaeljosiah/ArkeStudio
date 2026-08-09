@@ -895,6 +895,12 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 /* scene screen (14a) */
 .fy-seg { display: inline-flex; align-items: center; background: var(--secondary); border-radius: 9px; padding: 3px; }
+/* The sheet-kind switch (design 54c): one Cast tab in the chrome, three ledgers behind it. */
+.fy-sheetkinds { display: flex; justify-content: center; padding: 18px 0 0; }
+.fy-sheetkinds .fy-seg__item { text-decoration: none; }
+/* A link that is really a button: focusable and keyboard-operable, styled as the quiet
+   underlined affordance the list heads use. */
+.fy-linkbtn { border: none; background: none; padding: 0; color: inherit; font: 500 12.5px var(--font-sans); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .fy-seg__item {
   padding: 5px 14px;
   border-radius: 7px;

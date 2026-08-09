@@ -23,7 +23,6 @@ export const SCREENS: ScreenEntry[] = [
   { id: "settings-providers", samplePath: "/settings/providers" },
   { id: "settings-notifications", samplePath: "/settings/notifications" },
   { id: "settings-appearance", samplePath: "/settings/appearance" },
-  { id: "settings-agents", samplePath: "/settings/agents" },
   { id: "settings-local-runtime", samplePath: "/settings/local-runtime" },
   { id: "settings-who-does-what", samplePath: "/settings/who-does-what" },
   { id: "settings-sample-world", samplePath: "/settings/sample-world" },
@@ -71,5 +70,5 @@ export const SCREENS: ScreenEntry[] = [
   { id: "cut", samplePath: `${P}/cut` },
   { id: "audio", samplePath: `${P}/audio` },
   { id: "exports", samplePath: `${P}/exports` },
-  { id: "stills-contact-sheet", samplePath: `${P}/stills` },
+  { id: "stills-contact-sheet", samplePath: `${P}/generate?view=stills` },
 ];

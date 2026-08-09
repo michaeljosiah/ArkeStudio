@@ -738,6 +738,14 @@ describe("chapters (R-4, R-5, D3, §3.2)", () => {
     const doc = MarkdownFile.parse(raw);
     assert.equal(doc.data["version"], 1, "direct authoring saves without cutting a version (R-5)");
     assert.match(doc.body, /three times/);
+    // The summary follows the prose: a save recounts the words, so the chapter tree and the
+    // story dashboard never report the count the chapter had when it was last stamped by hand.
+    assert.equal(doc.data["words"], 6, "a save recounts the chapter's words");
+    await saveChapter(store, "inkbound", a, "   ");
+    const cleared = MarkdownFile.parse(
+      await readFile(join(dir, "productions", "inkbound", "chapters", `${a}.md`), "utf8"),
+    );
+    assert.equal(cleared.data["words"], 0, "an emptied chapter counts zero, not one blank token");
 
     const before = (await readdir(join(dir, "productions", "inkbound", "chapters"))).sort();
     await reorderChapters(store, "inkbound", [b, a]);

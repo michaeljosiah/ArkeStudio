@@ -16,7 +16,6 @@ import {
   ShellChrome,
   WorldPickerScreen,
 } from "./screens/shell.js";
-import { SettingsAgentsScreen } from "./screens/agents.js";
 import { ArtDirectionProposalScreen, ArtDirectionScreen } from "./screens/art-direction.js";
 import { ProposalsScreen } from "./screens/proposals.js";
 import { WorldChatConversationScreen, WorldChatScreen } from "./screens/world-chat.js";
@@ -58,7 +57,6 @@ import {
   ProductionLayout,
   SceneDetailScreen,
   ScenesScreen,
-  StillsScreen,
   StoryScreen,
   VoiceLineDialogScreen,
 } from "./screens/production.js";
@@ -119,7 +117,8 @@ export function App() {
             <Route path="appearance" element={<SettingsAppearanceScreen />} />
             <Route path="notifications" element={<SettingsNotificationsScreen />} />
             <Route path="local-runtime" element={<SettingsLocalRuntimeScreen />} />
-            <Route path="agents" element={<SettingsAgentsScreen />} />
+            {/* Settings › Agents folded into Who does what (design 54b); the old address keeps working. */}
+            <Route path="agents" element={<Navigate to="/settings/who-does-what" replace />} />
             <Route path="who-does-what" element={<SettingsWhoDoesWhatScreen />} />
             <Route path="sample-world" element={<SettingsSampleWorldScreen />} />
             <Route path="about" element={<SettingsAboutScreen />} />
@@ -170,7 +169,8 @@ export function App() {
           <Route path="cut" element={<CutScreen />} />
           <Route path="audio" element={<AudioScreen />} />
           <Route path="exports" element={<ExportsScreen />} />
-          <Route path="stills" element={<StillsScreen />} />
+          {/* Stills is a lens on Generate now (design 55a); the old address keeps working. */}
+          <Route path="stills" element={<Navigate to="../generate?view=stills" replace />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

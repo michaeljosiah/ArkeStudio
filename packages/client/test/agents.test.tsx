@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { SettingsAgentsScreen } from "../src/screens/agents.js";
+import { AgentsPanel } from "../src/screens/agents.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -37,11 +37,11 @@ const withAgents = () => ({
 const render = () =>
   renderToString(
     <MemoryRouter>
-      <SettingsAgentsScreen />
+      <AgentsPanel />
     </MemoryRouter>,
   );
 
-describe("the agents settings screen", () => {
+describe("the agents panel (behind Advanced on Who does what)", () => {
   it("lists each agent with what it is for, and groups models by provider", () => {
     __setStateForTest(withAgents());
     const html = render();
