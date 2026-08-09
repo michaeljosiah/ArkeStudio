@@ -2871,7 +2871,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-looks-results__grid { display: grid; grid-template-columns: repeat(3,1fr); grid-template-rows: 250px 180px; gap: 12px; flex: 1; }
 .fy-looks-results__grid button { position: relative; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--muted); padding: 0; cursor: pointer; }
 .fy-looks-results__grid button.is-selected { border: 2px solid var(--foreground); grid-row: span 2; }
-.fy-looks-results__grid button > span { position: absolute; left: 10px; bottom: 10px; padding: 4px 8px; border-radius: 999px; background: color-mix(in srgb, var(--background) 92%, transparent); font: 500 9px var(--font-mono); }
+.fy-looks-results__grid button > span { position: absolute; left: 10px; bottom: 10px; max-width: calc(100% - 20px); padding: 4px 8px; border-radius: 999px; background: color-mix(in srgb, var(--background) 92%, transparent); font: 500 9px var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fy-looks-results > footer { height: 58px; display: flex; align-items: center; gap: 10px; }
 .fy-looks-results > footer > span { font: 400 10px var(--font-mono); color: var(--neutral-400); }
 .fy-looks-results > footer .ui-btn:first-of-type { margin-left: auto; }
