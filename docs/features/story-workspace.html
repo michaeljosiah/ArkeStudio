@@ -1,0 +1,726 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="How the Arke Studio production story workspace works: arrival, the season board, the episode workspace, what it writes to disk, and a day of using it."
+    />
+    <title>Arke Studio - The Story workspace</title>
+    <style>
+      :root {
+        --paper: #f4f1ea;
+        --paper-deep: #e8e1d6;
+        --ink: #171715;
+        --ink-soft: #5f5b53;
+        --ink-faint: #6f6a61;
+        --line: rgba(23, 23, 21, 0.14);
+        --line-strong: rgba(23, 23, 21, 0.28);
+        --card: rgba(255, 255, 255, 0.78);
+        --card-solid: #fffefa;
+        --night: #11161a;
+        --coral: #ec6a4a;
+        --teal: #2d7b7a;
+        --amber: #c88d32;
+        --red: #b9483d;
+        --green: #3e7455;
+        --sans: "Segoe UI Variable Text", "Aptos", "Segoe UI", system-ui, sans-serif;
+        --display: "Segoe UI Variable Display", "Aptos Display", "Segoe UI", system-ui, sans-serif;
+        --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+        --shadow: 0 24px 70px rgba(28, 24, 18, 0.12);
+        --shadow-small: 0 10px 30px rgba(28, 24, 18, 0.09);
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 15% 0%, rgba(45, 123, 122, 0.11), transparent 26rem),
+          radial-gradient(circle at 88% 8%, rgba(236, 106, 74, 0.1), transparent 28rem), var(--paper);
+        font-family: var(--sans);
+        line-height: 1.65;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      a { color: inherit; }
+      code { font-family: var(--mono); font-size: 0.92em; }
+
+      .shell { width: min(1080px, calc(100% - 40px)); margin: 0 auto; }
+
+      .topbar {
+        position: sticky; top: 0; z-index: 50;
+        display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+        min-height: 58px; padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(244, 241, 234, 0.92);
+        backdrop-filter: blur(18px);
+      }
+      .brand { display: flex; align-items: baseline; gap: 7px; white-space: nowrap; }
+      .brand strong { font-size: 16px; letter-spacing: -0.02em; }
+      .brand span, .topmeta { color: var(--ink-soft); font-size: 12px; }
+      .topmeta { margin-left: auto; font-family: var(--mono); }
+      .toc { display: flex; gap: 2px; overflow: auto; scrollbar-width: none; }
+      .toc a {
+        padding: 6px 9px; border-radius: 999px; color: var(--ink-soft);
+        font-size: 12px; text-decoration: none; white-space: nowrap;
+      }
+      .toc a:hover { color: var(--ink); background: rgba(255, 255, 255, 0.75); }
+
+      .hero { padding: 58px 0 10px; }
+      .eyebrow {
+        font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em;
+        text-transform: uppercase; color: var(--ink-faint);
+      }
+      .hero h1 {
+        margin: 14px 0 0; font-family: var(--display); font-weight: 500;
+        font-size: clamp(34px, 5.4vw, 60px); line-height: 1.03; letter-spacing: -0.03em;
+      }
+      .hero p { margin: 20px 0 0; max-width: 720px; font-size: 17px; line-height: 1.62; color: var(--ink-soft); }
+
+      .status {
+        display: grid; grid-template-columns: 150px 1fr; gap: 18px;
+        margin: 30px 0 0; padding: 18px 22px;
+        border: 1px solid var(--line); border-left: 3px solid var(--amber);
+        border-radius: 12px; background: var(--card);
+      }
+      .status b { font-size: 12px; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-faint); }
+      .status p { margin: 0; font-size: 13.5px; line-height: 1.65; color: var(--ink-soft); }
+
+      .section { margin-top: 78px; }
+      .section__head { margin-bottom: 26px; }
+      .section__head h2 {
+        margin: 10px 0 0; font-family: var(--display); font-weight: 500;
+        font-size: clamp(26px, 3.4vw, 38px); line-height: 1.08; letter-spacing: -0.025em;
+      }
+      .lede { margin: 14px 0 0; max-width: 730px; font-size: 15px; color: var(--ink-soft); }
+
+      h3 { margin: 34px 0 10px; font-family: var(--display); font-weight: 500; font-size: 21px; letter-spacing: -0.015em; }
+      p { font-size: 14.5px; }
+
+      .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 22px; }
+      .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 22px; }
+      .card {
+        padding: 20px 22px; border: 1px solid var(--line); border-radius: 14px;
+        background: var(--card); box-shadow: var(--shadow-small);
+      }
+      .card h4 { margin: 8px 0 8px; font-size: 15.5px; font-weight: 600; }
+      .card p { margin: 0; font-size: 13.5px; color: var(--ink-soft); }
+      .card .num { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; color: var(--ink-faint); text-transform: uppercase; }
+
+      .rule {
+        margin: 26px 0 0; padding: 24px 28px; border-radius: 16px;
+        background: var(--night); color: rgba(255, 255, 255, 0.72); font-size: 14.5px;
+      }
+      .rule b { color: #fff; }
+      .rule code { color: #ffd9cc; }
+
+      pre {
+        margin: 18px 0; padding: 20px 22px; overflow-x: auto;
+        border: 1px solid var(--line); border-radius: 14px;
+        background: var(--card-solid); font-family: var(--mono);
+        font-size: 12.5px; line-height: 1.72; color: var(--ink);
+      }
+      pre b { color: var(--teal); }
+      pre i { color: var(--ink-faint); font-style: normal; }
+      pre .new { color: var(--coral); }
+      pre .prop { color: var(--amber); }
+
+      table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 18px; }
+      th, td { padding: 10px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+      th { font: 600 9.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); }
+      td code { color: var(--teal); }
+
+      .steps { counter-reset: step; margin-top: 26px; }
+      .step { position: relative; padding: 0 0 30px 58px; }
+      .step::before {
+        counter-increment: step; content: counter(step);
+        position: absolute; left: 0; top: 2px; width: 34px; height: 34px;
+        border-radius: 50%; background: var(--ink); color: #fff;
+        display: grid; place-items: center; font-family: var(--mono); font-size: 12.5px;
+      }
+      .step__time { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); letter-spacing: 0.06em; }
+      .step h4 { margin: 6px 0 8px; font-size: 16.5px; font-weight: 600; }
+      .step p { margin: 0 0 9px; font-size: 14px; color: var(--ink-soft); }
+      .step__see {
+        font-size: 12.5px; color: var(--ink-faint); font-family: var(--mono); line-height: 1.7;
+        border-left: 2px solid var(--line); padding-left: 12px; margin-top: 10px;
+      }
+      .step__see b { color: var(--ink); }
+
+      .note {
+        margin-top: 18px; padding: 14px 18px; border: 1px dashed var(--line-strong);
+        border-radius: 12px; font-size: 13.5px; color: var(--ink-soft);
+      }
+
+      footer {
+        margin: 78px 0 60px; padding-top: 26px; border-top: 1px solid var(--line);
+        font-size: 12.5px; color: var(--ink-faint);
+      }
+
+      @media (max-width: 880px) {
+        .grid2, .grid3, .status { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="brand"><strong>Arke Studio</strong><span>feature documentation</span></div>
+        <nav class="toc" aria-label="On this page">
+          <a href="#shape">What it is</a>
+          <a href="#arrival">Arrival</a>
+          <a href="#story">The workspace</a>
+          <a href="#season">The season</a>
+          <a href="#episode">The episode</a>
+          <a href="#gate">What changes anything</a>
+          <a href="#files">Files</a>
+          <a href="#day">A day</a>
+          <a href="#open">Open</a>
+        </nav>
+        <div class="topmeta">turns 43&ndash;48 &middot; 2026-08-09</div>
+      </div>
+
+      <section class="hero" id="top">
+        <div class="eyebrow">The production story workspace</div>
+        <h1>From a world you have<br />to a scene you can shoot.</h1>
+        <p>
+          Arke already holds a world &mdash; cast, locations, canon, a look &mdash; and it already knows how to
+          turn an accepted shot into generated footage. This feature is the part in between: creating a
+          production, deciding what it is about, breaking it into episodes and beats, and arriving at scenes
+          that the existing pipeline can shoot. It adds one workspace and one rule about layout, and it
+          changes nothing about how the world is authored.
+        </p>
+        <div class="status">
+          <b>Status</b>
+          <p>
+            Designed and drawn, not yet built. Turns 43&ndash;48 of the design master specify it and the
+            Prototype makes it clickable. In the shipping application the shells exist &mdash; a production,
+            a day one, a Story screen, scenes, shots, dispatch &mdash; but the authoring bridge described
+            here is not implemented. The companion brief,
+            <code>production-story-workspace.html</code>, carries a claim ledger recording exactly which
+            parts are built, which are partial, and which are proposed. Read that before estimating anything.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="shape">
+        <div class="section__head">
+          <div class="eyebrow">What it is</div>
+          <h2>One creative line, four scopes.</h2>
+          <p class="lede">
+            A production is a lens on a world, never a copy of it. Nothing here duplicates a character or a
+            canon entry; a production cites them by id and reads through to whatever they are now. What the
+            workspace adds is the layer of decisions that belong to <em>this</em> film or season and to
+            nothing else.
+          </p>
+        </div>
+
+        <div class="grid3">
+          <div class="card">
+            <span class="num">Season</span>
+            <h4>What changes this time</h4>
+            <p>
+              The question the season answers, the state it ends in, the arcs that run through it, and how it
+              looks. A short film has the same layer with fewer parts.
+            </p>
+          </div>
+          <div class="card">
+            <span class="num">Episode</span>
+            <h4>One audience promise</h4>
+            <p>
+              Opens, turns, closes. A hook and a cliffhanger. Underneath, the ordered beats that say what
+              changes &mdash; and which scenes realise them.
+            </p>
+          </div>
+          <div class="card">
+            <span class="num">Scene</span>
+            <h4>What happens and is said</h4>
+            <p>
+              Drafted in conversation, accepted into shots. Already implemented, and the point everything
+              above is trying to reach.
+            </p>
+          </div>
+        </div>
+
+        <div class="rule">
+          <b>The layout rule, because it is the thing most likely to be got wrong.</b> A view that authors
+          <b>one object</b> keeps the split &mdash; conversation on the left, a <code>470px</code> structured
+          draft on the right, its action at the foot. A view whose value comes from <b>reading rows against
+          each other</b> takes the surface &mdash; the full <code>1124px</code> content column, with the
+          conversation reduced to a row at its foot. That is why the Season and Direction views keep the rail
+          while Episodes and Arcs take the page, and why an episode has two views of different shapes. The
+          test is not importance or volume. It is whether you need to compare.
+        </div>
+      </section>
+
+      <section class="section" id="arrival">
+        <div class="section__head">
+          <div class="eyebrow">Step one</div>
+          <h2>Creating a production opens it.</h2>
+          <p class="lede">
+            Format is step one and decides which surfaces exist: story, video or stills. Profile is step two
+            and only sets defaults &mdash; a micro-drama is a Video production with the same scenes, shots,
+            takes and cut as a short film. No second model, no parallel pipeline.
+          </p>
+        </div>
+
+        <p>
+          Step two scales to what the profile actually decides. A micro-drama sets aspect, episode count,
+          per-episode length, a hook window, a cliffhanger check, an export preset and which view Story opens
+          on. A short film sets two things and says plainly what it does not set. Where a format has one
+          profile the step does not render at all, because a question with one answer is a toll.
+        </p>
+        <p>
+          The action names where it lands &mdash; <code>Create and open day one</code>, or for a series
+          <code>Create Series and open day one</code>. A button that says <code>Create production</code> and
+          then returns you to a list has told you what it made and not where it went, and the list is the one
+          place the thing you just named is hardest to find.
+        </p>
+
+        <h3>Day one is never blank</h3>
+        <p>
+          The production opens with the world already in it &mdash; cast, locations, canon count, tone, art
+          direction &mdash; and with seeds from <b>two</b> sources, always in this order: open canon threads
+          first, then work another production planned and never shot. Threads come first because they are the
+          world asking a question and a production answering one is the whole thesis; uncovered work is
+          opportunistic and reads that way.
+        </p>
+        <div class="note">
+          When both sources are empty &mdash; a young world, one production &mdash; each renders as a dashed
+          card saying <em>which</em> source is empty and what would fill it. A page that goes quiet at the
+          exact moment someone starts is the failure day one exists to prevent.
+        </div>
+      </section>
+
+      <section class="section" id="story">
+        <div class="section__head">
+          <div class="eyebrow">Step two</div>
+          <h2>Story is a conversation beside a draft.</h2>
+          <p class="lede">
+            The Story workspace is the third instance of a pattern the product already uses twice, in world
+            Genesis and in World Chat: the same split, the same composer carrying attach and voice, the same
+            rail with its action at the foot. A production screen already owns its 236px rail, so the
+            conversation column is 654px rather than half the page.
+          </p>
+        </div>
+
+        <p>
+          Talking writes nothing. Every reply carries a receipt ending <code>nothing written</code>, and the
+          rail shows the accepted draft with proposed changes marked <b>on the fields they would change</b>,
+          each carrying the accepted text beneath it. A draft that showed only the new version would make you
+          hold the old one in your head.
+        </p>
+        <p>
+          One action turns the draft into <b>one proposal for one file</b>. Accept happens elsewhere, on the
+          proposals screen, which is where every other accepted change in the product is confirmed.
+        </p>
+      </section>
+
+      <section class="section" id="season">
+        <div class="section__head">
+          <div class="eyebrow">Step three</div>
+          <h2>Four views, and the layout follows what each is for.</h2>
+          <p class="lede">
+            The Story workspace has one tab strip: Season, Episodes, Arcs, Direction. A production with no
+            episodes shows three, not four greyed out.
+          </p>
+        </div>
+
+        <table>
+          <thead>
+            <tr><th>View</th><th>Answers</th><th>Shape</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>Season</b></td>
+              <td>What is this season about, what state does it end in, and what engine does it inherit from the Series?</td>
+              <td>Split &middot; one object</td>
+            </tr>
+            <tr>
+              <td><b>Episodes</b></td>
+              <td>Do these episodes work as a sequence? Does five earn its place between four and six?</td>
+              <td>Surface &middot; comparison</td>
+            </tr>
+            <tr>
+              <td><b>Arcs</b></td>
+              <td>What changes across the season, where does it turn, and does it land?</td>
+              <td>Surface &middot; comparison</td>
+            </tr>
+            <tr>
+              <td><b>Direction</b></td>
+              <td>What does this season do differently from the world it belongs to?</td>
+              <td>Split &middot; one object</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>The episode board</h3>
+        <p>
+          Episodes take the content column as a grid of four tiles at 257px. Eight fit without scrolling and
+          the eighth is <code>Add an episode</code>, last in the grid, so making one happens where the others
+          already are. Each card carries its hook and cliffhanger as two lines, and states a missing ending in
+          words &mdash; <code>NO ENDING YET</code> &mdash; so colour is never carrying the meaning alone. An
+          unwritten episode is a dashed tile holding a sentence, never an empty slot: the shape of the season
+          stays honest whether or not it has been written.
+        </p>
+
+        <h3>Inheritance is shown, not hidden</h3>
+        <p>
+          The Season view carries the Series engine as a read-only card naming which seasons it governs, and
+          says that editing it opens the Series. A field that silently edits two seasons is exactly the drift
+          the world model exists to prevent. Direction works the same way: it shows the world look first, then
+          the lines this season narrows against it, and states that no other production moves.
+        </p>
+      </section>
+
+      <section class="section" id="episode">
+        <div class="section__head">
+          <div class="eyebrow">Step four</div>
+          <h2>Beats cite scenes. They never contain them.</h2>
+          <p class="lede">
+            An episode opens from a card on the board. Its rail carries the promise first &mdash; opens, turn,
+            closes, then hook and cliffhanger &mdash; because an episode is one audience promise and its beats
+            only make sense underneath it. Beats come second, ordered, each naming what <em>changes</em>
+            rather than what is seen.
+          </p>
+        </div>
+
+        <p>
+          The second view maps beats against scenes, and it is where the structure earns its keep. One beat
+          may be carried by two scenes. One scene may be cited by two episodes &mdash; a release that cuts
+          through a continuous production scene, ending episode three inside it and opening episode four where
+          it left off. A beat with no scene says <code>no scene yet</code> and offers to draft one rather than
+          hiding.
+        </p>
+        <div class="note">
+          Scenes claimed by <b>no</b> beat are surfaced at the foot with a count. A scene that nothing points
+          at is the one thing this view exists to reveal.
+        </div>
+        <p>
+          This is why the hierarchy is not a folder tree. Arcs, setups and payoffs cross episode boundaries;
+          beats may be realised by several scenes. Arke stores stable links and derives the views, so the same
+          scene appearing under two episodes is correct rather than duplicated.
+        </p>
+      </section>
+
+      <section class="section" id="gate">
+        <div class="section__head">
+          <div class="eyebrow">The boundary</div>
+          <h2>What can change anything.</h2>
+          <p class="lede">
+            The rules here are inherited, not invented. This feature adds surfaces; it does not widen what an
+            agent may touch.
+          </p>
+        </div>
+
+        <div class="grid2">
+          <div class="card">
+            <span class="num">Conversation</span>
+            <h4>Proposes, never writes</h4>
+            <p>
+              A turn may read the world and the production and suggest changes. It cannot write an accepted
+              file, accept a proposal, or dispatch work. Receipts state what was read and that nothing was
+              written.
+            </p>
+          </div>
+          <div class="card">
+            <span class="num">The accept gate</span>
+            <h4>One path to truth</h4>
+            <p>
+              Every authored change becomes a staged proposal holding whole files, verified against the base
+              it was drafted from, and accepted explicitly. Story, episode and direction changes use the same
+              path as canon and sheets.
+            </p>
+          </div>
+          <div class="card">
+            <span class="num">Dispatch</span>
+            <h4>The only spend</h4>
+            <p>
+              Accepting a scene creates its shots and dispatches nothing. Money moves only at an explicit
+              dispatch, with the estimate and every warning computed first.
+            </p>
+          </div>
+          <div class="card">
+            <span class="num">World facts</span>
+            <h4>Cross over separately</h4>
+            <p>
+              A production conversation that surfaces something true of the whole world does not write it.
+              It becomes a world change, reviewed on its own terms.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="files">
+        <div class="section__head">
+          <div class="eyebrow">Impact</div>
+          <h2>Files and folders.</h2>
+          <p class="lede">
+            The world folder is the only durable truth, readable by hand, with no git. What follows is what a
+            production directory holds <b>today</b>, verified against the code and against the sample world in
+            <code>fixtures/worlds/the-undersong</code> &mdash; then what this feature adds.
+          </p>
+        </div>
+
+        <h3>What a production holds today</h3>
+<pre>
+worlds/the-undersong/
+  productions/
+    saltlight/
+      production.json     <i>id, format, title, logline, status, created, updated</i>
+      story.json          <i>version, logline, spine, acts[], targetLength</i>
+      story.md            <i>optional treatment prose</i>
+      chapters/           <i>story format only, one file per chapter, order in frontmatter</i>
+      scenes/
+        04-the-verse-rises.json   <i>id, number, slug, title, status, version,</i>
+                                  <i>inherits{location,timeOfDay,tone}, board, shots[]</i>
+      selections.json     <i>shot id -&gt; acceptedTakeId, startFrameTakeId</i>
+      reviews.jsonl       <i>append-only accept and reject decisions</i>
+      takes/
+        tk_01J.../take.json + media
+      boards/             <i>compiled scene boards, local and free</i>
+      incoming/           <i>where a job lands its artifacts</i>
+      cut.json            <i>audio placement; picture is derived from selections</i>
+      exports/
+  .proposals/&lt;id&gt;/      <i>staged whole files, awaiting accept</i>
+  .history/               <i>every committed version</i>
+  .conversations/&lt;cv&gt;/  <i>World Chat, world-scoped today</i>
+  changes.jsonl
+  .index/                 <i>derived, deletable</i>
+</pre>
+
+        <h3>What this feature adds</h3>
+<pre>
+    bell-watch-s1/
+      production.json     <span class="prop">gains: profile, and the defaults it set</span>
+      story.json          <i>unchanged shape &mdash; and finally written by the app</i>
+      <span class="prop">season.json</span>         <span class="prop">proposed: question, ending state, direction lines</span>
+      <span class="prop">episodes/</span>           <span class="prop">proposed: one file per episode card, with its beats</span>
+        <span class="prop">01-the-first-answer.json</span>
+      scenes/             <i>unchanged &mdash; a scene is still a scene</i>
+      ...
+  <span class="prop">series/</span>                <span class="prop">proposed: a thin joining record, shared by seasons</span>
+    <span class="prop">bell-watch.json</span>      <span class="prop">title, engine, ordered season production ids</span>
+  .conversations/&lt;cv&gt;/  <span class="prop">extended: a conversation may be about a production</span>
+</pre>
+
+        <div class="note">
+          <b>Undecided, and it matters.</b> Where a Series lives is the open question with the widest blast
+          radius. The recommendation is a thin joining record &mdash; id, title, engine prose, ordered season
+          ids &mdash; with recurring cast staying in world sheets. A Series that describes characters becomes
+          a second world, which is the drift the whole model exists to prevent. Whether an episode owns a file
+          or a range, and how beats reference scenes, are settled in shape here but not in schema.
+        </div>
+
+        <table>
+          <thead>
+            <tr><th>Accepted file</th><th>Written by</th><th>Versioned</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>production.json</code></td><td>Creation, and profile edits</td><td>Change-logged</td></tr>
+            <tr><td><code>story.json</code></td><td>Accepting a Story proposal</td><td>Yes</td></tr>
+            <tr><td><code>season.json</code>, <code>episodes/*</code></td><td>Accepting a season or episode proposal</td><td>Yes</td></tr>
+            <tr><td><code>scenes/*.json</code></td><td>Accepting a scene draft or edit</td><td>Yes</td></tr>
+            <tr><td><code>selections.json</code>, <code>reviews.jsonl</code></td><td>Reviewing a take</td><td>No &mdash; operational</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="section" id="day">
+        <div class="section__head">
+          <div class="eyebrow">A day in the life</div>
+          <h2>Thursday, with The Undersong.</h2>
+          <p class="lede">
+            One morning making a seven-episode micro-drama in a world that already exists, including the part
+            where the season is wrong and has to be fixed. Every step says what reached disk, because that is
+            the promise this feature has to keep. Written in the present tense as though it were built; it is
+            not yet.
+          </p>
+        </div>
+
+        <div class="steps">
+          <div class="step">
+            <div class="step__time">09:38 &middot; creating</div>
+            <h4>A world she has, an idea she half has.</h4>
+            <p>
+              The Undersong has six characters, four locations and forty-one canon entries. She wants
+              something vertical and nightly out of it. New production, Video, then step two: Micro-drama
+              series. Seven episodes, 45&ndash;75 seconds, hook in three, cliffhanger required. She types the
+              idea the way she would say it aloud &mdash; a bell-ringer on the late watch starts getting
+              answers back.
+            </p>
+            <p>The button says <b>Create Series and open day one</b>, so she knows where she is going.</p>
+            <div class="step__see">
+              <b>On disk:</b> <code>productions/bell-watch-s1/production.json</code> created, carrying the
+              profile and its defaults. <code>series/bell-watch.json</code> created with the two of them
+              linked. One line appended to <code>changes.jsonl</code>. Nothing generated, nothing copied out
+              of the world.
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="step__time">09:39 &middot; arriving</div>
+            <h4>Day one, and the world walked in with her.</h4>
+            <p>
+              Six faces, The Vigil, The Drowned Quarter, tone, art direction v3. Two groups of seeds: an open
+              canon thread about what the water leaves behind, and a scene Saltlight accepted and never shot.
+              She reads them and takes neither.
+            </p>
+            <div class="step__see"><b>On disk:</b> nothing. Day one is a read.</div>
+          </div>
+
+          <div class="step">
+            <div class="step__time">09:52 &middot; the season</div>
+            <h4>The engine is not the question.</h4>
+            <p>
+              In Story she says the season should be about who is answering, not whether her mother is alive.
+              The reply separates the two: the nightly answer is the <em>Series</em> engine and season two
+              needs it intact; what she has changed is the season question and its ending. The rail marks both
+              fields, showing the accepted text beneath each.
+            </p>
+            <p>She presses <b>Turn this into a proposal</b>, reads the diff, accepts.</p>
+            <div class="step__see">
+              <b>On disk:</b> while talking, nothing. On staging,
+              <code>.proposals/pr_.../</code> holds the whole proposed <code>season.json</code>. On accept,
+              <code>season.json</code> is written, the previous version lands in <code>.history/</code>, and
+              <code>changes.jsonl</code> gains a line. The Series engine is untouched &mdash; it would have
+              needed its own accept.
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="step__time">10:14 &middot; the board</div>
+            <h4>Seven cards, and two of them are lying.</h4>
+            <p>
+              Episodes takes the page. Seven tiles plus <code>Add an episode</code>. Five have hooks, four
+              have cliffhangers, and episode three says <code>NO ENDING YET</code> in words rather than in
+              red. Episode six is a dashed tile with one sentence, which is honest: it has a title and nothing
+              else.
+            </p>
+            <div class="step__see"><b>On disk:</b> nothing. The board is a view over the episode files.</div>
+          </div>
+
+          <div class="step">
+            <div class="step__time">10:26 &middot; the episode</div>
+            <h4>It opens well and stops.</h4>
+            <p>
+              She clicks episode three. The rail shows its promise: they go back to the night the ledger
+              skips, and then nothing. She says the street is there but the house numbers are wrong. The reply
+              makes that the turn, and gives the episode a closing state it did not have &mdash; the Quarter
+              has been edited, and someone did it &mdash; which pays off the ledger from episode two.
+            </p>
+            <p>Two new beats appear at the bottom of the list, both marked <code>no scene yet</code>.</p>
+            <div class="step__see">
+              <b>On disk:</b> nothing until she stages it. On accept,
+              <code>episodes/03-the-missing-night.json</code> is written with its promise and four ordered
+              beats. The two new beats cite no scene, and the file says so.
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="step__time">10:41 &middot; the scene</div>
+            <h4>A beat with no scene offers to become one.</h4>
+            <p>
+              On the beats-and-scenes view, beat three is a dashed row reading <b>Draft the scene for this
+              beat</b>. She presses it and the beat becomes the brief. The draft comes back with a location it
+              inherits, a cast resolved from <code>@</code> mentions, and four shots &mdash; and it names the
+              canon it checked.
+            </p>
+            <p>She accepts. The shots exist. Nothing has been generated.</p>
+            <div class="step__see">
+              <b>On disk:</b> <code>scenes/11-the-answer-from-inside.json</code> written, with
+              <code>shots[]</code> carrying camera, audio and duration. Episode three's beat three now cites
+              <code>sc_11</code>. Still no money spent.
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="step__time">10:58 &middot; the arc that never lands</div>
+            <h4>The grid tells her something the board could not.</h4>
+            <p>
+              Arcs, across the season. Three lanes. Maren's turns in episode four and pays off in seven.
+              The Quarter's does the same. Odile's lane has a setup, a turn in five &mdash; and the finale
+              column reads <code>NO PAYOFF</code>. She has been believed and disbelieved and the season never
+              says which she is.
+            </p>
+            <p>She types into the row at the foot: <em>Odile's lane needs to land somewhere.</em></p>
+            <div class="step__see">
+              <b>On disk:</b> nothing yet. Lanes and their cells live in <code>season.json</code>; the
+              missing payoff is computed, not stored.
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="step__time">11:20 &middot; the first spend</div>
+            <h4>One shot, priced before it runs.</h4>
+            <p>
+              Scene eleven, shot two. The dispatch dialog names the model, the size and the length it will
+              actually ask for, and lists what it knows: one sheet is a sketch, one reference will be dropped
+              for exceeding the model's cap. None of it blocks. She presses dispatch.
+            </p>
+            <div class="step__see">
+              <b>On disk:</b> a job appended to <code>%USERPROFILE%\ArkeStudio\queue\jobs.jsonl</code> before
+              any network call, then the artifact into
+              <code>productions/bell-watch-s1/incoming/sh_02/</code>, then a take under
+              <code>takes/tk_.../</code>. Accepting it writes <code>selections.json</code> and appends to
+              <code>reviews.jsonl</code> in one commit. The scene file does not move &mdash; it is gated, and
+              a selection is operational.
+            </div>
+          </div>
+        </div>
+
+        <div class="note">
+          Three hours, one accepted season, one accepted episode, one accepted scene, one clip. The world it
+          all came from was not edited once &mdash; and the two moments that could have edited it, the canon
+          thread on day one and the checked canon during the scene draft, both stayed reads.
+        </div>
+      </section>
+
+      <section class="section" id="open">
+        <div class="section__head">
+          <div class="eyebrow">Honest limits</div>
+          <h2>What this does not do, and what is not decided.</h2>
+        </div>
+
+        <h3>Deliberately out of scope</h3>
+        <p>
+          No branching, no graph, no choice or state. A season is a sequence, and the graph language the game
+          prototype proves is not copied into linear video on day one. No world editing from a production
+          conversation. No generation from unaccepted state. Nothing here changes canon, sheets or the world
+          look.
+        </p>
+
+        <h3>Not yet designed</h3>
+        <p>
+          The scene script layer &mdash; stable action and dialogue blocks with shots citing the blocks they
+          cover &mdash; is specified in the brief and not drawn. Neither is the pass planner, the durable
+          dispatch plan, the Series view for when season two exists, or an episode-aware cut and export. Seven
+          episodes are seven deliverables and the cut is still one timeline.
+        </p>
+
+        <h3>Known to be unresolved</h3>
+        <p>
+          The Prototype now has <b>two</b> step-two screens for Video: this feature's profile step, and an
+          older subtype screen offering Watch, Choose and Interact. Those are two different axes &mdash; form
+          and interactivity &mdash; and nothing has reconciled them. A season of twenty is the first thing
+          that will test the episode grid and the arc columns, both of which are drawn at seven. And the
+          conversation layer this feature consumes exists only for the world; extending it to production scope
+          is real work, bounded but not free.
+        </p>
+      </section>
+
+      <footer>
+        Arke Studio feature documentation &middot; the production story workspace. Describes turns 43&ndash;48
+        of <code>design-system/Arke Studio.dc.html</code> and the flow carried into
+        <code>design-system/Arke Studio Prototype.dc.html</code>. Filesystem paths verified against the
+        coordinator and against <code>fixtures/worlds/the-undersong</code> on 2026-08-09. For what is built
+        versus proposed, the claim ledger in <code>production-story-workspace.html</code> is the authority;
+        this document describes the design, not the shipped application.
+      </footer>
+    </div>
+  </body>
+</html>
