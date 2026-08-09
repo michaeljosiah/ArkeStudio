@@ -16,7 +16,9 @@ import {
   modelPriceCopy,
   passesForDuration,
   reconcileStrategy,
+  sceneImageOutput,
   sumMicroUsd,
+  tiersFor,
   type ClientDeclarations,
 } from "@arke-studio/contracts";
 import { requireModel, SHIPPED_MANIFEST } from "../src/manifest-data.js";
@@ -276,6 +278,41 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
     const banana = model("nano-banana-2");
     const fourK = characterImageOutput(banana, "main-photo", "4K");
     assert.equal(Math.max(fourK.width, fourK.height), 4096);
+  });
+
+  it("every size an OpenAI request can carry is one the route accepts (#223)", () => {
+    // OpenAI's `size` is an enum, not a width and a height. Long-edge scaling turned the 2K tier
+    // into 1366x2048, which the route rejected at validation in 1.3s — a guaranteed failure
+    // offered in the picker as an ordinary choice, priced the same as the 1K that works.
+    const accepted = new Set(["1024x1024", "1536x1024", "1024x1536"]);
+    const images = SHIPPED_MANIFEST.models.filter((m) => m.provider === "openai" && m.capability === "image");
+    assert.ok(images.length > 0);
+    for (const image of images) {
+      // Every tier, not only the reachable ones: a stale saved choice or a later manifest row
+      // must not be able to put a size on the wire the route has never heard of.
+      for (const tier of [undefined, "1K", "2K", "4K"] as const) {
+        for (const out of [
+          characterImageOutput(image, "main-photo", tier),
+          characterImageOutput(image, "character-sheet", tier),
+          sceneImageOutput(image, tier),
+        ]) {
+          const size = `${out.width}x${out.height}`;
+          assert.ok(accepted.has(size), `${image.id} at ${tier ?? "no tier"} would send ${size}`);
+        }
+      }
+    }
+  });
+
+  it("GPT Image 2 offers only the tier its route reaches", () => {
+    const image = model("gpt-image-2");
+    assert.deepEqual(tiersFor(image), ["1K"], "2K is disabled in the picker, not silently sent and refused");
+    // And a request that asks for one anyway comes back portrait: the reference workflows are
+    // portrait, and squaring them to the nearest size would crop the subject out of its frame.
+    const portrait = characterImageOutput(image, "main-photo", "2K");
+    assert.ok(portrait.height > portrait.width, `main-photo stays portrait, got ${portrait.width}x${portrait.height}`);
+    assert.equal(portrait.aspect, "2:3");
+    const landscape = sceneImageOutput(image, "4K");
+    assert.ok(landscape.width > landscape.height, `a scene still stays landscape, got ${landscape.width}x${landscape.height}`);
   });
 
   it("prices explicit character outputs, including model resolution overrides", () => {

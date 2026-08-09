@@ -13,8 +13,8 @@ import { FAL_MODELS } from "./fal-catalogue.generated.js";
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 14,
-  generated: "2026-08-07",
+  manifestVersion: 15,
+  generated: "2026-08-09",
   models: [
     // ---- fal: generated from the live catalogue ---------------------------
     ...FAL_MODELS.map((model) => ({
@@ -56,8 +56,13 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       displayName: "GPT Image 2",
       accepts: { referenceImages: 16, referenceRoles: false, startFrame: false, endFrame: false },
       limits: {
-        resolutions: ["1024", "2048"],
-        tiers: { "1K": "1024", "2K": "2048" },
+        // One tier, because the route has one size per shape: `size` is an enum — 1024x1024,
+        // 1536x1024, 1024x1536 — and nothing else is accepted. The row used to claim 2048 as
+        // well, which put a 2K button in the picker that scaled portrait to 1366x2048 and was
+        // rejected at validation every time, in 1.3s, for the same estimated price as the 1K
+        // that works (#223). A tier the picker offers has to be one dispatch can reach.
+        resolutions: ["1024"],
+        tiers: { "1K": "1024" },
         aspects: ["1:1", "3:2", "2:3"],
       },
       // Medium output is documented up to $0.053. The $0.10/reference allowance deliberately
