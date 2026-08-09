@@ -56,6 +56,39 @@ export const SceneBoardSchema = z
   .strict();
 export type SceneBoard = z.infer<typeof SceneBoardSchema>;
 
+/**
+ * A storyboard drawn to be a *reference* (SPEC-019 R-22..R-25, R-27).
+ *
+ * Distinct from `board`, which compiles selected frames for review. This one is generated to be
+ * read by a video model — line art, no text, capped panels — and it is production output, so it
+ * lives beside the board rather than inside the authored record proper.
+ */
+export const SceneStoryboardSchema = z
+  .object({
+    /** Filename within the production's storyboard directory; doubles as its identity. */
+    file: z.string().min(1),
+    /**
+     * The scene version the panels were drawn from (R-27). A board outlives the description it
+     * was drawn from, and an edited shot beside an unredrawn panel is the contradiction R-24
+     * exists to prevent — so the version travels with the board and staleness is computable.
+     */
+    sceneVersion: z.number().int().min(1),
+    /** The shots this board actually covers, in order — the excess over the cap is not drawn. */
+    panels: z.array(ShotIdSchema),
+    drawnAt: IsoDateTimeSchema,
+    /** The job that drew it, so its cost is findable in the ledger (R-25). */
+    sourceJobId: z.string().min(1),
+    /**
+     * Accepted before it may steer a generation (R-25). Lands false: the accept gate is what
+     * decides which images drive generation, and a board nobody looked at silently steering a
+     * scene is that gate inverted.
+     */
+    accepted: z.boolean(),
+    acceptedAt: IsoDateTimeSchema.optional(),
+  })
+  .strict();
+export type SceneStoryboard = z.infer<typeof SceneStoryboardSchema>;
+
 export const SceneSchema = z
   .object({
     id: SceneIdSchema,
@@ -75,6 +108,8 @@ export const SceneSchema = z
       .strict()
       .optional(),
     board: SceneBoardSchema.optional(),
+    /** The reference storyboard drawn for this scene, when one has been (R-22). */
+    storyboard: SceneStoryboardSchema.optional(),
     /**
      * The authoring skill this scene was drafted under (SPEC-019 R-19, R-21).
      *

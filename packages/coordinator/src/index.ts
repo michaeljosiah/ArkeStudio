@@ -92,6 +92,12 @@ export {
   setPromptOverride,
   type SceneDraft,
 } from "./productions/ops.js";
+export {
+  acceptStoryboard,
+  recordStoryboard,
+  storyboardRequest,
+  type StoryboardRequest,
+} from "./productions/storyboard.js";
 export { FrontmatterError, parseFrontmatter, splitSections, type BodySection } from "./frontmatter.js";
 export { ReadModel } from "./read-model.js";
 export {

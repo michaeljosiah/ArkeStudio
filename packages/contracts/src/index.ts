@@ -28,3 +28,4 @@ export * from "./activity.js";
 export * from "./art-direction.js";
 export * from "./provider-call.js";
 export * from "./update.js";
+export * from "./storyboard.js";

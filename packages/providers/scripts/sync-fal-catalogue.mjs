@@ -113,6 +113,9 @@ const CURATED = {
       durations: { "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" },
       resolutions: ["720p", "1080p"],
       aspects: ["16:9", "9:16", "1:1"],
+      // SPEC-019 R-23: panels this family reads reliably. Past it the documented failure is a
+      // still output or panels rendered out of order.
+      storyboardPanels: 15,
     },
   },
   "bytedance/seedance-2.0/fast/text-to-video": {
@@ -127,6 +130,9 @@ const CURATED = {
       durations: { "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" },
       resolutions: ["720p"],
       aspects: ["16:9", "9:16"],
+      // SPEC-019 R-23: panels this family reads reliably. Past it the documented failure is a
+      // still output or panels rendered out of order.
+      storyboardPanels: 15,
     },
   },
   "fal-ai/veo3.1": {

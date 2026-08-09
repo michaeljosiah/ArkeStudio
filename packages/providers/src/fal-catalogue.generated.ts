@@ -180,7 +180,8 @@ export const FAL_MODELS: readonly ManifestModel[] = [
         "16:9",
         "9:16",
         "1:1"
-      ]
+      ],
+      "storyboardPanels": 15
     },
     "pricing": {
       "kind": "perSecond",
@@ -223,7 +224,8 @@ export const FAL_MODELS: readonly ManifestModel[] = [
       "aspects": [
         "16:9",
         "9:16"
-      ]
+      ],
+      "storyboardPanels": 15
     },
     "pricing": {
       "kind": "perSecond",

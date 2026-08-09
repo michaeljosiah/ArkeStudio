@@ -111,6 +111,14 @@ export const ModelLimitsSchema = z
     aspects: z.array(z.string()).optional(),
     /** LLMs: the context window, for routing sanity rather than pricing. */
     maxContextTokens: z.number().int().min(1).optional(),
+    /**
+     * Video: how many storyboard panels this family reads reliably (SPEC-019 R-23).
+     *
+     * A property of the model that *consumes* the board, not of the image model that draws it —
+     * past the cap the documented failure is a still output or panels rendered out of order. A
+     * row without one states no cap, and the plan draws every shot.
+     */
+    storyboardPanels: z.number().int().min(1).optional(),
   })
   .strict();
 export type ModelLimits = z.infer<typeof ModelLimitsSchema>;
