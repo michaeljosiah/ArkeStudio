@@ -105,6 +105,19 @@ describe("the rendered guide", () => {
     assert.match(guide, /Copy both exactly/);
   });
 
+  /**
+   * A payload enum the guide shows only one value of is a field the model has to guess at — the
+   * same deterministic schema failure the guide exists to remove, one field further in.
+   */
+  it("spells out every payload enum, not only the one the example happens to use", () => {
+    for (const value of ["add", "remove", "unchanged"]) {
+      assert.ok(guide.includes(value), `linkAction option ${value} is named`);
+    }
+    for (const value of ["world-key-art", "character-main-photo", "character-look"]) {
+      assert.ok(guide.includes(value), `image purpose option ${value} is named`);
+    }
+  });
+
   it("says where a world citation's version, hash and receipt id come from", () => {
     assert.match(guide, /checkReceiptId/, "the citation block beside every tool result");
     assert.match(guide, /citable/);

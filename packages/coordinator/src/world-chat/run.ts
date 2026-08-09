@@ -14,6 +14,7 @@ import {
   type WorldChatLoaded,
   type WorldChatRun,
 } from "@arke-studio/contracts";
+import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
 import { assembleContext, type ContextAttachment } from "./context.js";
 import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
 import { deriveChecks, planFor } from "./check-plan.js";
@@ -75,7 +76,8 @@ export interface RunDeps {
    */
   readAttachmentText?: (attachment: WorldChatAttachment) => Promise<string | null>;
   /**
-   * The passages this run pulled through `get_attachment_text`, per attachment.
+   * The passages this run pulled through `get_attachment_text`, per attachment, each with the
+   * offset it came from.
    *
    * The other half of what a quotation may be checked against. The prompt inlines only a
    * document's opening, while the tool will serve a passage from any offset — the run budget
@@ -84,7 +86,7 @@ export interface RunDeps {
    * turn rejected for quoting what it correctly read is the failure this whole path keeps
    * producing. Absent, only the inlined opening is quotable.
    */
-  attachmentReadsFor?: (runId: RunId) => ReadonlyMap<string, readonly string[]>;
+  attachmentReadsFor?: (runId: RunId) => ReadonlyMap<string, readonly AttachmentRange[]>;
   /**
    * The focused slice of accepted world state a run may see (§8.5).
    *
@@ -435,20 +437,28 @@ export class WorldChatRunner {
   }
 
   /**
-   * Everything this run may have quoted from: the openings it was shown, and the passages it
-   * asked for. Kept as separate ranges so a quotation cannot be assembled across the join
-   * between two passages that are not adjacent in the document.
+   * Everything this run may have quoted from: the opening it was shown, and the passages it
+   * asked for, folded back into whatever was actually contiguous.
+   *
+   * The opening is a range at offset 0, which is what lets a quotation run from the inlined text
+   * into the first paged read — the model saw those as one continuous stretch, because they are
+   * one. Passages with a gap between them stay apart, so a quote cannot be assembled across text
+   * that was never read.
    */
   private quotableAttachmentText(
     readable: readonly WorldChatAttachment[],
     inlined: ReadonlyMap<string, string>,
     runId: RunId,
   ): Map<string, readonly string[]> {
-    const served = this.deps.attachmentReadsFor?.(runId) ?? new Map<string, readonly string[]>();
+    const served = this.deps.attachmentReadsFor?.(runId) ?? new Map<string, readonly AttachmentRange[]>();
     const quotable = new Map<string, readonly string[]>();
     for (const attachment of readable) {
       const opening = inlined.get(attachment.id);
-      const passages = [...(opening !== undefined ? [opening] : []), ...(served.get(attachment.id) ?? [])];
+      const ranges: AttachmentRange[] = [
+        ...(opening !== undefined ? [{ offset: 0, text: opening }] : []),
+        ...(served.get(attachment.id) ?? []),
+      ];
+      const passages = mergeAttachmentRanges(ranges);
       if (passages.length > 0) quotable.set(attachment.id, passages);
     }
     return quotable;

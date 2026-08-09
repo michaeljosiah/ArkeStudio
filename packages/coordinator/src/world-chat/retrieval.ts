@@ -10,7 +10,11 @@ import { canonObservation, sheetObservation } from "./observations.js";
 import { refsForCanon, refsForSheet, searchCanon, searchSheets } from "../index-db/queries.js";
 import type { WorldIndex } from "../index-db/world-index.js";
 import { LeaseDeniedError, type QueryLease, type QueryLeaseRegistry } from "./lease.js";
-import { MAX_TEXT_PER_RUN_CHARS, type WorldChatAttachmentStore } from "./attachments.js";
+import {
+  MAX_TEXT_PER_RUN_CHARS,
+  type AttachmentRange,
+  type WorldChatAttachmentStore,
+} from "./attachments.js";
 import type { WorldChatAttachment } from "@arke-studio/contracts";
 
 /**
@@ -84,7 +88,7 @@ export interface RetrievalDeps {
   now?: () => string;
 }
 
-const NO_RANGES: ReadonlyMap<string, readonly string[]> = new Map();
+const NO_RANGES: ReadonlyMap<string, readonly AttachmentRange[]> = new Map();
 
 export class WorldChatRetrieval {
   private readonly now: () => string;
@@ -99,8 +103,11 @@ export class WorldChatRetrieval {
    * document. Verification cannot reconstruct that by re-reading a prefix — there is no prefix
    * long enough — so the ranges are kept as they are served. It also makes the evidence rule
    * exact rather than approximate: a quotation is verifiable when the model actually read it.
+   *
+   * Each range keeps the offset it came from, so windows that were consecutive can be rejoined
+   * and windows that were not stay apart.
    */
-  private readonly textReadByRun = new Map<string, Map<string, string[]>>();
+  private readonly textReadByRun = new Map<string, Map<string, AttachmentRange[]>>();
 
   constructor(private readonly deps: RetrievalDeps) {
     this.now = deps.now ?? (() => new Date().toISOString());
@@ -284,8 +291,11 @@ export class WorldChatRetrieval {
         });
         this.textSpentByRun.set(lease.runId, spent + read.text.length);
         if (read.text.length > 0) {
-          const byAttachment = this.textReadByRun.get(lease.runId) ?? new Map<string, string[]>();
-          byAttachment.set(attachment.id, [...(byAttachment.get(attachment.id) ?? []), read.text]);
+          const byAttachment = this.textReadByRun.get(lease.runId) ?? new Map<string, AttachmentRange[]>();
+          byAttachment.set(attachment.id, [
+            ...(byAttachment.get(attachment.id) ?? []),
+            { offset: read.offset, text: read.text },
+          ]);
           this.textReadByRun.set(lease.runId, byAttachment);
         }
 
@@ -305,8 +315,8 @@ export class WorldChatRetrieval {
     }
   }
 
-  /** What this run read out of each attachment, in the order it was served. */
-  textReadBy(runId: string): ReadonlyMap<string, readonly string[]> {
+  /** What this run read out of each attachment, with the offset each passage came from. */
+  textReadBy(runId: string): ReadonlyMap<string, readonly AttachmentRange[]> {
     return this.textReadByRun.get(runId) ?? NO_RANGES;
   }
 

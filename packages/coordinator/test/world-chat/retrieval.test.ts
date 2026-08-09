@@ -239,7 +239,7 @@ describe("leased attachment reads", () => {
     const served = (result as { text: string }).text;
     assert.ok(served.includes("THE-DEEP-PART"));
 
-    assert.deepEqual(h.retrieval.textReadBy(h.runId).get(big.id), [served]);
+    assert.deepEqual(h.retrieval.textReadBy(h.runId).get(big.id), [{ offset: 50_000, text: served }]);
 
     // And it does not outlive the run, or one run could quote what another read.
     h.retrieval.forgetRun(h.runId);

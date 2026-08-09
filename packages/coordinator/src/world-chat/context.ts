@@ -117,12 +117,16 @@ function trimToBound(text: string, bound: number): { text: string; trimmed: bool
 }
 
 /**
- * The live propositions and groups, each with the id and revision an operation must name.
+ * The live propositions and groups, each with everything an operation on it has to restate.
  *
- * Groups are here for the same reason candidates are: `update` and `withdraw` on a group carry a
- * `grp_...` id and its expected revision, and an id that is nowhere in the prompt can only be
- * guessed at. Without them the model could create groups and never touch one again — every
- * correction to an existing group rejected as naming something that does not exist.
+ * Groups are here for the same reason candidates are: `update` and `withdraw` carry a `grp_...`
+ * id and its expected revision, and an id that is nowhere in the prompt can only be guessed at.
+ *
+ * They carry their rationale and their exact membership for a second reason. A group update
+ * replaces the whole group — title, rationale and members together — so anything omitted here is
+ * something the model has to invent to say anything at all. Inventing a membership is the worst
+ * of the three: a plausible guess validates, and quietly re-forms which propositions must land
+ * together, which is the one promise a group exists to make.
  */
 function renderRegistry(
   candidates: readonly WorldChangeCandidate[],
@@ -133,9 +137,13 @@ function renderRegistry(
     .map((c) => `- [${c.id} r${c.revision}] (${c.classification}, ${c.settledness}) ${c.title}`);
   const groupLines = groups
     .filter((g) => g.status === "live")
-    .map((g) => `- [${g.id} r${g.revision}] (group of ${g.members.length}) ${g.title}`);
+    .flatMap((g) => [
+      `- [${g.id} r${g.revision}] ${g.title}`,
+      `  rationale: ${g.rationale}`,
+      `  members: ${g.members.map((m) => `${m.candidateId} r${m.revision}`).join(", ")}`,
+    ]);
   if (groupLines.length === 0) return lines.join("\n");
-  return [...lines, "", "Groups:", ...groupLines].join("\n");
+  return [...lines, "", "Groups (an update restates all three fields):", ...groupLines].join("\n");
 }
 
 /**

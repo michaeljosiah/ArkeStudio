@@ -83,6 +83,7 @@ const NO_EVIDENCE: readonly CandidateEvidence[] = [];
  * spend the retry's context on its own faults, which is the failure the bounds exist to prevent.
  */
 const MAX_KEYS_NAMED = 8;
+const MAX_PROBLEMS = 8;
 const MAX_PROBLEM_CHARS = 300;
 const MAX_CORRECTIVE_CHARS = 4_000;
 
@@ -176,8 +177,20 @@ export function parseTurnResult(raw: string): { ok: true; value: WorldChatTurnRe
   }
   const parsed = WorldChatTurnResultSchema.safeParse(json);
   if (!parsed.success) {
-    const lines = [...new Set(parsed.error.issues.map(schemaIssueLine))];
-    return { ok: false, problems: lines.map((line) => problem("schema", truncate(line, MAX_PROBLEM_CHARS))) };
+    /**
+     * Bounded where the issues are collected, not where they are printed.
+     *
+     * Zod reports every element of an invalid array separately, so a long one produces a problem
+     * per entry. Only the first few are ever shown, but the whole list used to be built, mapped
+     * and joined on the way to a 500-character run detail — work proportional to how wrong the
+     * answer was, at the moment there is least time to spare.
+     */
+    const lines = new Set<string>();
+    for (const issue of parsed.error.issues) {
+      lines.add(truncate(schemaIssueLine(issue), MAX_PROBLEM_CHARS));
+      if (lines.size >= MAX_PROBLEMS) break;
+    }
+    return { ok: false, problems: [...lines].map((line) => problem("schema", line)) };
   }
   return { ok: true, value: parsed.data };
 }
@@ -511,7 +524,7 @@ function dedupeProblems(problems: readonly TurnProblem[]): TurnProblem[] {
  * return the third one.
  */
 export function correctiveMessage(problems: readonly TurnProblem[]): string {
-  const lines = problems.slice(0, 8).map((p) => `- ${truncate(p.safeMessage, MAX_PROBLEM_CHARS)}`);
+  const lines = problems.slice(0, MAX_PROBLEMS).map((p) => `- ${truncate(p.safeMessage, MAX_PROBLEM_CHARS)}`);
   const message = [
     "The previous result was not accepted:",
     ...lines,

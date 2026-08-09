@@ -25,6 +25,7 @@ import {
   runScratchDir,
   sweepRunScratch,
 } from "../../src/world-chat/run-scratch.js";
+import { mergeAttachmentRanges } from "../../src/world-chat/attachments.js";
 
 /**
  * Bounded context and the per-run scratch (#70 §8.2, §8.5).
@@ -207,11 +208,13 @@ describe("context assembly", () => {
   });
 
   /**
-   * A group operation names a grp_... id and its expected revision. Rendering only candidates
-   * meant the model could create a group and then never touch one again: every update or
-   * withdrawal would have to guess an id, and a guessed id is refused.
+   * A group operation names a grp_... id and its expected revision, and an update restates the
+   * whole group. Rendering only candidates meant the model could create a group and never touch
+   * one again; rendering it without its rationale and membership was barely better, because an
+   * update would then have to invent both — and an invented membership validates, silently
+   * re-forming which propositions must land together.
    */
-  it("shows live groups with the id and revision an operation has to name", () => {
+  it("shows live groups with everything an operation on one has to restate", () => {
     const group = {
       id: newId("grp"),
       conversationId: newId("cv"),
@@ -226,8 +229,14 @@ describe("context assembly", () => {
       status: "live" as const,
     };
     const context = assembleContext({ ...baseInput(), groups: [group] });
-    assert.match(context.registry, new RegExp(`\\[${group.id} r3\\]`));
-    assert.match(context.registry, /group of 2/);
+    assert.match(context.registry, new RegExp(`\\[${group.id} r3\\]`), "the id and revision to name");
+    assert.match(context.registry, /rationale: One change, two propositions\./, "the rationale to restate");
+    for (const member of group.members) {
+      assert.ok(
+        context.registry.includes(`${member.candidateId} r${member.revision}`),
+        "and each member, so the grouping is not re-formed by guesswork",
+      );
+    }
   });
 
   it("says nothing about groups when there are none, rather than an empty heading", () => {
@@ -265,6 +274,65 @@ describe("context assembly", () => {
     assert.equal(shouldSummarise({ turnCount: 8, recentTurnsLength: 10 }), true);
     assert.equal(shouldSummarise({ turnCount: 2, recentTurnsLength: BOUNDS.recentTurns }), true);
     assert.equal(shouldSummarise({ turnCount: 2, recentTurnsLength: 10 }), false);
+  });
+});
+
+/**
+ * Which passages of a document count as one (#70 §5.8, §13.2).
+ *
+ * The rule has to hold in both directions: windows the model read consecutively are one passage,
+ * because a quotation may sit across their join; windows with a gap between them are not, because
+ * joining them would manufacture text that appears nowhere in the file and call it evidence.
+ */
+describe("folding the passages a run read", () => {
+  it("joins windows that abut", () => {
+    assert.deepEqual(
+      mergeAttachmentRanges([
+        { offset: 0, text: "the bells " },
+        { offset: 10, text: "were whale bone" },
+      ]),
+      ["the bells were whale bone"],
+    );
+  });
+
+  it("joins windows that overlap, without repeating the overlap", () => {
+    assert.deepEqual(
+      mergeAttachmentRanges([
+        { offset: 0, text: "the bells were" },
+        { offset: 10, text: "were whale bone" },
+      ]),
+      ["the bells were whale bone"],
+    );
+  });
+
+  it("keeps windows with a gap apart, so nothing is quotable across what was never read", () => {
+    assert.deepEqual(
+      mergeAttachmentRanges([
+        { offset: 0, text: "the bells" },
+        { offset: 500, text: "whale bone" },
+      ]),
+      ["the bells", "whale bone"],
+    );
+  });
+
+  it("folds a window wholly inside another into nothing new", () => {
+    assert.deepEqual(
+      mergeAttachmentRanges([
+        { offset: 0, text: "the bells were whale bone" },
+        { offset: 4, text: "bells" },
+      ]),
+      ["the bells were whale bone"],
+    );
+  });
+
+  it("does not depend on the order they were read in", () => {
+    assert.deepEqual(
+      mergeAttachmentRanges([
+        { offset: 10, text: "were whale bone" },
+        { offset: 0, text: "the bells " },
+      ]),
+      ["the bells were whale bone"],
+    );
   });
 });
 

@@ -458,13 +458,15 @@ const SheetEditPayload = {
     .strict(),
 } as const;
 
+const LinkActionSchema = z.enum(["add", "remove", "unchanged"]);
+
 const RelationshipChangePayload = {
   classification: z.literal("relationship.change"),
   draft: z
     .object({
       from: WorldChatLinkRefSchema,
       to: WorldChatLinkRefSchema,
-      linkAction: z.enum(["add", "remove", "unchanged"]),
+      linkAction: LinkActionSchema,
       proseEdits: z.array(
         z
           .object({
@@ -480,12 +482,14 @@ const RelationshipChangePayload = {
     .strict(),
 } as const;
 
+const ImagePurposeSchema = z.enum(["world-key-art", "character-main-photo", "character-look"]);
+
 const ImageOpportunityPayload = {
   classification: z.literal("media.image-opportunity"),
   draft: z
     .object({
       target: WorldChatEntityRefSchema,
-      purpose: z.enum(["world-key-art", "character-main-photo", "character-look"]),
+      purpose: ImagePurposeSchema,
       brief: z.string().min(1).max(4000),
       reason: z.string().max(1000),
       dependencies: z.array(
@@ -1374,7 +1378,9 @@ candidateId and expectedRevision come from "What you have already understood" â€
 - ${draftPayloadLine("sheet.edit")}
   (target names the sheet; the draft carries only the fields that change)
 - ${draftPayloadLine("relationship.change")}
+  (linkAction is one of ${LinkActionSchema.options.join(" | ")}; proseEdits carries the complete new body of each section it touches, never an instruction to append)
 - ${draftPayloadLine("media.image-opportunity")}
+  (purpose is one of ${ImagePurposeSchema.options.join(" | ")})
 - ${draftPayloadLine("undecided")}
 
 ### Evidence

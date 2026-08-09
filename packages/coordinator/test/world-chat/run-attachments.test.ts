@@ -8,7 +8,11 @@ import {
   type WorldBundle,
   type WorldChatMessage,
 } from "@arke-studio/contracts";
-import { MAX_TEXT_READ_CHARS, WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
+import {
+  MAX_TEXT_READ_CHARS,
+  WorldChatAttachmentStore,
+  type AttachmentRange,
+} from "../../src/world-chat/attachments.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { WorldChatRunner } from "../../src/world-chat/run.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
@@ -77,7 +81,7 @@ interface RunnerOptions {
   onPrepare?: (ids: readonly ChatAttachmentId[]) => void;
   onRead?: (id: string) => void;
   /** Passages get_attachment_text served this run, as the retrieval layer records them. */
-  served?: ReadonlyMap<string, readonly string[]>;
+  served?: ReadonlyMap<string, readonly AttachmentRange[]>;
 }
 
 function runnerFor(options: RunnerOptions): WorldChatRunner {
@@ -100,7 +104,7 @@ function runnerFor(options: RunnerOptions): WorldChatRunner {
       options.onRead?.(a.id);
       return (await options.attachments.readText(a)).text;
     },
-    attachmentReadsFor: () => options.served ?? new Map<string, readonly string[]>(),
+    attachmentReadsFor: () => options.served ?? new Map<string, readonly AttachmentRange[]>(),
     now: NOW,
   });
 }
@@ -190,7 +194,33 @@ describe("reading an attachment", () => {
     const runner = runnerFor({
       ...c,
       adapter: fakeAdapter([citing(c.freshStore(), doc.id, doc.contentHash, buried)]),
-      served: new Map([[doc.id, [`...${buried}...`]]]),
+      served: new Map([[doc.id, [{ offset: inlined.text.length + 100, text: `...${buried}...` }]]]),
+    });
+
+    const outcome = await runner.send(c.freshStore(), c.conversationId, "read my notes", [doc.id]);
+    assert.equal(outcome.status, "completed");
+  });
+
+  /**
+   * A quote can sit across the join between the inlined opening and the first paged read. The
+   * model saw those as one continuous stretch, because they are one — so rejoining them is what
+   * makes the citation checkable, and why the offsets are kept rather than the strings alone.
+   */
+  it("verifies a quotation spanning two windows that really were adjacent", async () => {
+    const c = await conversation("arke-att-seam-");
+    const whole = `${"filler. ".repeat(1_000)}the bells were cast from whale bone`;
+    const doc = await c.attachments.ingestText(c.conversationId, whole, "seam.txt");
+
+    // The prompt inlines [0, n); the next read begins exactly at n, and the quote straddles it.
+    const inlined = await c.attachments.readText(doc);
+    const rest = whole.slice(inlined.text.length);
+    const across = whole.slice(inlined.text.length - 20, inlined.text.length + 20);
+    assert.ok(!inlined.text.includes(across), "the quote must not fit inside the opening alone");
+
+    const runner = runnerFor({
+      ...c,
+      adapter: fakeAdapter([citing(c.freshStore(), doc.id, doc.contentHash, across)]),
+      served: new Map([[doc.id, [{ offset: inlined.text.length, text: rest }]]]),
     });
 
     const outcome = await runner.send(c.freshStore(), c.conversationId, "read my notes", [doc.id]);
