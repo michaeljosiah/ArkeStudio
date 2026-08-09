@@ -565,6 +565,9 @@ function contextAttachments(
     .map((a) => {
       const body = text.get(a.id);
       return {
+        // Attachment evidence cites both, so both have to be in front of the model (§13.2).
+        id: a.id,
+        contentHash: a.contentHash,
         fileName: a.fileName,
         kind: a.kind,
         readable: a.readability !== "not-readable",

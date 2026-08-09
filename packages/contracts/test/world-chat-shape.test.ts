@@ -86,4 +86,22 @@ describe("the rendered guide", () => {
     assert.match(guide, /\[msg_\.\.\.\]/, "message ids are cited from the conversation, never invented");
     assert.match(guide, /end exclusive/, "offsets are the exact slice the verifier takes");
   });
+
+  /**
+   * Each of these is a rule the model cannot discover by trying: the turn either fails whole, or
+   * — worse, before the intent rule moved into the validator — succeeds and is dropped at wrap-up.
+   */
+  it("states that intent evidence is required and cannot be substituted", () => {
+    assert.match(guide, /"purpose": "intent"/, "the required purpose is named");
+    assert.match(guide, /no other kind substitutes/, "and that supporting evidence does not stand in");
+  });
+
+  it("says the Studio's own replies are never evidence", () => {
+    assert.match(guide, /never cite your own replies/);
+  });
+
+  it("says where an attachment's id and hash come from", () => {
+    assert.match(guide, /What they handed you/, "the section that prints them");
+    assert.match(guide, /Copy both exactly/);
+  });
 });

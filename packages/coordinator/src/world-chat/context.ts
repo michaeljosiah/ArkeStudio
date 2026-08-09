@@ -37,8 +37,16 @@ export const RECENT_TURN_COUNT = 8;
  * `text` is present only for what can honestly be read. An unreadable file is still named — the
  * model must be able to say "I can see you attached a PNG and I cannot read it" rather than
  * denying it exists, which is what silence produces.
+ *
+ * `id` and `contentHash` travel for the same reason message ids do: attachment evidence requires
+ * both, and evidence can only cite what the prompt shows. Rendering the text without them left
+ * every attachment quotation unwriteable — the model had to invent an id, and the verifier then
+ * rejected the whole turn. `get_attachment_text` is no way round it either: that tool takes the
+ * very id this is the only place to learn.
  */
 export interface ContextAttachment {
+  id: string;
+  contentHash: string;
   fileName: string;
   kind: string;
   readable: boolean;
@@ -113,15 +121,21 @@ function renderRegistry(candidates: readonly WorldChangeCandidate[]): string {
 }
 
 /**
- * Each line opens with the message's durable id, because evidence has to cite one.
+ * Every user line opens with its durable id, because evidence has to cite one. Studio lines do
+ * not, because nothing the Studio said is evidence of anything.
  *
  * The id is product identity, not model output: the model copies it into a `messageId` field,
  * and evidence verification then checks the quote against that exact message. Without the ids
  * here there is nothing valid to copy, and every citation of the conversation is an invention.
+ *
+ * Withholding them from Studio lines is the other half. An id on its own reply is an invitation
+ * to cite it, and a proposition evidenced by the Studio's earlier prose is a claim about a claim:
+ * an inference from two turns ago would come back as a fact the user is told they asked for.
+ * The verifier refuses those anyway — this stops the model spending a turn on one.
  */
 function renderTurns(messages: readonly WorldChatMessage[]): string {
   return messages
-    .map((m) => `${m.role === "user" ? "User" : "Studio"} [${m.id}]: ${m.text}`)
+    .map((m) => (m.role === "user" ? `User [${m.id}]: ${m.text}` : `Studio: ${m.text}`))
     .join("\n\n");
 }
 
@@ -144,10 +158,13 @@ function renderTurns(messages: readonly WorldChatMessage[]): string {
 function renderAttachments(attachments: readonly ContextAttachment[]): string {
   return attachments
     .map((a) => {
+      // The identity line is what makes a quotation of this document citable at all; it is
+      // printed for unreadable files too, so an image can still be referred to by id.
+      const head = `### ${a.fileName} (${a.kind})\nattachmentId: ${a.id}\ncontentHash: ${a.contentHash}`;
       if (!a.readable || a.text === undefined) {
-        return `### ${a.fileName} (${a.kind})\nAttached, and cannot be read as text here. Say so plainly if it is relevant; do not guess at what it contains.`;
+        return `${head}\nAttached, and cannot be read as text here. Say so plainly if it is relevant; do not guess at what it contains.`;
       }
-      return `### ${a.fileName} (${a.kind})\n${a.text}`;
+      return `${head}\n${a.text}`;
     })
     .join("\n\n");
 }

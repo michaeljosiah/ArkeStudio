@@ -23,6 +23,7 @@ import { canonObservation, quotableText, sheetObservation } from "./observations
 
 export type EvidenceProblem =
   | { kind: "message-missing"; messageId: string }
+  | { kind: "message-not-the-users"; messageId: string }
   | { kind: "message-span-mismatch"; messageId: string; expected: string; found: string }
   | { kind: "message-span-out-of-range"; messageId: string }
   | { kind: "world-entity-missing"; ref: string }
@@ -59,6 +60,19 @@ export function verifyEvidence(evidence: CandidateEvidence, sources: EvidenceSou
     case "message": {
       const message = sources.messages.find((m) => m.id === evidence.messageId);
       if (!message) return [{ kind: "message-missing", messageId: evidence.messageId }];
+      /**
+       * Only the user's own words are evidence.
+       *
+       * Every purpose a message citation can carry — intent, settledness, correction — is a
+       * statement about what the *person* wanted, decided or changed. The Studio's replies are
+       * this app's own prose, and a proposition evidenced by one is circular: an inference the
+       * model made two turns ago would come back as a fact, verified, indistinguishable in the
+       * panel from something the user actually said. The quote would match, which is exactly
+       * what makes it worth refusing here rather than trusting the prompt not to offer it.
+       */
+      if (message.role !== "user") {
+        return [{ kind: "message-not-the-users", messageId: evidence.messageId }];
+      }
       if (evidence.end > message.text.length || evidence.start > evidence.end) {
         return [{ kind: "message-span-out-of-range", messageId: evidence.messageId }];
       }
@@ -159,6 +173,8 @@ export function safeEvidenceMessage(problem: EvidenceProblem): string {
   switch (problem.kind) {
     case "message-missing":
       return "Evidence cites a message that is not in this conversation.";
+    case "message-not-the-users":
+      return "Evidence cites one of your own replies. Only the user's messages are evidence — cite the id shown beside their words.";
     case "message-span-mismatch":
       return "A quoted span does not match the text at those offsets in the message.";
     case "message-span-out-of-range":

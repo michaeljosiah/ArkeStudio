@@ -1379,21 +1379,22 @@ candidateId and expectedRevision come from "What you have already understood" �
 
 ### Evidence
 
-Every candidate cites at least one piece of evidence, and every piece is verified before the turn lands.
+EVERY candidate must cite at least one message quotation with "purpose": "intent" — the words in which they asked for it. That one is required and no other kind substitutes for it: a candidate without it is rejected now, and would be dropped at wrap-up even if it were not. Anything else is supporting evidence, added beside it.
 
-Quoting the conversation:
+The required intent quotation:
 ${JSON.stringify(exampleMessageEvidence)}
-- messageId is the id shown in brackets in the conversation — [msg_...]. Never invent one.
+- messageId is a user message's id, shown in brackets beside their words — [msg_...]. Never invent one, and never cite your own replies: your lines carry no id because nothing you said is evidence of what they want.
 - start and end are 0-based character offsets into that message's text alone (never into this prompt), end exclusive. The quote must equal exactly the text between them.
-- purpose is one of ${MessageEvidencePurposeSchema.options.join(" | ")}
+- purpose is one of ${MessageEvidencePurposeSchema.options.join(" | ")}. Use "intent" for the ask itself, "settledness" for the words that decided it, "correction" for the words that changed it.
 
-Quoting the world (only something you read through the arke-world tools this turn):
+Supporting evidence — the world (only something you read through the arke-world tools this turn):
 ${JSON.stringify(exampleWorldEvidence)}
 - Copy observedVersion and contentHash exactly from the tool's response.
 - purpose is one of ${WorldEvidencePurposeSchema.options.join(" | ")}
 
-Quoting an attachment you were handed:
+Supporting evidence — an attachment you were handed:
 ${JSON.stringify(exampleAttachmentEvidence)}
+- attachmentId and contentHash are printed with the document under "What they handed you". Copy both exactly; do not guess either.
 
 ### Group operations
 

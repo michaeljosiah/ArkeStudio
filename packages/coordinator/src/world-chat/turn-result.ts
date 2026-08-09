@@ -206,6 +206,23 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
     }
     if (draft.evidence.length === 0) {
       problems.push(problem("no-evidence", "Every proposition needs evidence of what it is based on."));
+    } else if (!draft.evidence.some((e) => e.kind === "message" && e.purpose === "intent")) {
+      /**
+       * Intent is the one piece that cannot be substituted, and it is checked here rather than
+       * only at wrap-up (`hasIntentEvidence` in readiness.ts).
+       *
+       * Without this a candidate evidenced only by a document or by world state validates,
+       * appears in the panel as understood, and is then silently dropped as "invalid" when the
+       * user presses the button — the exact failure this feature's all-or-nothing rule exists to
+       * prevent, only deferred to the worst moment. Refusing it now spends the corrective turn
+       * on something the model can actually fix: quote the sentence they asked in.
+       */
+      problems.push(
+        problem(
+          "no-intent-evidence",
+          'Every proposition needs a message quotation with "purpose": "intent" — the user\'s own words asking for it. Supporting evidence from the world or an attachment does not replace it.',
+        ),
+      );
     }
     for (const id of draft.checkReceiptIds) {
       if (!receiptIds.has(id)) {

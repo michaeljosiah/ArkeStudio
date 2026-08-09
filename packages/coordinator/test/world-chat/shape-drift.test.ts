@@ -6,13 +6,18 @@ import {
   type CandidateChecks,
   type ConversationId,
   type MessageId,
+  type ModelCandidateDraft,
   type RunId,
   type TurnId,
   type WorldChatCheckReceipt,
   type WorldChatMessage,
   type WorldChatTurnResult,
 } from "@arke-studio/contracts";
-import { correctiveMessage, validateTurnResult } from "../../src/world-chat/turn-result.js";
+import {
+  correctiveMessage,
+  validateTurnResult,
+  type ValidateInput,
+} from "../../src/world-chat/turn-result.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { FIXTURE_WORLD } from "../world/helpers.js";
 
@@ -54,6 +59,31 @@ function completeChecks(): CandidateChecks {
   };
 }
 
+/** A validator input around one user message and one raw answer, against the fixture world. */
+async function validateInput(
+  message: WorldChatMessage,
+  result: unknown,
+  receipts: readonly WorldChatCheckReceipt[] = [],
+): Promise<ValidateInput> {
+  return {
+    raw: typeof result === "string" ? result : JSON.stringify(result),
+    conversationId: newId("cv") as ConversationId,
+    messages: [message],
+    existing: [],
+    groups: [],
+    tombstones: [],
+    receiptsThisRun: receipts,
+    evidenceSources: {
+      messages: [message],
+      bundle: (await scanWorld(FIXTURE_WORLD)).bundle,
+      attachments: [],
+      attachmentText: new Map(),
+    },
+    checksFor: () => completeChecks(),
+    now: () => AT,
+  };
+}
+
 describe("an answer written the way the guide teaches", () => {
   it("passes the full validator once its ids point at real things", async () => {
     const message = guideMessage();
@@ -79,23 +109,7 @@ describe("an answer written the way the guide teaches", () => {
       at: AT,
     }));
 
-    const outcome = validateTurnResult({
-      raw: JSON.stringify(result),
-      conversationId: newId("cv") as ConversationId,
-      messages: [message],
-      existing: [],
-      groups: [],
-      tombstones: [],
-      receiptsThisRun: receipts,
-      evidenceSources: {
-        messages: [message],
-        bundle: (await scanWorld(FIXTURE_WORLD)).bundle,
-        attachments: [],
-        attachmentText: new Map(),
-      },
-      checksFor: () => completeChecks(),
-      now: () => AT,
-    });
+    const outcome = validateTurnResult(await validateInput(message, result, receipts));
 
     assert.equal(
       outcome.ok,
@@ -107,6 +121,80 @@ describe("an answer written the way the guide teaches", () => {
     if (!outcome.ok) return;
     assert.equal(outcome.turn.candidates.length, 2);
     assert.equal(outcome.turn.reply, WORLD_CHAT_SHAPE_EXAMPLES.turnResult.reply);
+  });
+});
+
+describe("the evidence a proposition may stand on", () => {
+  /**
+   * A candidate evidenced only by a document used to validate, appear in the panel as
+   * understood, and then be dropped as "invalid" at wrap-up by `hasIntentEvidence`. The user
+   * would find out at the button, about work they were told had landed.
+   */
+  it("refuses a candidate with supporting evidence but no statement of intent", async () => {
+    const message = guideMessage();
+    const draft: ModelCandidateDraft = structuredClone(WORLD_CHAT_SHAPE_EXAMPLES.drafts["canon.create"]);
+    draft.evidence = [WORLD_CHAT_SHAPE_EXAMPLES.evidence.world];
+    draft.checkReceiptIds = [];
+
+    const outcome = validateTurnResult(
+      await validateInput(message, {
+        reply: "Noted.",
+        candidateOperations: [{ op: "create", temporaryId: "t1", candidate: draft }],
+        groupOperations: [],
+      }),
+    );
+
+    assert.equal(outcome.ok, false, "or wrap-up would drop it silently, long after it was shown");
+    if (outcome.ok) return;
+    assert.ok(
+      outcome.problems.some((p) => p.code === "no-intent-evidence"),
+      `expected no-intent-evidence, got ${outcome.problems.map((p) => p.code).join(", ")}`,
+    );
+    assert.match(correctiveMessage(outcome.problems), /"purpose": "intent"/);
+  });
+
+  /** Citing its own reply would let a proposition bootstrap from the Studio's earlier inference. */
+  it("refuses evidence that quotes the Studio rather than the user", async () => {
+    const message = guideMessage();
+    const studio: WorldChatMessage = {
+      id: newId("msg") as MessageId,
+      turnId: newId("turn") as TurnId,
+      role: "studio",
+      text: "The bells, then, are older than the harbour.",
+      attachmentIds: [],
+      createdAt: AT,
+    };
+    const draft: ModelCandidateDraft = structuredClone(WORLD_CHAT_SHAPE_EXAMPLES.drafts["canon.create"]);
+    draft.evidence = [
+      {
+        kind: "message",
+        messageId: studio.id,
+        // Quoted exactly, at the right offsets: everything but the role checks out.
+        quote: studio.text,
+        start: 0,
+        end: studio.text.length,
+        purpose: "intent",
+      },
+    ];
+    draft.checkReceiptIds = [];
+
+    const input = await validateInput(message, {
+      reply: "Noted.",
+      candidateOperations: [{ op: "create", temporaryId: "t1", candidate: draft }],
+      groupOperations: [],
+    });
+    const outcome = validateTurnResult({
+      ...input,
+      messages: [message, studio],
+      evidenceSources: { ...input.evidenceSources, messages: [message, studio] },
+    });
+
+    assert.equal(outcome.ok, false);
+    if (outcome.ok) return;
+    assert.ok(
+      outcome.problems.some((p) => p.code === "message-not-the-users"),
+      `expected message-not-the-users, got ${outcome.problems.map((p) => p.code).join(", ")}`,
+    );
   });
 });
 
@@ -135,24 +223,7 @@ describe("an answer shaped the way the live model actually guessed", () => {
   };
 
   it("gets a corrective message that names what belongs at each fault", async () => {
-    const message = guideMessage();
-    const outcome = validateTurnResult({
-      raw: JSON.stringify(guessed),
-      conversationId: newId("cv") as ConversationId,
-      messages: [message],
-      existing: [],
-      groups: [],
-      tombstones: [],
-      receiptsThisRun: [],
-      evidenceSources: {
-        messages: [message],
-        bundle: (await scanWorld(FIXTURE_WORLD)).bundle,
-        attachments: [],
-        attachmentText: new Map(),
-      },
-      checksFor: () => completeChecks(),
-      now: () => AT,
-    });
+    const outcome = validateTurnResult(await validateInput(guideMessage(), guessed));
 
     assert.equal(outcome.ok, false);
     if (outcome.ok) return;

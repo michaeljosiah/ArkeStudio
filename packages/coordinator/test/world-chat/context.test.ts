@@ -13,7 +13,12 @@ import {
   type TurnId,
   type WorldChatMessage,
 } from "@arke-studio/contracts";
-import { assembleContext, BOUNDS, shouldSummarise } from "../../src/world-chat/context.js";
+import {
+  assembleContext,
+  BOUNDS,
+  shouldSummarise,
+  type ContextAttachment,
+} from "../../src/world-chat/context.js";
 import {
   createRunScratch,
   removeRunScratch,
@@ -42,6 +47,18 @@ function message(role: "user" | "studio", text: string): WorldChatMessage {
 
 /** Stable across calls: two baseInput() contexts must digest identically. */
 const CURRENT_MESSAGE_ID = newId("msg") as MessageId;
+
+/** An attachment as the runner hands it over: identity first, because evidence cites it. */
+function attachment(over: Partial<ContextAttachment> = {}): ContextAttachment {
+  return {
+    id: newId("wca"),
+    contentHash: `sha256:${"b".repeat(64)}`,
+    fileName: "pasted-note.txt",
+    kind: "document",
+    readable: true,
+    ...over,
+  };
+}
 
 function baseInput() {
   return {
@@ -83,23 +100,37 @@ describe("context assembly", () => {
   it("puts what was handed over in front of the model", () => {
     const context = assembleContext({
       ...baseInput(),
-      attachments: [
-        { fileName: "pasted-note.txt", kind: "document", readable: true, text: "The drowned god sings." },
-      ],
+      attachments: [attachment({ text: "The drowned god sings." })],
       currentUserMessage: "The attached document, can you see it?",
     });
     assert.match(context.attachments, /pasted-note\.txt/, "it is named");
     assert.match(context.attachments, /The drowned god sings\./, "and its text is actually there");
   });
 
+  /**
+   * The same failure as the missing message ids, one field over: attachment evidence requires an
+   * attachmentId and a contentHash, and neither appeared anywhere in the prompt. The model could
+   * not even call get_attachment_text to find them out — that tool takes the id it has not got.
+   * Every quotation of a handed-over document was therefore an invention the verifier rejected.
+   */
+  it("prints the identity attachment evidence has to cite", () => {
+    const doc = attachment({ text: "The drowned god sings." });
+    const context = assembleContext({ ...baseInput(), attachments: [doc] });
+    assert.match(context.attachments, new RegExp(`attachmentId: ${doc.id}`));
+    assert.match(context.attachments, new RegExp(`contentHash: ${doc.contentHash}`));
+  });
+
   it("names an attachment it cannot read rather than staying silent about it", () => {
-    const context = assembleContext({
-      ...baseInput(),
-      attachments: [{ fileName: "maren.png", kind: "image", readable: false }],
-    });
+    const image = attachment({ fileName: "maren.png", kind: "image", readable: false });
+    const context = assembleContext({ ...baseInput(), attachments: [image] });
     assert.match(context.attachments, /maren\.png/, "silence would make the model deny it exists");
     assert.match(context.attachments, /cannot be read/);
     assert.doesNotMatch(context.attachments, /do not guess[\s\S]*do not guess/, "said once");
+    assert.match(
+      context.attachments,
+      new RegExp(`attachmentId: ${image.id}`),
+      "an image cannot be quoted, but it can still be referred to by id",
+    );
   });
 
   it("is empty when nothing was handed over, so the prompt gains no empty section", () => {
@@ -115,7 +146,7 @@ describe("context assembly", () => {
     const body = `START-OF-DOCUMENT ${"x ".repeat(BOUNDS.attachments)} END-OF-DOCUMENT`;
     const context = assembleContext({
       ...baseInput(),
-      attachments: [{ fileName: "long.md", kind: "document", readable: true, text: body }],
+      attachments: [attachment({ fileName: "long.md", text: body })],
     });
     assert.ok(context.attachments.length <= BOUNDS.attachments + 200, "bounded");
     assert.match(context.attachments, /START-OF-DOCUMENT/);
@@ -128,7 +159,7 @@ describe("context assembly", () => {
     const without = assembleContext(baseInput()).digest;
     const with_ = assembleContext({
       ...baseInput(),
-      attachments: [{ fileName: "a.txt", kind: "document", readable: true, text: "something" }],
+      attachments: [attachment({ fileName: "a.txt", text: "something" })],
     }).digest;
     assert.notEqual(without, with_, "or a run record would claim they had the same context");
   });
@@ -152,7 +183,7 @@ describe("context assembly", () => {
    * no valid id anywhere in the model's world, and every citation of the conversation was an
    * invention the validator rejected.
    */
-  it("renders every message with the id evidence has to cite", () => {
+  it("renders every user message with the id evidence has to cite", () => {
     const said = message("user", "the tide answers the bells");
     const context = assembleContext({ ...baseInput(), messages: [said] });
     assert.ok(
@@ -160,6 +191,19 @@ describe("context assembly", () => {
       "the id is beside the words, where a citation needs it",
     );
     assert.equal(context.currentUserMessageId, CURRENT_MESSAGE_ID);
+  });
+
+  /**
+   * An id on the Studio's own reply is an invitation to cite it, and a proposition evidenced by
+   * this app's earlier prose is a claim about a claim — an inference from two turns ago coming
+   * back as a fact the user is told they asked for. The verifier refuses those; this keeps the
+   * model from spending a turn writing one.
+   */
+  it("gives the Studio's own replies no id to cite", () => {
+    const reply = message("studio", "the bells ring at slack water");
+    const context = assembleContext({ ...baseInput(), messages: [reply] });
+    assert.ok(context.recentTurns.includes("Studio: the bells ring at slack water"));
+    assert.ok(!context.recentTurns.includes(reply.id), "nothing the Studio said is evidence");
   });
 
   it("carries retractions as keys, not as the text that was retracted", () => {
