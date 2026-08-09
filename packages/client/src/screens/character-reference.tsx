@@ -751,6 +751,12 @@ export function ReplaceMainPhotoScreen() {
   );
 }
 
+/** Accepted looks record the look prompt; pending takes carry it in dispatch params. */
+function lookCaption(image: { look: { prompt: string } } | { take: { params: Record<string, unknown> } }): string | null {
+  const raw = "look" in image ? image.look.prompt : image.take.params["lookPrompt"];
+  return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : null;
+}
+
 export function CharacterLooksScreen() {
   const { worldId, sheetId } = useParams();
   const world = useOpenWorldGuard(worldId);
@@ -758,9 +764,7 @@ export function CharacterLooksScreen() {
   const { state } = useStore();
   const [kind, setKind] = useState<"costume" | "pose-expression" | "condition-age">("costume");
   const [mode, setMode] = useState<"stay-close" | "push-it">("stay-close");
-  const [prompt, setPrompt] = useState(
-    "Formal Ebb Council coat, storm-dark wool, sea-glass clasp and salt at the hem.",
-  );
+  const [prompt, setPrompt] = useState("");
   const navigate = useNavigate();
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier }>({});
   // Four was hard-coded at the call site while the frame already carried a count — the estimate
@@ -839,7 +843,17 @@ export function CharacterLooksScreen() {
             </button>
           </div>
           <label>Describe the look</label>
-          <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
+          <textarea
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder={
+              kind === "costume"
+                ? "A formal occasion, work clothes, festival dress…"
+                : kind === "pose-expression"
+                  ? "Mid-laugh, guard up, lost in thought…"
+                  : "Years later, soaked through, after the fight…"
+            }
+          />
           <DispatchBar
             workflow="character-look"
             count={count}
@@ -874,17 +888,7 @@ export function CharacterLooksScreen() {
                   onClick={() => setSelected(image.key)}
                 >
                   <Portrait worldSlug={world.meta.slug} path={image.path} label={`Look ${index + 1}`} radius={12} />
-                  <span>
-                    {
-                      [
-                        "Council coat",
-                        "Calling the tide",
-                        "Twenty years later",
-                        "Dry dock clothes",
-                        "After the third verse",
-                      ][index]
-                    }
-                  </span>
+                  <span>{lookCaption(image) ?? `Look ${index + 1}`}</span>
                 </button>
               ))}
             </div>
