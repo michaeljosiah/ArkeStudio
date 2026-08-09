@@ -2868,13 +2868,22 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-looks-composer__foot .ui-btn { margin-left: auto; }
 .fy-looks-note { margin-top: auto; padding-top: 18px; font: 400 10px/1.55 var(--font-mono); color: var(--neutral-400); }
 .fy-looks-results { min-width: 0; display: flex; flex-direction: column; }
-.fy-looks-results__grid { display: grid; grid-template-columns: repeat(3,1fr); grid-template-rows: 250px 180px; gap: 12px; flex: 1; }
+/* Auto rows carry the tiles past the design's two sample rows: the gallery may hold every
+   unreviewed take, and an implicit row of height auto collapses a tile whose image is
+   absolutely placed. */
+.fy-looks-results__grid { display: grid; grid-template-columns: repeat(3,1fr); grid-template-rows: 250px 180px; grid-auto-rows: 180px; gap: 12px; flex: 1; }
 .fy-looks-results__grid button { position: relative; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--muted); padding: 0; cursor: pointer; }
 .fy-looks-results__grid button.is-selected { border: 2px solid var(--foreground); grid-row: span 2; }
-.fy-looks-results__grid button > span { position: absolute; left: 10px; bottom: 10px; padding: 4px 8px; border-radius: 999px; background: color-mix(in srgb, var(--background) 92%, transparent); font: 500 9px var(--font-mono); }
+.fy-looks-results__grid button > span { position: absolute; left: 10px; bottom: 10px; max-width: calc(100% - 20px); box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 8px; border-radius: 999px; background: color-mix(in srgb, var(--background) 92%, transparent); font: 500 9px var(--font-mono); }
+.fy-looks-results__older { margin-top: 12px; align-self: flex-start; border: 1px solid var(--border); border-radius: 999px; background: var(--background); box-shadow: var(--shadow-xs); padding: 7px 14px; font: 500 10.5px var(--font-sans); color: var(--foreground); cursor: pointer; }
 .fy-looks-results > footer { height: 58px; display: flex; align-items: center; gap: 10px; }
 .fy-looks-results > footer > span { font: 400 10px var(--font-mono); color: var(--neutral-400); }
-.fy-looks-results > footer .ui-btn:first-of-type { margin-left: auto; }
+/* The notice — span or button — owns the leftover space, so the actions keep the right edge
+   whichever form it takes. (`.ui-btn:first-of-type` stopped matching once the notice became
+   a button: first-of-type counts elements, not classes.) */
+.fy-looks-results__fresh { border: 0; background: transparent; padding: 0; font: 500 10px var(--font-mono); color: var(--foreground); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.fy-looks-results > footer > span,
+.fy-looks-results > footer > .fy-looks-results__fresh { margin-right: auto; }
 .fy-looks-results > footer select { height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); padding: 0 10px; font: 500 10px var(--font-sans); }
 
 @media (max-width: 900px) {
