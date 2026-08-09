@@ -1,4 +1,5 @@
 import type {
+  CandidateGroup,
   CandidateTombstone,
   WorldChangeCandidate,
   WorldChatMessage,
@@ -37,8 +38,16 @@ export const RECENT_TURN_COUNT = 8;
  * `text` is present only for what can honestly be read. An unreadable file is still named — the
  * model must be able to say "I can see you attached a PNG and I cannot read it" rather than
  * denying it exists, which is what silence produces.
+ *
+ * `id` and `contentHash` travel for the same reason message ids do: attachment evidence requires
+ * both, and evidence can only cite what the prompt shows. Rendering the text without them left
+ * every attachment quotation unwriteable — the model had to invent an id, and the verifier then
+ * rejected the whole turn. `get_attachment_text` is no way round it either: that tool takes the
+ * very id this is the only place to learn.
  */
 export interface ContextAttachment {
+  id: string;
+  contentHash: string;
   fileName: string;
   kind: string;
   readable: boolean;
@@ -56,12 +65,23 @@ export interface ContextInput {
   entryContext?: string;
   summary?: string;
   candidates: readonly WorldChangeCandidate[];
+  /** Live groups, so an operation on one can name it. Empty when nothing has been grouped. */
+  groups?: readonly CandidateGroup[];
   messages: readonly WorldChatMessage[];
   tombstones: readonly CandidateTombstone[];
   worldContext?: string;
   /** Linked to this turn. Empty for a turn that handed nothing over. */
   attachments?: readonly ContextAttachment[];
   currentUserMessage: string;
+  /**
+   * The durable id of the message being answered, shown to the model beside the text.
+   *
+   * Message evidence requires a messageId, and the model can only cite an id it has been shown —
+   * the first live turn of World Chat failed on exactly this: the schema demanded an id the
+   * prompt never rendered, so no answer could ever validate. On a retry this is the original
+   * message's id, because that is the record the evidence must verify against.
+   */
+  currentUserMessageId: string;
 }
 
 export interface AssembledContext {
@@ -76,6 +96,7 @@ export interface AssembledContext {
   /** Structural keys and digests only — enough to not re-propose, not enough to reconstruct. */
   tombstones: string;
   currentUserMessage: string;
+  currentUserMessageId: string;
   /** What identifies this exact context, recorded on the run (§5.3). */
   digest: string;
   /** Sections that had to be trimmed, so the trimming is never silent. */
@@ -95,15 +116,53 @@ function trimToBound(text: string, bound: number): { text: string; trimmed: bool
   return { text: boundary === -1 ? cut : cut.slice(boundary + 1), trimmed: true };
 }
 
-function renderRegistry(candidates: readonly WorldChangeCandidate[]): string {
-  return candidates
+/**
+ * The live propositions and groups, each with everything an operation on it has to restate.
+ *
+ * Groups are here for the same reason candidates are: `update` and `withdraw` carry a `grp_...`
+ * id and its expected revision, and an id that is nowhere in the prompt can only be guessed at.
+ *
+ * They carry their rationale and their exact membership for a second reason. A group update
+ * replaces the whole group — title, rationale and members together — so anything omitted here is
+ * something the model has to invent to say anything at all. Inventing a membership is the worst
+ * of the three: a plausible guess validates, and quietly re-forms which propositions must land
+ * together, which is the one promise a group exists to make.
+ */
+function renderRegistry(
+  candidates: readonly WorldChangeCandidate[],
+  groups: readonly CandidateGroup[],
+): string {
+  const lines = candidates
     .filter((c) => c.status === "live")
-    .map((c) => `- [${c.id} r${c.revision}] (${c.classification}, ${c.settledness}) ${c.title}`)
-    .join("\n");
+    .map((c) => `- [${c.id} r${c.revision}] (${c.classification}, ${c.settledness}) ${c.title}`);
+  const groupLines = groups
+    .filter((g) => g.status === "live")
+    .flatMap((g) => [
+      `- [${g.id} r${g.revision}] ${g.title}`,
+      `  rationale: ${g.rationale}`,
+      `  members: ${g.members.map((m) => `${m.candidateId} r${m.revision}`).join(", ")}`,
+    ]);
+  if (groupLines.length === 0) return lines.join("\n");
+  return [...lines, "", "Groups (an update restates all three fields):", ...groupLines].join("\n");
 }
 
+/**
+ * Every user line opens with its durable id, because evidence has to cite one. Studio lines do
+ * not, because nothing the Studio said is evidence of anything.
+ *
+ * The id is product identity, not model output: the model copies it into a `messageId` field,
+ * and evidence verification then checks the quote against that exact message. Without the ids
+ * here there is nothing valid to copy, and every citation of the conversation is an invention.
+ *
+ * Withholding them from Studio lines is the other half. An id on its own reply is an invitation
+ * to cite it, and a proposition evidenced by the Studio's earlier prose is a claim about a claim:
+ * an inference from two turns ago would come back as a fact the user is told they asked for.
+ * The verifier refuses those anyway — this stops the model spending a turn on one.
+ */
 function renderTurns(messages: readonly WorldChatMessage[]): string {
-  return messages.map((m) => `${m.role === "user" ? "User" : "Studio"}: ${m.text}`).join("\n\n");
+  return messages
+    .map((m) => (m.role === "user" ? `User [${m.id}]: ${m.text}` : `Studio: ${m.text}`))
+    .join("\n\n");
 }
 
 /**
@@ -122,15 +181,41 @@ function renderTurns(messages: readonly WorldChatMessage[]): string {
  * An unreadable attachment is still named, with what it is and that it cannot be read. Silence
  * about it produces a denial, which is worse than a refusal: the file plainly went somewhere.
  */
-function renderAttachments(attachments: readonly ContextAttachment[]): string {
-  return attachments
-    .map((a) => {
-      if (!a.readable || a.text === undefined) {
-        return `### ${a.fileName} (${a.kind})\nAttached, and cannot be read as text here. Say so plainly if it is relevant; do not guess at what it contains.`;
-      }
-      return `### ${a.fileName} (${a.kind})\n${a.text}`;
-    })
-    .join("\n\n");
+const CUT_NOTE = "[Cut off here. Read further with get_attachment_text rather than guessing at the rest.]";
+
+/**
+ * The budget is shared out per document rather than spent in order.
+ *
+ * Cutting the concatenation at a total bound spends it first-come: five documents with long
+ * openings and the fifth one's heading falls off the end — name, id and hash with it. That is
+ * the worst thing to lose, because the id is what `get_attachment_text` needs, so the one
+ * document the model was told least about is also the only one it cannot go and read. Every
+ * attachment now keeps its identity and a share of the text.
+ */
+function renderAttachments(
+  attachments: readonly ContextAttachment[],
+  budget: number,
+): { text: string; trimmed: boolean } {
+  if (attachments.length === 0) return { text: "", trimmed: false };
+  const share = Math.floor(budget / attachments.length);
+  let trimmed = false;
+  const blocks = attachments.map((a) => {
+    // The identity line is what makes a quotation of this document citable at all; it is
+    // printed for unreadable files too, so an image can still be referred to by id.
+    const head = `### ${a.fileName} (${a.kind})\nattachmentId: ${a.id}\ncontentHash: ${a.contentHash}`;
+    if (!a.readable || a.text === undefined) {
+      return `${head}\nAttached, and cannot be read as text here. Say so plainly if it is relevant; do not guess at what it contains.`;
+    }
+    // Less the newline after the heading, the blank line before the note, and the blank line
+    // that joins this block to the next — a share that ignored them would overrun the bound.
+    const room = Math.max(0, share - head.length - CUT_NOTE.length - 5);
+    if (a.text.length <= room) return `${head}\n${a.text}`;
+    trimmed = true;
+    // The beginning, as before: a document was handed over whole and starts at its start, so
+    // keeping the tail would give the model the last page of something it never saw page one of.
+    return `${head}\n${a.text.slice(0, room)}\n\n${CUT_NOTE}`;
+  });
+  return { text: blocks.join("\n\n"), trimmed };
 }
 
 /**
@@ -154,7 +239,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
   };
 
   const summary = take("summary", input.summary ?? "", BOUNDS.summary);
-  const registry = take("registry", renderRegistry(input.candidates), BOUNDS.registry);
+  const registry = take("registry", renderRegistry(input.candidates, input.groups ?? []), BOUNDS.registry);
   const recentTurns = take(
     "recentTurns",
     renderTurns(input.messages.slice(-RECENT_TURN_COUNT * 2)),
@@ -163,19 +248,16 @@ export function assembleContext(input: ContextInput): AssembledContext {
   const worldContext = take("worldContext", input.worldContext ?? "", BOUNDS.worldContext);
   const tombstones = renderTombstones(input.tombstones);
   /**
-   * Trimmed from the *end*, unlike every other section.
+   * Cut per document and from the *end* of each, unlike every other section.
    *
    * The others keep their most recent lines because a conversation's recent material is what is
    * still being talked about. A document is the other way round: it was handed over whole and
    * starts at its beginning, so keeping the tail would hand the model the last page of something
    * it was never given the first page of.
    */
-  const attachmentsText = renderAttachments(input.attachments ?? []);
-  const attachments =
-    attachmentsText.length <= BOUNDS.attachments
-      ? attachmentsText
-      : (trimmed.push("attachments"),
-        `${attachmentsText.slice(0, BOUNDS.attachments)}\n\n[Cut off here. Read further with get_attachment_text rather than guessing at the rest.]`);
+  const rendered = renderAttachments(input.attachments ?? [], BOUNDS.attachments);
+  if (rendered.trimmed) trimmed.push("attachments");
+  const attachments = rendered.text;
 
   return {
     // Never trimmed: it is one short line, and it is the frame for everything else.
@@ -188,6 +270,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
     tombstones,
     // Never trimmed. See the note at the top of this file.
     currentUserMessage: input.currentUserMessage,
+    currentUserMessageId: input.currentUserMessageId,
     digest: contentHash({
       entryContext: input.entryContext ?? "",
       summary,
@@ -199,6 +282,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
       attachments,
       tombstones,
       current: input.currentUserMessage,
+      currentId: input.currentUserMessageId,
     }),
     trimmed,
   };

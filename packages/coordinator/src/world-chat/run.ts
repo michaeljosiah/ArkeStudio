@@ -14,6 +14,7 @@ import {
   type WorldChatLoaded,
   type WorldChatRun,
 } from "@arke-studio/contracts";
+import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
 import { assembleContext, type ContextAttachment } from "./context.js";
 import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
 import { deriveChecks, planFor } from "./check-plan.js";
@@ -67,13 +68,25 @@ export interface RunDeps {
   /** The world half of evidence verification; the conversation half comes from the fold. */
   evidenceSources: (messages: readonly WorldChatMessage[]) => EvidenceSources;
   /**
-   * The text of a readable attachment, or null.
+   * The opening of a readable attachment, as the prompt inlines it, or null.
    *
    * Needed so an attachment quotation can be verified against the bytes it claims to come from.
    * Without it every such quotation fails, which is worse than not offering attachments at all:
    * the Studio would read a document through the tool and then be unable to cite it.
    */
   readAttachmentText?: (attachment: WorldChatAttachment) => Promise<string | null>;
+  /**
+   * The passages this run pulled through `get_attachment_text`, per attachment, each with the
+   * offset it came from.
+   *
+   * The other half of what a quotation may be checked against. The prompt inlines only a
+   * document's opening, while the tool will serve a passage from any offset — the run budget
+   * caps how much text is read, not where it is read from — so a model may quite properly quote
+   * something a megabyte in. Re-reading a prefix at verification time cannot reach it, and a
+   * turn rejected for quoting what it correctly read is the failure this whole path keeps
+   * producing. Absent, only the inlined opening is quotable.
+   */
+  attachmentReadsFor?: (runId: RunId) => ReadonlyMap<string, readonly AttachmentRange[]>;
   /**
    * The focused slice of accepted world state a run may see (§8.5).
    *
@@ -282,6 +295,12 @@ export class WorldChatRunner {
     const { events } = await store.read();
     const meta = await store.readMeta();
     const view = foldConversation(conversationId, meta?.createdAt ?? at, events).view;
+    // On a retry the words being asked again are already in the log under their original id, and
+    // that id is the one evidence must cite — the fresh `message` above is never appended then.
+    const original = existingTurnId
+      ? view.messages.find((m) => m.turnId === existingTurnId && m.role === "user")
+      : undefined;
+    const currentMessage = original ?? message;
     // What was handed over goes into the prompt (§13.2). Without this the model is never told an
     // attachment exists, and answers "I can't see an attached document" — truthfully, from where
     // it is standing, which is the worst kind of wrong answer to debug.
@@ -292,11 +311,16 @@ export class WorldChatRunner {
         : {}),
       ...(view.summary !== undefined ? { summary: view.summary } : {}),
       candidates: view.candidates,
-      messages: view.messages,
+      groups: view.groups,
+      // Without the filter a retry shows the message twice — once in the recent turns (it is in
+      // the log by then) and once as what they just said — and a model that notices the
+      // duplication spends its attention on it.
+      messages: view.messages.filter((m) => m.id !== currentMessage.id),
       tombstones: tombstonesFrom(events),
       ...(this.deps.worldContext ? { worldContext: this.deps.worldContext(view) } : {}),
       attachments: contextAttachments(view, attachmentIds, handed.text),
       currentUserMessage: text,
+      currentUserMessageId: currentMessage.id,
     });
 
     const run: WorldChatRun = {
@@ -352,7 +376,7 @@ export class WorldChatRunner {
         await store.append(
           {
             type: "run.retry-started",
-            run: { ...run, safeDetail: outcome.problems.map((p) => p.code).join(",").slice(0, 500) },
+            run: { ...run, safeDetail: [...new Set(outcome.problems.map((p) => p.code))].join(",").slice(0, 500) },
           },
           { at: this.deps.now() },
         );
@@ -413,6 +437,34 @@ export class WorldChatRunner {
   }
 
   /**
+   * Everything this run may have quoted from: the opening it was shown, and the passages it
+   * asked for, folded back into whatever was actually contiguous.
+   *
+   * The opening is a range at offset 0, which is what lets a quotation run from the inlined text
+   * into the first paged read — the model saw those as one continuous stretch, because they are
+   * one. Passages with a gap between them stay apart, so a quote cannot be assembled across text
+   * that was never read.
+   */
+  private quotableAttachmentText(
+    readable: readonly WorldChatAttachment[],
+    inlined: ReadonlyMap<string, string>,
+    runId: RunId,
+  ): Map<string, readonly string[]> {
+    const served = this.deps.attachmentReadsFor?.(runId) ?? new Map<string, readonly AttachmentRange[]>();
+    const quotable = new Map<string, readonly string[]>();
+    for (const attachment of readable) {
+      const opening = inlined.get(attachment.id);
+      const ranges: AttachmentRange[] = [
+        ...(opening !== undefined ? [{ offset: 0, text: opening }] : []),
+        ...(served.get(attachment.id) ?? []),
+      ];
+      const passages = mergeAttachmentRanges(ranges);
+      if (passages.length > 0) quotable.set(attachment.id, passages);
+    }
+    return quotable;
+  }
+
+  /**
    * Validate one answer and, if it holds, append the whole turn.
    *
    * The check plan runs here rather than inside validation because it is the coordinator's own
@@ -438,7 +490,8 @@ export class WorldChatRunner {
     const messages = folded.messages;
     const checksByDraft = new Map<ModelCandidateDraft, CandidateChecks>();
 
-    const { readable, text: attachmentText } = await this.readAttachments(folded, allowed);
+    const { readable, text: inlined } = await this.readAttachments(folded, allowed);
+    const attachmentText = this.quotableAttachmentText(readable, inlined, runId);
 
     const outcome = validateTurnResult({
       raw,
@@ -555,6 +608,9 @@ function contextAttachments(
     .map((a) => {
       const body = text.get(a.id);
       return {
+        // Attachment evidence cites both, so both have to be in front of the model (§13.2).
+        id: a.id,
+        contentHash: a.contentHash,
         fileName: a.fileName,
         kind: a.kind,
         readable: a.readability !== "not-readable",
@@ -604,6 +660,7 @@ ${assembled.entryContext}`);
   if (assembled.attachments) {
     sections.push(`## What they handed you\n${assembled.attachments}`);
   }
-  sections.push(`## They just said\n${assembled.currentUserMessage}`);
+  // The id on its own line, so the text below it is unambiguously what offsets index into.
+  sections.push(`## They just said\n[${assembled.currentUserMessageId}]\n${assembled.currentUserMessage}`);
   return sections.join("\n\n");
 }

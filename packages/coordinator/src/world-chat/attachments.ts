@@ -33,6 +33,41 @@ export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 /** One `get_attachment_text` call. Bounded results, like every other tool (§19). */
 export const MAX_TEXT_READ_CHARS = 8_000;
 
+/**
+ * A passage of a document, and where in it that passage begins.
+ *
+ * The offset is what makes two reads comparable. A run pages through a long document one window
+ * at a time, and a quotation may sit across the join between two of them — which is a real
+ * quotation of text really read, but only if the windows were adjacent. Without the offsets,
+ * consecutive windows and unrelated ones look identical.
+ */
+export interface AttachmentRange {
+  offset: number;
+  text: string;
+}
+
+/**
+ * Fold ranges into the longest passages that were actually contiguous.
+ *
+ * Overlapping and abutting windows join; a gap between them does not close. That gap is the
+ * point: a quote spanning two passages the model never read consecutively is not evidence, and
+ * concatenating everything would manufacture text that appears nowhere in the document.
+ */
+export function mergeAttachmentRanges(ranges: readonly AttachmentRange[]): string[] {
+  const sorted = [...ranges].filter((r) => r.text.length > 0).sort((a, b) => a.offset - b.offset);
+  const merged: AttachmentRange[] = [];
+  for (const range of sorted) {
+    const last = merged[merged.length - 1];
+    if (!last || range.offset > last.offset + last.text.length) {
+      merged.push({ ...range });
+      continue;
+    }
+    const overlap = last.offset + last.text.length - range.offset;
+    if (overlap < range.text.length) last.text += range.text.slice(overlap);
+  }
+  return merged.map((r) => r.text);
+}
+
 /** Everything one run may read out of attachments, across all calls (§19). */
 export const MAX_TEXT_PER_RUN_CHARS = 32_000;
 

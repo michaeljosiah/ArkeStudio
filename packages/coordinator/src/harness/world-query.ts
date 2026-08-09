@@ -33,6 +33,31 @@ interface JsonRpcRequest {
   params?: Record<string, unknown>;
 }
 
+/**
+ * What a leased read leaves behind that a proposition may cite (#70 §5.8, §8.3.1).
+ *
+ * Sent as a second content block beside the result, rather than merged into it: the result is
+ * the entity as the model asked for it, and every caller — including the ambient surface and
+ * its tests — reads it from the first block.
+ *
+ * It exists because world evidence requires an `observedVersion` and a `contentHash`, and
+ * `checkReceiptIds` requires a `check_...` id, none of which appear in the entity itself. The
+ * receipt has always carried all three, and used to go only to the coordinator: the model was
+ * asked to cite values it was never shown, so every world citation was either omitted or
+ * invented, and an invented one fails verification and takes the whole turn with it.
+ */
+function citation(receipt: WorldChatCheckReceipt): Record<string, unknown> {
+  return {
+    checkReceiptId: receipt.id,
+    // Exactly the fields world evidence is made of, for anything this call actually read.
+    citable: receipt.consulted.map((c) => ({
+      ref: c.ref,
+      observedVersion: c.observedVersion,
+      contentHash: c.contentHash,
+    })),
+  };
+}
+
 const TOOLS = [
   {
     name: "search_canon",
@@ -228,7 +253,12 @@ export class WorldQueryServer {
                 .call(token, name, args)
                 .then(({ result, receipt }) => {
                   leased.onReceipt(receipt);
-                  reply({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                  reply({
+                    content: [
+                      { type: "text", text: JSON.stringify(result, null, 2) },
+                      { type: "text", text: JSON.stringify(citation(receipt), null, 2) },
+                    ],
+                  });
                 })
                 .catch((err: unknown) => {
                   // A denied lease is not a tool failure to be recorded against the run; it means

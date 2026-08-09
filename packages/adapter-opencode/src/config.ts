@@ -31,6 +31,10 @@ const READ_ONLY_TOOLS: Record<string, boolean> = {
   edit: false,
   write: false,
   patch: false,
+  // No delegating either. A read-only agent answers in its own turn; handing the question to a
+  // subagent was observed to spend thirty seconds of a live turn's budget producing nothing the
+  // validator could accept, and a child session escapes the per-prompt agent pinning below.
+  task: false,
 };
 
 const READ_ONLY_PERMISSION: Record<string, string> = {
@@ -45,6 +49,7 @@ const READ_ONLY_PERMISSION: Record<string, string> = {
   edit: "deny",
   write: "deny",
   patch: "deny",
+  task: "deny",
   bash: "deny",
   webfetch: "deny",
   websearch: "deny",

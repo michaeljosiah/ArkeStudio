@@ -13,13 +13,19 @@ import {
   type TurnId,
   type WorldChatMessage,
 } from "@arke-studio/contracts";
-import { assembleContext, BOUNDS, shouldSummarise } from "../../src/world-chat/context.js";
+import {
+  assembleContext,
+  BOUNDS,
+  shouldSummarise,
+  type ContextAttachment,
+} from "../../src/world-chat/context.js";
 import {
   createRunScratch,
   removeRunScratch,
   runScratchDir,
   sweepRunScratch,
 } from "../../src/world-chat/run-scratch.js";
+import { mergeAttachmentRanges } from "../../src/world-chat/attachments.js";
 
 /**
  * Bounded context and the per-run scratch (#70 §8.2, §8.5).
@@ -40,12 +46,28 @@ function message(role: "user" | "studio", text: string): WorldChatMessage {
   };
 }
 
+/** Stable across calls: two baseInput() contexts must digest identically. */
+const CURRENT_MESSAGE_ID = newId("msg") as MessageId;
+
+/** An attachment as the runner hands it over: identity first, because evidence cites it. */
+function attachment(over: Partial<ContextAttachment> = {}): ContextAttachment {
+  return {
+    id: newId("wca"),
+    contentHash: `sha256:${"b".repeat(64)}`,
+    fileName: "pasted-note.txt",
+    kind: "document",
+    readable: true,
+    ...over,
+  };
+}
+
 function baseInput() {
   return {
     candidates: [],
     messages: [] as WorldChatMessage[],
     tombstones: [] as CandidateTombstone[],
     currentUserMessage: "and the bells?",
+    currentUserMessageId: CURRENT_MESSAGE_ID,
   };
 }
 
@@ -79,23 +101,37 @@ describe("context assembly", () => {
   it("puts what was handed over in front of the model", () => {
     const context = assembleContext({
       ...baseInput(),
-      attachments: [
-        { fileName: "pasted-note.txt", kind: "document", readable: true, text: "The drowned god sings." },
-      ],
+      attachments: [attachment({ text: "The drowned god sings." })],
       currentUserMessage: "The attached document, can you see it?",
     });
     assert.match(context.attachments, /pasted-note\.txt/, "it is named");
     assert.match(context.attachments, /The drowned god sings\./, "and its text is actually there");
   });
 
+  /**
+   * The same failure as the missing message ids, one field over: attachment evidence requires an
+   * attachmentId and a contentHash, and neither appeared anywhere in the prompt. The model could
+   * not even call get_attachment_text to find them out — that tool takes the id it has not got.
+   * Every quotation of a handed-over document was therefore an invention the verifier rejected.
+   */
+  it("prints the identity attachment evidence has to cite", () => {
+    const doc = attachment({ text: "The drowned god sings." });
+    const context = assembleContext({ ...baseInput(), attachments: [doc] });
+    assert.match(context.attachments, new RegExp(`attachmentId: ${doc.id}`));
+    assert.match(context.attachments, new RegExp(`contentHash: ${doc.contentHash}`));
+  });
+
   it("names an attachment it cannot read rather than staying silent about it", () => {
-    const context = assembleContext({
-      ...baseInput(),
-      attachments: [{ fileName: "maren.png", kind: "image", readable: false }],
-    });
+    const image = attachment({ fileName: "maren.png", kind: "image", readable: false });
+    const context = assembleContext({ ...baseInput(), attachments: [image] });
     assert.match(context.attachments, /maren\.png/, "silence would make the model deny it exists");
     assert.match(context.attachments, /cannot be read/);
     assert.doesNotMatch(context.attachments, /do not guess[\s\S]*do not guess/, "said once");
+    assert.match(
+      context.attachments,
+      new RegExp(`attachmentId: ${image.id}`),
+      "an image cannot be quoted, but it can still be referred to by id",
+    );
   });
 
   it("is empty when nothing was handed over, so the prompt gains no empty section", () => {
@@ -111,7 +147,7 @@ describe("context assembly", () => {
     const body = `START-OF-DOCUMENT ${"x ".repeat(BOUNDS.attachments)} END-OF-DOCUMENT`;
     const context = assembleContext({
       ...baseInput(),
-      attachments: [{ fileName: "long.md", kind: "document", readable: true, text: body }],
+      attachments: [attachment({ fileName: "long.md", text: body })],
     });
     assert.ok(context.attachments.length <= BOUNDS.attachments + 200, "bounded");
     assert.match(context.attachments, /START-OF-DOCUMENT/);
@@ -120,11 +156,31 @@ describe("context assembly", () => {
     assert.match(context.attachments, /get_attachment_text/, "pointing at how to read the rest");
   });
 
+  /**
+   * Spending the budget in document order loses the last document's heading first — its name,
+   * id and hash — so the one the model is told least about is also the only one it cannot go
+   * and read, because `get_attachment_text` needs the id that just fell off the end.
+   */
+  it("keeps every attachment's identity when several long documents are handed over", () => {
+    const many = Array.from({ length: 5 }, (_, i) =>
+      attachment({ fileName: `doc-${i}.txt`, text: "x".repeat(BOUNDS.attachments) }),
+    );
+    const context = assembleContext({ ...baseInput(), attachments: many });
+
+    assert.ok(context.attachments.length <= BOUNDS.attachments, "still inside the bound");
+    for (const doc of many) {
+      assert.ok(context.attachments.includes(doc.fileName), `${doc.fileName} is named`);
+      assert.ok(context.attachments.includes(doc.id), `${doc.fileName} keeps the id the tool needs`);
+      assert.ok(context.attachments.includes(doc.contentHash), `${doc.fileName} keeps its hash`);
+    }
+    assert.ok(context.trimmed.includes("attachments"), "and it says it cut, rather than cutting quietly");
+  });
+
   it("distinguishes two turns that differ only by what was attached", () => {
     const without = assembleContext(baseInput()).digest;
     const with_ = assembleContext({
       ...baseInput(),
-      attachments: [{ fileName: "a.txt", kind: "document", readable: true, text: "something" }],
+      attachments: [attachment({ fileName: "a.txt", text: "something" })],
     }).digest;
     assert.notEqual(without, with_, "or a run record would claim they had the same context");
   });
@@ -140,6 +196,71 @@ describe("context assembly", () => {
       messages: [message("user", "the oldest thing said"), message("user", "the newest thing said")],
     });
     assert.match(context.recentTurns, /the newest thing said/);
+  });
+
+  /**
+   * Message evidence requires a messageId, and the model can only cite what it is shown. The
+   * first live turn failed on exactly this: the prompt rendered bare "User:" lines, so there was
+   * no valid id anywhere in the model's world, and every citation of the conversation was an
+   * invention the validator rejected.
+   */
+  it("renders every user message with the id evidence has to cite", () => {
+    const said = message("user", "the tide answers the bells");
+    const context = assembleContext({ ...baseInput(), messages: [said] });
+    assert.ok(
+      context.recentTurns.includes(`User [${said.id}]: the tide answers the bells`),
+      "the id is beside the words, where a citation needs it",
+    );
+    assert.equal(context.currentUserMessageId, CURRENT_MESSAGE_ID);
+  });
+
+  /**
+   * An id on the Studio's own reply is an invitation to cite it, and a proposition evidenced by
+   * this app's earlier prose is a claim about a claim — an inference from two turns ago coming
+   * back as a fact the user is told they asked for. The verifier refuses those; this keeps the
+   * model from spending a turn writing one.
+   */
+  it("gives the Studio's own replies no id to cite", () => {
+    const reply = message("studio", "the bells ring at slack water");
+    const context = assembleContext({ ...baseInput(), messages: [reply] });
+    assert.ok(context.recentTurns.includes("Studio: the bells ring at slack water"));
+    assert.ok(!context.recentTurns.includes(reply.id), "nothing the Studio said is evidence");
+  });
+
+  /**
+   * A group operation names a grp_... id and its expected revision, and an update restates the
+   * whole group. Rendering only candidates meant the model could create a group and never touch
+   * one again; rendering it without its rationale and membership was barely better, because an
+   * update would then have to invent both — and an invented membership validates, silently
+   * re-forming which propositions must land together.
+   */
+  it("shows live groups with everything an operation on one has to restate", () => {
+    const group = {
+      id: newId("grp"),
+      conversationId: newId("cv"),
+      revision: 3,
+      title: "Maren's upbringing lands together",
+      rationale: "One change, two propositions.",
+      members: [
+        { candidateId: newId("cand"), revision: 1 },
+        { candidateId: newId("cand"), revision: 1 },
+      ],
+      atomic: true as const,
+      status: "live" as const,
+    };
+    const context = assembleContext({ ...baseInput(), groups: [group] });
+    assert.match(context.registry, new RegExp(`\\[${group.id} r3\\]`), "the id and revision to name");
+    assert.match(context.registry, /rationale: One change, two propositions\./, "the rationale to restate");
+    for (const member of group.members) {
+      assert.ok(
+        context.registry.includes(`${member.candidateId} r${member.revision}`),
+        "and each member, so the grouping is not re-formed by guesswork",
+      );
+    }
+  });
+
+  it("says nothing about groups when there are none, rather than an empty heading", () => {
+    assert.ok(!assembleContext(baseInput()).registry.includes("Groups:"));
   });
 
   it("carries retractions as keys, not as the text that was retracted", () => {
@@ -173,6 +294,65 @@ describe("context assembly", () => {
     assert.equal(shouldSummarise({ turnCount: 8, recentTurnsLength: 10 }), true);
     assert.equal(shouldSummarise({ turnCount: 2, recentTurnsLength: BOUNDS.recentTurns }), true);
     assert.equal(shouldSummarise({ turnCount: 2, recentTurnsLength: 10 }), false);
+  });
+});
+
+/**
+ * Which passages of a document count as one (#70 §5.8, §13.2).
+ *
+ * The rule has to hold in both directions: windows the model read consecutively are one passage,
+ * because a quotation may sit across their join; windows with a gap between them are not, because
+ * joining them would manufacture text that appears nowhere in the file and call it evidence.
+ */
+describe("folding the passages a run read", () => {
+  it("joins windows that abut", () => {
+    assert.deepEqual(
+      mergeAttachmentRanges([
+        { offset: 0, text: "the bells " },
+        { offset: 10, text: "were whale bone" },
+      ]),
+      ["the bells were whale bone"],
+    );
+  });
+
+  it("joins windows that overlap, without repeating the overlap", () => {
+    assert.deepEqual(
+      mergeAttachmentRanges([
+        { offset: 0, text: "the bells were" },
+        { offset: 10, text: "were whale bone" },
+      ]),
+      ["the bells were whale bone"],
+    );
+  });
+
+  it("keeps windows with a gap apart, so nothing is quotable across what was never read", () => {
+    assert.deepEqual(
+      mergeAttachmentRanges([
+        { offset: 0, text: "the bells" },
+        { offset: 500, text: "whale bone" },
+      ]),
+      ["the bells", "whale bone"],
+    );
+  });
+
+  it("folds a window wholly inside another into nothing new", () => {
+    assert.deepEqual(
+      mergeAttachmentRanges([
+        { offset: 0, text: "the bells were whale bone" },
+        { offset: 4, text: "bells" },
+      ]),
+      ["the bells were whale bone"],
+    );
+  });
+
+  it("does not depend on the order they were read in", () => {
+    assert.deepEqual(
+      mergeAttachmentRanges([
+        { offset: 10, text: "were whale bone" },
+        { offset: 0, text: "the bells " },
+      ]),
+      ["the bells were whale bone"],
+    );
   });
 });
 

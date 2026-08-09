@@ -222,6 +222,30 @@ describe("leased attachment reads", () => {
     assert.ok(total <= 32_000, `read ${total} characters, over the per-run bound`);
     h.index?.close();
   });
+
+  /**
+   * The budget caps how much a run reads, not where from — `offset` is free. So the passages a
+   * run was served are the only honest account of what it may quote, and re-reading a prefix at
+   * verification time can never reproduce one taken from deep in a long document.
+   */
+  it("remembers the passages a run was served, so a quotation can be checked against them", async () => {
+    const h = await harness();
+    const big = await h.attachments.ingestText(h.conversationId, `${"x".repeat(50_000)}THE-DEEP-PART`);
+    h.known.set(big.id, big);
+    const { result } = await h.retrieval.call(h.mint([big.id]).token, "get_attachment_text", {
+      id: big.id,
+      offset: 50_000,
+    });
+    const served = (result as { text: string }).text;
+    assert.ok(served.includes("THE-DEEP-PART"));
+
+    assert.deepEqual(h.retrieval.textReadBy(h.runId).get(big.id), [{ offset: 50_000, text: served }]);
+
+    // And it does not outlive the run, or one run could quote what another read.
+    h.retrieval.forgetRun(h.runId);
+    assert.equal(h.retrieval.textReadBy(h.runId).size, 0);
+    h.index?.close();
+  });
 });
 
 async function rpc(url: string, method: string, params?: Record<string, unknown>) {
@@ -275,6 +299,37 @@ describe("the served surface", () => {
     assert.equal(res.status, 200);
     assert.equal(receipts.length, 1);
     assert.equal(receipts[0]!.tool, "search-canon");
+    await server.stop();
+    h.index?.close();
+  });
+
+  /**
+   * World evidence needs an observedVersion and a contentHash, and checkReceiptIds needs a
+   * check_... id. None of the three is part of the entity, so serialising only the result asked
+   * the model to cite values it had never been shown — and an invented one fails verification and
+   * takes the whole turn with it. The receipt always held them; now they travel back beside it.
+   */
+  it("hands the model the citation metadata its evidence has to carry", async () => {
+    const { h, server } = await serve(true);
+    const token = h.mint().token;
+    const res = await rpc(server.leasedUrl(token)!, "tools/call", {
+      name: "get_sheet",
+      arguments: { id: "maren-kest" },
+    });
+    const content = (res.body as { result: { content: Array<{ text: string }> } }).result.content;
+
+    const entity = JSON.parse(content[0]!.text) as { id: string };
+    assert.equal(entity.id, "maren-kest", "the result stays first and unchanged");
+
+    const cite = JSON.parse(content[1]!.text) as {
+      checkReceiptId: string;
+      citable: Array<{ ref: unknown; observedVersion: number; contentHash: string }>;
+    };
+    assert.match(cite.checkReceiptId, /^check_/, "so checkReceiptIds can name a real receipt");
+    assert.equal(cite.citable.length, 1);
+    assert.match(cite.citable[0]!.contentHash, /^sha256:/);
+    assert.equal(typeof cite.citable[0]!.observedVersion, "number");
+
     await server.stop();
     h.index?.close();
   });

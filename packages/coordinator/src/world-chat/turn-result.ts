@@ -1,7 +1,9 @@
+import { z } from "zod";
 import {
   newId,
   WorldChatTurnResultSchema,
   type CandidateChecks,
+  type CandidateEvidence,
   type CandidateGroup,
   type CandidateGroupId,
   type CandidateId,
@@ -14,7 +16,12 @@ import {
   type WorldChatCheckReceipt,
   type WorldChatTurnResult,
 } from "@arke-studio/contracts";
-import { verifyAllEvidence, safeEvidenceMessage, type EvidenceSources } from "./evidence.js";
+import {
+  normaliseEvidence,
+  safeEvidenceMessage,
+  verifyAllEvidence,
+  type EvidenceSources,
+} from "./evidence.js";
 import { findByStructure, payloadDigest, structuralKey, suppressedByTombstone } from "./identity.js";
 
 /**
@@ -71,6 +78,87 @@ function problem(code: string, safeMessage: string): TurnProblem {
   return { code, safeMessage };
 }
 
+const NO_EVIDENCE: readonly CandidateEvidence[] = [];
+
+/**
+ * What a corrective turn may cost (§8.4).
+ *
+ * The turn budget is the reason for each of these. A correction is meant to be smaller than the
+ * thing it corrects; one that grows with the size of a malformed answer would let a bad result
+ * spend the retry's context on its own faults, which is the failure the bounds exist to prevent.
+ */
+const MAX_KEYS_NAMED = 8;
+const MAX_PROBLEMS = 8;
+const MAX_PROBLEM_CHARS = 300;
+const MAX_CORRECTIVE_CHARS = 4_000;
+
+/** Whether these reasons include the one that cannot be substituted (§8.4, and wrap-up's gate). */
+function hasIntentEvidence(evidence: readonly CandidateEvidence[]): boolean {
+  return evidence.some((e) => e.kind === "message" && e.purpose === "intent");
+}
+
+/** The verified intent a revision inherits from the proposition it revises. */
+function intentEvidenceOf(existing: WorldChangeCandidate | undefined): readonly CandidateEvidence[] {
+  if (!existing) return NO_EVIDENCE;
+  return existing.evidence.filter((e) => e.kind === "message" && e.purpose === "intent");
+}
+
+/**
+ * One schema issue as a line the model can act on.
+ *
+ * The rule this follows: expected values are the schema's own and safe to state; received values
+ * are the model's and are not, because what it sent may carry world content. So a wrong field is
+ * named by its path and what belongs there — never by echoing what arrived. The exceptions are
+ * type names ("string", "undefined"), which describe shape rather than content, and messages
+ * zod carries for `invalid_string` and `custom` issues, which are authored in the schema itself.
+ *
+ * This replaced a bare list of failing paths, which was watched failing live: told to "check
+ * candidateOperations.0.candidate.draft.type", the model guessed a value, and the guess was
+ * wrong too. A path without what belongs at it spends the one corrective turn on a coin toss.
+ */
+function schemaIssueLine(issue: z.ZodIssue): string {
+  const path = issue.path.join(".") || "(root)";
+  switch (issue.code) {
+    case z.ZodIssueCode.invalid_type:
+      // For an enum field zod's `expected` is the joined options, so a missing `type` reads
+      // "required: expected 'rule' | 'lore' | …" — the answer travels with the complaint.
+      return issue.received === "undefined"
+        ? `${path} is required: expected ${issue.expected}`
+        : `${path} must be ${issue.expected}, not ${issue.received}`;
+    case z.ZodIssueCode.invalid_literal:
+      return `${path} must be exactly ${JSON.stringify(issue.expected)}`;
+    case z.ZodIssueCode.unrecognized_keys: {
+      // Zod puts every unknown key in one issue, so an object with a thousand of them would
+      // otherwise become a corrective prompt the size of the answer it is rejecting — spending
+      // the one retry's context on a list nobody needs to read past the first few of.
+      const shown = issue.keys.slice(0, MAX_KEYS_NAMED).map((k) => k.slice(0, 60));
+      const rest = issue.keys.length - shown.length;
+      return `${path} has unknown field${issue.keys.length === 1 ? "" : "s"}: ${shown.join(", ")}${
+        rest > 0 ? `, and ${rest} more` : ""
+      }`;
+    }
+    case z.ZodIssueCode.invalid_union_discriminator:
+    case z.ZodIssueCode.invalid_enum_value:
+      return `${path} must be one of ${issue.options.map((o) => JSON.stringify(o)).join(" | ")}`;
+    case z.ZodIssueCode.invalid_union:
+      return `${path} matches none of the allowed shapes for that field`;
+    case z.ZodIssueCode.too_small: {
+      const unit = issue.type === "string" ? " characters" : issue.type === "array" ? " items" : "";
+      if (unit && (issue.minimum === 1 || issue.minimum === 1n)) return `${path} must not be empty`;
+      return `${path} needs at least ${issue.minimum}${unit}`;
+    }
+    case z.ZodIssueCode.too_big: {
+      const unit = issue.type === "string" ? " characters" : issue.type === "array" ? " items" : "";
+      return `${path} allows at most ${issue.maximum}${unit}`;
+    }
+    case z.ZodIssueCode.invalid_string:
+    case z.ZodIssueCode.custom:
+      return `${path}: ${issue.message}`;
+    default:
+      return `${path} does not match the required shape`;
+  }
+}
+
 /**
  * Parse the model's message as the strict turn-result schema.
  *
@@ -84,23 +172,30 @@ export function parseTurnResult(raw: string): { ok: true; value: WorldChatTurnRe
   } catch {
     return {
       ok: false,
-      problems: [problem("not-json", "The reply was not valid JSON. Return the complete result again as JSON.")],
+      problems: [
+        problem(
+          "not-json",
+          "The reply was not valid JSON. Return the complete result again as one JSON object — no prose around it, no markdown fences.",
+        ),
+      ],
     };
   }
   const parsed = WorldChatTurnResultSchema.safeParse(json);
   if (!parsed.success) {
-    // Issue paths are structural (field names and indexes), so they are safe to echo. Values
-    // are not included: a value that failed validation may be world content.
-    const paths = [...new Set(parsed.error.issues.map((i) => i.path.join(".") || "(root)"))].slice(0, 8);
-    return {
-      ok: false,
-      problems: [
-        problem(
-          "schema",
-          `The result did not match the required shape. Check these fields and return the complete result again: ${paths.join(", ")}.`,
-        ),
-      ],
-    };
+    /**
+     * Bounded where the issues are collected, not where they are printed.
+     *
+     * Zod reports every element of an invalid array separately, so a long one produces a problem
+     * per entry. Only the first few are ever shown, but the whole list used to be built, mapped
+     * and joined on the way to a 500-character run detail — work proportional to how wrong the
+     * answer was, at the moment there is least time to spare.
+     */
+    const lines = new Set<string>();
+    for (const issue of parsed.error.issues) {
+      lines.add(truncate(schemaIssueLine(issue), MAX_PROBLEM_CHARS));
+      if (lines.size >= MAX_PROBLEMS) break;
+    }
+    return { ok: false, problems: [...lines].map((line) => problem("schema", line)) };
   }
   return { ok: true, value: parsed.data };
 }
@@ -150,16 +245,48 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
     }
   }
 
-  // Step 5: evidence, and step 6: receipts.
-  const drafts = result.candidateOperations.flatMap((op) =>
-    op.op === "create" || op.op === "update" ? [op.candidate] : op.op === "split" ? op.replacements : [],
-  );
-  for (const draft of drafts) {
+  /**
+   * Step 5: evidence, and step 6: receipts.
+   *
+   * A draft that revises an existing proposition carries that proposition's verified intent with
+   * it. Without this, correcting something said more than eight turns ago is impossible to
+   * express: the original message has left the context window, the registry shows only titles and
+   * ids, and the words in front of the model are a `correction` rather than the original ask — so
+   * a required intent citation could not be written, and both the turn and its one retry would
+   * fail on a proposition the user was actively trying to fix.
+   */
+  const drafts = result.candidateOperations.flatMap((op) => {
+    if (op.op === "create") return [{ draft: op.candidate, inherited: NO_EVIDENCE }];
+    if (op.op === "update") return [{ draft: op.candidate, inherited: intentEvidenceOf(byId.get(op.candidateId)) }];
+    if (op.op === "split") {
+      const inherited = intentEvidenceOf(byId.get(op.candidateId));
+      return op.replacements.map((draft) => ({ draft, inherited }));
+    }
+    return [];
+  });
+  for (const { draft, inherited } of drafts) {
     for (const evidenceProblem of verifyAllEvidence(draft.evidence, input.evidenceSources)) {
       problems.push(problem(evidenceProblem.kind, safeEvidenceMessage(evidenceProblem)));
     }
     if (draft.evidence.length === 0) {
       problems.push(problem("no-evidence", "Every proposition needs evidence of what it is based on."));
+    } else if (!hasIntentEvidence(draft.evidence) && inherited.length === 0) {
+      /**
+       * Intent is the one piece that cannot be substituted, and it is checked here rather than
+       * only at wrap-up (`hasIntentEvidence` in readiness.ts).
+       *
+       * Without this a candidate evidenced only by a document or by world state validates,
+       * appears in the panel as understood, and is then silently dropped as "invalid" when the
+       * user presses the button — the exact failure this feature's all-or-nothing rule exists to
+       * prevent, only deferred to the worst moment. Refusing it now spends the corrective turn
+       * on something the model can actually fix: quote the sentence they asked in.
+       */
+      problems.push(
+        problem(
+          "no-intent-evidence",
+          'Every proposition needs a message quotation with "purpose": "intent" — the user\'s own words asking for it. Supporting evidence from the world or an attachment does not replace it.',
+        ),
+      );
     }
     for (const id of draft.checkReceiptIds) {
       if (!receiptIds.has(id)) {
@@ -234,9 +361,10 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
       case "split": {
         const existing = byId.get(op.candidateId)!;
         candidates.push({ ...existing, status: "superseded", revision: existing.revision + 1, updatedAt: at });
+        const inherited = intentEvidenceOf(existing);
         for (const replacement of op.replacements) {
           const id = newId("cand") as CandidateId;
-          candidates.push({ ...fresh(id, replacement, input, at), splitFrom: existing.id });
+          candidates.push({ ...fresh(id, replacement, input, at, inherited), splitFrom: existing.id });
         }
         break;
       }
@@ -287,6 +415,7 @@ function fresh(
   draft: ModelCandidateDraft,
   input: ValidateInput,
   at: string,
+  inheritedIntent: readonly CandidateEvidence[] = NO_EVIDENCE,
 ): WorldChangeCandidate {
   // `checkReceiptIds` is model-facing only. It is what the model says it read, and it is dropped
   // here because the stored candidate carries `checks` instead — the coordinator's own findings.
@@ -294,6 +423,12 @@ function fresh(
   // difference between them is exactly what must not be blurred (§8.3.1).
   const { title, rationale, settledness, evidence, checkReceiptIds, ...payload } = draft;
   void checkReceiptIds;
+  // Intent travels with the proposition, not with the turn that last touched it: the original ask
+  // is still why this exists, and wrap-up refuses anything that cannot show one. A revision that
+  // states its own intent keeps it; only a revision that does not inherits.
+  const cited = hasIntentEvidence(evidence) ? [...evidence] : [...inheritedIntent, ...evidence];
+  // Stored with the offsets pointing where the words actually are, not where they were said to be.
+  const reasons = normaliseEvidence(cited, input.messages);
   return {
     ...(payload as object),
     id,
@@ -304,8 +439,8 @@ function fresh(
     subject: subjectOf(draft),
     title,
     rationale,
-    sourceMessageIds: [...new Set(evidence.filter((e) => e.kind === "message").map((e) => e.messageId))],
-    evidence: [...evidence],
+    sourceMessageIds: [...new Set(reasons.filter((e) => e.kind === "message").map((e) => e.messageId))],
+    evidence: reasons,
     checks: input.checksFor(draft),
     createdAt: at,
     updatedAt: at,
@@ -326,7 +461,7 @@ function snapshot(
   revision: number,
 ): WorldChangeCandidate {
   return {
-    ...fresh(existing.id, draft, input, at),
+    ...fresh(existing.id, draft, input, at, intentEvidenceOf(existing)),
     revision,
     createdAt: existing.createdAt,
     ...(existing.groupId !== undefined ? { groupId: existing.groupId } : {}),
@@ -396,11 +531,17 @@ function dedupeProblems(problems: readonly TurnProblem[]): TurnProblem[] {
  * return the third one.
  */
 export function correctiveMessage(problems: readonly TurnProblem[]): string {
-  const lines = problems.slice(0, 8).map((p) => `- ${p.safeMessage}`);
-  return [
+  const lines = problems.slice(0, MAX_PROBLEMS).map((p) => `- ${truncate(p.safeMessage, MAX_PROBLEM_CHARS)}`);
+  const message = [
     "The previous result was not accepted:",
     ...lines,
     "",
     "Return the complete result again, as a single JSON object matching the required shape.",
+    'The exact shape, with examples, is under "The result shape, exactly" in your instructions.',
   ].join("\n");
+  return truncate(message, MAX_CORRECTIVE_CHARS);
+}
+
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }

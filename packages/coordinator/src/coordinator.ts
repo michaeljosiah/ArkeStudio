@@ -3964,6 +3964,9 @@ export class Coordinator {
         const read = await attachments.readText(attachment).catch(() => null);
         return read?.text ?? null;
       },
+      // Whatever this run pulled through get_attachment_text, so a passage the model paged to is
+      // quotable even though the prompt only ever inlined the document's opening.
+      attachmentReadsFor: (runId) => retrieval.textReadBy(runId),
       now: () => new Date().toISOString(),
     });
 
