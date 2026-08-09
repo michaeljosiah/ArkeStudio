@@ -484,6 +484,12 @@ export interface AudioDesign {
 export interface NegativeInput {
   capability: string;
   shot?: Shot;
+  /**
+   * The shots one clip covers, for a whole-scene pass. Silence is a property of the output, so a
+   * pass is silent only when every shot in it is: one spoken beat among four makes the clip a
+   * clip with audio. Absent falls back to `shot`, which is the single-shot case.
+   */
+  shots?: readonly Shot[];
   audioDesign?: AudioDesign;
   /**
    * Raw byte size of each attachable reference file, measured by the caller (SPEC-019 R-43).
@@ -507,7 +513,11 @@ export function derivedNegatives(input: NegativeInput): string | null {
   // Always. A take is immutable, so burned-in text is damage with no version of the take without
   // it; no surface asks for subtitles and the cut renders its own titles (R-10, D8).
   const parts = ["No subtitles."];
-  if (input.shot?.audio?.kind === "silence") {
+  // Silence has to be said. Omitting the audio direction asks for a clip with no stated
+  // soundtrack, which is a clip whose soundtrack the model chooses.
+  const covered = input.shots ?? (input.shot ? [input.shot] : []);
+  const silent = covered.length > 0 && covered.every((s) => s.audio?.kind === "silence");
+  if (silent) {
     parts.push("No audio.");
   } else if (input.audioDesign?.scoreTrack === true) {
     // Score only. Environmental and action sound belong to the shot and replacing them would
@@ -522,6 +532,12 @@ export function derivedNegatives(input: NegativeInput): string | null {
 // ---------------------------------------------------------------------------
 
 export interface PromptParts {
+  /**
+   * The shape of the clip being asked for, stated first (see `passStructure`). Only a whole-scene
+   * pass has one; a single shot's length and frame are the request's own parameters and there are
+   * no boundaries inside it to describe.
+   */
+  structure?: string | null;
   /** Machine-composed, outside the override (R-3). */
   preamble: string | null;
   /** The override when present, else the assembled blocks (SPEC-012 R-15). */
@@ -531,14 +547,37 @@ export interface PromptParts {
 }
 
 /**
- * The text that actually goes over the wire. The override owns the direction; the preamble
- * describes the payload and the negatives describe the delivery, and neither is authored intent.
+ * The text that actually goes over the wire. The override owns the direction; the structure
+ * states the shape of the clip, the preamble describes the payload and the negatives describe the
+ * delivery, and none of those three is authored intent.
  */
 export function composePrompt(parts: PromptParts): string {
-  return [parts.preamble, parts.body, parts.negatives]
+  return [parts.structure ?? null, parts.preamble, parts.body, parts.negatives]
     .map((part) => part?.trim() ?? "")
     .filter((part) => part.length > 0)
     .join("\n\n");
+}
+
+/**
+ * The pass's shape, said in the prompt rather than left to the parameters.
+ *
+ * A pass is one clip that we then cut at `shotPlan`'s boundaries (R-19, D11). Those boundaries
+ * are only sound if the model divides the clip where we are going to: a request that carries
+ * "14 seconds" as a parameter and says nothing in the prompt is a request to compose 14 seconds
+ * however it likes, and the cuts then land on whatever it happened to do.
+ *
+ * The seconds are the seconds actually asked for, not the seconds planned — a pass snapped up to
+ * the route's next length is longer than its shots, and the last one absorbs the difference
+ * (`coverPlan`), so that is the clip being described.
+ */
+export function passStructure(input: {
+  shotCount: number;
+  askedSec: number;
+  aspect?: string | undefined;
+}): string | null {
+  if (input.shotCount < 2) return null;
+  const frame = input.aspect ? `, ${input.aspect}` : "";
+  return `One continuous clip: ${input.askedSec}s${frame}, ${input.shotCount} shots. Cut between shots only at the boundaries given below, in that order.`;
 }
 
 export function attachmentFor(
@@ -875,10 +914,13 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           references,
           budget,
           bound: bindReferences(references, sheets),
-          // A pass is one clip, so its negatives are the clip's: no per-shot silence, because
-          // several shots' audio directions share the same output.
+          // A pass is one clip, so its negatives are the clip's. Silence is still stated, but
+          // only when the whole clip is silent — one spoken beat among four is not a silent pass.
           negatives: derivedNegatives({
             capability: model.capability,
+            shots: pass.plan
+              .map((entry) => scene.shots.find((s) => s.id === entry.shotId))
+              .filter((s): s is Shot => s !== undefined),
             ...(input.audioDesign !== undefined ? { audioDesign: input.audioDesign } : {}),
           }),
         };

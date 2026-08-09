@@ -964,6 +964,80 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     assert.equal(prompt.match(/\[shot \d+ · /g)?.length, 4, "all four beats are present");
     await store.close();
   });
+
+  it("states the pass's shape before anything else, because the cuts depend on it", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const scene4 = {
+      ...production.scenes[0]!,
+      shots: [1, 2, 3].map((n) => shot(n, 3, `@maren-kest beat ${n}`)),
+    };
+    const model = { ...VIDEO_MODEL, limits: { maxDurationSec: 15 } };
+    const plan = planScene(
+      {
+        world: bundle.meta,
+        artDirection: bundle.artDirection,
+        productionId: production.meta.id,
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene: scene4,
+        selections: {},
+        model,
+      },
+      "whole-scene",
+    );
+    const [request] = composeDispatches(
+      bundle.meta.worldId,
+      production.meta.id,
+      scene4,
+      plan,
+      model,
+      bundle,
+    );
+    const params = request!.params as { prompt: string; durationSec?: number; shotPlan?: unknown[] };
+    const first = params.prompt.split("\n\n")[0]!;
+    assert.match(first, /^One continuous clip: /, "the shape leads the prompt");
+    assert.match(first, /3 shots/, "the shot count is stated");
+    assert.ok(
+      first.includes(`${params.durationSec}s`),
+      "the seconds stated are the seconds asked for, which is what shotPlan covers",
+    );
+    assert.equal(params.shotPlan?.length, 3, "and the boundaries it refers to are actually sent");
+    await store.close();
+  });
+
+  it("says nothing about shape for a single-shot dispatch, which has no boundaries", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const scene1 = { ...production.scenes[0]!, shots: [shot(1, 4, "@maren-kest waits")] };
+    const model = { ...VIDEO_MODEL, limits: { maxDurationSec: 15 } };
+    const plan = planScene(
+      {
+        world: bundle.meta,
+        artDirection: bundle.artDirection,
+        productionId: production.meta.id,
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene: scene1,
+        selections: {},
+        model,
+      },
+      "per-shot",
+    );
+    const [request] = composeDispatches(
+      bundle.meta.worldId,
+      production.meta.id,
+      scene1,
+      plan,
+      model,
+      bundle,
+    );
+    const prompt = (request!.params as { prompt: string }).prompt;
+    assert.ok(!prompt.includes("One continuous clip"), "a lone shot's length is its own parameter");
+    await store.close();
+  });
 });
 
 describe("SPEC-019 derived negatives (R-9..R-13, D8..D10)", () => {
@@ -987,6 +1061,22 @@ describe("SPEC-019 derived negatives (R-9..R-13, D8..D10)", () => {
       audioDesign: { scoreTrack: true },
     })!;
     assert.match(silent, /No audio\./);
+  });
+
+  it("says silence for a pass only when every shot in it is silent", () => {
+    const quiet = { ...shot(1, 4), audio: { kind: "silence" } };
+    const spoken = { ...shot(2, 6), audio: { kind: "dialogue", line: "Ring it properly." } };
+
+    const allSilent = derivedNegatives({ capability: "video", shots: [quiet, { ...quiet, id: "sh_x" }] })!;
+    assert.match(allSilent, /No audio\./, "a pass of silent shots is a silent clip and must say so");
+
+    const mixed = derivedNegatives({ capability: "video", shots: [quiet, spoken] })!;
+    assert.ok(!mixed.includes("No audio"), "one spoken beat among four is not a silent pass");
+  });
+
+  it("leaves the audio negative off when nothing directs the audio either way", () => {
+    const undirected = derivedNegatives({ capability: "video", shots: [shot(1, 4), shot(2, 4)] })!;
+    assert.equal(undirected, "No subtitles.", "silence is a direction, not the absence of one");
   });
 
   it("survives an override, because a rewritten shot is still a video dispatch", async () => {
