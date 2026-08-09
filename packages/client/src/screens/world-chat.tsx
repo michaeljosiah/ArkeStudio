@@ -415,15 +415,19 @@ export function WorldChatConversationScreen() {
                 {failure && !running && (
                   <div className="fy-chat__failed" role="status">
                     <div className="fy-chat__failedtext">{failureLine(failure)}</div>
-                    <button
-                      type="button"
-                      className="fy-chat__retry"
-                      onClick={() =>
-                        worldId && conversationId && retryWorldChatTurn(worldId, conversationId, failure.turnId)
-                      }
-                    >
-                      Try that again
-                    </button>
+                    {/* Retrying a turn is saying something again, so it is held back for the same
+                        reason the composer is while a wrap-up is running. */}
+                    {!wrappingUp && (
+                      <button
+                        type="button"
+                        className="fy-chat__retry"
+                        onClick={() =>
+                          worldId && conversationId && retryWorldChatTurn(worldId, conversationId, failure.turnId)
+                        }
+                      >
+                        Try that again
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -436,7 +440,7 @@ export function WorldChatConversationScreen() {
               onChange={setDraft}
               onSubmit={() => {
                 const text = draft.trim();
-                if (!text || !worldId || running) return;
+                if (!text || !worldId || running || wrappingUp) return;
                 sendWorldChat(worldId, conversationId!, text, chips.map((c) => c.id));
                 setDraft("");
               }}
@@ -448,10 +452,10 @@ export function WorldChatConversationScreen() {
               // Appended to whatever is already typed, never sent: speaking gets you to a draft,
               // and the draft is still corrected and sent by hand (SPEC-018 R-2, R-5).
               onDictate={(text) => setDraft((prev) => (prev ? `${prev} ${text}` : text))}
-              {...(worldId && conversationId
+              {...(worldId && conversationId && !wrappingUp
                 ? { onAttach: () => worldChatAttachFiles(worldId, conversationId) }
                 : {})}
-              {...(worldId && conversationId && hostCanAttach()
+              {...(worldId && conversationId && hostCanAttach() && !wrappingUp
                 ? {
                     onAttachFiles: (files: readonly File[]) =>
                       attachHostFiles(worldChatAttachTarget(worldId, conversationId), files),
@@ -464,7 +468,18 @@ export function WorldChatConversationScreen() {
                   }
                 : {})}
               onRemoveAttachment={(id) => setDismissed((prev) => [...prev, id])}
-              disabledReason={composerReason(state)}
+              /*
+               * Nothing may be said to a conversation that is being turned into proposals.
+               *
+               * The window is new: the screen used to leave for the approvals list on the press,
+               * so there was no composer left to type into. Now that it waits here, a message or
+               * a file landing mid-wrap-up would be appended around `wrapup.completed` — in the
+               * conversation but absent from the proposals just made from it, or written after it
+               * closed. The coordinator does not refuse it, so the screen must not offer it.
+               */
+              disabledReason={
+                wrappingUp ? "This conversation is being turned into proposals." : composerReason(state)
+              }
             />
             {/* Stop lives on the working line in the transcript now, beside what it would stop. */}
             <div className="fy-chat__composernote">

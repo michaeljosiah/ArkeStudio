@@ -11,6 +11,7 @@ import { foldConversation } from "./fold.js";
 import { canonIdsNeeded, materialiseCandidate, MaterialiseError, planIdentities } from "./materialise.js";
 import { evaluateReadiness, type NotCarried } from "./readiness.js";
 import { conversationDir, WorldChatStore } from "./store.js";
+import { openIntentOf } from "./wrapup-recovery.js";
 
 /**
  * Turning a conversation into proposals, once (#70 §11.3).
@@ -44,7 +45,7 @@ export interface WrapUpResult {
 
 export class WrapUpError extends Error {
   constructor(
-    readonly reason: "stale" | "nothing-to-carry" | "materialise" | "too-many",
+    readonly reason: "stale" | "nothing-to-carry" | "materialise" | "too-many" | "in-flight",
     message: string,
   ) {
     super(message);
@@ -105,11 +106,35 @@ export async function wrapUp(input: WrapUpInput): Promise<WrapUpResult> {
   // instead held only while the numbers ran 1..N unbroken, so a log that had ever been written
   // by two writers at once could never be wrapped up again — the count stayed permanently ahead
   // of the sequence, and every attempt came back stale with nothing to act on.
+  //
+  // The number is a sound revision token because an append takes the highest sequence in the file
+  // and adds one, so the last one always moves when anything is written — including on a log an
+  // older race left with a repeat in the middle, which is the case this has to keep working.
   const lastSeq = events.length > 0 ? events[events.length - 1]!.seq : 0;
   if (lastSeq !== input.expectedConversationSeq) {
     throw new WrapUpError(
       "stale",
       "This conversation moved on while you were looking at it. Open it again and wrap up from there.",
+    );
+  }
+
+  /**
+   * One intent at a time (R-42a).
+   *
+   * An intent with no outcome after it means a wrap-up is still running, or one died after
+   * staging some of its proposals and never recorded how it ended. Starting a second would stage
+   * a second set for the same propositions, because their `candidate.status-changed` events are
+   * only appended once every proposal is durable — until then they still read as live and would
+   * be carried again.
+   *
+   * The refusal, rather than resuming here: recovery reconciles an open intent against the
+   * proposals actually on disk, and it will not guess when they do not match. Doing that inside a
+   * button press would be repair by accident.
+   */
+  if (openIntentOf(events)) {
+    throw new WrapUpError(
+      "in-flight",
+      "This conversation is already being turned into proposals. If that did not finish, restart the studio and it will be resolved before anything else is written.",
     );
   }
 

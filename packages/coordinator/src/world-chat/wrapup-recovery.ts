@@ -31,13 +31,21 @@ export interface RecoveryOutcome {
   repaired: WrapUpRepair[];
 }
 
-interface OpenIntent {
+export interface OpenIntent {
   requestId: string;
   expectedConversationSeq: number;
 }
 
-/** The intent that has no matching completion or failure, if there is one. */
-function openIntentOf(events: ReadonlyArray<{ event: { type: string } }>): OpenIntent | null {
+/**
+ * The intent that has no matching completion or failure, if there is one.
+ *
+ * Exported because wrap-up itself has to ask the same question before starting another: at
+ * startup an open intent belongs to a process that is gone, but during a session it belongs to a
+ * wrap-up still running, or to one that died part-way and left proposals nothing has accounted
+ * for. Two readings of "unfinished" would eventually disagree, and the one that matters here is
+ * whether a second set of proposals is about to be staged for the same propositions.
+ */
+export function openIntentOf(events: ReadonlyArray<{ event: { type: string } }>): OpenIntent | null {
   let open: OpenIntent | null = null;
   for (const { event } of events) {
     if (event.type === "wrapup.intent-recorded") {

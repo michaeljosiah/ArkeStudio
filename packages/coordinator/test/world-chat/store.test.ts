@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFile, readFile, writeFile } from "node:fs/promises";
+import { appendFile, open, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { newId, type WorldChatStoredEvent } from "@arke-studio/contracts";
@@ -72,6 +72,39 @@ describe("world chat store", () => {
       "one sequence number per record, however many stores were holding the file",
     );
     assert.deepEqual(problems, [], "and no writer mistook another's append for a foreign one");
+  });
+
+  it("forgets the tail when an append fails after the bytes may have landed", async () => {
+    const s = await store();
+    await s.append(message("ours"), { at: AT });
+
+    // `sync` failing stands for every step that can throw once the record may be down — close,
+    // and the digest read after it. The writer cannot know whether the bytes are there, and a
+    // tail it merely believes would make it call the studio's own record a foreign write and
+    // refuse every later append to this conversation until the app was restarted.
+    const probe = await open(s.eventsPath, "r");
+    const handles = Object.getPrototypeOf(probe) as { sync: () => Promise<void> };
+    await probe.close();
+    const real = handles.sync;
+    handles.sync = () => Promise.reject(new Error("the device is having a moment"));
+    try {
+      await assert.rejects(() => s.append(message("during the wobble"), { at: AT }));
+    } finally {
+      handles.sync = real;
+    }
+
+    // Whatever landed, a fresh look at the file is the recovery — not a permanent refusal.
+    await s.append(message("after"), { at: AT });
+    const { events } = await new WorldChatStore(s.dir).read();
+    assert.ok(
+      events.some((e) => JSON.stringify(e).includes("after")),
+      "the conversation can still be written to",
+    );
+    assert.deepEqual(
+      events.map((e) => e.seq),
+      events.map((_, i) => i + 1),
+      "and its numbering is still one per record",
+    );
   });
 
   it("has the bytes on disk before the append resolves", async () => {

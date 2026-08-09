@@ -321,6 +321,42 @@ describe("what wrap-up refuses", () => {
     assert.equal(result.proposalIds.length, 1);
   });
 
+  /*
+   * The second press, after a wrap-up that died between staging its proposals and recording how
+   * it ended. Its propositions are still `live` — their status events are only appended once every
+   * proposal is durable — so a second run would carry them again and stage a duplicate set beside
+   * the ones already on disk.
+   */
+  it("refuses a second wrap-up while one is still unaccounted for", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    await withCandidates(w.log, [candidate()]);
+    await w.log.append(
+      {
+        type: "wrapup.intent-recorded",
+        requestId: "req-died",
+        expectedConversationSeq: 2,
+        plannedProposalIds: [],
+      },
+      { at: AT },
+    );
+
+    const { events } = await w.log.read();
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "req-second",
+          expectedConversationSeq: events[events.length - 1]!.seq,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "in-flight",
+    );
+    assert.equal((await w.ours()).length, 0, "and stages nothing while it refuses");
+  });
+
   it("refuses a conversation that moved on while it was being read", async () => {
     const w = await world();
     const seq = await withCandidates(w.log, [candidate()]);

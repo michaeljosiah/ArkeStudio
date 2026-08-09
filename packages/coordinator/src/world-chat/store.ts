@@ -249,21 +249,34 @@ export class WorldChatStore {
         });
 
         const line = JSON.stringify(envelope) + "\n";
-        const handle = await open(toExtendedLength(this.eventsPath), "a");
+        /*
+         * From here on the bytes may be on disk, so any failure leaves this writer unable to say
+         * what the tail looks like — `close` and the digest read can both fail after `sync` has
+         * already put the record down. Forgetting the tail is the recoverable answer: the next
+         * append inspects the file again and carries on. Keeping a tail that is merely probably
+         * right would have the studio call its own record a foreign write and refuse every append
+         * to that conversation until it is restarted.
+         */
         try {
-          await handle.appendFile(line, "utf8");
-          // The whole point of this store: the caller acts on the strength of this append, so
-          // it resolves only once the bytes are on the device, not merely in a page cache.
-          await handle.sync();
-        } finally {
-          await handle.close();
-        }
+          const handle = await open(toExtendedLength(this.eventsPath), "a");
+          try {
+            await handle.appendFile(line, "utf8");
+            // The whole point of this store: the caller acts on the strength of this append, so
+            // it resolves only once the bytes are on the device, not merely in a page cache.
+            await handle.sync();
+          } finally {
+            await handle.close();
+          }
 
-        this.writer.tail = {
-          size: current.size + Buffer.byteLength(line, "utf8"),
-          digest: sha256((await readFile(toExtendedLength(this.eventsPath), "utf8")) as string),
-          seq: envelope.seq,
-        };
+          this.writer.tail = {
+            size: current.size + Buffer.byteLength(line, "utf8"),
+            digest: sha256((await readFile(toExtendedLength(this.eventsPath), "utf8")) as string),
+            seq: envelope.seq,
+          };
+        } catch (err) {
+          this.writer.tail = null;
+          throw err;
+        }
         result = { envelope, deduplicated: false };
       })
       .then(() => result);
