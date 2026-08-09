@@ -152,8 +152,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
  * a resting state inherited rather than hand-written.
  */
 @keyframes fy-sweep {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
+  from { background-position: 130% 0; }
+  to { background-position: -130% 0; }
 }
 .fy-loading {
   display: flex;
@@ -177,7 +177,10 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: fy-sweep 1.9s var(--ease-out) infinite;
+  /* Linear, not eased: the ease-out curve crossed the glyph in the first half-second and then
+     parked the band off-glyph for the rest of each cycle, so the mark read as a static pale A —
+     precisely when it was the only signal that anything was happening. */
+  animation: fy-sweep 1.6s linear infinite;
 }
 .fy-loading--inline .fy-loading__mark { font-size: 15px; }
 .fy-loading__label { font: 400 12px var(--font-mono); color: var(--muted-foreground); }

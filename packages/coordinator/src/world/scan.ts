@@ -328,6 +328,11 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
   const keyArtCandidate = await stat(toExtendedLength(join(dir, "incoming", "world-image", "candidate.png")))
     .then(() => "incoming/world-image/candidate.png")
     .catch(() => null);
+  // Same rule for the accepted key art: the disk is the truth. The art-direction page needs to
+  // know it exists to stand it in while no master look is set.
+  const hasKeyArt = await stat(toExtendedLength(join(dir, "world-art.png")))
+    .then(() => true)
+    .catch(() => false);
 
   const resolved = resolveArtDirection(meta, artDirectionRecord);
   const overrides: ArtDirectionOverride[] = [];
@@ -414,6 +419,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       overrides,
     },
     keyArtCandidate,
+    hasKeyArt,
     sheets,
     canon,
     referenceKits,

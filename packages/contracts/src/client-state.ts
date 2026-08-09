@@ -195,6 +195,8 @@ export const WorldBundleSchema = z
      * visit, over a file that had already been used or thrown away.
      */
     keyArtCandidate: z.string().nullable().default(null),
+    /** Whether accepted key art (world-art.png) exists — the disk is the truth here too. */
+    hasKeyArt: z.boolean().default(false),
     /** Closed-world edits awaiting reconciliation (SPEC-002 R-28). */
     externalEdits: z.array(ExternalEditSchema).default([]),
     /** Set when another program changed files while the world was open (SPEC-002 R-23). */

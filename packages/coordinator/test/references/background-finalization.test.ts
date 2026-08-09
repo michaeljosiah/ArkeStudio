@@ -66,6 +66,20 @@ describe("background world finalization", () => {
       })),
     );
     assert.equal(backgroundTake.filter((take) => take.raw.includes(job.id)).length, 1);
+
+    // The human's own action rule: the composite the user asked for lands designated — the
+    // person who pressed the button is not asked to approve their own press (build-test
+    // feedback, 2026-08-09). The take id is derived from the job id; the review rides along.
+    const kit = JSON.parse(await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8")) as {
+      designatedCompilation?: string;
+    };
+    assert.equal(
+      kit.designatedCompilation,
+      `takes/tk_${job.id.slice(3)}/character-sheet-background.png`,
+      "the landed composite is designated without a review step",
+    );
+    const reviews = await readFile(join(worldDir, "references", "reviews.jsonl"), "utf8");
+    assert.ok(reviews.includes(`tk_${job.id.slice(3)}`), "the accept is recorded as a review");
     await provider.close();
   });
 });

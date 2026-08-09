@@ -21,7 +21,7 @@ import type { ArkeBridge, AttachTarget } from "../arke-bridge.js";
 
 /** A conversation nobody has said anything in yet. */
 function emptyGenesis(): StoreState["genesis"][string] {
-  return { turns: [], draft: null, status: null, attachments: [], refusals: [] };
+  return { turns: [], draft: null, status: null, working: null, runStartedAt: null, attachments: [], refusals: [] };
 }
 
 /**
@@ -93,6 +93,10 @@ interface StoreState {
       draft: import("@arke-studio/contracts").GenesisDraft | null;
       status: "running" | "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed" | null;
       detail?: string;
+      /** The turn in flight, one verb at a time — cleared when the turn settles. */
+      working: string | null;
+      /** When the running turn began, for the working line's elapsed clock. */
+      runStartedAt: string | null;
       /** Waiting in the sandbox: filed into the world the moment it exists. */
       attachments: Array<{ name: string; kind: import("@arke-studio/contracts").ArtifactKind }>;
       /** What would not go in, and why — said on a chip rather than swallowed. */
@@ -479,9 +483,15 @@ function handleFrame(json: string): void {
         [event.genesisId]: {
           ...g,
           status: event.status,
+          // The clock starts when the turn does; a settled turn takes its working line with it.
+          runStartedAt: event.status === "running" ? event.at : g.runStartedAt,
+          working: event.status === "running" ? g.working : null,
           ...(event.detail !== undefined ? { detail: event.detail } : {}),
         },
       };
+    } else if (event.type === "genesis.progress") {
+      const g = genesis[event.genesisId] ?? emptyGenesis();
+      genesis = { ...genesis, [event.genesisId]: { ...g, working: event.label } };
     } else if (event.type === "genesis.attachment") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
       genesis = {
@@ -970,6 +980,16 @@ export function stageArtDirectionChange(
 ): void {
   send({
     kind: "stage-art-direction-change",
+    worldId,
+    description,
+    ...(masterLook !== undefined ? { masterLook } : {}),
+  });
+}
+
+/** The human's own action (the assign-voice rule): applies at once, versioned, never staged. */
+export function setArtDirection(worldId: string, description: string, masterLook?: string | null): void {
+  send({
+    kind: "set-art-direction",
     worldId,
     description,
     ...(masterLook !== undefined ? { masterLook } : {}),

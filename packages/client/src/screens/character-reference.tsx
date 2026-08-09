@@ -544,6 +544,15 @@ export function ReplaceMainPhotoScreen() {
   }));
   const candidates = [...uploadedCandidates, ...generatedCandidates];
   const selectedCandidate = candidates.find((candidate) => candidate.key === selected) ?? null;
+  // Previews in flight, the same way the kit page watches sheet jobs. Without this the panel
+  // said "Ready when you are" while the money was already being spent — indistinguishable
+  // from having pressed nothing.
+  const generatingPreviews = (state?.app.jobs ?? []).filter(
+    (job) =>
+      job.target.kind === "main-photo-candidate" &&
+      job.target.id?.startsWith(`${sheetId}/`) &&
+      (!["succeeded", "failed", "cancelled"].includes(job.status) || job.finalization?.status === "pending"),
+  ).length;
   // The chosen model decides what can travel, so it decides what this screen shows travelling.
   // A silent downgrade from image identity to text description is the failure the bar exists to
   // prevent, and it has to be visible where the references are, not only in the bar's own line.
@@ -637,9 +646,17 @@ export function ReplaceMainPhotoScreen() {
         <section className="fy-mainphoto-dialog__results">
           <header>
             <span>PREVIEWS</span>
-            <strong>{candidates.length ? "ready" : "waiting"}</strong>
+            <strong>{generatingPreviews > 0 ? "generating" : candidates.length ? "ready" : "waiting"}</strong>
           </header>
-          {candidates.length === 0 ? (
+          {candidates.length === 0 && generatingPreviews > 0 ? (
+            <div className="fy-mainphoto-dialog__empty">
+              <Loading
+                label={`Generating ${generatingPreviews} preview${generatingPreviews === 1 ? "" : "s"} of ${sheet.name}`}
+                size={44}
+              />
+              <span>You can leave this page. Previews land here and in Activity.</span>
+            </div>
+          ) : candidates.length === 0 ? (
             <div className="fy-mainphoto-dialog__empty">
               <strong>Ready when you are</strong>
               <span>The selected world look carries as treatment, never subject.</span>
