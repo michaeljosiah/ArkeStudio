@@ -143,7 +143,6 @@ describe("the looks gallery route", () => {
       assert.match(html, /<button[^>]*fy-looks-results__older[^>]*>Show 3 older looks<\/button>/);
       assert.match(html, /<button[^>]*fy-looks-results__fresh[^>]*>8 new variations ready<\/button>/);
       assert.ok(html.includes("Look 8"), "tiles carry the takes' own words");
-      // "Council coat" would prove nothing — it is also the composer's starter prompt.
       assert.ok(!html.includes("Calling the tide"), "not the sample copy the design canvas used");
       assert.equal(nestedButtons(html).length, 0, "the toggle is a sibling of the grid, never inside a tile");
     } finally {

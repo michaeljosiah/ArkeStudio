@@ -833,9 +833,7 @@ export function CharacterLooksScreen() {
   const { state } = useStore();
   const [kind, setKind] = useState<"costume" | "pose-expression" | "condition-age">("costume");
   const [mode, setMode] = useState<"stay-close" | "push-it">("stay-close");
-  const [prompt, setPrompt] = useState(
-    "Formal Ebb Council coat, storm-dark wool, sea-glass clasp and salt at the hem.",
-  );
+  const [prompt, setPrompt] = useState("");
   const navigate = useNavigate();
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier }>({});
   // Four was hard-coded at the call site while the frame already carried a count — the estimate
@@ -901,7 +899,17 @@ export function CharacterLooksScreen() {
             </button>
           </div>
           <label>Describe the look</label>
-          <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
+          <textarea
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder={
+              kind === "costume"
+                ? "A formal occasion, work clothes, festival dress…"
+                : kind === "pose-expression"
+                  ? "Mid-laugh, guard up, lost in thought…"
+                  : "Years later, soaked through, after the fight…"
+            }
+          />
           <DispatchBar
             workflow="character-look"
             count={count}
