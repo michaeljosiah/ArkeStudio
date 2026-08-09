@@ -4,9 +4,13 @@ import {
   compilationIsStale,
   designatedCompilation,
   mainPhotoFor,
+  type CharacterLook,
   type ManifestModel,
+  type ReferenceKit,
+  type ReviewDecision,
   type SizeTier,
   type Sheet,
+  type Take,
 } from "@arke-studio/contracts";
 import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
@@ -751,10 +755,75 @@ export function ReplaceMainPhotoScreen() {
   );
 }
 
-/** Accepted looks record the look prompt; pending takes carry it in dispatch params. */
-function lookCaption(image: { look: { prompt: string } } | { take: { params: Record<string, unknown> } }): string | null {
-  const raw = "look" in image ? image.look.prompt : image.take.params["lookPrompt"];
-  return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : null;
+/** One gallery tile: a promoted look, or an unreviewed exploration take awaiting its decision. */
+export type LookGalleryEntry = {
+  key: string;
+  path: string;
+  label: string;
+  /** When it arrived (takes) or was accepted (looks); the gallery's ordering key. */
+  at: string;
+  look?: CharacterLook;
+  take?: Take;
+};
+
+/** How many tiles the gallery leads with; the rest stay one press away, never unreachable. */
+export const RECENT_LOOKS = 5;
+
+const LOOK_KIND_LABELS: Record<string, string> = {
+  costume: "Costume",
+  "pose-expression": "Pose / expression",
+  "condition-age": "Condition / age",
+};
+
+/**
+ * The tile caption is the user's own words, not the composed dispatch prompt — the composed
+ * one leads with the world style, so every caption would open identically. Kept short enough
+ * for the pill; the full text stays available as the tile's title.
+ */
+function lookTileLabel(prompt: string | undefined, kind: string | undefined): string {
+  const text = prompt?.trim();
+  if (!text) return LOOK_KIND_LABELS[kind ?? ""] ?? "Exploration";
+  return text.length > 48 ? `${text.slice(0, 47).trimEnd()}…` : text;
+}
+
+/**
+ * Everything explorable for this character, newest first: promoted looks and every
+ * unreviewed look take. Unreviewed takes each cost money and stay promotable, so the read
+ * model never drops one — any windowing is the gallery's presentation, not existence.
+ * Newest-first also puts fresh arrivals at the front of the grid, in sight, rather than
+ * beyond a cut-off.
+ */
+export function lookGallery(
+  kit: ReferenceKit | null | undefined,
+  takes: Take[],
+  reviews: ReviewDecision[],
+  sheetId: string,
+): LookGalleryEntry[] {
+  const promoted: LookGalleryEntry[] = (kit?.looks ?? []).map((look) => ({
+    key: `look:${look.id}`,
+    path: `references/${sheetId}/${look.file}`,
+    label: lookTileLabel(look.prompt, look.kind),
+    at: look.acceptedAt,
+    look,
+  }));
+  const pending: LookGalleryEntry[] = takes
+    .filter(
+      (take) =>
+        take.kind === "look" &&
+        take.reference?.sheetId === sheetId &&
+        !reviews.some((review) => review.takeId === take.id),
+    )
+    .map((take) => ({
+      key: `take:${take.id}`,
+      path: `references/${sheetId}/takes/${take.id}/${take.media}`,
+      label: lookTileLabel(
+        typeof take.params["lookPrompt"] === "string" ? take.params["lookPrompt"] : take.prompt,
+        typeof take.params["lookKind"] === "string" ? take.params["lookKind"] : undefined,
+      ),
+      at: take.completedAt ?? take.dispatchedAt,
+      take,
+    }));
+  return [...promoted, ...pending].sort((a, b) => b.at.localeCompare(a.at));
 }
 
 export function CharacterLooksScreen() {
@@ -771,34 +840,21 @@ export function CharacterLooksScreen() {
   // said four and there was no way to ask for fewer.
   const [count, setCount] = useState(4);
   const [selected, setSelected] = useState<string | null>(null);
+  const [showOlder, setShowOlder] = useState(false);
+  const resultsRef = useRef<HTMLDivElement>(null);
   if (!world || !sheet || !sheetId) return null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = kit ? mainPhotoFor(kit) : null;
   const chosenModel = shownImageModel(state, choice.modelId);
-  const pendingLooks = world.referenceTakes.filter(
-    (take) =>
-      take.kind === "look" &&
-      take.reference?.sheetId === sheetId &&
-      !world.referenceReviews.some((review) => review.takeId === take.id),
-  );
-  const sortedPendingLooks = [...pendingLooks].sort((a, b) =>
-    (a.completedAt ?? a.dispatchedAt).localeCompare(b.completedAt ?? b.dispatchedAt),
-  );
-  const images = [
-    ...(kit?.looks ?? []).map((look) => ({
-      key: `look:${look.id}`,
-      path: `references/${sheetId}/${look.file}`,
-      look,
-    })),
-    ...sortedPendingLooks.map((take) => ({
-      key: `take:${take.id}`,
-      path: `references/${sheetId}/takes/${take.id}/${take.media}`,
-      take,
-    })),
-  ];
+  const images = lookGallery(kit, world.referenceTakes, world.referenceReviews, sheetId);
+  // The window is presentation only: the newest lead, and the rest — money already spent,
+  // still promotable — expand in place rather than falling off the end of a slice.
+  const visible = showOlder ? images : images.slice(0, RECENT_LOOKS);
+  const older = images.length - RECENT_LOOKS;
+  const pendingCount = images.reduce((n, image) => n + (image.take !== undefined ? 1 : 0), 0);
   const selectedImage = images.find((image) => image.key === selected);
-  const selectedLook = selectedImage && "look" in selectedImage ? selectedImage.look : undefined;
-  const selectedTake = selectedImage && "take" in selectedImage ? selectedImage.take : undefined;
+  const selectedLook = selectedImage?.look;
+  const selectedTake = selectedImage?.take;
   return (
     <div data-screen="character-looks">
       <CharacterHeader active="looks" />
@@ -879,22 +935,51 @@ export function CharacterLooksScreen() {
               <span>Looks remain optional until you accept one.</span>
             </div>
           ) : (
-            <div className="fy-looks-results__grid">
-              {images.slice(-5).map((image, index) => (
+            <>
+              <div className="fy-looks-results__grid" ref={resultsRef}>
+                {visible.map((image) => (
+                  <button
+                    type="button"
+                    key={image.key}
+                    className={selected === image.key ? "is-selected" : ""}
+                    title={image.take?.prompt ?? image.look?.prompt}
+                    onClick={() => setSelected(image.key)}
+                  >
+                    <Portrait worldSlug={world.meta.slug} path={image.path} label={image.label} radius={12} />
+                    <span>{image.label}</span>
+                  </button>
+                ))}
+              </div>
+              {older > 0 && (
                 <button
                   type="button"
-                  key={image.key}
-                  className={selected === image.key ? "is-selected" : ""}
-                  onClick={() => setSelected(image.key)}
+                  className="fy-looks-results__older"
+                  onClick={() => setShowOlder(!showOlder)}
                 >
-                  <Portrait worldSlug={world.meta.slug} path={image.path} label={`Look ${index + 1}`} radius={12} />
-                  <span>{lookCaption(image) ?? `Look ${index + 1}`}</span>
+                  {showOlder ? `Show the newest ${RECENT_LOOKS}` : `Show ${older} older look${older === 1 ? "" : "s"}`}
                 </button>
-              ))}
-            </div>
+              )}
+            </>
           )}
           <footer>
-            <span>{sortedPendingLooks.length ? "new variations ready" : "Looks never carry by default"}</span>
+            {pendingCount > 0 ? (
+              /* A control, not an announcement: pressing it selects the freshest arrival —
+                 enlarging it and surfacing its Accept — instead of leaving the reader to
+                 hunt for what "ready" refers to. */
+              <button
+                type="button"
+                className="fy-looks-results__fresh"
+                onClick={() => {
+                  const fresh = images.find((image) => image.take !== undefined);
+                  if (fresh) setSelected(fresh.key);
+                  resultsRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+                }}
+              >
+                {pendingCount} new variation{pendingCount === 1 ? "" : "s"} ready
+              </button>
+            ) : (
+              <span>Looks never carry by default</span>
+            )}
             {selectedTake && (
               <Button onClick={() => acceptCharacterLook(world.meta.worldId, sheetId, selectedTake.id)}>
                 Accept look
