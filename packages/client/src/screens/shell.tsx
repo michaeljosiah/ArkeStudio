@@ -3,7 +3,8 @@ import { NavLink, Outlet, useNavigate } from "react-router";
 import { Badge, Button, Callout, Input, StatusDot, Textarea, cx, type StatusDotTone } from "../components/ui.js";
 import { EmptyState } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
-import { Archive, Plus, Sparkle, X } from "../components/icons.js";
+import { Archive, ChevronDown, ChevronRight, Plus, Sparkle, X } from "../components/icons.js";
+import { AgentsPanel } from "./agents.js";
 import { AppChrome } from "../components/chrome.js";
 import type { StartupState } from "../arke-bridge.js";
 import { Loading } from "../components/loading.js";
@@ -1149,7 +1150,6 @@ export function SettingsLayout() {
                     ["appearance", "Appearance"],
                     ["notifications", "Notifications"],
                     ["local-runtime", "Local runtime"],
-                    ["agents", "Agents"],
                     ["who-does-what", "Who does what"],
                     ["sample-world", "Sample world"],
                     ["about", "About"],
@@ -1997,6 +1997,10 @@ const ROUTED_CAPABILITIES: readonly Capability[] = ["video", "image", "voice-tts
 export function SettingsWhoDoesWhatScreen() {
   const { state } = useStore();
   const navigate = useNavigate();
+  // The writing agents fold beneath Advanced (design 54b): the routing defaults are the
+  // everyday answer, the per-agent overrides are the expert's. Closed by default, and a
+  // control rather than a tab — it does not survive navigation.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const manifest = state?.app.manifest ?? null;
   const configured = new Set((state?.app.providers ?? []).filter((p) => p.configured).map((p) => p.id));
   const routing = state?.app.routing ?? { defaults: {}, faults: [] };
@@ -2068,6 +2072,17 @@ export function SettingsWhoDoesWhatScreen() {
         with that dispatch alone
         {manifest ? ` · manifest v${manifest.manifestVersion}` : ""}
       </div>
+      <button
+        type="button"
+        className="fy-set__link"
+        style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)", width: "100%", textAlign: "left" }}
+        aria-expanded={advancedOpen}
+        onClick={() => setAdvancedOpen(!advancedOpen)}
+      >
+        {advancedOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        Advanced · which model runs each writing agent
+      </button>
+      {advancedOpen && <AgentsPanel />}
       {/* The way out, at the foot (40d): every repair this screen can suggest — turn a model back
           on, or find a key for one — is made on the Providers tab. */}
       <div className="fy-set__actions">

@@ -3,7 +3,8 @@ import { Button, Textarea, cx } from "../components/ui.js";
 import { listHarnessModels, setAgentConfig, useStore } from "../lib/store.js";
 
 /**
- * Settings › Agents.
+ * The writing agents, behind Advanced on Who does what (design 54b — this was a settings tab
+ * of its own until Settings asked "which model does this work" on two tabs in two vocabularies).
  *
  * Six assistants do the writing in this app, and until now which model ran them was nobody's
  * business — not even the app's. It never set one, so the harness used whatever it was
@@ -15,7 +16,7 @@ import { listHarnessModels, setAgentConfig, useStore } from "../lib/store.js";
  * restate canon, never stamp versions. The accept gate assumes them, so an agent talked out of
  * them fails in ways that look like application bugs rather than like a changed setting.
  */
-export function SettingsAgentsScreen() {
+export function AgentsPanel() {
   const { state } = useStore();
   const agents = state?.app.agents ?? [];
   const models = state?.app.harnessModels ?? [];
@@ -38,8 +39,7 @@ export function SettingsAgentsScreen() {
   }
 
   return (
-    <div data-screen="settings-agents" className="fy-set">
-      <div className="fy-set__eyebrow">AGENTS</div>
+    <>
       {agents.map((a) => {
         const open = editing === a.name;
         return (
@@ -128,6 +128,6 @@ export function SettingsAgentsScreen() {
         a session already running keeps the settings it started with · the next one picks these
         up{models.length > 0 ? ` · ${models.length} models offered by the harness` : ""}
       </div>
-    </div>
+    </>
   );
 }

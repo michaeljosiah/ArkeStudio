@@ -16,7 +16,6 @@ import {
   ShellChrome,
   WorldPickerScreen,
 } from "./screens/shell.js";
-import { SettingsAgentsScreen } from "./screens/agents.js";
 import { ArtDirectionProposalScreen, ArtDirectionScreen } from "./screens/art-direction.js";
 import { ProposalsScreen } from "./screens/proposals.js";
 import { WorldChatConversationScreen, WorldChatScreen } from "./screens/world-chat.js";
@@ -119,7 +118,8 @@ export function App() {
             <Route path="appearance" element={<SettingsAppearanceScreen />} />
             <Route path="notifications" element={<SettingsNotificationsScreen />} />
             <Route path="local-runtime" element={<SettingsLocalRuntimeScreen />} />
-            <Route path="agents" element={<SettingsAgentsScreen />} />
+            {/* Settings › Agents folded into Who does what (design 54b); the old address keeps working. */}
+            <Route path="agents" element={<Navigate to="/settings/who-does-what" replace />} />
             <Route path="who-does-what" element={<SettingsWhoDoesWhatScreen />} />
             <Route path="sample-world" element={<SettingsSampleWorldScreen />} />
             <Route path="about" element={<SettingsAboutScreen />} />
