@@ -336,7 +336,13 @@ export function estimateMicroUsd(model: ManifestModel, input: EstimateInput): nu
   }
 }
 
-export type CharacterImageWorkflow = "main-photo" | "character-sheet" | "character-look" | "reference-tile";
+export type CharacterImageWorkflow =
+  | "main-photo"
+  | "character-sheet"
+  | "character-look"
+  | "reference-tile"
+  /** A place, not a person (#243) — and so landscape, like the panels it will be stacked into. */
+  | "location-view";
 
 export interface ImageOutputSpec {
   width: number;
@@ -360,7 +366,7 @@ export function characterImageOutput(
   workflow: CharacterImageWorkflow,
   tier?: SizeTier,
 ): ImageOutputSpec {
-  return imageOutput(model, workflow === "character-sheet", tier);
+  return imageOutput(model, workflow === "character-sheet" || workflow === "location-view", tier);
 }
 
 /**

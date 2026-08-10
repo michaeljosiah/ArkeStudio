@@ -174,6 +174,12 @@ interface StoreState {
   >;
   /** Last hand-carried character sheet result by sheet; null status means the picker is open. */
   characterSheetAcceptance: Record<string, { status: "accepted" | "failed" | null; reason?: string }>;
+  /**
+   * Last hand-carried location view result by sheet; null status means the picker is open (issue 243).
+   * "landed" and not "accepted": the upload leaves an unreviewed candidate, and naming it is a
+   * separate press.
+   */
+  locationViewUpload: Record<string, { status: "landed" | "failed" | null; reason?: string }>;
   /** SPEC-013: export lifecycle by exportId. */
   exportsState: Record<string, ExportState>;
   /** SPEC-015: the last import report and filing notices — transient. */
@@ -232,6 +238,7 @@ let current: StoreState = {
   voiceRuntimeTest: null,
   mainPhotoAcceptance: {},
   characterSheetAcceptance: {},
+  locationViewUpload: {},
   exportsState: {},
   importReport: null,
   artifactNotices: [],
@@ -433,6 +440,7 @@ function handleFrame(json: string): void {
       // three-digit hex and fails the token test.
       mainPhotoAcceptance: changedWorld ? {} : current.mainPhotoAcceptance,
       characterSheetAcceptance: changedWorld ? {} : current.characterSheetAcceptance,
+      locationViewUpload: changedWorld ? {} : current.locationViewUpload,
     });
   } else if (current.state) {
     let gateNotices = current.gateNotices;
@@ -599,6 +607,7 @@ function handleFrame(json: string): void {
     let voiceRuntimeTest = current.voiceRuntimeTest;
     let mainPhotoAcceptance = current.mainPhotoAcceptance;
     let characterSheetAcceptance = current.characterSheetAcceptance;
+    let locationViewUpload = current.locationViewUpload;
     if (event.type === "voice.candidates") {
       voiceCandidates = {
         ...voiceCandidates,
@@ -664,6 +673,15 @@ function handleFrame(json: string): void {
       if (event.status === "cancelled") delete characterSheetAcceptance[event.sheetId];
       else {
         characterSheetAcceptance[event.sheetId] = {
+          status: event.status,
+          ...(event.reason ? { reason: event.reason } : {}),
+        };
+      }
+    } else if (event.type === "location-view.upload") {
+      locationViewUpload = { ...locationViewUpload };
+      if (event.status === "cancelled") delete locationViewUpload[event.sheetId];
+      else {
+        locationViewUpload[event.sheetId] = {
           status: event.status,
           ...(event.reason ? { reason: event.reason } : {}),
         };
@@ -778,6 +796,7 @@ function handleFrame(json: string): void {
       voiceRuntimeTest,
       mainPhotoAcceptance,
       characterSheetAcceptance,
+      locationViewUpload,
       exportsState,
       importReport,
       artifactNotices,
@@ -1507,6 +1526,78 @@ export function acceptCharacterSheet(worldId: string, sheetId: string, takeId: s
   send({ kind: "accept-character-sheet", worldId, sheetId, takeId });
 }
 
+// ---- Location views (issue 243) -------------------------------------------------
+
+export function generateLocationView(
+  worldId: string,
+  sheetId: string,
+  input: { name: string; prompt?: string; count: number; establishing?: boolean },
+  choice: { modelId?: string; tier?: SizeTier } = {},
+): string | null {
+  const requestId = queueRequest("generate-location-view", input.name);
+  const sent = send({
+    kind: "generate-location-view",
+    ...(choice.modelId !== undefined ? { modelId: choice.modelId } : {}),
+    ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
+    worldId,
+    sheetId,
+    name: input.name,
+    ...(input.prompt ? { prompt: input.prompt } : {}),
+    count: input.count,
+    ...(input.establishing !== undefined ? { establishing: input.establishing } : {}),
+    requestId,
+  });
+  if (!sent) {
+    pendingQueueRequests.delete(requestId);
+    return null;
+  }
+  return requestId;
+}
+
+/**
+ * `replaceExistingName` is the confirmation, not a convenience: without it a colliding name
+ * refuses, because superseding an angle somebody still wants is a loss they would only notice
+ * later, in a shot.
+ */
+export function acceptLocationView(
+  worldId: string,
+  sheetId: string,
+  takeId: string,
+  input: { name: string; establishing?: boolean; replaceExistingName?: boolean },
+): void {
+  send({
+    kind: "accept-location-view",
+    worldId,
+    sheetId,
+    takeId,
+    name: input.name,
+    ...(input.establishing !== undefined ? { establishing: input.establishing } : {}),
+    ...(input.replaceExistingName !== undefined ? { replaceExistingName: input.replaceExistingName } : {}),
+  });
+}
+
+/** Opens the host picker. Lands an unreviewed candidate; naming it is the separate accept. */
+export function importLocationViewCandidate(worldId: string, sheetId: string): void {
+  if (current.locationViewUpload[sheetId]?.status === null) return;
+  emitChange({
+    ...current,
+    locationViewUpload: { ...current.locationViewUpload, [sheetId]: { status: null } },
+  });
+  if (!send({ kind: "import-location-view-candidate", worldId, sheetId })) {
+    clearLocationViewUpload(sheetId);
+  }
+}
+
+export function useLocationViewUpload() {
+  return useStore().locationViewUpload;
+}
+
+export function clearLocationViewUpload(sheetId: string): void {
+  const locationViewUpload = { ...current.locationViewUpload };
+  delete locationViewUpload[sheetId];
+  emitChange({ ...current, locationViewUpload });
+}
+
 export function generateCharacterLooks(
   worldId: string,
   sheetId: string,
@@ -1957,6 +2048,7 @@ export function __setStateForTest(state: ClientState): void {
     voiceRuntimeTest: null,
     mainPhotoAcceptance: {},
     characterSheetAcceptance: {},
+  locationViewUpload: {},
     exportsState: {},
     importReport: null,
     artifactNotices: [],

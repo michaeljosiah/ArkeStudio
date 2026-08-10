@@ -25,6 +25,7 @@ import {
   GenerateCharacterSheetScreen,
   ReplaceMainPhotoScreen,
 } from "./screens/character-reference.js";
+import { LocationReferenceScreen } from "./screens/location-reference.js";
 import {
   ArtifactsScreen,
   CanonEntryScreen,
@@ -143,6 +144,7 @@ export function App() {
           <Route path="locations" element={<LocationsScreen />} />
           <Route path="locations/new" element={<NewLocationScreen />} />
           <Route path="locations/:sheetId" element={<LocationDetailScreen />} />
+          <Route path="locations/:sheetId/reference" element={<LocationReferenceScreen />} />
           <Route path="factions" element={<FactionsScreen />} />
           <Route path="factions/:sheetId" element={<LocationDetailScreen />} />
           <Route path="canon" element={<CanonScreen />} />

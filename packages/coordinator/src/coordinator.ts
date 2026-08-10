@@ -120,6 +120,7 @@ import {
   recordReferenceReview,
   recordReferenceTake,
   recordUploadedCharacterSheetTake,
+  recordUploadedLocationViewTake,
   referenceReviewDecision,
 } from "./references/takes.js";
 import {
@@ -3901,6 +3902,57 @@ export class Coordinator {
           msg.requestId,
           msg.kind,
           requests.map((request) => request.input),
+        );
+        return;
+      }
+      case "import-location-view-candidate": {
+        const store = this.opts.provider.openStore?.();
+        const pick = this.opts.pickFiles;
+        const report = (status: "landed" | "failed" | "cancelled", reason?: string) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "location-view.upload",
+            worldId: msg.worldId,
+            sheetId: msg.sheetId,
+            status,
+            ...(reason ? { reason } : {}),
+          });
+        // Sheet slugs recur across worlds, so a frame written for a world the user has since
+        // left would file the image under the same-named place somewhere else entirely.
+        if (!store || store.worldId !== msg.worldId || !pick) return;
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
+        if (!sheet || sheet.type !== "location") {
+          report("failed", "That location is no longer available.");
+          return;
+        }
+        const chosen = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
+        const [source] = chosen;
+        if (!source) {
+          report("cancelled");
+          return;
+        }
+        if (chosen.length > 1) {
+          report("failed", "Choose a single image: a view is one angle, not a set.");
+          return;
+        }
+        if (!this.stillOpen(store)) return;
+        const picked = await readPickedImage(source);
+        if (!this.stillOpen(store)) return;
+        if ("error" in picked) {
+          report("failed", picked.error);
+          return;
+        }
+        // Lands unreviewed, exactly where a generated candidate lands. Nothing is named or
+        // accepted here: naming is the acceptance, and doing both in one motion would put the
+        // duplicate-name confirmation behind a file dialog that has already closed.
+        const media = `location-view-upload-${Date.now().toString(36)}${picked.extension}`;
+        const take = await recordUploadedLocationViewTake(store, msg.sheetId, media, picked.data).catch(
+          () => null,
+        );
+        this.refreshIfStillOpen(store);
+        report(
+          take ? "landed" : "failed",
+          take ? undefined : "The view was not added because its permanent copy could not be made. Try again.",
         );
         return;
       }
