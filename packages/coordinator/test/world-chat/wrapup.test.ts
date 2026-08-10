@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
+  ART_DIRECTION_PATH,
   newId,
   type CandidateId,
   type ConversationId,
@@ -254,6 +255,65 @@ describe("what a conversation carries", () => {
     assert.match(content, /status: open/, "and it is open, because it asserts nothing");
     await w.store.close();
   });
+
+  /*
+   * The world's look, changed by talking about it.
+   *
+   * Before this classification existed the nearest thing was canon.create, so "make it painterly"
+   * became a Canon entry titled "Visual art direction" — accepted, applied, and read by nothing
+   * that generates an image. The world looked exactly as it had. That is the failure worth a test:
+   * not that a proposal appears, but that it writes the record generation actually reads.
+   */
+  it("changes the world look rather than writing a note about it", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const before = w.store.getBundle().artDirection;
+    const seq = await withCandidates(w.log, [
+      candidate({
+        classification: "art-direction.change",
+        title: "The world takes a painterly, hand-animated look",
+        draft: { description: "Painterly and hand-animated: visible brushwork, dramatic key light." },
+      } as Partial<WorldChangeCandidate>),
+    ]);
+
+    const result = await wrapUp({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "req-look",
+      expectedConversationSeq: seq,
+      now: NOW,
+    });
+
+    assert.equal(result.proposalIds.length, 1);
+    const staged = (await w.gate.listOpen()).find((p) => p.id === result.proposalIds[0]);
+    assert.ok(staged);
+    assert.equal(
+      staged.kind,
+      "art-direction",
+      "the kind is what the gate computes the look's ripple from — staged as worldbuilding it would arrive as an unexplained file change",
+    );
+    assert.deepEqual(
+      staged.targets.map((t) => t.path),
+      ["art-direction/art-direction.json"],
+      "and it writes the record every generation reads, not a canon entry about it",
+    );
+
+    const written = JSON.parse(
+      await readFile(join(w.dir, ".proposals", staged.id, "art-direction/art-direction.json"), "utf8"),
+    ) as { version: number; description: string; masterLook?: string; history: Array<{ version: number }> };
+    assert.equal(written.version, before.version + 1);
+    assert.match(written.description, /painterly/i);
+    assert.equal(
+      written.masterLook,
+      undefined,
+      "an image of the look being replaced is not an illustration of the one replacing it",
+    );
+    assert.ok(
+      written.history.some((h) => h.version === before.version),
+      "the look it replaces stays in history, because accepted takes are still pinned to it",
+    );
+  });
 });
 
 describe("what wrap-up refuses", () => {
@@ -386,6 +446,108 @@ describe("what wrap-up refuses", () => {
     assert.equal((await w.ours()).length, 1, "and one set of proposals exists, not two");
   });
 
+  /*
+   * The look moving between readiness and the base that staging captures.
+   *
+   * Readiness cannot close that window on its own — there are awaited writes and an id allocation
+   * after it — so the check is repeated once the captured base is known. What matters as much as
+   * the refusal is what it leaves: nothing staged, and no open intent, or the conversation would
+   * refuse every later wrap-up as in-flight until the studio restarted.
+   */
+  it("leaves nothing staged and nothing in flight when the look moves mid-wrap-up", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [
+      candidate({
+        classification: "art-direction.change",
+        title: "The world takes a painterly look",
+        draft: { description: "Painterly and hand-animated." },
+        checks: { ...candidate().checks, required: [], completed: [], basedOnArtDirectionVersion: 3 },
+      } as Partial<WorldChangeCandidate>),
+      candidate({ title: "A rule that would have carried" }),
+    ]);
+
+    // The look moves after readiness has run: the bundle reports a version the draft never saw.
+    const realBundle = w.store.getBundle.bind(w.store);
+    let readinessDone = false;
+    w.store.getBundle = () => {
+      const bundle = realBundle();
+      if (!readinessDone) {
+        readinessDone = true;
+        return bundle;
+      }
+      return { ...bundle, artDirection: { ...bundle.artDirection, version: 99 } };
+    };
+
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "req-look-moved",
+          expectedConversationSeq: seq,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "stale",
+    );
+
+    assert.deepEqual(await w.ours(), [], "the rule staged beside it went too — all or nothing");
+    const { events } = await w.log.read();
+    const last = events.map((e) => e.event.type);
+    assert.ok(last.includes("wrapup.failed"), "the intent is closed, so the next wrap-up is not refused as in-flight");
+  });
+
+  /*
+   * Staging itself can refuse — the world-look singleton does, when another conversation gets
+   * there first — and it refuses between two of the loop's calls. What matters is that a wrap-up
+   * stopped half way leaves nothing: no proposals on the approvals screen with no account of
+   * themselves, and no open intent, which the in-flight guard would read as a reason to refuse
+   * every later wrap-up on this conversation until the studio restarted.
+   */
+  it("rolls the whole set back when staging refuses part way", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [
+      candidate({ title: "An ordinary rule that stages first" }),
+      candidate({
+        classification: "art-direction.change",
+        title: "The world takes a painterly look",
+        draft: { description: "Painterly and hand-animated." },
+        checks: { ...candidate().checks, required: [], completed: [] },
+      } as Partial<WorldChangeCandidate>),
+    ]);
+
+    // Somebody else's look proposal appears between the two stage calls.
+    const realStage = w.gate.stage.bind(w.gate);
+    let staged = 0;
+    w.gate.stage = async (input) => {
+      staged += 1;
+      if (staged === 2) await realStage({ kind: "art-direction", summary: "theirs", source: "elsewhere", targets: [{ path: ART_DIRECTION_PATH, content: "{}" }] }).catch(() => undefined);
+      return realStage(input);
+    };
+
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "req-lost-the-slot",
+          expectedConversationSeq: seq,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError,
+    );
+
+    assert.deepEqual(await w.ours(), [], "the rule staged before it went too — all or nothing");
+    const { events } = await w.log.read();
+    assert.ok(
+      events.some((e) => e.event.type === "wrapup.failed"),
+      "and the intent is closed, so the next wrap-up is not refused as in-flight",
+    );
+  });
+
   it("refuses a conversation that moved on while it was being read", async () => {
     const w = await world();
     const seq = await withCandidates(w.log, [candidate()]);
@@ -463,6 +625,60 @@ describe("readiness on its own", () => {
     const { carried, notCarried } = evaluateReadiness([bare], bundle);
     assert.deepEqual(carried, []);
     assert.equal(notCarried[0]!.reason, "invalid");
+  });
+
+  /*
+   * A look drafted against a look that has since changed.
+   *
+   * This classification carries the whole description, so writing it now would replace whatever
+   * was decided in between with words chosen before it existed — and nothing downstream would
+   * catch it, because the proposal is staged against whatever is current at that moment. Held
+   * back rather than dropped: it stays in the conversation to be asked for again.
+   */
+  function lookChange(basedOn: number) {
+    return candidate({
+      classification: "art-direction.change",
+      title: "The world takes a painterly look",
+      draft: { description: "Painterly and hand-animated." },
+      checks: { ...candidate().checks, required: [], completed: [], basedOnArtDirectionVersion: basedOn },
+    } as Partial<WorldChangeCandidate>);
+  }
+
+  it("holds back a look written against a look that has since changed", () => {
+    const world = { canon: [], sheets: [], proposals: [], artDirection: { version: 5 } } as never;
+    const { carried, notCarried } = evaluateReadiness([lookChange(4)], world);
+    assert.deepEqual(carried, []);
+    assert.equal(notCarried[0]!.reason, "look-moved");
+  });
+
+  it("carries one written against the look that is still current", () => {
+    const world = { canon: [], sheets: [], proposals: [], artDirection: { version: 5 } } as never;
+    const { carried, notCarried } = evaluateReadiness([lookChange(5)], world);
+    assert.equal(carried.length, 1);
+    assert.deepEqual(notCarried, []);
+  });
+
+  /*
+   * There is one world look, and the screen that reviews a proposed one finds it by kind rather
+   * than by id — so a second would be reviewed, accepted or discarded in place of the first.
+   */
+  it("holds back a second look change from the same wrap-up", () => {
+    const world = { canon: [], sheets: [], proposals: [], artDirection: { version: 5 } } as never;
+    const { carried, notCarried } = evaluateReadiness([lookChange(5), lookChange(5)], world);
+    assert.equal(carried.length, 1, "the staged set cannot see itself, so this pass has to");
+    assert.equal(notCarried[0]!.reason, "look-already-proposed");
+  });
+
+  it("holds back a second look change while one is already waiting", () => {
+    const world = {
+      canon: [],
+      sheets: [],
+      proposals: [{ proposal: { kind: "art-direction" } }],
+      artDirection: { version: 5 },
+    } as never;
+    const { carried, notCarried } = evaluateReadiness([lookChange(5)], world);
+    assert.deepEqual(carried, []);
+    assert.equal(notCarried[0]!.reason, "look-already-proposed");
   });
 
   it("holds back an undecided proposition", () => {

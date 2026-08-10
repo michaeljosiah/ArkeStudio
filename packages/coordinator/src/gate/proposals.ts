@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
   CHARACTER_ROLE_MAX,
   newId,
@@ -62,6 +63,14 @@ export type DraftRecovery = {
   rolledForward: number;
   dropped: number;
 };
+
+/** A second world look cannot wait beside the first — see stage(). */
+export class LookAlreadyProposedError extends Error {
+  constructor(readonly proposalId: string) {
+    super(`a change to the world look is already waiting (${proposalId}); decide that one first`);
+    this.name = "LookAlreadyProposedError";
+  }
+}
 
 /**
  * Thrown by the paths that have no outcome type to carry a refusal.
@@ -151,6 +160,21 @@ export class ProposalManager {
   /** Materialise a proposal: copies, bases, `_base/` snapshots, reservation, preview (R-1, R-2). */
   async stage(input: StageInput): Promise<Proposal> {
     return this.store.gateOp(async () => {
+      /*
+       * One open look proposal, enforced where it is actually atomic.
+       *
+       * Readiness checks this too, but from a bundle read before any staging — two conversations
+       * wrapping up together both see none and both proceed. Inside the gate operation the check
+       * and the write cannot be separated, and this is the only place that is true. It matters
+       * because the screen that reviews a proposed look finds it by kind rather than by id, so a
+       * second one is reviewed, accepted or discarded in place of the first, arbitrarily.
+       */
+      if (input.kind === "art-direction") {
+        const open = this.store.getBundle().proposals.find((p) => p.proposal.kind === "art-direction");
+        if (open) {
+          throw new LookAlreadyProposedError(open.proposal.id);
+        }
+      }
       const id = newId("pr");
       const at = this.store.now();
 
@@ -269,7 +293,7 @@ export class ProposalManager {
       source: "form",
       targets: [
         {
-          path: "art-direction/art-direction.json",
+          path: ART_DIRECTION_PATH,
           content: `${JSON.stringify(proposed, null, 2)}\n`,
         },
       ],
@@ -560,10 +584,61 @@ export class ProposalManager {
         const base = await this.readProposalFile(proposalId, `_base/${target.path}`);
 
         if (live === null) {
+          /*
+           * A deleted look file does not mean the world has no look.
+           *
+           * Delete it and the world falls back to the one derived from its tone and genre, so the
+           * generic create branch would leave this proposal restating a version that is no longer
+           * anywhere — reviewed against the deleted file and accepted against the derived one,
+           * which are two different looks. Restating against what the world actually resolves to
+           * keeps the thing reviewed and the thing written the same thing.
+           */
+          if (target.path === ART_DIRECTION_PATH) {
+            const resolvedNow = `${JSON.stringify(currentLookRecord(this.store.getBundle().artDirection), null, 2)}
+`;
+            const restated = restateArtDirection(mine, resolvedNow, this.store.now());
+            if (restated !== null) {
+              await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(target.path)), restated);
+              await atomicWriteFile(
+                join(this.proposalDir(proposalId), "_base", fromPortable(target.path)),
+                resolvedNow,
+              );
+              targets.push({ path: target.path, baseVersion: null, baseHash: null });
+              continue;
+            }
+          }
           // The live file vanished (retired files stay; this is create-vs-nothing): keep mine.
           targets.push({ path: target.path, baseVersion: null, baseHash: null });
           continue;
         }
+        /*
+         * The world look rebases by restatement, not by merging — and before the generic branches,
+         * not after them.
+         *
+         * It is one JSON document rather than prose with a shape, so there are no sections to
+         * merge and mergeMarkdown would rewrite it with frontmatter delimiters, leaving a file
+         * that no longer parses as a look behind a button that promises recovery. A three-way
+         * merge would be the wrong idea even if it worked: a look is one whole description, so
+         * rebasing it means stating this look against the version that is current now.
+         *
+         * The staleness test is the live file rather than `base`, because "staged when the world
+         * had no look at all, and one exists now" is exactly the case the create branch below
+         * would swallow — it would refresh the hash and leave a record whose version and history
+         * were computed against nothing.
+         */
+        if (target.path === ART_DIRECTION_PATH && sha256(live) !== target.baseHash) {
+          const restated = restateArtDirection(mine, live, this.store.now());
+          if (restated === null) {
+            conflicts.push({ path: target.path, field: "Look", base, mine, theirs: live });
+            targets.push({ path: target.path, baseVersion: readVersion(target.path, live), baseHash: sha256(live) });
+            continue;
+          }
+          await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(target.path)), restated);
+          await atomicWriteFile(join(this.proposalDir(proposalId), "_base", fromPortable(target.path)), live);
+          targets.push({ path: target.path, baseVersion: readVersion(target.path, live), baseHash: sha256(live) });
+          continue;
+        }
+
         if (base === null || sha256(live) === target.baseHash) {
           // Created by this proposal, or not stale: rebase just refreshes the base record.
           targets.push({
@@ -611,10 +686,46 @@ export class ProposalManager {
       if (!conflict) throw new Error(`no conflict on ${path}#${field}`);
       const current = await this.readProposalFile(proposalId, path);
       if (current === null) throw new Error(`${path} missing from proposal`);
-      await atomicWriteFile(
-        join(this.proposalDir(proposalId), fromPortable(path)),
-        applyResolution(path, current, conflict, choice),
-      );
+      /*
+       * Choosing a side of a world-look conflict takes that whole document.
+       *
+       * The conflict only exists because one of the two would not parse, and its "field" is the
+       * entire record rather than a section. applyResolution writes Markdown — it would wrap the
+       * chosen JSON in frontmatter and produce something no longer readable as a look, which is
+       * the failure the conflict was raised to prevent.
+       */
+      if (path === ART_DIRECTION_PATH) {
+        /*
+         * Neither side is choosable while the live look is unreadable.
+         *
+         * The commit gate parses the live record before writing the next version, so it would
+         * throw whichever side was picked — and the screen would have said the conflict was
+         * resolved. A control that reports success and cannot succeed is worse than no control:
+         * the file has to be repaired first, and saying so is the only honest answer here.
+         */
+        const live = await this.readLive(path);
+        if (live === null || !parsesAsLook(live)) {
+          throw new Error(
+            `${path} cannot be read as a world look, so neither side can be accepted; repair the file first`,
+          );
+        }
+      }
+      let resolved: string;
+      if (path === ART_DIRECTION_PATH) {
+        // The side being written has to be a look as well. Guarding only the live document left
+        // "mine" free to write the malformed staged one, which the commit gate then throws on —
+        // after this had reported the conflict resolved.
+        const chosen = (choice === "mine" ? conflict.mine : conflict.theirs) ?? current;
+        if (!parsesAsLook(chosen)) {
+          throw new Error(
+            `the ${choice} side of ${path} cannot be read as a world look, so it cannot be accepted`,
+          );
+        }
+        resolved = chosen;
+      } else {
+        resolved = applyResolution(path, current, conflict, choice);
+      }
+      await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(path)), resolved);
       const conflicts = (proposal.conflicts ?? []).map((c) =>
         c.path === path && c.field === field ? { ...c, resolution: choice } : c,
       );
@@ -638,6 +749,7 @@ export class ProposalManager {
     const bundle = this.store.getBundle();
     if (proposal.kind === "art-direction") {
       const reach = bundle.artDirection.reach;
+      const pinnedByThisChange = reach.earlierAcceptedTakes + (reach.acceptedTakesAtCurrentVersion ?? 0);
       items.push(
         {
           kind: "visual-assets-keep-look",
@@ -658,8 +770,16 @@ export class ProposalManager {
         },
         {
           kind: "takes-pinned-to-old-version",
-          summary: `${reach.earlierAcceptedTakes} accepted takes remain pinned to their original look`,
-          targets: Array.from({ length: reach.earlierAcceptedTakes }, (_, index) => `accepted-take-${index + 1}`),
+          /*
+           * Everything already behind, plus everything made under the look this replaces.
+           *
+           * Counting only what was already old described the consequence of the *previous*
+           * change: the takes made since — often all of them, and the ones the person is
+           * actually thinking of — became pinned the moment this landed and were not in the
+           * number they were shown before accepting.
+           */
+          summary: `${pinnedByThisChange} accepted takes remain pinned to their original look`,
+          targets: Array.from({ length: pinnedByThisChange }, (_, index) => `accepted-take-${index + 1}`),
         },
       );
       if (bundle.artDirection.overrides.length > 0) {
@@ -812,6 +932,74 @@ function isRetired(path: string, raw: string): boolean {
     return MarkdownFile.parse(raw).data["retired"] === true;
   } catch {
     return false;
+  }
+}
+
+/** Whether a file on disk can still be read as a world look. */
+function parsesAsLook(raw: string): boolean {
+  try {
+    ArtDirectionRecordSchema.parse(JSON.parse(raw));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The world's resolved look as a record, for the case where no file holds it.
+ *
+ * A world without an explicit art-direction file still has a look, derived from its tone and
+ * genre. `ResolvedArtDirection` carries everything the record needs plus reach and overrides,
+ * which are computed rather than stored — so this is the narrowing, not a new fact.
+ */
+function currentLookRecord(resolved: {
+  version: number;
+  description: string;
+  masterLook?: string;
+  acceptedAt?: string;
+  history: ReadonlyArray<{ version: number; description: string; masterLook?: string; acceptedAt: string }>;
+}): unknown {
+  return {
+    version: resolved.version,
+    description: resolved.description,
+    ...(resolved.masterLook ? { masterLook: resolved.masterLook } : {}),
+    acceptedAt: resolved.acceptedAt ?? new Date(0).toISOString(),
+    history: resolved.history,
+  };
+}
+
+/**
+ * The proposed look, stated against the version that is current now.
+ *
+ * Keeps what the proposal is actually for — its description and master look — and takes
+ * everything positional from the live record: the version it now follows, and a history with the
+ * live version appended, so accepted takes still resolve against the look they were made under.
+ *
+ * Null when either side will not parse. That is a real conflict rather than something to paper
+ * over: writing a guess here would put an unreadable look behind an Accept button.
+ */
+function restateArtDirection(mine: string, live: string, now: string): string | null {
+  try {
+    const proposed = ArtDirectionRecordSchema.parse(JSON.parse(mine));
+    const current = ArtDirectionRecordSchema.parse(JSON.parse(live));
+    const rebased = ArtDirectionRecordSchema.parse({
+      version: current.version + 1,
+      description: proposed.description,
+      ...(proposed.masterLook ? { masterLook: proposed.masterLook } : {}),
+      acceptedAt: now,
+      history: [
+        ...current.history,
+        {
+          version: current.version,
+          description: current.description,
+          ...(current.masterLook ? { masterLook: current.masterLook } : {}),
+          acceptedAt: current.acceptedAt,
+        },
+      ],
+    });
+    return `${JSON.stringify(rebased, null, 2)}\n`;
+  } catch {
+    return null;
   }
 }
 

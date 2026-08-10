@@ -145,6 +145,7 @@ import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
 import { titleFrom } from "./world-chat/title.js";
 import { describeEntryContext } from "./world-chat/entry-context.js";
+import { currentLookContext } from "./world-chat/context.js";
 import { discoverConversations } from "./world-chat/discover.js";
 import { recordResolution, sendBack } from "./world-chat/resolution.js";
 import { WorldChatStore, conversationDir } from "./world-chat/store.js";
@@ -384,7 +385,7 @@ export class Coordinator {
   private readonly changeLog: ChangeLog;
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
   private readonly worldQuery: WorldQueryServer;
-  private readonly worldChatRunners = new Map<string, WorldChatRunner>();
+  private readonly worldChatRunners = new Map<string, { runner: WorldChatRunner; store: WorldStore }>();
   private readonly grants: GrantStore | null;
   private readonly authoring: AuthoringService | null;
   private readonly genesis: GenesisService | null;
@@ -4216,7 +4217,23 @@ export class Coordinator {
    */
   private worldChatRunner(store: WorldStore): WorldChatRunner {
     const existing = this.worldChatRunners.get(store.worldId);
-    if (existing) return existing;
+    /*
+     * Cached per world, but only while it is the same open store.
+     *
+     * Close a world and reopen it and the provider hands back a new WorldStore, while these
+     * callbacks still close over the old one — so every later prompt would carry the look as it
+     * was before the close, and record that version on its drafts. Wrap-up, reading the store
+     * that is actually open, would then reject every drafted look as moved: conversational look
+     * editing broken until restart, with nothing to point at.
+     *
+     * A runner mid-turn is kept regardless. Replacing it would lose the in-flight run — the thing
+     * a cancel needs — and a turn already talking to a model is a worse thing to drop than a
+     * stale read is to carry for one more turn.
+     */
+    if (existing) {
+      if (existing.store === store || existing.runner.hasRunning()) return existing.runner;
+      this.worldChatRunners.delete(store.worldId);
+    }
 
     const leases = new QueryLeaseRegistry(() => this.opts.provider.openStore?.()?.worldId ?? null);
     const attachments = new WorldChatAttachmentStore(store.dir);
@@ -4234,6 +4251,19 @@ export class Coordinator {
 
     const runner = new WorldChatRunner({
       adapter: this.opts.adapter ?? null,
+      /*
+       * A look can only be rewritten by something that can read it — see currentLookContext.
+       *
+       * From this runner's own world, not from whichever store happens to be open: a turn can
+       * still be reading when somebody opens another world, and the provider's selection would
+       * have followed them. That would put world B's look, verbatim, in world A's prompt — one
+       * world's content shown while talking about another, and an invitation to rewrite A's look
+       * into B's words.
+       */
+      worldContext: () => currentLookContext(store.getBundle().artDirection),
+      // Read at the same instant as the look above, and from the same world, so what a draft
+      // says it was based on is what the model was actually shown.
+      artDirectionVersion: () => store.getBundle().artDirection.version,
       prepare: async ({ conversationId, runId, attachmentIds }) => {
         const lease = leases.mint({
           worldId: store.worldId,
@@ -4274,10 +4304,9 @@ export class Coordinator {
           const outcome = await retrieval.call(leaseToken, tool, { id }).catch(() => null);
           if (outcome) produced.push(outcome.receipt);
         }
-        return {
-          receipts: produced,
-          canonRevision: this.opts.provider.openStore?.()?.getBundle().meta.canonRevision ?? 0,
-        };
+        // This runner's own world, for the same reason worldContext reads from it: the provider's
+        // selection follows whatever the person opened while the turn was still running.
+        return { receipts: produced, canonRevision: store.getBundle().meta.canonRevision };
       },
       describeEntry: (context) => describeEntryContext(context, store.getBundle()),
       onProgress: (conversationId, label) => {
@@ -4307,7 +4336,7 @@ export class Coordinator {
       now: () => new Date().toISOString(),
     });
 
-    this.worldChatRunners.set(store.worldId, runner);
+    this.worldChatRunners.set(store.worldId, { runner, store });
     return runner;
   }
 
@@ -4348,6 +4377,8 @@ export class Coordinator {
         // than having been abandoned by a crash. Read through the same accessor that made the
         // runner, so a conversation mid-turn reports running even on the first projection.
         liveRun: this.worldChatRunner(store).isRunning(loaded.id),
+        // So the rail's count matches what wrap-up will actually carry — see ProjectOptions.
+        lookAlreadyProposed: bundle.proposals.some((staged) => staged.proposal.kind === "art-direction"),
       }),
     );
     this.transport.broadcastSnapshot();

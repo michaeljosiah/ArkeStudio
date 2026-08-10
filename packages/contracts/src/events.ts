@@ -469,7 +469,15 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("world-chat.wrap-up-refused"),
       conversationId: z.string().min(1),
       requestId: z.string().min(1),
-      reason: z.enum(["stale", "nothing-to-carry", "materialise", "too-many", "in-flight", "unknown"]),
+      reason: z.enum([
+        "stale",
+        "nothing-to-carry",
+        "materialise",
+        "too-many",
+        "in-flight",
+        "look-already-proposed",
+        "unknown",
+      ]),
       detail: z.string().min(1).max(300),
     })
     .strict(),

@@ -25,6 +25,7 @@ import { SceneSchema, SelectionsSchema } from "./scene.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
 import { VoiceRuntimeStatusSchema } from "./voice.js";
 import { IDLE_UPDATE_STATE, UpdateStateSchema } from "./update.js";
+import { sheetDir } from "./sheet-shapes.js";
 import {
   CanonEntrySchema,
   ChapterSummarySchema,
@@ -32,6 +33,7 @@ import {
   SheetSchema,
   StoryOverviewSchema,
   WorldMetaSchema,
+  type SheetKind,
 } from "./world.js";
 
 /**
@@ -323,3 +325,75 @@ export const ClientStateSchema = z
   })
   .strict();
 export type ClientState = z.infer<typeof ClientStateSchema>;
+
+// ---------------------------------------------------------------------------
+// Work that has been asked for and has not landed (issue 228)
+// ---------------------------------------------------------------------------
+
+/**
+ * A sheet the studio was asked to draft, between the asking and the arrival.
+ *
+ * The gap is real and it is long: staging the skeleton takes milliseconds, but the agent that
+ * writes the sheet runs for seconds to minutes. Through all of it the sheet is in `.proposals/`
+ * and not in `world.sheets`, so every list that reads `world.sheets` — Cast, Locations,
+ * Factions, the hub fan — correctly showed nothing, and therefore showed its *empty state*. A
+ * submitted action looked like a failed one, and the obvious response was to submit it again.
+ *
+ * Nothing new is recorded to fix that. The proposal is already in the snapshot the moment the
+ * request lands; this reads the pending sheets back out of it.
+ */
+export interface PendingSheet {
+  proposalId: string;
+  /** What it will be called, taken from the staged file rather than from the request. */
+  name: string;
+  /** Where it will live once accepted, world-relative. */
+  path: string;
+}
+
+/** "New location: The Bell Market" → "The Bell Market". */
+function nameFromSummary(summary: string): string | null {
+  const at = summary.indexOf(": ");
+  const tail = at > 0 ? summary.slice(at + 2).trim() : "";
+  return tail.length > 0 ? tail : null;
+}
+
+/** "locations/the-bell-market.md" → "the bell market". The last resort, never the first. */
+function nameFromPath(path: string): string {
+  return (path.split("/").pop() ?? path).replace(/\.md$/i, "").replace(/-/g, " ");
+}
+
+/**
+ * The sheets of one kind that are on their way (issue 228).
+ *
+ * Matched on the target path, because that is what decides which list a sheet lands in — the
+ * summary is display copy and the slug is not a type.
+ *
+ * Two kinds of proposal can bring a sheet into being, and they are read differently. A
+ * `new-sheet` is a creation by definition — the form staged one skeleton — so its target counts
+ * even when the review could not be computed; a file that will not parse is exactly when
+ * someone most needs to see that something is there, and the name degrades through the summary
+ * to the slug rather than the row disappearing. A `worldbuilding` proposal is the several
+ * changes one World Chat turned into, and it mixes creations with amendments freely, so only a
+ * target the review calls a create counts. Without a review there is no way to tell those
+ * apart, and inventing a drafting card for an edit to a sheet already in the list would double
+ * it on screen.
+ */
+export function pendingSheets(proposals: readonly StagedProposal[], kind: SheetKind): PendingSheet[] {
+  const prefix = `${sheetDir(kind)}/`;
+  const pending: PendingSheet[] = [];
+  for (const staged of proposals) {
+    const creation = staged.proposal.kind === "new-sheet";
+    if (!creation && staged.proposal.kind !== "worldbuilding") continue;
+    for (const target of staged.proposal.targets) {
+      if (!target.path.startsWith(prefix)) continue;
+      const reviewed = staged.review?.targets.find((candidate) => candidate.path === target.path);
+      if (reviewed ? reviewed.action !== "create" : !creation) continue;
+      pending.push({
+        proposalId: staged.proposal.id,
+        name: reviewed?.label ?? nameFromSummary(staged.proposal.summary) ?? nameFromPath(target.path),
+        path: target.path,
+      });
+    }
+  }
+  return pending;
+}

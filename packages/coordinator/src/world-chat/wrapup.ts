@@ -6,7 +6,7 @@ import {
   type ProposalOpenChoice,
   type WorldChangeCandidate,
 } from "@arke-studio/contracts";
-import type { ProposalManager } from "../gate/proposals.js";
+import { LookAlreadyProposedError, type ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "../world/store.js";
 import { foldConversation } from "./fold.js";
 import { canonIdsNeeded, materialiseCandidate, MaterialiseError, planIdentities } from "./materialise.js";
@@ -46,7 +46,13 @@ export interface WrapUpResult {
 
 export class WrapUpError extends Error {
   constructor(
-    readonly reason: "stale" | "nothing-to-carry" | "materialise" | "too-many" | "in-flight",
+    readonly reason:
+      | "stale"
+      | "nothing-to-carry"
+      | "materialise"
+      | "too-many"
+      | "in-flight"
+      | "look-already-proposed",
     message: string,
   ) {
     super(message);
@@ -213,7 +219,7 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
   try {
     for (const candidate of carried) {
       built.push(
-        materialiseCandidate(candidate, identities, bundle, at.slice(0, 10), () => identities.canonIds[nextCanon++]!),
+        materialiseCandidate(candidate, identities, bundle, at, () => identities.canonIds[nextCanon++]!),
       );
     }
   } catch (err) {
@@ -232,30 +238,93 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
   const openChoices: WrapUpResult["openChoices"] = [];
   const threadProposalIds: string[] = [];
 
-  for (const item of built) {
-    const choice = openChoiceFor(item.candidate);
-    const proposal = await input.gate.stage({
-      kind: "worldbuilding",
-      summary: item.candidate.title,
-      source: `world-chat:${input.conversationId}`,
-      targets: item.targets,
-      preReservedCanonIds: item.reservedCanonIds,
-      worldChatOrigins: [
-        {
-          requestId: input.requestId,
-          conversationId: input.conversationId,
-          candidateId: item.candidate.id,
-          candidateRevision: item.candidate.revision,
-          ...(item.candidate.groupId ? { groupId: item.candidate.groupId } : {}),
-          targetPaths: item.targets.map((t) => t.path),
-          fields: item.fields,
-        },
-      ],
-      ...(choice ? { openChoices: [choice] } : {}),
-    });
-    proposals.push(proposal);
-    if (choice) openChoices.push({ ...choice, proposalId: proposal.id });
-    if (item.candidate.classification === "canon.thread") threadProposalIds.push(proposal.id);
+  /*
+   * Everything this wrap-up stages, or nothing (R-42a).
+   *
+   * Staging can refuse for reasons only the gate knows — the world look singleton is one, and it
+   * is a refusal raised between two of these calls when another conversation gets there first.
+   * Whatever the reason, a wrap-up that stops half way must not leave proposals on the approvals
+   * screen with no account of themselves, and must not leave its intent open: the in-flight guard
+   * would then refuse every later wrap-up on this conversation until the studio restarted, which
+   * turns one lost race into a feature that stays broken.
+   *
+   * So the cleanup is here, around the whole loop, rather than at any one refusal inside it.
+   */
+  try {
+    for (const item of built) {
+      const choice = openChoiceFor(item.candidate);
+      const proposal = await input.gate.stage({
+        /*
+         * A world-look change is an art-direction proposal wherever it came from.
+         *
+         * The kind is not a label: the gate computes an art-direction proposal's ripple from it —
+         * which reference kits see the new look, which productions inherit it, which accepted
+         * takes stay pinned to the old one. Staged as "worldbuilding" it would arrive at the
+         * approvals screen as a file change with none of that said, which is the wrong thing to
+         * be quiet about: this is the one proposal whose consequences reach work already made.
+         */
+        kind: item.candidate.classification === "art-direction.change" ? "art-direction" : "worldbuilding",
+        summary: item.candidate.title,
+        source: `world-chat:${input.conversationId}`,
+        targets: item.targets,
+        preReservedCanonIds: item.reservedCanonIds,
+        worldChatOrigins: [
+          {
+            requestId: input.requestId,
+            conversationId: input.conversationId,
+            candidateId: item.candidate.id,
+            candidateRevision: item.candidate.revision,
+            ...(item.candidate.groupId ? { groupId: item.candidate.groupId } : {}),
+            targetPaths: item.targets.map((t) => t.path),
+            fields: item.fields,
+          },
+        ],
+        ...(choice ? { openChoices: [choice] } : {}),
+      });
+      // Recorded before anything else can fail, so the rollback below knows about it.
+      proposals.push(proposal);
+
+      /*
+       * The look was materialised from a bundle read before any of this, and staging captures its
+       * base now — so a look accepted in between would be replaced by a record computed against
+       * the one before it, and nothing downstream would call that stale: the proposal's base is
+       * the new file. Readiness cannot close that window on its own, because there are awaited
+       * writes and an id allocation between it and here.
+       */
+      if (item.candidate.classification === "art-direction.change") {
+        const basedOn = item.candidate.checks.basedOnArtDirectionVersion;
+        const now = input.store.getBundle().artDirection.version;
+        if (basedOn !== undefined && basedOn !== now) {
+          throw new WrapUpError(
+            "stale",
+            "The world look changed while this was being written, so nothing was. Open the conversation again and ask for the look you want from where it is now.",
+          );
+        }
+      }
+
+      if (choice) openChoices.push({ ...choice, proposalId: proposal.id });
+      if (item.candidate.classification === "canon.thread") threadProposalIds.push(proposal.id);
+    }
+  } catch (err) {
+    for (const staged of proposals) {
+      await input.gate.discard(staged.id).catch(() => {
+        /* recovery reconciles what will not go now; the refusal below is the answer either way */
+      });
+    }
+    const refusal =
+      err instanceof WrapUpError
+        ? err
+        : err instanceof LookAlreadyProposedError
+          ? new WrapUpError(
+              "look-already-proposed",
+              "A change to the world look is already waiting to be decided. Decide that one, then wrap this up.",
+            )
+          : new WrapUpError("materialise", "One of these changes could not be staged, so none were.");
+    await log.append(
+      { type: "wrapup.failed", requestId: input.requestId, safeDetail: refusal.reason },
+      { at: input.now() },
+    );
+    throw refusal;
   }
 
   /**

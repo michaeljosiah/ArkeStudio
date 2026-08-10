@@ -22,6 +22,9 @@ import type {
 
 /** How a subject is described in the panel: "sheet · v4", "new rule", "canon · CANON-018". */
 function subjectKindOf(candidate: WorldChangeCandidate, sheetVersion?: (slug: string) => number | null): string {
+  // The world look is not one of the world's entities, so no subject ref describes it: whatever
+  // the model names, "This world · world" is true and says nothing about what is changing.
+  if (candidate.classification === "art-direction.change") return "world look";
   const subject = candidate.subject;
   if (subject.kind === "new") {
     switch (candidate.classification) {
@@ -44,6 +47,7 @@ function subjectKindOf(candidate: WorldChangeCandidate, sheetVersion?: (slug: st
 }
 
 function subjectLabelOf(candidate: WorldChangeCandidate, sheetName?: (slug: string) => string | null): string {
+  if (candidate.classification === "art-direction.change") return "Art direction";
   const subject = candidate.subject;
   if (subject.kind === "new") return subject.label;
   if (subject.kind === "canon") return subject.entryId;
@@ -58,10 +62,11 @@ function subjectLabelOf(candidate: WorldChangeCandidate, sheetName?: (slug: stri
  * caption has to say how many of the points become proposals, and saying "nine" when three would
  * carry would be a promise the next screen breaks.
  */
-function wouldCarry(candidate: WorldChangeCandidate): boolean {
+function wouldCarry(candidate: WorldChangeCandidate, options: ProjectOptions = {}): boolean {
   if (candidate.classification === "undecided") return false;
   if (candidate.classification === "media.image-opportunity") return false;
   if (candidate.classification === "canon.thread") return candidate.settledness === "unresolved";
+  if (candidate.classification === "art-direction.change" && options.lookAlreadyProposed === true) return false;
   return candidate.settledness === "settled";
 }
 
@@ -152,6 +157,16 @@ export interface ProjectOptions {
    * and never offers Stop, which is indistinguishable from having sent nothing at all.
    */
   liveRun?: boolean;
+  /**
+   * A change to the world look is already waiting to be decided.
+   *
+   * Supplied for the same reason as `liveRun`: the fold cannot see the world's staged proposals,
+   * and readiness will refuse a second look on those grounds at wrap-up. Without it the rail
+   * counts such a point as one that carries, the caption promises "1 of 1 points become
+   * proposals", and pressing the button returns nothing-to-carry — the screen having promised
+   * something the coordinator was always going to refuse.
+   */
+  lookAlreadyProposed?: boolean;
 }
 
 export function projectPoints(
@@ -168,7 +183,7 @@ export function projectPoints(
       subject: subjectLabelOf(candidate, options.sheetName).slice(0, 160),
       subjectKind: subjectKindOf(candidate, options.sheetVersion).slice(0, 80),
       text: candidate.title.slice(0, 400),
-      settled: wouldCarry(candidate),
+      settled: wouldCarry(candidate, options),
     }));
 }
 

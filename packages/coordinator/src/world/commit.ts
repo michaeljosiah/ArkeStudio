@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rm, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
   deriveArtDirectionDescription,
   newId,
@@ -134,7 +135,7 @@ export function classify(path: string): Classified {
   if (m) return { track: "story", production: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/production\.json$/.exec(path);
   if (m) return { track: "production-meta", production: m[1]! };
-  if (path === "art-direction/art-direction.json") return { track: "art-direction" };
+  if (path === ART_DIRECTION_PATH) return { track: "art-direction" };
   return { track: "unversioned" };
 }
 

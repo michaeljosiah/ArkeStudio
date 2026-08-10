@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ART_DIRECTION_PATH, ArtDirectionRecordSchema } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
+import { projectReview } from "../../src/gate/review.js";
 import { WorldStore } from "../../src/world/store.js";
 import { readChanges } from "../../src/world/change-writer.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
+import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
@@ -189,6 +192,227 @@ describe("accept: one commit, versions derived (R-11, R-12)", () => {
     assert.equal(meta["status"], "cutting");
     assert.equal("version" in meta, false, "unversioned per §2.4.1");
     await store.close();
+  });
+});
+
+/**
+ * The world look is the one proposal target that is not Markdown, and the generic gate assumed
+ * everything was. Both of these are about the JSON surviving a path built for prose.
+ */
+describe("a world look through the generic gate", () => {
+  /**
+   * Move the world's look on without staging a second proposal.
+   *
+   * Only one look change may wait at a time now, so a test that needs a *stale* proposal cannot
+   * make one by staging a rival — it writes the next accepted look straight to disk, which is what
+   * another accept would have left behind anyway.
+   */
+  async function moveLookOn(dir: string, description: string): Promise<void> {
+    const path = join(dir, "art-direction", "art-direction.json");
+    const current = JSON.parse(await readFile(path, "utf8")) as {
+      version: number;
+      description: string;
+      acceptedAt: string;
+      history: Array<{ version: number; description: string; acceptedAt: string }>;
+    };
+    const next = {
+      version: current.version + 1,
+      description,
+      acceptedAt: CLOCK(),
+      history: [
+        ...current.history,
+        { version: current.version, description: current.description, acceptedAt: current.acceptedAt },
+      ],
+    };
+    await writeFile(path, `${JSON.stringify(next, null, 2)}
+`, "utf8");
+  }
+
+  /** An open store holds the event loop, so a failure before close hangs the file (see test/tmp). */
+  async function openGateSafely() {
+    const opened = await openGate();
+    closeOnCleanup(() => opened.store.close());
+    return opened;
+  }
+
+  it("shows the proposed look on the review, rather than an empty one", async () => {
+    const { dir, gate } = await openGateSafely();
+    const proposal = await gate.stageArtDirectionChange(
+      "Painterly and hand-animated, with visible brushwork.",
+      null,
+    );
+    const staged = await readFile(join(dir, ".proposals", proposal.id, "art-direction", "art-direction.json"), "utf8");
+
+    const review = projectReview({
+      proposal,
+      proposed: (path) => (path === ART_DIRECTION_PATH ? staged : null),
+      base: () => null,
+    });
+
+    const target = review.targets.find((t) => t.path === ART_DIRECTION_PATH);
+    assert.ok(target, "the look is a reviewable target, not a file the panel silently skips");
+    const look = target.fields.find((f) => f.field === "Look");
+    assert.ok(look, "and its description is the field a reviewer has to read before accepting");
+    assert.match(look.proposed ?? "", /visible brushwork/);
+  });
+
+  /*
+   * A world always has a look, even before it has a file for one: until somebody changes it, the
+   * look is derived from the world's tone and genre. So the first change stages as a create with
+   * no base, and the review showed a new art direction with no `was` — never naming the words
+   * about to be replaced, which are the only reason to read the screen.
+   */
+  it("names the inherited look a first change replaces", async () => {
+    const { dir, gate } = await openGateSafely();
+    const inherited = JSON.parse(await readFile(join(dir, "art-direction", "art-direction.json"), "utf8")) as {
+      description: string;
+    };
+    await rm(join(dir, "art-direction", "art-direction.json"));
+
+    const proposal = await gate.stageArtDirectionChange("Painterly, with visible brushwork.", null);
+    const staged = await readFile(join(dir, ".proposals", proposal.id, "art-direction", "art-direction.json"), "utf8");
+
+    const review = projectReview({ proposal, proposed: () => staged, base: () => null });
+    const target = review.targets.find((t) => t.path === ART_DIRECTION_PATH);
+    assert.equal(target?.action, "amend", "changing the look is an amendment even the first time");
+    const look = target?.fields.find((f) => f.field === "Look");
+    assert.equal(look?.before, inherited.description, "the words being replaced are on the screen");
+    assert.match(look?.proposed ?? "", /visible brushwork/);
+  });
+
+  /*
+   * Staged when the world had no look at all, and one exists by the time it is rebased.
+   *
+   * `base` is null for a create, and the create branch returns before anything else runs — so
+   * this used to refresh the hash and leave a record whose version and history had been computed
+   * against nothing, presented for review as though it followed the look now on disk.
+   */
+  it("restates a look staged before the world had one", async () => {
+    const { dir, gate } = await openGateSafely();
+    const noLook = join(dir, "art-direction", "art-direction.json");
+    const had = await readFile(noLook, "utf8");
+    await rm(noLook);
+
+    const mine = await gate.stageArtDirectionChange("Painterly, with visible brushwork.", null);
+    assert.equal(mine.targets[0]!.baseHash, null, "staged as a create, because there was no look");
+
+    // The look exists again — as though another proposal created it first.
+    await writeFile(noLook, had, "utf8");
+    const { conflicts } = await gate.rebase(mine.id);
+    assert.deepEqual(conflicts, []);
+
+    const restated = JSON.parse(
+      await readFile(join(dir, ".proposals", mine.id, "art-direction", "art-direction.json"), "utf8"),
+    ) as { version: number; history: Array<{ version: number }> };
+    const live = JSON.parse(had) as { version: number };
+    assert.equal(restated.version, live.version + 1, "it follows the look that is actually there now");
+    assert.ok(
+      restated.history.some((h) => h.version === live.version),
+      "and that look is in its history rather than nowhere",
+    );
+  });
+
+  /*
+   * When one side will not parse there is a conflict, and choosing a side takes that whole
+   * document. Sent through the Markdown resolver instead, the chosen JSON came back wrapped in
+   * frontmatter — no longer readable as a look, produced by the control offered to repair it.
+   */
+  it("resolves a look conflict to a document that is still a look", async () => {
+    const { dir, gate } = await openGateSafely();
+    const mine = await gate.stageArtDirectionChange("Painterly, with visible brushwork.", null);
+
+    // The staged side is the unreadable one this time, so the live look can still be chosen.
+    const staged = join(dir, ".proposals", mine.id, "art-direction", "art-direction.json");
+    await writeFile(staged, "{ this is not a look", "utf8");
+    await writeFile(
+      join(dir, "art-direction", "art-direction.json"),
+      await readFile(join(dir, ".proposals", mine.id, "_base", "art-direction", "art-direction.json"), "utf8"),
+      "utf8",
+    );
+    // Move the live look on so the rebase is not a no-op.
+    await moveLookOn(dir, "Ink and wash.");
+
+    const { conflicts } = await gate.rebase(mine.id);
+    assert.equal(conflicts.length, 1, "a side has to be chosen; it cannot be merged");
+    assert.equal(conflicts[0]!.field, "Look");
+
+    await gate.resolveConflict(mine.id, ART_DIRECTION_PATH, "Look", "theirs");
+
+    const resolved = await readFile(staged, "utf8");
+    assert.doesNotMatch(resolved, /^---/, "no frontmatter was wrapped around it");
+    const record = ArtDirectionRecordSchema.parse(JSON.parse(resolved));
+    assert.match(record.description, /Ink and wash/, "and it is the side that was chosen");
+  });
+
+  /*
+   * The commit gate parses the live record before writing the next version, so with an unreadable
+   * one on disk neither side can actually be accepted. Offering a choice that reports success and
+   * then cannot commit is worse than refusing: the file has to be repaired first, and only this
+   * says so.
+   */
+  it("refuses to resolve a look conflict while the live look is unreadable", async () => {
+    const { dir, gate } = await openGateSafely();
+    const mine = await gate.stageArtDirectionChange("Painterly, with visible brushwork.", null);
+
+    await writeFile(join(dir, "art-direction", "art-direction.json"), "{ this is not a look", "utf8");
+    const { conflicts } = await gate.rebase(mine.id);
+    assert.equal(conflicts.length, 1);
+
+    await assert.rejects(
+      () => gate.resolveConflict(mine.id, ART_DIRECTION_PATH, "Look", "mine"),
+      /repair the file first/,
+    );
+  });
+
+  /*
+   * The number a person reads before accepting. It counted only takes already pinned to an older
+   * look — the consequence of the *previous* change — while the takes made under the look being
+   * replaced, usually the ones they are thinking of, become pinned the moment this lands.
+   */
+  it("counts takes made under the current look as pinned by this change", async () => {
+    const { store, gate } = await openGateSafely();
+    // Delegating rather than snapshotting: staging refreshes the real bundle, and a frozen copy
+    // would not contain the proposal this test then looks for.
+    const realBundle = store.getBundle.bind(store);
+    store.getBundle = () => {
+      const bundle = realBundle();
+      return {
+        ...bundle,
+        artDirection: {
+          ...bundle.artDirection,
+          reach: { ...bundle.artDirection.reach, earlierAcceptedTakes: 2, acceptedTakesAtCurrentVersion: 3 },
+        },
+      };
+    };
+
+    const proposal = await gate.stageArtDirectionChange("Ink and wash.", null);
+    const staged = store.getBundle().proposals.find((item) => item.proposal.id === proposal.id);
+    const pinned = staged?.ripple?.items.find((item) => item.kind === "takes-pinned-to-old-version");
+    assert.equal(pinned?.targets.length, 5, "the two already behind, and the three about to be");
+    assert.match(pinned?.summary ?? "", /^5 accepted takes/);
+  });
+
+  it("rebases by restating the look, not by merging it as prose", async () => {
+    const { dir, store, gate } = await openGateSafely();
+    const mine = await gate.stageArtDirectionChange("Painterly and hand-animated, with visible brushwork.", null);
+
+    // Somebody else's look lands first, so mine is stale.
+    await moveLookOn(dir, "Ink and wash: brush contour, washed tone.");
+
+    assert.equal((await gate.accept(mine.id, {})).status, "stale");
+    const { conflicts } = await gate.rebase(mine.id);
+    assert.deepEqual(conflicts, [], "there is nothing to merge — a look is one whole description");
+
+    await gate.markSeen(mine.id);
+    assert.equal((await gate.accept(mine.id, {})).status, "accepted");
+
+    const record = store.getBundle().artDirection;
+    assert.match(record.description, /visible brushwork/, "the look that was proposed is the look that landed");
+    assert.equal(record.version, 5, "the fixture's look was v3, theirs landed v4, and this follows it");
+    assert.ok(
+      record.history.some((h) => /Ink and wash/.test(h.description)),
+      "the look it replaced stays in history, because accepted takes are pinned to it",
+    );
   });
 });
 
