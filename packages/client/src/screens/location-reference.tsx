@@ -69,8 +69,15 @@ export function LocationReferenceScreen() {
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);
   const upload = useLocationViewUpload()[sheetId ?? ""];
-  const [naming, setNaming] = useState<{ takeId: string; name: string; confirmReplace: boolean } | null>(null);
+  const [naming, setNaming] = useState<{
+    takeId: string;
+    name: string;
+    confirmReplace: boolean;
+    /** Promote this candidate to panel 1. Only ever a choice once there is a panel 1 to displace. */
+    asEstablishing: boolean;
+  } | null>(null);
   const [adding, setAdding] = useState(false);
+  const [replacingEstablishing, setReplacingEstablishing] = useState(false);
   const [angle, setAngle] = useState("");
   const [angleName, setAngleName] = useState("");
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier }>({});
@@ -149,6 +156,20 @@ export function LocationReferenceScreen() {
                   accepted {new Date(view.acceptedAt).toLocaleDateString()} · sheet v{view.sheetVersion} · look v
                   {view.artDirectionVersion}
                 </p>
+                {index === 0 && (
+                  // Panel 1 is the anchor every other angle was generated against, so replacing it
+                  // is the one generation that is deliberately *not* anchored to anything.
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setAngleName(view.name);
+                      setReplacingEstablishing(true);
+                      setAdding(true);
+                    }}
+                  >
+                    Replace
+                  </Button>
+                )}
               </div>
             </article>
           ))}
@@ -190,7 +211,12 @@ export function LocationReferenceScreen() {
                         maxLength={80}
                         placeholder={establishing ? "Establishing view" : "Reverse angle"}
                         onChange={(event) =>
-                          setNaming({ takeId: take.id, name: event.target.value, confirmReplace: false })
+                          setNaming({
+                            takeId: take.id,
+                            name: event.target.value,
+                            confirmReplace: false,
+                            asEstablishing: active?.asEstablishing ?? false,
+                          })
                         }
                       />
                     </label>
@@ -202,11 +228,38 @@ export function LocationReferenceScreen() {
                         </p>
                         <Button
                           variant="secondary"
-                          onClick={() => setNaming({ takeId: take.id, name, confirmReplace: true })}
+                          onClick={() =>
+                            setNaming({
+                              takeId: take.id,
+                              name,
+                              confirmReplace: true,
+                              asEstablishing: active?.asEstablishing ?? false,
+                            })
+                          }
                         >
                           Replace it
                         </Button>
                       </Callout>
+                    )}
+                    {!establishing && (
+                      // Offered rather than inferred. A replacement for panel 1 is usually named
+                      // the same thing as the view it replaces, and a screen that read the name
+                      // to decide would silently promote an angle that merely shared a word.
+                      <label className="fy-locref__establishing">
+                        <input
+                          type="checkbox"
+                          checked={active?.asEstablishing ?? false}
+                          onChange={(event) =>
+                            setNaming({
+                              takeId: take.id,
+                              name,
+                              confirmReplace: active?.confirmReplace ?? false,
+                              asEstablishing: event.target.checked,
+                            })
+                          }
+                        />
+                        <span>Make this the establishing view — it moves to panel 1</span>
+                      </label>
                     )}
                     <div className="fy-locref__candidateactions">
                       <Button
@@ -220,7 +273,7 @@ export function LocationReferenceScreen() {
                         onClick={() => {
                           acceptLocationView(worldId, sheetId, take.id, {
                             name: name.trim(),
-                            ...(establishing ? { establishing: true } : {}),
+                            ...(establishing || active?.asEstablishing ? { establishing: true } : {}),
                             ...(clash ? { replaceExistingName: true } : {}),
                           });
                           setNaming(null);
@@ -292,10 +345,13 @@ export function LocationReferenceScreen() {
                 workflow="location-view"
                 count={count}
                 onCount={setCount}
-                referenceImages={establishing ? 0 : 1}
+                referenceImages={establishing || replacingEstablishing ? 0 : 1}
                 choice={choice}
                 onChoice={setChoice}
-                onCancel={() => setAdding(false)}
+                onCancel={() => {
+                  setAdding(false);
+                  setReplacingEstablishing(false);
+                }}
                 primaryLabel="Generate"
                 primaryDisabled={angleName.trim() === ""}
                 onPrimary={(chosen) => {
@@ -306,11 +362,12 @@ export function LocationReferenceScreen() {
                       name: angleName.trim(),
                       ...(angle.trim() ? { prompt: angle.trim() } : {}),
                       count: chosen.count ?? count,
-                      ...(establishing ? { establishing: true } : {}),
+                      ...(establishing || replacingEstablishing ? { establishing: true } : {}),
                     },
                     { modelId: chosen.model.id, ...(chosen.tier ? { tier: chosen.tier } : {}) },
                   );
                   setAdding(false);
+                  setReplacingEstablishing(false);
                   setAngle("");
                   setAngleName("");
                 }}

@@ -155,7 +155,10 @@ describe("the location reference tab (#243)", () => {
       ],
       [candidate("  reverse   ANGLE ")],
     );
-    assert.ok(html.includes("Replace"), "the collision is named before the press, not after");
+    // Specifically the collision copy — panel 1 carries its own Replace, and matching that
+    // instead would let this test pass with the confirmation gone entirely.
+    assert.ok(html.includes("Replace “reverse   ANGLE”?"), "the collision is named before the press, not after");
+    assert.ok(html.includes(">Replace it<"));
     assert.ok(html.includes("becomes superseded"));
     assert.ok(html.includes("leaves the panel order unchanged"));
     const pending = html.slice(html.indexOf("A view is waiting on you"));
@@ -171,6 +174,26 @@ describe("the location reference tab (#243)", () => {
     assert.ok(html.includes("stops being read as one room"));
     const add = html.slice(html.indexOf("stops being read as one room"));
     assert.match(add, /<button[^>]*disabled[^>]*>Add a view</, "the door is shut, not merely warned about");
+  });
+
+  it("offers to promote a candidate to panel 1, and offers it only when there is a panel 1 to displace", () => {
+    const withViews = render(
+      [kit([view(1, "Establishing view", "2026-08-01T10:00:00Z")], "lv_01")],
+      [candidate("Reverse angle")],
+    );
+    assert.ok(
+      withViews.includes("Make this the establishing view"),
+      "a later view can take panel 1 — otherwise the anchor is whatever was accepted first, forever",
+    );
+    // Panel 1 also carries the control the design turn shows, and it is the one generation that
+    // is deliberately unanchored.
+    assert.match(withViews, /Establishing view<\/h3>[\s\S]{0,300}>Replace</, "panel 1 offers Replace");
+
+    // With nothing accepted, there is no choice to offer: the first view *is* the establishing
+    // view, and a checkbox that can only be checked is a decision pretending to be one.
+    const empty = render([], [candidate("Establishing view")]);
+    assert.ok(!empty.includes("Make this the establishing view"));
+    assert.ok(!empty.includes(">Replace<"));
   });
 
   it("says what to do first when there is nothing at all", () => {
