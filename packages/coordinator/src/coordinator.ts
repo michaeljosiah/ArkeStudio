@@ -2957,6 +2957,9 @@ export class Coordinator {
           ...(msg.links !== undefined ? { links: msg.links } : {}),
           ...(msg.allowLarge !== undefined ? { allowLarge: msg.allowLarge } : {}),
           ...(msg.supersedes !== undefined ? { supersedes: msg.supersedes } : {}),
+          // Forwarded including an explicit null: filing from a world surface says "the world's"
+          // and that is what re-homes a scoped artifact on dedup (SPEC-020 §2.5).
+          ...(msg.production !== undefined ? { production: msg.production } : {}),
         });
         return;
       }
@@ -2979,7 +2982,10 @@ export class Coordinator {
         const paths = await pick({ accept: ATTACHABLE_EXTENSIONS }).catch(() => [] as readonly string[]);
         // Cancelling the dialog is an answer, not an error: nothing is said and nothing happens.
         for (const sourcePath of paths) {
-          await this.fileOne(msg.worldId, sourcePath, msg.links !== undefined ? { links: msg.links } : {});
+          await this.fileOne(msg.worldId, sourcePath, {
+            ...(msg.links !== undefined ? { links: msg.links } : {}),
+            ...(msg.production !== undefined ? { production: msg.production } : {}),
+          });
         }
         return;
       }
@@ -4348,7 +4354,7 @@ export class Coordinator {
   private async fileOne(
     worldId: string,
     sourcePath: string,
-    opts: { links?: string[]; allowLarge?: boolean; supersedes?: string },
+    opts: { links?: string[]; allowLarge?: boolean; supersedes?: string; production?: string | null },
   ): Promise<void> {
     const store = this.opts.provider.openStore?.();
     if (!store) return;

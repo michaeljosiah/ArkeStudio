@@ -1088,6 +1088,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       allowLarge: z.boolean().optional(),
       /** Files a replacement recording what it supersedes (R-5). */
       supersedes: z.string().optional(),
+      /**
+       * Who owns the filed artifact (SPEC-020 R-11). Three states, all meaningful:
+       * a slug files it to that production, `null` files it to the world *explicitly*, and
+       * absent leaves ownership to whatever the artifact already had.
+       *
+       * The distinction between `null` and absent is what makes the documented escape hatch work
+       * (§2.5): re-filing scoped material from a world surface must be able to say "the world's",
+       * and dedup returns an existing sidecar rather than creating one, so silence cannot mean it.
+       */
+      production: SlugSchema.nullable().optional(),
     })
     .strict(),
   /**
@@ -1095,7 +1105,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * into the renderer in either direction — it asks, and learns only that artifacts now exist.
    */
   z
-    .object({ kind: z.literal("attach-files"), worldId: UlidSchema, links: z.array(z.string()).optional() })
+    .object({
+      kind: z.literal("attach-files"),
+      worldId: UlidSchema,
+      links: z.array(z.string()).optional(),
+      /** Ownership for everything the picker returns — same three states as `file-artifact`. */
+      production: SlugSchema.nullable().optional(),
+    })
     .strict(),
   /**
    * The same two gestures before a world exists. A genesis conversation has no world to file

@@ -134,6 +134,9 @@ export async function createSheetFromSentence(
         : `New ${input.sheetType}: ${input.name}`,
     source: "chat:studio",
     targets: [{ path, content }],
+    // Ownership on the proposal, not only in the staged file: the world's surfaces read pending
+    // sheets from the proposal and would otherwise show this guest all through its review.
+    ...(input.production !== undefined ? { production: input.production } : {}),
   });
 
   // The count the agent is told about is the world's own cast. A guest drafting against "nine
@@ -172,11 +175,16 @@ export async function duplicateSheet(
     updated: store.now().slice(0, 10),
   });
 
+  // A duplicate inherits the source's frontmatter, ownership included, so duplicating a guest
+  // makes another guest of the same production. The proposal has to say so or the copy shows on
+  // the world's surfaces for the length of its review (SPEC-020 R-8).
+  const owner = copy.data["production"];
   return gate.stage({
     kind: "new-sheet",
     summary: `Duplicate ${String(doc.data["name"])} as ${input.newName} (from v${sourceVersion})`,
     source: "form",
     targets: [{ path: `${sheetDir(type)}/${slug}.md`, content: copy.serialize() }],
+    ...(typeof owner === "string" && owner !== "" ? { production: owner } : {}),
   });
 }
 
@@ -366,5 +374,6 @@ export async function createSheetFromImage(
     summary: `New ${input.sheetType} from an image: ${input.name}`,
     source: `import:${input.sourceArtifactId}`,
     targets: [{ path: `${sheetDir(input.sheetType)}/${slug}.md`, content }],
+    ...(input.production !== undefined ? { production: input.production } : {}),
   });
 }

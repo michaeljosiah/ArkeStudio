@@ -4,6 +4,8 @@ import {
   assemblePrompt,
   deriveCut,
   guestsOf,
+  pendingGuestsOf,
+  pendingSheets,
   modelCapabilityCopy,
   nativeResolution,
   overrideStaleAgainst,
@@ -48,6 +50,15 @@ import {
 /** Production screens (§2.9), composed to the prototype frames 11a/14a/11b/24a/25a/25b/10b. */
 
 // ---- small shared pieces ---------------------------------------------------
+
+/**
+ * The artifacts a production may see (SPEC-020 R-13): the world's own, plus the ones it owns.
+ * Another production's scoped material is absent — selecting audio by kind alone would put one
+ * production's scratch takes in every other production's Audio screen.
+ */
+function artifactsFor<T extends { production?: string }>(artifacts: readonly T[], productionId: string | undefined): T[] {
+  return artifacts.filter((a) => a.production === undefined || a.production === productionId);
+}
 
 /** Render @mentions the way the prototype does: quiet mono chips inside prose. */
 function Mentions({ text }: { text: string }) {
@@ -119,7 +130,7 @@ export function ProductionLayout() {
   const isStory = production?.meta.format === "story";
   const cut = production ? deriveCut(production) : null;
   const audioCount =
-    (world?.artifacts.filter((a) => a.kind === "audio").length ?? 0) +
+    (artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio").length ?? 0) +
     (production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue")
       .length ?? 0);
   const exportCount = Object.values(exportsState).filter((e) => e.productionId === prodId).length;
@@ -230,6 +241,13 @@ export function ProductionCastScreen() {
   }
   const guests = guestsOf(world.sheets, production.meta.id).filter((s) => s.retired !== true);
   const fromWorld = worldSheets(world.sheets).filter((s) => s.retired !== true);
+  // Guests under review are kept off the world's surfaces, so they have to be visible here or a
+  // staged guest is nowhere at all until it is accepted (SPEC-020 R-8, R-9).
+  const pendingGuests = (["character", "location", "faction"] as const).flatMap((kind) =>
+    pendingGuestsOf(pendingSheets(world.proposals, kind), production.meta.id),
+  );
+  // Owned artifacts are off the world's shelf (R-13), so this is the only place they appear.
+  const owned = world.artifacts.filter((a) => a.production === production.meta.id);
   const kindLabel = (sheet: Sheet) => (sheet.type === "character" ? "character" : sheet.type === "location" ? "location" : "faction");
 
   const card = (sheet: Sheet, guest: boolean) => (
@@ -337,9 +355,9 @@ export function ProductionCastScreen() {
       )}
 
       <div className="fy-eyebrow-sm" style={{ padding: "10px 90px 0" }}>
-        GUESTS · ONLY IN {production.meta.title.toUpperCase()} · {guests.length}
+        GUESTS · ONLY IN {production.meta.title.toUpperCase()} · {guests.length + pendingGuests.length}
       </div>
-      {guests.length === 0 ? (
+      {guests.length + pendingGuests.length === 0 ? (
         <div style={{ padding: "0 90px" }}>
           <EmptyState
             title="No guests yet"
@@ -347,7 +365,21 @@ export function ProductionCastScreen() {
           />
         </div>
       ) : (
-        <div className="fy-cardgrid" style={columns(guests.length)}>
+        <div className="fy-cardgrid" style={columns(guests.length + pendingGuests.length)}>
+          {pendingGuests.map((p) => (
+            <div key={p.proposalId} className="fy-gridcard fy-gridcard--media fy-gridcard--fixed fy-gridcard--quiet">
+              <div className="fy-gridcard__frame" style={{ height: 210 }} />
+              <div className="fy-gridcard__pad">
+                <div className="fy-gridcard__title">
+                  <span className="fy-gridcard__name">{p.name}</span>
+                </div>
+                <div className="fy-gridcard__body">awaiting review</div>
+                <div className="fy-gridcard__foot" style={{ marginTop: 9 }}>
+                  guest · not yet accepted
+                </div>
+              </div>
+            </div>
+          ))}
           {guests.map((sheet) => card(sheet, true))}
         </div>
       )}
@@ -363,6 +395,33 @@ export function ProductionCastScreen() {
         <div className="fy-cardgrid" style={columns(fromWorld.length)}>
           {fromWorld.map((sheet) => card(sheet, false))}
         </div>
+      )}
+
+      {owned.length > 0 && (
+        <>
+          <div className="fy-eyebrow-sm" style={{ padding: "10px 90px 0" }}>
+            FILED HERE · ONLY IN {production.meta.title.toUpperCase()} · {owned.length}
+          </div>
+          <div style={{ padding: "8px 90px 30px", display: "grid", gap: 8 }}>
+            {owned.map((artifact) => (
+              <div
+                key={artifact.id}
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: 10,
+                  padding: "9px 4px",
+                  borderBottom: "1px solid var(--border)",
+                }}
+              >
+                <span style={{ flex: 1, font: "400 13px var(--font-sans)" }}>{artifact.file}</span>
+                <span className="fy-mono" style={{ color: "var(--muted-foreground)" }}>
+                  {artifact.kind}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
@@ -1670,7 +1729,7 @@ export function CutScreen() {
   const cut = production ? deriveCut(production) : null;
   const slug = world?.meta.slug;
   const firstCovered = cut?.entries.find((e) => e.media);
-  const audioBeds = world?.artifacts.filter((a) => a.kind === "audio") ?? [];
+  const audioBeds = artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio");
 
   // Group the derived cut per scene for the V track: contiguous covered runs render as
   // filmstrip cells; each gap is its own dashed cell — remaining work made visible.
@@ -1796,7 +1855,7 @@ export function AudioScreen() {
   // A story production keeps this pane for its audio artifacts alone (design 54a: nothing on a
   // story screen mentions shots or dispatch); narration comes later, as its own design.
   const isStory = production?.meta.format === "story";
-  const linked = world?.artifacts.filter((a) => a.kind === "audio") ?? [];
+  const linked = artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio");
   const voLines = isStory
     ? []
     : (production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue") ??

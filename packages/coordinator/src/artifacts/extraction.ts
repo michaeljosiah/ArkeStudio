@@ -231,6 +231,7 @@ export async function resolveCandidate(
             : `Extracted ${kind}: ${candidate.name} (from ${artifact.file})`,
         source: `import:${artifact.id}`,
         targets: [{ path: `${sheetDir(kind)}/${slug}.md`, content }],
+        ...(artifact.production !== undefined ? { production: artifact.production } : {}),
       });
       const outcome = await gate.accept(staged.id);
       if (outcome.status !== "accepted") throw new Error(`sheet candidate did not land: ${outcome.status}`);

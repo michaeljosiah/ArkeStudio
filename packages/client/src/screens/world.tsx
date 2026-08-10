@@ -7,6 +7,7 @@ import {
   formatMicroUsd,
   mainPhotoFor,
   pendingSheets,
+  pendingWorldSheets,
   worldSheets,
   type CanonEntry,
   type PendingSheet,
@@ -390,7 +391,10 @@ export function WorldOverviewScreen() {
   // The fan is where "1 awaiting you" and "No one lives here yet" used to sit on screen at the
   // same time, saying opposite things about the same world (issue 228). The one awaiting is a
   // character being drafted, so it takes a card in the fan like any other.
-  const pendingCast = pendingSheets(world.proposals, "character").slice(0, Math.max(0, 5 - characters.length));
+  const pendingCast = pendingWorldSheets(pendingSheets(world.proposals, "character")).slice(
+    0,
+    Math.max(0, 5 - characters.length),
+  );
   const threads = world.canon.filter((c) => c.status === "open");
   const proposals = world.proposals;
   const production = world.productions[0];
@@ -716,7 +720,9 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
   // user could click through to (SPEC-020 R-8).
   const worldOwned = worldSheets(world?.sheets ?? []);
   const sheets = worldOwned.filter((s) => s.type === kind && s.retired !== true);
-  const pending = pendingSheets(world?.proposals ?? [], kind);
+  // A pending guest is not the world's business either — filtering only accepted guests would
+  // let every new one sit on this ledger for exactly as long as it took to review (R-8).
+  const pending = pendingWorldSheets(pendingSheets(world?.proposals ?? [], kind));
   const retired = worldOwned.filter((s) => s.type === kind && s.retired === true).length;
   const locked = sheets.filter((s) => s.status === "locked").length;
   const sketches = sheets.filter((s) => s.status === "sketch").length;
@@ -3147,7 +3153,10 @@ export function ArtifactsScreen() {
           {n.outcome === "needs-consent" && worldId && (
             <>
               {" "}
-              <Button onClick={() => fileArtifactMsg(worldId, n.sourcePath, { allowLarge: true })}>
+              {/* `production: null` is the world saying so out loud. Filing from the world's own
+                  shelf is how a production-scoped document is brought back to the world, and on
+                  the dedup path silence would leave it scoped (SPEC-020 §2.5). */}
+              <Button onClick={() => fileArtifactMsg(worldId, n.sourcePath, { allowLarge: true, production: null })}>
                 Copy it anyway
               </Button>
             </>

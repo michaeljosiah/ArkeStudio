@@ -5,6 +5,9 @@ import { join } from "node:path";
 import {
   guestsOf,
   isGuest,
+  pendingGuestsOf,
+  pendingSheets,
+  pendingWorldSheets,
   pickableSheets,
   planScene,
   SheetSchema,
@@ -20,6 +23,7 @@ import {
   stageGuestPromotion,
 } from "../../src/sheets/authoring.js";
 import { verifyCandidates, type RawCandidate } from "../../src/artifacts/extraction.js";
+import { fileArtifact } from "../../src/artifacts/filing.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -493,5 +497,139 @@ describe("extraction from a scoped artifact (R-12, D8)", () => {
     const batch = verifyCandidates(fabricated, SOURCE, [], "saltlight");
     assert.deepEqual(batch.verified, []);
     assert.equal(batch.droppedCount, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review round one (PR #268): the seams the first pass left open
+// ---------------------------------------------------------------------------
+
+describe("filing states an owner, and dedup honours it (R-11, D8)", () => {
+  it("files to a production, and re-filing the same bytes at world scope brings it back", async () => {
+    const { dir, store } = await open();
+    const source = join(dir, "..", "note.md");
+    await writeFile(source, "The barman pours without being asked.", "utf8");
+
+    const filed = await fileArtifact(store, { sourcePath: source, production: "saltlight" });
+    assert.equal(filed.outcome, "filed");
+    assert.equal(filed.outcome === "filed" ? filed.artifact.production : null, "saltlight");
+
+    // The escape hatch of §2.5: the same document, filed from the world's shelf, says "the
+    // world's" out loud. Dedup returns the existing sidecar, so silence could not have said it.
+    const again = await fileArtifact(store, { sourcePath: source, production: null });
+    assert.equal(again.outcome, "deduplicated");
+    assert.equal(again.outcome === "deduplicated" ? again.artifact.production : "still owned", undefined);
+    assert.equal(
+      store.getBundle().artifacts.filter((a) => a.hash === (filed.outcome === "filed" ? filed.artifact.hash : "")).length,
+      1,
+      "re-homing moves the one artifact rather than making a second",
+    );
+    await store.close();
+  });
+
+  it("a caller with no opinion leaves ownership alone", async () => {
+    const { dir, store } = await open();
+    const source = join(dir, "..", "kept.md");
+    await writeFile(source, "One line.", "utf8");
+    await fileArtifact(store, { sourcePath: source, production: "saltlight" });
+    // importFolder's path: no production stated at all, which must not strip an owner.
+    const again = await fileArtifact(store, { sourcePath: source });
+    assert.equal(again.outcome === "deduplicated" ? again.artifact.production : null, "saltlight");
+    await store.close();
+  });
+});
+
+describe("a pending guest is not the world's business (R-8)", () => {
+  it("carries its owner on the proposal, so world surfaces can keep it off", async () => {
+    const { store, gate } = await open();
+    const draft = await createSheetFromSentence(store, gate, {
+      sheetType: "character",
+      name: "The barman",
+      sentence: "Two lines and a wet cloth.",
+      production: "saltlight",
+    });
+    assert.equal(draft.proposal.production, "saltlight");
+
+    const staged = store.getBundle().proposals;
+    const pending = pendingSheets(staged, "character");
+    assert.ok(pending.some((p) => p.production === "saltlight"), "the pending sheet knows whose it is");
+    assert.deepEqual(
+      pendingWorldSheets(pending).filter((p) => p.name.includes("barman")),
+      [],
+      "and the world's pending list does not carry it",
+    );
+    assert.equal(pendingGuestsOf(pending, "saltlight").length, 1);
+    await store.close();
+  });
+
+  it("a world sheet's proposal states no owner, and still reaches the world's pending list", async () => {
+    const { store, gate } = await open();
+    const draft = await createSheetFromSentence(store, gate, {
+      sheetType: "character",
+      name: "Someone Ordinary",
+      sentence: "Of the world.",
+    });
+    assert.equal(draft.proposal.production, undefined);
+    const pending = pendingWorldSheets(pendingSheets(store.getBundle().proposals, "character"));
+    assert.ok(pending.some((p) => p.name.includes("Ordinary")));
+    await store.close();
+  });
+});
+
+describe("an inherited location is a citation too (R-6)", () => {
+  it("warns when a scene inherits another production's guest place", async () => {
+    const dir = await makeTempWorld();
+    await writeGuest(dir, { id: "the-inn", name: "The Inn", production: "the-ledger-of-nights", type: "location" });
+    const store = await openAt(dir);
+    const bundle = store.getBundle();
+    const base = bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!;
+    // No @mention anywhere — the citation is the inheritance, which reaches the prompt and the
+    // reference budget without ever entering the resolved cast.
+    const scene: Scene = {
+      ...base,
+      inherits: { ...base.inherits, location: "the-inn" },
+      shots: [{ ...base.shots[0]!, id: "sh_1", number: 1, description: "A room, at night." }],
+    };
+    const plan = planScene(
+      {
+        world: bundle.meta,
+        productionId: "saltlight",
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene,
+        selections: {},
+        model: VIDEO_MODEL,
+      },
+      "per-shot",
+    );
+    assert.deepEqual(plan.warnings.foreignGuests, [{ name: "The Inn", owner: "the-ledger-of-nights" }]);
+    assert.ok(plan.totalEstimatedMicroUsd > 0, "named, not blocked");
+    await store.close();
+  });
+
+  it("names a sheet once when it is both inherited and mentioned", async () => {
+    const dir = await makeTempWorld();
+    await writeGuest(dir, { id: "the-inn", name: "The Inn", production: "the-ledger-of-nights", type: "location" });
+    const store = await openAt(dir);
+    const bundle = store.getBundle();
+    const base = bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!;
+    const plan = planScene(
+      {
+        world: bundle.meta,
+        productionId: "saltlight",
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene: {
+          ...base,
+          inherits: { ...base.inherits, location: "the-inn" },
+          shots: [{ ...base.shots[0]!, id: "sh_1", number: 1, description: "@the-inn at night." }],
+        },
+        selections: {},
+        model: VIDEO_MODEL,
+      },
+      "per-shot",
+    );
+    assert.equal(plan.warnings.foreignGuests.length, 1, "one place, one sentence");
+    await store.close();
   });
 });

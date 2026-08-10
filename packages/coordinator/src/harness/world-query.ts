@@ -95,7 +95,8 @@ const TOOLS = [
   },
   {
     name: "list_entities",
-    description: "List world entities of a kind (character | location | faction | canon | production), with status and version.",
+    description:
+      "List world entities of a kind (character | location | faction | canon | production), with status and version. A sheet carrying a `production` field is that production's guest — do not cite it from other work.",
     inputSchema: {
       type: "object",
       properties: {
@@ -332,10 +333,22 @@ export class WorldQueryServer {
         if (kind === "production") {
           return bundle.productions.map((p) => ({ id: p.meta.id, title: p.meta.title, format: p.meta.format }));
         }
+        // Ownership travels with the row (SPEC-020 R-7). This server is world-wide and has no
+        // per-run production, so it cannot filter to the caller's production; what it can do is
+        // stop presenting another production's one-off as though the world held it. `production`
+        // present means a guest, and the drafting guidance treats it as out of reach unless the
+        // run belongs to it. Filtering properly needs a per-run scope the harness does not yet
+        // carry, and dispatch names a cross-production citation either way (R-6).
         return bundle.sheets
           .filter((s) => s.type === kind)
           .filter((s) => status === undefined || s.status === status)
-          .map((s) => ({ id: s.id, name: s.name, status: s.status, version: s.version }));
+          .map((s) => ({
+            id: s.id,
+            name: s.name,
+            status: s.status,
+            version: s.version,
+            ...(s.production !== undefined ? { production: s.production } : {}),
+          }));
       }
       case "related": {
         if (!index) throw new Error("the index is unavailable");

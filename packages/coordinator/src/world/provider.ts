@@ -1,6 +1,6 @@
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { ulid, type ArtDirectionRecord, type WorldBundle, type WorldSummary } from "@arke-studio/contracts";
+import { ulid, worldSheets, type ArtDirectionRecord, type WorldBundle, type WorldSummary } from "@arke-studio/contracts";
 import { ProposalManager } from "../gate/proposals.js";
 import { AppIndex } from "../index-db/app-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
@@ -326,9 +326,12 @@ export class FsWorldProvider implements WorldProvider {
       name: bundle.meta.name,
       ...(bundle.meta.logline !== undefined ? { logline: bundle.meta.logline } : {}),
       counts: {
-        characters: bundle.sheets.filter((s) => s.type === "character").length,
-        locations: bundle.sheets.filter((s) => s.type === "location").length,
-        factions: bundle.sheets.filter((s) => s.type === "faction").length,
+        // The world's own cast, matching the hub, the ledgers and their counts (SPEC-020 R-8).
+        // The picker summarises the world, and a total that counted a production's guests would
+        // be a number no surface in the world can show and no click can reach.
+        characters: worldSheets(bundle.sheets).filter((s) => s.type === "character").length,
+        locations: worldSheets(bundle.sheets).filter((s) => s.type === "location").length,
+        factions: worldSheets(bundle.sheets).filter((s) => s.type === "faction").length,
         canonEntries: bundle.canon.length,
         productions: bundle.productions.length,
       },
