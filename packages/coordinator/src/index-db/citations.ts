@@ -35,7 +35,21 @@ export interface EntityRow {
   status: string | null;
   version: number | null;
   retired: boolean;
+  /**
+   * Which production's *slice* this row belongs to — the partition `applyCommit` deletes and
+   * re-inserts when a production's files change. Null for everything the world owns directly.
+   */
   productionId: string | null;
+  /**
+   * Which production *owns* this sheet, for a guest (SPEC-020 R-17). Absent on every other kind.
+   *
+   * Deliberately NOT `productionId`, however much the two look alike. That field is a partition
+   * key: `applyCommit` deletes every row carrying it whenever that production's files change,
+   * and re-inserts only scenes, shots and takes. A guest filed under it would be deleted by an
+   * edit to an unrelated scene and never come back — the sheet would vanish from the index while
+   * sitting untouched on disk.
+   */
+  ownerProduction?: string | null;
   updatedAt: string | null;
 }
 
@@ -99,6 +113,7 @@ export function extract(bundle: WorldBundle): Extraction {
       version: sheet.version,
       retired: sheet.retired === true,
       productionId: null,
+      ownerProduction: sheet.production ?? null,
       updatedAt: sheet.updated,
     });
     for (const ruleId of sheet.canonRules) {

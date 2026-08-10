@@ -1221,6 +1221,8 @@ export function createSheetFromSentence(
   sentence: string,
   /** Settle it as drafted, without asking — see the frame. Beginning a world sets this. */
   settle = false,
+  /** Creating from inside a production files a guest of it rather than world cast (SPEC-020). */
+  production?: string,
 ): void {
   send({
     kind: "create-sheet-from-sentence",
@@ -1229,7 +1231,13 @@ export function createSheetFromSentence(
     name,
     sentence,
     ...(settle ? { settle } : {}),
+    ...(production !== undefined ? { production } : {}),
   });
+}
+
+/** SPEC-020 R-14: clear the guest's owner. No file moves and no citation breaks. */
+export function promoteGuest(worldId: string, path: string): void {
+  send({ kind: "promote-guest", worldId, path });
 }
 
 export function duplicateSheet(worldId: string, path: string, newName: string): void {

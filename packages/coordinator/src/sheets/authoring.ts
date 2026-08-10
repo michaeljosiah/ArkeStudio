@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   SHEET_SHAPES,
   sheetDir,
+  worldSheets,
   type Proposal,
   type SheetKind,
   type VoiceAssignment,
@@ -30,7 +31,9 @@ async function readLive(store: WorldStore, path: string): Promise<string | null>
 
 async function takenSlugs(store: WorldStore, type: SheetKind): Promise<string[]> {
   // Uniqueness is checked across ALL sheet collections — a location and a character sharing a
-  // slug would collide in citations, which key on the slug alone.
+  // slug would collide in citations, which key on the slug alone. Guests are included without
+  // being special-cased, because they are in the same directories: a production's one-off shares
+  // the world's namespace, which is what lets promotion move nothing (SPEC-020 R-2, D2).
   const slugs: string[] = [];
   for (const dir of ["characters", "locations", "factions"]) {
     const entries = await readdir(toExtendedLength(join(store.dir, dir))).catch(() => [] as string[]);
@@ -49,6 +52,8 @@ export function buildSheetContent(input: {
   sections: Record<string, string>;
   extra?: Record<string, unknown>;
   origin?: { sheet: string; version: number };
+  /** Set to file this as a guest of that production (SPEC-020 R-1); absent means the world's. */
+  production?: string;
   date: string;
 }): string {
   const shape = SHEET_SHAPES[input.type];
@@ -68,6 +73,9 @@ export function buildSheetContent(input: {
       ...input.extra,
       version: 1, // the committer stamps the real version
       status: input.status,
+      // Ownership sits with status: both say what this sheet currently *is*, and promotion
+      // reads as a state change in the diff rather than a field appearing from nowhere.
+      ...(input.production !== undefined ? { production: input.production } : {}),
       canonRules: [],
       links: [],
       ...(input.origin ? { origin: input.origin } : {}),
@@ -91,7 +99,13 @@ export interface SentenceDraft {
 export async function createSheetFromSentence(
   store: WorldStore,
   gate: ProposalManager,
-  input: { sheetType: SheetKind; name: string; sentence: string },
+  input: {
+    sheetType: SheetKind;
+    name: string;
+    sentence: string;
+    /** Creating from inside a production files a guest (SPEC-020 R-1). */
+    production?: string;
+  },
 ): Promise<SentenceDraft> {
   const bundle = store.getBundle();
   const slug = uniqueSlug(input.name, input.sheetType, await takenSlugs(store, input.sheetType));
@@ -108,17 +122,24 @@ export async function createSheetFromSentence(
     name: input.name,
     status: "sketch",
     sections,
+    ...(input.production !== undefined ? { production: input.production } : {}),
     date: store.now().slice(0, 10),
   });
 
   const proposal = await gate.stage({
     kind: "new-sheet",
-    summary: `New ${input.sheetType}: ${input.name}`,
+    summary:
+      input.production !== undefined
+        ? `New ${input.sheetType} for ${input.production}: ${input.name}`
+        : `New ${input.sheetType}: ${input.name}`,
     source: "chat:studio",
     targets: [{ path, content }],
   });
 
-  const characters = bundle.sheets.filter((s) => s.type === "character").length;
+  // The count the agent is told about is the world's own cast. A guest drafting against "nine
+  // existing characters" when six of them belong to another production would be told the world
+  // is more populated than it is.
+  const characters = worldSheets(bundle.sheets).filter((s) => s.type === "character").length;
   const scope = `drafts with: ${bundle.meta.name} · canon v${bundle.meta.canonRevision}${
     bundle.meta.tone ? ` · tone: ${bundle.meta.tone}` : ""
   } · ${characters} existing character${characters === 1 ? "" : "s"}`;
@@ -194,6 +215,45 @@ export async function stageSheetRename(
   return gate.stage({
     kind: "sheet-edit",
     summary: `Rename ${oldName} to ${input.name} — the id and every citation stay`,
+    source: "form",
+    targets: [{ path: input.path, content: doc.serialize() }],
+  });
+}
+
+/**
+ * Promote a guest into the world (SPEC-020 R-14, R-15): clear `production`, nothing else.
+ *
+ * The whole design is here. The slug does not change, so every `@` mention still resolves; the
+ * file does not move, so `.history/` continues unbroken and `references/<slug>/kit.json` is
+ * already in the right place; the version is not reset, so `take_sheets` rows keep pointing at
+ * the take's actual provenance. Promotion is a frontmatter edit because the namespace was flat
+ * from the start (D1, D2).
+ *
+ * Gated rather than committed direct, following rename and lock: it is a frontmatter-only human
+ * edit whose effect is that the sheet appears somewhere it did not before, and the diff is worth
+ * a look. There is no inverse (D7) — a sheet promoted by mistake is retired, not demoted.
+ */
+export async function stageGuestPromotion(
+  store: WorldStore,
+  gate: ProposalManager,
+  input: { path: string },
+): Promise<Proposal> {
+  const live = await readLive(store, input.path);
+  if (live === null) throw new Error(`${input.path} does not exist`);
+  const doc = MarkdownFile.parse(live);
+  const owner = doc.data["production"];
+  if (typeof owner !== "string" || owner === "") {
+    throw new Error(`${input.path} is not a guest — it already belongs to the world`);
+  }
+  // Deleting the key, not setting it empty: absent is what "the world owns this" means, and an
+  // empty string would read as a guest of a production with no name everywhere downstream.
+  const next = { ...doc.data };
+  delete next["production"];
+  doc.data = next;
+  doc.setData({});
+  return gate.stage({
+    kind: "sheet-edit",
+    summary: `Promote ${String(doc.data["name"])} out of ${owner} and into the world — the id and every citation stay`,
     source: "form",
     targets: [{ path: input.path, content: doc.serialize() }],
   });
@@ -286,6 +346,8 @@ export async function createSheetFromImage(
     extraction: ImageExtraction;
     /** The filed source artifact id, recorded as the drafting source. */
     sourceArtifactId: string;
+    /** Drafting from inside a production files a guest (SPEC-020 R-1). */
+    production?: string;
   },
 ): Promise<Proposal> {
   const slug = uniqueSlug(input.name, input.sheetType, await takenSlugs(store, input.sheetType));
@@ -296,6 +358,7 @@ export async function createSheetFromImage(
     name: input.name,
     status: "sketch",
     sections,
+    ...(input.production !== undefined ? { production: input.production } : {}),
     date: store.now().slice(0, 10),
   });
   return gate.stage({

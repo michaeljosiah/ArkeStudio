@@ -518,8 +518,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * review is the point of it.
        */
       settle: z.boolean().optional(),
+      /**
+       * SPEC-020 R-1: file this as a guest of that production rather than into the world's cast.
+       * The sheet is a full sheet either way; this decides only where it is shown.
+       */
+      production: SlugSchema.optional(),
     })
     .strict(),
+  /**
+   * SPEC-020 R-14: promote a guest into the world. Clears `production` and nothing else — no
+   * file moves, no slug changes, no version resets, so every citation survives it.
+   */
+  z.object({ kind: z.literal("promote-guest"), worldId: UlidSchema, path: z.string().min(1) }).strict(),
   /** SPEC-007 R-12: duplicate a sheet — sketch, origin recorded at the source's version. */
   z
     .object({

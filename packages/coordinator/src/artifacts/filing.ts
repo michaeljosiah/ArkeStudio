@@ -81,6 +81,12 @@ export interface FileInput {
   allowLarge?: boolean;
   /** Files a replacement recording what it supersedes (R-5). */
   supersedes?: string;
+  /**
+   * File it as this production's rather than the world's (SPEC-020 R-11). Ownership, not
+   * linkage: pass a production here to keep it off the world's shelf, and put it in `links` to
+   * say what it is about.
+   */
+  production?: string;
 }
 
 export async function fileArtifact(store: WorldStore, input: FileInput): Promise<FileOutcome> {
@@ -112,6 +118,11 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
   const hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
 
   // Dedup by content (R-4): same content filed twice is one artifact with more links.
+  //
+  // Dedup wins over scope, deliberately. The same bytes filed again from inside a production
+  // gain a link and keep the home the first filing gave them — there is one copy on disk, so
+  // there is one owner, and re-filing must not quietly move the world's document into a
+  // production where the rest of the world stops seeing it (SPEC-020 R-11, R-13).
   const existing = store.getBundle().artifacts.find((a) => a.hash === hash);
   if (existing) {
     const merged = await addLinks(store, existing, input.links ?? []);
@@ -133,6 +144,7 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
     origin: { by: "user", ...(input.importedFrom !== undefined ? { importedFrom: input.importedFrom } : {}) },
     links: [...new Set(input.links ?? [])],
     ...(input.supersedes !== undefined ? { supersedes: input.supersedes as ArtifactSidecar["supersedes"] } : {}),
+    ...(input.production !== undefined ? { production: input.production as ArtifactSidecar["production"] } : {}),
     created: store.now(),
   };
   await store.gateOp(async () => {

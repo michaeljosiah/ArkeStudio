@@ -59,6 +59,7 @@ export const SCREENS: ScreenEntry[] = [
 
   // Production
   { id: "production-dashboard", samplePath: P },
+  { id: "production-cast", samplePath: `${P}/cast` },
   { id: "story-overview", samplePath: `${P}/story` },
   { id: "chapter-tree", samplePath: `${P}/story/chapters` },
   { id: "scenes", samplePath: `${P}/scenes` },

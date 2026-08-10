@@ -730,6 +730,16 @@ export interface DispatchWarnings {
   staleModelSheets: string[];
   retiredCitations: string[];
   unknownMentions: string[];
+  /**
+   * Cast owned by a *different* production (SPEC-020 R-6).
+   *
+   * The mention resolved — scope is not consulted at resolution time, deliberately (R-5, D3), so
+   * a description that names another production's one-off still finds the sheet and still
+   * dispatches. This is where the user finds out, which is the moment money moves, and it is
+   * named rather than blocked for the same reason a retired citation is: it may well be what
+   * they meant.
+   */
+  foreignGuests: Array<{ name: string; owner: string }>;
   overriddenStale: Array<{
     shotId: string;
     number: number;
@@ -1064,6 +1074,11 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       .filter((g): g is string => g !== null),
     retiredCitations: resolved.cast.filter((c) => c.retired).map((c) => c.sheet.name),
     unknownMentions: resolved.unknown,
+    foreignGuests: resolved.cast.flatMap((c) => {
+      const owner = c.sheet.production;
+      if (owner === undefined || owner === input.productionId) return [];
+      return [{ name: c.sheet.name, owner }];
+    }),
     overlongShots,
     skillFamilyMismatch: skillFamilyMismatch(scene, model),
     subjectsOverRange: sceneBudget.subjectsOverRange,
