@@ -11,9 +11,11 @@ import {
   type WorldChangeCandidate,
 } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
+import { lookContentHash } from "../../src/world-chat/look.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { recoverWrapUps } from "../../src/world-chat/wrapup-recovery.js";
 import { evaluateReadiness } from "../../src/world-chat/readiness.js";
+import { recordResolution } from "../../src/world-chat/resolution.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { rejectPoint, savePoint, wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -127,6 +129,16 @@ async function withCandidates(
   const { events } = await log.read();
   return events[events.length - 1]!.seq;
 }
+
+/** The `wrapup.failed` this conversation recorded, if it recorded one. */
+async function failureIn(log: WorldChatStore) {
+  const { events } = await log.read();
+  return events
+    .map((e) => e.event)
+    .find((e): e is Extract<typeof e, { type: "wrapup.failed" }> => e.type === "wrapup.failed");
+}
+
+
 
 function failsToMaterialise(): WorldChangeCandidate {
   return candidate({
@@ -550,6 +562,224 @@ describe("what wrap-up refuses", () => {
     );
   });
 
+  /*
+   * The roll-back that could not roll everything back.
+   *
+   * `gate.discard` can refuse — a file held open, a directory that will not go — and swallowing
+   * that left a proposal on the approvals screen for a conversation whose propositions were all
+   * still live, under a refusal that said nothing had been created. The intent closes either way,
+   * so startup recovery, which reconciles by open intent, would never look again: nothing in the
+   * world or the log knew the thing was there.
+   */
+  it("names the proposals a failed roll-back could not take back", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [
+      candidate({ title: "A rule that stages first" }),
+      candidate({ title: "A rule that never gets that far" }),
+    ]);
+
+    const realStage = w.gate.stage.bind(w.gate);
+    let staged = 0;
+    w.gate.stage = async (input) => {
+      staged += 1;
+      if (staged === 2) throw new Error("the disk went away");
+      return realStage(input);
+    };
+    w.gate.discard = async () => {
+      throw new Error("and it is still away");
+    };
+
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "req-stuck",
+          expectedConversationSeq: seq,
+          now: NOW,
+        }),
+      (err: unknown) =>
+        err instanceof WrapUpError && err.reason === "leftovers" && /could not be taken back/.test(err.message),
+    );
+
+    const left = await w.ours();
+    assert.equal(left.length, 1, "the proposal that would not go is still on the approvals screen");
+    const failed = await failureIn(w.log);
+    assert.deepEqual(
+      failed?.leftovers?.map((one) => one.proposalId),
+      [left[0]!.id],
+      "and the log names it, because after the intent closes nothing else remembers",
+    );
+    assert.deepEqual(
+      failed?.leftovers?.[0]?.candidateIds,
+      [left[0]!.worldChatOrigins?.[0]?.candidateId],
+      "with the propositions it was made from, which its manifest may not outlive",
+    );
+  });
+
+  /*
+   * A discard that threw is not proof the proposal survived. It removes the directory and then
+   * writes the world's change journal, so a failure in the second half leaves nothing on the
+   * approvals screen — and an id recorded for it would name a proposal that does not exist, which
+   * the guard would then refuse every later wrap-up over, for good.
+   */
+  it("records nothing for a discard that failed after the proposal had already gone", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [
+      candidate({ title: "A rule that stages first" }),
+      candidate({ title: "A rule that never gets that far" }),
+    ]);
+
+    const realStage = w.gate.stage.bind(w.gate);
+    let staged = 0;
+    w.gate.stage = async (input) => {
+      staged += 1;
+      if (staged === 2) throw new Error("the disk went away");
+      return realStage(input);
+    };
+    // Removes the proposal and then fails, exactly as a failing journal append would.
+    const realDiscard = w.gate.discard.bind(w.gate);
+    w.gate.discard = async (id) => {
+      await realDiscard(id);
+      throw new Error("the journal would not take it");
+    };
+
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "req-half-gone",
+          expectedConversationSeq: seq,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason !== "leftovers",
+    );
+
+    assert.deepEqual(await w.ours(), [], "the proposal did go, whatever the discard then said");
+    assert.equal(
+      (await failureIn(w.log))?.leftovers,
+      undefined,
+      "so nothing is named, and the next wrap-up is not refused over a proposal that is not there",
+    );
+  });
+
+  /*
+   * The same filesystem trouble that makes a discard fail is what would make reading `.proposals`
+   * fail. `listOpen` answers that with an empty list — the same answer it gives when nothing is
+   * staged — so verifying through it would report every proposal gone at the moment they are
+   * certainly not, and the leftovers would go unrecorded.
+   */
+  it("records the leftovers when it cannot tell whether they are still there", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [
+      candidate({ title: "A rule that stages first" }),
+      candidate({ title: "A rule that never gets that far" }),
+    ]);
+
+    const realStage = w.gate.stage.bind(w.gate);
+    let staged = 0;
+    w.gate.stage = async (input) => {
+      staged += 1;
+      if (staged === 2) throw new Error("the disk went away");
+      return realStage(input);
+    };
+    w.gate.discard = async () => {
+      throw new Error("and it is still away");
+    };
+    // The disk is unreadable in both directions, which is the point: an unanswerable question is
+    // not a "no".
+    w.gate.isStaged = async () => {
+      throw new Error("cannot read .proposals either");
+    };
+
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "req-cannot-tell",
+          expectedConversationSeq: seq,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "leftovers",
+    );
+
+    const named = (await failureIn(w.log))?.leftovers ?? [];
+    assert.equal(named.length, 1, "recorded rather than assumed gone, so recovery still comes back for it");
+    assert.deepEqual(named.map((one) => one.proposalId), (await w.ours()).map((p) => p.id));
+  });
+
+  it("refuses to go again while a proposal it could not take back is still waiting", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    await withCandidates(w.log, [candidate(), candidate({ title: "A second one" })]);
+
+    const realStage = w.gate.stage.bind(w.gate);
+    let staged = 0;
+    w.gate.stage = async (input) => {
+      staged += 1;
+      if (staged === 2) throw new Error("the disk went away");
+      return realStage(input);
+    };
+    const stuck = w.gate.discard.bind(w.gate);
+    w.gate.discard = async () => {
+      throw new Error("and it is still away");
+    };
+
+    const attempt = async (requestId: string) => {
+      const { events } = await w.log.read();
+      return wrapUp({
+        store: w.store,
+        gate: w.gate,
+        conversationId: w.conversationId,
+        requestId,
+        expectedConversationSeq: events[events.length - 1]!.seq,
+        now: NOW,
+      });
+    };
+
+    await assert.rejects(() => attempt("req-first"), (err: unknown) => err instanceof WrapUpError);
+    await assert.rejects(
+      () => attempt("req-second"),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "leftovers",
+      "going again would stage a second proposal for propositions that already have one",
+    );
+
+    // Discarded on the approvals screen, as the refusal says to do: the way out is not a restart.
+    w.gate.discard = stuck;
+    const waiting = await w.ours();
+    for (const proposal of waiting) await w.gate.discard(proposal.id);
+
+    /*
+     * Still refused, on the gap the gate cannot see. Deciding a proposal removes it and records
+     * that against the conversation afterwards, so between the two the gate says gone while every
+     * candidate still reads live — and a wrap-up that went ahead there would propose again what
+     * had just been decided.
+     */
+    await assert.rejects(
+      () => attempt("req-in-the-gap"),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "leftovers",
+    );
+
+    for (const proposal of waiting) {
+      await recordResolution(w.store, proposal, "discarded", NOW);
+    }
+    w.gate.stage = realStage;
+    const done = await attempt("req-third");
+    assert.equal(
+      done.proposalIds.length,
+      1,
+      "the conversation carries again, less the proposition discarded along with the leftover",
+    );
+  });
+
   it("refuses a conversation that moved on while it was being read", async () => {
     const w = await world();
     const seq = await withCandidates(w.log, [candidate()]);
@@ -658,6 +888,50 @@ describe("readiness on its own", () => {
     const { carried, notCarried } = evaluateReadiness([lookChange(5)], world);
     assert.equal(carried.length, 1);
     assert.deepEqual(notCarried, []);
+  });
+
+  /*
+   * The version did not move and the look did.
+   *
+   * A world with no art-direction file still has one, derived from its name, tone, genre and
+   * logline — and that derivation is always v1. Edit the world's tone and the description every
+   * image is generated from is rewritten while the number sits exactly where it was, so a draft
+   * pinned to the number alone passed as current and replaced words it had never been shown.
+   */
+  it("holds back a look whose description was rewritten under the same version", () => {
+    const shown = "Painterly and hand-animated, with visible brushwork.";
+    const pinned = candidate({
+      classification: "art-direction.change",
+      title: "The world takes a painterly look",
+      draft: { description: "Painterly and hand-animated." },
+      checks: {
+        ...candidate().checks,
+        required: [],
+        completed: [],
+        basedOnArtDirectionVersion: 1,
+        basedOnArtDirectionLook: lookContentHash(shown),
+      },
+    } as Partial<WorldChangeCandidate>);
+
+    const rewritten = {
+      canon: [],
+      sheets: [],
+      proposals: [],
+      artDirection: { version: 1, description: "Saltlight should feel wry and salt-bleached." },
+    } as never;
+    assert.equal(evaluateReadiness([pinned], rewritten).notCarried[0]!.reason, "look-moved");
+
+    const unchanged = {
+      canon: [],
+      sheets: [],
+      proposals: [],
+      artDirection: { version: 1, description: shown },
+    } as never;
+    assert.equal(
+      evaluateReadiness([pinned], unchanged).carried.length,
+      1,
+      "word for word what it was shown is not a look that moved",
+    );
   });
 
   /*

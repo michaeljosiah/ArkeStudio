@@ -8,6 +8,7 @@ import {
   type WorldChatCheckReceipt,
 } from "@arke-studio/contracts";
 import { checksAreStale, deriveChecks, planFor } from "../../src/world-chat/check-plan.js";
+import { sha256 } from "../../src/world/text-files.js";
 
 /**
  * The coordinator's own check plan (#70 §5.7, §8.3.1).
@@ -199,5 +200,56 @@ describe("what the checks found", () => {
     assert.equal(checksAreStale(checks, { canonRevision: 42, versionOf: () => 4 }), false);
     assert.equal(checksAreStale(checks, { canonRevision: 42, versionOf: () => 5 }), true, "the sheet moved");
     assert.equal(checksAreStale(checks, { canonRevision: 43, versionOf: () => 4 }), true, "canon moved");
+  });
+
+  /*
+   * The look a whole-description draft was shown, pinned by its words and not only its number.
+   *
+   * A world with no art-direction file derives its look from world.json, and derives it at v1
+   * every time — so a draft bound to the version alone survives the world's tone being rewritten
+   * underneath it, and replaces a description nobody ever showed the model.
+   */
+  it("pins a look change to the words it was shown as well as the version", () => {
+    const shown = "Painterly and hand-animated, with visible brushwork.";
+    const look = draft({
+      classification: "art-direction.change",
+      draft: { description: "Ink and wash." },
+    } as never);
+    const checks = deriveChecks({
+      draft: look,
+      plan: planFor(look),
+      receipts: [],
+      canonRevision: 42,
+      artDirectionLook: { version: 1, description: shown },
+    });
+
+    assert.equal(checks.basedOnArtDirectionVersion, 1);
+    assert.equal(checks.basedOnArtDirectionLook, sha256(shown));
+    const versionOf = () => null;
+    assert.equal(
+      checksAreStale(checks, { canonRevision: 42, versionOf, artDirectionLook: { version: 1, description: shown } }),
+      false,
+    );
+    assert.equal(
+      checksAreStale(checks, {
+        canonRevision: 42,
+        versionOf,
+        artDirectionLook: { version: 1, description: "The Undersong should feel quiet dread." },
+      }),
+      true,
+      "the number stayed still and the look did not",
+    );
+  });
+
+  it("pins nothing on a proposition that does not replace the look", () => {
+    const checks = deriveChecks({
+      draft: draft(),
+      plan: planFor(draft()),
+      receipts: [],
+      canonRevision: 42,
+      artDirectionLook: { version: 1, description: "Painterly." },
+    });
+    assert.equal(checks.basedOnArtDirectionVersion, undefined);
+    assert.equal(checks.basedOnArtDirectionLook, undefined, "nothing else is bound to the world's look");
   });
 });

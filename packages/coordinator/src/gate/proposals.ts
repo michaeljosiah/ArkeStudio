@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ART_DIRECTION_PATH,
@@ -604,15 +604,28 @@ export class ProposalManager {
             const resolvedNow = `${JSON.stringify(currentLookRecord(this.store.getBundle().artDirection), null, 2)}
 `;
             const restated = restateArtDirection(mine, resolvedNow, this.store.now());
-            if (restated !== null) {
-              await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(target.path)), restated);
-              await atomicWriteFile(
-                join(this.proposalDir(proposalId), "_base", fromPortable(target.path)),
-                resolvedNow,
-              );
+            if (restated === null) {
+              /*
+               * The staged document will not parse, and falling through would keep it.
+               *
+               * The create branch below reports no conflict and refreshes nothing, so a rebase
+               * that could not restate anything came back clean — and the malformed record sat
+               * behind an Accept button that throws in the commit gate, with the conflict
+               * controls offering no repair because no conflict was ever raised. Raised against
+               * the look the world resolves to, exactly as the branch for a live file does: it
+               * blocks the accept, and it gives the panel a side that can be chosen.
+               */
+              conflicts.push({ path: target.path, field: "Look", base, mine, theirs: resolvedNow });
               targets.push({ path: target.path, baseVersion: null, baseHash: null });
               continue;
             }
+            await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(target.path)), restated);
+            await atomicWriteFile(
+              join(this.proposalDir(proposalId), "_base", fromPortable(target.path)),
+              resolvedNow,
+            );
+            targets.push({ path: target.path, baseVersion: null, baseHash: null });
+            continue;
           }
           // The live file vanished (retired files stay; this is create-vs-nothing): keep mine.
           targets.push({ path: target.path, baseVersion: null, baseHash: null });
@@ -709,9 +722,15 @@ export class ProposalManager {
          * throw whichever side was picked — and the screen would have said the conflict was
          * resolved. A control that reports success and cannot succeed is worse than no control:
          * the file has to be repaired first, and saying so is the only honest answer here.
+         *
+         * A file that is simply not there is a different thing and not a fault: the world still
+         * has a look, derived from its tone and genre, and the commit gate derives the same one
+         * rather than parsing anything. Refusing that case would strand the conflict this rebase
+         * now raises when a deleted look meets a malformed proposal — telling somebody to repair
+         * a file that does not exist.
          */
         const live = await this.readLive(path);
-        if (live === null || !parsesAsLook(live)) {
+        if (live !== null && !parsesAsLook(live)) {
           throw new Error(
             `${path} cannot be read as a world look, so neither side can be accepted; repair the file first`,
           );
@@ -879,6 +898,26 @@ export class ProposalManager {
   }
 
   /** Restart recovery (§2.11): validate manifests; report proposals whose target retired. */
+  /**
+   * Whether one proposal is still staged, or a throw when that cannot be read.
+   *
+   * `listOpen` is the wrong instrument for this question: it swallows a failure to read
+   * `.proposals` and returns an empty list, so "nothing is there" and "I could not look" arrive
+   * as the same answer. That is fine for painting a screen and wrong for a caller deciding
+   * whether a proposal it failed to discard is still standing — the filesystem trouble that made
+   * the discard fail is exactly what would make the listing fail too, and it would report the
+   * proposal gone at the moment it certainly is not.
+   */
+  async isStaged(proposalId: string): Promise<boolean> {
+    try {
+      await stat(toExtendedLength(this.proposalDir(proposalId)));
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw err;
+    }
+  }
+
   async listOpen(): Promise<Proposal[]> {
     const out: Proposal[] = [];
     let entries: string[] = [];
