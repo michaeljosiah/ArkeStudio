@@ -315,17 +315,19 @@ export function WorldChatConversationScreen() {
    * asking is remembered in a ref that no reconnection clears, and the button is freed meanwhile.
    */
   const closed = loaded?.status === "closed";
-  const asked = useRef(false);
+  /** The attempt this window made, if any: an answer naming another one is somebody else's. */
+  const asked = useRef<string | null>(null);
+  const refusedMine = wrapUpRefusal !== null && wrapUpRefusal.requestId === asked.current;
   useEffect(() => {
     if (!worldId) return;
     if (asked.current && closed) {
-      asked.current = false;
+      asked.current = null;
       setWrappingUp(false);
       navigate(`/w/${worldId}/proposals`);
-    } else if (wrappingUp && (wrapUpRefusal || connection !== "open")) {
+    } else if (wrappingUp && (refusedMine || connection !== "open")) {
       setWrappingUp(false);
     }
-  }, [wrappingUp, closed, wrapUpRefusal, connection, worldId, navigate]);
+  }, [wrappingUp, closed, refusedMine, connection, worldId, navigate]);
 
   if (!world) return null;
   /**
@@ -561,8 +563,9 @@ export function WorldChatConversationScreen() {
                 // sheet here that said less than the screen it stood in front of, and the version
                 // after it left for the proposals before knowing there were any. The effect above
                 // goes when the conversation closes.
-                if (!wrapUpWorldChat(worldId, conversationId!, loaded.seq)) return;
-                asked.current = true;
+                const attempt = wrapUpWorldChat(worldId, conversationId!, loaded.seq);
+                if (!attempt) return;
+                asked.current = attempt;
                 setWrappingUp(true);
               }}
             >
@@ -575,7 +578,7 @@ export function WorldChatConversationScreen() {
             */}
             {wrapUpRefusal && !wrappingUp && (
               <div className="fy-panel__refused" role="status">
-                {wrapUpRefusal}
+                {wrapUpRefusal.detail}
               </div>
             )}
             <div className="fy-panel__caption">

@@ -146,8 +146,12 @@ interface StoreState {
    * Here for the same reason as a refused file: a refused wrap-up writes nothing, so the workspace
    * that arrives afterwards is identical to the one before and cannot carry the reason. One at a
    * time, not a list — the next attempt replaces it, and there is only ever one button to answer.
+   *
+   * It carries the id of the attempt it answers. The reason is worth showing whoever is looking,
+   * but only the window that made that attempt may act on it: these events reach every client,
+   * and a second window's refusal must not end the first window's wait.
    */
-  worldChatWrapUpRefusals: Record<string, string>;
+  worldChatWrapUpRefusals: Record<string, { requestId: string; detail: string }>;
   /**
    * What the studio is doing right now, by conversation (#70 §15.3).
    *
@@ -614,7 +618,10 @@ function handleFrame(json: string): void {
         ],
       };
     } else if (event.type === "world-chat.wrap-up-refused") {
-      worldChatWrapUpRefusals = { ...worldChatWrapUpRefusals, [event.conversationId]: event.detail };
+      worldChatWrapUpRefusals = {
+        ...worldChatWrapUpRefusals,
+        [event.conversationId]: { requestId: event.requestId, detail: event.detail },
+      };
     } else if (event.type === "world-chat.progress") {
       worldChatProgress = {
         ...worldChatProgress,
@@ -1964,19 +1971,20 @@ export function retryWorldChatTurn(worldId: string, conversationId: string, turn
 /**
  * Turn the conversation into proposals and close it.
  *
- * Returns whether the command actually went out. The screen waits on the answer to this, and a
- * command that was never transmitted has nothing to wait for — reporting that here is what keeps
- * a press made a moment after the socket dropped from looking like one that is still working.
+ * Returns the id of the attempt, or null when the command did not go out at all. The screen waits
+ * on the answer to this: a command that was never transmitted has nothing to wait for, and an
+ * answer that names a different attempt belongs to another window.
  */
 export function wrapUpWorldChat(
   worldId: string,
   conversationId: string,
   expectedConversationSeq: number,
-): boolean {
+): string | null {
+  const requestId = crypto.randomUUID();
   const sent = send({
     kind: "world-chat-wrap-up",
     worldId,
-    requestId: crypto.randomUUID(),
+    requestId,
     conversationId,
     expectedConversationSeq,
   });
@@ -1988,7 +1996,7 @@ export function wrapUpWorldChat(
     delete cleared[conversationId];
     emitChange({ ...current, worldChatWrapUpRefusals: cleared });
   }
-  return sent;
+  return sent ? requestId : null;
 }
 
 /**
@@ -2023,8 +2031,10 @@ export function useWorldChatRefusals(conversationId: string | undefined): Array<
   return conversationId ? (refusals[conversationId] ?? []) : [];
 }
 
-/** Why the last wrap-up did not happen, or null if none has been refused. */
-export function useWorldChatWrapUpRefusal(conversationId: string | undefined): string | null {
+/** Why the last wrap-up did not happen, and which attempt it answers. */
+export function useWorldChatWrapUpRefusal(
+  conversationId: string | undefined,
+): { requestId: string; detail: string } | null {
   const refusals = useStore().worldChatWrapUpRefusals;
   return conversationId ? (refusals[conversationId] ?? null) : null;
 }

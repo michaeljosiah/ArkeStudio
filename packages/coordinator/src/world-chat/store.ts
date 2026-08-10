@@ -170,27 +170,46 @@ export class WorldChatStore {
    * fails leaves exactly the same bytes while the process carries on, and the store that wrote
    * them has already spent its one check — so without `uncertain` the retry would extend the
    * fragment and report success over a line nothing can read.
+   *
+   * Both flags are only put down once the tail has actually been seen to be whole, or made whole.
+   * Recording the check before doing it means a repair that fails part-way — the read, the
+   * write, the rename — leaves the fragment on disk and the file marked as looked at, and the
+   * very next append glues its record to it. The caller that failed is often the one that
+   * immediately tries again with the same store, so this is not a rare path.
    */
   private async repairTail(problems: WorldChatProblem[]): Promise<void> {
     if (this.repaired && !this.writer.uncertain) return;
-    this.repaired = true;
-    this.writer.uncertain = false;
     let raw: string;
     try {
       raw = await readFile(toExtendedLength(this.eventsPath), "utf8");
-    } catch {
+    } catch (err) {
+      // No file yet is a conversation's first append, and an empty tail is a whole one — that is
+      // a completed check, and it has to count as one, or the store never spends it and goes on
+      // repairing away the mid-life writes it is supposed to report. Any other read failure has
+      // told us nothing, so the next append looks again.
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") this.settleRepair();
       return;
     }
-    if (raw.length === 0 || raw.endsWith("\n")) return;
+    if (raw.length === 0 || raw.endsWith("\n")) {
+      this.settleRepair();
+      return;
+    }
     const cut = raw.lastIndexOf("\n");
     const keep = cut === -1 ? "" : raw.slice(0, cut + 1);
     const tmp = join(this.dir, `.tmp-events-repair-${process.pid}`);
     await writeFile(toExtendedLength(tmp), keep, "utf8");
     await rename(toExtendedLength(tmp), toExtendedLength(this.eventsPath));
+    this.settleRepair();
     problems.push({
       kind: "torn-tail",
       detail: "The last event was incomplete and has been discarded. Everything before it is intact.",
     });
+  }
+
+  /** The tail is whole, and known to be: only now is the check spent. */
+  private settleRepair(): void {
+    this.repaired = true;
+    this.writer.uncertain = false;
   }
 
   /** Current tail facts, straight from disk. */

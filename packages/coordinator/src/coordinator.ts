@@ -1524,6 +1524,9 @@ export class Coordinator {
             at: new Date().toISOString(),
             type: "world-chat.wrap-up-refused",
             conversationId: msg.conversationId,
+            // Named, because this goes to every client: without it a second window's refusal
+            // would settle the first window's wrap-up while its proposals were still being made.
+            requestId: msg.requestId,
             reason,
             // Every WrapUpError message is already written for a person to read; anything else is
             // ours to explain and not theirs to decode.

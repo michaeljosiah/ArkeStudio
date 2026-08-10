@@ -578,6 +578,7 @@ describe("a wrap-up that was refused", () => {
       at: AT,
       type: "world-chat.wrap-up-refused",
       conversationId: CV,
+      requestId: "req-1",
       reason: "stale",
       detail: "This conversation moved on while you were looking at it. Open it again and wrap up from there.",
     } as never);
@@ -586,6 +587,7 @@ describe("a wrap-up that was refused", () => {
     assert.match(html, /fy-panel__refused/, "the reason has somewhere to be shown");
     assert.match(html, /moved on while you were looking at it/);
   });
+
 
   /*
    * The screen enters its waiting state on the strength of this, so a command that never left
@@ -597,7 +599,7 @@ describe("a wrap-up that was refused", () => {
     openConversation();
     __connectionStatusForTest("closed");
     try {
-      assert.equal(wrapUpWorldChat(FIXTURE_WORLD_ID, CV, 1), false);
+      assert.equal(wrapUpWorldChat(FIXTURE_WORLD_ID, CV, 1), null, "no attempt id, because no attempt");
     } finally {
       __connectionStatusForTest("open");
     }

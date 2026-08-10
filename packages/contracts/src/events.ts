@@ -434,12 +434,17 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
    * broken button looks like.
    *
    * `reason` is the machine-readable why; `detail` is already the words to show.
+   *
+   * `requestId` names the attempt this answers. Events reach every connected client, and two
+   * windows on one conversation would otherwise have the second one's refusal settle the first
+   * one's wrap-up — freeing a screen whose proposals are still being written.
    */
   z
     .object({
       ...base,
       type: z.literal("world-chat.wrap-up-refused"),
       conversationId: z.string().min(1),
+      requestId: z.string().min(1),
       reason: z.enum(["stale", "nothing-to-carry", "materialise", "too-many", "in-flight", "unknown"]),
       detail: z.string().min(1).max(300),
     })
