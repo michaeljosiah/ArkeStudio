@@ -1,4 +1,5 @@
 import {
+  ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
   CanonEntrySchema,
   SheetSchema,
@@ -305,9 +306,7 @@ export function materialiseCandidate(
       });
       return {
         candidate,
-        targets: [
-          { path: "art-direction/art-direction.json", content: `${JSON.stringify(record, null, 2)}\n` },
-        ],
+        targets: [{ path: ART_DIRECTION_PATH, content: `${JSON.stringify(record, null, 2)}\n` }],
         fields: ["description"],
         reservedCanonIds: [],
       };

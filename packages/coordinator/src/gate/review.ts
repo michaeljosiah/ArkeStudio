@@ -1,4 +1,10 @@
-import { CanonEntrySchema, SheetSchema, type Proposal } from "@arke-studio/contracts";
+import {
+  ART_DIRECTION_PATH,
+  ArtDirectionRecordSchema,
+  CanonEntrySchema,
+  SheetSchema,
+  type Proposal,
+} from "@arke-studio/contracts";
 import { MarkdownFile } from "../world/text-files.js";
 
 /**
@@ -36,6 +42,27 @@ export interface ReviewProjection {
 
 /** Parse a sheet or canon file into comparable fields, or null when it is neither. */
 function fieldsOf(path: string, content: string): { label: string; kind: string; fields: Map<string, string> } | null {
+  /*
+   * The world look is JSON, and the only proposal target that is not Markdown.
+   *
+   * Everything below parses frontmatter and would return nothing for it, which the panel renders
+   * as an empty review — the summary and the ripples, and not one word of the look being adopted.
+   * That is the one thing a reviewer has to read: it can run to four thousand characters and it
+   * is what every image is generated from.
+   */
+  if (path === ART_DIRECTION_PATH) {
+    try {
+      const record = ArtDirectionRecordSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>([["Look", record.description]]);
+      // Named even though it is rarely set: a look that quietly loses its master image would
+      // otherwise change every generation with nothing on screen to show for it.
+      if (record.masterLook) fields.set("Master look", record.masterLook);
+      return { label: `World look v${record.version}`, kind: "art direction", fields };
+    } catch {
+      return null;
+    }
+  }
+
   let doc;
   try {
     doc = MarkdownFile.parse(content);

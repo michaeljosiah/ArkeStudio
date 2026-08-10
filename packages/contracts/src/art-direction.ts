@@ -13,6 +13,15 @@ export const ArtDirectionHistoryEntrySchema = z
   .strict();
 export type ArtDirectionHistoryEntry = z.infer<typeof ArtDirectionHistoryEntrySchema>;
 
+/**
+ * Where the world's look lives, spelled once.
+ *
+ * Five places knew this string and each spelled it out. It is the only proposal target that is
+ * not Markdown, so it is also the path every generic file path has to recognise as an exception —
+ * a typo in any one of them fails open, quietly, as the wrong kind of file.
+ */
+export const ART_DIRECTION_PATH = "art-direction/art-direction.json";
+
 /** `art-direction/art-direction.json`: the world's accepted visual default. */
 export const ArtDirectionRecordSchema = z
   .object({

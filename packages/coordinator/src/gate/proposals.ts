@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
   CHARACTER_ROLE_MAX,
   newId,
@@ -269,7 +270,7 @@ export class ProposalManager {
       source: "form",
       targets: [
         {
-          path: "art-direction/art-direction.json",
+          path: ART_DIRECTION_PATH,
           content: `${JSON.stringify(proposed, null, 2)}\n`,
         },
       ],
@@ -574,6 +575,35 @@ export class ProposalManager {
           continue;
         }
 
+        /*
+         * The world look rebases by restatement, not by merging.
+         *
+         * It is one JSON document rather than prose with a shape, so there are no sections to
+         * merge and mergeMarkdown would rewrite it with frontmatter delimiters — leaving a file
+         * that no longer parses as a look, offered under a button that promises recovery. And a
+         * three-way merge would be the wrong idea even if it worked: a look is a whole
+         * description, so what "rebase" means here is this look, stated against the version that
+         * is current now.
+         */
+        if (target.path === ART_DIRECTION_PATH) {
+          const restated = restateArtDirection(mine, live, this.store.now());
+          if (restated === null) {
+            conflicts.push({
+              path: target.path,
+              field: "Look",
+              base,
+              mine,
+              theirs: live,
+            });
+            targets.push({ path: target.path, baseVersion: readVersion(target.path, live), baseHash: sha256(live) });
+            continue;
+          }
+          await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(target.path)), restated);
+          await atomicWriteFile(join(this.proposalDir(proposalId), "_base", fromPortable(target.path)), live);
+          targets.push({ path: target.path, baseVersion: readVersion(target.path, live), baseHash: sha256(live) });
+          continue;
+        }
+
         const merge = mergeMarkdown(target.path, base, mine, live);
         conflicts.push(...merge.conflicts);
         await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(target.path)), merge.merged);
@@ -812,6 +842,41 @@ function isRetired(path: string, raw: string): boolean {
     return MarkdownFile.parse(raw).data["retired"] === true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * The proposed look, stated against the version that is current now.
+ *
+ * Keeps what the proposal is actually for — its description and master look — and takes
+ * everything positional from the live record: the version it now follows, and a history with the
+ * live version appended, so accepted takes still resolve against the look they were made under.
+ *
+ * Null when either side will not parse. That is a real conflict rather than something to paper
+ * over: writing a guess here would put an unreadable look behind an Accept button.
+ */
+function restateArtDirection(mine: string, live: string, now: string): string | null {
+  try {
+    const proposed = ArtDirectionRecordSchema.parse(JSON.parse(mine));
+    const current = ArtDirectionRecordSchema.parse(JSON.parse(live));
+    const rebased = ArtDirectionRecordSchema.parse({
+      version: current.version + 1,
+      description: proposed.description,
+      ...(proposed.masterLook ? { masterLook: proposed.masterLook } : {}),
+      acceptedAt: now,
+      history: [
+        ...current.history,
+        {
+          version: current.version,
+          description: current.description,
+          ...(current.masterLook ? { masterLook: current.masterLook } : {}),
+          acceptedAt: current.acceptedAt,
+        },
+      ],
+    });
+    return `${JSON.stringify(rebased, null, 2)}\n`;
+  } catch {
+    return null;
   }
 }
 

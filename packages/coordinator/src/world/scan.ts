@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { discoverConversations } from "../world-chat/discover.js";
 import {
+  ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
   ArtifactSidecarSchema,
   CanonEntrySchema,
@@ -130,7 +131,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
   manifest["world.json"] = sha256(await read(join(dir, "world.json")));
 
   let artDirectionRecord: ArtDirectionRecord | null = null;
-  const artDirectionPath = "art-direction/art-direction.json";
+  const artDirectionPath = ART_DIRECTION_PATH;
   if (await exists(join(dir, artDirectionPath))) {
     artDirectionRecord = await tryParse(artDirectionPath, (raw) =>
       ArtDirectionRecordSchema.parse(JSON.parse(raw)),

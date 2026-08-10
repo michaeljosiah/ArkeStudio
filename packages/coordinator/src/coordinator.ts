@@ -141,6 +141,7 @@ import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
 import { titleFrom } from "./world-chat/title.js";
 import { describeEntryContext } from "./world-chat/entry-context.js";
+import { currentLookContext } from "./world-chat/context.js";
 import { discoverConversations } from "./world-chat/discover.js";
 import { recordResolution, sendBack } from "./world-chat/resolution.js";
 import { WorldChatStore, conversationDir } from "./world-chat/store.js";
@@ -3941,6 +3942,8 @@ export class Coordinator {
 
     const runner = new WorldChatRunner({
       adapter: this.opts.adapter ?? null,
+      // A look can only be rewritten by something that can read it — see currentLookContext.
+      worldContext: () => currentLookContext(this.opts.provider.openStore?.()?.getBundle().artDirection ?? null),
       prepare: async ({ conversationId, runId, attachmentIds }) => {
         const lease = leases.mint({
           worldId: store.worldId,

@@ -16,6 +16,7 @@ import {
 import {
   assembleContext,
   BOUNDS,
+  currentLookContext,
   shouldSummarise,
   type ContextAttachment,
 } from "../../src/world-chat/context.js";
@@ -414,5 +415,31 @@ describe("the per-run scratch directory", () => {
 
   it("sweeps an app that has never run a conversation", async () => {
     assert.deepEqual(await sweepRunScratch(await appRoot()), []);
+  });
+});
+
+/**
+ * The look a conversation may be asked to rewrite.
+ *
+ * Nothing else in a run shows it — the retrieval tools reach Canon, sheets, relationships and
+ * attachments, and never the one string every image is generated from. A model told to restate
+ * the whole look, unable to read it, has to invent whatever it was not asked to change.
+ */
+describe("the world's look in a run's context", () => {
+  it("carries the description word for word, not a summary of it", () => {
+    const description = "Painterly and hand-animated: visible brushwork, sculpted faces, salt-bleached tones.";
+    const rendered = currentLookContext({ version: 4, description });
+
+    assert.ok(rendered.includes(description), "a paraphrase of the look would be a different look");
+    assert.match(rendered, /v4/, "and the version it is replacing is named");
+    assert.match(
+      rendered,
+      /replaces this text entirely/,
+      "with the rule that makes reading it matter — a change restates the whole thing",
+    );
+  });
+
+  it("says nothing at all when the world has no look yet", () => {
+    assert.equal(currentLookContext(null), "", "an empty section is better than a heading over nothing");
   });
 });

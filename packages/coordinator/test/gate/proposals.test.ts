@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ART_DIRECTION_PATH } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
+import { projectReview } from "../../src/gate/review.js";
 import { WorldStore } from "../../src/world/store.js";
 import { readChanges } from "../../src/world/change-writer.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
+import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
@@ -189,6 +192,64 @@ describe("accept: one commit, versions derived (R-11, R-12)", () => {
     assert.equal(meta["status"], "cutting");
     assert.equal("version" in meta, false, "unversioned per §2.4.1");
     await store.close();
+  });
+});
+
+/**
+ * The world look is the one proposal target that is not Markdown, and the generic gate assumed
+ * everything was. Both of these are about the JSON surviving a path built for prose.
+ */
+describe("a world look through the generic gate", () => {
+  /** An open store holds the event loop, so a failure before close hangs the file (see test/tmp). */
+  async function openGateSafely() {
+    const opened = await openGate();
+    closeOnCleanup(() => opened.store.close());
+    return opened;
+  }
+
+  it("shows the proposed look on the review, rather than an empty one", async () => {
+    const { dir, gate } = await openGateSafely();
+    const proposal = await gate.stageArtDirectionChange(
+      "Painterly and hand-animated, with visible brushwork.",
+      null,
+    );
+    const staged = await readFile(join(dir, ".proposals", proposal.id, "art-direction", "art-direction.json"), "utf8");
+
+    const review = projectReview({
+      proposal,
+      proposed: (path) => (path === ART_DIRECTION_PATH ? staged : null),
+      base: () => null,
+    });
+
+    const target = review.targets.find((t) => t.path === ART_DIRECTION_PATH);
+    assert.ok(target, "the look is a reviewable target, not a file the panel silently skips");
+    const look = target.fields.find((f) => f.field === "Look");
+    assert.ok(look, "and its description is the field a reviewer has to read before accepting");
+    assert.match(look.proposed ?? "", /visible brushwork/);
+  });
+
+  it("rebases by restating the look, not by merging it as prose", async () => {
+    const { store, gate } = await openGateSafely();
+    const mine = await gate.stageArtDirectionChange("Painterly and hand-animated, with visible brushwork.", null);
+
+    // Somebody else changes the look first, so mine is stale.
+    const theirs = await gate.stageArtDirectionChange("Ink and wash: brush contour, washed tone.", null);
+    await gate.accept(theirs.id, {});
+
+    assert.equal((await gate.accept(mine.id, {})).status, "stale");
+    const { conflicts } = await gate.rebase(mine.id);
+    assert.deepEqual(conflicts, [], "there is nothing to merge — a look is one whole description");
+
+    await gate.markSeen(mine.id);
+    assert.equal((await gate.accept(mine.id, {})).status, "accepted");
+
+    const record = store.getBundle().artDirection;
+    assert.match(record.description, /visible brushwork/, "the look that was proposed is the look that landed");
+    assert.equal(record.version, 5, "the fixture's look was v3, theirs landed v4, and this follows it");
+    assert.ok(
+      record.history.some((h) => /Ink and wash/.test(h.description)),
+      "the look it replaced stays in history, because accepted takes are pinned to it",
+    );
   });
 });
 

@@ -315,3 +315,26 @@ export interface SummaryInput {
 export function boundSummary(input: SummaryInput): SummaryInput {
   return { ...input, text: input.text.slice(0, BOUNDS.summary) };
 }
+
+/**
+ * The world's look, verbatim, for a model that may be asked to change it.
+ *
+ * An `art-direction.change` replaces the whole description, and nothing else the model can reach
+ * shows it: the retrieval tools cover Canon, sheets, relationships and attachments, and there is
+ * no tool for the one string every image is generated from. Told to restate it whole and unable
+ * to read it, a model asked to "make it darker and keep the rest" has to invent the rest — and
+ * whatever it cannot guess is gone, with nothing on screen to show that it went.
+ *
+ * Verbatim rather than summarised for the same reason: this is the text being rewritten, so a
+ * paraphrase of it would be a different look.
+ */
+export function currentLookContext(look: { version: number; description: string } | null): string {
+  if (!look) return "";
+  return [
+    `The world look is v${look.version}, and it is what every image is generated from:`,
+    "",
+    look.description,
+    "",
+    "An art-direction.change replaces this text entirely. Restate everything that should still be true of the look, not only the part being changed.",
+  ].join("\n");
+}
