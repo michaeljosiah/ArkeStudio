@@ -272,6 +272,16 @@ export const CandidateChecksSchema = z
   .object({
     state: z.enum(["complete", "partial", "unavailable", "stale"]),
     basedOnCanonRevision: z.number().int().min(0),
+    /**
+     * The world look this proposition was drafted against, for the one classification that
+     * replaces it whole (§6.2).
+     *
+     * An `art-direction.change` carries the entire description, so it is only safe to write while
+     * the look it was written from is still the look on disk. Without this the draft would be
+     * materialised against whatever is current at wrap-up and staged with that as its base — not
+     * stale by any test the gate applies, and silently replacing an edit made in between.
+     */
+    basedOnArtDirectionVersion: z.number().int().min(1).optional(),
     required: z.array(CheckCategorySchema),
     completed: z.array(CheckCategorySchema),
     consulted: z.array(
@@ -620,7 +630,7 @@ export const WorldChatNotCarriedSchema = z
   .object({
     candidateId: CandidateIdSchema,
     summary: z.string().min(1).max(300),
-    reason: z.enum(["tentative", "undecided", "target-missing", "invalid"]),
+    reason: z.enum(["tentative", "undecided", "target-missing", "invalid", "look-moved"]),
   })
   .strict();
 export type WorldChatNotCarried = z.infer<typeof WorldChatNotCarriedSchema>;

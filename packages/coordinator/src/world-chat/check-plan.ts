@@ -121,6 +121,8 @@ export interface DeriveInput {
   /** Receipts produced by the coordinator's own plan for this candidate, in this run. */
   receipts: readonly WorldChatCheckReceipt[];
   canonRevision: number;
+  /** The world look as it stands, so a draft that replaces it whole is bound to what it read. */
+  artDirectionVersion?: number;
   /** Scored matches from the plan's searches, above and below the duplicate floor. */
   matches?: ReadonlyArray<{ ref: WorldChatEntityRef; score: number }>;
 }
@@ -174,6 +176,10 @@ export function deriveChecks(input: DeriveInput): CandidateChecks {
   return {
     state,
     basedOnCanonRevision: input.canonRevision,
+    // Only for the classification that replaces the look whole; nothing else is bound to it.
+    ...(input.draft.classification === "art-direction.change" && input.artDirectionVersion !== undefined
+      ? { basedOnArtDirectionVersion: input.artDirectionVersion }
+      : {}),
     required: [...required],
     completed: [...completed].filter((c) => required.includes(c)),
     consulted,
@@ -221,8 +227,19 @@ function explain(
  */
 export function checksAreStale(
   checks: CandidateChecks,
-  current: { canonRevision: number; versionOf: (ref: WorldChatEntityRef) => number | null },
+  current: {
+    canonRevision: number;
+    versionOf: (ref: WorldChatEntityRef) => number | null;
+    artDirectionVersion?: number;
+  },
 ): boolean {
   if (checks.basedOnCanonRevision !== current.canonRevision) return true;
+  if (
+    checks.basedOnArtDirectionVersion !== undefined &&
+    current.artDirectionVersion !== undefined &&
+    checks.basedOnArtDirectionVersion !== current.artDirectionVersion
+  ) {
+    return true;
+  }
   return checks.consulted.some((c) => current.versionOf(c.ref) !== c.observedVersion);
 }

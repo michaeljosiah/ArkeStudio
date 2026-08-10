@@ -64,7 +64,12 @@ export interface RunDeps {
   runCheckPlan: (input: {
     draft: ModelCandidateDraft;
     leaseToken: string;
-  }) => Promise<{ receipts: readonly WorldChatCheckReceipt[]; canonRevision: number }>;
+  }) => Promise<{
+    receipts: readonly WorldChatCheckReceipt[];
+    canonRevision: number;
+    /** Bound into the checks of a draft that replaces the whole look — see basedOnArtDirectionVersion. */
+    artDirectionVersion?: number;
+  }>;
   /** The world half of evidence verification; the conversation half comes from the fold. */
   evidenceSources: (messages: readonly WorldChatMessage[]) => EvidenceSources;
   /**
@@ -519,8 +524,20 @@ export class WorldChatRunner {
     for (const candidate of outcome.turn.candidates) {
       const draft = candidate as unknown as ModelCandidateDraft;
       const plan = planFor(draft);
-      const { receipts, canonRevision } = await this.deps.runCheckPlan({ draft, leaseToken });
-      checksByDraft.set(draft, deriveChecks({ draft, plan, receipts, canonRevision }));
+      const { receipts, canonRevision, artDirectionVersion } = await this.deps.runCheckPlan({
+        draft,
+        leaseToken,
+      });
+      checksByDraft.set(
+        draft,
+        deriveChecks({
+          draft,
+          plan,
+          receipts,
+          canonRevision,
+          ...(artDirectionVersion !== undefined ? { artDirectionVersion } : {}),
+        }),
+      );
     }
 
     const revalidated = outcome.turn.candidates.map((candidate) => ({

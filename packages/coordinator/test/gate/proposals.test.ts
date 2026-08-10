@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ART_DIRECTION_PATH } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
@@ -226,6 +226,38 @@ describe("a world look through the generic gate", () => {
     const look = target.fields.find((f) => f.field === "Look");
     assert.ok(look, "and its description is the field a reviewer has to read before accepting");
     assert.match(look.proposed ?? "", /visible brushwork/);
+  });
+
+  /*
+   * Staged when the world had no look at all, and one exists by the time it is rebased.
+   *
+   * `base` is null for a create, and the create branch returns before anything else runs — so
+   * this used to refresh the hash and leave a record whose version and history had been computed
+   * against nothing, presented for review as though it followed the look now on disk.
+   */
+  it("restates a look staged before the world had one", async () => {
+    const { dir, gate } = await openGateSafely();
+    const noLook = join(dir, "art-direction", "art-direction.json");
+    const had = await readFile(noLook, "utf8");
+    await rm(noLook);
+
+    const mine = await gate.stageArtDirectionChange("Painterly, with visible brushwork.", null);
+    assert.equal(mine.targets[0]!.baseHash, null, "staged as a create, because there was no look");
+
+    // The look exists again — as though another proposal created it first.
+    await writeFile(noLook, had, "utf8");
+    const { conflicts } = await gate.rebase(mine.id);
+    assert.deepEqual(conflicts, []);
+
+    const restated = JSON.parse(
+      await readFile(join(dir, ".proposals", mine.id, "art-direction", "art-direction.json"), "utf8"),
+    ) as { version: number; history: Array<{ version: number }> };
+    const live = JSON.parse(had) as { version: number };
+    assert.equal(restated.version, live.version + 1, "it follows the look that is actually there now");
+    assert.ok(
+      restated.history.some((h) => h.version === live.version),
+      "and that look is in its history rather than nowhere",
+    );
   });
 
   it("rebases by restating the look, not by merging it as prose", async () => {

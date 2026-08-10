@@ -388,23 +388,28 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
   }
 
   let earlierAcceptedTakes = 0;
+  // Counted alongside, because a proposal replacing the current look turns all of these into
+  // earlier ones the moment it lands — see acceptedTakesAtCurrentVersion.
+  let acceptedTakesAtCurrentVersion = 0;
+  const countTake = (version: number | undefined): void => {
+    if (version === undefined) return;
+    if (version < resolved.version) earlierAcceptedTakes += 1;
+    else if (version === resolved.version) acceptedTakesAtCurrentVersion += 1;
+  };
+
   const latestReferenceReviews = new Map<string, "accept" | "reject">();
   for (const review of referenceReviews) latestReferenceReviews.set(review.takeId, review.decision);
-  earlierAcceptedTakes += referenceTakes.filter(
-    (take) =>
-      latestReferenceReviews.get(take.id) === "accept" &&
-      take.provenance.artDirectionVersion !== undefined &&
-      take.provenance.artDirectionVersion < resolved.version,
-  ).length;
+  for (const take of referenceTakes) {
+    if (latestReferenceReviews.get(take.id) !== "accept") continue;
+    countTake(take.provenance.artDirectionVersion);
+  }
   for (const production of productions) {
     const latest = new Map<string, "accept" | "reject">();
     for (const review of production.reviews) latest.set(review.takeId, review.decision);
-    earlierAcceptedTakes += production.takes.filter(
-      (take) =>
-        latest.get(take.id) === "accept" &&
-        take.provenance.artDirectionVersion !== undefined &&
-        take.provenance.artDirectionVersion < resolved.version,
-    ).length;
+    for (const take of production.takes) {
+      if (latest.get(take.id) !== "accept") continue;
+      countTake(take.provenance.artDirectionVersion);
+    }
   }
 
   const bundle: WorldBundle = {
@@ -416,6 +421,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
         referenceKits: referenceKits.filter((kit) => !kit.styleOverride?.trim()).length,
         productions: productions.filter((production) => !production.meta.styleOverride?.trim()).length,
         earlierAcceptedTakes,
+        acceptedTakesAtCurrentVersion,
       },
       overrides,
     },

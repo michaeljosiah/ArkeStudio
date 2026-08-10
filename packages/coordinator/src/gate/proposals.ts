@@ -565,6 +565,34 @@ export class ProposalManager {
           targets.push({ path: target.path, baseVersion: null, baseHash: null });
           continue;
         }
+        /*
+         * The world look rebases by restatement, not by merging — and before the generic branches,
+         * not after them.
+         *
+         * It is one JSON document rather than prose with a shape, so there are no sections to
+         * merge and mergeMarkdown would rewrite it with frontmatter delimiters, leaving a file
+         * that no longer parses as a look behind a button that promises recovery. A three-way
+         * merge would be the wrong idea even if it worked: a look is one whole description, so
+         * rebasing it means stating this look against the version that is current now.
+         *
+         * The staleness test is the live file rather than `base`, because "staged when the world
+         * had no look at all, and one exists now" is exactly the case the create branch below
+         * would swallow — it would refresh the hash and leave a record whose version and history
+         * were computed against nothing.
+         */
+        if (target.path === ART_DIRECTION_PATH && sha256(live) !== target.baseHash) {
+          const restated = restateArtDirection(mine, live, this.store.now());
+          if (restated === null) {
+            conflicts.push({ path: target.path, field: "Look", base, mine, theirs: live });
+            targets.push({ path: target.path, baseVersion: readVersion(target.path, live), baseHash: sha256(live) });
+            continue;
+          }
+          await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(target.path)), restated);
+          await atomicWriteFile(join(this.proposalDir(proposalId), "_base", fromPortable(target.path)), live);
+          targets.push({ path: target.path, baseVersion: readVersion(target.path, live), baseHash: sha256(live) });
+          continue;
+        }
+
         if (base === null || sha256(live) === target.baseHash) {
           // Created by this proposal, or not stale: rebase just refreshes the base record.
           targets.push({
@@ -572,35 +600,6 @@ export class ProposalManager {
             baseVersion: readVersion(target.path, live),
             baseHash: sha256(live),
           });
-          continue;
-        }
-
-        /*
-         * The world look rebases by restatement, not by merging.
-         *
-         * It is one JSON document rather than prose with a shape, so there are no sections to
-         * merge and mergeMarkdown would rewrite it with frontmatter delimiters — leaving a file
-         * that no longer parses as a look, offered under a button that promises recovery. And a
-         * three-way merge would be the wrong idea even if it worked: a look is a whole
-         * description, so what "rebase" means here is this look, stated against the version that
-         * is current now.
-         */
-        if (target.path === ART_DIRECTION_PATH) {
-          const restated = restateArtDirection(mine, live, this.store.now());
-          if (restated === null) {
-            conflicts.push({
-              path: target.path,
-              field: "Look",
-              base,
-              mine,
-              theirs: live,
-            });
-            targets.push({ path: target.path, baseVersion: readVersion(target.path, live), baseHash: sha256(live) });
-            continue;
-          }
-          await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(target.path)), restated);
-          await atomicWriteFile(join(this.proposalDir(proposalId), "_base", fromPortable(target.path)), live);
-          targets.push({ path: target.path, baseVersion: readVersion(target.path, live), baseHash: sha256(live) });
           continue;
         }
 
@@ -641,10 +640,19 @@ export class ProposalManager {
       if (!conflict) throw new Error(`no conflict on ${path}#${field}`);
       const current = await this.readProposalFile(proposalId, path);
       if (current === null) throw new Error(`${path} missing from proposal`);
-      await atomicWriteFile(
-        join(this.proposalDir(proposalId), fromPortable(path)),
-        applyResolution(path, current, conflict, choice),
-      );
+      /*
+       * Choosing a side of a world-look conflict takes that whole document.
+       *
+       * The conflict only exists because one of the two would not parse, and its "field" is the
+       * entire record rather than a section. applyResolution writes Markdown — it would wrap the
+       * chosen JSON in frontmatter and produce something no longer readable as a look, which is
+       * the failure the conflict was raised to prevent.
+       */
+      const resolved =
+        path === ART_DIRECTION_PATH
+          ? ((choice === "mine" ? conflict.mine : conflict.theirs) ?? current)
+          : applyResolution(path, current, conflict, choice);
+      await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(path)), resolved);
       const conflicts = (proposal.conflicts ?? []).map((c) =>
         c.path === path && c.field === field ? { ...c, resolution: choice } : c,
       );
@@ -668,6 +676,7 @@ export class ProposalManager {
     const bundle = this.store.getBundle();
     if (proposal.kind === "art-direction") {
       const reach = bundle.artDirection.reach;
+      const pinnedByThisChange = reach.earlierAcceptedTakes + (reach.acceptedTakesAtCurrentVersion ?? 0);
       items.push(
         {
           kind: "visual-assets-keep-look",
@@ -688,8 +697,16 @@ export class ProposalManager {
         },
         {
           kind: "takes-pinned-to-old-version",
-          summary: `${reach.earlierAcceptedTakes} accepted takes remain pinned to their original look`,
-          targets: Array.from({ length: reach.earlierAcceptedTakes }, (_, index) => `accepted-take-${index + 1}`),
+          /*
+           * Everything already behind, plus everything made under the look this replaces.
+           *
+           * Counting only what was already old described the consequence of the *previous*
+           * change: the takes made since — often all of them, and the ones the person is
+           * actually thinking of — became pinned the moment this landed and were not in the
+           * number they were shown before accepting.
+           */
+          summary: `${pinnedByThisChange} accepted takes remain pinned to their original look`,
+          targets: Array.from({ length: pinnedByThisChange }, (_, index) => `accepted-take-${index + 1}`),
         },
       );
       if (bundle.artDirection.overrides.length > 0) {

@@ -524,6 +524,37 @@ describe("readiness on its own", () => {
     assert.equal(notCarried[0]!.reason, "invalid");
   });
 
+  /*
+   * A look drafted against a look that has since changed.
+   *
+   * This classification carries the whole description, so writing it now would replace whatever
+   * was decided in between with words chosen before it existed — and nothing downstream would
+   * catch it, because the proposal is staged against whatever is current at that moment. Held
+   * back rather than dropped: it stays in the conversation to be asked for again.
+   */
+  function lookChange(basedOn: number) {
+    return candidate({
+      classification: "art-direction.change",
+      title: "The world takes a painterly look",
+      draft: { description: "Painterly and hand-animated." },
+      checks: { ...candidate().checks, required: [], completed: [], basedOnArtDirectionVersion: basedOn },
+    } as Partial<WorldChangeCandidate>);
+  }
+
+  it("holds back a look written against a look that has since changed", () => {
+    const world = { canon: [], sheets: [], artDirection: { version: 5 } } as never;
+    const { carried, notCarried } = evaluateReadiness([lookChange(4)], world);
+    assert.deepEqual(carried, []);
+    assert.equal(notCarried[0]!.reason, "look-moved");
+  });
+
+  it("carries one written against the look that is still current", () => {
+    const world = { canon: [], sheets: [], artDirection: { version: 5 } } as never;
+    const { carried, notCarried } = evaluateReadiness([lookChange(5)], world);
+    assert.equal(carried.length, 1);
+    assert.deepEqual(notCarried, []);
+  });
+
   it("holds back an undecided proposition", () => {
     const undecided = candidate({
       classification: "undecided",

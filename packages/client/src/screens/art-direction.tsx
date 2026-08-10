@@ -14,6 +14,21 @@ function splitDescription(description: string): { title: string; body: string } 
   return { title: first[1]!, body: first[2]?.trim() || first[1]! };
 }
 
+/**
+ * What the proposal does to the master image, by presence rather than by fallback.
+ *
+ * The three cases are genuinely different and were previously two: a look change that keeps the
+ * image, one that replaces it, and one that removes it. A conversation's look change carries no
+ * image at all, so without the third case every one of them read as "retained" while accepting
+ * removed it.
+ */
+function proposedMasterLookNote(proposed: string | null, current: string | null, staged: boolean): string {
+  if (!staged) return "New style · master image retained";
+  if (proposed === current) return "New style · master image retained";
+  if (proposed === null) return "New style · master image removed";
+  return "New master image";
+}
+
 function directionImage(worldSlug: string, path: string | undefined, label: string, radius = 0) {
   return path ? (
     <Portrait worldSlug={worldSlug} path={path} label={label} radius={radius} />
@@ -231,19 +246,25 @@ export function ArtDirectionProposalScreen() {
           </div>
           <div className="fy-artproposal__preview">
             <div className="fy-artproposal__proposed-image">
+              {/*
+                A staged look says what it says, including saying nothing.
+
+                This used to fall back to the current master image whenever the proposal carried
+                none, and label it "master image retained" — so a proposal that removes the master
+                look showed the very image it was about to delete, over a caption promising it
+                would stay. A conversation's look change carries no image, so that was every one
+                of them. Only a draft with nothing staged yet borrows the current image, because
+                there is no proposal to misdescribe.
+              */}
               {directionImage(
                 world.meta.slug,
-                proposed?.masterLook ?? direction.masterLook,
+                proposed ? proposed.masterLook : direction.masterLook,
                 "Proposed look",
                 0,
               )}
               <span>PROPOSED</span>
             </div>
-            <p>
-              {proposed?.masterLook === direction.masterLook || !proposed
-                ? "New style · master image retained"
-                : "New master image"}
-            </p>
+            <p>{proposedMasterLookNote(proposed?.masterLook ?? null, direction.masterLook ?? null, Boolean(proposed))}</p>
           </div>
         </div>
         {/* The same nine presets genesis offers (design turn 38c). A look chosen a year in should

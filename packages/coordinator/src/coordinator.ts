@@ -3942,8 +3942,16 @@ export class Coordinator {
 
     const runner = new WorldChatRunner({
       adapter: this.opts.adapter ?? null,
-      // A look can only be rewritten by something that can read it — see currentLookContext.
-      worldContext: () => currentLookContext(this.opts.provider.openStore?.()?.getBundle().artDirection ?? null),
+      /*
+       * A look can only be rewritten by something that can read it — see currentLookContext.
+       *
+       * From this runner's own world, not from whichever store happens to be open: a turn can
+       * still be reading when somebody opens another world, and the provider's selection would
+       * have followed them. That would put world B's look, verbatim, in world A's prompt — one
+       * world's content shown while talking about another, and an invitation to rewrite A's look
+       * into B's words.
+       */
+      worldContext: () => currentLookContext(store.getBundle().artDirection),
       prepare: async ({ conversationId, runId, attachmentIds }) => {
         const lease = leases.mint({
           worldId: store.worldId,
@@ -3984,9 +3992,12 @@ export class Coordinator {
           const outcome = await retrieval.call(leaseToken, tool, { id }).catch(() => null);
           if (outcome) produced.push(outcome.receipt);
         }
+        // This runner's own world, for the same reason worldContext reads from it: the provider's
+        // selection follows whatever the person opened while the turn was still running.
         return {
           receipts: produced,
-          canonRevision: this.opts.provider.openStore?.()?.getBundle().meta.canonRevision ?? 0,
+          canonRevision: store.getBundle().meta.canonRevision,
+          artDirectionVersion: store.getBundle().artDirection.version,
         };
       },
       describeEntry: (context) => describeEntryContext(context, store.getBundle()),
