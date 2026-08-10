@@ -677,9 +677,18 @@ function PendingSheetRows({ worldId, pending }: { worldId: string | undefined; p
   );
 }
 
-/** " · 2 drafting", or nothing at all. The count beside a heading counts what exists. */
-function draftingSuffix(pending: readonly PendingSheet[]): string {
-  return pending.length > 0 ? ` · ${pending.length} drafting` : "";
+/**
+ * " · 2 in Proposals", or nothing at all.
+ *
+ * Not "drafting", which would be a claim about work that in several cases never happens: a
+ * duplicated sheet is staged whole and synchronously, and a World Chat candidate is
+ * materialised before it is staged. Neither ever runs an agent, so a heading counting them as
+ * drafting would say so for as long as they sat there — and would disagree with the card
+ * beneath it, which says what it actually knows. Where they all are is the one thing true of
+ * every pending sheet, so that is what the count says.
+ */
+function pendingSuffix(pending: readonly PendingSheet[]): string {
+  return pending.length > 0 ? ` · ${pending.length} in Proposals` : "";
 }
 
 function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
@@ -787,7 +796,7 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
               <span className="fy-ledgerhead__meta">
                 {locked} canon-locked · {sketches} sketch{sketches === 1 ? "" : "es"}
                 {retired > 0 ? ` · ${retired} retired` : ""}
-                {draftingSuffix(pending)}
+                {pendingSuffix(pending)}
               </span>
             </div>
             <div className="fy-ledger">
@@ -889,7 +898,7 @@ export function LocationsScreen() {
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {places.length} place{places.length === 1 ? "" : "s"}
-          {draftingSuffix(pending)}
+          {pendingSuffix(pending)}
         </div>
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Locations
@@ -902,6 +911,10 @@ export function LocationsScreen() {
         className="fy-cardgrid"
         style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(places.length + pending.length, 2), 4)}, minmax(0, 1fr))` }}
       >
+        {/* Pending cards lead, and it has to be the markup rather than a comment: a world with
+            a screen's worth of places would otherwise put the one just submitted below the
+            fold, which is the same "did that work?" the empty state caused (issue 228). */}
+        <PendingSheetCards worldId={worldId} pending={pending} frameHeight={270} />
         {places.map((s) => (
           <button key={s.id} type="button" className="fy-gridcard fy-gridcard--media fy-gridcard--fixed" onClick={() => navigate(`/w/${worldId}/locations/${s.id}`)}>
             <div className="fy-gridcard__frame" style={{ height: 270 }}>
@@ -920,10 +933,7 @@ export function LocationsScreen() {
             </div>
           </button>
         ))}
-        {/* Drafting cards lead: they are the newest thing here and the reason the list looks
-            emptier than it is. An empty state means "nothing here", never "something is on
-            its way" (issue 228). */}
-        <PendingSheetCards worldId={worldId} pending={pending} frameHeight={270} />
+        {/* An empty state means "nothing here", never "something is on its way" (issue 228). */}
         {places.length === 0 && pending.length === 0 && (
           <EmptyState title="No locations yet" hint="Where the world happens — look, sound, customs." />
         )}
@@ -946,7 +956,7 @@ export function FactionsScreen() {
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {factions.length} faction{factions.length === 1 ? "" : "s"}
-          {draftingSuffix(pending)}
+          {pendingSuffix(pending)}
         </div>
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Factions
@@ -962,6 +972,7 @@ export function FactionsScreen() {
           padding: "32px 150px 46px",
         }}
       >
+        <PendingSheetCards worldId={worldId} pending={pending} frameHeight={210} />
         {factions.map((s) => {
           const wants = facet(s, "want");
           const fears = facet(s, "fear");
@@ -1004,7 +1015,6 @@ export function FactionsScreen() {
             </button>
           );
         })}
-        <PendingSheetCards worldId={worldId} pending={pending} frameHeight={210} />
         {factions.length === 0 && pending.length === 0 && (
           <EmptyState title="No factions yet" hint="Groups with wants and fears." />
         )}

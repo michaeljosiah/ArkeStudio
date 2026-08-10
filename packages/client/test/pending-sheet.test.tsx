@@ -71,7 +71,7 @@ describe("an entity being drafted shows as pending, not as nothing (issue 228)",
     );
     assert.ok(html.includes("Ojuelegba Junction"), "the place the user just asked for is on the screen");
     assert.equal(html.includes("No locations yet"), false, "an empty state never means 'something is on its way'");
-    assert.ok(html.includes("1 drafting"), "and the heading says one is on the way");
+    assert.ok(html.includes("1 in Proposals"), "and the heading says one is on the way");
   });
 
   it("does not claim a sheet is drafted when it has not seen the run", () => {
@@ -123,7 +123,7 @@ describe("an entity being drafted shows as pending, not as nothing (issue 228)",
     assert.ok(html.includes("Timi J"), "the character being drafted is the one awaiting");
   });
 
-  it("counts the drafting ones apart from the ones that exist", () => {
+  it("counts the pending ones apart from the ones that exist", () => {
     // A draft is not a place yet, so the count of places does not move — it is said separately.
     const html = render(
       emptyWorldWith([draftingProposal("locations/ojuelegba-junction.md", "Ojuelegba Junction")]),
@@ -131,7 +131,27 @@ describe("an entity being drafted shows as pending, not as nothing (issue 228)",
       <LocationsScreen />,
     );
     assert.ok(html.includes("0 place"), "nothing has landed yet");
-    assert.ok(html.includes("1 drafting"), "and one is on the way");
+    assert.ok(html.includes("1 in Proposals"), "and one is waiting there");
+    // Never "drafting": a duplicated sheet is staged whole and a World Chat candidate is
+    // materialised before staging, so neither ever runs an agent. A heading calling them
+    // drafting would say so forever, and disagree with the card beneath it.
+    assert.equal(html.includes("1 drafting"), false, "the count claims no work that may never happen");
+  });
+
+  it("puts the pending card ahead of the places that already exist", () => {
+    // A world with a screen's worth of places would otherwise push the one just submitted
+    // below the fold, which is the same "did that work?" the empty state caused.
+    const world = FIXTURE_STATE.world!;
+    const state: ClientState = {
+      ...FIXTURE_STATE,
+      world: { ...world, proposals: [draftingProposal("locations/ojuelegba-junction.md", "Ojuelegba Junction")] },
+    };
+    const html = render(state, `${W}/locations`, <LocationsScreen />);
+    const pendingAt = html.indexOf("Ojuelegba Junction");
+    const existingAt = html.indexOf("The Vigil");
+    assert.ok(pendingAt > 0, "the pending place is drawn");
+    assert.ok(existingAt > 0, "so is the place the world already had");
+    assert.ok(pendingAt < existingAt, "and the pending one comes first");
   });
 
   it("sends the pending card to Proposals, where the yes it waits for is given", () => {
