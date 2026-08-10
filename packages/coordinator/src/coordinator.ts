@@ -3952,6 +3952,9 @@ export class Coordinator {
        * into B's words.
        */
       worldContext: () => currentLookContext(store.getBundle().artDirection),
+      // Read at the same instant as the look above, and from the same world, so what a draft
+      // says it was based on is what the model was actually shown.
+      artDirectionVersion: () => store.getBundle().artDirection.version,
       prepare: async ({ conversationId, runId, attachmentIds }) => {
         const lease = leases.mint({
           worldId: store.worldId,
@@ -3994,11 +3997,7 @@ export class Coordinator {
         }
         // This runner's own world, for the same reason worldContext reads from it: the provider's
         // selection follows whatever the person opened while the turn was still running.
-        return {
-          receipts: produced,
-          canonRevision: store.getBundle().meta.canonRevision,
-          artDirectionVersion: store.getBundle().artDirection.version,
-        };
+        return { receipts: produced, canonRevision: store.getBundle().meta.canonRevision };
       },
       describeEntry: (context) => describeEntryContext(context, store.getBundle()),
       onProgress: (conversationId, label) => {

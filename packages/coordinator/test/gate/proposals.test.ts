@@ -229,6 +229,30 @@ describe("a world look through the generic gate", () => {
   });
 
   /*
+   * A world always has a look, even before it has a file for one: until somebody changes it, the
+   * look is derived from the world's tone and genre. So the first change stages as a create with
+   * no base, and the review showed a new art direction with no `was` — never naming the words
+   * about to be replaced, which are the only reason to read the screen.
+   */
+  it("names the inherited look a first change replaces", async () => {
+    const { dir, gate } = await openGateSafely();
+    const inherited = JSON.parse(await readFile(join(dir, "art-direction", "art-direction.json"), "utf8")) as {
+      description: string;
+    };
+    await rm(join(dir, "art-direction", "art-direction.json"));
+
+    const proposal = await gate.stageArtDirectionChange("Painterly, with visible brushwork.", null);
+    const staged = await readFile(join(dir, ".proposals", proposal.id, "art-direction", "art-direction.json"), "utf8");
+
+    const review = projectReview({ proposal, proposed: () => staged, base: () => null });
+    const target = review.targets.find((t) => t.path === ART_DIRECTION_PATH);
+    assert.equal(target?.action, "amend", "changing the look is an amendment even the first time");
+    const look = target?.fields.find((f) => f.field === "Look");
+    assert.equal(look?.before, inherited.description, "the words being replaced are on the screen");
+    assert.match(look?.proposed ?? "", /visible brushwork/);
+  });
+
+  /*
    * Staged when the world had no look at all, and one exists by the time it is rebased.
    *
    * `base` is null for a create, and the create branch returns before anything else runs — so

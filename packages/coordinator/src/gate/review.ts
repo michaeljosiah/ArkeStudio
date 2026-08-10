@@ -118,6 +118,27 @@ export interface ReviewInput {
  * the one line that changed among fifteen that did not, and the reviewer's job is to judge the
  * change, not to find it.
  */
+/**
+ * The look a staged change supersedes, taken from the change's own history.
+ *
+ * Only for the case where nothing is on disk to compare against: the record being staged always
+ * pushes the look it replaces onto `history`, so the newest entry there is what the world was
+ * resolving to. Null when the staged record is the world's very first look and supersedes
+ * nothing — then "create" is the honest word.
+ */
+function inheritedLookBase(proposedRaw: string): { label: string; kind: string; fields: Map<string, string> } | null {
+  try {
+    const record = ArtDirectionRecordSchema.parse(JSON.parse(proposedRaw));
+    const previous = record.history.at(-1);
+    if (!previous) return null;
+    const fields = new Map<string, string>([["Look", previous.description]]);
+    if (previous.masterLook) fields.set("Master look", previous.masterLook);
+    return { label: `World look v${previous.version}`, kind: "art direction", fields };
+  } catch {
+    return null;
+  }
+}
+
 export function projectReview(input: ReviewInput): ReviewProjection {
   const targets: ReviewTarget[] = [];
 
@@ -128,7 +149,21 @@ export function projectReview(input: ReviewInput): ReviewProjection {
     if (!proposed) continue;
 
     const baseRaw = input.base(target.path);
-    const base = baseRaw === null ? null : fieldsOf(target.path, baseRaw);
+    /*
+     * A world always has a look, even before it has a file for one.
+     *
+     * Until somebody changes it, the look is derived from the world's tone and genre and lives
+     * nowhere on disk — so the first change to it stages as a create with no base, and the review
+     * showed a new art direction with no `was` at all. What it was replacing, and what the person
+     * was about to lose, went unmentioned. The staged record carries the look it supersedes in
+     * its own history, which is the same words the world was resolving to.
+     */
+    const base =
+      baseRaw === null
+        ? target.path === ART_DIRECTION_PATH
+          ? inheritedLookBase(proposedRaw)
+          : null
+        : fieldsOf(target.path, baseRaw);
     const action: ReviewTarget["action"] = base === null ? "create" : "amend";
 
     const fields: ReviewField[] = [];
