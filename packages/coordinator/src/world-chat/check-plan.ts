@@ -5,6 +5,7 @@ import type {
   WorldChatEntityRef,
   WorldChangeClassification,
 } from "@arke-studio/contracts";
+import { type CurrentLook, lookHasMoved, lookIdentityOf } from "./look.js";
 
 /**
  * What must be checked before a proposition can be called ready, and what the checks found
@@ -121,8 +122,13 @@ export interface DeriveInput {
   /** Receipts produced by the coordinator's own plan for this candidate, in this run. */
   receipts: readonly WorldChatCheckReceipt[];
   canonRevision: number;
-  /** The world look as it stands, so a draft that replaces it whole is bound to what it read. */
-  artDirectionVersion?: number;
+  /**
+   * The world look as it stands, so a draft that replaces it whole is bound to what it read.
+   *
+   * Both halves of it: a look is identified by its words as well as its number, because a derived
+   * one is always v1 however often the world's tone is edited underneath it (see look.ts).
+   */
+  artDirectionLook?: CurrentLook;
   /** Scored matches from the plan's searches, above and below the duplicate floor. */
   matches?: ReadonlyArray<{ ref: WorldChatEntityRef; score: number }>;
 }
@@ -177,8 +183,8 @@ export function deriveChecks(input: DeriveInput): CandidateChecks {
     state,
     basedOnCanonRevision: input.canonRevision,
     // Only for the classification that replaces the look whole; nothing else is bound to it.
-    ...(input.draft.classification === "art-direction.change" && input.artDirectionVersion !== undefined
-      ? { basedOnArtDirectionVersion: input.artDirectionVersion }
+    ...(input.draft.classification === "art-direction.change" && input.artDirectionLook !== undefined
+      ? lookIdentityOf(input.artDirectionLook)
       : {}),
     required: [...required],
     completed: [...completed].filter((c) => required.includes(c)),
@@ -230,16 +236,10 @@ export function checksAreStale(
   current: {
     canonRevision: number;
     versionOf: (ref: WorldChatEntityRef) => number | null;
-    artDirectionVersion?: number;
+    artDirectionLook?: CurrentLook;
   },
 ): boolean {
   if (checks.basedOnCanonRevision !== current.canonRevision) return true;
-  if (
-    checks.basedOnArtDirectionVersion !== undefined &&
-    current.artDirectionVersion !== undefined &&
-    checks.basedOnArtDirectionVersion !== current.artDirectionVersion
-  ) {
-    return true;
-  }
+  if (lookHasMoved(checks, current.artDirectionLook)) return true;
   return checks.consulted.some((c) => current.versionOf(c.ref) !== c.observedVersion);
 }

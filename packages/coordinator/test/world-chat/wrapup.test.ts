@@ -11,6 +11,7 @@ import {
   type WorldChangeCandidate,
 } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
+import { lookContentHash } from "../../src/world-chat/look.js";
 import { evaluateReadiness } from "../../src/world-chat/readiness.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
@@ -548,6 +549,105 @@ describe("what wrap-up refuses", () => {
     );
   });
 
+  /*
+   * The roll-back that could not roll everything back.
+   *
+   * `gate.discard` can refuse — a file held open, a directory that will not go — and swallowing
+   * that left a proposal on the approvals screen for a conversation whose propositions were all
+   * still live, under a refusal that said nothing had been created. The intent closes either way,
+   * so startup recovery, which reconciles by open intent, would never look again: nothing in the
+   * world or the log knew the thing was there.
+   */
+  it("names the proposals a failed roll-back could not take back", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [
+      candidate({ title: "A rule that stages first" }),
+      candidate({ title: "A rule that never gets that far" }),
+    ]);
+
+    const realStage = w.gate.stage.bind(w.gate);
+    let staged = 0;
+    w.gate.stage = async (input) => {
+      staged += 1;
+      if (staged === 2) throw new Error("the disk went away");
+      return realStage(input);
+    };
+    w.gate.discard = async () => {
+      throw new Error("and it is still away");
+    };
+
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "req-stuck",
+          expectedConversationSeq: seq,
+          now: NOW,
+        }),
+      (err: unknown) =>
+        err instanceof WrapUpError && err.reason === "leftovers" && /could not be taken back/.test(err.message),
+    );
+
+    const left = await w.ours();
+    assert.equal(left.length, 1, "the proposal that would not go is still on the approvals screen");
+    const { events } = await w.log.read();
+    const failed = events
+      .map((e) => e.event)
+      .find((e): e is Extract<typeof e, { type: "wrapup.failed" }> => e.type === "wrapup.failed");
+    assert.deepEqual(
+      failed?.leftoverProposalIds,
+      [left[0]!.id],
+      "and the log names it, because after the intent closes nothing else remembers",
+    );
+  });
+
+  it("refuses to go again while a proposal it could not take back is still waiting", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    await withCandidates(w.log, [candidate(), candidate({ title: "A second one" })]);
+
+    const realStage = w.gate.stage.bind(w.gate);
+    let staged = 0;
+    w.gate.stage = async (input) => {
+      staged += 1;
+      if (staged === 2) throw new Error("the disk went away");
+      return realStage(input);
+    };
+    const stuck = w.gate.discard.bind(w.gate);
+    w.gate.discard = async () => {
+      throw new Error("and it is still away");
+    };
+
+    const attempt = async (requestId: string) => {
+      const { events } = await w.log.read();
+      return wrapUp({
+        store: w.store,
+        gate: w.gate,
+        conversationId: w.conversationId,
+        requestId,
+        expectedConversationSeq: events[events.length - 1]!.seq,
+        now: NOW,
+      });
+    };
+
+    await assert.rejects(() => attempt("req-first"), (err: unknown) => err instanceof WrapUpError);
+    await assert.rejects(
+      () => attempt("req-second"),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "leftovers",
+      "going again would stage a second proposal for propositions that already have one",
+    );
+
+    // Discarded on the approvals screen, as the refusal says to do: the way out is not a restart.
+    w.gate.discard = stuck;
+    for (const proposal of await w.ours()) await w.gate.discard(proposal.id);
+    w.gate.stage = realStage;
+    const done = await attempt("req-third");
+    assert.equal(done.proposalIds.length, 2, "and the conversation carries as it always would have");
+  });
+
   it("refuses a conversation that moved on while it was being read", async () => {
     const w = await world();
     const seq = await withCandidates(w.log, [candidate()]);
@@ -656,6 +756,50 @@ describe("readiness on its own", () => {
     const { carried, notCarried } = evaluateReadiness([lookChange(5)], world);
     assert.equal(carried.length, 1);
     assert.deepEqual(notCarried, []);
+  });
+
+  /*
+   * The version did not move and the look did.
+   *
+   * A world with no art-direction file still has one, derived from its name, tone, genre and
+   * logline — and that derivation is always v1. Edit the world's tone and the description every
+   * image is generated from is rewritten while the number sits exactly where it was, so a draft
+   * pinned to the number alone passed as current and replaced words it had never been shown.
+   */
+  it("holds back a look whose description was rewritten under the same version", () => {
+    const shown = "Painterly and hand-animated, with visible brushwork.";
+    const pinned = candidate({
+      classification: "art-direction.change",
+      title: "The world takes a painterly look",
+      draft: { description: "Painterly and hand-animated." },
+      checks: {
+        ...candidate().checks,
+        required: [],
+        completed: [],
+        basedOnArtDirectionVersion: 1,
+        basedOnArtDirectionLook: lookContentHash(shown),
+      },
+    } as Partial<WorldChangeCandidate>);
+
+    const rewritten = {
+      canon: [],
+      sheets: [],
+      proposals: [],
+      artDirection: { version: 1, description: "Saltlight should feel wry and salt-bleached." },
+    } as never;
+    assert.equal(evaluateReadiness([pinned], rewritten).notCarried[0]!.reason, "look-moved");
+
+    const unchanged = {
+      canon: [],
+      sheets: [],
+      proposals: [],
+      artDirection: { version: 1, description: shown },
+    } as never;
+    assert.equal(
+      evaluateReadiness([pinned], unchanged).carried.length,
+      1,
+      "word for word what it was shown is not a look that moved",
+    );
   });
 
   /*

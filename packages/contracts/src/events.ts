@@ -452,6 +452,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
         "too-many",
         "in-flight",
         "look-already-proposed",
+        "leftovers",
         "unknown",
       ]),
       detail: z.string().min(1).max(300),

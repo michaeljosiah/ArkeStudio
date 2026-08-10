@@ -9,10 +9,11 @@ import {
 import { LookAlreadyProposedError, type ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "../world/store.js";
 import { foldConversation } from "./fold.js";
+import { lookHasMoved } from "./look.js";
 import { canonIdsNeeded, materialiseCandidate, MaterialiseError, planIdentities } from "./materialise.js";
 import { evaluateReadiness, type NotCarried } from "./readiness.js";
 import { conversationDir, WorldChatStore } from "./store.js";
-import { openIntentOf } from "./wrapup-recovery.js";
+import { leftoverProposalIdsOf, openIntentOf } from "./wrapup-recovery.js";
 
 /**
  * Turning a conversation into proposals, once (#70 §11.3).
@@ -52,7 +53,8 @@ export class WrapUpError extends Error {
       | "materialise"
       | "too-many"
       | "in-flight"
-      | "look-already-proposed",
+      | "look-already-proposed"
+      | "leftovers",
     message: string,
   ) {
     super(message);
@@ -177,6 +179,32 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
     );
   }
 
+  /**
+   * Nothing an earlier attempt left standing (R-42a).
+   *
+   * A failed wrap-up takes its own staging back, and a discard that will not go leaves a proposal
+   * behind for propositions that are all still live. Going again from here would stage a second
+   * proposal for each of them, and the approvals screen would hold two accounts of one
+   * conversation with no way to tell which was meant.
+   *
+   * Not the permanent wedge the open-intent refusal would be: these are visible on the approvals
+   * screen and can be discarded there, and the next start sweeps them without being asked.
+   *
+   * The gate is only asked when the log says there is something to ask about — a wrap-up on a
+   * conversation that never failed reads no proposal directories at all.
+   */
+  const recordedLeftovers = leftoverProposalIdsOf(events);
+  if (recordedLeftovers.length > 0) {
+    const open = await input.gate.listOpen();
+    const stillStaged = recordedLeftovers.filter((id) => open.some((p) => p.id === id));
+    if (stillStaged.length > 0) {
+      throw new WrapUpError(
+        "leftovers",
+        "An earlier attempt on this conversation left proposals behind that could not be taken back. Decide or discard those on the approvals screen, then wrap this up.",
+      );
+    }
+  }
+
   const view = foldConversation(meta.id, meta.createdAt, events).view;
   const bundle = input.store.getBundle();
   const { carried, mediaIdeas, notCarried } = evaluateReadiness(view.candidates, bundle);
@@ -292,9 +320,9 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
        * writes and an id allocation between it and here.
        */
       if (item.candidate.classification === "art-direction.change") {
-        const basedOn = item.candidate.checks.basedOnArtDirectionVersion;
-        const now = input.store.getBundle().artDirection.version;
-        if (basedOn !== undefined && basedOn !== now) {
+        // Against the words as well as the version — a derived look is v1 however often the
+        // world's tone is edited underneath it (see look.ts).
+        if (lookHasMoved(item.candidate.checks, input.store.getBundle().artDirection)) {
           throw new WrapUpError(
             "stale",
             "The world look changed while this was being written, so nothing was. Open the conversation again and ask for the look you want from where it is now.",
@@ -306,12 +334,25 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
       if (item.candidate.classification === "canon.thread") threadProposalIds.push(proposal.id);
     }
   } catch (err) {
+    /*
+     * What would not go is named, not swallowed.
+     *
+     * The intent closes below whatever happens here, because leaving it open would refuse every
+     * later wrap-up on this conversation as in-flight until the studio restarted. That closure is
+     * also what puts a failed discard beyond the reach of startup recovery, which reconciles by
+     * open intent and would never look again — so an undiscarded proposal would sit on the
+     * approvals screen for propositions that are all still live, with nothing anywhere recording
+     * that it is there.
+     *
+     * So the ids travel with the terminal event. The next start sweeps them, the next wrap-up on
+     * this conversation refuses while they remain, and the refusal below stops claiming that
+     * nothing was created when something was.
+     */
+    const leftBehind: string[] = [];
     for (const staged of proposals) {
-      await input.gate.discard(staged.id).catch(() => {
-        /* recovery reconciles what will not go now; the refusal below is the answer either way */
-      });
+      await input.gate.discard(staged.id).catch(() => leftBehind.push(staged.id));
     }
-    const refusal =
+    const cause =
       err instanceof WrapUpError
         ? err
         : err instanceof LookAlreadyProposedError
@@ -320,8 +361,24 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
               "A change to the world look is already waiting to be decided. Decide that one, then wrap this up.",
             )
           : new WrapUpError("materialise", "One of these changes could not be staged, so none were.");
+    // What is said and what is recorded differ on purpose. The person is told the thing they can
+    // act on — there are proposals on the screen that should not be there — while the log keeps
+    // why the wrap-up stopped in the first place, which is the only thing that explains them.
+    const refusal =
+      leftBehind.length > 0
+        ? new WrapUpError(
+            "leftovers",
+            "This could not be finished, and what it had already created could not be taken back. Those proposals are on the approvals screen; decide or discard them before trying again.",
+          )
+        : cause;
     await log.append(
-      { type: "wrapup.failed", requestId: input.requestId, safeDetail: refusal.reason },
+      {
+        type: "wrapup.failed",
+        requestId: input.requestId,
+        safeDetail:
+          leftBehind.length > 0 ? `${cause.reason}; ${leftBehind.length} left staged` : cause.reason,
+        ...(leftBehind.length > 0 ? { leftoverProposalIds: leftBehind } : {}),
+      },
       { at: input.now() },
     );
     throw refusal;

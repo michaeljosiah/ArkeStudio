@@ -315,4 +315,74 @@ describe("a wrap-up the app died in the middle of", () => {
     assert.deepEqual(outcome.repaired, [], "a completed wrap-up is not an unfinished one");
     await w.store.close();
   });
+
+  /*
+   * A wrap-up that failed and could not take back what it had already staged.
+   *
+   * It closes its own intent — leaving it open would refuse every later wrap-up on the
+   * conversation as in-flight until the studio restarted — so the sweep below is the only thing
+   * that ever comes back for these. Without it the proposal waits on the approvals screen with a
+   * summary from a conversation that says it created nothing, and accepting it writes one part of
+   * a set nobody agreed to as a whole.
+   */
+  it("takes back what a failed wrap-up could not", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir);
+    const gate = new ProposalManager(store);
+    const conversationId = newId("cv") as ConversationId;
+    const log = new WorldChatStore(conversationDir(dir, conversationId));
+    await log.create(conversationId, AT);
+    await log.append(
+      { type: "conversation.created", title: "t", entryContext: { kind: "world" } },
+      { at: AT },
+    );
+
+    const orphan = await gate.stage({
+      kind: "worldbuilding",
+      summary: "Bells",
+      source: `world-chat:${conversationId}`,
+      targets: [
+        {
+          path: "canon/CANON-901.md",
+          content:
+            "---\nid: CANON-901\ntype: lore\ntitle: B\nstatus: settled\nintroducedAt: 0\nlinks: []\n---\n\nBody.\n",
+        },
+      ],
+    });
+    await log.append(
+      {
+        type: "wrapup.intent-recorded",
+        requestId: "req-stuck",
+        expectedConversationSeq: 1,
+        plannedProposalIds: [],
+      },
+      { at: AT },
+    );
+    await log.append(
+      {
+        type: "wrapup.failed",
+        requestId: "req-stuck",
+        safeDetail: "leftovers",
+        leftoverProposalIds: [orphan.id],
+      },
+      { at: AT },
+    );
+
+    const outcome = await recoverWrapUps(store, gate, NOW);
+    assert.equal(outcome.repaired[0]!.outcome, "cleaned");
+    assert.equal(
+      (await gate.listOpen()).some((p) => p.id === orphan.id),
+      false,
+      "the proposal that attempt left standing is gone",
+    );
+
+    const meta = await log.readMeta();
+    const view = foldConversation(meta!.id, meta!.createdAt, (await log.read()).events).view;
+    assert.equal(view.status, "open", "and the conversation is where it was — nothing carried");
+
+    // Idempotent: the failure event stays in the log for good, so the sweep has to find nothing
+    // the second time rather than report the same repair at every start for the rest of the world.
+    assert.deepEqual((await recoverWrapUps(store, gate, NOW)).repaired, []);
+    await store.close();
+  });
 });

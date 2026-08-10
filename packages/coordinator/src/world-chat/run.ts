@@ -16,6 +16,7 @@ import {
 } from "@arke-studio/contracts";
 import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
 import { assembleContext, type ContextAttachment } from "./context.js";
+import type { CurrentLook } from "./look.js";
 import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
 import { deriveChecks, planFor } from "./check-plan.js";
 import { correctiveMessage, validateTurnResult, type TurnProblem } from "./turn-result.js";
@@ -96,14 +97,18 @@ export interface RunDeps {
    */
   worldContext?: (view: WorldChatLoaded) => string;
   /**
-   * The world look's version at the moment the prompt is assembled.
+   * The world look at the moment the prompt is assembled — its version and its words.
    *
    * Read here rather than after the answer arrives, because that is when the model was shown the
    * description. A look edited while the model was still writing would otherwise be recorded as
-   * the version this draft was based on — and the staleness check that exists to catch exactly
-   * that would pass, letting a whole-description draft overwrite the edit it never saw.
+   * the one this draft was based on — and the staleness check that exists to catch exactly that
+   * would pass, letting a whole-description draft overwrite the edit it never saw.
+   *
+   * One call returning both, rather than two: read separately, a change landing between them
+   * would pin the number from before it and the words from after, which matches nothing that ever
+   * existed and is stale against neither.
    */
-  artDirectionVersion?: () => number;
+  artDirectionLook?: () => CurrentLook;
   /** What the conversation was opened about, worded for the model (#70 phase 6). */
   describeEntry?: (context: NonNullable<WorldChatLoaded["entryContext"]>) => string;
   /**
@@ -332,7 +337,7 @@ export class WorldChatRunner {
      * this draft was based on. Doing that would silently satisfy the staleness check whose entire
      * job is to catch a whole-description draft written against a look that has since moved.
      */
-    const artDirectionVersion = this.deps.artDirectionVersion?.();
+    const artDirectionLook = this.deps.artDirectionLook?.();
     const assembled = assembleContext({
       ...(view.entryContext && this.deps.describeEntry
         ? { entryContext: this.deps.describeEntry(view.entryContext) }
@@ -405,7 +410,7 @@ export class WorldChatRunner {
         leaseToken,
         at,
         linked,
-        artDirectionVersion,
+        artDirectionLook,
       );
       if (!outcome.ok) {
         // The one corrective turn (§8.4). It names the faults and asks for the whole result
@@ -436,7 +441,7 @@ export class WorldChatRunner {
           leaseToken,
           at,
           linked,
-          artDirectionVersion,
+          artDirectionLook,
         );
       }
 
@@ -527,8 +532,8 @@ export class WorldChatRunner {
     leaseToken: string,
     at: string,
     allowed: readonly ChatAttachmentId[],
-    /** The look version the prompt was assembled against — see RunDeps.artDirectionVersion. */
-    artDirectionVersion: number | undefined,
+    /** The look the prompt was assembled against — see RunDeps.artDirectionLook. */
+    artDirectionLook: CurrentLook | undefined,
   ): Promise<{ ok: true; reply: string } | { ok: false; problems: readonly TurnProblem[] }> {
     const { events } = await store.read();
     const meta = await store.readMeta();
@@ -575,7 +580,7 @@ export class WorldChatRunner {
           plan,
           receipts,
           canonRevision,
-          ...(artDirectionVersion !== undefined ? { artDirectionVersion } : {}),
+          ...(artDirectionLook !== undefined ? { artDirectionLook } : {}),
         }),
       );
     }

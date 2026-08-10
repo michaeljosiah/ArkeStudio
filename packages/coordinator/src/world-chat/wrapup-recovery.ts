@@ -23,7 +23,7 @@ import { conversationDir, WorldChatStore } from "./store.js";
 
 export interface WrapUpRepair {
   conversationId: ConversationId;
-  outcome: "completed" | "failed" | "left-for-review";
+  outcome: "completed" | "failed" | "left-for-review" | "cleaned";
   detail: string;
 }
 
@@ -59,6 +59,28 @@ export function openIntentOf(events: ReadonlyArray<{ event: { type: string } }>)
 }
 
 /**
+ * Proposals a failed wrap-up staged and could not take back, in the order they were recorded.
+ *
+ * Exported for the same reason as `openIntentOf`: wrap-up has to ask this before starting another
+ * one. A failed attempt closes its own intent — deliberately, or the in-flight guard would refuse
+ * every later wrap-up on the conversation until the studio restarted — so this is the only thing
+ * that remembers a proposal was left standing, and both the retry and the startup sweep read it.
+ *
+ * Every failure in the log, not only the last: two attempts can each leave something, and the
+ * second one's event says nothing about the first one's.
+ */
+export function leftoverProposalIdsOf(events: ReadonlyArray<{ event: { type: string } }>): string[] {
+  const ids = new Set<string>();
+  for (const { event } of events) {
+    if (event.type !== "wrapup.failed") continue;
+    for (const id of (event as { leftoverProposalIds?: readonly string[] }).leftoverProposalIds ?? []) {
+      ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
+/**
  * Reconcile every conversation whose wrap-up did not finish.
  *
  * Runs at startup, when no wrap-up can be in flight, so an unresolved intent belongs to a process
@@ -71,11 +93,50 @@ export async function recoverWrapUps(
 ): Promise<RecoveryOutcome> {
   const { summaries } = await discoverConversations(store.dir);
   const repaired: WrapUpRepair[] = [];
-  const staged = await gate.listOpen();
+  // Re-read whenever the sweep below removes something, so the intent reconciliation that follows
+  // is never deciding against proposals this pass has already taken away.
+  let staged = await gate.listOpen();
 
   for (const summary of summaries) {
     const log = new WorldChatStore(conversationDir(store.dir, summary.id));
     const { events } = await log.read();
+
+    /*
+     * Proposals a failed wrap-up could not take back, taken back now.
+     *
+     * The attempt they belong to is over — it recorded that it failed, and said nothing was
+     * created — so they are not proposals anybody chose to make: they are the remains of one that
+     * refused itself. Left alone they sit on the approvals screen with a summary from a
+     * conversation whose propositions are all still live, and accepting one writes half of
+     * something nobody ever agreed to as a whole.
+     *
+     * Nothing is appended when this succeeds. The `wrapup.failed` event stays exactly as written,
+     * which is what makes the sweep idempotent: it runs again next start, finds them gone, and
+     * does nothing. One that still will not go is reported and tried again next time.
+     */
+    const recorded = leftoverProposalIdsOf(events);
+    const stillStaged = recorded.filter((id) => staged.some((p) => p.id === id));
+    if (stillStaged.length > 0) {
+      const stuck: string[] = [];
+      for (const id of stillStaged) {
+        await gate.discard(id).catch(() => stuck.push(id));
+      }
+      staged = await gate.listOpen();
+      repaired.push(
+        stuck.length > 0
+          ? {
+              conversationId: summary.id,
+              outcome: "left-for-review",
+              detail: `${stuck.length} proposals from a failed wrap-up could not be removed and need a look`,
+            }
+          : {
+              conversationId: summary.id,
+              outcome: "cleaned",
+              detail: `${stillStaged.length} proposals a failed wrap-up left behind were removed`,
+            },
+      );
+    }
+
     const intent = openIntentOf(events);
     if (!intent) continue;
 
