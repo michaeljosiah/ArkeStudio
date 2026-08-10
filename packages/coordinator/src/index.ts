@@ -35,6 +35,7 @@ export {
 } from "./references/generate.js";
 export { attachmentFor, type AttachmentDecision } from "@arke-studio/contracts";
 export {
+  acceptLocationView,
   chooseAnchor,
   compileGrid,
   designate,
