@@ -194,6 +194,11 @@ export function compilationIsStale(
 ): boolean {
   if (compilation.sheetVersion < sheetVersion) return true;
   if (compilation.format === "character-sheet") {
+    // No anchor claimed, nothing to contradict: an uploaded sheet was drawn somewhere else, by
+    // someone who never saw the main photo, so a later main photo cannot make it out of date.
+    // Only generation records an anchor here, and it always records one — so this stays a
+    // statement about uploads rather than a hole in the generated path's staleness.
+    if (compilation.anchorFile === undefined) return false;
     const photo = mainPhotoFor(kit);
     return photo === null || compilation.anchorFile !== photo.file;
   }

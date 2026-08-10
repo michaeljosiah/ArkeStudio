@@ -235,6 +235,64 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * Write one point into the world, from the conversation it was understood in.
+   *
+   * The design this replaces decided twice — once to turn a whole conversation into proposals,
+   * once to approve them on another screen — and both decisions were about everything at once.
+   * In practice a conversation produces a dozen points of which two are wrong, and the only way
+   * to say so was to carry all twelve to a second screen and reject two there. Deciding where the
+   * point is, as it arrives, is fewer steps and the same authority.
+   *
+   * Saving is writing: this stages the proposition and accepts it in one motion, exactly as the
+   * art-direction form does for a look the person typed themselves. The conversation stays open —
+   * only Accept all closes it.
+   *
+   * `expectedCandidateRevision` is the revision the rail was showing. A point that has been
+   * corrected by talking since is refused rather than written as it was.
+   */
+  z
+    .object({
+      kind: z.literal("world-chat-save-point"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      conversationId: ConversationIdSchema,
+      candidateId: z.string().min(1),
+      expectedCandidateRevision: z.number().int().min(1),
+      /**
+       * What the rail was showing for every member of this point's atomic group.
+       *
+       * A group lands together, so saving one writes all of them. Without the revisions it showed
+       * for each, a sibling corrected in another window would be written unseen as part of a save
+       * nobody made about it.
+       */
+      expectedGroupRevisions: z
+        .array(z.object({ candidateId: z.string().min(1), revision: z.number().int().min(1) }).strict())
+        .max(40)
+        .optional(),
+    })
+    .strict(),
+  /**
+   * Drop one point. It is not written, and it stops being offered.
+   *
+   * Distinct from correcting it by talking, which is how a point that is nearly right gets fixed.
+   * This is for one that should not exist at all, and it is reversible only by saying it again.
+   */
+  z
+    .object({
+      kind: z.literal("world-chat-reject-point"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      conversationId: ConversationIdSchema,
+      candidateId: z.string().min(1),
+      expectedCandidateRevision: z.number().int().min(1),
+      /** As for a save: rejecting a grouped point drops its siblings, so it names them too. */
+      expectedGroupRevisions: z
+        .array(z.object({ candidateId: z.string().min(1), revision: z.number().int().min(1) }).strict())
+        .max(40)
+        .optional(),
+    })
+    .strict(),
+  /**
    * #70 §10.1.1: run a failed turn again.
    *
    * Names an existing failed, cancelled or interrupted turn and starts a new run against it. No
@@ -658,6 +716,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("import-main-photo-candidate"), worldId: UlidSchema, sheetId: SlugSchema })
     .strict(),
+  /**
+   * The whole main photo, brought in by hand (PR #241).
+   *
+   * Distinct from `import-main-photo-candidate`, which adds one option to a set the user then
+   * chooses from. Here the choosing already happened — in the host's own file dialog, on a file
+   * the user pointed at — so the picked image becomes the identity anchor in the same motion.
+   * The dialog IS the confirmation; a second "are you sure" would be asking twice.
+   */
+  z.object({ kind: z.literal("import-main-photo"), worldId: UlidSchema, sheetId: SlugSchema }).strict(),
+  /** The same hand-carried route for the composite: no provider, no cost, no review step. */
+  z.object({ kind: z.literal("import-character-sheet"), worldId: UlidSchema, sheetId: SlugSchema }).strict(),
   z
     .object({
       kind: z.literal("generate-main-photo"),

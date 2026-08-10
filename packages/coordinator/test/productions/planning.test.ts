@@ -16,6 +16,9 @@ import {
   resolveCast,
   assembleBlocks,
   assemblePrompt,
+  assemblePassBlocks,
+  joinBlocks,
+  spatialLayoutFor,
   overrideStaleAgainst,
   SceneSchema,
   type ManifestModel,
@@ -887,6 +890,72 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     shots,
   });
 
+  it("emits one spatial layout per whole-scene pass and anchors each ordinary beat", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const a: Shot = { ...shot(1, 5, "@maren-kest grips the rail"), camera: "At the rail desk, facing the mouth; MCU" };
+    const b: Shot = { ...shot(2, 5, "@maren-kest turns inland"), camera: "At the lamp housing, facing the stair; wide" };
+    const passBlocks = assemblePassBlocks({
+      world: bundle.meta,
+      sheets: bundle.sheets,
+      scene: scene([a, b]),
+      entries: [
+        { shot: a, prompt: { text: "", overridden: false } },
+        { shot: b, prompt: { text: "", overridden: false } },
+      ],
+      capability: "video",
+    });
+
+    assert.match(passBlocks.spatial, /^SPATIAL LAYOUT\n/, "the room belongs to the pass");
+    assert.equal(
+      passBlocks.beats.filter((beat) => beat.text.includes("SPATIAL LAYOUT")).length,
+      0,
+      "and is never restated per beat (R-6's reasoning applied to the room)",
+    );
+    assert.equal(
+      passBlocks.beats.filter((beat) => beat.text.includes("CAMERA ANCHOR")).length,
+      2,
+      "each ordinary beat places its own camera, because that is what changes between them",
+    );
+    assert.match(passBlocks.beats[0]!.text, /At the rail desk, facing the mouth; MCU/);
+    assert.match(passBlocks.beats[1]!.text, /At the lamp housing, facing the stair; wide/);
+    await store.close();
+  });
+
+  it("keeps overridden per-shot and pass beats verbatim", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const override = "Whatever the director wrote, including their own room and camera.";
+    const overridden: Shot = {
+      ...shot(1, 5, "@maren-kest grips the rail"),
+      camera: "At the rail desk, facing the mouth; MCU",
+      promptOverride: { text: override, sheetVersions: {} },
+    };
+    const ordinary: Shot = { ...shot(2, 5, "@maren-kest turns inland"), camera: "At the lamp housing; wide" };
+
+    // Per shot: the override is the body, untouched.
+    const single = promptFor(bundle.meta, bundle.sheets, scene([overridden]), overridden, undefined, undefined, "video");
+    assert.equal(single.text, override, "no generated spatial or camera text is merged into an override");
+    assert.ok(single.overridden);
+
+    // In a pass: the overridden beat stays verbatim, the ordinary beat still gets its anchor,
+    // and the pass keeps the room because the room is derived from the scene, not from a beat.
+    const passBlocks = assemblePassBlocks({
+      world: bundle.meta,
+      sheets: bundle.sheets,
+      scene: scene([overridden, ordinary]),
+      entries: [
+        { shot: overridden, prompt: { text: override, overridden: true } },
+        { shot: ordinary, prompt: { text: "", overridden: false } },
+      ],
+      capability: "video",
+    });
+    assert.equal(passBlocks.beats[0]!.text, override, "an overridden beat is emitted exactly as written");
+    assert.match(passBlocks.beats[1]!.text, /CAMERA ANCHOR/);
+    assert.match(passBlocks.spatial, /SPATIAL LAYOUT/, "common context survives an overridden beat, as standing does");
+    await store.close();
+  });
+
   it("emits blocks as paragraphs, never fragments glued with punctuation", async () => {
     const { store } = await open();
     const bundle = store.getBundle();
@@ -908,6 +977,115 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     assert.equal(blocks.direction, "", "no camera and no audio produces no direction block");
     const prompt = assemblePrompt(bundle.meta, bundle.sheets, scene([bare]), bare);
     assert.ok(!/\n\n\n/.test(prompt), "an omitted block leaves no blank paragraph behind");
+    await store.close();
+  });
+
+  it("emits the complete location Look and an explicitly authored camera anchor for video", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const s: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      camera: "At the rail desk, facing the harbour mouth; MCU, slow push-in.",
+    };
+    const blocks = assembleBlocks({
+      world: bundle.meta,
+      sheets: bundle.sheets,
+      scene: scene([s]),
+      shot: s,
+      capability: "video",
+    });
+    const location = bundle.sheets.find((sheet) => sheet.id === "the-vigil")!;
+    const look = location.sections.find((section) => section.heading === "Look")!.body.trim();
+
+    assert.match(blocks.spatial, /^SPATIAL LAYOUT\n/, "the block names itself");
+    assert.ok(
+      blocks.spatial.includes(look.replace(/\s+/g, " ")),
+      "the complete authored Look travels, not its first clause",
+    );
+    assert.equal(
+      blocks.cameraAnchor,
+      "CAMERA ANCHOR\nAt the rail desk, facing the harbour mouth; MCU, slow push-in.",
+      "the authored camera value is carried byte-for-byte after trimming",
+    );
+    assert.equal(blocks.direction, "", "the camera is spoken once, in its anchor, not also trailing the beat");
+    assert.ok(
+      !blocks.standing.includes(location.name),
+      "the room is not described twice, once abridged (acceptance: Look not repeated in standing)",
+    );
+
+    const prompt = joinBlocks(blocks);
+    assert.ok(
+      prompt.indexOf("SPATIAL LAYOUT") < prompt.indexOf("CAMERA ANCHOR"),
+      "the room is established before the camera is placed in it",
+    );
+    assert.ok(prompt.indexOf("CAMERA ANCHOR") < prompt.indexOf("Maren Kest grips the rail"));
+    await store.close();
+  });
+
+  it("does not infer an anchor from generic camera vocabulary", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const s: Shot = { ...shot(1, 6, "@maren-kest grips the rail"), camera: "MCU · slow push-in" };
+    const blocks = assembleBlocks({
+      world: bundle.meta,
+      sheets: bundle.sheets,
+      scene: scene([s]),
+      shot: s,
+      capability: "video",
+    });
+    assert.equal(
+      blocks.cameraAnchor,
+      "CAMERA ANCHOR\nMCU · slow push-in",
+      "generic vocabulary is carried as authored — never dressed up as a placement nobody wrote",
+    );
+    await store.close();
+  });
+
+  it("omits spatial blocks and preserves the old prompt when location resolution fails", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const s: Shot = { ...shot(1, 6, "@maren-kest grips the rail"), camera: "MCU, slow push-in" };
+    const noLocation: Scene = { ...scene([s]), inherits: { timeOfDay: "night" } };
+
+    const before = assemblePrompt(bundle.meta, bundle.sheets, noLocation, s);
+    const after = assemblePrompt(bundle.meta, bundle.sheets, noLocation, s, undefined, undefined, "video");
+    assert.equal(after, before, "no qualifying location means byte-for-byte the prior prompt");
+    assert.ok(!after.includes("SPATIAL LAYOUT"));
+    assert.ok(!after.includes("CAMERA ANCHOR"));
+    assert.ok(!/\n\n\n/.test(after), "and no empty heading left behind");
+
+    // A citation that resolves to a character rather than a location does not qualify either.
+    const wrongKind: Scene = { ...scene([s]), inherits: { location: "maren-kest" } };
+    assert.equal(spatialLayoutFor(wrongKind, bundle.sheets), null, "a character sheet is not a room");
+    await store.close();
+  });
+
+  it("omits an empty camera heading when camera is absent", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const bare: Shot = shot(1, 6, "@maren-kest grips the rail");
+    const blocks = assembleBlocks({
+      world: bundle.meta,
+      sheets: bundle.sheets,
+      scene: scene([bare]),
+      shot: bare,
+      capability: "video",
+    });
+    assert.match(blocks.spatial, /SPATIAL LAYOUT/, "the room still travels");
+    assert.equal(blocks.cameraAnchor, "", "no authored camera means no anchor block");
+    assert.ok(!joinBlocks(blocks).includes("CAMERA ANCHOR"));
+    await store.close();
+  });
+
+  it("does not add spatial blocks to image planning", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const s: Shot = { ...shot(1, 6, "@maren-kest grips the rail"), camera: "MCU, slow push-in" };
+    const stills = assemblePrompt(bundle.meta, bundle.sheets, scene([s]), s, undefined, undefined, "image");
+    const unplanned = assemblePrompt(bundle.meta, bundle.sheets, scene([s]), s);
+    assert.equal(stills, unplanned, "a still is byte-identical to what it was before this feature");
+    assert.ok(!stills.includes("SPATIAL LAYOUT"));
+    assert.match(stills, /MCU, slow push-in/, "and its camera stays where it always was");
     await store.close();
   });
 

@@ -56,15 +56,39 @@ trade a few probing strikes before the first real exchange" carries further than
 individual blows. Write specific detail only for the one or two actions a viewer would remember,
 and do not repeat the same action across consecutive shots.
 
+**Emotion.** State the intended emotion directly and support it with one observable cue. Do not
+turn an emotional beat into a chain of actions — the chain reads as choreography and the feeling
+is lost in the traffic.
+Wrong: "He crosses the room, stops, turns, wipes his eye, looks down, then sits."
+Right: "He is overwhelmed; his lower lip trembles as he moves so slowly it barely reads as walking."
+
 **Expression.** Describe what the face and body do, in plain words. Idiom does not survive: "she
 is beside herself" is rendered literally or ignored, where "her jaw tightens and she looks away"
 is neither. The same goes for "sees red", "lights up", "falls apart".
+
+**Shot continuity.** Each shot you author is one uninterrupted camera setup. Describing per-second
+phases inside a shot invites an internal hard cut the description never asked for. This rule holds
+within one shot: it does not stop several authored shots from being packed into a whole-scene clip
+with explicit boundaries — that packing happens downstream and keeps your shots intact.
+Wrong: "In the first 3 seconds he reaches the door; in the next 3 seconds he turns and sits."
+Right: "One continuous shot: overwhelmed, he drifts to the door and sinks into the chair."
+
+**Motion.** Give the shot one smooth, dominant motion. Stacked micro-gestures morph into one
+another instead of reading in sequence. A single gesture also stays legible if the production
+later reverses the clip in post — a plan some shots are written for.
 
 **Camera.** Standard vocabulary can be written directly and needs no explanation — shot size
 (extreme wide, wide, medium, medium close-up, close-up), movement (push in, pull out, pan,
 track, follow, orbit, tilt up, handheld), angle (low, overhead, first person), and named
 techniques (one-shot, dolly zoom, aerial, FPV, bullet time, speed ramp). An unusual term needs a
 clause explaining it: "rack focus: the foreground trees blur as the figure behind them sharpens".
+
+**Camera anchors.** When the location prose or the user's brief names a fixture, anchor the
+camera to it: put the fixture and the facing direction in the shot's camera value first, then the
+ordinary size and movement vocabulary. Never invent a fixture the location or brief does not
+support, and never write relative corrections — a nudge moves the furniture, not the camera.
+Wrong: "move the camera closer to the fridge."
+Right: "at the kettle beside the fridge, facing the hallway; medium close-up, slow push-in."
 
 **Transitions.** Give both the trigger and the method: "at the cut, a fast whip pan left into the
 next setup". A transition with only one of the two is guesswork.
@@ -118,7 +142,7 @@ is redrawn.`;
 export const SKILLS: readonly Skill[] = [
   {
     id: "seedance-scene-drafting",
-    version: 1,
+    version: 2,
     family: "seedance",
     purpose: "scene-drafting",
     body: SEEDANCE_SCENE_DRAFTING,

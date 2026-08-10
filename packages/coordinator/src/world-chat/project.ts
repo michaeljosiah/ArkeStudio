@@ -200,6 +200,8 @@ export function projectPoints(
       subjectKind: subjectKindOf(candidate, options.sheetVersion).slice(0, 80),
       text: candidate.title.slice(0, 400),
       settled: wouldCarry(candidate, options),
+      revision: candidate.revision,
+      ...(candidate.groupId ? { groupId: candidate.groupId } : {}),
     }));
 }
 

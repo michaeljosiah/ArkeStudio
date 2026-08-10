@@ -20,6 +20,8 @@ import {
   unarchiveWorldChat,
   useStore,
   useWorldChatProgress,
+  rejectWorldChatPoint,
+  saveWorldChatPoint,
   useWorldChatRefusals,
   useWorldChatWrapUpRefusal,
   worldChatAttachFiles,
@@ -35,10 +37,21 @@ import {
  * made a world already knows this shape, and a second nearly-identical split would teach them
  * that similar-looking screens behave differently.
  *
- * The rule that shapes everything: the conversation decides nothing. There are no controls on a
- * point, because a point is corrected by saying so. Deciding happens exactly twice — once when
- * the conversation is turned into proposals, and once on the approvals screen — and neither of
- * those is here.
+ * The rule that shapes everything used to be that the conversation decides nothing: a point
+ * carried no control, and deciding happened twice — at wrap-up, and again on the approvals
+ * screen. Both decisions were about everything at once, and that is what it cost. A conversation
+ * produces a dozen points of which two are wrong, and saying so meant carrying all twelve to
+ * another screen to reject two there.
+ *
+ * The rule now is that a decision belongs where the point is. Save writes that line to the world
+ * and Reject drops it, both from the rail, and Accept all writes what is left and closes the
+ * conversation. Talking still changes nothing — it is how a point that is nearly right gets
+ * corrected, and the composer still says so.
+ *
+ * What did not change is who decides. Saving goes through the accept gate exactly as a reviewed
+ * proposal does, so the history, the ripples and the change log are the same; the review is the
+ * press. The one thing a press cannot decide is a proposal carrying an open choice — a question
+ * only the person can answer — and those still wait on the approvals screen.
  */
 
 /**
@@ -72,13 +85,24 @@ const WHY_NOT_DELETABLE: Record<WorldChatDeletionBlock, string> = {
 };
 
 function whatItIsWaitingOn(row: WorldChatSummary): string {
+  /*
+   * A proposal from a conversation is now the exception rather than the rule: what is saved from
+   * the rail is written, and only a change carrying a question a press cannot answer waits on the
+   * approvals screen. So it is worth saying which it is, rather than counting proposals as though
+   * every conversation still produced a pile of them.
+   */
   if (row.openProposalCount > 0) {
-    return `${row.openProposalCount} proposal${row.openProposalCount === 1 ? "" : "s"} waiting on you`;
+    /*
+     * "Waiting on you", not "a question": most are questions a press could not answer, but one
+     * left by an accept that came back stale or unconfirmed is not — it wants a rebase or a look,
+     * and sending somebody hunting for a question that does not exist is worse than saying less.
+     */
+    return `${row.openProposalCount} waiting on you`;
   }
-  if (row.status === "closed") return "closed · nothing waiting";
+  if (row.status === "closed") return "closed · everything decided";
   if (row.status === "archived") return "archived";
   if (row.pointCount === 0) return "open · nothing understood yet";
-  return `open · ${row.pointCount} point${row.pointCount === 1 ? "" : "s"} understood`;
+  return `open · ${row.pointCount} point${row.pointCount === 1 ? "" : "s"} to decide`;
 }
 
 /**
@@ -260,6 +284,49 @@ export function WorldChatScreen() {
  * while the conversation was still going, which meant deciding twelve times about things that had
  * not settled yet. Reading is not deciding, so there is nothing here to press.
  */
+/**
+ * One point, and the two things that can now be done to it.
+ *
+ * The design this replaces had no controls on a point at all — deciding happened twice, and both
+ * times about everything at once. That was right when a decision meant a whole conversation and
+ * wrong in practice: a dozen points of which two are wrong took twelve to another screen to reject
+ * two there. Save writes this line to the world; Reject drops it; talking still corrects it.
+ *
+ * A point that is not ready shows why instead of a Save it cannot honour. The reason is the same
+ * one wrap-up would have given, said where it can be acted on rather than after the fact.
+ */
+function PointRow({
+  point,
+  busy,
+  onSave,
+  onReject,
+}: {
+  point: { id: string; text: string; settled: boolean; kind: string; revision: number; groupId?: string };
+  busy: boolean;
+  onSave: () => void;
+  onReject: () => void;
+}) {
+  return (
+    <div className="fy-panel__point">
+      <div className="fy-panel__pointtext">{point.text}</div>
+      <div className="fy-panel__pointacts">
+        {point.settled ? (
+          <Button variant="ghost" size="sm" disabled={busy} onClick={onSave}>
+            {busy ? "Saving…" : "Save"}
+          </Button>
+        ) : (
+          <span className="fy-panel__pointwhy">
+            {point.kind === "question" ? "still open" : "still a maybe"}
+          </span>
+        )}
+        <Button variant="ghost" size="sm" disabled={busy} onClick={onReject}>
+          Reject
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function WorldChatConversationScreen() {
   const { worldId, conversationId } = useParams();
   useOpenWorldGuard(worldId);
@@ -279,6 +346,14 @@ export function WorldChatConversationScreen() {
   const wrapUpRefusal = useWorldChatWrapUpRefusal(conversationId);
   /** Set while a wrap-up is in flight, so the button cannot be pressed twice into the same log. */
   const [wrappingUp, setWrappingUp] = useState(false);
+  /**
+   * Points with a decision in flight.
+   *
+   * Held per point rather than for the rail, because deciding one is no reason to freeze the
+   * other eleven — the whole change is that these are separate decisions. Cleared when the
+   * workspace comes back, which is the only thing that knows whether the point survived.
+   */
+  const [busyPoints, setBusyPoints] = useState<string[]>([]);
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
@@ -314,6 +389,39 @@ export function WorldChatConversationScreen() {
    * have finished, and the closed workspace that proves it arrives on the next connection. So the
    * asking is remembered in a ref that no reconnection clears, and the button is freed meanwhile.
    */
+  /*
+   * A decision on one point. Save writes it; Reject drops it. Both send the revision the rail is
+   * showing, so a point corrected by talking since is refused rather than acted on as it was.
+   */
+  const decide = (point: { id: string; revision: number; groupId?: string }, action: "save" | "reject") => {
+    if (!worldId || !conversationId) return;
+    /*
+     * A grouped point writes its siblings too, so the request carries what the rail was showing
+     * for each of them. Checking only the point that was pressed would let a sibling corrected in
+     * another window be written unseen, as part of a save nobody made about it.
+     */
+    const members = point.groupId
+      ? points.filter((p) => p.groupId === point.groupId).map((p) => ({ candidateId: p.id, revision: p.revision }))
+      : [];
+    const sent =
+      action === "save"
+        ? saveWorldChatPoint(worldId, conversationId, point.id, point.revision, members) !== null
+        : rejectWorldChatPoint(worldId, conversationId, point.id, point.revision, members);
+    if (sent) setBusyPoints((prev) => [...prev, point.id]);
+  };
+
+  /*
+   * The workspace arriving is the answer: whatever it now holds is what survived the decision.
+   *
+   * A refusal is an answer too, and several arrive without appending anything to the conversation
+   * — a readiness that moved, a staging that was refused. The sequence is then unchanged and a
+   * point would sit on "Saving…" until something unrelated happened, so the refusal clears it as
+   * surely as a new sequence does.
+   */
+  useEffect(() => {
+    setBusyPoints([]);
+  }, [loaded?.seq, wrapUpRefusal]);
+
   const closed = loaded?.status === "closed";
   /** The attempt this window made, if any: an answer naming another one is somebody else's. */
   const asked = useRef<string | null>(null);
@@ -323,11 +431,20 @@ export function WorldChatConversationScreen() {
     if (asked.current && closed) {
       asked.current = null;
       setWrappingUp(false);
-      navigate(`/w/${worldId}/proposals`);
+      /*
+       * Only when something is actually waiting.
+       *
+       * Accept all writes; it no longer stages for a screen to visit afterwards, so being taken
+       * to an empty approvals list would be the app performing a step it had just removed. What
+       * can still be waiting is a proposal carrying an open choice — a question only the person
+       * can answer — and that is worth going to, because it is the one thing this press could
+       * not decide for them.
+       */
+      if ((row?.openProposalCount ?? 0) > 0) navigate(`/w/${worldId}/proposals`);
     } else if (wrappingUp && (refusedMine || connection !== "open")) {
       setWrappingUp(false);
     }
-  }, [wrappingUp, closed, refusedMine, connection, worldId, navigate]);
+  }, [wrappingUp, closed, refusedMine, connection, worldId, navigate, row?.openProposalCount]);
 
   if (!world) return null;
   /**
@@ -492,7 +609,7 @@ export function WorldChatConversationScreen() {
             />
             {/* Stop lives on the working line in the transcript now, beside what it would stop. */}
             <div className="fy-chat__composernote">
-              world author · talking changes nothing until you wrap up
+              world author · talking changes nothing until you save
             </div>
           </div>
         </div>
@@ -502,11 +619,11 @@ export function WorldChatConversationScreen() {
             <div className="fy-panel__headline">
               <div className="fy-panel__title">What I&rsquo;ve understood</div>
               <div className="fy-panel__count">
-                {points.length} point{points.length === 1 ? "" : "s"} · nothing decided
+                {carried} of {points.length} ready
               </div>
             </div>
             <div className="fy-panel__note">
-              If a line is wrong, say so and it changes. There is nothing to approve here.
+              Save writes a line to the world. If one is wrong, say so and it changes — or reject it.
             </div>
           </div>
 
@@ -524,9 +641,13 @@ export function WorldChatConversationScreen() {
                       <div className="fy-panel__kind">{group.kind}</div>
                     </div>
                     {group.items.map((p) => (
-                      <div key={p.id} className="fy-panel__point">
-                        {p.text}
-                      </div>
+                      <PointRow
+                        key={p.id}
+                        point={p}
+                        busy={busyPoints.includes(p.id) || running || wrappingUp}
+                        onSave={() => decide(p, "save")}
+                        onReject={() => decide(p, "reject")}
+                      />
                     ))}
                   </div>
                 ))}
@@ -537,9 +658,13 @@ export function WorldChatConversationScreen() {
                       <div className="fy-panel__kind">not settled</div>
                     </div>
                     {openThreads.map((p) => (
-                      <div key={p.id} className="fy-panel__point">
-                        {p.text}
-                      </div>
+                      <PointRow
+                        key={p.id}
+                        point={p}
+                        busy={busyPoints.includes(p.id) || running || wrappingUp}
+                        onSave={() => decide(p, "save")}
+                        onReject={() => decide(p, "reject")}
+                      />
                     ))}
                   </div>
                 )}
@@ -569,7 +694,7 @@ export function WorldChatConversationScreen() {
                 setWrappingUp(true);
               }}
             >
-              {wrappingUp ? "Turning this into proposals…" : "Turn this into proposals"}
+              {wrappingUp ? "Writing them…" : `Accept all${carried > 0 ? ` · ${carried}` : ""}`}
             </Button>
             {/*
               A refused wrap-up is the one thing this rail must not swallow. Nothing was written,
@@ -583,8 +708,8 @@ export function WorldChatConversationScreen() {
             )}
             <div className="fy-panel__caption">
               {carried === 0
-                ? "Nothing is settled enough to propose yet."
-                : `${carried} of ${points.length} points become proposals. Closes the conversation and takes you to them, where nothing is written to the world until you accept.`}
+                ? "Nothing is ready to write yet."
+                : `Writes the ${carried} ready to the world and closes this conversation. Save them one at a time above to keep talking.`}
             </div>
           </div>
         </div>
@@ -609,15 +734,15 @@ function aboutLabel(context: NonNullable<WorldChatSummary["entryContext"]>): str
 }
 
 /** Points group under the thing they are about, per R-15 — not under what kind of change they are. */
-function groupBySubject(
-  points: ReadonlyArray<{ id: string; kind: string; subject: string; subjectKind: string; text: string }>,
-): Array<{ subject: string; kind: string; items: Array<{ id: string; text: string }> }> {
-  const groups: Array<{ subject: string; kind: string; items: Array<{ id: string; text: string }> }> = [];
+function groupBySubject<P extends { id: string; kind: string; subject: string; subjectKind: string }>(
+  points: readonly P[],
+): Array<{ subject: string; kind: string; items: P[] }> {
+  const groups: Array<{ subject: string; kind: string; items: P[] }> = [];
   for (const point of points) {
     if (point.kind === "question") continue;
     const existing = groups.find((g) => g.subject === point.subject);
-    if (existing) existing.items.push({ id: point.id, text: point.text });
-    else groups.push({ subject: point.subject, kind: point.subjectKind, items: [{ id: point.id, text: point.text }] });
+    if (existing) existing.items.push(point);
+    else groups.push({ subject: point.subject, kind: point.subjectKind, items: [point] });
   }
   return groups;
 }

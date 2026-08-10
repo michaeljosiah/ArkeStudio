@@ -259,6 +259,51 @@ export async function recoverWrapUps(
     );
 
     if (mine.length === 0) {
+      /*
+       * No open proposal under this request — which is two different situations.
+       *
+       * Either nothing was ever created, or every proposal it created was accepted and is
+       * therefore no longer open: an Accept all that wrote everything and died before recording
+       * that it had. Calling the second one failed leaves the conversation open with no live
+       * points, which no later Accept all can finish — it answers nothing-to-carry forever. The
+       * conversation's own log distinguishes them, because each accept is recorded on it as it
+       * happens.
+       */
+      /*
+       * Only what this intent produced, and only after it opened.
+       *
+       * A conversation that saved a point last week also carries a `proposal.resolved` — read as
+       * proof that this wrap-up landed, it would close a conversation whose current points were
+       * never written at all. The intent's own position in the log is the boundary.
+       */
+      const openedAt = events.findIndex(
+        (e) =>
+          e.event.type === "wrapup.intent-recorded" &&
+          (e.event as { requestId?: string }).requestId === intent.requestId,
+      );
+      const accepted = events
+        .slice(openedAt + 1)
+        .flatMap((e) =>
+          e.event.type === "proposal.resolved" && e.event.outcome === "accepted" ? [e.event.proposalId] : [],
+        );
+      if (accepted.length > 0) {
+        await log.append(
+          {
+            type: "wrapup.completed",
+            requestId: intent.requestId,
+            proposalIds: accepted,
+            notCarried: [],
+            mediaIdeaIds: [],
+          },
+          { at: now() },
+        );
+        repaired.push({
+          conversationId: summary.id,
+          outcome: "completed",
+          detail: `${accepted.length} changes had already been written, so the conversation is closed`,
+        });
+        continue;
+      }
       // Nothing was created under this intent. The ids reserved for it are burned — Canon ids
       // are never reused — but nothing is inconsistent, and the conversation can be wrapped up
       // again whenever the user chooses.

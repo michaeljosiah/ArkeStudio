@@ -57,6 +57,8 @@ export function foldConversation(
   let reopened = false;
   /** An intent with no outcome after it. Last one wins, as wrapup-recovery reads it too. */
   let wrapUpInFlight = false;
+  /** A point being written right now — see save.intent-recorded. */
+  let saveInFlight = false;
 
   const messages: WorldChatMessage[] = [];
   /** The log sequence each message arrived at, so paging can use a real cursor. */
@@ -148,6 +150,17 @@ export function foldConversation(
         const c = candidates.get(e.candidateId);
         if (!c) break;
         candidates.set(e.candidateId, { ...c, status: e.status });
+        /*
+         * A point saved on its own records its proposal here and nowhere else.
+         *
+         * Wrap-up announces its proposals in `wrapup.completed`; a save has no such event, so
+         * without this the conversation reports no open proposals for one it is holding — which
+         * means nothing blocks deleting it, and deleting it takes away the only place a proposal
+         * carrying a question could ever be sent back to.
+         */
+        if (e.status === "proposed" && e.proposalId && !resolvedProposals.has(e.proposalId)) {
+          proposalIds.add(e.proposalId);
+        }
         break;
       }
       case "attachment.created":
@@ -183,9 +196,19 @@ export function foldConversation(
         break;
       case "wrapup.completed":
         status = "closed";
-        for (const p of e.proposalIds) proposalIds.add(p);
+        // Not the ones already resolved: Accept all writes as it goes and records each acceptance
+        // as it happens, so completion arrives after them and would otherwise re-add proposals
+        // that have already landed — reported as waiting, and blocking deletion for good.
+        for (const p of e.proposalIds) if (!resolvedProposals.has(p)) proposalIds.add(p);
         notCarried = e.notCarried;
         wrapUpInFlight = false;
+        break;
+      case "save.intent-recorded":
+        saveInFlight = true;
+        break;
+      case "save.settled":
+        saveInFlight = false;
+        for (const p of e.proposalIds) if (!resolvedProposals.has(p)) proposalIds.add(p);
         break;
       case "wrapup.failed":
         wrapUpInFlight = false;
@@ -284,7 +307,7 @@ export function foldConversation(
     // not be able to disagree.
     deletionBlock: needsInterruptedRunRepair
       ? "active-run"
-      : wrapUpInFlight
+      : wrapUpInFlight || saveInFlight
         ? "wrap-up-in-flight"
         : proposalIds.size > 0
           ? "unresolved-proposals"

@@ -4,6 +4,8 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Job } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
+import { acceptCharacterSheet } from "../../src/references/kit.js";
+import { recordUploadedCharacterSheetTake, referenceReviewDecision } from "../../src/references/takes.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { pngBytes } from "../queue/fake-provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
@@ -80,6 +82,84 @@ describe("background world finalization", () => {
     );
     const reviews = await readFile(join(worldDir, "references", "reviews.jsonl"), "utf8");
     assert.ok(reviews.includes(`tk_${job.id.slice(3)}`), "the accept is recorded as a review");
+    await provider.close();
+  });
+
+  it("does not designate itself over a sheet claimed after the job began", async () => {
+    const { root, worldDir } = await makeTempRoot();
+    const provider = new FsWorldProvider(root, { clock: () => CLOCK });
+    await provider.loadWorld(WORLD_ID);
+    const landed = "references/maren-kest/incoming/character-sheet-late.png";
+    await mkdir(join(worldDir, "references", "maren-kest", "incoming"), { recursive: true });
+    await writeFile(join(worldDir, landed), pngBytes());
+
+    const coordinator = new Coordinator({
+      provider,
+      adapter: null,
+      changeLogPath: join(root, "logs", "changes.jsonl"),
+      appVersion: "test",
+    });
+    // A sheet the user brought in by hand while the generation was still running. Its acceptance
+    // is stamped with the store's clock, which is after the job's createdAt below.
+    const store = provider.openStore()!;
+    const sheet = store.getBundle().sheets.find((candidate) => candidate.id === "maren-kest")!;
+    const uploaded = await recordUploadedCharacterSheetTake(
+      store,
+      "maren-kest",
+      "character-sheet-upload-late.png",
+      pngBytes(),
+    );
+    await acceptCharacterSheet(store, sheet, {
+      file: `takes/${uploaded.id}/${uploaded.media}`,
+      takeId: uploaded.id,
+      sheetVersion: sheet.version,
+      artDirectionVersion: store.getBundle().artDirection.version,
+      review: referenceReviewDecision(store.now(), uploaded, "accept"),
+    });
+
+    const job: Job = {
+      id: "jb_01J8E00000000000000000BG9",
+      idempotencyKey: "01J8E10000000000000000BG9",
+      worldId: WORLD_ID,
+      target: { kind: "character-sheet", id: "maren-kest/late" },
+      capability: "image",
+      provider: "fal",
+      model: "flux-2-pro",
+      params: {
+        prompt: "one composite",
+        provenance: {
+          canonRevision: 42,
+          sheets: { "maren-kest": sheet.version },
+          artDirectionVersion: 3,
+          anchorFile: "head-front.png",
+        },
+      },
+      estimatedMicroUsd: 47000,
+      status: "succeeded",
+      providerJobId: "remote-late",
+      attempt: 1,
+      landing: { dir: "references/maren-kest/incoming" },
+      landedFiles: [landed],
+      error: null,
+      // Begun before the upload was accepted — which is the whole point.
+      createdAt: "2026-08-04T11:00:00.000Z",
+      updatedAt: CLOCK,
+    };
+    await (coordinator as unknown as { onJobTerminal(terminal: Job): Promise<void> }).onJobTerminal(job);
+
+    const kit = JSON.parse(await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8")) as {
+      designatedCompilation?: string;
+    };
+    assert.equal(
+      kit.designatedCompilation,
+      `takes/${uploaded.id}/${uploaded.media}`,
+      "the later human choice keeps the slot",
+    );
+    // Nothing is lost: the generated take is still recorded, and still offerable for review.
+    const takes = await readdir(join(worldDir, "references", "maren-kest", "takes"));
+    assert.ok(takes.includes(`tk_${job.id.slice(3)}`), "the generated take is still on disk");
+    const reviews = await readFile(join(worldDir, "references", "reviews.jsonl"), "utf8").catch(() => "");
+    assert.equal(reviews.includes(`tk_${job.id.slice(3)}`), false, "and is left undecided, not accepted");
     await provider.close();
   });
 });

@@ -2746,7 +2746,10 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-reference-card__foot { display: flex; align-items: center; gap: 12px; padding: 15px 17px; }
 .fy-reference-card__foot h2 { font: 600 16px var(--font-sans); }
 .fy-reference-card__foot p { font: 400 10.5px var(--font-mono); color: var(--neutral-400); margin-top: 3px; }
-.fy-reference-card__foot .ui-btn { margin-left: auto; height: 32px; }
+.fy-reference-card__foot .ui-btn { height: 32px; }
+/* Only the first button takes the slack, so a second one sits beside it rather than having the
+   leftover space split between them — which is what an auto margin on every button does. */
+.fy-reference-card__foot .ui-btn:first-of-type { margin-left: auto; }
 .fy-reference-card__dispatch { margin-top: auto; border-top: 1px solid var(--border); min-height: 58px; padding: 10px 15px; display: flex; align-items: center; gap: 12px; }
 .fy-reference-card__dispatch > span { font: 400 9.5px var(--font-mono); color: var(--neutral-400); }
 .fy-reference-card__dispatch .ui-btn { margin-left: auto; }
@@ -2823,7 +2826,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-mainphoto-dialog__prompt { position: relative; margin-top: 7px; }
 .fy-mainphoto-dialog__prompt textarea { width: 100%; height: 112px; resize: none; border: 1px solid var(--border); border-radius: 11px; padding: 13px 42px 13px 14px; background: var(--background); font: 400 12.5px/1.6 var(--font-sans); }
 .fy-mainphoto-dialog__prompt button { position: absolute; right: 9px; bottom: 9px; width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); }
-.fy-mainphoto-dialog__refbuttons { display: flex; gap: 7px; margin-top: 12px; }
+/* Wraps, because the reference controls are a set that grows: three of them already overflow
+   the composer at its fixed width, and a nowrap row spills into the padding rather than saying so. */
+.fy-mainphoto-dialog__refbuttons { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
 .fy-mainphoto-dialog__refs { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; margin-top: 10px; min-height: 106px; }
 .fy-mainphoto-dialog__refs > div { height: 106px; position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; }
 .fy-mainphoto-dialog__refs span { position: absolute; left: 7px; bottom: 7px; padding: 3px 7px; border-radius: 999px; background: color-mix(in srgb, var(--background) 92%, transparent); font: 500 8.5px var(--font-mono); }
@@ -3215,8 +3220,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-panel__grouphead { display: flex; align-items: baseline; gap: 8px; }
 .fy-panel__subject { font: 600 12.5px var(--font-sans); flex: 1; min-width: 0; }
 .fy-panel__kind { font: 400 10px var(--font-mono); color: var(--neutral-400); }
-/* No control on a point, by design: a point is corrected by saying so, not by pressing anything. */
+/*
+ * A point now carries its own decision. The controls sit on a second line rather than beside the
+ * text: a point is a sentence, often two lines of one, and putting buttons on its right squeezed
+ * the sentence into a column narrower than the words it has to hold.
+ */
 .fy-panel__point { font: 400 12.5px/1.6 var(--font-sans); color: var(--foreground); margin-top: 6px; }
+.fy-panel__pointtext { color: var(--foreground); }
+.fy-panel__pointacts { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+/* Why there is no Save, in the space the Save would have taken. */
+.fy-panel__pointwhy { font: 400 10px var(--font-mono); color: var(--neutral-400); padding: 0 6px; }
 .fy-panel__caption { font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); text-align: center; }
 /* A wrap-up that was refused. Quiet like the failed turn it rhymes with: nothing was written and
    nothing was lost, so this is the app explaining itself, not raising an alarm. */

@@ -102,7 +102,7 @@ export function ProposalsScreen() {
       {proposals.length === 0 ? (
         <EmptyState
           title="Nothing is waiting"
-          hint="Proposals show up here when the studio drafts a change, or when you write one by hand. Nothing reaches the world until you accept it."
+          hint="A conversation writes what you save from its own rail, so most changes never come through here. What lands on this screen is a change that could not be decided by a press — one asking a question only you can answer — and anything written by hand."
         />
       ) : (
         <div className="fy-proposals">

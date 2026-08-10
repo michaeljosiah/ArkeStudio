@@ -194,9 +194,33 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("main-photo.acceptance"),
       worldId: UlidSchema,
       sheetId: SlugSchema,
-      status: z.enum(["accepted", "failed"]),
+      /**
+       * "cancelled" is the answer to a file dialog closed without a choice. It says nothing to
+       * the user — there is nothing to say — but a client that marked the button busy on the
+       * press has no other way to learn it may stop (PR review).
+       */
+      status: z.enum(["accepted", "failed", "cancelled"]),
       reason: z.string().optional(),
       candidateRetained: z.boolean(),
+    })
+    .strict(),
+
+  /**
+   * Result of bringing a character sheet in by hand (PR #241).
+   *
+   * A generated sheet reports through the queue and then through its review; an uploaded one
+   * passes neither, so without this the only answer to "did my file take?" is whether the card
+   * happens to change. The main photo learned that lesson as `main-photo.acceptance`.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("character-sheet.acceptance"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      /** As above: a closed dialog is reported so the button that opened it can stop waiting. */
+      status: z.enum(["accepted", "failed", "cancelled"]),
+      reason: z.string().optional(),
     })
     .strict(),
 

@@ -192,6 +192,44 @@ export function pendingReferenceTake(
   return take;
 }
 
+/**
+ * The take a hand-carried image gets: provider "user", model "upload", cost nil and *stated*
+ * nil rather than unknown, provenance frozen at the moment it came in. It is a real take for
+ * the same reason a generated one is — the kit points at takes, and the history has to be able
+ * to say where the bytes came from — it simply names a person instead of a provider.
+ */
+function uploadedTake(
+  store: WorldStore,
+  sheetId: string,
+  kind: Take["kind"],
+  media: string,
+  params: Record<string, unknown>,
+): Take {
+  const bundle = store.getBundle();
+  const sheet = bundle.sheets.find((candidate) => candidate.id === sheetId);
+  if (!sheet) throw new Error(`no sheet ${sheetId}`);
+  const now = store.now();
+  return {
+    id: `tk_${ulid()}` as Take["id"],
+    coversShots: [],
+    kind,
+    reference: { sheetId },
+    provider: "user",
+    model: "upload",
+    provenance: {
+      canonRevision: bundle.meta.canonRevision,
+      sheets: { [sheetId]: sheet.version },
+      artDirectionVersion: bundle.artDirection.version,
+    },
+    references: [],
+    params,
+    cost: { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "local-zero" },
+    dispatchedAt: now,
+    completedAt: now,
+    media,
+  };
+}
+
 export async function recordUploadedReferenceTake(
   store: WorldStore,
   sheetId: string,
@@ -207,38 +245,81 @@ export async function recordUploadedReferenceTake(
         take.params["uploadedCandidate"] === candidatePath,
     );
   if (existing) return existing;
-  const sheet = store.getBundle().sheets.find((candidate) => candidate.id === sheetId);
-  if (!sheet) throw new Error(`no sheet ${sheetId}`);
-  const id = `tk_${ulid()}` as Take["id"];
   const media = basename(candidatePath);
-  const now = store.now();
-  const take: Take = {
-    id,
-    coversShots: [],
-    kind: "main-photo",
-    reference: { sheetId },
-    provider: "user",
-    model: "upload",
-    provenance: {
-      canonRevision: store.getBundle().meta.canonRevision,
-      sheets: { [sheetId]: sheet.version },
-      artDirectionVersion: store.getBundle().artDirection.version,
-    },
-    references: [],
-    params: { uploadedCandidate: candidatePath },
-    cost: { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "local-zero" },
-    dispatchedAt: now,
-    completedAt: now,
-    media,
-  };
-  await store.gateOp(async () => {
-    const dir = join(store.dir, "references", sheetId, "takes", id);
-    await mkdir(toExtendedLength(dir), { recursive: true });
-    // An upload keeps its candidate: the user put that file there, and `uploadedCandidate`
-    // points back at it. Only a staging copy this code made is this code's to remove.
-    await placeMedia(join(store.dir, candidatePath), join(dir, media));
+  const take = uploadedTake(store, sheetId, "main-photo", media, { uploadedCandidate: candidatePath });
+  await store.gateOp(() =>
+    writeTakeDirectory(store, sheetId, take, async (dir) => {
+      // An upload keeps its candidate: the user put that file there, and `uploadedCandidate`
+      // points back at it. Only a staging copy this code made is this code's to remove.
+      await placeMedia(join(store.dir, candidatePath), join(dir, media));
+    }),
+  );
+  return take;
+}
+
+/**
+ * Write a take's directory whole, or leave nothing behind (PR review).
+ *
+ * `take.json` is what makes a take exist: `scanWorld` skips a directory without one, for good
+ * reason — a half-written take is not a take. But that means media written before a failing
+ * `take.json` is not merely unused, it is unreachable, and a retry mints a new id rather than
+ * finding it. One 50 MB sheet that failed at the last step would sit in the world forever with
+ * nothing pointing at it and nothing able to explain it.
+ *
+ * The media goes down first regardless, because take.json must never be the file that survives
+ * alone — it would name bytes that are not there. So the ordering stays, and the failure is
+ * swept instead.
+ */
+async function writeTakeDirectory(
+  store: WorldStore,
+  sheetId: string,
+  take: Take,
+  putMedia: (dir: string) => Promise<void>,
+): Promise<void> {
+  const dir = join(store.dir, "references", sheetId, "takes", take.id);
+  await mkdir(toExtendedLength(dir), { recursive: true });
+  try {
+    await putMedia(dir);
     await atomicWriteFile(join(dir, "take.json"), JSON.stringify(take, null, 2) + "\n");
-  });
+  } catch (err) {
+    // Its own directory, named for an id nothing else has yet: removing it can strand no one.
+    await rm(toExtendedLength(dir), { recursive: true, force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+/**
+ * A character sheet the user drew, bought, or made elsewhere (PR #241).
+ *
+ * Takes the bytes, not a path: the caller has already read and verified them, and passing the
+ * path would mean reading the file a second time — with a window in between for it to change
+ * into something that was never checked. Unlike the main photo's route there is no candidate to
+ * come from and none left behind; the file the user picked is never moved or touched.
+ *
+ * Not deduplicated, deliberately. The same file chosen twice is two deliberate acts, and the
+ * second one is usually a corrected export of the first — collapsing them would silently keep
+ * the older bytes.
+ */
+export async function recordUploadedCharacterSheetTake(
+  store: WorldStore,
+  sheetId: string,
+  media: string,
+  data: Uint8Array,
+): Promise<Take> {
+  // A plain filename and nothing else. `basename` alone lets "." and ".." through — basename("..")
+  // is ".." — and both name a directory that already exists, so the write would land on something
+  // real instead of failing cleanly.
+  if (basename(media) !== media || media === "." || media === "..") {
+    throw new Error(`unsafe media name ${media}`);
+  }
+  const take = uploadedTake(store, sheetId, "sheet", media, { uploadedFile: media });
+  await store.gateOp(() =>
+    writeTakeDirectory(store, sheetId, take, async (dir) => {
+      // Staged and renamed like every other write here, so a half-written 40 MB sheet cannot be
+      // mistaken for a finished one (SPEC-002 R-13).
+      await atomicWriteFile(join(dir, media), data);
+    }),
+  );
   return take;
 }
 

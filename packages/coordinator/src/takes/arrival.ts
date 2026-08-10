@@ -1,9 +1,10 @@
 import { rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { ulid, type Job, type ShotPlanEntry, type Take } from "@arke-studio/contracts";
+import { ulid, type Job, type ShotPlanEntry, type Take, type TakeQc } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
+import type { TakeQcAnalyzer, TakeQcUnavailableReason } from "./qc.js";
 
 /**
  * Take arrival (SPEC-013 §2.2, §2.3): SPEC-009 landed verified media; this writes the
@@ -28,12 +29,58 @@ function takeKindFor(job: Job): Take["kind"] {
   return "clip";
 }
 
+export interface TakeArrivalOptions {
+  /** Absent on any build without ffmpeg, which is most of them — see takes/qc.ts. */
+  analyzer?: TakeQcAnalyzer;
+  /** Told why a measurement is missing, so "not measured" is explicable rather than silent. */
+  onQcUnavailable?: (reason: TakeQcUnavailableReason) => void;
+}
+
+/** Only a video clip has motion to measure; a still or a voice line has no question to ask. */
+function qcApplies(job: Job): boolean {
+  return job.capability === "video" && (job.target.kind === "shot" || job.target.kind === "scene-pass");
+}
+
+/**
+ * The measurement, or null with the reason reported. Total: every path here returns rather than
+ * throws, including the reporting itself — a logging failure that lost a paid take would be an
+ * absurd trade, and this is the boundary where that trade would otherwise be made.
+ */
+async function measureArrival(file: string | null, options: TakeArrivalOptions): Promise<TakeQc | null> {
+  const notify = (reason: TakeQcUnavailableReason): void => {
+    try {
+      options.onQcUnavailable?.(reason);
+    } catch {
+      /* a diagnostic that fails is still only a diagnostic */
+    }
+  };
+  if (file === null) return null; // Not a video shot or pass: no reason to report, nothing asked.
+  if (options.analyzer === undefined) {
+    notify("not-configured");
+    return null;
+  }
+  try {
+    const analysis = await options.analyzer.analyze(file);
+    if (analysis.ok) return analysis.qc;
+    notify(analysis.reason);
+    return null;
+  } catch {
+    notify("process-failed");
+    return null;
+  }
+}
+
 /**
  * Write the take (and segments for a pass) from a succeeded job. Media is moved from the
  * landing dir into the take's own directory; take.json is written once and never again (R-1).
  * Returns every take written, pass first.
  */
-export async function recordTakesFromJob(store: WorldStore, job: Job, actualMicroUsd: number | null): Promise<Take[]> {
+export async function recordTakesFromJob(
+  store: WorldStore,
+  job: Job,
+  actualMicroUsd: number | null,
+  options: TakeArrivalOptions = {},
+): Promise<Take[]> {
   if (job.status !== "succeeded" || job.productionId === undefined) return [];
   const media = job.landedFiles?.[0];
   if (media === undefined) return [];
@@ -52,6 +99,12 @@ export async function recordTakesFromJob(store: WorldStore, job: Job, actualMicr
     const { rm } = await import("node:fs/promises");
     await rm(toExtendedLength(join(takeDir, ".keep")), { force: true }).catch(() => {});
     await rm(toExtendedLength(dirname(join(store.dir, media))), { recursive: true, force: true }).catch(() => {});
+
+    // Measured once, against the file that arrived, before any take.json exists — a take is
+    // immutable, so the only moment to record this is before it is written (#248). Every
+    // failure below is swallowed by design: finalization is not replayable, and a paid clip
+    // must never be lost to a diagnostic that could not run.
+    const qc = await measureArrival(qcApplies(job) ? join(takeDir, mediaName) : null, options);
 
     const base = {
       jobId: job.id,
@@ -76,6 +129,7 @@ export async function recordTakesFromJob(store: WorldStore, job: Job, actualMicr
         ...(actualMicroUsd !== null ? { actualSource: "manifest-derived" as const } : {}),
       },
       media: mediaName,
+      ...(qc !== null ? { qc } : {}),
     };
     await atomicWriteFile(join(takeDir, "take.json"), JSON.stringify(primary, null, 2) + "\n");
     written.push(primary);
@@ -105,6 +159,9 @@ export async function recordTakesFromJob(store: WorldStore, job: Job, actualMicr
             allocated: true,
           },
           segment: { passTakeId: primaryId, inSec: entry.startSec, outSec: entry.endSec },
+          // The same source-media measurement, not a per-segment one: the pass media was
+          // analyzed once, and decoding each range separately would report numbers nobody took.
+          ...(qc !== null ? { qc } : {}),
         };
         const segmentDir = join(store.dir, "productions", job.productionId!, "takes", segmentId);
         await atomicWriteFile(join(segmentDir, "take.json"), JSON.stringify(segment, null, 2) + "\n");

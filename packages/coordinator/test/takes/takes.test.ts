@@ -323,3 +323,146 @@ describe("exports (R-19..R-22, D10..D12, §3.2)", () => {
     await reopened.close();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Arrival-time motion QC (#248): measured before the take exists, and never able
+// to cost one. Every case injects a fake analyzer — ffmpeg is not on CI.
+// ---------------------------------------------------------------------------
+
+describe("take QC at arrival (#248)", () => {
+  const QC = {
+    method: "adjacent-framemd5-v1",
+    scope: "source-media",
+    status: "degraded",
+    nominalFps: 24,
+    effectiveFps: 14,
+    duplicateFrames: 10,
+    duplicateRatio: 0.416667,
+    sampledFrames: 25,
+    thresholdRatio: 0.8,
+  } as const;
+
+  const shotJob = (landed: string): Job => ({
+    ...passJob(landed),
+    target: { kind: "shot", id: "sh_12", coversShots: ["sh_12"] },
+    params: { ...passJob(landed).params, shotPlan: undefined },
+  });
+
+  it("records source-media QC once on a per-shot take", async () => {
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const calls: string[] = [];
+    const takes = await recordTakesFromJob(store, shotJob(landed), 400000, {
+      analyzer: {
+        analyze: async (file) => {
+          calls.push(file);
+          return { ok: true, qc: QC };
+        },
+      },
+    });
+    assert.equal(calls.length, 1, "analyzed once, against the landed file");
+    assert.match(calls[0]!, /output-1\.mp4$/);
+    assert.deepEqual(takes[0]!.qc, QC);
+
+    // Persisted, not merely returned: the record on disk is what review will read.
+    const onDisk = JSON.parse(
+      await readFile(join(dir, "productions", "saltlight", "takes", takes[0]!.id, "take.json"), "utf8"),
+    );
+    assert.deepEqual(onDisk.qc, QC);
+    await store.close();
+  });
+
+  it("copies one pass analysis to the pass and every virtual segment", async () => {
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    let analyses = 0;
+    const takes = await recordTakesFromJob(store, passJob(landed), 400000, {
+      analyzer: {
+        analyze: async () => {
+          analyses += 1;
+          return { ok: true, qc: QC };
+        },
+      },
+    });
+    assert.equal(analyses, 1, "the backing media is measured once, not once per segment");
+    assert.equal(takes.length, 4);
+    for (const take of takes) {
+      assert.deepEqual(take.qc, QC, "the same source-media record travels to every segment");
+    }
+    await store.close();
+  });
+
+  it("QC timeout and analyzer exceptions never fail take finalization", async () => {
+    const { dir, store } = await open();
+
+    for (const [label, analyzer, expected] of [
+      ["timeout", { analyze: async () => ({ ok: false as const, reason: "timeout" as const }) }, "timeout"],
+      ["throws", { analyze: () => Promise.reject(new Error("spawn failed")) }, "process-failed"],
+    ] as const) {
+      const landed = await landPass(dir);
+      const reasons: string[] = [];
+      const takes = await recordTakesFromJob(store, shotJob(landed), 400000, {
+        analyzer,
+        onQcUnavailable: (reason) => reasons.push(reason),
+      });
+      assert.equal(takes.length, 1, `${label}: the paid take is still written`);
+      assert.equal(takes[0]!.qc, undefined, `${label}: absent means not measured, never "measured clean"`);
+      assert.deepEqual(reasons, [expected], `${label}: the reason is reported, not swallowed`);
+    }
+
+    // Even the reporting is allowed to fail: a diagnostic must not cost a generation.
+    const landed = await landPass(dir);
+    const takes = await recordTakesFromJob(store, shotJob(landed), 400000, {
+      analyzer: { analyze: async () => ({ ok: false as const, reason: "malformed-output" as const }) },
+      onQcUnavailable: () => {
+        throw new Error("the log is on fire");
+      },
+    });
+    assert.equal(takes.length, 1, "a throwing callback still leaves the take recorded");
+    assert.equal(takes[0]!.qc, undefined);
+
+    // No analyzer at all is the ordinary state, reported as such.
+    const noneLanded = await landPass(dir);
+    const noneReasons: string[] = [];
+    const none = await recordTakesFromJob(store, shotJob(noneLanded), 400000, {
+      onQcUnavailable: (reason) => noneReasons.push(reason),
+    });
+    assert.equal(none[0]!.qc, undefined);
+    assert.deepEqual(noneReasons, ["not-configured"]);
+    await store.close();
+  });
+
+  it("non-video takes never invoke QC", async () => {
+    const { dir, store } = await open();
+    let analyses = 0;
+    const analyzer = {
+      analyze: async () => {
+        analyses += 1;
+        return { ok: true as const, qc: QC };
+      },
+    };
+    const reasons: string[] = [];
+
+    const stills = await landPass(dir);
+    const image = await recordTakesFromJob(
+      store,
+      { ...shotJob(stills), capability: "image" },
+      400000,
+      { analyzer, onQcUnavailable: (reason) => reasons.push(reason) },
+    );
+    assert.equal(image[0]!.qc, undefined);
+
+    const voiceLanded = await landPass(dir);
+    const voice = await recordTakesFromJob(
+      store,
+      { ...shotJob(voiceLanded), capability: "voice-tts", target: { kind: "voice-line", id: "vl_1", coversShots: [] } },
+      400000,
+      { analyzer, onQcUnavailable: (reason) => reasons.push(reason) },
+    );
+    assert.equal(voice[0]!.qc, undefined);
+
+    assert.equal(analyses, 0, "a still and a voice line have no motion to measure");
+    assert.deepEqual(reasons, [], "and nothing to explain, so nothing is logged");
+    await store.close();
+  });
+});
