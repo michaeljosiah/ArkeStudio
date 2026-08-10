@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
-import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { copyFile, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { basename, extname, join } from "node:path";
+import { basename, join } from "node:path";
 import {
   DomainEventSchema,
   JobSchema,
@@ -76,7 +76,9 @@ import {
   type CloudVoiceSource,
   type SidecarLike,
 } from "./voice/service.js";
+import { atomicWriteFile } from "./world/atomic.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
+import { imageFormatOf } from "./queue/verify.js";
 import { readContainedImageReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
 import {
@@ -178,28 +180,56 @@ import type { WorldStore } from "./world/store.js";
  */
 
 /**
- * What a hand-carried reference image may be. Deliberately narrower than what the media route
- * will serve: the host's dialog offers an "All files" filter, so the extension arriving here is
- * whatever the user typed, and it is checked again rather than trusted.
+ * What the host's file dialog offers to filter by. A hint for the picker, nothing more: the
+ * dialog also offers "All files", so the name arriving back is whatever the user typed and the
+ * decision is taken on the bytes below.
  */
 const IMPORTABLE_IMAGES = [".png", ".jpg", ".jpeg", ".webp"] as const;
 
 const UNSUPPORTED_IMAGE = "That file is not an image the studio can hold. Choose a PNG, JPEG or WebP.";
 
-function importableImage(extension: string): boolean {
-  return (IMPORTABLE_IMAGES as readonly string[]).includes(extension);
+/**
+ * The same ceiling `readContainedImageReferences` enforces when a reference is about to be sent.
+ * Refusing here rather than there is the whole point: an image accepted as the identity anchor
+ * and then silently dropped at dispatch is worse than one that was never accepted.
+ */
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024 - 1;
+
+/**
+ * Read a picked file, refusing anything the dispatch path would later refuse (PR #241 review).
+ *
+ * The extension is checked by *reading* it — `imageFormatOf` looks at signatures and trailers,
+ * so a text file renamed `.png`, or a PNG that stopped downloading halfway, is caught here
+ * instead of becoming an accepted reference with a broken preview. The format the bytes actually
+ * carry is what names the stored file, the same rule the dispatcher applies when it lands a
+ * generated artifact, so a JPEG called `.png` is stored as the JPEG it is.
+ */
+async function readPickedImage(
+  source: string,
+): Promise<{ data: Uint8Array; extension: string } | { error: string }> {
+  const info = await stat(toExtendedLength(source)).catch(() => null);
+  if (!info?.isFile()) return { error: "That file could not be read. Try choosing it again." };
+  if (info.size > MAX_UPLOAD_BYTES) {
+    return { error: "That image is over 50 MB, which is more than an image model will accept." };
+  }
+  const data = await readFile(toExtendedLength(source)).then(
+    (bytes) => Uint8Array.from(bytes),
+    () => null,
+  );
+  if (!data) return { error: "That file could not be read. Try choosing it again." };
+  const format = imageFormatOf(data);
+  if (!format) return { error: UNSUPPORTED_IMAGE };
+  return { data, extension: format.extension };
 }
 
-/** Copy a picked file into a sheet's candidate set under a name of our making, never the user's. */
+/** Put verified bytes in a sheet's candidate set under a name of our making, never the user's. */
 async function landUploadedImage(
   store: WorldStore,
   sheetId: string,
-  source: string,
   name: string,
+  data: Uint8Array,
 ): Promise<void> {
-  const dir = join(store.dir, "references", sheetId, "candidates");
-  await mkdir(toExtendedLength(dir), { recursive: true });
-  await copyFile(toExtendedLength(source), toExtendedLength(join(dir, name)));
+  await atomicWriteFile(join(store.dir, "references", sheetId, "candidates", name), data);
 }
 
 export interface CoordinatorOptions {
@@ -3366,11 +3396,12 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId || !pick) return;
         const [source] = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
         if (!source) return;
-        const extension = extname(source).toLowerCase();
-        if (!importableImage(extension)) return;
+        const picked = await readPickedImage(source);
+        if ("error" in picked) return;
         await store
           .gateOp(async () => {
-            await landUploadedImage(store, msg.sheetId, source, `upload-${Date.now().toString(36)}${extension}`);
+            const name = `upload-${Date.now().toString(36)}${picked.extension}`;
+            await landUploadedImage(store, msg.sheetId, name, picked.data);
           })
           .catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
@@ -3390,8 +3421,7 @@ export class Coordinator {
             candidateRetained,
           });
         if (!store || store.worldId !== msg.worldId || !pick) return;
-        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
-        if (!sheet) {
+        if (!store.getBundle().sheets.some((candidate) => candidate.id === msg.sheetId)) {
           report("failed", false, "The main photo was not changed because the character is unavailable.");
           return;
         }
@@ -3399,20 +3429,28 @@ export class Coordinator {
         // A closed dialog is not a failure. Reporting one would put an error under a card the
         // user just decided to leave alone.
         if (!source) return;
-        const extension = extname(source).toLowerCase();
-        if (!importableImage(extension)) {
-          report("failed", false, UNSUPPORTED_IMAGE);
+        const picked = await readPickedImage(source);
+        if ("error" in picked) {
+          report("failed", false, picked.error);
           return;
         }
-        const file = `upload-${Date.now().toString(36)}${extension}`;
+        const file = `upload-${Date.now().toString(36)}${picked.extension}`;
         const landed = await store
-          .gateOp(() => landUploadedImage(store, msg.sheetId, source, file))
+          .gateOp(() => landUploadedImage(store, msg.sheetId, file, picked.data))
           .then(
             () => true,
             () => false,
           );
         if (!landed) {
           report("failed", false, "The main photo was not changed because that file could not be copied in.");
+          return;
+        }
+        // Re-read after the picker: a dialog can stand open for minutes, and the version this
+        // accept records has to be the one the world holds now, not the one it held when the
+        // button was pressed (PR #241 review).
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
+        if (!sheet) {
+          report("failed", true, "The main photo was not changed because the character is unavailable.");
           return;
         }
         // gateOp rescans on the way out, so the bundle already lists the candidate that
@@ -3446,20 +3484,21 @@ export class Coordinator {
             ...(reason ? { reason } : {}),
           });
         if (!store || store.worldId !== msg.worldId || !pick) return;
-        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
-        if (!sheet) {
+        if (!store.getBundle().sheets.some((candidate) => candidate.id === msg.sheetId)) {
           report("failed", "The character sheet was not changed because the character is unavailable.");
           return;
         }
         const [source] = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
         if (!source) return;
-        const extension = extname(source).toLowerCase();
-        if (!importableImage(extension)) {
-          report("failed", UNSUPPORTED_IMAGE);
+        const picked = await readPickedImage(source);
+        if ("error" in picked) {
+          report("failed", picked.error);
           return;
         }
-        const media = `character-sheet-upload-${Date.now().toString(36)}${extension}`;
-        const take = await recordUploadedCharacterSheetTake(store, msg.sheetId, source, media).catch(() => null);
+        const media = `character-sheet-upload-${Date.now().toString(36)}${picked.extension}`;
+        const take = await recordUploadedCharacterSheetTake(store, msg.sheetId, media, picked.data).catch(
+          () => null,
+        );
         if (!take) {
           await this.refreshWorldSnapshot(msg.worldId);
           report(
@@ -3468,14 +3507,24 @@ export class Coordinator {
           );
           return;
         }
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
+        if (!sheet) {
+          await this.refreshWorldSnapshot(msg.worldId);
+          report("failed", "The character sheet was not changed because the character is unavailable.");
+          return;
+        }
         // No anchorFile: this sheet was not drawn from the main photo, so it claims no lineage
         // and no later main photo can call it out of date. Accepted in the same motion as the
         // upload — the human's own action rule, the same one the generated sheet gets at
         // finalization. Nobody needs to review a file they just chose by hand.
+        //
+        // The version comes from the take rather than from a sheet read before the picker opened:
+        // those are the same number only when nothing edited the character while the dialog was
+        // up, and when they disagree the compilation is born stale (PR #241 review).
         const accepted = await acceptCharacterSheet(store, sheet, {
           file: `takes/${take.id}/${media}`,
           takeId: take.id,
-          sheetVersion: sheet.version,
+          sheetVersion: take.provenance.sheets[msg.sheetId] ?? sheet.version,
           artDirectionVersion: store.getBundle().artDirection.version,
           review: referenceReviewDecision(store.now(), take, "accept"),
         }).then(

@@ -261,27 +261,29 @@ export async function recordUploadedReferenceTake(
 /**
  * A character sheet the user drew, bought, or made elsewhere (PR #241).
  *
- * The source sits outside the world, so unlike the main photo's route there is no candidate to
- * come from and none left behind: the bytes go straight into the take that will own them, and
- * the file the user picked is never moved or touched. `placeMedia` still stages and renames, so
- * a half-copied 40 MB sheet cannot be mistaken for a finished one.
+ * Takes the bytes, not a path: the caller has already read and verified them, and passing the
+ * path would mean reading the file a second time — with a window in between for it to change
+ * into something that was never checked. Unlike the main photo's route there is no candidate to
+ * come from and none left behind; the file the user picked is never moved or touched.
  *
- * Not deduplicated, deliberately. The same path picked twice is two deliberate acts, and the
+ * Not deduplicated, deliberately. The same file chosen twice is two deliberate acts, and the
  * second one is usually a corrected export of the first — collapsing them would silently keep
  * the older bytes.
  */
 export async function recordUploadedCharacterSheetTake(
   store: WorldStore,
   sheetId: string,
-  sourcePath: string,
   media: string,
+  data: Uint8Array,
 ): Promise<Take> {
   if (basename(media) !== media) throw new Error(`unsafe media name ${media}`);
   const take = uploadedTake(store, sheetId, "sheet", media, { uploadedFile: media });
   await store.gateOp(async () => {
     const dir = join(store.dir, "references", sheetId, "takes", take.id);
     await mkdir(toExtendedLength(dir), { recursive: true });
-    await placeMedia(sourcePath, join(dir, media));
+    // Staged and renamed like every other write here, so a half-written 40 MB sheet cannot be
+    // mistaken for a finished one (SPEC-002 R-13).
+    await atomicWriteFile(join(dir, media), data);
     await atomicWriteFile(join(dir, "take.json"), JSON.stringify(take, null, 2) + "\n");
   });
   return take;

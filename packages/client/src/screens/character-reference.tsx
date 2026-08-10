@@ -296,11 +296,18 @@ export function CharacterReferenceScreen() {
             </div>
             {/* Not gated on the main photo, unlike Generate: a sheet drawn elsewhere owes this
                 world's identity anchor nothing, and waiting on one would be a rule with no
-                purpose behind it. */}
+                purpose behind it. Gated on a generation in flight, though — that one designates
+                itself when it lands, and would quietly replace a sheet uploaded while it ran. */}
             <Button
               variant="ghost"
-              disabled={!canUpload}
-              title={canUpload ? "Use a composite from this computer — nothing is generated" : UPLOAD_UNAVAILABLE}
+              disabled={!canUpload || runningSheet}
+              title={
+                !canUpload
+                  ? UPLOAD_UNAVAILABLE
+                  : runningSheet
+                    ? "A generated sheet is on its way and will take this slot when it lands"
+                    : "Use a composite from this computer — nothing is generated"
+              }
               onClick={() => importCharacterSheet(world.meta.worldId, sheetId)}
             >
               Upload

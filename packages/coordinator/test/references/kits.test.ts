@@ -693,13 +693,14 @@ describe("kit mutations through the one commit primitive", () => {
   it("takes an uploaded character sheet without a provider, a cost, or the file the user picked", async () => {
     const { dir, store } = await open();
     const outside = join(await tempDir("arke-upload-"), "my-own-sheet.png");
-    await writeFile(outside, "hand-drawn-sheet-bytes");
+    const bytes = new TextEncoder().encode("hand-drawn-sheet-bytes");
+    await writeFile(outside, bytes);
 
     // Derived, never hardcoded: the fixture character's version moves, and a literal here would
     // fail somewhere unrelated to what this test is about.
     const live = store.getBundle().sheets.find((candidate) => candidate.id === "maren-kest")!;
 
-    const take = await recordUploadedCharacterSheetTake(store, "maren-kest", outside, "character-sheet-upload-a1.png");
+    const take = await recordUploadedCharacterSheetTake(store, "maren-kest", "character-sheet-upload-a1.png", bytes);
     assert.equal(take.kind, "sheet");
     assert.equal(take.provider, "user");
     assert.equal(take.model, "upload");
@@ -743,11 +744,19 @@ describe("kit mutations through the one commit primitive", () => {
 
   it("gives each hand-carried sheet its own take, so a corrected export never keeps the old bytes", async () => {
     const { dir, store } = await open();
-    const outside = join(await tempDir("arke-upload-"), "my-own-sheet.png");
-    await writeFile(outside, "first-export");
-    const first = await recordUploadedCharacterSheetTake(store, "maren-kest", outside, "character-sheet-upload-a1.png");
-    await writeFile(outside, "corrected-export");
-    const second = await recordUploadedCharacterSheetTake(store, "maren-kest", outside, "character-sheet-upload-a2.png");
+    const encode = (text: string) => new TextEncoder().encode(text);
+    const first = await recordUploadedCharacterSheetTake(
+      store,
+      "maren-kest",
+      "character-sheet-upload-a1.png",
+      encode("first-export"),
+    );
+    const second = await recordUploadedCharacterSheetTake(
+      store,
+      "maren-kest",
+      "character-sheet-upload-a2.png",
+      encode("corrected-export"),
+    );
 
     assert.notEqual(second.id, first.id, "the same path picked twice is two deliberate acts");
     assert.equal(
@@ -764,10 +773,13 @@ describe("kit mutations through the one commit primitive", () => {
 
   it("refuses a media name that would climb out of the take directory", async () => {
     const { store } = await open();
-    const outside = join(await tempDir("arke-upload-"), "my-own-sheet.png");
-    await writeFile(outside, "hand-drawn-sheet-bytes");
     await assert.rejects(
-      recordUploadedCharacterSheetTake(store, "maren-kest", outside, "../../world.json"),
+      recordUploadedCharacterSheetTake(
+        store,
+        "maren-kest",
+        "../../world.json",
+        new TextEncoder().encode("hand-drawn-sheet-bytes"),
+      ),
       /unsafe media name/,
     );
     await store.close();

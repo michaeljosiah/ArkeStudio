@@ -50,6 +50,16 @@ async function fileOutsideTheWorld(name: string, bytes: Uint8Array | string = pn
   return path;
 }
 
+/** Whole enough to pass the same signature-and-trailer check the dispatcher lands artifacts by. */
+function jpegBytes(): Uint8Array {
+  return Uint8Array.from([0xff, 0xd8, ...Array.from({ length: 32 }, () => 0x00), 0xff, 0xd9]);
+}
+
+/** A PNG that stopped arriving: the signature is there, the IEND that closes it is not. */
+function truncatedPngBytes(): Uint8Array {
+  return pngBytes().slice(0, 20);
+}
+
 /** The one report this action owes. Exactly one: reporting twice is its own kind of wrong. */
 function theReport<T extends DomainEvent["type"]>(events: DomainEvent[], type: T): Extract<DomainEvent, { type: T }> {
   const found = events.filter((event) => event.type === type);
@@ -137,6 +147,35 @@ describe("uploading a main photo by hand", () => {
       await provider.close();
     }
   });
+
+  // The case a suffix check cannot see, and the reason the check reads bytes: this file is named
+  // .png and starts like one. Accepting it would have committed an unopenable identity anchor and
+  // reported success, leaving the failure to surface at dispatch, far from the choosing.
+  it("refuses a truncated image rather than accepting a broken anchor", async () => {
+    const picked = await fileOutsideTheWorld("half-a-portrait.png", truncatedPngBytes());
+    const { provider, worldDir, events, send } = await harness(() => [picked]);
+    try {
+      const before = await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8");
+      await send({ kind: "import-main-photo", worldId: WORLD_ID, sheetId: "maren-kest" });
+      assert.equal(await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8"), before);
+      assert.equal(theReport(events, "main-photo.acceptance").status, "failed");
+      const candidates = await readdir(join(worldDir, "references", "maren-kest", "candidates")).catch(() => []);
+      assert.deepEqual(candidates.filter((name) => name.startsWith("upload-")), [], "and nothing was copied in");
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("stores what the bytes are, not what the name claims", async () => {
+    const picked = await fileOutsideTheWorld("actually-a-jpeg.png", jpegBytes());
+    const { provider, send, kitOf } = await harness(() => [picked]);
+    try {
+      await send({ kind: "import-main-photo", worldId: WORLD_ID, sheetId: "maren-kest" });
+      assert.match((await kitOf("maren-kest")).mainPhoto?.file ?? "", /\.jpg$/);
+    } finally {
+      await provider.close();
+    }
+  });
 });
 
 describe("uploading a character sheet by hand", () => {
@@ -171,14 +210,14 @@ describe("uploading a character sheet by hand", () => {
   });
 
   it("does not wait on a main photo the way generation does", async () => {
-    const picked = await fileOutsideTheWorld("bought-elsewhere.webp");
+    const picked = await fileOutsideTheWorld("bought-elsewhere.png");
     // Perrin has no reference kit at all — no anchor, no photo, nothing to be conditioned on.
     const { provider, events, send, kitOf } = await harness(() => [picked]);
     try {
       await send({ kind: "import-character-sheet", worldId: WORLD_ID, sheetId: "perrin-tallow" });
 
       const kit = await kitOf("perrin-tallow");
-      assert.match(kit.designatedCompilation ?? "", /\.webp$/);
+      assert.match(kit.designatedCompilation ?? "", /\.png$/);
       assert.equal(kit.mainPhoto, undefined, "an uploaded sheet invents no identity anchor");
       assert.equal(theReport(events, "character-sheet.acceptance").status, "accepted");
     } finally {

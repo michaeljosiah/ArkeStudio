@@ -426,6 +426,13 @@ function handleFrame(json: string): void {
       voiceCandidates: changedWorld ? {} : current.voiceCandidates,
       voicePreviews: changedWorld ? {} : current.voicePreviews,
       voiceAudio: { ...(changedWorld ? {} : current.voiceAudio), ...durableVoiceAudio },
+      // Both are keyed by sheet slug alone, and slugs recur across worlds: a failure left over
+      // from one world would otherwise surface under the same-named character in the next one
+      // (PR 241 review). They describe an action just taken here, so they do not outlive it.
+      // No "#" before that number anywhere under src/: the hard-coded-colour rule reads it as a
+      // three-digit hex and fails the token test.
+      mainPhotoAcceptance: changedWorld ? {} : current.mainPhotoAcceptance,
+      characterSheetAcceptance: changedWorld ? {} : current.characterSheetAcceptance,
     });
   } else if (current.state) {
     let gateNotices = current.gateNotices;
