@@ -67,6 +67,8 @@ export const CompilationFormatSchema = z.enum([
   "pitch-board",
   "expression-board",
   "character-sheet",
+  /** A location's accepted views, stacked and labelled — assembled locally, never generated. */
+  "location-sheet",
 ]);
 export type CompilationFormat = z.infer<typeof CompilationFormatSchema>;
 
@@ -124,6 +126,41 @@ export const CharacterLookSchema = z
   .strict();
 export type CharacterLook = z.infer<typeof CharacterLookSchema>;
 
+/**
+ * One accepted angle on a place (#243, design turn 57).
+ *
+ * A character is established by a face; a place is established by geometry, and geometry needs
+ * more than one angle before a model stops inventing the half of the room it was not shown.
+ * Each view is an accepted immutable take, exactly like a main photo — `file` points into
+ * `takes/<takeId>/`, never at a loose file somebody could replace underneath it.
+ *
+ * Superseded rather than deleted: a take made against an older view has to stay explicable
+ * (the same reasoning as D11 for tiles).
+ */
+export const LocationViewSchema = z
+  .object({
+    id: z.string().min(1),
+    /** What this angle is called — "Establishing view", "Reverse angle", "Day". */
+    name: z.string().trim().min(1).max(80),
+    /** Relative to `references/<sheetId>/`. */
+    file: z.string().min(1),
+    sourceTakeId: TakeIdSchema,
+    sheetVersion: z.number().int().min(1),
+    artDirectionVersion: z.number().int().min(1),
+    acceptedAt: IsoDateTimeSchema,
+    status: z.enum(["active", "superseded"]).default("active"),
+  })
+  .strict();
+export type LocationView = z.infer<typeof LocationViewSchema>;
+
+/** Past this a sheet stops reading as one room (design turn 57). */
+export const MAX_ACTIVE_LOCATION_VIEWS = 6;
+
+/** Two names are the same name if they differ only by case or spacing. */
+export function normalizeViewName(name: string): string {
+  return name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
 export const ReferenceKitSchema = z
   .object({
     sheetId: SlugSchema,
@@ -160,9 +197,78 @@ export const ReferenceKitSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * A location's accepted angles (#243). Optional so every character kit written before this
+     * existed round-trips unchanged, and so opening an old world rewrites nothing.
+     */
+    locationViews: z.array(LocationViewSchema).optional(),
+    /** Which view is the establishing one — the anchor later views are generated against. */
+    establishingViewId: z.string().min(1).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((kit, ctx) => {
+    // Invariants that a strict object cannot state on its own. Checked here rather than only at
+    // the mutation boundary because kit.json is hand-editable: a world someone edited into an
+    // impossible shape should be refused at the door, not discovered at dispatch.
+    const views = kit.locationViews ?? [];
+    if (views.length === 0) {
+      if (kit.establishingViewId !== undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["establishingViewId"], message: "no location views to establish" });
+      }
+      return;
+    }
+    const active = views.filter((view) => view.status === "active");
+    if (active.length > MAX_ACTIVE_LOCATION_VIEWS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["locationViews"],
+        message: `at most ${MAX_ACTIVE_LOCATION_VIEWS} active location views`,
+      });
+    }
+    if (active.length > 0 && kit.establishingViewId === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["establishingViewId"], message: "active views need an establishing view" });
+    }
+    if (kit.establishingViewId !== undefined) {
+      const matches = active.filter((view) => view.id === kit.establishingViewId);
+      if (matches.length !== 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["establishingViewId"],
+          message: "establishingViewId must resolve to exactly one active view",
+        });
+      }
+    }
+    const seen = new Set<string>();
+    for (const view of active) {
+      const key = normalizeViewName(view.name);
+      if (seen.has(key)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["locationViews"], message: `duplicate active view name: ${view.name}` });
+      }
+      seen.add(key);
+    }
+    const ids = new Set<string>();
+    for (const view of views) {
+      if (ids.has(view.id)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["locationViews"], message: `duplicate view id: ${view.id}` });
+      }
+      ids.add(view.id);
+    }
+  });
 export type ReferenceKit = z.infer<typeof ReferenceKitSchema>;
+
+/**
+ * The views a location sheet is built from, in panel order: the establishing view first, then
+ * acceptance order (design turn 57's binding rule). Never alphabetical and never generation
+ * order — a panel map that reordered itself would make every prompt citing "panel 2" wrong.
+ */
+export function orderedLocationViews(kit: ReferenceKit): LocationView[] {
+  const active = (kit.locationViews ?? []).filter((view) => view.status === "active");
+  const establishing = active.find((view) => view.id === kit.establishingViewId);
+  const rest = active
+    .filter((view) => view.id !== kit.establishingViewId)
+    .sort((a, b) => (a.acceptedAt === b.acceptedAt ? a.id.localeCompare(b.id) : a.acceptedAt.localeCompare(b.acceptedAt)));
+  return establishing ? [establishing, ...rest] : rest;
+}
 
 // ---------------------------------------------------------------------------
 // Pure judgements the coordinator and the client share

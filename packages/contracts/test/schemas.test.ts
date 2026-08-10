@@ -21,6 +21,8 @@ import {
   type Job,
   ProposalSchema,
   ReferenceKitSchema,
+  orderedLocationViews,
+  normalizeViewName,
   ReviewDecisionSchema,
   RipplePreviewSchema,
   SceneSchema,
@@ -607,6 +609,131 @@ describe("reference kits", () => {
     };
     assert.deepEqual(ReferenceKitSchema.parse(next), next);
     assert.deepEqual(ReferenceKitSchema.parse(kit), kit, "the six-tile shape still parses unchanged");
+  });
+
+  // #243 / design turn 57: a location's accepted angles.
+  const view = (id: string, name: string, acceptedAt: string, status = "active") => ({
+    id,
+    name,
+    file: `takes/tk_${id}/view.png`,
+    sourceTakeId: newId("tk"),
+    sheetVersion: 3,
+    artDirectionVersion: 4,
+    acceptedAt,
+    status,
+  });
+  const locationKit = {
+    sheetId: "the-vigil",
+    tiles: [],
+    compilations: [
+      {
+        file: "location-sheet-8f2c1d0a4b77.png",
+        format: "location-sheet",
+        sheetVersion: 3,
+        tiles: ["takes/tk_v1/view.png", "takes/tk_v2/view.png"],
+        compiledAt: "2026-08-10T09:00:00Z",
+        source: "local",
+        accepted: true,
+      },
+    ],
+    designatedCompilation: "location-sheet-8f2c1d0a4b77.png",
+    locationViews: [view("v1", "Establishing view", "2026-08-08T09:00:00Z"), view("v2", "Reverse angle", "2026-08-09T09:00:00Z")],
+    establishingViewId: "v1",
+  };
+
+  it("accepts a location kit and leaves a character kit alone", () => {
+    assert.deepEqual(ReferenceKitSchema.parse(locationKit), locationKit);
+    // The two shapes share a file and never each other's fields.
+    assert.equal(ReferenceKitSchema.parse(kit).locationViews, undefined);
+    assert.equal(ReferenceKitSchema.parse(locationKit).mainPhoto, undefined);
+  });
+
+  it("refuses a location kit whose establishing view does not resolve", () => {
+    assert.throws(
+      () => ReferenceKitSchema.parse({ ...locationKit, establishingViewId: "nope" }),
+      /establishingViewId/,
+      "a dangling anchor makes the panel map unanswerable",
+    );
+    assert.throws(
+      () => ReferenceKitSchema.parse({ ...locationKit, establishingViewId: undefined }),
+      /establishing/,
+      "active views without an establishing view have no panel 1",
+    );
+    // Superseded is not a candidate: the anchor has to be a view that still exists.
+    assert.throws(() =>
+      ReferenceKitSchema.parse({
+        ...locationKit,
+        locationViews: [view("v1", "Establishing view", "2026-08-08T09:00:00Z", "superseded"), view("v2", "Reverse angle", "2026-08-09T09:00:00Z")],
+      }),
+    );
+  });
+
+  it("holds the active-view ceiling and refuses two views by the same name", () => {
+    const seven = Array.from({ length: 7 }, (_, i) => view(`v${i}`, `View ${i}`, `2026-08-0${i + 1}T09:00:00Z`));
+    assert.throws(
+      () => ReferenceKitSchema.parse({ ...locationKit, locationViews: seven, establishingViewId: "v0" }),
+      /6 active/,
+      "the seventh is refused at the door, not discovered at dispatch",
+    );
+
+    // Case and spacing do not make a second name.
+    assert.throws(
+      () =>
+        ReferenceKitSchema.parse({
+          ...locationKit,
+          locationViews: [view("v1", "Establishing view", "2026-08-08T09:00:00Z"), view("v2", "  reverse   ANGLE ", "2026-08-09T09:00:00Z"), view("v3", "Reverse angle", "2026-08-10T09:00:00Z")],
+        }),
+      /duplicate active view name/,
+    );
+
+    // A superseded record may keep a name an active view has taken back.
+    const reused = {
+      ...locationKit,
+      locationViews: [
+        view("v1", "Establishing view", "2026-08-08T09:00:00Z"),
+        view("v2", "Reverse angle", "2026-08-09T09:00:00Z", "superseded"),
+        view("v3", "Reverse angle", "2026-08-10T09:00:00Z"),
+      ],
+    };
+    assert.deepEqual(ReferenceKitSchema.parse(reused), reused, "history keeps its name; only active names are unique");
+  });
+
+  it("orders panels establishing-first, then by acceptance", () => {
+    const kitOut = ReferenceKitSchema.parse({
+      ...locationKit,
+      // Deliberately out of order, and with the establishing view accepted last.
+      locationViews: [
+        view("v3", "Day", "2026-08-07T09:00:00Z"),
+        view("v1", "Establishing view", "2026-08-10T09:00:00Z"),
+        view("v2", "Reverse angle", "2026-08-08T09:00:00Z"),
+      ],
+      establishingViewId: "v1",
+    });
+    assert.deepEqual(
+      orderedLocationViews(kitOut).map((v) => v.name),
+      ["Establishing view", "Day", "Reverse angle"],
+      "the anchor leads whenever it was accepted; the rest follow the order they were accepted in",
+    );
+    assert.equal(normalizeViewName("  Reverse   ANGLE "), "reverse angle");
+  });
+
+  it("records a location view as its own immutable take kind", () => {
+    const take = {
+      id: newId("tk"),
+      coversShots: [],
+      kind: "location-view",
+      reference: { sheetId: "the-vigil" },
+      provider: "openai",
+      model: "gpt-image-2",
+      provenance: { canonRevision: 12, sheets: { "the-vigil": 3 }, artDirectionVersion: 4 },
+      references: [],
+      params: {},
+      cost: { estimatedMicroUsd: 150000, actualMicroUsd: 150000, actualSource: "manifest-derived" },
+      dispatchedAt: "2026-08-10T08:59:00Z",
+      completedAt: "2026-08-10T09:00:00Z",
+      media: "view.png",
+    };
+    assert.deepEqual(TakeSchema.parse(take), take);
   });
 });
 

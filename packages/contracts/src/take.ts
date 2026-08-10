@@ -16,7 +16,17 @@ import {
  * uses (selections.json, mutable) are three different things and live in three places.
  */
 
-export const TakeKindSchema = z.enum(["clip", "frame", "still", "voice", "main-photo", "sheet", "look"]);
+export const TakeKindSchema = z.enum([
+  "clip",
+  "frame",
+  "still",
+  "voice",
+  "main-photo",
+  "sheet",
+  "look",
+  /** One accepted angle on a location (#243) — an immutable take, like a main photo. */
+  "location-view",
+]);
 export type TakeKind = z.infer<typeof TakeKindSchema>;
 
 /**
