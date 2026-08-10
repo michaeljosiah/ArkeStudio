@@ -49,6 +49,19 @@ export {
 } from "./references/kit.js";
 export { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "./references/png.js";
 export {
+  composeLocationSheet,
+  fitLabel,
+  normalizeLabel,
+  panelLabel,
+  panelMapSentence,
+  PANEL_HEIGHT,
+  PANEL_IMAGE_HEIGHT,
+  PANEL_LABEL_HEIGHT,
+  SHEET_WIDTH,
+  type LocationSheet,
+  type LocationSheetPanel,
+} from "./references/location-sheet.js";
+export {
   previewCacheFile,
   VoiceService,
   voiceLineRequest,
