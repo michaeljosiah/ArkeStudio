@@ -348,6 +348,8 @@ export interface PendingSheet {
   name: string;
   /** Where it will live once accepted, world-relative. */
   path: string;
+  /** The production it will belong to, if it is a guest (SPEC-020 R-8). */
+  production?: string;
 }
 
 /** "New location: The Bell Market" → "The Bell Market". */
@@ -378,6 +380,20 @@ function nameFromPath(path: string): string {
  * apart, and inventing a drafting card for an edit to a sheet already in the list would double
  * it on screen.
  */
+/**
+ * The pending sheets the world itself is waiting on (SPEC-020 R-8). A guest under review is not
+ * the world's business, and showing it on the hub for the length of its review would undo the
+ * scoping the moment it mattered most — while the thing is new and most conspicuous.
+ */
+export function pendingWorldSheets(pending: PendingSheet[]): PendingSheet[] {
+  return pending.filter((p) => p.production === undefined);
+}
+
+/** The pending guests of one production, for the group drawn beside its cast (R-9). */
+export function pendingGuestsOf(pending: PendingSheet[], productionId: string): PendingSheet[] {
+  return pending.filter((p) => p.production === productionId);
+}
+
 export function pendingSheets(proposals: readonly StagedProposal[], kind: SheetKind): PendingSheet[] {
   const prefix = `${sheetDir(kind)}/`;
   const pending: PendingSheet[] = [];
@@ -392,6 +408,7 @@ export function pendingSheets(proposals: readonly StagedProposal[], kind: SheetK
         proposalId: staged.proposal.id,
         name: reviewed?.label ?? nameFromSummary(staged.proposal.summary) ?? nameFromPath(target.path),
         path: target.path,
+        ...(staged.proposal.production !== undefined ? { production: staged.proposal.production } : {}),
       });
     }
   }

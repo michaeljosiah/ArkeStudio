@@ -7,6 +7,8 @@ import {
   formatMicroUsd,
   mainPhotoFor,
   pendingSheets,
+  pendingWorldSheets,
+  worldSheets,
   type CanonEntry,
   type PendingSheet,
   type Sheet,
@@ -50,6 +52,7 @@ import {
   openThread as openThreadMsg,
   reconcileExternalEdit,
   reloadWorld,
+  promoteGuest,
   renameSheet,
   replyToPermission,
   requestCanonRefs,
@@ -379,11 +382,19 @@ export function WorldOverviewScreen() {
     );
   }
   const slug = world.meta.slug;
-  const characters = world.sheets.filter((s) => s.type === "character" && s.retired !== true).slice(0, 5);
+  // The world's own cast, not every sheet on disk: a production's guests live in the same
+  // directories and would otherwise crowd the fan with people the world has never met
+  // (SPEC-020 R-8).
+  const characters = worldSheets(world.sheets)
+    .filter((s) => s.type === "character" && s.retired !== true)
+    .slice(0, 5);
   // The fan is where "1 awaiting you" and "No one lives here yet" used to sit on screen at the
   // same time, saying opposite things about the same world (issue 228). The one awaiting is a
   // character being drafted, so it takes a card in the fan like any other.
-  const pendingCast = pendingSheets(world.proposals, "character").slice(0, Math.max(0, 5 - characters.length));
+  const pendingCast = pendingWorldSheets(pendingSheets(world.proposals, "character")).slice(
+    0,
+    Math.max(0, 5 - characters.length),
+  );
   const threads = world.canon.filter((c) => c.status === "open");
   const proposals = world.proposals;
   const production = world.productions[0];
@@ -524,7 +535,8 @@ export function WorldOverviewScreen() {
 function SheetKindNav({ active }: { active: Sheet["type"] }) {
   const { worldId } = useParams();
   const world = useWorld();
-  const count = (t: Sheet["type"]) => world?.sheets.filter((s) => s.type === t && s.retired !== true).length ?? 0;
+  const count = (t: Sheet["type"]) =>
+    worldSheets(world?.sheets ?? []).filter((s) => s.type === t && s.retired !== true).length;
   const items = [
     ["character", "Characters", "cast"],
     ["location", "Locations", "locations"],
@@ -703,9 +715,15 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const sheetRefs = useSheetRefs();
-  const sheets = world?.sheets.filter((s) => s.type === kind && s.retired !== true) ?? [];
-  const pending = pendingSheets(world?.proposals ?? [], kind);
-  const retired = world?.sheets.filter((s) => s.type === kind && s.retired === true).length ?? 0;
+  // Ledgers are the world's, so guests are absent from the list and from both tallies — a
+  // retired count that included another production's one-offs would not add up to anything the
+  // user could click through to (SPEC-020 R-8).
+  const worldOwned = worldSheets(world?.sheets ?? []);
+  const sheets = worldOwned.filter((s) => s.type === kind && s.retired !== true);
+  // A pending guest is not the world's business either — filtering only accepted guests would
+  // let every new one sit on this ledger for exactly as long as it took to review (R-8).
+  const pending = pendingWorldSheets(pendingSheets(world?.proposals ?? [], kind));
+  const retired = worldOwned.filter((s) => s.type === kind && s.retired === true).length;
   const locked = sheets.filter((s) => s.status === "locked").length;
   const sketches = sheets.filter((s) => s.status === "sketch").length;
   const featured = sheets[0] ?? null;
@@ -1284,6 +1302,9 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
               {sheet.status === "sketch" ? `sketch · v${sheet.version}` : `v${sheet.version} · locked`}
             </Badge>
             {sheet.retired && <Badge tone="danger">retired</Badge>}
+            {/* A guest reached from the world's own address says whose it is, or the sheet reads
+                as a member of a cast it was deliberately kept out of (SPEC-020 R-10). */}
+            {sheet.production !== undefined && <Badge tone="outline">guest of {sheet.production}</Badge>}
             {sheet.origin && (
               <Badge tone="outline">
                 from {sheet.origin.sheet} v{sheet.origin.version}
@@ -1335,6 +1356,18 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           <Button variant="ghost" onClick={() => setDuplicating(duplicating === null ? `${sheet.name} (copy)` : null)}>
             Duplicate
           </Button>
+          {/* One way only (SPEC-020 R-15, D7): a sheet promoted by mistake is retired, because
+              demotion would either break the citations outside the production or need an
+              exception for widely-cited guests. */}
+          {sheet.production !== undefined && (
+            <Button
+              variant="ghost"
+              onClick={() => worldId && promoteGuest(worldId, sheetPath)}
+              title={`Moves ${sheet.name} out of ${sheet.production} and into the world's cast — the id, every citation and the reference kit stay`}
+            >
+              Promote to the world
+            </Button>
+          )}
           <Button
             variant="ghost"
             disabled={sheet.retired === true}
@@ -2860,7 +2893,10 @@ export function CanonThreadScreen() {
               {...(worldId !== undefined && hostCanAttach()
                 ? {
                     onAttachFiles: (files: readonly File[]) =>
-                      attachHostFiles({ kind: "file-artifact", worldId }, files),
+                      // Dropped on the world's own shelf, so it says so — same statement the
+                      // "Copy it anyway" button makes, and the one dedup needs to re-home a
+                      // scoped artifact rather than silently leave it scoped (SPEC-020 §2.5).
+                      attachHostFiles({ kind: "file-artifact", worldId, production: null }, files),
                     onAttachText: (text: string) =>
                       attachHostText({ kind: "file-artifact", worldId }, text, "pasted-note.txt"),
                   }
@@ -3058,7 +3094,9 @@ export function NewCanonScreen() {
 export function ArtifactsScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
-  const artifacts = world?.artifacts ?? [];
+  // The world's own shelf (SPEC-020 R-13): artifacts a production owns are shown there, and
+  // counting them here would make "12 files" a number no filter on this screen can reach.
+  const artifacts = (world?.artifacts ?? []).filter((a) => a.production === undefined);
   const report = useImportReport();
   const notices = useArtifactNotices();
   const [importPath, setImportPath] = useState("");
@@ -3118,7 +3156,10 @@ export function ArtifactsScreen() {
           {n.outcome === "needs-consent" && worldId && (
             <>
               {" "}
-              <Button onClick={() => fileArtifactMsg(worldId, n.sourcePath, { allowLarge: true })}>
+              {/* `production: null` is the world saying so out loud. Filing from the world's own
+                  shelf is how a production-scoped document is brought back to the world, and on
+                  the dedup path silence would leave it scoped (SPEC-020 §2.5). */}
+              <Button onClick={() => fileArtifactMsg(worldId, n.sourcePath, { allowLarge: true, production: null })}>
                 Copy it anyway
               </Button>
             </>

@@ -53,6 +53,7 @@ import {
   ExportsScreen,
   GenerateScreen,
   NewSceneScreen,
+  ProductionCastScreen,
   ProductionDashboardScreen,
   ProductionLayout,
   SceneDetailScreen,
@@ -158,6 +159,7 @@ export function App() {
 
         <Route path="/w/:worldId/p/:prodId" element={<ProductionLayout />}>
           <Route index element={<ProductionDashboardScreen />} />
+          <Route path="cast" element={<ProductionCastScreen />} />
           <Route path="story" element={<StoryScreen />} />
           <Route path="story/chapters" element={<ChapterTreeScreen />} />
           <Route path="scenes" element={<ScenesScreen />} />

@@ -11,6 +11,7 @@ import {
   parseMentions,
   passStructure,
   planScene,
+  pickableSheets,
   sceneImageOutput,
   SceneSchema,
   ulid,
@@ -215,7 +216,12 @@ export async function draftSceneSkeleton(
     // dispatch — two scenes drafted under different guidance differ for a recoverable reason.
     ...(skill !== null ? { skill } : {}),
   });
-  const characters = bundle.sheets.filter((s) => s.type === "character" && s.retired !== true).length;
+  // What this production can actually draw on (SPEC-020 R-7): the world's cast plus its own
+  // guests. Counting another production's one-offs would tell the drafting agent a larger cast
+  // is available than it may cite without a cross-production warning.
+  const characters = pickableSheets(bundle.sheets, input.productionId).filter(
+    (s) => s.type === "character" && s.retired !== true,
+  ).length;
   // Whichever way it went, the scope line says it (R-20). A fallback nobody is told about looks
   // exactly like a fallback that misfired, and the difference matters when the shots read oddly.
   const guidance =

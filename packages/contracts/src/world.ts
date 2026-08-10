@@ -93,6 +93,20 @@ export const SheetSchema = z
     status: SheetStatusSchema,
     /** Retired entities stay on disk and resolvable so citations keep meaning (SPEC-002 R-26). */
     retired: z.boolean().optional(),
+    /**
+     * The production that owns this sheet — a *guest* (SPEC-020 R-1). Absent means the world
+     * owns it, which is every sheet written before SPEC-020 and most sheets after it.
+     *
+     * Ownership decides where the sheet is *shown* and nothing else. A guest versions, gates,
+     * snapshots, is cited, is retired, takes a reference kit and takes a voice exactly as a
+     * world sheet does (R-3) — the field is read by surfaces and by one dispatch warning, never
+     * by a mechanism that could fail on it.
+     *
+     * Deliberately not validated against the productions that exist. A sheet naming a production
+     * that has been renamed away still parses and still resolves (R-4); the alternative is a
+     * scan that drops a character because a directory moved.
+     */
+    production: SlugSchema.optional(),
     /** Duplication origin — a record at copy time, never a live dependency (SPEC-007 R-12, D9). */
     origin: z
       .object({ sheet: SlugSchema, version: z.number().int().min(1) })
@@ -108,6 +122,37 @@ export const SheetSchema = z
   })
   .strict();
 export type Sheet = z.infer<typeof SheetSchema>;
+
+/**
+ * Scope predicates (SPEC-020). Every surface that has to answer "does this sheet belong here?"
+ * asks through these rather than reading `production` directly, so the answer is written once
+ * and the three world-level surfaces cannot drift apart.
+ */
+
+/** A guest — owned by a production rather than by the world (R-1). */
+export function isGuest(sheet: Sheet): boolean {
+  return sheet.production !== undefined;
+}
+
+/** The world's own cast: what the hub's fan, its counts and its ledgers draw (R-8). */
+export function worldSheets(sheets: Sheet[]): Sheet[] {
+  return sheets.filter((sheet) => !isGuest(sheet));
+}
+
+/** Just this production's guests, for the group drawn beside the world cast (R-9). */
+export function guestsOf(sheets: Sheet[], productionId: string): Sheet[] {
+  return sheets.filter((sheet) => sheet.production === productionId);
+}
+
+/**
+ * What a picker inside a production may offer: the world's cast plus this production's guests
+ * (R-7). Another production's guests are absent — an offer is not a record, and narrowing it
+ * costs nothing. Resolution deliberately does NOT use this (R-5): a mention that already names a
+ * foreign guest still resolves, and the problem surfaces at dispatch instead.
+ */
+export function pickableSheets(sheets: Sheet[], productionId: string | undefined): Sheet[] {
+  return sheets.filter((sheet) => !isGuest(sheet) || sheet.production === productionId);
+}
 
 // ---------------------------------------------------------------------------
 // Canon entries — canon/CANON-nnn.md (§2.3.3)

@@ -173,6 +173,7 @@ export {
   createSheetFromSentence,
   duplicateSheet,
   scopeImageExtraction,
+  stageGuestPromotion,
   stageSheetRename,
   stageSheetStatus,
   applyVoiceAssignment,

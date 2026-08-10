@@ -868,8 +868,13 @@ export function createWorld(input: {
 }
 
 /** Ask the host to open its picker and file whatever is chosen. No path passes through here. */
-export function attachFiles(worldId: string, links?: string[]): void {
-  send({ kind: "attach-files", worldId, ...(links !== undefined ? { links } : {}) });
+export function attachFiles(worldId: string, links?: string[], production?: string | null): void {
+  send({
+    kind: "attach-files",
+    worldId,
+    ...(links !== undefined ? { links } : {}),
+    ...(production !== undefined ? { production } : {}),
+  });
 }
 
 /**
@@ -1221,6 +1226,8 @@ export function createSheetFromSentence(
   sentence: string,
   /** Settle it as drafted, without asking — see the frame. Beginning a world sets this. */
   settle = false,
+  /** Creating from inside a production files a guest of it rather than world cast (SPEC-020). */
+  production?: string,
 ): void {
   send({
     kind: "create-sheet-from-sentence",
@@ -1229,7 +1236,13 @@ export function createSheetFromSentence(
     name,
     sentence,
     ...(settle ? { settle } : {}),
+    ...(production !== undefined ? { production } : {}),
   });
+}
+
+/** SPEC-020 R-14: clear the guest's owner. No file moves and no citation breaks. */
+export function promoteGuest(worldId: string, path: string): void {
+  send({ kind: "promote-guest", worldId, path });
 }
 
 export function duplicateSheet(worldId: string, path: string, newName: string): void {
@@ -1768,7 +1781,12 @@ export function useExports(): Record<string, ExportState> {
 export function fileArtifactMsg(
   worldId: string,
   sourcePath: string,
-  opts: { links?: string[]; allowLarge?: boolean; supersedes?: string } = {},
+  /**
+   * `production` carries SPEC-020 ownership: a slug files it to that production, `null` says the
+   * world explicitly — which is what re-homes an already-scoped artifact when filing dedups —
+   * and omitting it leaves whatever ownership the artifact had.
+   */
+  opts: { links?: string[]; allowLarge?: boolean; supersedes?: string; production?: string | null } = {},
 ): void {
   send({ kind: "file-artifact", worldId, sourcePath, ...opts });
 }

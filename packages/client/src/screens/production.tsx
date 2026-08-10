@@ -3,18 +3,24 @@ import { NavLink, Outlet, useNavigate, useParams, useSearchParams } from "react-
 import {
   assemblePrompt,
   deriveCut,
+  guestsOf,
+  pendingGuestsOf,
+  pendingSheets,
   modelCapabilityCopy,
   nativeResolution,
   overrideStaleAgainst,
+  pickableSheets,
   planScene,
   PRESETS,
   promptFor,
+  worldSheets,
   type Scene,
+  type Sheet,
   type Shot,
   type SizeTier,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen } from "../components/layout.js";
-import { Badge, Button, Callout, Textarea, cx } from "../components/ui.js";
+import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
 import { ChevronLeft, ChevronRight, Play, Plus } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
@@ -28,6 +34,7 @@ import {
   acceptTake,
   cancelExport,
   compileSceneBoard,
+  createSheetFromSentence,
   dispatchScene,
   draftScene,
   exportCut,
@@ -43,6 +50,15 @@ import {
 /** Production screens (§2.9), composed to the prototype frames 11a/14a/11b/24a/25a/25b/10b. */
 
 // ---- small shared pieces ---------------------------------------------------
+
+/**
+ * The artifacts a production may see (SPEC-020 R-13): the world's own, plus the ones it owns.
+ * Another production's scoped material is absent — selecting audio by kind alone would put one
+ * production's scratch takes in every other production's Audio screen.
+ */
+function artifactsFor<T extends { production?: string }>(artifacts: readonly T[], productionId: string | undefined): T[] {
+  return artifacts.filter((a) => a.production === undefined || a.production === productionId);
+}
 
 /** Render @mentions the way the prototype does: quiet mono chips inside prose. */
 function Mentions({ text }: { text: string }) {
@@ -114,10 +130,11 @@ export function ProductionLayout() {
   const isStory = production?.meta.format === "story";
   const cut = production ? deriveCut(production) : null;
   const audioCount =
-    (world?.artifacts.filter((a) => a.kind === "audio").length ?? 0) +
+    (artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio").length ?? 0) +
     (production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue")
       .length ?? 0);
   const exportCount = Object.values(exportsState).filter((e) => e.productionId === prodId).length;
+  const guestCount = prodId ? guestsOf(world?.sheets ?? [], prodId).filter((s) => s.retired !== true).length : 0;
   const base = `/w/${worldId}/p/${prodId}`;
   const item = (slug: string, label: string, count?: string, end?: boolean) => (
     <NavLink
@@ -155,6 +172,10 @@ export function ProductionLayout() {
             <ChevronRight size={14} />
           </button>
           {item("", "Dashboard")}
+          {/* Cast is on both formats' rails (SPEC-020 R-9): a story has a cast as much as a
+              video does, and the count is the guests — the number the rail can say something
+              true about, since the world's cast is shared and belongs to the world's own rail. */}
+          {item("cast", "Cast", String(guestCount))}
           {isStory ? (
             <>
               {/* Story ends where Chapters begins, so the two never light together. */}
@@ -188,6 +209,220 @@ export function ProductionLayout() {
           <Outlet />
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---- Cast (SPEC-020) -------------------------------------------------------
+
+/**
+ * The production's cast, in two bands: the guests it owns, and the world's cast it draws on.
+ *
+ * The bands are the whole point of the screen (R-9). Both sets of people are equally usable in a
+ * shot — a guest is a full sheet, and resolution never asks who owns it (R-5) — so the only thing
+ * separating them is what happens to them when this production ends. Naming that on the surface
+ * is cheaper than discovering it later, when a one-off barman has quietly become part of the
+ * world's permanent record.
+ */
+export function ProductionCastScreen() {
+  const { worldId, prodId } = useParams();
+  const { world, production } = useProduction(worldId, prodId);
+  const navigate = useNavigate();
+  const [drafting, setDrafting] = useState<{ type: "character" | "location" | "faction"; name: string; sentence: string } | null>(
+    null,
+  );
+
+  if (!world || !production) {
+    return (
+      <Screen id="production-cast">
+        <EmptyState title="Opening the cast…" />
+      </Screen>
+    );
+  }
+  const guests = guestsOf(world.sheets, production.meta.id).filter((s) => s.retired !== true);
+  const fromWorld = worldSheets(world.sheets).filter((s) => s.retired !== true);
+  // Guests under review are kept off the world's surfaces, so they have to be visible here or a
+  // staged guest is nowhere at all until it is accepted (SPEC-020 R-8, R-9).
+  const pendingGuests = (["character", "location", "faction"] as const).flatMap((kind) =>
+    pendingGuestsOf(pendingSheets(world.proposals, kind), production.meta.id),
+  );
+  // Owned artifacts are off the world's shelf (R-13), so this is the only place they appear.
+  const owned = world.artifacts.filter((a) => a.production === production.meta.id);
+  const kindLabel = (sheet: Sheet) => (sheet.type === "character" ? "character" : sheet.type === "location" ? "location" : "faction");
+
+  const card = (sheet: Sheet, guest: boolean) => (
+    <button
+      key={sheet.id}
+      type="button"
+      className="fy-gridcard fy-gridcard--media fy-gridcard--fixed"
+      onClick={() => navigate(`/w/${worldId}/${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${sheet.id}`)}
+    >
+      <div className="fy-gridcard__frame" style={{ height: 210 }}>
+        <Portrait worldSlug={world.meta.slug} path={sheetPortraitPath(sheet.id)} label={sheet.name} />
+      </div>
+      <div className="fy-gridcard__pad">
+        <div className="fy-gridcard__title">
+          <span className="fy-gridcard__name">{sheet.name}</span>
+          <span className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`} style={{ width: 6, height: 6 }} />
+        </div>
+        <div className="fy-gridcard__body">{sheet.role ?? sheet.region ?? kindLabel(sheet)}</div>
+        <div className="fy-gridcard__foot" style={{ marginTop: 9 }}>
+          {guest ? `guest · v${sheet.version}` : `${kindLabel(sheet)} · v${sheet.version}`}
+        </div>
+      </div>
+    </button>
+  );
+
+  const columns = (n: number) => ({ gridTemplateColumns: `repeat(${Math.min(Math.max(n, 2), 4)}, minmax(0, 1fr))` });
+
+  return (
+    <div data-screen="production-cast">
+      <div className="fy-corner">
+        <Button
+          variant="primary"
+          onClick={() => setDrafting(drafting === null ? { type: "character", name: "", sentence: "" } : null)}
+        >
+          New guest
+        </Button>
+      </div>
+      <div className="fy-hero">
+        <div className="fy-eyebrow-sm">CAST · {production.meta.title.toUpperCase()}</div>
+        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+          Cast
+        </h1>
+        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 520 }}>
+          Guests belong to this production alone. The world's cast is shared with everything else{" "}
+          {world.meta.name} holds — change one and every production sees it.
+        </p>
+      </div>
+
+      {drafting !== null && (
+        <Card className="scr-form">
+          <div className="scr-field">
+            <label className="scr-field__label">
+              A guest of {production.meta.title} — a full sheet, kept out of the world's cast until you promote it
+            </label>
+            <div style={{ display: "flex", gap: "var(--space-2)", marginBottom: 8 }}>
+              {(["character", "location", "faction"] as const).map((type) => (
+                <Button
+                  key={type}
+                  variant={drafting.type === type ? "primary" : "ghost"}
+                  onClick={() => setDrafting({ ...drafting, type })}
+                >
+                  {type}
+                </Button>
+              ))}
+            </div>
+            <Input
+              placeholder="Name"
+              value={drafting.name}
+              onChange={(e) => setDrafting({ ...drafting, name: e.target.value })}
+            />
+          </div>
+          <div className="scr-field">
+            <label className="scr-field__label">One sentence — the agent drafts the rest inside the sketch</label>
+            <Textarea
+              rows={2}
+              value={drafting.sentence}
+              onChange={(e) => setDrafting({ ...drafting, sentence: e.target.value })}
+            />
+          </div>
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
+            <Button
+              variant="primary"
+              disabled={drafting.name.trim().length === 0 || drafting.sentence.trim().length === 0}
+              onClick={() => {
+                if (worldId) {
+                  createSheetFromSentence(
+                    worldId,
+                    drafting.type,
+                    drafting.name.trim(),
+                    drafting.sentence.trim(),
+                    false,
+                    production.meta.id,
+                  );
+                }
+                setDrafting(null);
+              }}
+            >
+              Stage guest
+            </Button>
+            <Button variant="ghost" onClick={() => setDrafting(null)}>
+              Cancel
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      <div className="fy-eyebrow-sm" style={{ padding: "10px 90px 0" }}>
+        GUESTS · ONLY IN {production.meta.title.toUpperCase()} · {guests.length + pendingGuests.length}
+      </div>
+      {guests.length + pendingGuests.length === 0 ? (
+        <div style={{ padding: "0 90px" }}>
+          <EmptyState
+            title="No guests yet"
+            hint="People and places this production needs but the world does not — the barman with two lines, the room above the chandlery."
+          />
+        </div>
+      ) : (
+        <div className="fy-cardgrid" style={columns(guests.length + pendingGuests.length)}>
+          {pendingGuests.map((p) => (
+            <div key={p.proposalId} className="fy-gridcard fy-gridcard--media fy-gridcard--fixed fy-gridcard--quiet">
+              <div className="fy-gridcard__frame" style={{ height: 210 }} />
+              <div className="fy-gridcard__pad">
+                <div className="fy-gridcard__title">
+                  <span className="fy-gridcard__name">{p.name}</span>
+                </div>
+                <div className="fy-gridcard__body">awaiting review</div>
+                <div className="fy-gridcard__foot" style={{ marginTop: 9 }}>
+                  guest · not yet accepted
+                </div>
+              </div>
+            </div>
+          ))}
+          {guests.map((sheet) => card(sheet, true))}
+        </div>
+      )}
+
+      <div className="fy-eyebrow-sm" style={{ padding: "10px 90px 0" }}>
+        FROM {world.meta.name.toUpperCase()} · SHARED · {fromWorld.length}
+      </div>
+      {fromWorld.length === 0 ? (
+        <div style={{ padding: "0 90px" }}>
+          <EmptyState title="The world has no cast yet" hint="Everything this production cites would be its own." />
+        </div>
+      ) : (
+        <div className="fy-cardgrid" style={columns(fromWorld.length)}>
+          {fromWorld.map((sheet) => card(sheet, false))}
+        </div>
+      )}
+
+      {owned.length > 0 && (
+        <>
+          <div className="fy-eyebrow-sm" style={{ padding: "10px 90px 0" }}>
+            FILED HERE · ONLY IN {production.meta.title.toUpperCase()} · {owned.length}
+          </div>
+          <div style={{ padding: "8px 90px 30px", display: "grid", gap: 8 }}>
+            {owned.map((artifact) => (
+              <div
+                key={artifact.id}
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: 10,
+                  padding: "9px 4px",
+                  borderBottom: "1px solid var(--border)",
+                }}
+              >
+                <span style={{ flex: 1, font: "400 13px var(--font-sans)" }}>{artifact.file}</span>
+                <span className="fy-mono" style={{ color: "var(--muted-foreground)" }}>
+                  {artifact.kind}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -439,7 +674,9 @@ export function StoryScreen() {
   const navigate = useNavigate();
   const story = production?.story ?? null;
   const spineLines = (story?.spine ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
-  const cast = world?.sheets.filter((s) => s.type === "character").length ?? 0;
+  // What drafting can actually reach: the world's cast plus this production's guests, and not
+  // another production's one-offs (SPEC-020 R-7).
+  const cast = pickableSheets(world?.sheets ?? [], prodId).filter((s) => s.type === "character").length;
   return (
     <div className="fy-story" data-screen="story-overview">
       <div className="fy-story__chat">
@@ -1242,6 +1479,10 @@ export function DispatchDialogScreen() {
     for (const g of warnings.staleModelSheets) warningRows.push({ key: `st-${g}`, text: g });
     for (const name of warnings.retiredCitations) warningRows.push({ key: `re-${name}`, text: `${name} is retired and still cited here` });
     for (const u of warnings.unknownMentions) warningRows.push({ key: `un-${u}`, text: `@${u} resolves to nothing — check the description` });
+    // SPEC-020 R-6: the mention resolved, and the sheet belongs to another production. Named,
+    // never blocked — borrowing somebody else's one-off is unusual, not wrong.
+    for (const g of warnings.foreignGuests)
+      warningRows.push({ key: `fg-${g.name}`, text: `${g.name} belongs to ${g.owner}, not to this production` });
     for (const o of warnings.overriddenStale)
       warningRows.push({
         key: `ov-${o.shotId}`,
@@ -1488,7 +1729,7 @@ export function CutScreen() {
   const cut = production ? deriveCut(production) : null;
   const slug = world?.meta.slug;
   const firstCovered = cut?.entries.find((e) => e.media);
-  const audioBeds = world?.artifacts.filter((a) => a.kind === "audio") ?? [];
+  const audioBeds = artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio");
 
   // Group the derived cut per scene for the V track: contiguous covered runs render as
   // filmstrip cells; each gap is its own dashed cell — remaining work made visible.
@@ -1614,7 +1855,7 @@ export function AudioScreen() {
   // A story production keeps this pane for its audio artifacts alone (design 54a: nothing on a
   // story screen mentions shots or dispatch); narration comes later, as its own design.
   const isStory = production?.meta.format === "story";
-  const linked = world?.artifacts.filter((a) => a.kind === "audio") ?? [];
+  const linked = artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio");
   const voLines = isStory
     ? []
     : (production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue") ??

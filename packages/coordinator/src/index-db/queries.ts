@@ -115,24 +115,34 @@ export interface SheetSearchResult {
 export function searchSheets(
   db: Database,
   query: string,
-  opts: { kind?: string; limit?: number; floor?: number } = {},
+  opts: { kind?: string; limit?: number; floor?: number; production?: string } = {},
 ): SheetSearchResult {
   const limit = opts.limit ?? 8;
   const floor = opts.floor ?? DEFAULT_RELEVANCE_FLOOR;
+  // The visible corpus (SPEC-020 R-7): the world's own sheets, plus this production's guests
+  // when asked from inside one. `IS NOT` rather than `<>` so the bound NULL of a world-level
+  // caller compares rather than swallowing the row — `owner_production <> NULL` is never true,
+  // and every guest would stay in the corpus.
+  const visible =
+    "sheet_id NOT IN (SELECT id FROM entities WHERE owner_production IS NOT NULL AND owner_production IS NOT ?)";
+  const scope = opts.production ?? null;
+  // `searched` counts the same corpus the search ran over. A scoped search reporting the whole
+  // world's total would make "searched all 40" a lie in the one place the product promises it.
   const searched = (
     opts.kind === undefined
-      ? (db.prepare("SELECT COUNT(*) AS n FROM sheet_fts").get() as { n: number })
-      : (db.prepare("SELECT COUNT(*) AS n FROM sheet_fts WHERE kind = ?").get(opts.kind) as { n: number })
+      ? (db.prepare(`SELECT COUNT(*) AS n FROM sheet_fts WHERE ${visible}`).get(scope) as { n: number })
+      : (db
+          .prepare(`SELECT COUNT(*) AS n FROM sheet_fts WHERE kind = ? AND ${visible}`)
+          .get(opts.kind, scope) as { n: number })
   ).n;
   const match = ftsQuery(query);
   if (match === null) return { searched, floorCleared: false, candidates: [] };
 
-  const select =
-    "SELECT sheet_id AS sheetId, kind, name, descriptor, -bm25(sheet_fts, 0.0, 0.0, 8.0, 3.0, 1.0) AS score FROM sheet_fts WHERE sheet_fts MATCH ?";
+  const select = `SELECT sheet_id AS sheetId, kind, name, descriptor, -bm25(sheet_fts, 0.0, 0.0, 8.0, 3.0, 1.0) AS score FROM sheet_fts WHERE sheet_fts MATCH ? AND ${visible}`;
   const rows = (
     opts.kind === undefined
-      ? db.prepare(`${select} ORDER BY score DESC LIMIT ?`).all(match, limit)
-      : db.prepare(`${select} AND kind = ? ORDER BY score DESC LIMIT ?`).all(match, opts.kind, limit)
+      ? db.prepare(`${select} ORDER BY score DESC LIMIT ?`).all(match, scope, limit)
+      : db.prepare(`${select} AND kind = ? ORDER BY score DESC LIMIT ?`).all(match, scope, opts.kind, limit)
   ) as SheetCandidate[];
 
   const above = rows.filter((r) => r.score >= floor);

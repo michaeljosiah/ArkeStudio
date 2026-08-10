@@ -17,8 +17,9 @@ import { assertFts5, loadNodeSqlite, type Database, type DatabaseCtor } from "./
 // v3: sheet-link citations extracted for reverse relationship lookup (SPEC-007 R-4).
 // v4: superseded/queue-state tiles excluded from tile-source citations (SPEC-010 R-4, D11).
 // v5: sheet_fts added so World Chat can ask whether an entity already exists (#70 §9.2).
+// v6: owner_production on entities — guest sheets, scope-filtered without a scan (SPEC-020 R-17).
 // The bump is what forces existing indexes to rebuild — derivation changes are schema changes.
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -30,9 +31,13 @@ CREATE TABLE IF NOT EXISTS entities(
   version INTEGER,
   retired INTEGER NOT NULL DEFAULT 0,
   production_id TEXT,
+  -- Guest ownership (SPEC-020 R-17), and NOT part of the primary key: a sheet is one row
+  -- whoever owns it, so promotion updates that row rather than creating a second one.
+  owner_production TEXT,
   updated_at TEXT,
   PRIMARY KEY (kind, id, production_id)
 );
+CREATE INDEX IF NOT EXISTS idx_entities_owner ON entities(owner_production);
 CREATE TABLE IF NOT EXISTS citations(
   source_kind TEXT NOT NULL,
   source_id TEXT NOT NULL,
@@ -223,6 +228,9 @@ export class WorldIndex {
         this.refreshLiveTargetVersions(extraction, worldEntityIds);
       }
       if (productionIds.size > 0) {
+        // Guests are NOT swept here, and must not be: they carry `owner_production`, never
+        // `production_id`. This delete owns the production's slice — scenes, shots, takes — and
+        // re-inserts it below; a sheet caught in it would disappear until the next cold rebuild.
         const delEnt = this.db.prepare("DELETE FROM entities WHERE production_id = ?");
         const delCit = this.db.prepare("DELETE FROM citations WHERE production_id = ?");
         const delTakes = this.db.prepare("DELETE FROM takes WHERE production_id = ?");
@@ -253,14 +261,12 @@ export class WorldIndex {
   }
 
   private insertWorldEntities(extraction: Extraction, include: (id: string) => boolean): void {
-    const insEntity = this.db.prepare(
-      "INSERT OR REPLACE INTO entities(kind,id,name,status,version,retired,production_id,updated_at) VALUES (?,?,?,?,?,?,?,?)",
-    );
+    const insEntity = this.entityInsert();
     const insCitation = this.citationInsert();
     for (const e of extraction.entities) {
       if (!(WORLD_ENTITY_KINDS as readonly string[]).includes(e.kind)) continue;
       if (!include(e.id)) continue;
-      insEntity.run(e.kind, e.id, e.name, e.status, e.version, e.retired ? 1 : 0, e.productionId, e.updatedAt);
+      insEntity.run(e.kind, e.id, e.name, e.status, e.version, e.retired ? 1 : 0, e.productionId, e.ownerProduction ?? null, e.updatedAt);
     }
     for (const c of extraction.citations) {
       if (!(WORLD_ENTITY_KINDS as readonly string[]).includes(c.sourceKind)) continue;
@@ -270,17 +276,15 @@ export class WorldIndex {
   }
 
   private insertProductionRows(extraction: Extraction, include: (productionId: string) => boolean): void {
-    const insEntity = this.db.prepare(
-      "INSERT OR REPLACE INTO entities(kind,id,name,status,version,retired,production_id,updated_at) VALUES (?,?,?,?,?,?,?,?)",
-    );
+    const insEntity = this.entityInsert();
     const insCitation = this.citationInsert();
     for (const e of extraction.entities) {
       if (e.kind === "production" && include(e.id)) {
-        insEntity.run(e.kind, e.id, e.name, e.status, e.version, e.retired ? 1 : 0, e.productionId, e.updatedAt);
+        insEntity.run(e.kind, e.id, e.name, e.status, e.version, e.retired ? 1 : 0, e.productionId, e.ownerProduction ?? null, e.updatedAt);
       } else if ((e.kind === "scene" || e.kind === "shot") && e.productionId && include(e.productionId)) {
-        insEntity.run(e.kind, e.id, e.name, e.status, e.version, e.retired ? 1 : 0, e.productionId, e.updatedAt);
+        insEntity.run(e.kind, e.id, e.name, e.status, e.version, e.retired ? 1 : 0, e.productionId, e.ownerProduction ?? null, e.updatedAt);
       } else if (e.kind === "artifact" && include("__artifacts__")) {
-        insEntity.run(e.kind, e.id, e.name, e.status, e.version, e.retired ? 1 : 0, e.productionId, e.updatedAt);
+        insEntity.run(e.kind, e.id, e.name, e.status, e.version, e.retired ? 1 : 0, e.productionId, e.ownerProduction ?? null, e.updatedAt);
       }
     }
     for (const c of extraction.citations) {
@@ -338,6 +342,12 @@ export class WorldIndex {
       const body = sheet.sections.map((s) => `${s.heading}\n${s.body}`).join("\n\n");
       insSheetFts.run(sheet.id, sheet.type, sheet.name, sheet.role ?? sheet.region ?? "", body);
     }
+  }
+
+  private entityInsert() {
+    return this.db.prepare(
+      "INSERT OR REPLACE INTO entities(kind,id,name,status,version,retired,production_id,owner_production,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+    );
   }
 
   private citationInsert() {

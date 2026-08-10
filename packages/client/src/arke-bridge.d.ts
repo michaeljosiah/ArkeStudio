@@ -46,7 +46,8 @@ export type StartupState =
  * the object as-is — so a new destination is a new member here and a matching `ClientMessage`.
  */
 export type AttachTarget =
-  | { kind: "file-artifact"; worldId: string }
+  /** `production` is SPEC-020 ownership; `null` is the world stated out loud. Mirrors preload.ts. */
+  | { kind: "file-artifact"; worldId: string; production?: string | null }
   | { kind: "genesis-attach"; genesisId: string }
   | { kind: "world-chat-attach"; worldId: string; conversationId: string };
 

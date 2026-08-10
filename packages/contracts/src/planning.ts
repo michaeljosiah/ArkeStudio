@@ -730,6 +730,16 @@ export interface DispatchWarnings {
   staleModelSheets: string[];
   retiredCitations: string[];
   unknownMentions: string[];
+  /**
+   * Cast owned by a *different* production (SPEC-020 R-6).
+   *
+   * The mention resolved — scope is not consulted at resolution time, deliberately (R-5, D3), so
+   * a description that names another production's one-off still finds the sheet and still
+   * dispatches. This is where the user finds out, which is the moment money moves, and it is
+   * named rather than blocked for the same reason a retired citation is: it may well be what
+   * they meant.
+   */
+  foreignGuests: Array<{ name: string; owner: string }>;
   overriddenStale: Array<{
     shotId: string;
     number: number;
@@ -1064,6 +1074,25 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       .filter((g): g is string => g !== null),
     retiredCitations: resolved.cast.filter((c) => c.retired).map((c) => c.sheet.name),
     unknownMentions: resolved.unknown,
+    foreignGuests: (() => {
+      // The cast is `@` mentions, but a scene also cites its inherited location, which never
+      // enters `resolved.cast` and which `budgetFor` deliberately carries into the references and
+      // the prompt. Warning only on mentions would let a scene inherit and dispatch another
+      // production's guest place in silence, unless the author redundantly mentioned it in a shot.
+      const inherited = scene.inherits?.location;
+      const cited = [
+        ...resolved.cast.map((c) => c.sheet),
+        ...(inherited !== undefined ? sheets.filter((s) => s.id === inherited) : []),
+      ];
+      const seen = new Set<string>();
+      return cited.flatMap((sheet) => {
+        const owner = sheet.production;
+        if (owner === undefined || owner === input.productionId) return [];
+        if (seen.has(sheet.id)) return [];
+        seen.add(sheet.id);
+        return [{ name: sheet.name, owner }];
+      });
+    })(),
     overlongShots,
     skillFamilyMismatch: skillFamilyMismatch(scene, model),
     subjectsOverRange: sceneBudget.subjectsOverRange,

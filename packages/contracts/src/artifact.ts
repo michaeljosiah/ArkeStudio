@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ArtifactIdSchema, IsoDateTimeSchema, Sha256Schema } from "./ids.js";
+import { ArtifactIdSchema, IsoDateTimeSchema, Sha256Schema, SlugSchema } from "./ids.js";
 
 /**
  * Artifacts (master spec §13): recordings, documents, boards, stems and images filed against
@@ -53,6 +53,18 @@ export const ArtifactSidecarSchema = z
     origin: ArtifactOriginSchema,
     /** Sheet slugs, canon ids, production slugs, shot ids — anything may link an artifact. */
     links: z.array(z.string()),
+    /**
+     * The production that owns this artifact (SPEC-020 R-11). Absent means the world owns it.
+     *
+     * Ownership is not linkage. `links` says what this artifact is *about* and may name three
+     * productions; `production` says who it *belongs to* and names at most one. Conflating them
+     * would make an artifact linked to a production disappear from the world's shelf, which is
+     * the opposite of what linking it meant.
+     *
+     * The one mechanism this changes is extraction: a scoped artifact offers sheet candidates
+     * into its own production and offers no canon at all (R-12).
+     */
+    production: SlugSchema.optional(),
     /**
      * Replacement files a NEW artifact recording what it supersedes (SPEC-015 R-5, D10):
      * existing links keep pointing at the old one; pickers derive exclusion from this field.

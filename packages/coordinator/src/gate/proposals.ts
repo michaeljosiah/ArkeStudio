@@ -106,6 +106,12 @@ export interface StageInput {
   source: string;
   /** World-relative paths to materialise. Created paths carry content and no live base. */
   targets: Array<{ path: string; content?: string }>;
+  /**
+   * SPEC-020 R-8: the production this draft belongs to, when it stages a guest. Carried on the
+   * proposal so the world's surfaces can keep a pending guest off them — the targets hold no
+   * content, so nothing downstream could otherwise tell.
+   */
+  production?: string;
   /** How many canon ids to reserve at creation (R-13). */
   reserveCanonIds?: number;
   /** Ids already reserved by the caller (store.allocateCanonIds) — recorded, not re-allocated. */
@@ -219,6 +225,7 @@ export class ProposalManager {
         baseCanonRevision: this.store.getBundle().meta.canonRevision,
         reservedCanonIds,
         source: input.source,
+        ...(input.production !== undefined ? { production: input.production } : {}),
         created: at,
         draftRevision: 1,
         ...(input.worldChatOrigins ? { worldChatOrigins: input.worldChatOrigins } : {}),

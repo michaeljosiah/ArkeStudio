@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CanonIdSchema, IsoDateTimeSchema, ProposalIdSchema, Sha256Schema } from "./ids.js";
+import { CanonIdSchema, IsoDateTimeSchema, ProposalIdSchema, Sha256Schema, SlugSchema } from "./ids.js";
 
 /**
  * Proposals and ripples (master spec §3.3–§3.4).
@@ -101,6 +101,17 @@ export const ProposalSchema = z
     reservedCanonIds: z.array(CanonIdSchema),
     /** Where the draft came from, e.g. "chat:sess_9f2" | "form" | "import:ar_…". */
     source: z.string().min(1),
+    /**
+     * The production this draft belongs to, when it stages a guest (SPEC-020 R-8).
+     *
+     * Recorded on the proposal because the targets carry only path, base version and base hash —
+     * no content — so nothing downstream can tell a pending guest from a pending world sheet by
+     * reading them. Without it a staged guest appears in the world's cast fan and ledgers for the
+     * whole length of its review, which is the one thing the scope was added to prevent.
+     *
+     * Provenance stays in `source`; this is ownership, and the two answer different questions.
+     */
+    production: SlugSchema.optional(),
     created: IsoDateTimeSchema,
     /** Set by a rebase: the merged result must be seen before accept (SPEC-004 R-7). */
     pendingReview: z.boolean().optional(),

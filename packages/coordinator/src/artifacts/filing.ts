@@ -73,6 +73,30 @@ export async function addLinks(store: WorldStore, artifact: ArtifactSidecar, lin
   return next;
 }
 
+/**
+ * Re-file an existing artifact under a stated owner (SPEC-020 R-11, R-12).
+ *
+ * Dedup returns the sidecar that already exists, so without this the escape hatch in §2.5 does
+ * not exist: re-filing a production's document at world scope would keep it off the world's shelf
+ * and keep `verifyCandidates` refusing its canon, which is exactly what the user was trying to
+ * undo. `undefined` means the caller had no opinion and ownership is left alone.
+ */
+export async function setOwner(
+  store: WorldStore,
+  artifact: ArtifactSidecar,
+  production: string | null | undefined,
+): Promise<ArtifactSidecar> {
+  if (production === undefined) return artifact;
+  const current = artifact.production ?? null;
+  if (current === production) return artifact;
+  const next = { ...artifact };
+  if (production === null) delete next.production;
+  else next.production = production as ArtifactSidecar["production"];
+  const raw = await readSidecarRaw(store, artifact.file);
+  await store.gateOp(async () => writeSidecar(store, next, raw));
+  return next;
+}
+
 export interface FileInput {
   sourcePath: string;
   links?: string[];
@@ -81,6 +105,17 @@ export interface FileInput {
   allowLarge?: boolean;
   /** Files a replacement recording what it supersedes (R-5). */
   supersedes?: string;
+  /**
+   * File it as this production's rather than the world's (SPEC-020 R-11). Ownership, not
+   * linkage: pass a production here to keep it off the world's shelf, and put it in `links` to
+   * say what it is about.
+   *
+   * Three states. A slug owns it; `null` is the world *explicitly*; `undefined` leaves whatever
+   * ownership the artifact already had. Only the caller knows which it means — `importFolder`
+   * genuinely has no opinion, while a user re-filing a scoped document from the world's shelf is
+   * exercising the escape hatch (§2.5) and must not be read as having no opinion.
+   */
+  production?: string | null;
 }
 
 export async function fileArtifact(store: WorldStore, input: FileInput): Promise<FileOutcome> {
@@ -112,10 +147,15 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
   const hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
 
   // Dedup by content (R-4): same content filed twice is one artifact with more links.
+  //
+  // One copy on disk means one owner, so a re-filing that states an owner moves it rather than
+  // making a second artifact — that statement is the escape hatch of SPEC-020 §2.5, and silence
+  // is not a statement. A caller with no opinion (`importFolder`) leaves ownership untouched.
   const existing = store.getBundle().artifacts.find((a) => a.hash === hash);
   if (existing) {
-    const merged = await addLinks(store, existing, input.links ?? []);
-    return { outcome: "deduplicated", artifact: merged };
+    const linked = await addLinks(store, existing, input.links ?? []);
+    const owned = await setOwner(store, linked, input.production);
+    return { outcome: "deduplicated", artifact: owned };
   }
 
   const original = basename(input.sourcePath);
@@ -133,6 +173,11 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
     origin: { by: "user", ...(input.importedFrom !== undefined ? { importedFrom: input.importedFrom } : {}) },
     links: [...new Set(input.links ?? [])],
     ...(input.supersedes !== undefined ? { supersedes: input.supersedes as ArtifactSidecar["supersedes"] } : {}),
+    // A new artifact has no ownership to preserve, so `null` and `undefined` mean the same
+    // thing here — the world's — and only a slug writes the key.
+    ...(typeof input.production === "string"
+      ? { production: input.production as ArtifactSidecar["production"] }
+      : {}),
     created: store.now(),
   };
   await store.gateOp(async () => {
