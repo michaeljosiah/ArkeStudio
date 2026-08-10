@@ -151,6 +151,7 @@ import { discoverConversations } from "./world-chat/discover.js";
 import { recordResolution, sendBack } from "./world-chat/resolution.js";
 import { WorldChatStore, conversationDir } from "./world-chat/store.js";
 import { WorldChatRunner } from "./world-chat/run.js";
+import { WorldChatRunnerCache } from "./world-chat/runner-cache.js";
 import { QueryLeaseRegistry } from "./world-chat/lease.js";
 import { WorldChatRetrieval } from "./world-chat/retrieval.js";
 import {
@@ -392,7 +393,7 @@ export class Coordinator {
   private readonly changeLog: ChangeLog;
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
   private readonly worldQuery: WorldQueryServer;
-  private readonly worldChatRunners = new Map<string, { runner: WorldChatRunner; store: WorldStore }>();
+  private readonly worldChatRunners = new WorldChatRunnerCache<WorldChatRunner>();
   private readonly grants: GrantStore | null;
   private readonly authoring: AuthoringService | null;
   private readonly genesis: GenesisService | null;
@@ -1584,7 +1585,7 @@ export class Coordinator {
           await service.rename(msg.conversationId, titleFrom(msg.text)).catch(() => {});
         }
 
-        const runner = this.worldChatRunner(store);
+        const runner = this.worldChatRunner(store, msg.conversationId);
         // The screen shows the message and the spinner as soon as the turn starts, so the
         // snapshot is pushed before the model is waited on rather than after.
         const inFlight = runner.send(log, msg.conversationId, msg.text, msg.attachmentIds);
@@ -1604,7 +1605,8 @@ export class Coordinator {
         const log = new WorldChatStore(conversationDir(store.dir, msg.conversationId));
         if (!(await log.readMeta())) return;
 
-        const inFlight = this.worldChatRunner(store).retry(log, msg.conversationId, msg.turnId);
+        const runner = this.worldChatRunner(store, msg.conversationId);
+        const inFlight = runner.retry(log, msg.conversationId, msg.turnId);
         // The spinner replaces the failure notice immediately, so pressing it looks like it worked.
         await this.openWorldChat(store, msg.conversationId);
         await inFlight;
@@ -1818,7 +1820,7 @@ export class Coordinator {
       case "world-chat-cancel": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        this.worldChatRunner(store).cancel(msg.conversationId);
+        this.worldChatRunner(store, msg.conversationId).cancel(msg.conversationId);
         return;
       }
       case "world-chat-create": {
@@ -4376,8 +4378,7 @@ export class Coordinator {
    * Kept rather than rebuilt per command because it holds the in-flight runs: a runner made
    * fresh for a cancel would have no record of the turn it was asked to stop.
    */
-  private worldChatRunner(store: WorldStore): WorldChatRunner {
-    const existing = this.worldChatRunners.get(store.worldId);
+  private worldChatRunner(store: WorldStore, conversationId: ConversationId): WorldChatRunner {
     /*
      * Cached per world, but only while it is the same open store.
      *
@@ -4387,14 +4388,13 @@ export class Coordinator {
      * that is actually open, would then reject every drafted look as moved: conversational look
      * editing broken until restart, with nothing to point at.
      *
-     * A runner mid-turn is kept regardless. Replacing it would lose the in-flight run — the thing
-     * a cancel needs — and a turn already talking to a model is a worse thing to drop than a
-     * stale read is to carry for one more turn.
+     * A runner mid-turn is kept for the conversation that is mid-turn, and for nothing else.
+     * Keeping it for the whole world — which "is anything running?" amounts to — meant one slow
+     * turn left over from before the close went on serving every new turn in every other
+     * conversation from the closed store, which is the same breakage arriving by a longer road.
      */
-    if (existing) {
-      if (existing.store === store || existing.runner.hasRunning()) return existing.runner;
-      this.worldChatRunners.delete(store.worldId);
-    }
+    const existing = this.worldChatRunners.runnerFor(store.worldId, store, conversationId);
+    if (existing) return existing;
 
     const leases = new QueryLeaseRegistry(() => this.opts.provider.openStore?.()?.worldId ?? null);
     const attachments = new WorldChatAttachmentStore(store.dir);
@@ -4423,8 +4423,12 @@ export class Coordinator {
        */
       worldContext: () => currentLookContext(store.getBundle().artDirection),
       // Read at the same instant as the look above, and from the same world, so what a draft
-      // says it was based on is what the model was actually shown.
-      artDirectionVersion: () => store.getBundle().artDirection.version,
+      // says it was based on is what the model was actually shown — the words as well as the
+      // number, because a derived look is v1 however often the world's tone is edited under it.
+      artDirectionLook: () => {
+        const look = store.getBundle().artDirection;
+        return { version: look.version, description: look.description };
+      },
       prepare: async ({ conversationId, runId, attachmentIds }) => {
         const lease = leases.mint({
           worldId: store.worldId,
@@ -4497,7 +4501,7 @@ export class Coordinator {
       now: () => new Date().toISOString(),
     });
 
-    this.worldChatRunners.set(store.worldId, { runner, store });
+    this.worldChatRunners.remember(store.worldId, store, runner);
     return runner;
   }
 
@@ -4537,9 +4541,10 @@ export class Coordinator {
         // Asked of the runner, which is the only thing that knows a turn is happening now rather
         // than having been abandoned by a crash. Read through the same accessor that made the
         // runner, so a conversation mid-turn reports running even on the first projection.
-        liveRun: this.worldChatRunner(store).isRunning(loaded.id),
+        liveRun: this.worldChatRunner(store, loaded.id).isRunning(loaded.id),
         // So the rail's count matches what wrap-up will actually carry — see ProjectOptions.
         lookAlreadyProposed: bundle.proposals.some((staged) => staged.proposal.kind === "art-direction"),
+        look: { version: bundle.artDirection.version, description: bundle.artDirection.description },
       }),
     );
     this.transport.broadcastSnapshot();

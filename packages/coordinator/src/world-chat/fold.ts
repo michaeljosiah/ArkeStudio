@@ -115,6 +115,10 @@ export function foldConversation(
           if (c) candidates.set(candidateId, { ...c, status: "live" });
         }
         resolvedProposals.add(e.proposalId);
+        // Sent back is a proposal that no longer exists, so it is no longer one this conversation
+        // is waiting on. Without this the id stays in the set that blocks deletion, and a
+        // conversation whose proposals were all returned to it could never be deleted.
+        proposalIds.delete(e.proposalId);
         break;
       case "turn.started":
         addMessage(e.message, envelope.seq);
@@ -208,6 +212,19 @@ export function foldConversation(
         break;
       case "wrapup.failed":
         wrapUpInFlight = false;
+        /*
+         * A failure that could not take back everything it staged still holds deletion open.
+         *
+         * The intent closes here, so nothing else in this fold would say the conversation is
+         * waiting on anything — and it would offer Delete over a proposal that is still on the
+         * approvals screen. Deleting then puts it beyond reach of every repair there is: startup
+         * recovery walks the conversations that exist, send-back needs somewhere to restore the
+         * propositions to, and both are gone with the directory.
+         *
+         * Cleared the same way any other unresolved proposal is: by something saying what became
+         * of it.
+         */
+        for (const one of e.leftovers ?? []) proposalIds.add(one.proposalId);
         break;
       case "proposal.resolved": {
         // A proposal resolves once; a repeated reconciliation on startup is a no-op.

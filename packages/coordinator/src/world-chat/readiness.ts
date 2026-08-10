@@ -1,4 +1,5 @@
 import type { WorldBundle, WorldChangeCandidate } from "@arke-studio/contracts";
+import { lookHasMoved } from "./look.js";
 
 /**
  * What a proposition may become, decided once (#70 §6.2).
@@ -122,11 +123,13 @@ export function evaluateReadiness(
      * that stale, because the proposal is staged against whatever is current at this moment. The
      * proposition is not wrong, only out of date: it stays in the conversation, and saying so is
      * what lets somebody ask for it again against the look that is actually there.
+     *
+     * Against the words as well as the version, because a world with no art-direction file
+     * derives its look from world.json and derives it at v1 every time — see look.ts.
      */
     if (
       candidate.classification === "art-direction.change" &&
-      candidate.checks.basedOnArtDirectionVersion !== undefined &&
-      candidate.checks.basedOnArtDirectionVersion !== bundle.artDirection.version
+      lookHasMoved(candidate.checks, bundle.artDirection)
     ) {
       fail("look-moved");
       continue;

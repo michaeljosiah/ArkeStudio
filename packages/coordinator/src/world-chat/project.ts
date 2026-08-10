@@ -5,6 +5,7 @@ import type {
   WorldChatPoint,
   WorldChatWorkspace,
 } from "@arke-studio/contracts";
+import { type CurrentLook, lookHasMoved } from "./look.js";
 
 /**
  * The conversation as a screen needs it (#70 §10.3).
@@ -66,7 +67,13 @@ function wouldCarry(candidate: WorldChangeCandidate, options: ProjectOptions = {
   if (candidate.classification === "undecided") return false;
   if (candidate.classification === "media.image-opportunity") return false;
   if (candidate.classification === "canon.thread") return candidate.settledness === "unresolved";
-  if (candidate.classification === "art-direction.change" && options.lookAlreadyProposed === true) return false;
+  if (candidate.classification === "art-direction.change") {
+    // Every blocker readiness applies to a look, applied here too. One of the two was, and the
+    // other was not, so a point readiness would refuse as moved still counted towards "1 of 1
+    // points become proposals" — the caption promising exactly what the button then refused.
+    if (options.lookAlreadyProposed === true) return false;
+    if (lookHasMoved(candidate.checks, options.look)) return false;
+  }
   return candidate.settledness === "settled";
 }
 
@@ -167,6 +174,15 @@ export interface ProjectOptions {
    * something the coordinator was always going to refuse.
    */
   lookAlreadyProposed?: boolean;
+  /**
+   * The world look as it stands, for the same reason again.
+   *
+   * A whole-description draft written against a look that has since moved is held back at
+   * wrap-up, and the fold cannot see the world to know it. Absent, a point is counted as
+   * carrying — which was the second half of the same broken promise, and the half that survives
+   * even when nothing is waiting on the approvals screen.
+   */
+  look?: CurrentLook;
 }
 
 export function projectPoints(

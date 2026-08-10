@@ -282,6 +282,16 @@ export const CandidateChecksSchema = z
      * stale by any test the gate applies, and silently replacing an edit made in between.
      */
     basedOnArtDirectionVersion: z.number().int().min(1).optional(),
+    /**
+     * The same look, identified by its words rather than its number.
+     *
+     * The version is not enough on its own. A world with no art-direction file still has a look,
+     * derived from its name, tone, genre and logline, and that derivation is always v1 — so
+     * editing the world's tone rewrites the description every image is generated from while the
+     * number stays where it was, and a draft pinned only to the number passes every staleness test
+     * and replaces words it was never shown.
+     */
+    basedOnArtDirectionLook: Sha256Schema.optional(),
     required: z.array(CheckCategorySchema),
     completed: z.array(CheckCategorySchema),
     consulted: z.array(
@@ -754,6 +764,30 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
       type: z.literal("wrapup.failed"),
       requestId: z.string().min(1),
       safeDetail: z.string().max(500),
+      /**
+       * Proposals this attempt staged and then could not take back (R-42a).
+       *
+       * A failed wrap-up rolls its own staging back, and a discard that will not go leaves a
+       * proposal on the approvals screen belonging to a conversation that says it created
+       * nothing. This event is the only durable trace of it: the intent closes here, so startup
+       * recovery — which reconciles by open intent — would otherwise never look. Absent on the
+       * ordinary failure, where everything went.
+       *
+       * Each carries the propositions it was made from, rather than only its id. The proposal's
+       * own manifest says the same thing, but recovery has to work in the case where that
+       * manifest is gone and the log never learned what became of it — and without the
+       * candidate ids there is no way to leave those propositions in an honest state.
+       */
+      leftovers: z
+        .array(
+          z
+            .object({
+              proposalId: ProposalIdSchema,
+              candidateIds: z.array(CandidateIdSchema),
+            })
+            .strict(),
+        )
+        .optional(),
     })
     .strict(),
   z

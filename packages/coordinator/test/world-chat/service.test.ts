@@ -156,6 +156,44 @@ describe("conversation lifecycle", () => {
     assert.equal(await svc.load(id), null);
   });
 
+  /*
+   * A wrap-up that failed and could not take back everything it staged.
+   *
+   * The failure closes the in-flight guard, so nothing else says this conversation is waiting on
+   * anything — and Delete would be offered over a proposal still on the approvals screen. Deleting
+   * puts it beyond every repair there is: startup recovery walks the conversations that exist, and
+   * send-back needs somewhere to put the propositions back.
+   */
+  it("refuses to delete while a failed wrap-up's leftovers are still staged", async () => {
+    const svc = await service();
+    const { id } = await svc.create({ title: "left something behind" });
+    const { conversationDir } = await import("../../src/world-chat/store.js");
+    const store = new WorldChatStore(conversationDir(svc.worldPath, id));
+    const proposalId = newId("pr");
+    await store.append(
+      {
+        type: "wrapup.failed",
+        requestId: "w1",
+        safeDetail: "materialise; 1 left staged",
+        leftovers: [{ proposalId, candidateIds: [] }],
+      },
+      { at: NOW() },
+    );
+
+    assert.equal(await svc.blockedFromDeletion(id), "unresolved-proposals");
+
+    // Recovery sends it back: the proposal is gone, so there is nothing left to hold the door.
+    await store.append(
+      { type: "conversation.reopened", proposalId, restoredCandidateIds: [] },
+      { at: NOW() },
+    );
+    assert.equal(
+      await svc.blockedFromDeletion(id),
+      null,
+      "a proposal that no longer exists is not one this conversation is waiting on",
+    );
+  });
+
   /**
    * The reason has to reach the row, or the button cannot say why it is unavailable — and a
    * Delete that looks available and then refuses is the same mistake as one that fails silently.

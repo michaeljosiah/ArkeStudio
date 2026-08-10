@@ -10,10 +10,11 @@ import {
 import { LookAlreadyProposedError, type ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "../world/store.js";
 import { foldConversation } from "./fold.js";
+import { lookHasMoved } from "./look.js";
 import { canonIdsNeeded, materialiseCandidate, MaterialiseError, planIdentities } from "./materialise.js";
 import { evaluateReadiness, explainNotCarried, type NotCarried } from "./readiness.js";
 import { conversationDir, WorldChatStore } from "./store.js";
-import { openIntentOf } from "./wrapup-recovery.js";
+import { accountedProposalIdsOf, type Leftover, leftoversOf, openIntentOf } from "./wrapup-recovery.js";
 
 /**
  * Turning a conversation into proposals, once (#70 §11.3).
@@ -53,7 +54,8 @@ export class WrapUpError extends Error {
       | "materialise"
       | "too-many"
       | "in-flight"
-      | "look-already-proposed",
+      | "look-already-proposed"
+      | "leftovers",
     message: string,
   ) {
     super(message);
@@ -145,7 +147,14 @@ async function buildAndStage(input: {
   bundle: WorldBundle;
   at: string;
   now: () => string;
-  onFailure: (reason: WrapUpError["reason"]) => Promise<void>;
+  /**
+   * How the caller records the attempt, and what its roll-back could not take back.
+   *
+   * `leftovers` is empty on almost every failure, because the roll-back almost always works. When
+   * it is not, whatever the caller writes is the only durable trace of a proposal standing on the
+   * approvals screen for propositions that are all still live — see the roll-back below.
+   */
+  onFailure: (reason: WrapUpError["reason"], leftovers: readonly Leftover[]) => Promise<void>;
 }): Promise<{
   built: ReturnType<typeof materialiseCandidate>[];
   proposals: Proposal[];
@@ -168,7 +177,9 @@ async function buildAndStage(input: {
       built.push(materialiseCandidate(candidate, identities, bundle, at, () => identities.canonIds[nextCanon++]!));
     }
   } catch (err) {
-    await input.onFailure("materialise");
+    // Nothing was staged yet — this fails before the first gate call — so there is nothing that
+    // could have been left behind.
+    await input.onFailure("materialise", []);
     throw new WrapUpError(
       "materialise",
       err instanceof MaterialiseError
@@ -182,6 +193,8 @@ async function buildAndStage(input: {
   const threadProposalIds: string[] = [];
   /** Which proposal each proposition ended up in — a group's members share one. */
   const staged = new Map<string, string>();
+  /** The other direction: which propositions each proposal carries. See the roll-back below. */
+  const carrying = new Map<string, CandidateId[]>();
 
   /*
    * Everything staged, or nothing (R-42a).
@@ -279,6 +292,12 @@ async function buildAndStage(input: {
       // Recorded before anything else can fail, so the rollback below knows about it.
       proposals.push(proposal);
       for (const item of bucket.items) staged.set(item.candidate.id, proposal.id);
+      // Kept the other way round as well, so a roll-back that cannot remove this proposal can say
+      // which propositions it was carrying — the manifest that says so goes with the directory.
+      carrying.set(
+        proposal.id,
+        bucket.items.map((item) => item.candidate.id),
+      );
 
       /*
        * The look was materialised from a bundle read before any of this, and staging captures its
@@ -287,9 +306,9 @@ async function buildAndStage(input: {
        */
       for (const item of bucket.items) {
         if (item.candidate.classification !== "art-direction.change") continue;
-        const basedOn = item.candidate.checks.basedOnArtDirectionVersion;
-        const now = input.store.getBundle().artDirection.version;
-        if (basedOn !== undefined && basedOn !== now) {
+        // Against the words as well as the version — a derived look is v1 however often the
+        // world's tone is edited underneath it (see look.ts).
+        if (lookHasMoved(item.candidate.checks, input.store.getBundle().artDirection)) {
           throw new WrapUpError(
             "stale",
             "The world look changed while this was being written, so nothing was. Ask for the look you want from where it is now.",
@@ -303,12 +322,45 @@ async function buildAndStage(input: {
       }
     }
   } catch (err) {
+    /*
+     * What would not go is named, not swallowed.
+     *
+     * The caller closes its intent however this ends, because leaving it open would refuse every
+     * later wrap-up on the conversation until the studio restarted. That closure is also what
+     * puts a failed discard beyond the reach of startup recovery, which reconciles by open intent
+     * and would never look again — so an undiscarded proposal would sit on the approvals screen
+     * for propositions that are all still live, with nothing anywhere recording that it is there.
+     */
+    const wouldNotGo: Leftover[] = [];
     for (const proposal of proposals) {
-      await gate.discard(proposal.id).catch(() => {
-        /* recovery reconciles what will not go now; the refusal below is the answer either way */
-      });
+      await gate
+        .discard(proposal.id)
+        .catch(() =>
+          wouldNotGo.push({ proposalId: proposal.id, candidateIds: carrying.get(proposal.id) ?? [] }),
+        );
     }
-    const refusal =
+    /*
+     * A discard that threw is not proof the proposal is still there.
+     *
+     * It removes the directory and then writes the world's change journal, so a failure in the
+     * second half leaves nothing on the approvals screen and nothing to send back — while an id
+     * recorded for it would name a proposal that does not exist, and the leftovers guard would
+     * refuse every later wrap-up on its account for good.
+     *
+     * Asked one proposal at a time rather than through `listOpen`, which answers "I could not
+     * read `.proposals`" and "nothing is there" with the same empty list — and the filesystem
+     * trouble that made the discard fail is exactly what would make that listing fail, so the
+     * verification would report every proposal gone at the moment they certainly are not.
+     *
+     * When even that cannot be answered the proposal is recorded. Naming one that has gone costs
+     * a startup sweep, which reconciles it against the world's own journal; missing one that is
+     * still there costs a proposal nothing accounts for.
+     */
+    const leftBehind: Leftover[] = [];
+    for (const one of wouldNotGo) {
+      if (await gate.isStaged(one.proposalId).catch(() => true)) leftBehind.push(one);
+    }
+    const cause =
       err instanceof WrapUpError
         ? err
         : err instanceof LookAlreadyProposedError
@@ -317,7 +369,17 @@ async function buildAndStage(input: {
               "A change to the world look is already waiting to be decided. Decide that one first.",
             )
           : new WrapUpError("materialise", "One of these changes could not be staged, so none were.");
-    await input.onFailure(refusal.reason);
+    // What is said and what is recorded differ on purpose. The person is told the thing they can
+    // act on — there are proposals on the screen that should not be there — while the caller's
+    // record keeps why this stopped in the first place, which is the only thing that explains them.
+    const refusal =
+      leftBehind.length > 0
+        ? new WrapUpError(
+            "leftovers",
+            "This could not be finished, and what it had already created could not be taken back. Those proposals are on the approvals screen; send them back or decide them before trying again.",
+          )
+        : cause;
+    await input.onFailure(cause.reason, leftBehind);
     throw refusal;
   }
 
@@ -410,6 +472,42 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
     );
   }
 
+  /**
+   * Nothing an earlier attempt left standing (R-42a).
+   *
+   * A failed wrap-up takes its own staging back, and a discard that will not go leaves a proposal
+   * behind for propositions that are all still live. Going again from here would stage a second
+   * proposal for each of them, and the approvals screen would hold two accounts of one
+   * conversation with no way to tell which was meant.
+   *
+   * Not the permanent wedge the open-intent refusal would be: these are visible on the approvals
+   * screen and can be decided there, and the next start settles them without being asked.
+   *
+   * Held until the conversation's own log says what became of them, and not merely until the gate
+   * stops listing them. Deciding a proposal removes it and records that against the conversation
+   * afterwards, so in between the gate says gone while the log still shows every candidate live —
+   * and a wrap-up that trusted the gate alone would slip through exactly there and propose again
+   * what had just been accepted. Still staged counts too: send-back writes its log entry first and
+   * removes the proposal second, so the two disagree in that direction as well.
+   *
+   * The gate is only asked when the log says there is something to ask about — a wrap-up on a
+   * conversation that never failed reads no proposal directories at all.
+   */
+  const recordedLeftovers = leftoversOf(events).map((one) => one.proposalId);
+  if (recordedLeftovers.length > 0) {
+    const accounted = accountedProposalIdsOf(events);
+    const open = await input.gate.listOpen();
+    const outstanding = recordedLeftovers.filter(
+      (id) => !accounted.has(id) || open.some((p) => p.id === id),
+    );
+    if (outstanding.length > 0) {
+      throw new WrapUpError(
+        "leftovers",
+        "An earlier attempt on this conversation left proposals behind that could not be taken back. Send those back or decide them on the approvals screen, then wrap this up.",
+      );
+    }
+  }
+
   const view = foldConversation(meta.id, meta.createdAt, events).view;
   const bundle = input.store.getBundle();
   const { carried, mediaIdeas, notCarried } = evaluateReadiness(view.candidates, bundle);
@@ -453,9 +551,14 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
     now: input.now,
     // The intent opened above has to be closed however this ends, or the in-flight guard refuses
     // every later wrap-up on this conversation until the studio is restarted.
-    onFailure: async (reason) => {
+    onFailure: async (reason, leftovers) => {
       await log.append(
-        { type: "wrapup.failed", requestId: input.requestId, safeDetail: reason },
+        {
+          type: "wrapup.failed",
+          requestId: input.requestId,
+          safeDetail: leftovers.length > 0 ? `${reason}; ${leftovers.length} left staged` : reason,
+          ...(leftovers.length > 0 ? { leftovers: leftovers.map((one) => ({ ...one, candidateIds: [...one.candidateIds] })) } : {}),
+        },
         { at: input.now() },
       );
     },
@@ -737,6 +840,14 @@ export async function savePoint(input: SavePointInput): Promise<SavePointResult>
     );
 
     let staged: Awaited<ReturnType<typeof buildAndStage>>;
+    /*
+     * A roll-back here can fail to take something back just as wrap-up's can, and a save has no
+     * failure event of its own to name it in. `save.settled` is the one it does have, and naming
+     * the leftover there is true rather than convenient: it is a proposal this conversation is
+     * holding, which is exactly what that list is for — it blocks deletion until the proposal is
+     * decided, so the thing cannot be stranded beyond every repair by deleting the conversation.
+     */
+    const leftBehind: Leftover[] = [];
     try {
       staged = await buildAndStage({
       log,
@@ -748,11 +859,21 @@ export async function savePoint(input: SavePointInput): Promise<SavePointResult>
       bundle,
       at,
       now: input.now,
-        onFailure: async () => {},
+        onFailure: async (_reason, leftovers) => {
+          leftBehind.push(...leftovers);
+        },
       });
     } catch (err) {
-      // Settled with nothing, so the conversation is not left holding a save that never was.
-      await log.append({ type: "save.settled", requestId: input.requestId, proposalIds: [] }, { at: input.now() });
+      // Settled with whatever is genuinely still standing, so the conversation is not left holding
+      // a save that never was — nor blind to one that partly did.
+      await log.append(
+        {
+          type: "save.settled",
+          requestId: input.requestId,
+          proposalIds: leftBehind.map((one) => one.proposalId),
+        },
+        { at: input.now() },
+      );
       throw err;
     }
 

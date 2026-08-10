@@ -313,6 +313,56 @@ describe("a world look through the generic gate", () => {
   });
 
   /*
+   * The look file deleted, and the staged document unreadable.
+   *
+   * Restating is what a look rebase does, and with nothing to restate the code fell through to the
+   * branch for a file this proposal creates: no conflict reported, the malformed document kept,
+   * and a rebase that came back clean. Accept then threw inside the commit gate, and the conflict
+   * controls had nothing to offer because no conflict had ever been raised.
+   */
+  it("blocks a look that cannot be restated after the live one was deleted", async () => {
+    const { dir, store, gate } = await openGateSafely();
+    const mine = await gate.stageArtDirectionChange("Painterly, with visible brushwork.", null);
+
+    // The world's look file goes; the world still has a look, derived from its tone and genre.
+    await rm(join(dir, "art-direction", "art-direction.json"));
+    const staged = join(dir, ".proposals", mine.id, "art-direction", "art-direction.json");
+    await writeFile(staged, "{ this is not a look", "utf8");
+
+    const { conflicts } = await gate.rebase(mine.id);
+    assert.equal(conflicts.length, 1, "a rebase that could not restate anything is not a clean rebase");
+    assert.equal(conflicts[0]!.field, "Look");
+    await gate.markSeen(mine.id);
+    assert.equal(
+      (await gate.accept(mine.id, {})).status,
+      "unresolved-conflicts",
+      "and having been seen is not enough — it cannot be accepted into a throw in the commit gate",
+    );
+
+    // The side offered is a look the world can be given, rather than the document that will not
+    // parse — without which the repair controls are two buttons and no way out but discarding.
+    const theirs = ArtDirectionRecordSchema.parse(JSON.parse(conflicts[0]!.theirs ?? ""));
+    assert.equal(conflicts[0]!.mine, "{ this is not a look");
+    await assert.rejects(
+      () => gate.resolveConflict(mine.id, ART_DIRECTION_PATH, "Look", "mine"),
+      /cannot be read as a world look/,
+      "and the unreadable side is still refused, rather than reported as resolved",
+    );
+
+    await gate.resolveConflict(mine.id, ART_DIRECTION_PATH, "Look", "theirs");
+    // Losing the file moved what this change reaches, so the ripple is restated before it lands —
+    // the ordinary path for a proposal whose world changed under it, and not what is under test.
+    const restated = await gate.accept(mine.id, {});
+    assert.equal(restated.status, "needs-reconfirm");
+    assert.equal(
+      (await gate.accept(mine.id, restated.status === "needs-reconfirm" ? { confirmRipples: restated.signature } : {}))
+        .status,
+      "accepted",
+    );
+    assert.equal(store.getBundle().artDirection.description, theirs.description, "and it is a look again");
+  });
+
+  /*
    * When one side will not parse there is a conflict, and choosing a side takes that whole
    * document. Sent through the Markdown resolver instead, the chosen JSON came back wrapped in
    * frontmatter — no longer readable as a look, produced by the control offered to repair it.
