@@ -30,6 +30,10 @@ const REQUIRED_BY_CLASSIFICATION: Record<WorldChangeClassification, readonly Che
   "sheet.create": ["sheet-search", "canon-search"],
   "sheet.edit": ["target-read", "canon-search"],
   "relationship.change": ["target-read", "related-read"],
+  // Nothing to search. There is exactly one world look, so a change to it cannot duplicate
+  // anything and has no target to read that is not already in the bundle — the checks exist to
+  // answer "does this already exist, and what does it touch?", and here both answers are known.
+  "art-direction.change": [],
   "media.image-opportunity": ["target-read"],
   // Undecided needs whatever each plausible action would need, and stays partial until it is
   // decided — which is why it can never become a proposal.

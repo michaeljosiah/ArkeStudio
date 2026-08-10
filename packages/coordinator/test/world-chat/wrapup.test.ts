@@ -254,6 +254,65 @@ describe("what a conversation carries", () => {
     assert.match(content, /status: open/, "and it is open, because it asserts nothing");
     await w.store.close();
   });
+
+  /*
+   * The world's look, changed by talking about it.
+   *
+   * Before this classification existed the nearest thing was canon.create, so "make it painterly"
+   * became a Canon entry titled "Visual art direction" — accepted, applied, and read by nothing
+   * that generates an image. The world looked exactly as it had. That is the failure worth a test:
+   * not that a proposal appears, but that it writes the record generation actually reads.
+   */
+  it("changes the world look rather than writing a note about it", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const before = w.store.getBundle().artDirection;
+    const seq = await withCandidates(w.log, [
+      candidate({
+        classification: "art-direction.change",
+        title: "The world takes a painterly, hand-animated look",
+        draft: { description: "Painterly and hand-animated: visible brushwork, dramatic key light." },
+      } as Partial<WorldChangeCandidate>),
+    ]);
+
+    const result = await wrapUp({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "req-look",
+      expectedConversationSeq: seq,
+      now: NOW,
+    });
+
+    assert.equal(result.proposalIds.length, 1);
+    const staged = (await w.gate.listOpen()).find((p) => p.id === result.proposalIds[0]);
+    assert.ok(staged);
+    assert.equal(
+      staged.kind,
+      "art-direction",
+      "the kind is what the gate computes the look's ripple from — staged as worldbuilding it would arrive as an unexplained file change",
+    );
+    assert.deepEqual(
+      staged.targets.map((t) => t.path),
+      ["art-direction/art-direction.json"],
+      "and it writes the record every generation reads, not a canon entry about it",
+    );
+
+    const written = JSON.parse(
+      await readFile(join(w.dir, ".proposals", staged.id, "art-direction/art-direction.json"), "utf8"),
+    ) as { version: number; description: string; masterLook?: string; history: Array<{ version: number }> };
+    assert.equal(written.version, before.version + 1);
+    assert.match(written.description, /painterly/i);
+    assert.equal(
+      written.masterLook,
+      undefined,
+      "an image of the look being replaced is not an illustration of the one replacing it",
+    );
+    assert.ok(
+      written.history.some((h) => h.version === before.version),
+      "the look it replaces stays in history, because accepted takes are still pinned to it",
+    );
+  });
 });
 
 describe("what wrap-up refuses", () => {

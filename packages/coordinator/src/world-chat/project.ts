@@ -22,6 +22,9 @@ import type {
 
 /** How a subject is described in the panel: "sheet · v4", "new rule", "canon · CANON-018". */
 function subjectKindOf(candidate: WorldChangeCandidate, sheetVersion?: (slug: string) => number | null): string {
+  // The world look is not one of the world's entities, so no subject ref describes it: whatever
+  // the model names, "This world · world" is true and says nothing about what is changing.
+  if (candidate.classification === "art-direction.change") return "world look";
   const subject = candidate.subject;
   if (subject.kind === "new") {
     switch (candidate.classification) {
@@ -44,6 +47,7 @@ function subjectKindOf(candidate: WorldChangeCandidate, sheetVersion?: (slug: st
 }
 
 function subjectLabelOf(candidate: WorldChangeCandidate, sheetName?: (slug: string) => string | null): string {
+  if (candidate.classification === "art-direction.change") return "Art direction";
   const subject = candidate.subject;
   if (subject.kind === "new") return subject.label;
   if (subject.kind === "canon") return subject.entryId;

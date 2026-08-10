@@ -310,6 +310,7 @@ export const WorldChangeClassificationSchema = z.enum([
   "sheet.create",
   "sheet.edit",
   "relationship.change",
+  "art-direction.change",
   "media.image-opportunity",
   "undecided",
 ]);
@@ -482,6 +483,28 @@ const RelationshipChangePayload = {
     .strict(),
 } as const;
 
+/**
+ * The world's look, changed in words (#70 §6.2).
+ *
+ * Without this a conversation about the art style had nowhere to go. The nearest classification
+ * was `canon.create`, so "let's make it painterly and Arcane-inspired" became a Canon entry
+ * titled "Visual art direction" — true as lore, read by nothing that generates an image, and
+ * indistinguishable from success. The studio agreed and wrote the wrong thing.
+ *
+ * Only the description is the model's to give. `masterLook` is a visual asset and a conversation
+ * has none to offer; it is deliberately not carried over from the previous look either, because
+ * an image of the look being replaced is not an illustration of the one replacing it.
+ */
+const ArtDirectionChangePayload = {
+  classification: z.literal("art-direction.change"),
+  draft: z
+    .object({
+      /** The whole look, as it should now read — never an instruction to adjust the old one. */
+      description: z.string().trim().min(1).max(4000),
+    })
+    .strict(),
+} as const;
+
 const ImagePurposeSchema = z.enum(["world-key-art", "character-main-photo", "character-look"]);
 
 const ImageOpportunityPayload = {
@@ -513,7 +536,7 @@ const UndecidedPayload = {
     .strict(),
 } as const;
 
-/** The eight things a proposition can be, as the coordinator stores them. */
+/** The nine things a proposition can be, as the coordinator stores them. */
 export const WorldChangeCandidateSchema = z.discriminatedUnion("classification", [
   CandidateBaseSchema.extend(CanonCreatePayload).strict(),
   CandidateBaseSchema.extend(CanonAmendPayload).strict(),
@@ -521,6 +544,7 @@ export const WorldChangeCandidateSchema = z.discriminatedUnion("classification",
   CandidateBaseSchema.extend(SheetCreatePayload).strict(),
   CandidateBaseSchema.extend(SheetEditPayload).strict(),
   CandidateBaseSchema.extend(RelationshipChangePayload).strict(),
+  CandidateBaseSchema.extend(ArtDirectionChangePayload).strict(),
   CandidateBaseSchema.extend(ImageOpportunityPayload).strict(),
   CandidateBaseSchema.extend(UndecidedPayload).strict(),
 ]);
@@ -883,6 +907,7 @@ export const ModelCandidateDraftSchema = z.discriminatedUnion("classification", 
   ModelCandidateCommonSchema.extend(SheetCreatePayload).strict(),
   ModelCandidateCommonSchema.extend(SheetEditPayload).strict(),
   ModelCandidateCommonSchema.extend(RelationshipChangePayload).strict(),
+  ModelCandidateCommonSchema.extend(ArtDirectionChangePayload).strict(),
   ModelCandidateCommonSchema.extend(ImageOpportunityPayload).strict(),
   ModelCandidateCommonSchema.extend(UndecidedPayload).strict(),
 ]);
@@ -1233,6 +1258,18 @@ const exampleDrafts = {
       ],
     },
   },
+  "art-direction.change": {
+    classification: "art-direction.change",
+    title: "The world takes a painterly, hand-animated look",
+    rationale: "They asked for the art style itself to change, not for a note about it.",
+    settledness: "settled",
+    evidence: [exampleMessageEvidence],
+    checkReceiptIds: [],
+    draft: {
+      description:
+        "Painterly and hand-animated: visible brushwork, sculpted faces, dramatic key light and bold colour scripting, with salt-bleached harbour tones.",
+    },
+  },
   "media.image-opportunity": {
     classification: "media.image-opportunity",
     title: "Maren at the slack-water bells",
@@ -1334,6 +1371,7 @@ const DRAFT_PAYLOADS = {
   "sheet.create": SheetCreatePayload,
   "sheet.edit": SheetEditPayload,
   "relationship.change": RelationshipChangePayload,
+  "art-direction.change": ArtDirectionChangePayload,
   "media.image-opportunity": ImageOpportunityPayload,
   undecided: UndecidedPayload,
 } as const satisfies Record<WorldChangeClassification, { draft: z.ZodTypeAny }>;
@@ -1472,6 +1510,9 @@ Each classification below shows one complete example, then every field its draft
 - ${draftPayloadLine("relationship.change")}
   proseEdits carries the complete new body of each section it touches, never an instruction to append.
   fields: ${draftFieldCatalogue("relationship.change")}
+- ${draftPayloadLine("art-direction.change")}
+  Use this — never canon.create — when they want the world to LOOK different. It changes the world look itself, which is what every image is generated from; a Canon entry describing a style changes nothing anyone can see. description is the whole look as it should now read, not an adjustment to the old one.
+  fields: ${draftFieldCatalogue("art-direction.change")}
 - ${draftPayloadLine("media.image-opportunity")}
   fields: ${draftFieldCatalogue("media.image-opportunity")}
 - ${draftPayloadLine("undecided")}

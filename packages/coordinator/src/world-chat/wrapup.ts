@@ -213,7 +213,7 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
   try {
     for (const candidate of carried) {
       built.push(
-        materialiseCandidate(candidate, identities, bundle, at.slice(0, 10), () => identities.canonIds[nextCanon++]!),
+        materialiseCandidate(candidate, identities, bundle, at, () => identities.canonIds[nextCanon++]!),
       );
     }
   } catch (err) {
@@ -235,7 +235,16 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
   for (const item of built) {
     const choice = openChoiceFor(item.candidate);
     const proposal = await input.gate.stage({
-      kind: "worldbuilding",
+      /*
+       * A world-look change is an art-direction proposal wherever it came from.
+       *
+       * The kind is not a label: the gate computes an art-direction proposal's ripple from it —
+       * which reference kits see the new look, which productions inherit it, which accepted takes
+       * stay pinned to the old one. Staged as "worldbuilding" it would arrive at the approvals
+       * screen as a file change with none of that said, which is the wrong thing to be quiet
+       * about: this is the one proposal whose consequences reach work already made.
+       */
+      kind: item.candidate.classification === "art-direction.change" ? "art-direction" : "worldbuilding",
       summary: item.candidate.title,
       source: `world-chat:${input.conversationId}`,
       targets: item.targets,
