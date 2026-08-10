@@ -54,7 +54,6 @@ export {
   fitLabel,
   normalizeLabel,
   panelLabel,
-  panelMapSentence,
   PANEL_HEIGHT,
   PANEL_IMAGE_HEIGHT,
   PANEL_LABEL_HEIGHT,

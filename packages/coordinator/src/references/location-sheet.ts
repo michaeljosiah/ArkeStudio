@@ -238,15 +238,3 @@ export function composeLocationSheet(panels: readonly LocationSheetPanel[]): Loc
     labels,
   };
 }
-
-/**
- * The sentence a dispatch says about the sheet it is carrying, so a prompt can cite a fixture by
- * the panel it appears in rather than describing it again (#246's spatial block consumes this).
- */
-export function panelMapSentence(locationName: string, imageIndex: number, names: readonly string[]): string {
-  const parts = names.map((name, index) => {
-    const position = index === 0 ? "panel 1 (top)" : index === names.length - 1 ? `panel ${index + 1} (bottom)` : `panel ${index + 1}`;
-    return `${position}, ${name}`;
-  });
-  return `Image ${imageIndex}: ${locationName} location sheet - ${parts.join("; ")}.`;
-}
