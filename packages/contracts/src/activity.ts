@@ -3,6 +3,7 @@ import type { Job } from "./job.js";
 import type { LedgerEntry } from "./job.js";
 import { REPLAYABLE_FINALIZATION_TARGETS } from "./job.js";
 import { PROVIDERS } from "./provider.js";
+import type { Take } from "./take.js";
 
 /**
  * The Activity read model (SPEC-014): nothing is added to the needs-you queue — every entry is
@@ -50,6 +51,28 @@ export interface NeedsYouEntry {
   ref?: string;
   /** Exact in-app review destination when the derived item owns one. */
   reviewPath?: string;
+}
+
+/**
+ * Where a waiting reference take is actually decided.
+ *
+ * A location view is not decided on a character screen. It used to land there because every kind
+ * but `look` and `main-photo` fell through to the character kit, so Review on a location view
+ * opened another entity's reference set — a screen with no way to accept the thing that sent you
+ * there. Kinds are named here rather than defaulted, so the next one added has to answer this
+ * question instead of inheriting an answer.
+ */
+function referenceReviewPath(worldId: string, sheetId: string, kind: Take["kind"]): string {
+  switch (kind) {
+    case "look":
+      return `/w/${worldId}/cast/${sheetId}/looks`;
+    case "main-photo":
+      return `/w/${worldId}/cast/${sheetId}/main-photo`;
+    case "location-view":
+      return `/w/${worldId}/locations/${sheetId}/reference`;
+    default:
+      return `/w/${worldId}/cast/${sheetId}/kit`;
+  }
 }
 
 export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
@@ -130,9 +153,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
         actions: ["review"],
         ref: take.id,
         ...(take.reference?.sheetId
-          ? {
-              reviewPath: `/w/${world.meta.worldId}/cast/${take.reference.sheetId}/${take.kind === "look" ? "looks" : take.kind === "main-photo" ? "main-photo" : "kit"}`,
-            }
+          ? { reviewPath: referenceReviewPath(world.meta.worldId, take.reference.sheetId, take.kind) }
           : {}),
       });
     }

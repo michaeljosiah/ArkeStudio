@@ -127,6 +127,40 @@ describe("needs-you is derived, never appended to (R-3, D1, §3.2)", () => {
     ];
     assert.ok(!computeNeedsYou(state).some((entry) => entry.ref === take.id));
   });
+
+  it("sends a waiting location view to the location, not into the character flow (#243)", () => {
+    // Every kind but look and main-photo used to fall through to the character kit, so Review on
+    // a location view opened another entity's reference set — a screen with no way to accept the
+    // thing that sent you there.
+    const take = {
+      id: "tk_01J8A0000000000000000000R2",
+      coversShots: [],
+      kind: "location-view" as const,
+      reference: { sheetId: "the-vigil" },
+      provider: "openai",
+      model: "gpt-image-2",
+      provenance: { canonRevision: 1, sheets: { "the-vigil": 1 } },
+      references: [],
+      params: {},
+      cost: { estimatedMicroUsd: 150000, actualMicroUsd: null },
+      dispatchedAt: "2026-08-03T10:00:00Z",
+    };
+    const state = baseState(
+      {},
+      {
+        meta: { worldId: WORLD, name: "The Undersong", updated: "2026-08-03T10:00:00Z" },
+        externalEdits: [],
+        proposals: [],
+        productions: [],
+        referenceTakes: [take],
+        referenceReviews: [],
+      } as never,
+    );
+    const item = computeNeedsYou(state).find((entry) => entry.ref === take.id);
+    assert.ok(item);
+    assert.equal(item.reviewPath, `/w/${WORLD}/locations/the-vigil/reference`);
+  });
+
   const worldWithTake = (reviewed: boolean): ClientState["world"] =>
     ({
       meta: { worldId: WORLD, name: "The Undersong", updated: "2026-08-01T09:00:00Z" },

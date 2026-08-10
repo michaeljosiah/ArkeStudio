@@ -116,6 +116,22 @@ describe("the location sheet is assembled, not generated (#243)", () => {
     assert.match(a.file, /^location-sheet-[0-9a-f]{12}\.png$/);
   });
 
+  it("names the file after the rendered sheet, not after the bytes that went into it", () => {
+    // Two source images with byte-identical buffers and different dimensions: 40x20 and 20x40
+    // are both 3200 bytes of the same colour, and they compose to visibly different panels —
+    // one letterboxed left and right, the other top and bottom. A digest taken over the source
+    // pixels alone could not tell them apart, so both sheets would claim the same filename and
+    // whichever was written second would be served under the first one's digest.
+    const wide = solidImage(40, 20, [10, 20, 30, 255]);
+    const tall = solidImage(20, 40, [10, 20, 30, 255]);
+    assert.deepEqual(Buffer.from(wide.pixels), Buffer.from(tall.pixels), "the source buffers really are identical");
+
+    const a = composeLocationSheet([{ id: "v1", name: "Establishing view", image: wide }]);
+    const b = composeLocationSheet([{ id: "v1", name: "Establishing view", image: tall }]);
+    assert.notDeepEqual(Buffer.from(a.png), Buffer.from(b.png), "and they really do compose differently");
+    assert.notEqual(a.file, b.file, "so they must not share a name");
+  });
+
   it("composes one panel and six, and refuses none", () => {
     const one = composeLocationSheet([{ id: "v1", name: "Establishing view", image: RED }]);
     assert.equal(one.height, PANEL_HEIGHT);

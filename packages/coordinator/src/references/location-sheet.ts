@@ -195,8 +195,9 @@ export function composeLocationSheet(panels: readonly LocationSheetPanel[]): Loc
   const canvas = solidImage(SHEET_WIDTH, height, IMAGE_BG);
   const labelBand = solidImage(SHEET_WIDTH, PANEL_LABEL_HEIGHT, LABEL_BG);
   const labels: string[] = [];
-  // The digest covers what the image is made of and what it says: ids, drawn labels, and the
-  // normalized pixels themselves. Two sheets that differ in any of those are different files.
+  // What the sheet is made of and what it says. The rendered bytes go in below — this part is
+  // only so that two sheets which draw identically but came from different views still get
+  // different names, because a view's identity is part of what the sheet claims.
   const digest = createHash("sha256");
 
   panels.forEach((panel, index) => {
@@ -218,12 +219,19 @@ export function composeLocationSheet(panels: readonly LocationSheetPanel[]): Loc
     digest.update(" ");
     digest.update(label, "utf8");
     digest.update(" ");
-    digest.update(panel.image.pixels);
   });
 
+  // The rendered file, hashed as the file. Hashing the *source* pixels instead left the name
+  // blind to everything composition does with them: two source buffers of equal length but
+  // different dimensions compose differently, and a later change to the geometry, the ground
+  // colour or the bitmap face would go on producing the old name for new bytes — so a world
+  // holding the old sheet would never rebuild, and one that did would overwrite a file whose
+  // digest still claimed the old content. Content-addressing has to address the content.
+  const png = encodePng(canvas);
+  digest.update(png);
   const digest12 = digest.digest("hex").slice(0, 12);
   return {
-    png: encodePng(canvas),
+    png,
     file: `location-sheet-${digest12}.png`,
     width: SHEET_WIDTH,
     height,

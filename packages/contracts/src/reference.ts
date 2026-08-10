@@ -148,17 +148,37 @@ export const LocationViewSchema = z
     sheetVersion: z.number().int().min(1),
     artDirectionVersion: z.number().int().min(1),
     acceptedAt: IsoDateTimeSchema,
+    /**
+     * When this view's *panel slot* was opened, which is not always when the view was accepted.
+     *
+     * A replacement inherits the slot of the view it supersedes, because design turn 57 settles
+     * that replacing a view "leaves the panel order unchanged" — and it has to: a prompt that
+     * already cited panel 2 is wrong the moment panel 2 silently becomes something else.
+     * Ordering on `acceptedAt` alone pushed every replacement to the end of the sheet.
+     *
+     * Optional so a kit written before this existed still reads; those fall back to `acceptedAt`,
+     * which is what they were ordered by anyway.
+     */
+    slotAt: IsoDateTimeSchema.optional(),
     status: z.enum(["active", "superseded"]).default("active"),
   })
   .strict();
 export type LocationView = z.infer<typeof LocationViewSchema>;
+
+/** The instant a view's panel slot was opened — its own, or the acceptance that stood in for it. */
+export function locationViewSlotAt(view: LocationView): string {
+  return view.slotAt ?? view.acceptedAt;
+}
 
 /** Past this a sheet stops reading as one room (design turn 57). */
 export const MAX_ACTIVE_LOCATION_VIEWS = 6;
 
 /** Two names are the same name if they differ only by case or spacing. */
 export function normalizeViewName(name: string): string {
-  return name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+  // toLowerCase, not toLocaleLowerCase: this invariant is shared between the coordinator and the
+  // renderer, and under a Turkish default locale those two processes disagree about whether "I"
+  // and "i" are the same name — so a kit would validate in one and be refused by the other.
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 export const ReferenceKitSchema = z
@@ -266,7 +286,13 @@ export function orderedLocationViews(kit: ReferenceKit): LocationView[] {
   const establishing = active.find((view) => view.id === kit.establishingViewId);
   const rest = active
     .filter((view) => view.id !== kit.establishingViewId)
-    .sort((a, b) => (a.acceptedAt === b.acceptedAt ? a.id.localeCompare(b.id) : a.acceptedAt.localeCompare(b.acceptedAt)));
+    .sort((a, b) => {
+      // Parsed, not compared as strings: IsoDateTimeSchema accepts an offset, and
+      // "2026-08-10T09:00:00+02:00" is earlier than "2026-08-10T08:00:00Z" while sorting after
+      // it. A panel map in the wrong order is a prompt citing the wrong side of the room.
+      const gap = Date.parse(locationViewSlotAt(a)) - Date.parse(locationViewSlotAt(b));
+      return gap === 0 ? a.id.localeCompare(b.id) : gap;
+    });
   return establishing ? [establishing, ...rest] : rest;
 }
 
@@ -307,6 +333,15 @@ export function compilationIsStale(
     if (compilation.anchorFile === undefined) return false;
     const photo = mainPhotoFor(kit);
     return photo === null || compilation.anchorFile !== photo.file;
+  }
+  if (compilation.format === "location-sheet") {
+    // A location kit has no locked tiles at all, so falling through to the grid comparison below
+    // reported every location sheet stale — a permanent warning on the dispatch dialog that no
+    // rebuild could clear. Its tiles are view files in panel order, and order is content here:
+    // the same set stacked differently is a different sheet.
+    return orderedLocationViews(kit)
+      .map((view) => view.file)
+      .join("\n") !== compilation.tiles.join("\n");
   }
   const lockedNow = lockedTiles(kit)
     .map((t) => t.file!)

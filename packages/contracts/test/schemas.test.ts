@@ -21,6 +21,7 @@ import {
   type Job,
   ProposalSchema,
   ReferenceKitSchema,
+  compilationIsStale,
   orderedLocationViews,
   normalizeViewName,
   ReviewDecisionSchema,
@@ -715,6 +716,71 @@ describe("reference kits", () => {
       "the anchor leads whenever it was accepted; the rest follow the order they were accepted in",
     );
     assert.equal(normalizeViewName("  Reverse   ANGLE "), "reverse angle");
+  });
+
+  it("keeps a replaced view in the panel it replaced, however late the replacement arrived", () => {
+    // Panel 2 is replaced after panel 3 already exists. Ordering on acceptedAt alone would move
+    // the replacement to panel 3 — and every prompt already citing "panel 2" would then be
+    // describing the wrong side of the room. Design turn 57 settles that replacement "leaves the
+    // panel order unchanged", so the replacement inherits the slot rather than the timestamp.
+    const kitOut = ReferenceKitSchema.parse({
+      ...locationKit,
+      locationViews: [
+        view("v1", "Establishing view", "2026-08-01T09:00:00Z"),
+        { ...view("v2", "Reverse angle", "2026-08-02T09:00:00Z", "superseded") },
+        view("v3", "Day", "2026-08-03T09:00:00Z"),
+        { ...view("v4", "Reverse angle", "2026-08-09T09:00:00Z"), slotAt: "2026-08-02T09:00:00Z" },
+      ],
+      establishingViewId: "v1",
+    });
+    assert.deepEqual(
+      orderedLocationViews(kitOut).map((v) => v.name),
+      ["Establishing view", "Reverse angle", "Day"],
+      "the replacement holds panel 2; Day is not pushed up and does not become panel 2 itself",
+    );
+  });
+
+  it("orders by the instant, not by the string — an offset timestamp sorts where it happened", () => {
+    // Both forms are valid IsoDateTimeSchema. 09:00+02:00 is 07:00Z, so it happened BEFORE
+    // 08:00Z — and sorts after it lexically. A panel map derived from string order would put
+    // these two the wrong way round.
+    const kitOut = ReferenceKitSchema.parse({
+      ...locationKit,
+      locationViews: [
+        view("v1", "Establishing view", "2026-08-01T09:00:00Z"),
+        view("v2", "Later", "2026-08-10T08:00:00Z"),
+        view("v3", "Earlier", "2026-08-10T09:00:00+02:00"),
+      ],
+      establishingViewId: "v1",
+    });
+    assert.deepEqual(
+      orderedLocationViews(kitOut).map((v) => v.name),
+      ["Establishing view", "Earlier", "Later"],
+    );
+  });
+
+  it("measures a location sheet against its views, not against locked tiles it has none of", () => {
+    // A location kit has no tiles, so the character-sheet grid comparison called every location
+    // sheet stale — a warning on the dispatch dialog that no rebuild could ever clear.
+    const parsed = ReferenceKitSchema.parse(locationKit);
+    const files = orderedLocationViews(parsed).map((v) => v.file);
+    const current = {
+      file: "location-sheet-8f2c1d0a4b77.png",
+      format: "location-sheet" as const,
+      sheetVersion: 3,
+      tiles: files,
+      compiledAt: "2026-08-09T10:00:00Z",
+      source: "local" as const,
+      accepted: true,
+    };
+    assert.equal(compilationIsStale(parsed, current, 3), false, "the sheet matches its views");
+    assert.equal(compilationIsStale(parsed, { ...current, sheetVersion: 2 }, 3), true, "the sheet advanced");
+    assert.equal(
+      compilationIsStale(parsed, { ...current, tiles: [...files].reverse() }, 3),
+      true,
+      "order is content: the same views stacked differently are a different sheet",
+    );
+    assert.equal(compilationIsStale(parsed, { ...current, tiles: files.slice(1) }, 3), true, "a view was added");
   });
 
   it("records a location view as its own immutable take kind", () => {
