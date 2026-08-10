@@ -25,6 +25,7 @@ import { SceneSchema, SelectionsSchema } from "./scene.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
 import { VoiceRuntimeStatusSchema } from "./voice.js";
 import { IDLE_UPDATE_STATE, UpdateStateSchema } from "./update.js";
+import { sheetDir } from "./sheet-shapes.js";
 import {
   CanonEntrySchema,
   ChapterSummarySchema,
@@ -32,6 +33,7 @@ import {
   SheetSchema,
   StoryOverviewSchema,
   WorldMetaSchema,
+  type SheetKind,
 } from "./world.js";
 
 /**
@@ -323,3 +325,69 @@ export const ClientStateSchema = z
   })
   .strict();
 export type ClientState = z.infer<typeof ClientStateSchema>;
+
+// ---------------------------------------------------------------------------
+// Work that has been asked for and has not landed (issue 228)
+// ---------------------------------------------------------------------------
+
+/**
+ * A sheet the studio was asked to draft, between the asking and the arrival.
+ *
+ * The gap is real and it is long: staging the skeleton takes milliseconds, but the agent that
+ * writes the sheet runs for seconds to minutes. Through all of it the sheet is in `.proposals/`
+ * and not in `world.sheets`, so every list that reads `world.sheets` — Cast, Locations,
+ * Factions, the hub fan — correctly showed nothing, and therefore showed its *empty state*. A
+ * submitted action looked like a failed one, and the obvious response was to submit it again.
+ *
+ * Nothing new is recorded to fix that. The proposal is already in the snapshot the moment the
+ * request lands; this reads the pending sheets back out of it.
+ */
+export interface PendingSheet {
+  proposalId: string;
+  /** What it will be called, taken from the staged file rather than from the request. */
+  name: string;
+  /** Where it will live once accepted, world-relative. */
+  path: string;
+}
+
+/** "New location: The Bell Market" → "The Bell Market". */
+function nameFromSummary(summary: string): string | null {
+  const at = summary.indexOf(": ");
+  const tail = at > 0 ? summary.slice(at + 2).trim() : "";
+  return tail.length > 0 ? tail : null;
+}
+
+/** "locations/the-bell-market.md" → "the bell market". The last resort, never the first. */
+function nameFromPath(path: string): string {
+  return (path.split("/").pop() ?? path).replace(/\.md$/i, "").replace(/-/g, " ");
+}
+
+/**
+ * The sheets of one kind that are on their way (issue 228).
+ *
+ * Matched on the target path, because that is what decides which list a sheet lands in — the
+ * summary is display copy and the slug is not a type. A proposal whose review could not be
+ * computed still counts: a file that will not parse is exactly when someone most needs to see
+ * that something is there, so the name degrades through summary to slug rather than the row
+ * disappearing.
+ */
+export function pendingSheets(proposals: readonly StagedProposal[], kind: SheetKind): PendingSheet[] {
+  const prefix = `${sheetDir(kind)}/`;
+  const pending: PendingSheet[] = [];
+  for (const staged of proposals) {
+    if (staged.proposal.kind !== "new-sheet") continue;
+    for (const target of staged.proposal.targets) {
+      if (!target.path.startsWith(prefix)) continue;
+      const reviewed = staged.review?.targets.find((candidate) => candidate.path === target.path);
+      // An amend under a new-sheet proposal is a ripple onto an existing sheet, and that sheet
+      // is already in the list under its own name.
+      if (reviewed && reviewed.action !== "create") continue;
+      pending.push({
+        proposalId: staged.proposal.id,
+        name: reviewed?.label ?? nameFromSummary(staged.proposal.summary) ?? nameFromPath(target.path),
+        path: target.path,
+      });
+    }
+  }
+  return pending;
+}
