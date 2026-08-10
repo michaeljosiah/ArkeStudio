@@ -37,10 +37,21 @@ import {
  * made a world already knows this shape, and a second nearly-identical split would teach them
  * that similar-looking screens behave differently.
  *
- * The rule that shapes everything: the conversation decides nothing. There are no controls on a
- * point, because a point is corrected by saying so. Deciding happens exactly twice — once when
- * the conversation is turned into proposals, and once on the approvals screen — and neither of
- * those is here.
+ * The rule that shapes everything used to be that the conversation decides nothing: a point
+ * carried no control, and deciding happened twice — at wrap-up, and again on the approvals
+ * screen. Both decisions were about everything at once, and that is what it cost. A conversation
+ * produces a dozen points of which two are wrong, and saying so meant carrying all twelve to
+ * another screen to reject two there.
+ *
+ * The rule now is that a decision belongs where the point is. Save writes that line to the world
+ * and Reject drops it, both from the rail, and Accept all writes what is left and closes the
+ * conversation. Talking still changes nothing — it is how a point that is nearly right gets
+ * corrected, and the composer still says so.
+ *
+ * What did not change is who decides. Saving goes through the accept gate exactly as a reviewed
+ * proposal does, so the history, the ripples and the change log are the same; the review is the
+ * press. The one thing a press cannot decide is a proposal carrying an open choice — a question
+ * only the person can answer — and those still wait on the approvals screen.
  */
 
 /**
@@ -394,11 +405,20 @@ export function WorldChatConversationScreen() {
     if (asked.current && closed) {
       asked.current = null;
       setWrappingUp(false);
-      navigate(`/w/${worldId}/proposals`);
+      /*
+       * Only when something is actually waiting.
+       *
+       * Accept all writes; it no longer stages for a screen to visit afterwards, so being taken
+       * to an empty approvals list would be the app performing a step it had just removed. What
+       * can still be waiting is a proposal carrying an open choice — a question only the person
+       * can answer — and that is worth going to, because it is the one thing this press could
+       * not decide for them.
+       */
+      if ((row?.openProposalCount ?? 0) > 0) navigate(`/w/${worldId}/proposals`);
     } else if (wrappingUp && (refusedMine || connection !== "open")) {
       setWrappingUp(false);
     }
-  }, [wrappingUp, closed, refusedMine, connection, worldId, navigate]);
+  }, [wrappingUp, closed, refusedMine, connection, worldId, navigate, row?.openProposalCount]);
 
   if (!world) return null;
   /**

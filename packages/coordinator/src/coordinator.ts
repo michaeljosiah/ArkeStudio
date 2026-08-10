@@ -1602,7 +1602,7 @@ export class Coordinator {
         const gate = this.opts.provider.gate?.();
         if (!store || !gate) return;
         try {
-          await wrapUp({
+          const wrapped = await wrapUp({
             store,
             gate,
             conversationId: msg.conversationId,
@@ -1610,6 +1610,29 @@ export class Coordinator {
             expectedConversationSeq: msg.expectedConversationSeq,
             now: () => new Date().toISOString(),
           });
+          /*
+           * Accept all writes; it does not stage for a screen the person then has to visit.
+           *
+           * The conversation is where the deciding happens now, and pressing a button labelled
+           * Accept and being taken somewhere else to accept again was the two-step this design
+           * removed. Each still goes through the gate, so what lands is identical to a reviewed
+           * proposal — only the review is the press that just happened.
+           *
+           * One kind cannot be written this way and is left standing: a proposal carrying an open
+           * choice is asking a question only the person can answer — "is this a new rule, or a
+           * change to that one?" — and accepting it would be answering on their behalf. Those
+           * stay as proposals, and the screen says where they went.
+           */
+          for (const proposalId of wrapped.proposalIds) {
+            const staged = await gate.readManifest(proposalId).catch(() => null);
+            if (staged?.openChoices?.length) continue;
+            const outcome = await gate.accept(proposalId, {});
+            const at = new Date().toISOString();
+            if (outcome.status === "accepted" && staged) {
+              await recordResolution(store, staged, "accepted", () => at);
+              this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId, outcome: "accepted" });
+            }
+          }
         } catch (err) {
           // A refusal is the answer: nothing was written, and the conversation is still open and
           // still says what it understood. It is said to the screen as well as to the log, because
