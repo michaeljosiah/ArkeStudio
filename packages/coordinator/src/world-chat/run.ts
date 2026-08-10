@@ -95,6 +95,15 @@ export interface RunDeps {
    * without it.
    */
   worldContext?: (view: WorldChatLoaded) => string;
+  /**
+   * The world look's version at the moment the prompt is assembled.
+   *
+   * Read here rather than after the answer arrives, because that is when the model was shown the
+   * description. A look edited while the model was still writing would otherwise be recorded as
+   * the version this draft was based on — and the staleness check that exists to catch exactly
+   * that would pass, letting a whole-description draft overwrite the edit it never saw.
+   */
+  artDirectionVersion?: () => number;
   /** What the conversation was opened about, worded for the model (#70 phase 6). */
   describeEntry?: (context: NonNullable<WorldChatLoaded["entryContext"]>) => string;
   /**
@@ -206,6 +215,16 @@ export class WorldChatRunner {
     return this.cancelling.has(conversationId);
   }
 
+  /**
+   * Whether any conversation is mid-turn on this runner.
+   *
+   * Asked before a runner is replaced: one holding a live turn holds the only handle that can
+   * stop it, so it outlives a stale store rather than taking an in-flight answer down with it.
+   */
+  hasRunning(): boolean {
+    return this.cancelling.size > 0;
+  }
+
   /** Stop a run now. Local and immediate: the log says interrupted without waiting for a model. */
   cancel(conversationId: ConversationId): boolean {
     const controller = this.cancelling.get(conversationId);
@@ -305,6 +324,15 @@ export class WorldChatRunner {
     // attachment exists, and answers "I can't see an attached document" — truthfully, from where
     // it is standing, which is the worst kind of wrong answer to debug.
     const handed = await this.readAttachments(view, attachmentIds);
+    /*
+     * The look the model is about to be shown, pinned now.
+     *
+     * Sampled here rather than when the answer comes back: this is the description going into the
+     * prompt, and a look edited while the model is still writing must not be recorded as the one
+     * this draft was based on. Doing that would silently satisfy the staleness check whose entire
+     * job is to catch a whole-description draft written against a look that has since moved.
+     */
+    const artDirectionVersion = this.deps.artDirectionVersion?.();
     const assembled = assembleContext({
       ...(view.entryContext && this.deps.describeEntry
         ? { entryContext: this.deps.describeEntry(view.entryContext) }
@@ -369,7 +397,16 @@ export class WorldChatRunner {
       const prompt = renderPrompt(assembled);
       let raw = await askOnce(adapter, session.sessionId, prompt, timeoutMs, controller.signal, progress);
 
-      let outcome = await this.applyResult(store, conversationId, raw, runId, leaseToken, at, linked);
+      let outcome = await this.applyResult(
+        store,
+        conversationId,
+        raw,
+        runId,
+        leaseToken,
+        at,
+        linked,
+        artDirectionVersion,
+      );
       if (!outcome.ok) {
         // The one corrective turn (§8.4). It names the faults and asks for the whole result
         // again — never a partial fix, which would come back as a partial result.
@@ -391,7 +428,16 @@ export class WorldChatRunner {
           controller.signal,
           progress,
         );
-        outcome = await this.applyResult(store, conversationId, raw, runId, leaseToken, at, linked);
+        outcome = await this.applyResult(
+          store,
+          conversationId,
+          raw,
+          runId,
+          leaseToken,
+          at,
+          linked,
+          artDirectionVersion,
+        );
       }
 
       if (!outcome.ok) {
@@ -481,6 +527,8 @@ export class WorldChatRunner {
     leaseToken: string,
     at: string,
     allowed: readonly ChatAttachmentId[],
+    /** The look version the prompt was assembled against — see RunDeps.artDirectionVersion. */
+    artDirectionVersion: number | undefined,
   ): Promise<{ ok: true; reply: string } | { ok: false; problems: readonly TurnProblem[] }> {
     const { events } = await store.read();
     const meta = await store.readMeta();
@@ -520,7 +568,16 @@ export class WorldChatRunner {
       const draft = candidate as unknown as ModelCandidateDraft;
       const plan = planFor(draft);
       const { receipts, canonRevision } = await this.deps.runCheckPlan({ draft, leaseToken });
-      checksByDraft.set(draft, deriveChecks({ draft, plan, receipts, canonRevision }));
+      checksByDraft.set(
+        draft,
+        deriveChecks({
+          draft,
+          plan,
+          receipts,
+          canonRevision,
+          ...(artDirectionVersion !== undefined ? { artDirectionVersion } : {}),
+        }),
+      );
     }
 
     const revalidated = outcome.turn.candidates.map((candidate) => ({

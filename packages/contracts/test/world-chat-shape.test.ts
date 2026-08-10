@@ -96,6 +96,21 @@ describe("the rendered guide", () => {
     assert.match(guide, /no other kind substitutes/, "and that supporting evidence does not stand in");
   });
 
+  /**
+   * The one classification a model will reach past without being told to.
+   *
+   * "Make the world painterly" reads like a fact about the world, and canon.create accepts it
+   * happily — which is how a real conversation produced a Canon entry titled "Visual art
+   * direction" that was accepted, applied, and read by nothing that generates an image. The world
+   * looked exactly as it had. Choosing between the two is not something the schema can enforce,
+   * so the guide has to say it outright.
+   */
+  it("sends a change of look to the world look, not to Canon", () => {
+    assert.match(guide, /"classification":"art-direction\.change"/);
+    assert.match(guide, /never canon\.create/, "the wrong-but-plausible choice is named");
+    assert.match(guide, /changes nothing anyone can see/, "and why it is wrong is said, not implied");
+  });
+
   it("says the Studio's own replies are never evidence", () => {
     assert.match(guide, /never cite your own replies/);
   });

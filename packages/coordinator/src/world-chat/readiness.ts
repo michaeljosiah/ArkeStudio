@@ -13,7 +13,13 @@ import type { WorldBundle, WorldChangeCandidate } from "@arke-studio/contracts";
  * and the four have to be answerable.
  */
 
-export type NotCarriedReason = "tentative" | "undecided" | "target-missing" | "invalid";
+export type NotCarriedReason =
+  | "tentative"
+  | "undecided"
+  | "target-missing"
+  | "invalid"
+  | "look-moved"
+  | "look-already-proposed";
 
 export interface NotCarried {
   candidateId: string;
@@ -80,6 +86,14 @@ export function evaluateReadiness(
   const carried: WorldChangeCandidate[] = [];
   const mediaIdeas: WorldChangeCandidate[] = [];
   const notCarried: NotCarried[] = [];
+  /**
+   * One look change per wrap-up as well as per world.
+   *
+   * `bundle.proposals` cannot see what this same pass is about to stage, so without this two
+   * look propositions in one conversation would both carry and produce the pair of proposals the
+   * check below exists to prevent.
+   */
+  let carriedALook = false;
 
   for (const candidate of candidates) {
     if (candidate.status !== "live") continue;
@@ -100,6 +114,23 @@ export function evaluateReadiness(
       fail("target-missing");
       continue;
     }
+    /*
+     * A look drafted against a look that has since changed.
+     *
+     * This classification carries the whole description, so writing it now would replace an edit
+     * made in between with words chosen before it existed — and nothing downstream would call
+     * that stale, because the proposal is staged against whatever is current at this moment. The
+     * proposition is not wrong, only out of date: it stays in the conversation, and saying so is
+     * what lets somebody ask for it again against the look that is actually there.
+     */
+    if (
+      candidate.classification === "art-direction.change" &&
+      candidate.checks.basedOnArtDirectionVersion !== undefined &&
+      candidate.checks.basedOnArtDirectionVersion !== bundle.artDirection.version
+    ) {
+      fail("look-moved");
+      continue;
+    }
     if (!hasIntentEvidence(candidate) || !checksAllow(candidate)) {
       fail("invalid");
       continue;
@@ -109,6 +140,25 @@ export function evaluateReadiness(
       // so it cannot become a fact" is the difference between a bug and a design.
       fail("tentative");
       continue;
+    }
+    /*
+     * One look change waiting at a time.
+     *
+     * There is a single world look, and the screen that reviews a proposed one finds it by kind
+     * rather than by id — so a second would be reviewed, accepted or discarded in place of the
+     * first, arbitrarily. Held back rather than staged: the conversation keeps the proposition,
+     * and it can be asked for again once the one already waiting has been dealt with.
+     *
+     * Last, and only over candidates that have earned a place: claiming the slot any earlier let
+     * a tentative look — one that was never going to carry — spend it, and the settled look
+     * behind it was refused for a proposal that never existed.
+     */
+    if (candidate.classification === "art-direction.change") {
+      if (carriedALook || bundle.proposals.some((staged) => staged.proposal.kind === "art-direction")) {
+        fail("look-already-proposed");
+        continue;
+      }
+      carriedALook = true;
     }
     carried.push(candidate);
   }
@@ -126,6 +176,10 @@ export function explainNotCarried(reason: NotCarriedReason): string {
   switch (reason) {
     case "tentative":
       return "still a maybe, so it cannot become a fact yet";
+    case "look-moved":
+      return "the world look changed after this was written, so it would undo that change";
+    case "look-already-proposed":
+      return "a change to the world look is already waiting to be decided";
     case "undecided":
       return "it is not clear yet what kind of change this is";
     case "target-missing":

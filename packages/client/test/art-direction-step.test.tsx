@@ -4,6 +4,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { ArtStyleGrid, ArtStyleWords } from "../src/components/art-style-picker.js";
 import { ART_STYLE_PRESETS, presetById, seedFrom } from "../src/lib/art-styles.js";
+import { proposedMasterLookNote } from "../src/screens/art-direction.js";
 import { NewWorldScreen } from "../src/screens/shell.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -78,5 +79,31 @@ describe("the words a card seeds", () => {
     // from there stored those words as if someone had written them.
     assert.equal(seedFrom(null), "");
     assert.equal(seedFrom(presetById("editorial-print")!), presetById("editorial-print")!.description);
+  });
+});
+
+/**
+ * What the review says the proposal does to the master image.
+ *
+ * This read `proposed?.masterLook ?? direction.masterLook` and captioned the result "master image
+ * retained" — so a proposal carrying no image showed the current one, over a promise to keep it,
+ * and accepting removed it. A conversation's look change never carries an image, which made that
+ * every one of them. Presence, not fallback: the three cases are genuinely different.
+ */
+describe("the master image on a proposed look", () => {
+  it("says it is retained when the proposal carries the same image", () => {
+    assert.equal(proposedMasterLookNote("looks/a.png", "looks/a.png", true), "New style · master image retained");
+  });
+
+  it("says it is removed when the proposal carries none", () => {
+    assert.equal(proposedMasterLookNote(null, "looks/a.png", true), "New style · master image removed");
+  });
+
+  it("says it is new when the proposal carries a different one", () => {
+    assert.equal(proposedMasterLookNote("looks/b.png", "looks/a.png", true), "New master image");
+  });
+
+  it("borrows the current image only while nothing is staged to misdescribe", () => {
+    assert.equal(proposedMasterLookNote(null, "looks/a.png", false), "New style · master image retained");
   });
 });

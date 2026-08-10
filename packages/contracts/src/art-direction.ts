@@ -13,6 +13,15 @@ export const ArtDirectionHistoryEntrySchema = z
   .strict();
 export type ArtDirectionHistoryEntry = z.infer<typeof ArtDirectionHistoryEntrySchema>;
 
+/**
+ * Where the world's look lives, spelled once.
+ *
+ * Five places knew this string and each spelled it out. It is the only proposal target that is
+ * not Markdown, so it is also the path every generic file path has to recognise as an exception —
+ * a typo in any one of them fails open, quietly, as the wrong kind of file.
+ */
+export const ART_DIRECTION_PATH = "art-direction/art-direction.json";
+
 /** `art-direction/art-direction.json`: the world's accepted visual default. */
 export const ArtDirectionRecordSchema = z
   .object({
@@ -51,6 +60,20 @@ export const ArtDirectionReachSchema = z
     referenceKits: z.number().int().min(0),
     productions: z.number().int().min(0),
     earlierAcceptedTakes: z.number().int().min(0),
+    /**
+     * Accepted takes made under the look as it stands.
+     *
+     * Distinct from `earlierAcceptedTakes`, which counts what is already behind. The moment a
+     * change to the look lands, these join them — so this is the number a proposal's ripple has
+     * to add in when it says how much work stays pinned to the look it is replacing. Counting
+     * only what was already old told somebody the consequence of the *last* change rather than
+     * of the one in front of them.
+     *
+     * Optional because reach is derived at scan and also hand-built in fixtures: absent means
+     * nobody counted, which reads as zero, rather than forcing every constructed world to state
+     * a number it does not have.
+     */
+    acceptedTakesAtCurrentVersion: z.number().int().min(0).optional(),
   })
   .strict();
 export type ArtDirectionReach = z.infer<typeof ArtDirectionReachSchema>;

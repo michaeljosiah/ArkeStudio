@@ -1,4 +1,6 @@
 import {
+  ART_DIRECTION_PATH,
+  ArtDirectionRecordSchema,
   CanonEntrySchema,
   SheetSchema,
   type Sheet,
@@ -124,10 +126,12 @@ export function materialiseCandidate(
   candidate: WorldChangeCandidate,
   identities: Identities,
   bundle: WorldBundle,
-  date: string,
+  /** The whole instant, not the day: the world-look record stamps a full timestamp. */
+  at: string,
   nextCanonId: () => string,
 ): Materialised {
   const draft = candidate.draft as Record<string, unknown>;
+  const date = at.slice(0, 10);
 
   switch (candidate.classification) {
     case "canon.create": {
@@ -271,6 +275,41 @@ export function materialiseCandidate(
         throw new MaterialiseError(candidate.id, "this relationship change would edit no file");
       }
       return { candidate, targets, fields, reservedCanonIds: [] };
+    }
+
+    case "art-direction.change": {
+      /*
+       * The next world look, written whole.
+       *
+       * The same record `stageArtDirectionChange` builds from the form, because there is only one
+       * world look and two ways of writing it would drift. The previous version is pushed onto
+       * history rather than discarded — accepted takes stay pinned to the look they were made
+       * under, and the history is how they still resolve.
+       *
+       * `masterLook` is dropped rather than carried: it is an image of the look being replaced,
+       * and holding it against a new description would misdescribe every generation that read it.
+       */
+      const current = bundle.artDirection;
+      const record = ArtDirectionRecordSchema.parse({
+        version: current.version + 1,
+        description: String(draft["description"]).trim(),
+        acceptedAt: at,
+        history: [
+          ...current.history,
+          {
+            version: current.version,
+            description: current.description,
+            ...(current.masterLook ? { masterLook: current.masterLook } : {}),
+            acceptedAt: current.acceptedAt ?? bundle.meta.created,
+          },
+        ],
+      });
+      return {
+        candidate,
+        targets: [{ path: ART_DIRECTION_PATH, content: `${JSON.stringify(record, null, 2)}\n` }],
+        fields: ["description"],
+        reservedCanonIds: [],
+      };
     }
 
     default:

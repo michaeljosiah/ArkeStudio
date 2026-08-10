@@ -140,6 +140,7 @@ const AUTHORED: readonly WorldChangeClassification[] = [
   "sheet.create",
   "sheet.edit",
   "relationship.change",
+  "art-direction.change",
 ];
 
 export function isAuthoredChange(classification: WorldChangeClassification): boolean {
