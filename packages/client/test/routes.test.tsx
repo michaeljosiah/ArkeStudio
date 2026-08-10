@@ -47,9 +47,13 @@ function nestedButtons(html: string): string[] {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (52 screens)", () => {
-    assert.equal(SCREENS.length, 52);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 52, "screen ids are unique");
+  it("covers the full screen inventory (53 screens)", () => {
+    // The number is written three times on purpose — it is a tripwire, not a fact being derived,
+    // so `SCREENS.length` on both sides would assert nothing. It does mean two branches that each
+    // add a screen merge cleanly and land a count that was right for neither: #268 and #243 did
+    // exactly that, and this is where it surfaced.
+    assert.equal(SCREENS.length, 53);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 53, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {
