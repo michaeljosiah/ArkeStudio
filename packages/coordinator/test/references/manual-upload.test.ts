@@ -173,6 +173,22 @@ describe("uploading a main photo by hand", () => {
     }
   });
 
+  it("refuses several selections rather than importing one and calling it done", async () => {
+    const one = await fileOutsideTheWorld("first.png");
+    const two = await fileOutsideTheWorld("second.png");
+    const { provider, worldDir, events, send } = await harness(() => [one, two]);
+    try {
+      const before = await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8");
+      await send({ kind: "import-main-photo", worldId: WORLD_ID, sheetId: "maren-kest" });
+      assert.equal(await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8"), before);
+      const reported = theReport(events, "main-photo.acceptance");
+      assert.equal(reported.status, "failed");
+      assert.match(reported.reason ?? "", /single image/);
+    } finally {
+      await provider.close();
+    }
+  });
+
   it("stores what the bytes are, not what the name claims", async () => {
     const picked = await fileOutsideTheWorld("actually-a-jpeg.png", jpegBytes());
     const { provider, send, kitOf } = await harness(() => [picked]);
