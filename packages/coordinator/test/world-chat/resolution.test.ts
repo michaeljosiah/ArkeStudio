@@ -448,6 +448,11 @@ describe("a wrap-up the app died in the middle of", () => {
    * proposal can be gone with the conversation none the wiser. Without a terminal state here the
    * leftovers guard refuses that conversation for good, and the manifest that would say what
    * happened went with the proposal. The world's own change journal is what is left.
+   *
+   * It is asked one question: did the change land? A discard line says a proposal directory was
+   * removed and cannot say by whom — a person deciding and a previous recovery pass returning the
+   * leftover write the same line — so what did not land comes back rather than being read as
+   * somebody's decision to drop it.
    */
   it("settles a leftover the conversation never learned the fate of", async () => {
     const dir = await makeTempWorld();
@@ -495,8 +500,8 @@ describe("a wrap-up the app died in the middle of", () => {
       { at: AT },
     );
 
-    // Discarded on the approvals screen, and the conversation never told: the append that would
-    // have said so is the one this path is allowed to lose.
+    // Removed, and the conversation never told: the append that would have said so is the one
+    // this path is allowed to lose.
     await gate.discard(orphan.id);
 
     const outcome = await recoverWrapUps(store, gate, NOW);
@@ -506,10 +511,87 @@ describe("a wrap-up the app died in the middle of", () => {
     const view = foldConversation(meta!.id, meta!.createdAt, (await log.read()).events).view;
     assert.equal(
       view.candidates.find((c) => c.id === proposition.id)?.status,
-      "discarded",
-      "the journal said which way it went, so the conversation says the same",
+      "live",
+      "nothing landed, so the proposition is the conversation's again rather than quietly gone",
     );
     assert.deepEqual((await recoverWrapUps(store, gate, NOW)).repaired, [], "and once is enough");
+    await store.close();
+  });
+
+  /*
+   * Accepting commits the change and removes the proposal directory afterwards, so a process that
+   * stopped between the two leaves an accepted proposal still staged. Read as a rollback it would
+   * be sent back, its propositions returned to live, and the entry it had already written to the
+   * world proposed for a second time — a duplicate Canon entry produced by the cleanup.
+   */
+  it("does not send back a leftover whose change already landed", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir);
+    const gate = new ProposalManager(store);
+    const conversationId = newId("cv") as ConversationId;
+    const log = new WorldChatStore(conversationDir(dir, conversationId));
+    await log.create(conversationId, AT);
+    await log.append(
+      { type: "conversation.created", title: "t", entryContext: { kind: "world" } },
+      { at: AT },
+    );
+    const proposition = candidate();
+    await withCandidates(log, [proposition]);
+
+    const body =
+      "---\nid: CANON-903\ntype: lore\ntitle: B\nstatus: settled\nintroducedAt: 0\nlinks: []\n---\n\nBody.\n";
+    const orphan = await gate.stage({
+      kind: "worldbuilding",
+      summary: "Bells",
+      source: `world-chat:${conversationId}`,
+      targets: [{ path: "canon/CANON-903.md", content: body }],
+      worldChatOrigins: [
+        {
+          requestId: "req-stuck",
+          conversationId,
+          candidateId: proposition.id,
+          candidateRevision: 1,
+          targetPaths: ["canon/CANON-903.md"],
+          fields: ["statement"],
+        },
+      ],
+    });
+    await log.append(
+      {
+        type: "wrapup.failed",
+        requestId: "req-stuck",
+        safeDetail: "materialise; 1 left staged",
+        leftovers: [{ proposalId: orphan.id, candidateIds: [proposition.id] }],
+      },
+      { at: AT },
+    );
+
+    // The commit half of an accept, without the removal that follows it.
+    await store.commitUnserialised({
+      kind: "worldbuilding",
+      source: `world-chat:${conversationId}`,
+      proposalId: orphan.id,
+      files: [{ path: "canon/CANON-903.md", action: "create", content: body, baseHash: null }],
+    });
+    assert.ok(
+      (await gate.listOpen()).some((p) => p.id === orphan.id),
+      "the proposal is still staged, which is the whole shape of this failure",
+    );
+
+    await recoverWrapUps(store, gate, NOW);
+
+    const meta = await log.readMeta();
+    const view = foldConversation(meta!.id, meta!.createdAt, (await log.read()).events).view;
+    assert.equal(
+      view.candidates.find((c) => c.id === proposition.id)?.status,
+      "accepted",
+      "the change is in the world, so the proposition is history and not something to propose again",
+    );
+    assert.equal(
+      (await gate.listOpen()).some((p) => p.id === orphan.id),
+      false,
+      "and the directory the accept did not get to remove is gone",
+    );
     await store.close();
   });
 });

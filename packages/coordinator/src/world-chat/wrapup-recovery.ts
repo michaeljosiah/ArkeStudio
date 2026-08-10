@@ -152,24 +152,38 @@ export async function recoverWrapUps(
 
       for (const leftover of leftovers) {
         if (settled.has(leftover.proposalId)) continue;
-        const reopen = {
-          type: "conversation.reopened" as const,
-          proposalId: leftover.proposalId as ProposalId,
-          restoredCandidateIds: leftover.candidateIds as CandidateId[],
-        };
+        const landed = landedInJournal(journal, leftover.proposalId);
+        const account = landed
+          ? ({
+              type: "proposal.resolved",
+              proposalId: leftover.proposalId as ProposalId,
+              outcome: "accepted",
+              candidateIds: leftover.candidateIds as CandidateId[],
+            } as const)
+          : ({
+              type: "conversation.reopened",
+              proposalId: leftover.proposalId as ProposalId,
+              restoredCandidateIds: leftover.candidateIds as CandidateId[],
+            } as const);
 
         if (staged.some((p) => p.id === leftover.proposalId)) {
           /*
-           * Removed first and recorded second — the opposite of what `sendBack` does, and on
-           * purpose.
+           * Still on the approvals screen — but not necessarily unaccepted.
            *
-           * Send-back's order is right for a person pressing the button: the propositions come
-           * back to an open conversation, and a proposal still standing behind them is visible
-           * and fixable. Here the log entry is also what stops the next wrap-up being refused, so
-           * writing it first would clear the guard over a proposal still on the approvals screen.
-           * Worse, the fold takes a reopen as that proposal's resolution and ignores a real
-           * accept arriving after it — leaving the accepted change's propositions live, and
-           * proposable a second time.
+           * Accepting commits the change and removes the proposal directory after, so a process
+           * that stopped between the two leaves an accepted proposal staged. Treated as a
+           * rollback it would be sent back, its propositions returned to live, and the entry it
+           * had already written to the world proposed a second time — a duplicate Canon entry out
+           * of a cleanup. So the journal is asked first, and only what never landed goes back.
+           *
+           * Either way the directory goes, and the log entry is written after it rather than
+           * before — the opposite of what `sendBack` does, and on purpose. Send-back's order is
+           * right for a person pressing the button: the propositions come back to an open
+           * conversation, and a proposal still standing behind them is visible and fixable. Here
+           * the log entry is also what stops the next wrap-up being refused, so writing it first
+           * would clear the guard over a proposal still on the screen — and the fold takes a
+           * reopen as that proposal's resolution, so a real accept arriving afterwards would be
+           * ignored and its propositions left live.
            */
           try {
             await gate.discard(leftover.proposalId);
@@ -177,8 +191,8 @@ export async function recoverWrapUps(
             stuck.push(leftover.proposalId);
             continue;
           }
-          await log.append(reopen, { at: now() });
-          returned.push(leftover.proposalId);
+          await log.append(account, { at: now() });
+          (landed ? reconciled : returned).push(leftover.proposalId);
           continue;
         }
 
@@ -187,26 +201,11 @@ export async function recoverWrapUps(
          *
          * Recording a resolution is best-effort by design — a proposal that has been accepted is
          * accepted, and failing that over bookkeeping would undo real work — so this is reachable
-         * without any crash at all. The world's own change journal is the record that did not
-         * depend on the conversation: a commit names the proposal it came from, and a discard
-         * names the directory it removed.
-         *
-         * No line at all means it never landed. A commit writes its journal as part of itself, so
-         * an accept that left no trace did not happen; what is left is a discard whose second
-         * half failed, and the propositions are still the conversation's.
+         * without any crash at all. The journal answers the one question that matters: did the
+         * change land? What did not comes back to the conversation, whose propositions were never
+         * decided by anybody.
          */
-        const outcome = outcomeInJournal(journal, leftover.proposalId);
-        await log.append(
-          outcome === null
-            ? reopen
-            : {
-                type: "proposal.resolved",
-                proposalId: leftover.proposalId as ProposalId,
-                outcome,
-                candidateIds: leftover.candidateIds as CandidateId[],
-              },
-          { at: now() },
-        );
+        await log.append(account, { at: now() });
         reconciled.push(leftover.proposalId);
       }
 
@@ -291,24 +290,20 @@ export async function recoverWrapUps(
 }
 
 /**
- * What the world's change journal says became of one proposal, if it says anything.
+ * Whether the world's change journal says this proposal's change landed.
  *
  * The journal is the record that does not depend on the conversation: accepting writes a commit
- * naming the proposal it came from, and discarding writes a line naming the directory it removed.
- * Read last-line-wins, which is only a tiebreak — a proposal is accepted or discarded once.
+ * naming the proposal it came from. One question is asked of it and not two, because landing is
+ * the only outcome that must never be undone — and the only one the journal can attribute.
+ *
+ * A discard line says a proposal directory was removed and cannot say by whom: the person deciding
+ * on the approvals screen and a previous recovery pass returning the leftover write the same line.
+ * Read as a decision it would silently drop propositions that recovery was in the middle of giving
+ * back, so it is not read as one. Everything that did not land comes back to the conversation,
+ * which errs towards a proposition reappearing rather than one disappearing.
  */
-function outcomeInJournal(
-  journal: readonly ChangeLine[],
-  proposalId: string,
-): "accepted" | "discarded" | null {
-  let outcome: "accepted" | "discarded" | null = null;
-  for (const line of journal) {
-    if (line["proposalId"] === proposalId) outcome = "accepted";
-    else if (line.entity === `.proposals/${proposalId}` && line["discarded"] === true) {
-      outcome = "discarded";
-    }
-  }
-  return outcome;
+function landedInJournal(journal: readonly ChangeLine[], proposalId: string): boolean {
+  return journal.some((line) => line["proposalId"] === proposalId);
 }
 
 /** A proposal is whole when it has at least one target and an origin naming what it came from. */
