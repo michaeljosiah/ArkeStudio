@@ -13,7 +13,7 @@ import { lookHasMoved } from "./look.js";
 import { canonIdsNeeded, materialiseCandidate, MaterialiseError, planIdentities } from "./materialise.js";
 import { evaluateReadiness, type NotCarried } from "./readiness.js";
 import { conversationDir, WorldChatStore } from "./store.js";
-import { leftoverProposalIdsOf, openIntentOf } from "./wrapup-recovery.js";
+import { accountedProposalIdsOf, leftoverProposalIdsOf, openIntentOf } from "./wrapup-recovery.js";
 
 /**
  * Turning a conversation into proposals, once (#70 §11.3).
@@ -188,19 +188,29 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
    * conversation with no way to tell which was meant.
    *
    * Not the permanent wedge the open-intent refusal would be: these are visible on the approvals
-   * screen and can be discarded there, and the next start sweeps them without being asked.
+   * screen and can be decided there, and the next start sends them back without being asked.
+   *
+   * Held until the conversation's own log says what became of them, and not merely until the gate
+   * stops listing them. Deciding a proposal removes it and records that against the conversation
+   * afterwards, so in between the gate says gone while the log still shows every candidate live —
+   * and a wrap-up that trusted the gate alone would slip through exactly there and propose again
+   * what had just been accepted. Still staged counts too: send-back writes its log entry first and
+   * removes the proposal second, so the two disagree in that direction as well.
    *
    * The gate is only asked when the log says there is something to ask about — a wrap-up on a
    * conversation that never failed reads no proposal directories at all.
    */
   const recordedLeftovers = leftoverProposalIdsOf(events);
   if (recordedLeftovers.length > 0) {
+    const accounted = accountedProposalIdsOf(events);
     const open = await input.gate.listOpen();
-    const stillStaged = recordedLeftovers.filter((id) => open.some((p) => p.id === id));
-    if (stillStaged.length > 0) {
+    const outstanding = recordedLeftovers.filter(
+      (id) => !accounted.has(id) || open.some((p) => p.id === id),
+    );
+    if (outstanding.length > 0) {
       throw new WrapUpError(
         "leftovers",
-        "An earlier attempt on this conversation left proposals behind that could not be taken back. Decide or discard those on the approvals screen, then wrap this up.",
+        "An earlier attempt on this conversation left proposals behind that could not be taken back. Send those back or decide them on the approvals screen, then wrap this up.",
       );
     }
   }
@@ -368,7 +378,7 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
       leftBehind.length > 0
         ? new WrapUpError(
             "leftovers",
-            "This could not be finished, and what it had already created could not be taken back. Those proposals are on the approvals screen; decide or discard them before trying again.",
+            "This could not be finished, and what it had already created could not be taken back. Those proposals are on the approvals screen; send them back or decide them before trying again.",
           )
         : cause;
     await log.append(

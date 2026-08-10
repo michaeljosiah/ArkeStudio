@@ -13,6 +13,7 @@ import {
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { lookContentHash } from "../../src/world-chat/look.js";
 import { evaluateReadiness } from "../../src/world-chat/readiness.js";
+import { recordResolution } from "../../src/world-chat/resolution.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -642,10 +643,30 @@ describe("what wrap-up refuses", () => {
 
     // Discarded on the approvals screen, as the refusal says to do: the way out is not a restart.
     w.gate.discard = stuck;
-    for (const proposal of await w.ours()) await w.gate.discard(proposal.id);
+    const waiting = await w.ours();
+    for (const proposal of waiting) await w.gate.discard(proposal.id);
+
+    /*
+     * Still refused, on the gap the gate cannot see. Deciding a proposal removes it and records
+     * that against the conversation afterwards, so between the two the gate says gone while every
+     * candidate still reads live — and a wrap-up that went ahead there would propose again what
+     * had just been decided.
+     */
+    await assert.rejects(
+      () => attempt("req-in-the-gap"),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "leftovers",
+    );
+
+    for (const proposal of waiting) {
+      await recordResolution(w.store, proposal, "discarded", NOW);
+    }
     w.gate.stage = realStage;
     const done = await attempt("req-third");
-    assert.equal(done.proposalIds.length, 2, "and the conversation carries as it always would have");
+    assert.equal(
+      done.proposalIds.length,
+      1,
+      "the conversation carries again, less the proposition discarded along with the leftover",
+    );
   });
 
   it("refuses a conversation that moved on while it was being read", async () => {

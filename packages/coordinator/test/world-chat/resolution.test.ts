@@ -68,6 +68,43 @@ function candidate(over: Partial<WorldChangeCandidate> = {}): WorldChangeCandida
   } as WorldChangeCandidate;
 }
 
+/** Put a completed turn carrying these propositions into the log. */
+async function withCandidates(
+  log: WorldChatStore,
+  candidates: WorldChangeCandidate[],
+): Promise<void> {
+  const turnId = newId("turn");
+  await log.append(
+    {
+      type: "turn.completed",
+      message: {
+        id: newId("msg") as MessageId,
+        turnId,
+        role: "studio",
+        text: "Noted.",
+        attachmentIds: [],
+        createdAt: AT,
+      },
+      run: {
+        id: newId("run"),
+        turnId,
+        basedOnConversationSeq: 1,
+        status: "completed",
+        adapter: "fake",
+        harnessCleanup: "not-required",
+        contextDigest: `sha256:${"a".repeat(64)}`,
+        startedAt: AT,
+        endedAt: AT,
+      },
+      receipts: [],
+      candidates,
+      groups: [],
+      tombstones: [],
+    },
+    { at: AT },
+  );
+}
+
 /** A world with one conversation that has been wrapped up into one proposal. */
 async function wrapped() {
   const dir = await makeTempWorld();
@@ -325,7 +362,7 @@ describe("a wrap-up the app died in the middle of", () => {
    * summary from a conversation that says it created nothing, and accepting it writes one part of
    * a set nobody agreed to as a whole.
    */
-  it("takes back what a failed wrap-up could not", async () => {
+  it("sends back what a failed wrap-up could not take back", async () => {
     const dir = await makeTempWorld();
     const store = await WorldStore.open(dir);
     const gate = new ProposalManager(store);
@@ -336,6 +373,8 @@ describe("a wrap-up the app died in the middle of", () => {
       { type: "conversation.created", title: "t", entryContext: { kind: "world" } },
       { at: AT },
     );
+    const proposition = candidate();
+    await withCandidates(log, [proposition]);
 
     const orphan = await gate.stage({
       kind: "worldbuilding",
@@ -346,6 +385,16 @@ describe("a wrap-up the app died in the middle of", () => {
           path: "canon/CANON-901.md",
           content:
             "---\nid: CANON-901\ntype: lore\ntitle: B\nstatus: settled\nintroducedAt: 0\nlinks: []\n---\n\nBody.\n",
+        },
+      ],
+      worldChatOrigins: [
+        {
+          requestId: "req-stuck",
+          conversationId,
+          candidateId: proposition.id,
+          candidateRevision: 1,
+          targetPaths: ["canon/CANON-901.md"],
+          fields: ["statement"],
         },
       ],
     });
@@ -362,7 +411,7 @@ describe("a wrap-up the app died in the middle of", () => {
       {
         type: "wrapup.failed",
         requestId: "req-stuck",
-        safeDetail: "leftovers",
+        safeDetail: "materialise; 1 left staged",
         leftoverProposalIds: [orphan.id],
       },
       { at: AT },
@@ -379,6 +428,11 @@ describe("a wrap-up the app died in the middle of", () => {
     const meta = await log.readMeta();
     const view = foldConversation(meta!.id, meta!.createdAt, (await log.read()).events).view;
     assert.equal(view.status, "open", "and the conversation is where it was — nothing carried");
+    assert.equal(
+      view.candidates.find((c) => c.id === proposition.id)?.status,
+      "live",
+      "sent back, not discarded — nobody changed their mind, a wrap-up refused itself",
+    );
 
     // Idempotent: the failure event stays in the log for good, so the sweep has to find nothing
     // the second time rather than report the same repair at every start for the rest of the world.
