@@ -172,6 +172,8 @@ interface StoreState {
     string,
     { status: "accepted" | "failed" | null; reason?: string; candidateRetained: boolean }
   >;
+  /** Last hand-carried character sheet result by sheet; null status means the picker is open. */
+  characterSheetAcceptance: Record<string, { status: "accepted" | "failed" | null; reason?: string }>;
   /** SPEC-013: export lifecycle by exportId. */
   exportsState: Record<string, ExportState>;
   /** SPEC-015: the last import report and filing notices — transient. */
@@ -229,6 +231,7 @@ let current: StoreState = {
   voiceSidecar: null,
   voiceRuntimeTest: null,
   mainPhotoAcceptance: {},
+  characterSheetAcceptance: {},
   exportsState: {},
   importReport: null,
   artifactNotices: [],
@@ -423,6 +426,13 @@ function handleFrame(json: string): void {
       voiceCandidates: changedWorld ? {} : current.voiceCandidates,
       voicePreviews: changedWorld ? {} : current.voicePreviews,
       voiceAudio: { ...(changedWorld ? {} : current.voiceAudio), ...durableVoiceAudio },
+      // Both are keyed by sheet slug alone, and slugs recur across worlds: a failure left over
+      // from one world would otherwise surface under the same-named character in the next one
+      // (PR 241 review). They describe an action just taken here, so they do not outlive it.
+      // No "#" before that number anywhere under src/: the hard-coded-colour rule reads it as a
+      // three-digit hex and fails the token test.
+      mainPhotoAcceptance: changedWorld ? {} : current.mainPhotoAcceptance,
+      characterSheetAcceptance: changedWorld ? {} : current.characterSheetAcceptance,
     });
   } else if (current.state) {
     let gateNotices = current.gateNotices;
@@ -588,6 +598,7 @@ function handleFrame(json: string): void {
     let voiceSidecar = current.voiceSidecar;
     let voiceRuntimeTest = current.voiceRuntimeTest;
     let mainPhotoAcceptance = current.mainPhotoAcceptance;
+    let characterSheetAcceptance = current.characterSheetAcceptance;
     if (event.type === "voice.candidates") {
       voiceCandidates = {
         ...voiceCandidates,
@@ -637,14 +648,26 @@ function handleFrame(json: string): void {
         audioBase64: event.audioBase64,
       };
     } else if (event.type === "main-photo.acceptance") {
-      mainPhotoAcceptance = {
-        ...mainPhotoAcceptance,
-        [event.sheetId]: {
+      // A cancelled dialog leaves no trace: it releases the button and says nothing, because
+      // there is nothing to say about a choice the user declined to make.
+      mainPhotoAcceptance = { ...mainPhotoAcceptance };
+      if (event.status === "cancelled") delete mainPhotoAcceptance[event.sheetId];
+      else {
+        mainPhotoAcceptance[event.sheetId] = {
           status: event.status,
           ...(event.reason ? { reason: event.reason } : {}),
           candidateRetained: event.candidateRetained,
-        },
-      };
+        };
+      }
+    } else if (event.type === "character-sheet.acceptance") {
+      characterSheetAcceptance = { ...characterSheetAcceptance };
+      if (event.status === "cancelled") delete characterSheetAcceptance[event.sheetId];
+      else {
+        characterSheetAcceptance[event.sheetId] = {
+          status: event.status,
+          ...(event.reason ? { reason: event.reason } : {}),
+        };
+      }
     }
     let importReport = current.importReport;
     let artifactNotices = current.artifactNotices;
@@ -754,6 +777,7 @@ function handleFrame(json: string): void {
       voiceSidecar,
       voiceRuntimeTest,
       mainPhotoAcceptance,
+      characterSheetAcceptance,
       exportsState,
       importReport,
       artifactNotices,
@@ -1393,6 +1417,47 @@ export function importMainPhotoCandidate(worldId: string, sheetId: string): void
   send({ kind: "import-main-photo-candidate", worldId, sheetId });
 }
 
+/**
+ * Bring the whole main photo in from a file, no generation involved.
+ *
+ * In flight from the press until the coordinator answers. The dialog is modal while it is open,
+ * but it closes long before the work is done — up to 50 MB still to read, copy and commit — and
+ * the window is live again for all of it. A second press in that gap opens a competing import of
+ * the same sheet, and the two accepts race (PR review). This is only safe to set because a
+ * cancelled dialog now reports "cancelled": without that ending, the button would have had no way
+ * back from a dialog somebody simply closed.
+ */
+export function importMainPhoto(worldId: string, sheetId: string): void {
+  if (current.mainPhotoAcceptance[sheetId]?.status === null) return;
+  emitChange({
+    ...current,
+    mainPhotoAcceptance: {
+      ...current.mainPhotoAcceptance,
+      [sheetId]: { status: null, candidateRetained: false },
+    },
+  });
+  if (!send({ kind: "import-main-photo", worldId, sheetId })) clearMainPhotoAcceptance(sheetId);
+}
+
+export function importCharacterSheet(worldId: string, sheetId: string): void {
+  if (current.characterSheetAcceptance[sheetId]?.status === null) return;
+  emitChange({
+    ...current,
+    characterSheetAcceptance: { ...current.characterSheetAcceptance, [sheetId]: { status: null } },
+  });
+  if (!send({ kind: "import-character-sheet", worldId, sheetId })) clearCharacterSheetAcceptance(sheetId);
+}
+
+export function useCharacterSheetAcceptance() {
+  return useStore().characterSheetAcceptance;
+}
+
+export function clearCharacterSheetAcceptance(sheetId: string): void {
+  const characterSheetAcceptance = { ...current.characterSheetAcceptance };
+  delete characterSheetAcceptance[sheetId];
+  emitChange({ ...current, characterSheetAcceptance });
+}
+
 export function generateMainPhoto(
   worldId: string,
   sheetId: string,
@@ -1891,6 +1956,7 @@ export function __setStateForTest(state: ClientState): void {
     voiceSidecar: null,
     voiceRuntimeTest: null,
     mainPhotoAcceptance: {},
+    characterSheetAcceptance: {},
     exportsState: {},
     importReport: null,
     artifactNotices: [],
@@ -1908,6 +1974,10 @@ export function __applyEventForTest(event: DomainEvent): void {
 
 export function __mainPhotoAcceptanceForTest() {
   return current.mainPhotoAcceptance;
+}
+
+export function __characterSheetAcceptanceForTest() {
+  return current.characterSheetAcceptance;
 }
 
 export function __pendingQueueRequestsForTest(): string[] {

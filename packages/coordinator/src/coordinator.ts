@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
-import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { copyFile, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { basename, extname, join } from "node:path";
+import { basename, join } from "node:path";
 import {
   DomainEventSchema,
   JobSchema,
@@ -15,6 +15,7 @@ import {
   buildExportPlan,
   CutFileSchema,
   deriveCut,
+  designatedCompilation,
   estimateMicroUsd,
   modelForCapability,
   gateLocalRuntimes,
@@ -76,7 +77,9 @@ import {
   type CloudVoiceSource,
   type SidecarLike,
 } from "./voice/service.js";
+import { atomicWriteFile } from "./world/atomic.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
+import { imageFormatOf } from "./queue/verify.js";
 import { readContainedImageReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
 import {
@@ -112,6 +115,7 @@ import {
   pendingReferenceTake,
   recordReferenceReview,
   recordReferenceTake,
+  recordUploadedCharacterSheetTake,
   referenceReviewDecision,
 } from "./references/takes.js";
 import {
@@ -176,6 +180,79 @@ import type { WorldStore } from "./world/store.js";
  * (SPEC-001 D2) — never a separately launched server. Wires the world provider, read model,
  * transport, change log, harness adapter and child supervisors into one lifecycle.
  */
+
+/**
+ * What the host's file dialog offers to filter by. A hint for the picker, nothing more: the
+ * dialog also offers "All files", so the name arriving back is whatever the user typed and the
+ * decision is taken on the bytes below.
+ *
+ * Bare, no leading dot. Electron's `FileFilter.extensions` is specified without one, and a
+ * dotted list makes the dialog reject the filter — which the caller's `.catch(() => [])` would
+ * then render as a cancelled dialog, so the button would look like it did nothing at all. Every
+ * other picker in the app passes bare extensions for the same reason (`ATTACHABLE_EXTENSIONS`
+ * strips its dots explicitly); this list is checked against nothing, so it keeps none.
+ */
+const IMPORTABLE_IMAGES = ["png", "jpg", "jpeg", "webp"] as const;
+
+const UNSUPPORTED_IMAGE = "That file is not an image the studio can hold. Choose a PNG, JPEG or WebP.";
+
+/**
+ * The host's dialog allows multiple selections — it is the same seam that attaches whole folders
+ * of files — but a main photo and a character sheet are each exactly one image. Taking the first
+ * of several and reporting success would quietly discard the rest, so the extras are refused out
+ * loud instead (PR review).
+ */
+const ONE_IMAGE_ONLY = "Choose a single image: this replaces one picture, not a set.";
+
+/**
+ * The same ceiling `readContainedImageReferences` enforces when a reference is about to be sent.
+ * Refusing here rather than there is the whole point: an image accepted as the identity anchor
+ * and then silently dropped at dispatch is worse than one that was never accepted.
+ */
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024 - 1;
+
+/**
+ * Read a picked file, refusing anything the dispatch path would later refuse (PR #241 review).
+ *
+ * The extension is checked by *reading* it — `imageFormatOf` looks at signatures and trailers,
+ * so a text file renamed `.png`, or a PNG that stopped downloading halfway, is caught here
+ * instead of becoming an accepted reference with a broken preview. The format the bytes actually
+ * carry is what names the stored file, the same rule the dispatcher applies when it lands a
+ * generated artifact, so a JPEG called `.png` is stored as the JPEG it is.
+ *
+ * The returned extension carries its dot (`.png`), unlike `IMPORTABLE_IMAGES` above: that one is
+ * a dialog filter and this one builds a filename. They are never interchangeable.
+ */
+async function readPickedImage(
+  source: string,
+): Promise<{ data: Uint8Array; extension: string } | { error: string }> {
+  const tooBig = { error: "That image is over 50 MB, which is more than an image model will accept." };
+  const unreadable = { error: "That file could not be read. Try choosing it again." };
+  const info = await stat(toExtendedLength(source)).catch(() => null);
+  if (!info?.isFile()) return unreadable;
+  // Cheap enough to refuse a 4 GB file without reading it, but not the answer: an editor or a
+  // sync client can finish writing between the two calls, so the bytes in hand are measured too.
+  if (info.size > MAX_UPLOAD_BYTES) return tooBig;
+  const data = await readFile(toExtendedLength(source)).then(
+    (bytes) => Uint8Array.from(bytes),
+    () => null,
+  );
+  if (!data) return unreadable;
+  if (data.byteLength > MAX_UPLOAD_BYTES) return tooBig;
+  const format = imageFormatOf(data);
+  if (!format) return { error: UNSUPPORTED_IMAGE };
+  return { data, extension: format.extension };
+}
+
+/** Put verified bytes in a sheet's candidate set under a name of our making, never the user's. */
+async function landUploadedImage(
+  store: WorldStore,
+  sheetId: string,
+  name: string,
+  data: Uint8Array,
+): Promise<void> {
+  await atomicWriteFile(join(store.dir, "references", sheetId, "candidates", name), data);
+}
 
 export interface CoordinatorOptions {
   provider: WorldProvider;
@@ -931,7 +1008,17 @@ export class Coordinator {
             | { sheets?: Record<string, number>; anchorFile?: string }
             | undefined;
           const sheetVersion = sheetId ? frozen?.sheets?.[sheetId] : undefined;
-          if (sheet && sheetId && !alreadyReviewed && frozen?.anchorFile && sheetVersion !== undefined) {
+          // Unless the slot was claimed after this job began (PR review). A sheet uploaded while
+          // the generation was in flight is the later decision of the two, and it was made by a
+          // person; landing on top of it would undo a deliberate choice with no word said. The
+          // take is still recorded, so nothing is lost — it waits in the review strip like any
+          // other, and accepting it is one press away for whoever wants it.
+          const designatedSince = sheetId
+            ? ((await readKit(store, sheetId).catch(() => null))?.kit ?? null)
+            : null;
+          const claimed = designatedSince ? designatedCompilation(designatedSince) : null;
+          const outranked = claimed !== null && claimed.compiledAt > job.createdAt;
+          if (sheet && sheetId && !alreadyReviewed && !outranked && frozen?.anchorFile && sheetVersion !== undefined) {
             const review = referenceReviewDecision(store.now(), take, "accept");
             await acceptCharacterSheet(store, sheet, {
               file: `takes/${take.id}/${take.media}`,
@@ -3334,24 +3421,225 @@ export class Coordinator {
       case "import-main-photo-candidate": {
         const store = this.opts.provider.openStore?.();
         const pick = this.opts.pickFiles;
-        if (!store || !pick) return;
-        const [source] = await pick({ accept: [".png", ".jpg", ".jpeg", ".webp"] }).catch(() => []);
+        // The open world must be the world the frame was written for. Sheet slugs recur across
+        // worlds, so a frame from a screen the user has since navigated away from would file the
+        // image under the same-named character somewhere else entirely — and the only sign would
+        // be a candidate nobody put there. Every other reference handler already checks this.
+        if (!store || store.worldId !== msg.worldId || !pick) return;
+        const [source] = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
         if (!source) return;
-        const extension = extname(source).toLowerCase();
-        if (![".png", ".jpg", ".jpeg", ".webp"].includes(extension)) return;
+        if (!this.stillOpen(store)) return;
+        const picked = await readPickedImage(source);
+        if ("error" in picked) {
+          // Reported through the acceptance slot the replace dialog already reads. This route
+          // adds a candidate rather than accepting one, so it has no report of its own — and
+          // saying nothing would leave a refused file indistinguishable from a dead button.
+          this.emit({
+            at: new Date().toISOString(),
+            type: "main-photo.acceptance",
+            worldId: msg.worldId,
+            sheetId: msg.sheetId,
+            status: "failed",
+            reason: picked.error,
+            candidateRetained: false,
+          });
+          return;
+        }
         await store
           .gateOp(async () => {
-            const name = `upload-${Date.now().toString(36)}${extension}`;
-            await mkdir(toExtendedLength(join(store.dir, "references", msg.sheetId, "candidates")), {
-              recursive: true,
-            });
-            await copyFile(
-              toExtendedLength(source),
-              toExtendedLength(join(store.dir, "references", msg.sheetId, "candidates", name)),
-            );
+            const name = `upload-${Date.now().toString(36)}${picked.extension}`;
+            await landUploadedImage(store, msg.sheetId, name, picked.data);
           })
           .catch(() => {});
-        await this.refreshWorldSnapshot(msg.worldId);
+        this.refreshIfStillOpen(store);
+        return;
+      }
+      case "import-main-photo": {
+        const store = this.opts.provider.openStore?.();
+        const pick = this.opts.pickFiles;
+        const report = (
+          status: "accepted" | "failed" | "cancelled",
+          candidateRetained: boolean,
+          reason?: string,
+        ) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "main-photo.acceptance",
+            worldId: msg.worldId,
+            sheetId: msg.sheetId,
+            status,
+            ...(reason ? { reason } : {}),
+            candidateRetained,
+          });
+        if (!store || store.worldId !== msg.worldId || !pick) return;
+        if (!store.getBundle().sheets.some((candidate) => candidate.id === msg.sheetId)) {
+          report("failed", false, "The main photo was not changed because the character is unavailable.");
+          return;
+        }
+        const chosen = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
+        // A closed dialog is not a failure — no error belongs under a card the user just decided
+        // to leave alone — but it is still an ending, and the button that opened it is waiting.
+        const [source] = chosen;
+        if (!source) {
+          report("cancelled", false);
+          return;
+        }
+        if (chosen.length > 1) {
+          report("failed", false, ONE_IMAGE_ONLY);
+          return;
+        }
+        // Nor is walking away mid-dialog. Nothing to report to a screen that has gone.
+        if (!this.stillOpen(store)) return;
+        const picked = await readPickedImage(source);
+        // Again after the read: 50 MB takes a moment, and a world switched during it leaves this
+        // holding a closed store, which would still accept writes (PR review).
+        if (!this.stillOpen(store)) return;
+        if ("error" in picked) {
+          report("failed", false, picked.error);
+          return;
+        }
+        // Before writing, not only after: a character deleted while the dialog stood open has no
+        // card left to reach a retained candidate through, so landing 50 MB under its name would
+        // put media in the world that nothing could show and nobody could remove (PR review).
+        if (!store.getBundle().sheets.some((candidate) => candidate.id === msg.sheetId)) {
+          report("failed", false, "The main photo was not changed because the character is unavailable.");
+          return;
+        }
+        const file = `upload-${Date.now().toString(36)}${picked.extension}`;
+        const landed = await store
+          .gateOp(() => landUploadedImage(store, msg.sheetId, file, picked.data))
+          .then(
+            () => true,
+            () => false,
+          );
+        if (!landed) {
+          report("failed", false, "The main photo was not changed because that file could not be copied in.");
+          return;
+        }
+        // Re-read after the picker: a dialog can stand open for minutes, and the version this
+        // accept records has to be the one the world holds now, not the one it held when the
+        // button was pressed (PR #241 review).
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
+        if (!sheet) {
+          // Deleted between the two checks. The candidate we just wrote is the only trace, and
+          // there is no longer anywhere to see it, so it goes rather than lingering unreachable.
+          await store
+            .ownedWrite(() => rm(toExtendedLength(join(store.dir, "references", msg.sheetId, "candidates", file))))
+            .catch(() => {});
+          report("failed", false, "The main photo was not changed because the character is unavailable.");
+          return;
+        }
+        // gateOp rescans on the way out, so the bundle already lists the candidate that
+        // acceptMainPhoto is about to validate against — and from here the upload takes the
+        // identical path a chosen candidate takes, staged failures and cleanup included.
+        const result = await acceptMainPhoto(store, sheet, store.getBundle(), { source: "candidate", file });
+        this.refreshIfStillOpen(store);
+        if (result.status === "failed") {
+          void this.appLog?.append(mainPhotoLogRecord(msg.worldId, msg.sheetId, result.stage, "upload"));
+          report("failed", result.candidateRetained, mainPhotoFailureReason(result.stage));
+          return;
+        }
+        if (result.cleanupError) {
+          void this.appLog?.append(mainPhotoLogRecord(msg.worldId, msg.sheetId, "candidate-cleanup", "upload"));
+          report("accepted", true);
+          return;
+        }
+        report("accepted", false);
+        return;
+      }
+      case "import-character-sheet": {
+        const store = this.opts.provider.openStore?.();
+        const pick = this.opts.pickFiles;
+        const report = (status: "accepted" | "failed" | "cancelled", reason?: string) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "character-sheet.acceptance",
+            worldId: msg.worldId,
+            sheetId: msg.sheetId,
+            status,
+            ...(reason ? { reason } : {}),
+          });
+        if (!store || store.worldId !== msg.worldId || !pick) return;
+        if (!store.getBundle().sheets.some((candidate) => candidate.id === msg.sheetId)) {
+          report("failed", "The character sheet was not changed because the character is unavailable.");
+          return;
+        }
+        const chosen = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
+        const [source] = chosen;
+        if (!source) {
+          report("cancelled");
+          return;
+        }
+        if (chosen.length > 1) {
+          report("failed", ONE_IMAGE_ONLY);
+          return;
+        }
+        if (!this.stillOpen(store)) return;
+        const picked = await readPickedImage(source);
+        if (!this.stillOpen(store)) return;
+        if ("error" in picked) {
+          report("failed", picked.error);
+          return;
+        }
+        // The button was disabled against the jobs the screen could see when it was pressed. One
+        // started since — while the dialog stood open, or by another client — would land later,
+        // designate itself, and replace this upload without a word. Refused here, where the queue
+        // is actually known (PR review).
+        if (this.characterSheetJobRunning(msg.worldId, msg.sheetId)) {
+          report(
+            "failed",
+            "A generated character sheet for this character has not finished. It would land on top of this one. Wait for it, or settle it in Activity, then upload.",
+          );
+          return;
+        }
+        const media = `character-sheet-upload-${Date.now().toString(36)}${picked.extension}`;
+        const take = await recordUploadedCharacterSheetTake(store, msg.sheetId, media, picked.data).catch(
+          () => null,
+        );
+        if (!take) {
+          this.refreshIfStillOpen(store);
+          report(
+            "failed",
+            "The character sheet was not changed because its permanent copy could not be made. Try again.",
+          );
+          return;
+        }
+        // And again: writing the take is itself an await, long enough to open another world in.
+        // The take is durable and undecided, which is a state the card can offer to accept later.
+        if (!this.stillOpen(store)) return;
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
+        if (!sheet) {
+          this.refreshIfStillOpen(store);
+          report("failed", "The character sheet was not changed because the character is unavailable.");
+          return;
+        }
+        // No anchorFile: this sheet was not drawn from the main photo, so it claims no lineage
+        // and no later main photo can call it out of date. Accepted in the same motion as the
+        // upload — the human's own action rule, the same one the generated sheet gets at
+        // finalization. Nobody needs to review a file they just chose by hand.
+        //
+        // The version comes from the take rather than from a sheet read before the picker opened:
+        // those are the same number only when nothing edited the character while the dialog was
+        // up, and when they disagree the compilation is born stale (PR #241 review).
+        const accepted = await acceptCharacterSheet(store, sheet, {
+          file: `takes/${take.id}/${media}`,
+          takeId: take.id,
+          sheetVersion: take.provenance.sheets[msg.sheetId] ?? sheet.version,
+          artDirectionVersion: store.getBundle().artDirection.version,
+          review: referenceReviewDecision(store.now(), take, "accept"),
+        }).then(
+          () => true,
+          () => false,
+        );
+        this.refreshIfStillOpen(store);
+        // The report is scoped to a sheet slug, and slugs recur across worlds, so an outcome
+        // arriving after the user has opened another one would surface under whatever character
+        // there happens to share the name (PR review).
+        if (!this.stillOpen(store)) return;
+        report(
+          accepted ? "accepted" : "failed",
+          accepted ? undefined : "The character sheet was copied in but could not be recorded. Try again.",
+        );
         return;
       }
       case "generate-main-photo": {
@@ -3464,12 +3752,17 @@ export class Coordinator {
         const frozen = take.params["provenance"] as
           { sheets?: Record<string, number>; anchorFile?: string } | undefined;
         const sheetVersion = frozen?.sheets?.[msg.sheetId] ?? take.provenance.sheets[msg.sheetId];
-        if (sheetVersion === undefined || !frozen?.anchorFile) return;
+        // A generated take must name the main photo it was conditioned on — without it there is
+        // no telling what the composite depicts. An uploaded one has no such lineage and never
+        // will, so requiring one here left the "Accept this sheet" button on an upload whose
+        // first commit failed permanently inert: pressed, and nothing (PR #241 review).
+        const uploaded = take.provider === "user";
+        if (sheetVersion === undefined || (!uploaded && !frozen?.anchorFile)) return;
         await acceptCharacterSheet(store, sheet, {
           file: `takes/${take.id}/${take.media}`,
           takeId: take.id,
           sheetVersion,
-          anchorFile: frozen.anchorFile,
+          ...(frozen?.anchorFile ? { anchorFile: frozen.anchorFile } : {}),
           artDirectionVersion: take.provenance.artDirectionVersion ?? store.getBundle().artDirection.version,
           review,
         }).catch(() => {});
@@ -4088,6 +4381,54 @@ export class Coordinator {
         lookAlreadyProposed: bundle.proposals.some((staged) => staged.proposal.kind === "art-direction"),
       }),
     );
+    this.transport.broadcastSnapshot();
+  }
+
+  /**
+   * Is a character sheet already being generated for this character?
+   *
+   * The same reading the kit screen takes, made where the queue actually lives: not yet terminal,
+   * or terminal without a finished finalization — a job whose take has not been recorded will
+   * still accept and designate itself when it is. That includes a finalization that *failed*,
+   * because Activity offers to retry it and a successful retry runs the same acceptance, landing
+   * the older generated sheet on top of a newer upload (PR review). Scoped to the world because
+   * sheet slugs recur across them.
+   */
+  private characterSheetJobRunning(worldId: string, sheetId: string): boolean {
+    const settled = ["succeeded", "failed", "cancelled", "needs-reconciliation"];
+    return (this.jobQueue?.listJobs() ?? []).some(
+      (job) =>
+        job.worldId === worldId &&
+        job.target.kind === "character-sheet" &&
+        job.target.id?.startsWith(`${sheetId}/`) === true &&
+        (!settled.includes(job.status) ||
+          (job.finalization !== undefined && job.finalization.status !== "complete")),
+    );
+  }
+
+  /**
+   * Is this still the world the app is in? (PR #241 review.)
+   *
+   * A file dialog stands open for as long as the person in front of it wants, and they may well
+   * open another world while it is up. Identity, not the id: switching worlds closes the old
+   * store, and writing through a closed one is the thing to stop.
+   */
+  private stillOpen(store: WorldStore): boolean {
+    return this.opts.provider.openStore?.() === store;
+  }
+
+  /**
+   * Publish this store's own bundle, and only while it is still the open one.
+   *
+   * Deliberately not `refreshWorldSnapshot`: that *loads* the world it is given, and its first
+   * act is an awaited directory lookup. A world opened during that await is closed and the old
+   * one reopened underneath it — so the check would hold and the harm land anyway (PR review).
+   * Nothing is lost by reading the store directly; `loadWorld` returns this same bundle when the
+   * world is already open, which is the only case that reaches here.
+   */
+  private refreshIfStillOpen(store: WorldStore): void {
+    if (!this.stillOpen(store)) return;
+    this.readModel.setWorld(store.getBundle());
     this.transport.broadcastSnapshot();
   }
 

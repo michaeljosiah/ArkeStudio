@@ -212,7 +212,12 @@ export async function acceptCharacterSheet(
     file: string;
     takeId: Take["id"];
     sheetVersion: number;
-    anchorFile: string;
+    /**
+     * The main photo the generation was conditioned on. Optional only for an upload, which was
+     * conditioned on nothing: recording an anchor it never saw would claim a lineage that does
+     * not exist, and `compilationIsStale` reads the absence as "no anchor to fall out of date".
+     */
+    anchorFile?: string;
     artDirectionVersion: number;
     review?: ReviewDecision;
   },
@@ -226,7 +231,7 @@ export async function acceptCharacterSheet(
     compiledAt: store.now(),
     source: input.takeId,
     accepted: true,
-    anchorFile: input.anchorFile,
+    ...(input.anchorFile !== undefined ? { anchorFile: input.anchorFile } : {}),
     artDirectionVersion: input.artDirectionVersion,
   };
   const others = kit.compilations.filter((candidate) => candidate.file !== input.file);
