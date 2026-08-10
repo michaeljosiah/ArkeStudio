@@ -121,15 +121,45 @@ describe("main-photo acceptance feedback", () => {
 });
 
 describe("uploading a main photo or character sheet by hand", () => {
-  it("leaves no in-flight state, so a cancelled file dialog cannot wedge the buttons", () => {
+  it("a press that never went out leaves no button stuck behind it", () => {
     __setStateForTest(FIXTURE_STATE);
     const worldId = FIXTURE_STATE.world!.meta.worldId;
+    // Nothing is connected here, so neither message is sent. The in-flight mark each press makes
+    // has to come back off, or the button waits for an answer that can never arrive.
     importMainPhoto(worldId, "maren-kest");
     importCharacterSheet(worldId, "maren-kest");
-    // Cancelling reports nothing at all, by design — so anything set optimistically here would
-    // have nothing to clear it, and both buttons would read as busy for the rest of the session.
     assert.equal(__mainPhotoAcceptanceForTest()["maren-kest"], undefined);
     assert.equal(__characterSheetAcceptanceForTest()["maren-kest"], undefined);
+  });
+
+  it("a closed dialog releases the button without leaving a message under the card", () => {
+    __setStateForTest(FIXTURE_STATE);
+    const worldId = FIXTURE_STATE.world!.meta.worldId;
+    const acceptance = (status: "failed" | "cancelled") => ({
+      at: "2026-08-04T08:00:00Z",
+      type: "character-sheet.acceptance" as const,
+      worldId,
+      sheetId: "maren-kest",
+      status,
+      ...(status === "failed" ? { reason: "That file could not be read. Try choosing it again." } : {}),
+    });
+    __applyEventForTest(acceptance("failed"));
+    assert.equal(__characterSheetAcceptanceForTest()["maren-kest"]?.status, "failed");
+
+    // Cancelling is an ending, not an outcome: it frees the button and says nothing, so the
+    // previous failure does not linger either.
+    __applyEventForTest(acceptance("cancelled"));
+    assert.equal(__characterSheetAcceptanceForTest()["maren-kest"], undefined);
+
+    __applyEventForTest({
+      at: "2026-08-04T08:00:00Z",
+      type: "main-photo.acceptance",
+      worldId,
+      sheetId: "maren-kest",
+      status: "cancelled",
+      candidateRetained: false,
+    });
+    assert.equal(__mainPhotoAcceptanceForTest()["maren-kest"], undefined);
   });
 
   it("says why an uploaded sheet did not take, and stops saying it once cleared", () => {

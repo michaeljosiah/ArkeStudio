@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ClientMessage, DomainEvent, ReferenceKit } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
@@ -105,14 +105,18 @@ describe("uploading a main photo by hand", () => {
     }
   });
 
-  it("says nothing at all when the dialog is closed, and changes nothing", async () => {
+  it("answers a closed dialog with a cancellation, and changes nothing", async () => {
     const { provider, worldDir, events, send } = await harness(() => []);
     try {
       const before = await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8");
       await send({ kind: "import-main-photo", worldId: WORLD_ID, sheetId: "maren-kest" });
       assert.equal(await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8"), before);
-      // Not a failure — an error under a card the user just decided to leave alone reads as one.
-      assert.deepEqual(events.filter((event) => event.type === "main-photo.acceptance"), []);
+      // Reported, but as a cancellation carrying no reason: the button that opened the dialog is
+      // waiting for an ending, and an error under a card the user chose to leave alone reads as
+      // a fault that is not there.
+      const reported = theReport(events, "main-photo.acceptance");
+      assert.equal(reported.status, "cancelled");
+      assert.equal(reported.reason, undefined);
     } finally {
       await provider.close();
     }
@@ -254,6 +258,63 @@ describe("uploading a character sheet by hand", () => {
       const reviews = await readFile(join(worldDir, "references", "reviews.jsonl"), "utf8");
       assert.ok(reviews.includes(take.id), "and the press is recorded as the review it is");
     } finally {
+      await provider.close();
+    }
+  });
+
+  // The button is disabled against the jobs the screen could see when it was pressed. A job that
+  // starts while the dialog stands open — or from another connected client — is invisible to it,
+  // and would land afterwards, designate itself, and replace the upload without a word.
+  it("refuses while a generated sheet for this character is still on its way", async () => {
+    const { root, worldDir } = await makeTempRoot();
+    const running = {
+      id: "jb_01J8E0000000000000000000JX",
+      idempotencyKey: "01J8E1000000000000000000KX",
+      worldId: WORLD_ID,
+      target: { kind: "character-sheet", id: "maren-kest/gx" },
+      capability: "image",
+      provider: "fal",
+      model: "flux-pro-1.1",
+      params: {},
+      estimatedMicroUsd: 40000,
+      status: "running",
+      providerJobId: "rm_x",
+      attempt: 1,
+      error: null,
+      createdAt: CLOCK,
+      updatedAt: CLOCK,
+    };
+    await mkdir(join(root, "queue"), { recursive: true });
+    await writeFile(join(root, "queue", "jobs.jsonl"), `${JSON.stringify(running)}\n`, "utf8");
+
+    const picked = await fileOutsideTheWorld("my-own-sheet.png");
+    const provider = new FsWorldProvider(root, { clock: () => CLOCK });
+    await provider.loadWorld(WORLD_ID);
+    const events: DomainEvent[] = [];
+    const coordinator = new Coordinator({
+      provider,
+      adapter: null,
+      changeLogPath: join(root, "logs", "changes.jsonl"),
+      appVersion: "test",
+      appRoot: root,
+      // Any dispatch surface at all is enough for the queue to exist; nothing here submits.
+      dispatchClients: {},
+      observeEvent: (event) => events.push(event),
+      pickFiles: async () => [picked],
+    });
+    await coordinator.start(0);
+    try {
+      const before = await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8");
+      await (
+        coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }
+      ).handleClientMessage({ kind: "import-character-sheet", worldId: WORLD_ID, sheetId: "maren-kest" });
+
+      assert.equal(await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8"), before);
+      const reported = theReport(events, "character-sheet.acceptance");
+      assert.equal(reported.status, "failed");
+      assert.match(reported.reason ?? "", /already on its way/);
+    } finally {
+      await coordinator.stop();
       await provider.close();
     }
   });

@@ -648,19 +648,26 @@ function handleFrame(json: string): void {
         audioBase64: event.audioBase64,
       };
     } else if (event.type === "main-photo.acceptance") {
-      mainPhotoAcceptance = {
-        ...mainPhotoAcceptance,
-        [event.sheetId]: {
+      // A cancelled dialog leaves no trace: it releases the button and says nothing, because
+      // there is nothing to say about a choice the user declined to make.
+      mainPhotoAcceptance = { ...mainPhotoAcceptance };
+      if (event.status === "cancelled") delete mainPhotoAcceptance[event.sheetId];
+      else {
+        mainPhotoAcceptance[event.sheetId] = {
           status: event.status,
           ...(event.reason ? { reason: event.reason } : {}),
           candidateRetained: event.candidateRetained,
-        },
-      };
+        };
+      }
     } else if (event.type === "character-sheet.acceptance") {
-      characterSheetAcceptance = {
-        ...characterSheetAcceptance,
-        [event.sheetId]: { status: event.status, ...(event.reason ? { reason: event.reason } : {}) },
-      };
+      characterSheetAcceptance = { ...characterSheetAcceptance };
+      if (event.status === "cancelled") delete characterSheetAcceptance[event.sheetId];
+      else {
+        characterSheetAcceptance[event.sheetId] = {
+          status: event.status,
+          ...(event.reason ? { reason: event.reason } : {}),
+        };
+      }
     }
     let importReport = current.importReport;
     let artifactNotices = current.artifactNotices;
@@ -1413,17 +1420,32 @@ export function importMainPhotoCandidate(worldId: string, sheetId: string): void
 /**
  * Bring the whole main photo in from a file, no generation involved.
  *
- * No optimistic in-flight state, unlike `chooseAnchor`: the host's file dialog is modal to the
- * window, so it is its own feedback and a second press is not possible while it is open. An
- * optimistic flip would also have no way back — a cancelled dialog reports nothing, by design,
- * and the button would read "uploading" for the rest of the session.
+ * In flight from the press until the coordinator answers. The dialog is modal while it is open,
+ * but it closes long before the work is done — up to 50 MB still to read, copy and commit — and
+ * the window is live again for all of it. A second press in that gap opens a competing import of
+ * the same sheet, and the two accepts race (PR review). This is only safe to set because a
+ * cancelled dialog now reports "cancelled": without that ending, the button would have had no way
+ * back from a dialog somebody simply closed.
  */
 export function importMainPhoto(worldId: string, sheetId: string): void {
-  send({ kind: "import-main-photo", worldId, sheetId });
+  if (current.mainPhotoAcceptance[sheetId]?.status === null) return;
+  emitChange({
+    ...current,
+    mainPhotoAcceptance: {
+      ...current.mainPhotoAcceptance,
+      [sheetId]: { status: null, candidateRetained: false },
+    },
+  });
+  if (!send({ kind: "import-main-photo", worldId, sheetId })) clearMainPhotoAcceptance(sheetId);
 }
 
 export function importCharacterSheet(worldId: string, sheetId: string): void {
-  send({ kind: "import-character-sheet", worldId, sheetId });
+  if (current.characterSheetAcceptance[sheetId]?.status === null) return;
+  emitChange({
+    ...current,
+    characterSheetAcceptance: { ...current.characterSheetAcceptance, [sheetId]: { status: null } },
+  });
+  if (!send({ kind: "import-character-sheet", worldId, sheetId })) clearCharacterSheetAcceptance(sheetId);
 }
 
 export function useCharacterSheetAcceptance() {

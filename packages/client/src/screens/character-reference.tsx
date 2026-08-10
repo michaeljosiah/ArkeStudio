@@ -188,6 +188,10 @@ export function CharacterReferenceScreen() {
   }, [sheetUpload?.status, sheetId]);
   if (!world || !sheet || !sheetId) return null;
   const canUpload = canPickFiles();
+  // A null status is the press itself: sent, not yet answered. The host's dialog is up, or its
+  // bytes are still being read.
+  const photoUploading = photoUpload?.status === null;
+  const sheetUploading = sheetUpload?.status === null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId) ?? null;
   const photo = kit ? mainPhotoFor(kit) : null;
   const compilation = kit ? designatedCompilation(kit) : null;
@@ -216,7 +220,15 @@ export function CharacterReferenceScreen() {
       latestSheetJob.finalization?.status === "pending"
     : false;
   const reviewTake = pendingSheetTakes[0] ?? null;
-  const sheetPath = reviewTake
+  // Whichever arrived last is what the card is about. A take waiting on review is usually the
+  // newest thing here — but not when a sheet has just been uploaded past an older take that was
+  // stranded undecided, and showing that one would say the upload did nothing (PR review). The
+  // stranded take stays in the review list below either way; it is not being hidden, only
+  // out-ranked.
+  const showTake =
+    reviewTake !== null &&
+    (compilation === null || (reviewTake.completedAt ?? reviewTake.dispatchedAt) > compilation.compiledAt);
+  const sheetPath = showTake
     ? `references/${sheetId}/takes/${reviewTake.id}/${reviewTake.media}`
     : compilation
       ? `references/${sheetId}/${compilation.file}`
@@ -249,11 +261,11 @@ export function CharacterReferenceScreen() {
             </div>
             <Button
               variant="ghost"
-              disabled={!canUpload}
+              disabled={!canUpload || photoUploading}
               title={canUpload ? "Use an image from this computer — nothing is generated" : UPLOAD_UNAVAILABLE}
               onClick={() => importMainPhoto(world.meta.worldId, sheetId)}
             >
-              Upload
+              {photoUploading ? "Uploading…" : "Upload"}
             </Button>
             <Button onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/main-photo`)}>
               {photo ? "Replace" : "Create"}
@@ -275,10 +287,10 @@ export function CharacterReferenceScreen() {
             ) : (
               <Portrait worldSlug={world.meta.slug} path="" label="Character sheet outstanding" radius={0} />
             )}
-            <span className={cx("fy-reference-card__status", stale && !reviewTake && "fy-reference-card__status--warn")}>
+            <span className={cx("fy-reference-card__status", stale && !showTake && "fy-reference-card__status--warn")}>
               {runningSheet
                 ? "GENERATING"
-                : reviewTake
+                : showTake
                   ? "READY FOR REVIEW"
                 : stale
                   ? "MAIN PHOTO CHANGED · REGENERATE"
@@ -300,7 +312,7 @@ export function CharacterReferenceScreen() {
                 itself when it lands, and would quietly replace a sheet uploaded while it ran. */}
             <Button
               variant="ghost"
-              disabled={!canUpload || runningSheet}
+              disabled={!canUpload || runningSheet || sheetUploading}
               title={
                 !canUpload
                   ? UPLOAD_UNAVAILABLE
@@ -310,7 +322,7 @@ export function CharacterReferenceScreen() {
               }
               onClick={() => importCharacterSheet(world.meta.worldId, sheetId)}
             >
-              Upload
+              {sheetUploading ? "Uploading…" : "Upload"}
             </Button>
             <Button disabled={!photo || runningSheet} onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/model-sheet`)}>
               {runningSheet ? "Generating" : compilation ? "Regenerate" : "Generate"}

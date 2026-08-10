@@ -3437,7 +3437,11 @@ export class Coordinator {
       case "import-main-photo": {
         const store = this.opts.provider.openStore?.();
         const pick = this.opts.pickFiles;
-        const report = (status: "accepted" | "failed", candidateRetained: boolean, reason?: string) =>
+        const report = (
+          status: "accepted" | "failed" | "cancelled",
+          candidateRetained: boolean,
+          reason?: string,
+        ) =>
           this.emit({
             at: new Date().toISOString(),
             type: "main-photo.acceptance",
@@ -3453,12 +3457,18 @@ export class Coordinator {
           return;
         }
         const [source] = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
-        // A closed dialog is not a failure. Reporting one would put an error under a card the
-        // user just decided to leave alone.
-        if (!source) return;
+        // A closed dialog is not a failure — no error belongs under a card the user just decided
+        // to leave alone — but it is still an ending, and the button that opened it is waiting.
+        if (!source) {
+          report("cancelled", false);
+          return;
+        }
         // Nor is walking away mid-dialog. Nothing to report to a screen that has gone.
         if (!this.stillOpen(store)) return;
         const picked = await readPickedImage(source);
+        // Again after the read: 50 MB takes a moment, and a world switched during it leaves this
+        // holding a closed store, which would still accept writes (PR review).
+        if (!this.stillOpen(store)) return;
         if ("error" in picked) {
           report("failed", false, picked.error);
           return;
@@ -3503,7 +3513,7 @@ export class Coordinator {
       case "import-character-sheet": {
         const store = this.opts.provider.openStore?.();
         const pick = this.opts.pickFiles;
-        const report = (status: "accepted" | "failed", reason?: string) =>
+        const report = (status: "accepted" | "failed" | "cancelled", reason?: string) =>
           this.emit({
             at: new Date().toISOString(),
             type: "character-sheet.acceptance",
@@ -3518,11 +3528,26 @@ export class Coordinator {
           return;
         }
         const [source] = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
-        if (!source) return;
+        if (!source) {
+          report("cancelled");
+          return;
+        }
         if (!this.stillOpen(store)) return;
         const picked = await readPickedImage(source);
+        if (!this.stillOpen(store)) return;
         if ("error" in picked) {
           report("failed", picked.error);
+          return;
+        }
+        // The button was disabled against the jobs the screen could see when it was pressed. One
+        // started since — while the dialog stood open, or by another client — would land later,
+        // designate itself, and replace this upload without a word. Refused here, where the queue
+        // is actually known (PR review).
+        if (this.characterSheetJobRunning(msg.worldId, msg.sheetId)) {
+          report(
+            "failed",
+            "A generated character sheet is already on its way for this character. Wait for it to land, or cancel it in Activity, then upload.",
+          );
           return;
         }
         const media = `character-sheet-upload-${Date.now().toString(36)}${picked.extension}`;
@@ -4278,6 +4303,24 @@ export class Coordinator {
       }),
     );
     this.transport.broadcastSnapshot();
+  }
+
+  /**
+   * Is a character sheet already being generated for this character?
+   *
+   * The same reading the kit screen takes, made where the queue actually lives: not yet terminal,
+   * or terminal but still finalizing — a job whose take has not been recorded will still accept
+   * and designate itself when it is. Scoped to the world because sheet slugs recur across them.
+   */
+  private characterSheetJobRunning(worldId: string, sheetId: string): boolean {
+    const settled = ["succeeded", "failed", "cancelled", "needs-reconciliation"];
+    return (this.jobQueue?.listJobs() ?? []).some(
+      (job) =>
+        job.worldId === worldId &&
+        job.target.kind === "character-sheet" &&
+        job.target.id?.startsWith(`${sheetId}/`) === true &&
+        (!settled.includes(job.status) || job.finalization?.status === "pending"),
+    );
   }
 
   /**
