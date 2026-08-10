@@ -102,6 +102,19 @@ export interface PromptBlocks {
   summary: string;
   /** What is true for the whole clip: location look, and prose for subjects carrying no image. */
   standing: string;
+  /**
+   * The room, in the location's own authored words (SPEC-019; #246). Empty unless the scene
+   * inherits a location whose Look is nonblank and the dispatch is video: a still does not need
+   * to be told where the camera could stand, and stills stay byte-identical to what they were.
+   */
+  spatial: string;
+  /**
+   * Where the camera stands and what it faces, taken verbatim from the shot. Empty unless the
+   * spatial block is present and the shot authored a camera value — an anchor is never parsed
+   * out of ordinary camera vocabulary, because inferring a fixture is how "closer to the fridge"
+   * moves the fridge.
+   */
+  cameraAnchor: string;
   /** The shot's own action. */
   body: string;
   /** This shot's camera and audio direction — part of the beat, in a pass. */
@@ -127,9 +140,34 @@ export interface AssembleInput {
    * the fullest form and never the wrong one.
    */
   carriedSheetIds?: ReadonlySet<string>;
+  /**
+   * What the planned model does. The spatial and camera-anchor blocks are video-only: they exist
+   * to place a camera in a room over time, which is not a question a still asks. Absent — a
+   * preview with no model chosen — they are omitted, which is the prior behaviour exactly.
+   */
+  capability?: string;
 }
 
-/** The four blocks, before they are joined (R-5). */
+/**
+ * The room as the location authored it, or null (#246).
+ *
+ * Deliberately not clever: the complete Look body, whitespace collapsed so that Markdown line
+ * wrapping in a sheet cannot change what a provider receives. Nothing is extracted, inferred or
+ * asked of an agent — a fixture list nobody wrote is a fixture list nobody can be held to, and
+ * the failure mode this block exists to fix is precisely a model inventing geometry.
+ */
+export function spatialLayoutFor(scene: Scene, sheets: readonly Sheet[]): string | null {
+  const locationId = scene.inherits?.location;
+  const location = locationId !== undefined ? sheets.find((sheet) => sheet.id === locationId) : undefined;
+  if (location?.type !== "location") return null;
+
+  const look = location.sections.find((section) => section.heading === "Look")?.body.trim();
+  if (look === undefined || look.length === 0) return null;
+
+  return `SPATIAL LAYOUT\n${location.name} — ${look.replace(/\s+/g, " ")}`;
+}
+
+/** The blocks, before they are joined (R-5). */
 export function assembleBlocks(input: AssembleInput): PromptBlocks {
   const { world, sheets, scene, shot } = input;
   const carried = input.carriedSheetIds ?? new Set<string>();
@@ -157,10 +195,15 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
     .filter((s) => s.length > 0)
     .join(" ");
 
+  // The room's own words, video only. When it is present it replaces the location's first Look
+  // clause below rather than joining it — saying the same room twice, once abridged, invites the
+  // model to arbitrate between two descriptions of one place.
+  const spatial = input.capability === "video" ? (spatialLayoutFor(scene, sheets) ?? "") : "";
+
   // 2 — standing: true for the whole clip. A subject whose image travels contributes nothing
   // here; a sketch citation contributes its appearance once, rather than at every mention.
   const standingParts: string[] = [];
-  if (location) {
+  if (location && spatial.length === 0) {
     const look = firstClause(location, "Look");
     standingParts.push(sentence(look ? `${location.name} — ${look}` : location.name));
   }
@@ -177,9 +220,18 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   for (const { sheet } of cast) description = description.replaceAll(`@${sheet.id}`, sheet.name);
   const body = sentence(description);
 
-  // 4 — direction: this shot's camera and audio. Per-beat, so in a pass it travels with the beat.
+  // 4 — the camera's own block, when there is a room to place it in. Verbatim: whatever the shot
+  // authored is what the anchor says, so a generic "MCU · slow push-in" stays generic rather than
+  // being dressed up as a placement nobody wrote.
+  const authoredCamera = shot.camera?.trim() ?? "";
+  const cameraAnchor =
+    spatial.length > 0 && authoredCamera.length > 0 ? `CAMERA ANCHOR\n${authoredCamera}` : "";
+
+  // 5 — direction: this shot's camera and audio. Per-beat, so in a pass it travels with the beat.
+  // The camera is spoken once: if it has been raised into its own anchor block, it does not also
+  // trail the description.
   const directionParts: string[] = [];
-  if (shot.camera) directionParts.push(sentence(shot.camera));
+  if (shot.camera && cameraAnchor.length === 0) directionParts.push(sentence(shot.camera));
   if (shot.audio?.kind && shot.audio.kind !== "silence") {
     directionParts.push(
       sentence(shot.audio.line ? `${shot.audio.kind}: "${shot.audio.line}"` : shot.audio.kind),
@@ -187,15 +239,23 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   }
   const direction = directionParts.filter((s) => s.length > 0).join(" ");
 
-  // 5 — persistent: what must not drift, once at the end (R-6).
+  // 6 — persistent: what must not drift, once at the end (R-6).
   const persistent = style ? sentence(`Throughout: ${style}`) : "";
 
-  return { summary, standing, body, direction, persistent };
+  return { summary, standing, spatial, cameraAnchor, body, direction, persistent };
 }
 
 /** The blocks joined, one paragraph each, empty ones omitted rather than emitted (R-7). */
 export function joinBlocks(blocks: PromptBlocks): string {
-  return [blocks.summary, blocks.standing, blocks.body, blocks.direction, blocks.persistent]
+  return [
+    blocks.summary,
+    blocks.standing,
+    blocks.spatial,
+    blocks.cameraAnchor,
+    blocks.body,
+    blocks.direction,
+    blocks.persistent,
+  ]
     .map((block) => block.trim())
     .filter((block) => block.length > 0)
     .join("\n\n");
@@ -217,7 +277,14 @@ export function assemblePassBlocks(input: {
   entries: ReadonlyArray<{ shot: Shot; prompt: { text: string; overridden: boolean } }>;
   artDirection?: string;
   carriedSheetIds?: ReadonlySet<string>;
-}): { summary: string; standing: string; beats: Array<{ shot: Shot; text: string }>; persistent: string } {
+  capability?: string;
+}): {
+  summary: string;
+  standing: string;
+  spatial: string;
+  beats: Array<{ shot: Shot; text: string }>;
+  persistent: string;
+} {
   const blocksFor = (shot: Shot): PromptBlocks =>
     assembleBlocks({
       world: input.world,
@@ -226,6 +293,7 @@ export function assemblePassBlocks(input: {
       shot,
       ...(input.artDirection !== undefined ? { artDirection: input.artDirection } : {}),
       ...(input.carriedSheetIds !== undefined ? { carriedSheetIds: input.carriedSheetIds } : {}),
+      ...(input.capability !== undefined ? { capability: input.capability } : {}),
     });
   const first = input.entries[0];
   const lead = first ? blocksFor(first.shot) : null;
@@ -241,17 +309,27 @@ export function assemblePassBlocks(input: {
   const beats = input.entries.map((entry) => {
     if (entry.prompt.overridden) return { shot: entry.shot, text: entry.prompt.text };
     const blocks = blocksFor(entry.shot);
+    // The room is stated once for the pass; the camera is stated per beat, because that is what
+    // changes between them.
+    const beatBody = [blocks.body, blocks.direction].filter((b) => b.length > 0).join(" ");
     return {
       shot: entry.shot,
-      text: [blocks.body, blocks.direction].filter((b) => b.length > 0).join(" "),
+      text: blocks.cameraAnchor.length > 0 ? `${blocks.cameraAnchor}\n${beatBody}` : beatBody,
     };
   });
   return {
     summary: lead?.summary ?? "",
     standing: standing.join(" "),
+    // Derived from the scene, so a pass keeps its room even when every beat in it is overridden —
+    // the same reason the standing block survives an overridden beat today.
+    spatial: input.scene.inherits?.location !== undefined ? (lead?.spatial ?? spatialFromScene()) : "",
     beats,
     persistent: lead?.persistent ?? "",
   };
+
+  function spatialFromScene(): string {
+    return input.capability === "video" ? (spatialLayoutFor(input.scene, input.sheets) ?? "") : "";
+  }
 }
 
 /** The assembled form: cited sheets, the scene's location, the tone, the shot's direction. */
@@ -262,6 +340,7 @@ export function assemblePrompt(
   shot: Shot,
   artDirection?: string,
   carriedSheetIds?: ReadonlySet<string>,
+  capability?: string,
 ): string {
   return joinBlocks(
     assembleBlocks({
@@ -271,6 +350,7 @@ export function assemblePrompt(
       shot,
       ...(artDirection !== undefined ? { artDirection } : {}),
       ...(carriedSheetIds !== undefined ? { carriedSheetIds } : {}),
+      ...(capability !== undefined ? { capability } : {}),
     }),
   );
 }
@@ -289,10 +369,13 @@ export function promptFor(
   shot: Shot,
   artDirection?: string,
   carriedSheetIds?: ReadonlySet<string>,
+  capability?: string,
 ): { text: string; overridden: boolean } {
+  // An override owns every word of its body, including whatever it says about the room and the
+  // camera. Nothing generated is merged into it (D10's reasoning, one layer up).
   if (shot.promptOverride) return { text: shot.promptOverride.text, overridden: true };
   return {
-    text: assemblePrompt(world, sheets, scene, shot, artDirection, carriedSheetIds),
+    text: assemblePrompt(world, sheets, scene, shot, artDirection, carriedSheetIds, capability),
     overridden: false,
   };
 }
@@ -870,6 +953,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       shot,
       input.artDirection?.description,
       new Set(bound.map((reference) => reference.sheetId)),
+      model.capability,
     );
     const parts: PromptParts = {
       preamble: bindingPreamble(bound),
