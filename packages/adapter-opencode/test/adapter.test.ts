@@ -739,6 +739,59 @@ describe("SPEC-019 authoring skills (R-14..R-20)", () => {
     assert.match(storyboard.body, /at or under the cap/);
   });
 
+  it("ships Seedance scene-drafting guidance v2", () => {
+    const drafting = skillFor("scene-drafting", "seedance")!;
+    assert.equal(drafting.id, "seedance-scene-drafting");
+    assert.equal(drafting.version, 2, "the four production lessons are a body change, and a body change is a version");
+  });
+
+  it("leaves the Seedance storyboard skill at v1", () => {
+    const storyboard = skillFor("storyboard", "seedance")!;
+    assert.equal(storyboard.version, 1, "the storyboard body did not change, so its version must not");
+  });
+
+  it("states per-shot continuity without forbidding whole-scene boundaries", () => {
+    const body = skillFor("scene-drafting", "seedance")!.body;
+    assert.match(body, /one uninterrupted camera setup/);
+    assert.match(body, /per-second\s+phases/i, "the failure mode is named, not implied");
+    assert.match(body, /In the first 3 seconds he reaches the door/, "the wrong contrast is quotable");
+    assert.match(body, /One continuous shot: overwhelmed, he drifts to the door/, "and so is the right one");
+    assert.match(
+      body,
+      /whole-scene clip/,
+      "the rule confines itself to one shot rather than fighting whole-scene packing",
+    );
+  });
+
+  it("teaches emotion, one smooth motion, and fixture camera anchors with contrasts", () => {
+    const body = skillFor("scene-drafting", "seedance")!.body;
+    // Emotion: intent plus one observable cue, with both sides of the contrast.
+    assert.match(body, /State the intended emotion directly/);
+    assert.match(body, /one observable cue/);
+    assert.match(body, /He crosses the room, stops, turns, wipes his eye/);
+    assert.match(body, /his lower lip trembles/);
+    // Motion: one dominant movement that survives a reversed clip.
+    assert.match(body, /one smooth, dominant motion/);
+    assert.match(body, /reverses the clip in post/);
+    // Camera anchors: fixture and facing first, never a relative nudge, never an invented fixture.
+    assert.match(body, /move the camera closer to the fridge/);
+    assert.match(body, /at the kettle beside the fridge, facing the hallway; medium close-up, slow push-in/);
+    assert.match(body, /[Nn]ever invent a fixture/);
+  });
+
+  it("injects the v2 body only into the scene writer for the Seedance family", () => {
+    const config = buildSessionConfig({ skillFamily: "seedance" });
+    const agents = agentsIn(config);
+    assert.match(agents["scene-writer"]!.prompt, /Camera anchors\./, "the scene writer drafts under v2");
+    for (const [name, agent] of Object.entries(agents)) {
+      if (name === "scene-writer") continue;
+      assert.ok(
+        !agent.prompt.includes("Camera anchors."),
+        `${name} does not author shots and must not carry shot-drafting guidance`,
+      );
+    }
+  });
+
   it("every shipped skill carries an identity and a version to record", () => {
     for (const skill of SKILLS) {
       assert.ok(skill.id.length > 0);
