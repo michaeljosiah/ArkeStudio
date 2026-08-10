@@ -307,13 +307,38 @@ export async function recordUploadedCharacterSheetTake(
   media: string,
   data: Uint8Array,
 ): Promise<Take> {
+  return recordUploadedImageTake(store, sheetId, "sheet", media, data);
+}
+
+/**
+ * A location view the user photographed, drew or made elsewhere (#243). The same shape as an
+ * uploaded character sheet, and deliberately a take rather than a loose candidate: acceptance
+ * reads a pending take, so an upload that landed anywhere else would need a second accept path
+ * that could disagree with the first about what a view is.
+ */
+export async function recordUploadedLocationViewTake(
+  store: WorldStore,
+  sheetId: string,
+  media: string,
+  data: Uint8Array,
+): Promise<Take> {
+  return recordUploadedImageTake(store, sheetId, "location-view", media, data);
+}
+
+async function recordUploadedImageTake(
+  store: WorldStore,
+  sheetId: string,
+  kind: Take["kind"],
+  media: string,
+  data: Uint8Array,
+): Promise<Take> {
   // A plain filename and nothing else. `basename` alone lets "." and ".." through — basename("..")
   // is ".." — and both name a directory that already exists, so the write would land on something
   // real instead of failing cleanly.
   if (basename(media) !== media || media === "." || media === "..") {
     throw new Error(`unsafe media name ${media}`);
   }
-  const take = uploadedTake(store, sheetId, "sheet", media, { uploadedFile: media });
+  const take = uploadedTake(store, sheetId, kind, media, { uploadedFile: media });
   await store.gateOp(() =>
     writeTakeDirectory(store, sheetId, take, async (dir) => {
       // Staged and renamed like every other write here, so a half-written 40 MB sheet cannot be

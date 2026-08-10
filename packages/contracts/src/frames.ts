@@ -746,6 +746,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * The host picker, landing a candidate view — never accepted in the same motion, and so
+   * carrying no name: naming *is* the acceptance, and asking for one here would put the
+   * duplicate-name confirmation behind a file dialog that has already closed.
+   */
+  z
+    .object({
+      kind: z.literal("import-location-view-candidate"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+    })
+    .strict(),
+  /**
    * Accept a candidate as an active view and rebuild the sheet.
    *
    * `replaceExistingName` is the confirmation the design turn requires: without it a colliding

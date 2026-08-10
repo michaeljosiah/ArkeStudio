@@ -20,7 +20,7 @@ import { AppChrome } from "../components/chrome.js";
 import { DispatchBar, resolveModel, usableModels } from "../components/dispatch-bar.js";
 import { Loading } from "../components/loading.js";
 import { ImageDialog } from "../components/image-dialog.js";
-import { characterPortraitPath, Portrait, sheetPortraitPath } from "../components/portrait.js";
+import { characterPortraitPath, locationPortraitPath, Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
 import { DictationButton } from "../components/dictation.js";
 import { ExtractionOffer } from "../components/extraction-offer.js";
@@ -830,7 +830,13 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
                   <div className="fy-row__thumb">
                     <Portrait
                       worldSlug={slug}
-                      path={kind === "character" ? characterPortraitPath(world, sheet.id) : sheetPortraitPath(sheet.id)}
+                      path={
+                        kind === "character"
+                          ? characterPortraitPath(world, sheet.id)
+                          : kind === "location"
+                            ? locationPortraitPath(world, sheet.id)
+                            : sheetPortraitPath(sheet.id)
+                      }
                       label={sheet.name}
                       radius={6}
                     />
@@ -936,7 +942,7 @@ export function LocationsScreen() {
         {places.map((s) => (
           <button key={s.id} type="button" className="fy-gridcard fy-gridcard--media fy-gridcard--fixed" onClick={() => navigate(`/w/${worldId}/locations/${s.id}`)}>
             <div className="fy-gridcard__frame" style={{ height: 270 }}>
-              <Portrait worldSlug={world?.meta.slug} path={sheetPortraitPath(s.id)} label={`${s.name}: establishing view`} />
+              <Portrait worldSlug={world?.meta.slug} path={locationPortraitPath(world, s.id)} label={`${s.name}: establishing view`} />
             </div>
             <div className="fy-gridcard__pad">
               <div className="fy-gridcard__title">
@@ -1537,14 +1543,36 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
     );
   }
   // Locations and factions (prototype 23b): full-height establishing view, facts to the right.
+  // A location also carries a Reference tab (issue 243, turn 57); a faction has no view set, so the
+  // tabs appear only where there is a second place to go.
+  const locationTabs = sheet.type === "location" && (
+    <nav className="fy-seg fy-location-tabs">
+      <span className="fy-seg__item fy-seg__item--active">Overview</span>
+      <button
+        type="button"
+        className="fy-seg__item"
+        onClick={() => navigate(`/w/${worldId}/locations/${sheet.id}/reference`)}
+      >
+        Reference
+      </button>
+    </nav>
+  );
   return (
     <div className="fy-locdetail" data-screen={screenId}>
       <div className="fy-locdetail__hero">
         <div style={{ width: "100%", height: "100%" }}>
-          <Portrait worldSlug={slug} path={sheetPortraitPath(sheet.id)} label={`${sheet.name}: establishing view`} radius={12} />
+          <Portrait
+            worldSlug={slug}
+            path={sheet.type === "location" ? locationPortraitPath(world, sheet.id) : sheetPortraitPath(sheet.id)}
+            label={`${sheet.name}: establishing view`}
+            radius={12}
+          />
         </div>
       </div>
-      <div className="fy-locdetail__side">{main}</div>
+      <div className="fy-locdetail__side">
+        {locationTabs}
+        {main}
+      </div>
     </div>
   );
 }

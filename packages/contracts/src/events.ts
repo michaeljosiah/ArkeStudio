@@ -225,6 +225,22 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /**
+   * An uploaded location view landed, or did not (#243). A candidate, never an acceptance — the
+   * take arrives unreviewed like a generated one, so the screen has one accept path and not two.
+   * Reported all the same: a refused file and a dead button look identical without it.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("location-view.upload"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      status: z.enum(["landed", "failed", "cancelled"]),
+      reason: z.string().optional(),
+    })
+    .strict(),
+
   /** A provider queue paused, resumed, or its held count moved (SPEC-009 R-8, R-11). */
   z.object({ ...base, type: z.literal("queue.status"), queue: QueueStatusSchema }).strict(),
   /** What start-up reconciliation resolved, reported once (SPEC-009 R-18). */

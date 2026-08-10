@@ -7,6 +7,7 @@ import {
   modelForCapability,
   nativeResolution,
   type AppSettings,
+  type CharacterImageWorkflow,
   type ManifestModel,
   type ModelManifest,
   type ReferenceAngle,
@@ -154,7 +155,7 @@ export interface CharacterGenerationRequest {
 
 function pricedCharacterImage(
   model: ManifestModel,
-  workflow: "main-photo" | "character-sheet" | "character-look" | "reference-tile",
+  workflow: CharacterImageWorkflow,
   referenceImages = 0,
   tier?: SizeTier,
 ): number {
@@ -477,7 +478,7 @@ export function locationViewRequests(
   const style = kit?.styleOverride ?? direction.description;
   const references = input.anchorFile !== undefined ? [input.anchorFile] : [];
   const tier = tierFor(model, input.tier);
-  const estimatedMicroUsd = pricedCharacterImage(model, "main-photo", references.length, tier);
+  const estimatedMicroUsd = pricedCharacterImage(model, "location-view", references.length, tier);
 
   const anchored =
     input.anchorFile !== undefined
@@ -499,7 +500,7 @@ export function locationViewRequests(
         prompt: `${style}. ${sheet.name} — ${locationDescription(sheet)}.${angle} ${input.name}: an establishing photograph of this place with no people in frame, architecture and spatial layout legible, no text or montage.${anchored}`,
         references,
         referenceRoles: references.map((file) => ({ file, role: "environment" as const })),
-        output: characterImageOutput(model, "main-photo", tier),
+        output: characterImageOutput(model, "location-view", tier),
         artDirection: {
           version: direction.version,
           source: kit?.styleOverride ? "sheet" : "world",
