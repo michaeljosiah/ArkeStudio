@@ -215,6 +215,16 @@ export class WorldChatRunner {
     return this.cancelling.has(conversationId);
   }
 
+  /**
+   * Whether any conversation is mid-turn on this runner.
+   *
+   * Asked before a runner is replaced: one holding a live turn holds the only handle that can
+   * stop it, so it outlives a stale store rather than taking an in-flight answer down with it.
+   */
+  hasRunning(): boolean {
+    return this.cancelling.size > 0;
+  }
+
   /** Stop a run now. Local and immediate: the log says interrupted without waiting for a model. */
   cancel(conversationId: ConversationId): boolean {
     const controller = this.cancelling.get(conversationId);

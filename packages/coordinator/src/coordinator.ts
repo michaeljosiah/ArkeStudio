@@ -308,7 +308,7 @@ export class Coordinator {
   private readonly changeLog: ChangeLog;
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
   private readonly worldQuery: WorldQueryServer;
-  private readonly worldChatRunners = new Map<string, WorldChatRunner>();
+  private readonly worldChatRunners = new Map<string, { runner: WorldChatRunner; store: WorldStore }>();
   private readonly grants: GrantStore | null;
   private readonly authoring: AuthoringService | null;
   private readonly genesis: GenesisService | null;
@@ -3924,7 +3924,23 @@ export class Coordinator {
    */
   private worldChatRunner(store: WorldStore): WorldChatRunner {
     const existing = this.worldChatRunners.get(store.worldId);
-    if (existing) return existing;
+    /*
+     * Cached per world, but only while it is the same open store.
+     *
+     * Close a world and reopen it and the provider hands back a new WorldStore, while these
+     * callbacks still close over the old one — so every later prompt would carry the look as it
+     * was before the close, and record that version on its drafts. Wrap-up, reading the store
+     * that is actually open, would then reject every drafted look as moved: conversational look
+     * editing broken until restart, with nothing to point at.
+     *
+     * A runner mid-turn is kept regardless. Replacing it would lose the in-flight run — the thing
+     * a cancel needs — and a turn already talking to a model is a worse thing to drop than a
+     * stale read is to carry for one more turn.
+     */
+    if (existing) {
+      if (existing.store === store || existing.runner.hasRunning()) return existing.runner;
+      this.worldChatRunners.delete(store.worldId);
+    }
 
     const leases = new QueryLeaseRegistry(() => this.opts.provider.openStore?.()?.worldId ?? null);
     const attachments = new WorldChatAttachmentStore(store.dir);
@@ -4027,7 +4043,7 @@ export class Coordinator {
       now: () => new Date().toISOString(),
     });
 
-    this.worldChatRunners.set(store.worldId, runner);
+    this.worldChatRunners.set(store.worldId, { runner, store });
     return runner;
   }
 
@@ -4068,6 +4084,8 @@ export class Coordinator {
         // than having been abandoned by a crash. Read through the same accessor that made the
         // runner, so a conversation mid-turn reports running even on the first projection.
         liveRun: this.worldChatRunner(store).isRunning(loaded.id),
+        // So the rail's count matches what wrap-up will actually carry — see ProjectOptions.
+        lookAlreadyProposed: bundle.proposals.some((staged) => staged.proposal.kind === "art-direction"),
       }),
     );
     this.transport.broadcastSnapshot();

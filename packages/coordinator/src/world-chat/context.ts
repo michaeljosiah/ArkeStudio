@@ -134,7 +134,20 @@ function renderRegistry(
 ): string {
   const lines = candidates
     .filter((c) => c.status === "live")
-    .map((c) => `- [${c.id} r${c.revision}] (${c.classification}, ${c.settledness}) ${c.title}`);
+    .flatMap((c) => {
+      const head = `- [${c.id} r${c.revision}] (${c.classification}, ${c.settledness}) ${c.title}`;
+      /*
+       * A look proposition carries its whole replacement description, and an update to one has to
+       * restate that description whole. The title alone cannot be revised from: once the turn that
+       * wrote it falls out of the recent-turn window, the only text left in front of the model is
+       * the *accepted* look — so "make it a bit warmer" would rebuild the update from the look
+       * being replaced, and the structural key would then supersede the earlier proposition,
+       * silently dropping everything it had said.
+       */
+      if (c.classification !== "art-direction.change") return [head];
+      const description = (c.draft as { description?: string }).description ?? "";
+      return description ? [head, `  proposed look: ${description}`] : [head];
+    });
   const groupLines = groups
     .filter((g) => g.status === "live")
     .flatMap((g) => [

@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
+  ART_DIRECTION_PATH,
   newId,
   type CandidateId,
   type ConversationId,
@@ -495,6 +496,56 @@ describe("what wrap-up refuses", () => {
     const { events } = await w.log.read();
     const last = events.map((e) => e.event.type);
     assert.ok(last.includes("wrapup.failed"), "the intent is closed, so the next wrap-up is not refused as in-flight");
+  });
+
+  /*
+   * Staging itself can refuse — the world-look singleton does, when another conversation gets
+   * there first — and it refuses between two of the loop's calls. What matters is that a wrap-up
+   * stopped half way leaves nothing: no proposals on the approvals screen with no account of
+   * themselves, and no open intent, which the in-flight guard would read as a reason to refuse
+   * every later wrap-up on this conversation until the studio restarted.
+   */
+  it("rolls the whole set back when staging refuses part way", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [
+      candidate({ title: "An ordinary rule that stages first" }),
+      candidate({
+        classification: "art-direction.change",
+        title: "The world takes a painterly look",
+        draft: { description: "Painterly and hand-animated." },
+        checks: { ...candidate().checks, required: [], completed: [] },
+      } as Partial<WorldChangeCandidate>),
+    ]);
+
+    // Somebody else's look proposal appears between the two stage calls.
+    const realStage = w.gate.stage.bind(w.gate);
+    let staged = 0;
+    w.gate.stage = async (input) => {
+      staged += 1;
+      if (staged === 2) await realStage({ kind: "art-direction", summary: "theirs", source: "elsewhere", targets: [{ path: ART_DIRECTION_PATH, content: "{}" }] }).catch(() => undefined);
+      return realStage(input);
+    };
+
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "req-lost-the-slot",
+          expectedConversationSeq: seq,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError,
+    );
+
+    assert.deepEqual(await w.ours(), [], "the rule staged before it went too — all or nothing");
+    const { events } = await w.log.read();
+    assert.ok(
+      events.some((e) => e.event.type === "wrapup.failed"),
+      "and the intent is closed, so the next wrap-up is not refused as in-flight",
+    );
   });
 
   it("refuses a conversation that moved on while it was being read", async () => {
