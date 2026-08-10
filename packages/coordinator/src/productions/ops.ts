@@ -225,7 +225,7 @@ export async function draftSceneSkeleton(
   const scope = `drafts with: ${bundle.meta.name} · canon v${bundle.meta.canonRevision}${
     bundle.meta.tone ? ` · tone: ${bundle.meta.tone}` : ""
   } · ${characters} character${characters === 1 ? "" : "s"} available${guidance}`;
-  const instruction = `${scope}\n\nDraft scene ${number} in ${path} from this brief: "${input.brief}". Fill the shots array: each shot needs id ("sh_" + number), number, title, description with @mentions for every character and the location, camera, audio, durationSec. Propose an inherits block (location, timeOfDay, tone). Check canon for anything the brief touches and keep every line consistent with it. Do not touch any other file.`;
+  const instruction = `${scope}\n\nDraft scene ${number} in ${path} from this brief: "${input.brief}". Fill the shots array: each shot needs id ("sh_" + number), number, title, description with @mentions for every character and the location, camera, audio, durationSec. Write camera as a complete value: name a fixture the location or the brief already supports and what the camera faces, then the shot size and movement — "at the kettle beside the fridge, facing the hallway; medium close-up, slow push-in". Never invent a fixture, and never write a relative correction such as "closer". Propose an inherits block (location, timeOfDay, tone). Check canon for anything the brief touches and keep every line consistent with it. Do not touch any other file.`;
   return { proposalId: proposal.id, path, scope, instruction, skill };
 }
 
@@ -526,10 +526,12 @@ export function composeDispatches(
         ? { artDirection: world.artDirection.description }
         : {}),
       carriedSheetIds: new Set(passReferencePlan.bound.map((reference) => reference.sheetId)),
+      capability: model.capability,
     });
     const passBody = [
       passBlocks.summary,
       passBlocks.standing,
+      passBlocks.spatial,
       passBlocks.beats
         .map((beat) => `[shot ${beat.shot.number} · ${beat.shot.durationSec ?? 4}s] ${beat.text}`)
         .join("\n"),
