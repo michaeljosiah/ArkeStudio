@@ -66,6 +66,7 @@ import { ATTACHABLE_EXTENSIONS, fileArtifact, importFolder } from "./artifacts/f
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
+import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { acceptTake, audioDesignFor, rejectTake, saveAudioTracks } from "./takes/review.js";
 import {
@@ -298,6 +299,12 @@ export interface CoordinatorOptions {
   };
   /** SPEC-008: credential cipher (Electron safeStorage in the desktop; a fake in tests). */
   cipher?: Cipher;
+  /**
+   * Arrival-time motion QC (#248). Wired by the desktop host only when it can resolve an ffmpeg
+   * binary; absent everywhere else, which is an ordinary state and not a degraded one — takes
+   * simply record no measurement.
+   */
+  takeQcAnalyzer?: TakeQcAnalyzer;
   /**
    * The credential file's name inside the app root. Only dev overrides it, and only because its
    * cipher is not safeStorage: `ARKE_STUDIO_ROOT` can point the dev coordinator at a real app
@@ -1042,7 +1049,19 @@ export class Coordinator {
         const ledgerEntry = this.ledger
           ? (await this.ledger.readAll()).find((e) => e.jobId === job.id)
           : undefined;
-        const takes = await recordTakesFromJob(store, job, ledgerEntry?.actualMicroUsd ?? null);
+        const takes = await recordTakesFromJob(store, job, ledgerEntry?.actualMicroUsd ?? null, {
+          ...(this.opts.takeQcAnalyzer !== undefined ? { analyzer: this.opts.takeQcAnalyzer } : {}),
+          // Why a measurement is missing, and nothing else: no media path, no prompt, no world
+          // prose, no provider payload. A diagnostic about a clip is not a place to leak one.
+          onQcUnavailable: (reason) => {
+            void this.appLog?.append({
+              kind: "take.qc-unavailable",
+              jobId: job.id,
+              targetKind: job.target.kind,
+              reason,
+            });
+          },
+        });
         if (takes.length === 0) throw new Error("production take finalization produced no take");
         for (const take of takes) {
           this.emit({

@@ -52,6 +52,7 @@ import {
 } from "@arke-studio/voice";
 import { BackgroundNotificationController } from "./background-notifications.js";
 import { launchDesktop, StartupController, type StartupState } from "./startup.js";
+import { takeQcOptions } from "./take-qc.js";
 import { resolveTheme, themePalette, type ResolvedTheme } from "./theme.js";
 import { fileUpdateMarker, UpdateController } from "./updates.js";
 import {
@@ -712,6 +713,10 @@ async function initialize(): Promise<{ port: number }> {
                 );
               }),
           },
+          // The same binary, a different job (#248): arrival-time motion QC reads frame hashes
+          // and writes no media. The bounded runner lives in take-qc.ts so it can be tested
+          // without a real ffmpeg on the machine running the tests.
+          ...takeQcOptions(ffmpegPath()),
         }
       : {}),
     updates: {
