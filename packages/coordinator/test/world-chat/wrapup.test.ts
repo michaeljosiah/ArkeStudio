@@ -11,9 +11,11 @@ import {
   type WorldChangeCandidate,
 } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
+import { foldConversation } from "../../src/world-chat/fold.js";
+import { recoverWrapUps } from "../../src/world-chat/wrapup-recovery.js";
 import { evaluateReadiness } from "../../src/world-chat/readiness.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import { wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
+import { rejectPoint, savePoint, wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
 import { WorldStore } from "../../src/world/store.js";
 import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -708,5 +710,507 @@ describe("readiness on its own", () => {
       userOverride: { at: AT, reason: "create-anyway" },
     };
     assert.equal(evaluateReadiness([overridden], bundle).carried.length, 1);
+  });
+});
+
+/**
+ * Writing one point from the rail (#70, revised).
+ *
+ * The design this replaces decided twice, and both decisions were about everything at once: a
+ * conversation produced a dozen points of which two were wrong, and the only way to say so was to
+ * carry all twelve to another screen and reject two there. These are about the difference — one
+ * point, written where it is shown, with the conversation still open afterwards.
+ */
+describe("saving one point", () => {
+  it("writes only the point it was asked for, and leaves the rest live", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const wanted = candidate({ title: "Bells may pass sideways" });
+    const other = candidate({ title: "A separate rule nobody asked to save" });
+    await withCandidates(w.log, [wanted, other]);
+
+    const result = await savePoint({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "save-1",
+      candidateId: wanted.id,
+      expectedCandidateRevision: wanted.revision,
+      now: NOW,
+    });
+
+    assert.deepEqual(result.candidateIds, [wanted.id]);
+    assert.equal(result.proposalIds.length, 1);
+    assert.equal((await w.ours()).length, 1, "the other point was not written");
+
+    const { events } = await w.log.read();
+    const moved = events.flatMap((e) =>
+      e.event.type === "candidate.status-changed" ? [e.event.candidateId] : [],
+    );
+    assert.deepEqual(moved, [wanted.id], "and only the saved one left the rail");
+    assert.ok(
+      !events.some((e) => e.event.type === "wrapup.completed"),
+      "the conversation stays open — only Accept all closes it",
+    );
+  });
+
+  /*
+   * A point is corrected by talking, and a correction is a new revision of the same proposition.
+   * Saving whatever is current would write the correction the person has not read yet.
+   */
+  it("refuses a point that changed since the rail showed it", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+
+    await assert.rejects(
+      () =>
+        savePoint({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "save-stale",
+          candidateId: point.id,
+          expectedCandidateRevision: point.revision + 1,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "stale",
+    );
+    assert.deepEqual(await w.ours(), [], "and nothing was written");
+  });
+
+  it("says why a point that is not settled enough cannot be written", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const maybe = candidate({ settledness: "tentative", title: "Whether the bells are whale bone" });
+    await withCandidates(w.log, [maybe]);
+
+    await assert.rejects(
+      () =>
+        savePoint({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "save-tentative",
+          candidateId: maybe.id,
+          expectedCandidateRevision: maybe.revision,
+          now: NOW,
+        }),
+      (err: unknown) =>
+        err instanceof WrapUpError && err.reason === "nothing-to-carry" && /still a maybe/.test(err.message),
+    );
+  });
+});
+
+/**
+ * Accept all writes what is left and closes the conversation.
+ *
+ * The coordinator's handler does the accepting, so what wrapUp itself has to guarantee is the
+ * part that makes accepting possible and honest: every proposition that carried became a
+ * proposal, each says which one, and a proposal carrying an open choice is marked as asking a
+ * question — because that is the one a press must not answer on somebody's behalf.
+ */
+describe("what accept all leaves behind", () => {
+  it("marks a proposal that asks a question, so a press cannot answer it", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    /*
+     * A canon.create that looks like something already in the world. The gate attaches the
+     * duplicate-or-amend question to that proposal and no other, which is what lets the rest be
+     * written while this one waits.
+     */
+    const looksFamiliar = candidate({
+      title: "Bray Half-Hitch keeps the lock",
+      draft: { type: "lore", title: "Bray Half-Hitch", statement: "He keeps the lock.", links: [] },
+      checks: {
+        ...candidate().checks,
+        likelyDuplicates: [{ kind: "sheet", sheetKind: "character", sheetId: "bray-half-hitch" }],
+      },
+    } as Partial<WorldChangeCandidate>);
+    const seq = await withCandidates(w.log, [candidate(), looksFamiliar]);
+
+    const result = await wrapUp({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "req-accept-all",
+      expectedConversationSeq: seq,
+      now: NOW,
+    });
+
+    assert.equal(result.proposalIds.length, 2);
+    assert.equal(result.openChoices.length, 1, "one of them is asking, and names which");
+    const asking = result.openChoices[0]!;
+    assert.match(asking.question, /new rule, or a change/);
+    assert.ok(
+      result.proposalIds.includes(asking.proposalId),
+      "the question travels with its own proposal, so the others stay acceptable",
+    );
+  });
+});
+
+/**
+ * An atomic group, through a path that writes as soon as it is asked to.
+ *
+ * "These land together or not at all" was true of staging and only of staging: as one proposal
+ * per member, accepting them is one gate call each, so the first changes the targets the second
+ * was based on and the second comes back stale — half a group written, which is the single
+ * outcome the group exists to prevent.
+ */
+describe("a group is one change", () => {
+  /** Two propositions that must land together, and the group that says so. */
+  async function withGroup(log: WorldChatStore, members: WorldChangeCandidate[]) {
+    const groupId = newId("grp");
+    const grouped = members.map((m) => ({ ...m, groupId }) as WorldChangeCandidate);
+    const turnId = newId("turn");
+    await log.append(
+      {
+        type: "turn.completed",
+        message: { id: newId("msg") as MessageId, turnId, role: "studio", text: "Noted.", attachmentIds: [], createdAt: AT },
+        run: {
+          id: newId("run"),
+          turnId,
+          basedOnConversationSeq: 1,
+          status: "completed",
+          adapter: "fake",
+          harnessCleanup: "not-required",
+          contextDigest: `sha256:${"a".repeat(64)}`,
+          startedAt: AT,
+          endedAt: AT,
+        },
+        receipts: [],
+        candidates: grouped,
+        groups: [
+          {
+            id: groupId,
+            conversationId: grouped[0]!.conversationId,
+            revision: 1,
+            title: "These two go together",
+            rationale: "One refers to the other.",
+            members: grouped.map((m) => ({ candidateId: m.id, revision: m.revision })),
+            atomic: true,
+            status: "live",
+          },
+        ],
+        tombstones: [],
+      } as never,
+      { at: AT },
+    );
+    return { groupId, grouped };
+  }
+
+  it("stages a group as one proposal, so accepting it is one commit", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const { grouped } = await withGroup(w.log, [candidate({ title: "First half" }), candidate({ title: "Second half" })]);
+
+    const result = await savePoint({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "save-group",
+      candidateId: grouped[0]!.id,
+      expectedCandidateRevision: grouped[0]!.revision,
+      expectedGroupRevisions: grouped.map((c) => ({ candidateId: c.id, revision: c.revision })),
+      now: NOW,
+    });
+
+    assert.equal(result.proposalIds.length, 1, "one proposal, not one per member");
+    assert.equal(result.candidateIds.length, 2, "and it carries both");
+    const staged = (await w.ours()).find((p) => p.id === result.proposalIds[0]);
+    assert.equal(staged?.worldChatOrigins?.length, 2, "each proposition says it became this one");
+  });
+
+  it("refuses when a member changed behind a rail that still shows the old one", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const { grouped } = await withGroup(w.log, [candidate({ title: "First half" }), candidate({ title: "Second half" })]);
+
+    await assert.rejects(
+      () =>
+        savePoint({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "save-group-stale",
+          candidateId: grouped[0]!.id,
+          expectedCandidateRevision: grouped[0]!.revision,
+          // The rail saw the sibling a revision ago — it was corrected in another window since.
+          expectedGroupRevisions: [
+            { candidateId: grouped[0]!.id, revision: grouped[0]!.revision },
+            { candidateId: grouped[1]!.id, revision: grouped[1]!.revision + 1 },
+          ],
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "stale",
+    );
+    assert.deepEqual(await w.ours(), [], "and nothing was written");
+  });
+});
+
+describe("what a point save will not write from", () => {
+  it("refuses while a wrap-up that never finished is still open", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+    await w.log.append(
+      { type: "wrapup.intent-recorded", requestId: "died", expectedConversationSeq: 2, plannedProposalIds: [] },
+      { at: AT },
+    );
+
+    await assert.rejects(
+      () =>
+        savePoint({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "save-after-crash",
+          candidateId: point.id,
+          expectedCandidateRevision: point.revision,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "in-flight",
+    );
+  });
+
+  it("refuses in an archived conversation, which keeps its live points", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+    await w.log.append({ type: "conversation.archived" }, { at: AT });
+
+    await assert.rejects(
+      () =>
+        savePoint({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "save-archived",
+          candidateId: point.id,
+          expectedCandidateRevision: point.revision,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && /archived/.test(err.message),
+    );
+    assert.deepEqual(await w.ours(), [], "an archived conversation writes nothing");
+  });
+});
+
+/**
+ * What deciding immediately does to the states either side of it.
+ *
+ * Each of these is a window that only exists because the decision writes at once: between staging
+ * and the status that takes a point off the rail, between one accept and the next, and between a
+ * save reading the conversation and a reject writing to it.
+ */
+describe("the windows either side of a decision", () => {
+  it("refuses a save for a point a proposal already holds", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+
+    /*
+     * The crash window, made directly: a proposal staged and durable while the point still reads
+     * live, because the status that would take it off the rail never landed. In the ordinary case
+     * that status is what refuses a second press; this is the case where it is not there, and
+     * pressing again would allocate a second Canon id and leave two entries for one sentence.
+     */
+    await w.gate.stage({
+      kind: "worldbuilding",
+      summary: point.title,
+      source: `world-chat:${w.conversationId}`,
+      targets: [{ path: "canon/CANON-001.md" }],
+      worldChatOrigins: [
+        {
+          requestId: "died-mid-save",
+          conversationId: w.conversationId,
+          candidateId: point.id,
+          candidateRevision: point.revision,
+          targetPaths: ["canon/CANON-001.md"],
+          fields: ["statement"],
+        },
+      ],
+    });
+
+    await assert.rejects(
+      () =>
+        savePoint({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "save-again",
+          candidateId: point.id,
+          expectedCandidateRevision: point.revision,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "in-flight",
+    );
+    assert.equal((await w.ours()).length, 1, "one proposal, not two");
+  });
+
+  it("puts points back on the rail when accept all could not write them", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [candidate()]);
+
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "accept-all-fails",
+          expectedConversationSeq: seq,
+          now: NOW,
+          // Nothing lands, as a stale or unconfirmed accept would answer.
+          writeThrough: async () => false,
+        }),
+      (err: unknown) => err instanceof WrapUpError,
+    );
+
+    const { events } = await w.log.read();
+    const view = foldConversation((await w.log.readMeta())!.id, AT, events).view;
+    assert.equal(view.status, "open", "the conversation is not closed over work it did not write");
+    assert.equal(view.candidates.filter((c) => c.status === "live").length, 1, "and the point is decidable again");
+    assert.deepEqual(await w.ours(), [], "with no proposal left offering the same change twice");
+  });
+
+  it("refuses a reject whose revision is not the one the rail showed", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+
+    await assert.rejects(
+      () =>
+        rejectPoint({
+          store: w.store,
+          conversationId: w.conversationId,
+          candidateId: point.id,
+          expectedCandidateRevision: point.revision + 1,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "stale",
+    );
+
+    const { events } = await w.log.read();
+    assert.ok(
+      !events.some((e) => e.event.type === "candidate.status-changed"),
+      "the corrected point was left alone rather than discarded in its place",
+    );
+  });
+});
+
+/** The two states recovery has to tell apart when a wrap-up died with nothing left open. */
+describe("recovering an accept all that wrote and then died", () => {
+  it("closes a conversation whose changes had already landed", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    await withCandidates(w.log, [candidate()]);
+    /*
+     * The shape a crash leaves after the last accept: the intent is open, no proposal is left to
+     * find because acceptance removed it, and the log records that it landed. Read as "nothing was
+     * created", this closed nothing and left a conversation no later Accept all could finish.
+     */
+    await w.log.append(
+      { type: "wrapup.intent-recorded", requestId: "wrote-then-died", expectedConversationSeq: 2, plannedProposalIds: [] },
+      { at: AT },
+    );
+    await w.log.append(
+      { type: "proposal.resolved", proposalId: newId("pr") as never, outcome: "accepted", candidateIds: [] },
+      { at: AT },
+    );
+
+    const { repaired } = await recoverWrapUps(w.store, w.gate, NOW);
+    const mine = repaired.find((r) => r.conversationId === w.conversationId);
+    assert.equal(mine?.outcome, "completed", "what was written is what happened");
+
+    const { events } = await w.log.read();
+    const view = foldConversation((await w.log.readMeta())!.id, AT, events).view;
+    assert.equal(view.status, "closed");
+  });
+
+  it("still reports one that created nothing as failed, leaving it open", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    await withCandidates(w.log, [candidate()]);
+    await w.log.append(
+      { type: "wrapup.intent-recorded", requestId: "died-early", expectedConversationSeq: 2, plannedProposalIds: [] },
+      { at: AT },
+    );
+
+    const { repaired } = await recoverWrapUps(w.store, w.gate, NOW);
+    assert.equal(repaired.find((r) => r.conversationId === w.conversationId)?.outcome, "failed");
+    const { events } = await w.log.read();
+    const view = foldConversation((await w.log.readMeta())!.id, AT, events).view;
+    assert.equal(view.status, "open", "nothing was written, so there is still everything to decide");
+  });
+});
+
+/**
+ * A save is a thing the conversation knows it is doing.
+ *
+ * It was built without a durable record, on the reasoning that it stages at most a group and a
+ * crash leaves what a waiting proposal already is. That covered the proposal and nothing around
+ * it: while a save is in flight nothing else could see it, so a conversation could be deleted out
+ * from under one, and a proposal a save left waiting was counted nowhere.
+ */
+describe("a save the conversation can see", () => {
+  it("blocks deletion while it is writing, and stops blocking when it is done", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+
+    const before = foldConversation((await w.log.readMeta())!.id, AT, (await w.log.read()).events).view;
+    assert.equal(before.deletionBlock, null, "nothing is happening yet");
+
+    await w.log.append(
+      { type: "save.intent-recorded", requestId: "mid-save", candidateIds: [point.id] },
+      { at: AT },
+    );
+    const during = foldConversation((await w.log.readMeta())!.id, AT, (await w.log.read()).events).view;
+    assert.equal(
+      during.deletionBlock,
+      "wrap-up-in-flight",
+      "a conversation being written from cannot be deleted under the write",
+    );
+
+    await w.log.append({ type: "save.settled", requestId: "mid-save", proposalIds: [] }, { at: AT });
+    const after = foldConversation((await w.log.readMeta())!.id, AT, (await w.log.read()).events).view;
+    assert.equal(after.deletionBlock, null);
+  });
+
+  it("counts a proposal a save left waiting, so the conversation cannot be deleted from under it", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+
+    const result = await savePoint({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "save-waiting",
+      candidateId: point.id,
+      expectedCandidateRevision: point.revision,
+      now: NOW,
+    });
+
+    const view = foldConversation((await w.log.readMeta())!.id, AT, (await w.log.read()).events).view;
+    assert.deepEqual(
+      view.proposalIds,
+      result.proposalIds,
+      "a save announces its proposal on the status change, since it has no completion event",
+    );
+    assert.equal(
+      view.deletionBlock,
+      "unresolved-proposals",
+      "and the proposal keeps the conversation alive, because send-back has nowhere else to go",
+    );
   });
 });

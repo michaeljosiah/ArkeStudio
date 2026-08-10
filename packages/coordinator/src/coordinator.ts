@@ -141,7 +141,7 @@ import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
-import { wrapUp, WrapUpError } from "./world-chat/wrapup.js";
+import { rejectPoint, savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
 import { titleFrom } from "./world-chat/title.js";
@@ -1613,6 +1613,122 @@ export class Coordinator {
         await this.openWorldChat(store, msg.conversationId);
         return;
       }
+      case "world-chat-save-point": {
+        const store = this.opts.provider.openStore?.();
+        const gate = this.opts.provider.gate?.();
+        if (!store || !gate) return;
+        try {
+          /*
+           * Staged and accepted in one motion — the assign-voice rule, which the art-direction
+           * form already follows: being asked to approve a change you just approved is two steps
+           * for one decision. The gate still does the whole job, so the history, the ripples and
+           * the change log are identical to a proposal reviewed on the approvals screen; the only
+           * thing removed is the screen.
+           */
+          const saved = await savePoint({
+            store,
+            gate,
+            conversationId: msg.conversationId,
+            requestId: msg.requestId,
+            candidateId: msg.candidateId,
+            expectedCandidateRevision: msg.expectedCandidateRevision,
+            ...(msg.expectedGroupRevisions ? { expectedGroupRevisions: msg.expectedGroupRevisions } : {}),
+            now: () => new Date().toISOString(),
+          });
+          for (const proposalId of saved.proposalIds) {
+            const staged = await gate.readManifest(proposalId).catch(() => null);
+            /*
+             * A proposal asking a question is never answered by a press.
+             *
+             * "This looks close to Bray Half-Hitch — is it a new rule, or a change to that one?"
+             * has exactly one person who can answer it, and accepting past it would pick the
+             * create silently and put a duplicate in the world. It stays a proposal, which is
+             * where that question can be put.
+             */
+            if (staged?.openChoices?.length) {
+              /*
+               * Said, not swallowed. The rail promised Save would write this, and instead it has
+               * become a question — the point leaves the rail either way, so without this it
+               * simply disappears and the promise is what the person remembers.
+               */
+              this.emit({
+                at: new Date().toISOString(),
+                type: "world-chat.wrap-up-refused",
+                conversationId: msg.conversationId,
+                requestId: msg.requestId,
+                reason: "unknown",
+                detail: `${staged.openChoices[0]!.question} It is waiting on the proposals screen, where you can answer it.`,
+              });
+              continue;
+            }
+            const outcome = await gate.accept(proposalId, {});
+            const at = new Date().toISOString();
+            if (outcome.status === "accepted" && staged) {
+              // The conversation's own account of what became of its propositions (§6.5).
+              await recordResolution(store, staged, "accepted", () => at);
+              this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId, outcome: "accepted" });
+            } else if (outcome.status !== "accepted") {
+              /*
+               * Staged but not accepted: it is a proposal waiting on the approvals screen, which
+               * is a state a person can finish. Said out loud rather than left to be discovered —
+               * the rail promised to write this, and it did not.
+               */
+              this.emit({
+                at,
+                type: "world-chat.wrap-up-refused",
+                conversationId: msg.conversationId,
+                requestId: msg.requestId,
+                reason: "unknown",
+                detail: `This is waiting on the proposals screen instead — the gate answered "${outcome.status}".`,
+              });
+            }
+          }
+        } catch (err) {
+          const reason = err instanceof WrapUpError ? err.reason : "unknown";
+          void this.appLog?.append({ level: "warn", event: "world-chat.save-point-refused", reason });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "world-chat.wrap-up-refused",
+            conversationId: msg.conversationId,
+            requestId: msg.requestId,
+            reason,
+            detail:
+              err instanceof WrapUpError ? err.message : "This could not be written, so nothing was.",
+          });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        await this.refreshConversations(store);
+        await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "world-chat-reject-point": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        try {
+          await rejectPoint({
+            store,
+            conversationId: msg.conversationId,
+            candidateId: msg.candidateId,
+            expectedCandidateRevision: msg.expectedCandidateRevision,
+            ...(msg.expectedGroupRevisions ? { expectedGroupRevisions: msg.expectedGroupRevisions } : {}),
+            now: () => new Date().toISOString(),
+          });
+        } catch (err) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "world-chat.wrap-up-refused",
+            conversationId: msg.conversationId,
+            requestId: msg.requestId,
+            reason: err instanceof WrapUpError ? err.reason : "unknown",
+            detail:
+              err instanceof WrapUpError ? err.message : "That point could not be dropped, so it was left alone.",
+          });
+        }
+        // The list counts live points and orders by what is waiting, so it moves when one goes.
+        await this.refreshConversations(store);
+        await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
       case "world-chat-wrap-up": {
         const store = this.opts.provider.openStore?.();
         const gate = this.opts.provider.gate?.();
@@ -1625,6 +1741,32 @@ export class Coordinator {
             requestId: msg.requestId,
             expectedConversationSeq: msg.expectedConversationSeq,
             now: () => new Date().toISOString(),
+            /*
+             * Accept all writes; it does not stage for a screen the person then has to visit.
+             *
+             * The conversation is where the deciding happens now, and pressing a button labelled
+             * Accept and being taken somewhere else to accept again was the two-step this design
+             * removed. Each still goes through the gate, so what lands is identical to a reviewed
+             * proposal — only the review is the press that just happened. Handed to wrap-up rather
+             * than run after it, because a proposal that will not land has to keep the
+             * conversation open, and only wrap-up can still decide not to close.
+             *
+             * A proposal carrying an open choice is left standing and counted as landed: it is
+             * asking a question only the person can answer, so it is not a failure to write — it
+             * is the one thing this press was never allowed to decide.
+             */
+            writeThrough: async (proposalId) => {
+              const staged = await gate.readManifest(proposalId).catch(() => null);
+              if (staged?.openChoices?.length) return true;
+              const outcome = await gate.accept(proposalId, {});
+              const at = new Date().toISOString();
+              if (outcome.status !== "accepted") return false;
+              if (staged) {
+                await recordResolution(store, staged, "accepted", () => at);
+                this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId, outcome: "accepted" });
+              }
+              return true;
+            },
           });
         } catch (err) {
           // A refusal is the answer: nothing was written, and the conversation is still open and
