@@ -800,3 +800,50 @@ describe("saving one point", () => {
     );
   });
 });
+
+/**
+ * Accept all writes what is left and closes the conversation.
+ *
+ * The coordinator's handler does the accepting, so what wrapUp itself has to guarantee is the
+ * part that makes accepting possible and honest: every proposition that carried became a
+ * proposal, each says which one, and a proposal carrying an open choice is marked as asking a
+ * question — because that is the one a press must not answer on somebody's behalf.
+ */
+describe("what accept all leaves behind", () => {
+  it("marks a proposal that asks a question, so a press cannot answer it", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    /*
+     * A canon.create that looks like something already in the world. The gate attaches the
+     * duplicate-or-amend question to that proposal and no other, which is what lets the rest be
+     * written while this one waits.
+     */
+    const looksFamiliar = candidate({
+      title: "Bray Half-Hitch keeps the lock",
+      draft: { type: "lore", title: "Bray Half-Hitch", statement: "He keeps the lock.", links: [] },
+      checks: {
+        ...candidate().checks,
+        likelyDuplicates: [{ kind: "sheet", sheetKind: "character", sheetId: "bray-half-hitch" }],
+      },
+    } as Partial<WorldChangeCandidate>);
+    const seq = await withCandidates(w.log, [candidate(), looksFamiliar]);
+
+    const result = await wrapUp({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "req-accept-all",
+      expectedConversationSeq: seq,
+      now: NOW,
+    });
+
+    assert.equal(result.proposalIds.length, 2);
+    assert.equal(result.openChoices.length, 1, "one of them is asking, and names which");
+    const asking = result.openChoices[0]!;
+    assert.match(asking.question, /new rule, or a change/);
+    assert.ok(
+      result.proposalIds.includes(asking.proposalId),
+      "the question travels with its own proposal, so the others stay acceptable",
+    );
+  });
+});

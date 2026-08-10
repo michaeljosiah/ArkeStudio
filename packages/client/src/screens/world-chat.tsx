@@ -85,13 +85,19 @@ const WHY_NOT_DELETABLE: Record<WorldChatDeletionBlock, string> = {
 };
 
 function whatItIsWaitingOn(row: WorldChatSummary): string {
+  /*
+   * A proposal from a conversation is now the exception rather than the rule: what is saved from
+   * the rail is written, and only a change carrying a question a press cannot answer waits on the
+   * approvals screen. So it is worth saying which it is, rather than counting proposals as though
+   * every conversation still produced a pile of them.
+   */
   if (row.openProposalCount > 0) {
-    return `${row.openProposalCount} proposal${row.openProposalCount === 1 ? "" : "s"} waiting on you`;
+    return `${row.openProposalCount} question${row.openProposalCount === 1 ? "" : "s"} waiting on you`;
   }
-  if (row.status === "closed") return "closed · nothing waiting";
+  if (row.status === "closed") return "closed · everything decided";
   if (row.status === "archived") return "archived";
   if (row.pointCount === 0) return "open · nothing understood yet";
-  return `open · ${row.pointCount} point${row.pointCount === 1 ? "" : "s"} understood`;
+  return `open · ${row.pointCount} point${row.pointCount === 1 ? "" : "s"} to decide`;
 }
 
 /**
