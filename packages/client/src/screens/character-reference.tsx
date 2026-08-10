@@ -378,10 +378,19 @@ export function GenerateCharacterSheetScreen() {
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const earlierTakeIds = useRef(new Set<string>());
   const pendingRequestId = useRef<string | null>(null);
+  // Which job this dialog is waiting on. Without it the screen watches for "a sheet take it has
+  // not seen", and a sheet uploaded by hand while the generation runs answers that description —
+  // so the upload would be presented as the paid result and the generation called finished while
+  // it was still going (PR review).
+  const acceptedJobId = useRef<string | null>(null);
   useEffect(
     () =>
       subscribeQueueResults((result) => {
-        if (result.requestId !== pendingRequestId.current || result.acceptedJobIds.length > 0) return;
+        if (result.requestId !== pendingRequestId.current) return;
+        if (result.acceptedJobIds.length > 0) {
+          acceptedJobId.current = result.acceptedJobIds[0] ?? null;
+          return;
+        }
         setDispatchError(
           result.failures.map((failure) => failure.reason).join(" ") || "The character sheet could not be queued.",
         );
@@ -399,8 +408,15 @@ export function GenerateCharacterSheetScreen() {
   const sheetTakes = world.referenceTakes
     .filter((take) => take.kind === "sheet" && take.reference?.sheetId === sheetId)
     .sort((a, b) => (b.completedAt ?? b.dispatchedAt).localeCompare(a.completedAt ?? a.dispatchedAt));
+  // Generated only: an uploaded take carries no jobId, so it can never be mistaken for this
+  // request's result. Once the queue has named the job, that is the only take this dialog will
+  // accept — before then, "new and from some job" is the closest true statement available.
   const generatedTake = requested
-    ? sheetTakes.find((take) => !earlierTakeIds.current.has(take.id)) ?? null
+    ? sheetTakes.find((take) =>
+        acceptedJobId.current !== null
+          ? take.jobId === acceptedJobId.current
+          : take.jobId !== undefined && !earlierTakeIds.current.has(take.id),
+      ) ?? null
     : null;
   const generatedAccepted =
     generatedTake !== null &&
