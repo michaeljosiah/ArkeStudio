@@ -4,6 +4,7 @@ import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ClientMessage, DomainEvent, ReferenceKit } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
+import { recordUploadedCharacterSheetTake } from "../../src/references/takes.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { pngBytes } from "../queue/fake-provider.js";
 import { tempDir } from "../tmp.js";
@@ -95,7 +96,9 @@ describe("uploading a main photo by hand", () => {
       assert.equal(take.model, "upload");
       assert.equal(take.cost.estimatedMicroUsd, 0, "no provider was asked, so nothing was spent");
 
-      assert.deepEqual(asked, [[".png", ".jpg", ".jpeg", ".webp"]]);
+      // Bare, no dots: Electron rejects a dotted filter outright, and the caller's catch would
+      // turn that into what looks like a cancelled dialog.
+      assert.deepEqual(asked, [["png", "jpg", "jpeg", "webp"]]);
       assert.equal(theReport(events, "main-photo.acceptance").status, "accepted");
     } finally {
       await provider.close();
@@ -220,6 +223,36 @@ describe("uploading a character sheet by hand", () => {
       assert.match(kit.designatedCompilation ?? "", /\.png$/);
       assert.equal(kit.mainPhoto, undefined, "an uploaded sheet invents no identity anchor");
       assert.equal(theReport(events, "character-sheet.acceptance").status, "accepted");
+    } finally {
+      await provider.close();
+    }
+  });
+
+  // The recovery path: if the commit after the copy fails, the take is durable and undecided, so
+  // the card offers "Accept this sheet". That button used to be inert on an upload — the handler
+  // demanded the anchor a generated take carries and an uploaded one never has.
+  it("can still be accepted from the card when its first commit did not land", async () => {
+    const picked = await fileOutsideTheWorld("my-own-sheet.png");
+    const { provider, worldDir, send, kitOf } = await harness(() => [picked]);
+    try {
+      const store = provider.openStore()!;
+      const take = await recordUploadedCharacterSheetTake(
+        store,
+        "maren-kest",
+        "character-sheet-upload-orphan.png",
+        pngBytes(),
+      );
+      assert.equal(
+        store.getBundle().referenceReviews.some((review) => review.takeId === take.id),
+        false,
+        "undecided, exactly as a failed commit leaves it",
+      );
+
+      await send({ kind: "accept-character-sheet", worldId: WORLD_ID, sheetId: "maren-kest", takeId: take.id });
+
+      assert.equal((await kitOf("maren-kest")).designatedCompilation, `takes/${take.id}/${take.media}`);
+      const reviews = await readFile(join(worldDir, "references", "reviews.jsonl"), "utf8");
+      assert.ok(reviews.includes(take.id), "and the press is recorded as the review it is");
     } finally {
       await provider.close();
     }

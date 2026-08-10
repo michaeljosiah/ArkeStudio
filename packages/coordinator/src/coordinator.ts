@@ -183,8 +183,14 @@ import type { WorldStore } from "./world/store.js";
  * What the host's file dialog offers to filter by. A hint for the picker, nothing more: the
  * dialog also offers "All files", so the name arriving back is whatever the user typed and the
  * decision is taken on the bytes below.
+ *
+ * Bare, no leading dot. Electron's `FileFilter.extensions` is specified without one, and a
+ * dotted list makes the dialog reject the filter — which the caller's `.catch(() => [])` would
+ * then render as a cancelled dialog, so the button would look like it did nothing at all. Every
+ * other picker in the app passes bare extensions for the same reason (`ATTACHABLE_EXTENSIONS`
+ * strips its dots explicitly); this list is checked against nothing, so it keeps none.
  */
-const IMPORTABLE_IMAGES = [".png", ".jpg", ".jpeg", ".webp"] as const;
+const IMPORTABLE_IMAGES = ["png", "jpg", "jpeg", "webp"] as const;
 
 const UNSUPPORTED_IMAGE = "That file is not an image the studio can hold. Choose a PNG, JPEG or WebP.";
 
@@ -203,20 +209,26 @@ const MAX_UPLOAD_BYTES = 50 * 1024 * 1024 - 1;
  * instead of becoming an accepted reference with a broken preview. The format the bytes actually
  * carry is what names the stored file, the same rule the dispatcher applies when it lands a
  * generated artifact, so a JPEG called `.png` is stored as the JPEG it is.
+ *
+ * The returned extension carries its dot (`.png`), unlike `IMPORTABLE_IMAGES` above: that one is
+ * a dialog filter and this one builds a filename. They are never interchangeable.
  */
 async function readPickedImage(
   source: string,
 ): Promise<{ data: Uint8Array; extension: string } | { error: string }> {
+  const tooBig = { error: "That image is over 50 MB, which is more than an image model will accept." };
+  const unreadable = { error: "That file could not be read. Try choosing it again." };
   const info = await stat(toExtendedLength(source)).catch(() => null);
-  if (!info?.isFile()) return { error: "That file could not be read. Try choosing it again." };
-  if (info.size > MAX_UPLOAD_BYTES) {
-    return { error: "That image is over 50 MB, which is more than an image model will accept." };
-  }
+  if (!info?.isFile()) return unreadable;
+  // Cheap enough to refuse a 4 GB file without reading it, but not the answer: an editor or a
+  // sync client can finish writing between the two calls, so the bytes in hand are measured too.
+  if (info.size > MAX_UPLOAD_BYTES) return tooBig;
   const data = await readFile(toExtendedLength(source)).then(
     (bytes) => Uint8Array.from(bytes),
     () => null,
   );
-  if (!data) return { error: "That file could not be read. Try choosing it again." };
+  if (!data) return unreadable;
+  if (data.byteLength > MAX_UPLOAD_BYTES) return tooBig;
   const format = imageFormatOf(data);
   if (!format) return { error: UNSUPPORTED_IMAGE };
   return { data, extension: format.extension };
@@ -3396,15 +3408,30 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId || !pick) return;
         const [source] = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
         if (!source) return;
+        if (!this.stillOpen(store)) return;
         const picked = await readPickedImage(source);
-        if ("error" in picked) return;
+        if ("error" in picked) {
+          // Reported through the acceptance slot the replace dialog already reads. This route
+          // adds a candidate rather than accepting one, so it has no report of its own — and
+          // saying nothing would leave a refused file indistinguishable from a dead button.
+          this.emit({
+            at: new Date().toISOString(),
+            type: "main-photo.acceptance",
+            worldId: msg.worldId,
+            sheetId: msg.sheetId,
+            status: "failed",
+            reason: picked.error,
+            candidateRetained: false,
+          });
+          return;
+        }
         await store
           .gateOp(async () => {
             const name = `upload-${Date.now().toString(36)}${picked.extension}`;
             await landUploadedImage(store, msg.sheetId, name, picked.data);
           })
           .catch(() => {});
-        await this.refreshWorldSnapshot(msg.worldId);
+        await this.refreshIfStillOpen(store);
         return;
       }
       case "import-main-photo": {
@@ -3429,6 +3456,8 @@ export class Coordinator {
         // A closed dialog is not a failure. Reporting one would put an error under a card the
         // user just decided to leave alone.
         if (!source) return;
+        // Nor is walking away mid-dialog. Nothing to report to a screen that has gone.
+        if (!this.stillOpen(store)) return;
         const picked = await readPickedImage(source);
         if ("error" in picked) {
           report("failed", false, picked.error);
@@ -3457,7 +3486,7 @@ export class Coordinator {
         // acceptMainPhoto is about to validate against — and from here the upload takes the
         // identical path a chosen candidate takes, staged failures and cleanup included.
         const result = await acceptMainPhoto(store, sheet, store.getBundle(), { source: "candidate", file });
-        await this.refreshWorldSnapshot(msg.worldId);
+        await this.refreshIfStillOpen(store);
         if (result.status === "failed") {
           void this.appLog?.append(mainPhotoLogRecord(msg.worldId, msg.sheetId, result.stage, "upload"));
           report("failed", result.candidateRetained, mainPhotoFailureReason(result.stage));
@@ -3490,6 +3519,7 @@ export class Coordinator {
         }
         const [source] = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
         if (!source) return;
+        if (!this.stillOpen(store)) return;
         const picked = await readPickedImage(source);
         if ("error" in picked) {
           report("failed", picked.error);
@@ -3500,7 +3530,7 @@ export class Coordinator {
           () => null,
         );
         if (!take) {
-          await this.refreshWorldSnapshot(msg.worldId);
+          await this.refreshIfStillOpen(store);
           report(
             "failed",
             "The character sheet was not changed because its permanent copy could not be made. Try again.",
@@ -3509,7 +3539,7 @@ export class Coordinator {
         }
         const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
         if (!sheet) {
-          await this.refreshWorldSnapshot(msg.worldId);
+          await this.refreshIfStillOpen(store);
           report("failed", "The character sheet was not changed because the character is unavailable.");
           return;
         }
@@ -3531,7 +3561,7 @@ export class Coordinator {
           () => true,
           () => false,
         );
-        await this.refreshWorldSnapshot(msg.worldId);
+        await this.refreshIfStillOpen(store);
         report(
           accepted ? "accepted" : "failed",
           accepted ? undefined : "The character sheet was copied in but could not be recorded. Try again.",
@@ -3648,12 +3678,17 @@ export class Coordinator {
         const frozen = take.params["provenance"] as
           { sheets?: Record<string, number>; anchorFile?: string } | undefined;
         const sheetVersion = frozen?.sheets?.[msg.sheetId] ?? take.provenance.sheets[msg.sheetId];
-        if (sheetVersion === undefined || !frozen?.anchorFile) return;
+        // A generated take must name the main photo it was conditioned on — without it there is
+        // no telling what the composite depicts. An uploaded one has no such lineage and never
+        // will, so requiring one here left the "Accept this sheet" button on an upload whose
+        // first commit failed permanently inert: pressed, and nothing (PR #241 review).
+        const uploaded = take.provider === "user";
+        if (sheetVersion === undefined || (!uploaded && !frozen?.anchorFile)) return;
         await acceptCharacterSheet(store, sheet, {
           file: `takes/${take.id}/${take.media}`,
           takeId: take.id,
           sheetVersion,
-          anchorFile: frozen.anchorFile,
+          ...(frozen?.anchorFile ? { anchorFile: frozen.anchorFile } : {}),
           artDirectionVersion: take.provenance.artDirectionVersion ?? store.getBundle().artDirection.version,
           review,
         }).catch(() => {});
@@ -4243,6 +4278,27 @@ export class Coordinator {
       }),
     );
     this.transport.broadcastSnapshot();
+  }
+
+  /**
+   * Is this still the world the app is in? (PR #241 review.)
+   *
+   * A file dialog stands open for as long as the person in front of it wants, and they may well
+   * open another world while it is up. Identity, not the id: switching worlds closes the old
+   * store, and writing through a closed one is the thing to stop.
+   */
+  private stillOpen(store: WorldStore): boolean {
+    return this.opts.provider.openStore?.() === store;
+  }
+
+  /**
+   * Refresh only while that world is still the open one. `refreshWorldSnapshot` *loads* the world
+   * it is given, so an upload finishing after the user moved on would not merely publish a stale
+   * snapshot — it would reopen the world they left.
+   */
+  private async refreshIfStillOpen(store: WorldStore): Promise<void> {
+    if (!this.stillOpen(store)) return;
+    await this.refreshWorldSnapshot(store.worldId);
   }
 
   private async refreshWorldSnapshot(worldId: string): Promise<void> {
