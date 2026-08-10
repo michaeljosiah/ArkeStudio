@@ -128,6 +128,14 @@ async function withCandidates(
   return events[events.length - 1]!.seq;
 }
 
+/** The `wrapup.failed` this conversation recorded, if it recorded one. */
+async function failureIn(log: WorldChatStore) {
+  const { events } = await log.read();
+  return events
+    .map((e) => e.event)
+    .find((e): e is Extract<typeof e, { type: "wrapup.failed" }> => e.type === "wrapup.failed");
+}
+
 function failsToMaterialise(): WorldChangeCandidate {
   return candidate({
     classification: "relationship.change",
@@ -594,14 +602,65 @@ describe("what wrap-up refuses", () => {
 
     const left = await w.ours();
     assert.equal(left.length, 1, "the proposal that would not go is still on the approvals screen");
-    const { events } = await w.log.read();
-    const failed = events
-      .map((e) => e.event)
-      .find((e): e is Extract<typeof e, { type: "wrapup.failed" }> => e.type === "wrapup.failed");
+    const failed = await failureIn(w.log);
     assert.deepEqual(
-      failed?.leftoverProposalIds,
+      failed?.leftovers?.map((one) => one.proposalId),
       [left[0]!.id],
       "and the log names it, because after the intent closes nothing else remembers",
+    );
+    assert.deepEqual(
+      failed?.leftovers?.[0]?.candidateIds,
+      [left[0]!.worldChatOrigins?.[0]?.candidateId],
+      "with the propositions it was made from, which its manifest may not outlive",
+    );
+  });
+
+  /*
+   * A discard that threw is not proof the proposal survived. It removes the directory and then
+   * writes the world's change journal, so a failure in the second half leaves nothing on the
+   * approvals screen — and an id recorded for it would name a proposal that does not exist, which
+   * the guard would then refuse every later wrap-up over, for good.
+   */
+  it("records nothing for a discard that failed after the proposal had already gone", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [
+      candidate({ title: "A rule that stages first" }),
+      candidate({ title: "A rule that never gets that far" }),
+    ]);
+
+    const realStage = w.gate.stage.bind(w.gate);
+    let staged = 0;
+    w.gate.stage = async (input) => {
+      staged += 1;
+      if (staged === 2) throw new Error("the disk went away");
+      return realStage(input);
+    };
+    // Removes the proposal and then fails, exactly as a failing journal append would.
+    const realDiscard = w.gate.discard.bind(w.gate);
+    w.gate.discard = async (id) => {
+      await realDiscard(id);
+      throw new Error("the journal would not take it");
+    };
+
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "req-half-gone",
+          expectedConversationSeq: seq,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason !== "leftovers",
+    );
+
+    assert.deepEqual(await w.ours(), [], "the proposal did go, whatever the discard then said");
+    assert.equal(
+      (await failureIn(w.log))?.leftovers,
+      undefined,
+      "so nothing is named, and the next wrap-up is not refused over a proposal that is not there",
     );
   });
 

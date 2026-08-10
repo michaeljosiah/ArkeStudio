@@ -29,8 +29,13 @@ export class WorldChatRunnerCache<R extends CachedRunner> {
    * They serve no new work, but the conversation they are mid-turn on has to keep reaching them:
    * the abort controller that can stop that turn exists nowhere else, and a turn already talking
    * to a model is a worse thing to drop than a stale read is to carry to the end of it.
+   *
+   * Each remembers the world it belonged to, and is only ever offered back to that one. A
+   * conversation id is unique within a world and not across them — copying a world gives the copy
+   * a new id of its own while its conversations keep theirs — so matching on the conversation
+   * alone would hand the copy the original's runner, closed-over store and all.
    */
-  private readonly retired = new Set<R>();
+  private readonly retired = new Set<{ worldId: string; runner: R }>();
 
   /**
    * The runner that should serve this conversation, or undefined when one has to be built.
@@ -42,16 +47,16 @@ export class WorldChatRunnerCache<R extends CachedRunner> {
     const existing = this.current.get(worldId);
     if (existing && existing.store !== store) {
       this.current.delete(worldId);
-      if (existing.runner.hasRunning()) this.retired.add(existing.runner);
+      if (existing.runner.hasRunning()) this.retired.add({ worldId, runner: existing.runner });
     }
-    for (const runner of this.retired) {
+    for (const entry of this.retired) {
       // Swept here rather than on a timer: a runner with nothing running holds nothing worth
       // keeping, and this is the only place that ever asks.
-      if (!runner.hasRunning()) {
-        this.retired.delete(runner);
+      if (!entry.runner.hasRunning()) {
+        this.retired.delete(entry);
         continue;
       }
-      if (runner.isRunning(conversationId)) return runner;
+      if (entry.worldId === worldId && entry.runner.isRunning(conversationId)) return entry.runner;
     }
     return this.current.get(worldId)?.runner;
   }

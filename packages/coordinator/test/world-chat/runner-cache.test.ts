@@ -132,4 +132,26 @@ describe("the runner a conversation is served by", () => {
     assert.equal(cache.runnerFor("wld_here", here, TALKING), mine);
     assert.equal(cache.runnerFor("wld_there", there, TALKING), theirs);
   });
+
+  /*
+   * A conversation id is unique within a world and not across them. Copy a world and the copy
+   * gets an id of its own while its conversations keep theirs — so a retired runner matched on
+   * the conversation alone would be handed to the copy, closed-over store and all, and answer one
+   * world's turn out of another's files.
+   */
+  it("does not lend a retired runner to a world that merely shares a conversation id", () => {
+    const cache = new WorldChatRunnerCache<FakeRunner>();
+    const original = open();
+    const midTurn = new FakeRunner("original");
+    midTurn.begin(TALKING);
+    cache.remember("wld_original", original, midTurn);
+    // Retired by the original world being closed and opened again.
+    cache.runnerFor("wld_original", open(), OTHER);
+
+    assert.equal(
+      cache.runnerFor("wld_copy", open(), TALKING),
+      undefined,
+      "the copy builds its own, against the world it actually has open",
+    );
+  });
 });

@@ -412,7 +412,7 @@ describe("a wrap-up the app died in the middle of", () => {
         type: "wrapup.failed",
         requestId: "req-stuck",
         safeDetail: "materialise; 1 left staged",
-        leftoverProposalIds: [orphan.id],
+        leftovers: [{ proposalId: orphan.id, candidateIds: [proposition.id] }],
       },
       { at: AT },
     );
@@ -437,6 +437,79 @@ describe("a wrap-up the app died in the middle of", () => {
     // Idempotent: the failure event stays in the log for good, so the sweep has to find nothing
     // the second time rather than report the same repair at every start for the rest of the world.
     assert.deepEqual((await recoverWrapUps(store, gate, NOW)).repaired, []);
+    await store.close();
+  });
+
+  /*
+   * A leftover that was decided while nothing was recording it.
+   *
+   * Recording a resolution against the conversation is best-effort by design — a proposal that has
+   * been accepted is accepted, and failing that over bookkeeping would undo real work — so the
+   * proposal can be gone with the conversation none the wiser. Without a terminal state here the
+   * leftovers guard refuses that conversation for good, and the manifest that would say what
+   * happened went with the proposal. The world's own change journal is what is left.
+   */
+  it("settles a leftover the conversation never learned the fate of", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir);
+    const gate = new ProposalManager(store);
+    const conversationId = newId("cv") as ConversationId;
+    const log = new WorldChatStore(conversationDir(dir, conversationId));
+    await log.create(conversationId, AT);
+    await log.append(
+      { type: "conversation.created", title: "t", entryContext: { kind: "world" } },
+      { at: AT },
+    );
+    const proposition = candidate();
+    await withCandidates(log, [proposition]);
+
+    const orphan = await gate.stage({
+      kind: "worldbuilding",
+      summary: "Bells",
+      source: `world-chat:${conversationId}`,
+      targets: [
+        {
+          path: "canon/CANON-902.md",
+          content:
+            "---\nid: CANON-902\ntype: lore\ntitle: B\nstatus: settled\nintroducedAt: 0\nlinks: []\n---\n\nBody.\n",
+        },
+      ],
+      worldChatOrigins: [
+        {
+          requestId: "req-stuck",
+          conversationId,
+          candidateId: proposition.id,
+          candidateRevision: 1,
+          targetPaths: ["canon/CANON-902.md"],
+          fields: ["statement"],
+        },
+      ],
+    });
+    await log.append(
+      {
+        type: "wrapup.failed",
+        requestId: "req-stuck",
+        safeDetail: "materialise; 1 left staged",
+        leftovers: [{ proposalId: orphan.id, candidateIds: [proposition.id] }],
+      },
+      { at: AT },
+    );
+
+    // Discarded on the approvals screen, and the conversation never told: the append that would
+    // have said so is the one this path is allowed to lose.
+    await gate.discard(orphan.id);
+
+    const outcome = await recoverWrapUps(store, gate, NOW);
+    assert.equal(outcome.repaired[0]!.outcome, "cleaned");
+
+    const meta = await log.readMeta();
+    const view = foldConversation(meta!.id, meta!.createdAt, (await log.read()).events).view;
+    assert.equal(
+      view.candidates.find((c) => c.id === proposition.id)?.status,
+      "discarded",
+      "the journal said which way it went, so the conversation says the same",
+    );
+    assert.deepEqual((await recoverWrapUps(store, gate, NOW)).repaired, [], "and once is enough");
     await store.close();
   });
 });

@@ -10,10 +10,16 @@ import { LookAlreadyProposedError, type ProposalManager } from "../gate/proposal
 import type { WorldStore } from "../world/store.js";
 import { foldConversation } from "./fold.js";
 import { lookHasMoved } from "./look.js";
-import { canonIdsNeeded, materialiseCandidate, MaterialiseError, planIdentities } from "./materialise.js";
+import {
+  canonIdsNeeded,
+  materialiseCandidate,
+  MaterialiseError,
+  planIdentities,
+  type Materialised,
+} from "./materialise.js";
 import { evaluateReadiness, type NotCarried } from "./readiness.js";
 import { conversationDir, WorldChatStore } from "./store.js";
-import { accountedProposalIdsOf, leftoverProposalIdsOf, openIntentOf } from "./wrapup-recovery.js";
+import { accountedProposalIdsOf, leftoversOf, openIntentOf } from "./wrapup-recovery.js";
 
 /**
  * Turning a conversation into proposals, once (#70 §11.3).
@@ -200,7 +206,7 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
    * The gate is only asked when the log says there is something to ask about — a wrap-up on a
    * conversation that never failed reads no proposal directories at all.
    */
-  const recordedLeftovers = leftoverProposalIdsOf(events);
+  const recordedLeftovers = leftoversOf(events).map((one) => one.proposalId);
   if (recordedLeftovers.length > 0) {
     const accounted = accountedProposalIdsOf(events);
     const open = await input.gate.listOpen();
@@ -252,7 +258,7 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
 
   // Step 4: everything is built and validated before a single proposal directory exists, so a
   // malformed candidate fails wrap-up without leaving one behind (§11.2).
-  const built = [];
+  const built: Materialised[] = [];
   let nextCanon = 0;
   try {
     for (const candidate of carried) {
@@ -358,10 +364,31 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
      * this conversation refuses while they remain, and the refusal below stops claiming that
      * nothing was created when something was.
      */
-    const leftBehind: string[] = [];
-    for (const staged of proposals) {
-      await input.gate.discard(staged.id).catch(() => leftBehind.push(staged.id));
+    const wouldNotGo: Array<{ proposalId: string; candidateIds: CandidateId[] }> = [];
+    for (const [index, staged] of proposals.entries()) {
+      await input.gate
+        .discard(staged.id)
+        .catch(() =>
+          wouldNotGo.push({ proposalId: staged.id, candidateIds: [built[index]!.candidate.id] }),
+        );
     }
+    /*
+     * A discard that threw is not proof the proposal is still there.
+     *
+     * It removes the directory and then writes the world's change journal, so a failure in the
+     * second half leaves nothing on the approvals screen and nothing to send back — while the id
+     * recorded below would name a proposal that does not exist, and the guard above would refuse
+     * every later wrap-up on its account for good. So the gate is asked what actually remains.
+     *
+     * If that question cannot be answered either, every one of them is recorded. Naming a
+     * proposal that has gone costs a startup sweep, which reconciles it against the world's own
+     * journal; missing one that is still there costs a proposal nothing accounts for.
+     */
+    const stillOpen = wouldNotGo.length > 0 ? await input.gate.listOpen().catch(() => null) : [];
+    const leftBehind =
+      stillOpen === null
+        ? wouldNotGo
+        : wouldNotGo.filter((one) => stillOpen.some((p) => p.id === one.proposalId));
     const cause =
       err instanceof WrapUpError
         ? err
@@ -387,7 +414,7 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
         requestId: input.requestId,
         safeDetail:
           leftBehind.length > 0 ? `${cause.reason}; ${leftBehind.length} left staged` : cause.reason,
-        ...(leftBehind.length > 0 ? { leftoverProposalIds: leftBehind } : {}),
+        ...(leftBehind.length > 0 ? { leftovers: leftBehind } : {}),
       },
       { at: input.now() },
     );

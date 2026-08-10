@@ -772,8 +772,22 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
        * nothing. This event is the only durable trace of it: the intent closes here, so startup
        * recovery — which reconciles by open intent — would otherwise never look. Absent on the
        * ordinary failure, where everything went.
+       *
+       * Each carries the propositions it was made from, rather than only its id. The proposal's
+       * own manifest says the same thing, but recovery has to work in the case where that
+       * manifest is gone and the log never learned what became of it — and without the
+       * candidate ids there is no way to leave those propositions in an honest state.
        */
-      leftoverProposalIds: z.array(ProposalIdSchema).optional(),
+      leftovers: z
+        .array(
+          z
+            .object({
+              proposalId: ProposalIdSchema,
+              candidateIds: z.array(CandidateIdSchema),
+            })
+            .strict(),
+        )
+        .optional(),
     })
     .strict(),
   z

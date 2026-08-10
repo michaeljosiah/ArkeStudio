@@ -1,8 +1,9 @@
-import type { ConversationId, Proposal } from "@arke-studio/contracts";
+import { join } from "node:path";
+import type { CandidateId, ConversationId, Proposal, ProposalId } from "@arke-studio/contracts";
 import type { ProposalManager } from "../gate/proposals.js";
+import { readChanges, type ChangeLine } from "../world/change-writer.js";
 import type { WorldStore } from "../world/store.js";
 import { discoverConversations } from "./discover.js";
-import { sendBack } from "./resolution.js";
 import { conversationDir, WorldChatStore } from "./store.js";
 
 /**
@@ -70,15 +71,21 @@ export function openIntentOf(events: ReadonlyArray<{ event: { type: string } }>)
  * Every failure in the log, not only the last: two attempts can each leave something, and the
  * second one's event says nothing about the first one's.
  */
-export function leftoverProposalIdsOf(events: ReadonlyArray<{ event: { type: string } }>): string[] {
-  const ids = new Set<string>();
+export interface Leftover {
+  proposalId: string;
+  /** The propositions it was made from, so recovery can settle them without its manifest. */
+  candidateIds: readonly string[];
+}
+
+export function leftoversOf(events: ReadonlyArray<{ event: { type: string } }>): Leftover[] {
+  const byId = new Map<string, Leftover>();
   for (const { event } of events) {
     if (event.type !== "wrapup.failed") continue;
-    for (const id of (event as { leftoverProposalIds?: readonly string[] }).leftoverProposalIds ?? []) {
-      ids.add(id);
+    for (const one of (event as { leftovers?: readonly Leftover[] }).leftovers ?? []) {
+      byId.set(one.proposalId, one);
     }
   }
-  return [...ids];
+  return [...byId.values()];
 }
 
 /**
@@ -115,13 +122,16 @@ export async function recoverWrapUps(
   // Re-read whenever the sweep below removes something, so the intent reconciliation that follows
   // is never deciding against proposals this pass has already taken away.
   let staged = await gate.listOpen();
+  // Read once for the whole pass: the world's account of what happened to a proposal, for the
+  // leftovers whose own conversation never learned. See the sweep below.
+  const journal = await readChanges(join(store.dir, "changes.jsonl"));
 
   for (const summary of summaries) {
     const log = new WorldChatStore(conversationDir(store.dir, summary.id));
     let { events } = await log.read();
 
     /*
-     * Proposals a failed wrap-up could not take back, sent back now.
+     * Proposals a failed wrap-up could not take back, settled now.
      *
      * The attempt they belong to is over — it recorded that it failed, and said nothing was
      * created — so they are not proposals anybody chose to make: they are the remains of one that
@@ -129,52 +139,93 @@ export async function recoverWrapUps(
      * conversation whose propositions are all still live, and accepting one writes part of
      * something nobody ever agreed to as a whole.
      *
-     * Sent back rather than discarded, because discard means the person changed their mind and
-     * keeps the proposition out of the conversation for good. Nobody changed their mind here: the
-     * wrap-up refused itself, and the propositions have to still be there to be asked for again.
-     * `sendBack` is that, and it already writes the log entry before removing the proposal — the
-     * order that leaves something visible if the second half fails.
-     *
-     * What is left unaccounted for is not guessed at. A crash between the gate removing a
-     * proposal and the conversation recording what became of it leaves no way to know which it
-     * was, and the candidate ids that would say are in the manifest that went with it. Repairing
-     * that on a guess writes to somebody's world, so it is named and left.
+     * Every one of them leaves here with something durable said about it, because the guard that
+     * refuses the next wrap-up clears on exactly that. A leftover with no terminal state is a
+     * conversation that can never be wrapped up again.
      */
-    const recorded = leftoverProposalIdsOf(events);
-    if (recorded.length > 0) {
-      const sent: string[] = [];
+    const leftovers = leftoversOf(events);
+    if (leftovers.length > 0) {
+      const settled = accountedProposalIdsOf(events);
+      const returned: string[] = [];
+      const reconciled: string[] = [];
       const stuck: string[] = [];
-      for (const id of recorded) {
-        const proposal = staged.find((p) => p.id === id);
-        if (!proposal) continue;
-        try {
-          await sendBack(store, gate, proposal, now);
-          sent.push(id);
-        } catch {
-          stuck.push(id);
+
+      for (const leftover of leftovers) {
+        if (settled.has(leftover.proposalId)) continue;
+        const reopen = {
+          type: "conversation.reopened" as const,
+          proposalId: leftover.proposalId as ProposalId,
+          restoredCandidateIds: leftover.candidateIds as CandidateId[],
+        };
+
+        if (staged.some((p) => p.id === leftover.proposalId)) {
+          /*
+           * Removed first and recorded second — the opposite of what `sendBack` does, and on
+           * purpose.
+           *
+           * Send-back's order is right for a person pressing the button: the propositions come
+           * back to an open conversation, and a proposal still standing behind them is visible
+           * and fixable. Here the log entry is also what stops the next wrap-up being refused, so
+           * writing it first would clear the guard over a proposal still on the approvals screen.
+           * Worse, the fold takes a reopen as that proposal's resolution and ignores a real
+           * accept arriving after it — leaving the accepted change's propositions live, and
+           * proposable a second time.
+           */
+          try {
+            await gate.discard(leftover.proposalId);
+          } catch {
+            stuck.push(leftover.proposalId);
+            continue;
+          }
+          await log.append(reopen, { at: now() });
+          returned.push(leftover.proposalId);
+          continue;
         }
+
+        /*
+         * Gone from the gate with nothing in the conversation to say why.
+         *
+         * Recording a resolution is best-effort by design — a proposal that has been accepted is
+         * accepted, and failing that over bookkeeping would undo real work — so this is reachable
+         * without any crash at all. The world's own change journal is the record that did not
+         * depend on the conversation: a commit names the proposal it came from, and a discard
+         * names the directory it removed.
+         *
+         * No line at all means it never landed. A commit writes its journal as part of itself, so
+         * an accept that left no trace did not happen; what is left is a discard whose second
+         * half failed, and the propositions are still the conversation's.
+         */
+        const outcome = outcomeInJournal(journal, leftover.proposalId);
+        await log.append(
+          outcome === null
+            ? reopen
+            : {
+                type: "proposal.resolved",
+                proposalId: leftover.proposalId as ProposalId,
+                outcome,
+                candidateIds: leftover.candidateIds as CandidateId[],
+              },
+          { at: now() },
+        );
+        reconciled.push(leftover.proposalId);
       }
-      if (sent.length > 0 || stuck.length > 0) {
+
+      if (returned.length > 0 || reconciled.length > 0 || stuck.length > 0) {
         staged = await gate.listOpen();
         ({ events } = await log.read());
       }
-      const accounted = accountedProposalIdsOf(events);
-      const unaccounted = recorded.filter(
-        (id) => !accounted.has(id) && !staged.some((p) => p.id === id),
-      );
-
-      if (sent.length > 0) {
+      if (returned.length + reconciled.length > 0) {
         repaired.push({
           conversationId: summary.id,
           outcome: "cleaned",
-          detail: `${sent.length} proposals a failed wrap-up left behind went back to the conversation`,
+          detail: `${returned.length + reconciled.length} proposals a failed wrap-up left behind were settled`,
         });
       }
-      if (stuck.length > 0 || unaccounted.length > 0) {
+      if (stuck.length > 0) {
         repaired.push({
           conversationId: summary.id,
           outcome: "left-for-review",
-          detail: `${stuck.length + unaccounted.length} proposals from a failed wrap-up need a look`,
+          detail: `${stuck.length} proposals from a failed wrap-up would not be removed and need a look`,
         });
       }
     }
@@ -237,6 +288,27 @@ export async function recoverWrapUps(
   }
 
   return { repaired };
+}
+
+/**
+ * What the world's change journal says became of one proposal, if it says anything.
+ *
+ * The journal is the record that does not depend on the conversation: accepting writes a commit
+ * naming the proposal it came from, and discarding writes a line naming the directory it removed.
+ * Read last-line-wins, which is only a tiebreak — a proposal is accepted or discarded once.
+ */
+function outcomeInJournal(
+  journal: readonly ChangeLine[],
+  proposalId: string,
+): "accepted" | "discarded" | null {
+  let outcome: "accepted" | "discarded" | null = null;
+  for (const line of journal) {
+    if (line["proposalId"] === proposalId) outcome = "accepted";
+    else if (line.entity === `.proposals/${proposalId}` && line["discarded"] === true) {
+      outcome = "discarded";
+    }
+  }
+  return outcome;
 }
 
 /** A proposal is whole when it has at least one target and an origin naming what it came from. */
