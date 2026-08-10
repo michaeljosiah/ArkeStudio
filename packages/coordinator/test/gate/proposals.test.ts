@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ART_DIRECTION_PATH } from "@arke-studio/contracts";
+import { ART_DIRECTION_PATH, ArtDirectionRecordSchema } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { projectReview } from "../../src/gate/review.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -258,6 +258,57 @@ describe("a world look through the generic gate", () => {
       restated.history.some((h) => h.version === live.version),
       "and that look is in its history rather than nowhere",
     );
+  });
+
+  /*
+   * When one side will not parse there is a conflict, and choosing a side takes that whole
+   * document. Sent through the Markdown resolver instead, the chosen JSON came back wrapped in
+   * frontmatter — no longer readable as a look, produced by the control offered to repair it.
+   */
+  it("resolves a look conflict to a document that is still a look", async () => {
+    const { dir, gate } = await openGateSafely();
+    const mine = await gate.stageArtDirectionChange("Painterly, with visible brushwork.", null);
+
+    // The live look becomes unreadable, so there is nothing to restate against.
+    await writeFile(join(dir, "art-direction", "art-direction.json"), "{ this is not a look", "utf8");
+    const { conflicts } = await gate.rebase(mine.id);
+    assert.equal(conflicts.length, 1, "a side has to be chosen; it cannot be merged");
+    assert.equal(conflicts[0]!.field, "Look");
+
+    await gate.resolveConflict(mine.id, ART_DIRECTION_PATH, "Look", "mine");
+
+    const resolved = await readFile(join(dir, ".proposals", mine.id, "art-direction", "art-direction.json"), "utf8");
+    assert.doesNotMatch(resolved, /^---/, "no frontmatter was wrapped around it");
+    const record = ArtDirectionRecordSchema.parse(JSON.parse(resolved));
+    assert.match(record.description, /visible brushwork/, "and it is the side that was chosen");
+  });
+
+  /*
+   * The number a person reads before accepting. It counted only takes already pinned to an older
+   * look — the consequence of the *previous* change — while the takes made under the look being
+   * replaced, usually the ones they are thinking of, become pinned the moment this lands.
+   */
+  it("counts takes made under the current look as pinned by this change", async () => {
+    const { store, gate } = await openGateSafely();
+    // Delegating rather than snapshotting: staging refreshes the real bundle, and a frozen copy
+    // would not contain the proposal this test then looks for.
+    const realBundle = store.getBundle.bind(store);
+    store.getBundle = () => {
+      const bundle = realBundle();
+      return {
+        ...bundle,
+        artDirection: {
+          ...bundle.artDirection,
+          reach: { ...bundle.artDirection.reach, earlierAcceptedTakes: 2, acceptedTakesAtCurrentVersion: 3 },
+        },
+      };
+    };
+
+    const proposal = await gate.stageArtDirectionChange("Ink and wash.", null);
+    const staged = store.getBundle().proposals.find((item) => item.proposal.id === proposal.id);
+    const pinned = staged?.ripple?.items.find((item) => item.kind === "takes-pinned-to-old-version");
+    assert.equal(pinned?.targets.length, 5, "the two already behind, and the three about to be");
+    assert.match(pinned?.summary ?? "", /^5 accepted takes/);
   });
 
   it("rebases by restating the look, not by merging it as prose", async () => {

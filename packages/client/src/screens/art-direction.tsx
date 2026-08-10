@@ -22,7 +22,7 @@ function splitDescription(description: string): { title: string; body: string } 
  * image at all, so without the third case every one of them read as "retained" while accepting
  * removed it.
  */
-function proposedMasterLookNote(proposed: string | null, current: string | null, staged: boolean): string {
+export function proposedMasterLookNote(proposed: string | null, current: string | null, staged: boolean): string {
   if (!staged) return "New style · master image retained";
   if (proposed === current) return "New style · master image retained";
   if (proposed === null) return "New style · master image removed";
