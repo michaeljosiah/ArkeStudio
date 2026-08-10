@@ -247,15 +247,45 @@ export async function recordUploadedReferenceTake(
   if (existing) return existing;
   const media = basename(candidatePath);
   const take = uploadedTake(store, sheetId, "main-photo", media, { uploadedCandidate: candidatePath });
-  await store.gateOp(async () => {
-    const dir = join(store.dir, "references", sheetId, "takes", take.id);
-    await mkdir(toExtendedLength(dir), { recursive: true });
-    // An upload keeps its candidate: the user put that file there, and `uploadedCandidate`
-    // points back at it. Only a staging copy this code made is this code's to remove.
-    await placeMedia(join(store.dir, candidatePath), join(dir, media));
-    await atomicWriteFile(join(dir, "take.json"), JSON.stringify(take, null, 2) + "\n");
-  });
+  await store.gateOp(() =>
+    writeTakeDirectory(store, sheetId, take, async (dir) => {
+      // An upload keeps its candidate: the user put that file there, and `uploadedCandidate`
+      // points back at it. Only a staging copy this code made is this code's to remove.
+      await placeMedia(join(store.dir, candidatePath), join(dir, media));
+    }),
+  );
   return take;
+}
+
+/**
+ * Write a take's directory whole, or leave nothing behind (PR review).
+ *
+ * `take.json` is what makes a take exist: `scanWorld` skips a directory without one, for good
+ * reason — a half-written take is not a take. But that means media written before a failing
+ * `take.json` is not merely unused, it is unreachable, and a retry mints a new id rather than
+ * finding it. One 50 MB sheet that failed at the last step would sit in the world forever with
+ * nothing pointing at it and nothing able to explain it.
+ *
+ * The media goes down first regardless, because take.json must never be the file that survives
+ * alone — it would name bytes that are not there. So the ordering stays, and the failure is
+ * swept instead.
+ */
+async function writeTakeDirectory(
+  store: WorldStore,
+  sheetId: string,
+  take: Take,
+  putMedia: (dir: string) => Promise<void>,
+): Promise<void> {
+  const dir = join(store.dir, "references", sheetId, "takes", take.id);
+  await mkdir(toExtendedLength(dir), { recursive: true });
+  try {
+    await putMedia(dir);
+    await atomicWriteFile(join(dir, "take.json"), JSON.stringify(take, null, 2) + "\n");
+  } catch (err) {
+    // Its own directory, named for an id nothing else has yet: removing it can strand no one.
+    await rm(toExtendedLength(dir), { recursive: true, force: true }).catch(() => {});
+    throw err;
+  }
 }
 
 /**
@@ -276,16 +306,20 @@ export async function recordUploadedCharacterSheetTake(
   media: string,
   data: Uint8Array,
 ): Promise<Take> {
-  if (basename(media) !== media) throw new Error(`unsafe media name ${media}`);
+  // A plain filename and nothing else. `basename` alone lets "." and ".." through — basename("..")
+  // is ".." — and both name a directory that already exists, so the write would land on something
+  // real instead of failing cleanly.
+  if (basename(media) !== media || media === "." || media === "..") {
+    throw new Error(`unsafe media name ${media}`);
+  }
   const take = uploadedTake(store, sheetId, "sheet", media, { uploadedFile: media });
-  await store.gateOp(async () => {
-    const dir = join(store.dir, "references", sheetId, "takes", take.id);
-    await mkdir(toExtendedLength(dir), { recursive: true });
-    // Staged and renamed like every other write here, so a half-written 40 MB sheet cannot be
-    // mistaken for a finished one (SPEC-002 R-13).
-    await atomicWriteFile(join(dir, media), data);
-    await atomicWriteFile(join(dir, "take.json"), JSON.stringify(take, null, 2) + "\n");
-  });
+  await store.gateOp(() =>
+    writeTakeDirectory(store, sheetId, take, async (dir) => {
+      // Staged and renamed like every other write here, so a half-written 40 MB sheet cannot be
+      // mistaken for a finished one (SPEC-002 R-13).
+      await atomicWriteFile(join(dir, media), data);
+    }),
+  );
   return take;
 }
 

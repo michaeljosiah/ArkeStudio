@@ -3546,7 +3546,7 @@ export class Coordinator {
         if (this.characterSheetJobRunning(msg.worldId, msg.sheetId)) {
           report(
             "failed",
-            "A generated character sheet is already on its way for this character. Wait for it to land, or cancel it in Activity, then upload.",
+            "A generated character sheet for this character has not finished. It would land on top of this one. Wait for it, or settle it in Activity, then upload.",
           );
           return;
         }
@@ -3562,6 +3562,9 @@ export class Coordinator {
           );
           return;
         }
+        // And again: writing the take is itself an await, long enough to open another world in.
+        // The take is durable and undecided, which is a state the card can offer to accept later.
+        if (!this.stillOpen(store)) return;
         const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
         if (!sheet) {
           await this.refreshIfStillOpen(store);
@@ -4309,8 +4312,11 @@ export class Coordinator {
    * Is a character sheet already being generated for this character?
    *
    * The same reading the kit screen takes, made where the queue actually lives: not yet terminal,
-   * or terminal but still finalizing — a job whose take has not been recorded will still accept
-   * and designate itself when it is. Scoped to the world because sheet slugs recur across them.
+   * or terminal without a finished finalization — a job whose take has not been recorded will
+   * still accept and designate itself when it is. That includes a finalization that *failed*,
+   * because Activity offers to retry it and a successful retry runs the same acceptance, landing
+   * the older generated sheet on top of a newer upload (PR review). Scoped to the world because
+   * sheet slugs recur across them.
    */
   private characterSheetJobRunning(worldId: string, sheetId: string): boolean {
     const settled = ["succeeded", "failed", "cancelled", "needs-reconciliation"];
@@ -4319,7 +4325,8 @@ export class Coordinator {
         job.worldId === worldId &&
         job.target.kind === "character-sheet" &&
         job.target.id?.startsWith(`${sheetId}/`) === true &&
-        (!settled.includes(job.status) || job.finalization?.status === "pending"),
+        (!settled.includes(job.status) ||
+          (job.finalization !== undefined && job.finalization.status !== "complete")),
     );
   }
 

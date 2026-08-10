@@ -265,59 +265,71 @@ describe("uploading a character sheet by hand", () => {
   // The button is disabled against the jobs the screen could see when it was pressed. A job that
   // starts while the dialog stands open — or from another connected client — is invisible to it,
   // and would land afterwards, designate itself, and replace the upload without a word.
-  it("refuses while a generated sheet for this character is still on its way", async () => {
-    const { root, worldDir } = await makeTempRoot();
-    const running = {
-      id: "jb_01J8E0000000000000000000JX",
-      idempotencyKey: "01J8E1000000000000000000KX",
-      worldId: WORLD_ID,
-      target: { kind: "character-sheet", id: "maren-kest/gx" },
-      capability: "image",
-      provider: "fal",
-      model: "flux-pro-1.1",
-      params: {},
-      estimatedMicroUsd: 40000,
-      status: "running",
-      providerJobId: "rm_x",
-      attempt: 1,
-      error: null,
-      createdAt: CLOCK,
-      updatedAt: CLOCK,
-    };
-    await mkdir(join(root, "queue"), { recursive: true });
-    await writeFile(join(root, "queue", "jobs.jsonl"), `${JSON.stringify(running)}\n`, "utf8");
+  for (const conflicting of [
+    { what: "is still running", status: "running" as const },
+    // Succeeded, but its take was never recorded — and Activity still offers to retry that.
+    // A successful retry runs the same acceptance and lands the older generated sheet on top.
+    {
+      what: "succeeded with a finalization that can still be retried",
+      status: "succeeded" as const,
+      finalization: { status: "failed" as const, error: "the take could not be recorded", updatedAt: CLOCK },
+    },
+  ]) {
+    it(`refuses while a generated sheet for this character ${conflicting.what}`, async () => {
+      const { root, worldDir } = await makeTempRoot();
+      const job = {
+        id: "jb_01J8E0000000000000000000JX",
+        idempotencyKey: "01J8E1000000000000000000KX",
+        worldId: WORLD_ID,
+        target: { kind: "character-sheet", id: "maren-kest/gx" },
+        capability: "image",
+        provider: "fal",
+        model: "flux-pro-1.1",
+        params: {},
+        estimatedMicroUsd: 40000,
+        status: conflicting.status,
+        providerJobId: "rm_x",
+        attempt: 1,
+        error: null,
+        createdAt: CLOCK,
+        updatedAt: CLOCK,
+        ...(conflicting.finalization ? { finalization: conflicting.finalization } : {}),
+      };
+      await mkdir(join(root, "queue"), { recursive: true });
+      await writeFile(join(root, "queue", "jobs.jsonl"), `${JSON.stringify(job)}\n`, "utf8");
 
-    const picked = await fileOutsideTheWorld("my-own-sheet.png");
-    const provider = new FsWorldProvider(root, { clock: () => CLOCK });
-    await provider.loadWorld(WORLD_ID);
-    const events: DomainEvent[] = [];
-    const coordinator = new Coordinator({
-      provider,
-      adapter: null,
-      changeLogPath: join(root, "logs", "changes.jsonl"),
-      appVersion: "test",
-      appRoot: root,
-      // Any dispatch surface at all is enough for the queue to exist; nothing here submits.
-      dispatchClients: {},
-      observeEvent: (event) => events.push(event),
-      pickFiles: async () => [picked],
+      const picked = await fileOutsideTheWorld("my-own-sheet.png");
+      const provider = new FsWorldProvider(root, { clock: () => CLOCK });
+      await provider.loadWorld(WORLD_ID);
+      const events: DomainEvent[] = [];
+      const coordinator = new Coordinator({
+        provider,
+        adapter: null,
+        changeLogPath: join(root, "logs", "changes.jsonl"),
+        appVersion: "test",
+        appRoot: root,
+        // Any dispatch surface at all is enough for the queue to exist; nothing here submits.
+        dispatchClients: {},
+        observeEvent: (event) => events.push(event),
+        pickFiles: async () => [picked],
+      });
+      await coordinator.start(0);
+      try {
+        const before = await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8");
+        await (
+          coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }
+        ).handleClientMessage({ kind: "import-character-sheet", worldId: WORLD_ID, sheetId: "maren-kest" });
+
+        assert.equal(await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8"), before);
+        const reported = theReport(events, "character-sheet.acceptance");
+        assert.equal(reported.status, "failed");
+        assert.match(reported.reason ?? "", /has not finished/);
+      } finally {
+        await coordinator.stop();
+        await provider.close();
+      }
     });
-    await coordinator.start(0);
-    try {
-      const before = await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8");
-      await (
-        coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }
-      ).handleClientMessage({ kind: "import-character-sheet", worldId: WORLD_ID, sheetId: "maren-kest" });
-
-      assert.equal(await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8"), before);
-      const reported = theReport(events, "character-sheet.acceptance");
-      assert.equal(reported.status, "failed");
-      assert.match(reported.reason ?? "", /already on its way/);
-    } finally {
-      await coordinator.stop();
-      await provider.close();
-    }
-  });
+  }
 
   it("refuses a file that is not an image, and leaves the designated sheet standing", async () => {
     const picked = await fileOutsideTheWorld("sheet.pdf", "not an image");

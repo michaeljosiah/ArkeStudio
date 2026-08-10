@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   attachmentFor,
@@ -771,17 +771,20 @@ describe("kit mutations through the one commit primitive", () => {
     await store.close();
   });
 
-  it("refuses a media name that would climb out of the take directory", async () => {
-    const { store } = await open();
-    await assert.rejects(
-      recordUploadedCharacterSheetTake(
-        store,
-        "maren-kest",
-        "../../world.json",
-        new TextEncoder().encode("hand-drawn-sheet-bytes"),
-      ),
-      /unsafe media name/,
-    );
+  it("refuses a media name that is not a plain filename, and writes nothing when it does", async () => {
+    const { dir, store } = await open();
+    const takesDir = join(dir, "references", "maren-kest", "takes");
+    const before = await readdir(takesDir).catch(() => []);
+    // "." and ".." survive a basename check — basename("..") is ".." — and each names a directory
+    // that already exists, so the write lands somewhere real rather than failing cleanly.
+    for (const media of ["../../world.json", "..", ".", "a/b.png"]) {
+      await assert.rejects(
+        recordUploadedCharacterSheetTake(store, "maren-kest", media, new TextEncoder().encode("bytes")),
+        /unsafe media name/,
+        `"${media}" must be refused`,
+      );
+    }
+    assert.deepEqual(await readdir(takesDir).catch(() => []), before, "and no take directory was made");
     await store.close();
   });
 
