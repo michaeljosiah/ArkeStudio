@@ -192,6 +192,44 @@ export function pendingReferenceTake(
   return take;
 }
 
+/**
+ * The take a hand-carried image gets: provider "user", model "upload", cost nil and *stated*
+ * nil rather than unknown, provenance frozen at the moment it came in. It is a real take for
+ * the same reason a generated one is — the kit points at takes, and the history has to be able
+ * to say where the bytes came from — it simply names a person instead of a provider.
+ */
+function uploadedTake(
+  store: WorldStore,
+  sheetId: string,
+  kind: Take["kind"],
+  media: string,
+  params: Record<string, unknown>,
+): Take {
+  const bundle = store.getBundle();
+  const sheet = bundle.sheets.find((candidate) => candidate.id === sheetId);
+  if (!sheet) throw new Error(`no sheet ${sheetId}`);
+  const now = store.now();
+  return {
+    id: `tk_${ulid()}` as Take["id"],
+    coversShots: [],
+    kind,
+    reference: { sheetId },
+    provider: "user",
+    model: "upload",
+    provenance: {
+      canonRevision: bundle.meta.canonRevision,
+      sheets: { [sheetId]: sheet.version },
+      artDirectionVersion: bundle.artDirection.version,
+    },
+    references: [],
+    params,
+    cost: { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "local-zero" },
+    dispatchedAt: now,
+    completedAt: now,
+    media,
+  };
+}
+
 export async function recordUploadedReferenceTake(
   store: WorldStore,
   sheetId: string,
@@ -207,36 +245,43 @@ export async function recordUploadedReferenceTake(
         take.params["uploadedCandidate"] === candidatePath,
     );
   if (existing) return existing;
-  const sheet = store.getBundle().sheets.find((candidate) => candidate.id === sheetId);
-  if (!sheet) throw new Error(`no sheet ${sheetId}`);
-  const id = `tk_${ulid()}` as Take["id"];
   const media = basename(candidatePath);
-  const now = store.now();
-  const take: Take = {
-    id,
-    coversShots: [],
-    kind: "main-photo",
-    reference: { sheetId },
-    provider: "user",
-    model: "upload",
-    provenance: {
-      canonRevision: store.getBundle().meta.canonRevision,
-      sheets: { [sheetId]: sheet.version },
-      artDirectionVersion: store.getBundle().artDirection.version,
-    },
-    references: [],
-    params: { uploadedCandidate: candidatePath },
-    cost: { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "local-zero" },
-    dispatchedAt: now,
-    completedAt: now,
-    media,
-  };
+  const take = uploadedTake(store, sheetId, "main-photo", media, { uploadedCandidate: candidatePath });
   await store.gateOp(async () => {
-    const dir = join(store.dir, "references", sheetId, "takes", id);
+    const dir = join(store.dir, "references", sheetId, "takes", take.id);
     await mkdir(toExtendedLength(dir), { recursive: true });
     // An upload keeps its candidate: the user put that file there, and `uploadedCandidate`
     // points back at it. Only a staging copy this code made is this code's to remove.
     await placeMedia(join(store.dir, candidatePath), join(dir, media));
+    await atomicWriteFile(join(dir, "take.json"), JSON.stringify(take, null, 2) + "\n");
+  });
+  return take;
+}
+
+/**
+ * A character sheet the user drew, bought, or made elsewhere (PR #241).
+ *
+ * The source sits outside the world, so unlike the main photo's route there is no candidate to
+ * come from and none left behind: the bytes go straight into the take that will own them, and
+ * the file the user picked is never moved or touched. `placeMedia` still stages and renames, so
+ * a half-copied 40 MB sheet cannot be mistaken for a finished one.
+ *
+ * Not deduplicated, deliberately. The same path picked twice is two deliberate acts, and the
+ * second one is usually a corrected export of the first — collapsing them would silently keep
+ * the older bytes.
+ */
+export async function recordUploadedCharacterSheetTake(
+  store: WorldStore,
+  sheetId: string,
+  sourcePath: string,
+  media: string,
+): Promise<Take> {
+  if (basename(media) !== media) throw new Error(`unsafe media name ${media}`);
+  const take = uploadedTake(store, sheetId, "sheet", media, { uploadedFile: media });
+  await store.gateOp(async () => {
+    const dir = join(store.dir, "references", sheetId, "takes", take.id);
+    await mkdir(toExtendedLength(dir), { recursive: true });
+    await placeMedia(sourcePath, join(dir, media));
     await atomicWriteFile(join(dir, "take.json"), JSON.stringify(take, null, 2) + "\n");
   });
   return take;

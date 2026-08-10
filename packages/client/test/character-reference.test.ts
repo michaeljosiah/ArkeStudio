@@ -4,11 +4,15 @@ import type { Sheet } from "@arke-studio/contracts";
 import { mainPhotoPromptFor } from "../src/screens/character-reference.js";
 import {
   __applyEventForTest,
+  __characterSheetAcceptanceForTest,
   __connectionStatusForTest,
   __mainPhotoAcceptanceForTest,
   __pendingQueueRequestsForTest,
   __setStateForTest,
+  clearCharacterSheetAcceptance,
   generateWorldImage,
+  importCharacterSheet,
+  importMainPhoto,
   subscribeQueueResults,
   chooseAnchor,
 } from "../src/lib/store.js";
@@ -113,5 +117,48 @@ describe("main-photo acceptance feedback", () => {
     assert.equal(result?.status, "failed");
     assert.equal(result?.candidateRetained, true);
     assert.match(result?.reason ?? "", /try again/);
+  });
+});
+
+describe("uploading a main photo or character sheet by hand", () => {
+  it("leaves no in-flight state, so a cancelled file dialog cannot wedge the buttons", () => {
+    __setStateForTest(FIXTURE_STATE);
+    const worldId = FIXTURE_STATE.world!.meta.worldId;
+    importMainPhoto(worldId, "maren-kest");
+    importCharacterSheet(worldId, "maren-kest");
+    // Cancelling reports nothing at all, by design — so anything set optimistically here would
+    // have nothing to clear it, and both buttons would read as busy for the rest of the session.
+    assert.equal(__mainPhotoAcceptanceForTest()["maren-kest"], undefined);
+    assert.equal(__characterSheetAcceptanceForTest()["maren-kest"], undefined);
+  });
+
+  it("says why an uploaded sheet did not take, and stops saying it once cleared", () => {
+    __setStateForTest(FIXTURE_STATE);
+    __applyEventForTest({
+      at: "2026-08-04T08:00:00Z",
+      type: "character-sheet.acceptance",
+      worldId: FIXTURE_STATE.world!.meta.worldId,
+      sheetId: "maren-kest",
+      status: "failed",
+      reason: "The character sheet was not changed because its permanent copy could not be made. Try again.",
+    });
+    assert.equal(__characterSheetAcceptanceForTest()["maren-kest"]?.status, "failed");
+    assert.match(__characterSheetAcceptanceForTest()["maren-kest"]?.reason ?? "", /Try again/);
+
+    clearCharacterSheetAcceptance("maren-kest");
+    assert.equal(__characterSheetAcceptanceForTest()["maren-kest"], undefined);
+  });
+
+  it("carries an acceptance the hub can clear, so Replace never bounces on a stale success", () => {
+    __setStateForTest(FIXTURE_STATE);
+    __applyEventForTest({
+      at: "2026-08-04T08:00:00Z",
+      type: "character-sheet.acceptance",
+      worldId: FIXTURE_STATE.world!.meta.worldId,
+      sheetId: "maren-kest",
+      status: "accepted",
+    });
+    assert.equal(__characterSheetAcceptanceForTest()["maren-kest"]?.status, "accepted");
+    assert.equal(__characterSheetAcceptanceForTest()["maren-kest"]?.reason, undefined);
   });
 });

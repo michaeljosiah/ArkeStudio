@@ -50,9 +50,11 @@ import {
   pendingReferenceTake,
   recordReferenceReview,
   recordReferenceTake,
+  recordUploadedCharacterSheetTake,
   referenceReviewDecision,
 } from "../../src/references/takes.js";
 import { makeTempWorld } from "../world/helpers.js";
+import { tempDir } from "../tmp.js";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
 
@@ -489,6 +491,30 @@ describe("staleness, attachment and designation (R-13, R-14, D8, D10)", () => {
     assert.equal(compilationIsStale(direct, direct.compilations[0]!, 4), true);
   });
 
+  it("never marks an uploaded sheet stale for a main photo it was never drawn from", () => {
+    const uploaded = kitOf([], {
+      mainPhoto: { file: "main-photo-v2.png", source: "upload", sheetVersion: 4 },
+      compilations: [
+        {
+          file: "takes/tk_01J8E0000000000000000000T7/character-sheet-upload-a1.png",
+          format: "character-sheet",
+          sheetVersion: 4,
+          tiles: [],
+          compiledAt: CLOCK(),
+          source: "tk_01J8E0000000000000000000T7",
+          accepted: true,
+        },
+      ],
+    });
+    assert.equal(
+      compilationIsStale(uploaded, uploaded.compilations[0]!, 4),
+      false,
+      "no anchor claimed, so no anchor to fall out of date",
+    );
+    // The one staleness an upload still answers to: the character's own text moved on.
+    assert.equal(compilationIsStale(uploaded, uploaded.compilations[0]!, 5), true);
+  });
+
   it("a stale designated compilation is attached anyway, with its gap named", () => {
     const kit = kitOf(
       [{ angle: "head-front", status: "locked", file: "a.png", sheetVersion: 3 }],
@@ -662,6 +688,89 @@ describe("kit mutations through the one commit primitive", () => {
     });
     assert.equal(requests.length, 4);
     assert.deepEqual(requests[0]!.input.params["references"], ["references/maren-kest/main-photo.png"]);
+  });
+
+  it("takes an uploaded character sheet without a provider, a cost, or the file the user picked", async () => {
+    const { dir, store } = await open();
+    const outside = join(await tempDir("arke-upload-"), "my-own-sheet.png");
+    await writeFile(outside, "hand-drawn-sheet-bytes");
+
+    // Derived, never hardcoded: the fixture character's version moves, and a literal here would
+    // fail somewhere unrelated to what this test is about.
+    const live = store.getBundle().sheets.find((candidate) => candidate.id === "maren-kest")!;
+
+    const take = await recordUploadedCharacterSheetTake(store, "maren-kest", outside, "character-sheet-upload-a1.png");
+    assert.equal(take.kind, "sheet");
+    assert.equal(take.provider, "user");
+    assert.equal(take.model, "upload");
+    assert.deepEqual(take.cost, { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "local-zero" });
+    assert.equal(take.provenance.sheets["maren-kest"], live.version, "frozen at the version it came in against");
+    const stored = join(dir, "references", "maren-kest", "takes", take.id, "character-sheet-upload-a1.png");
+    assert.equal(await readFile(stored, "utf8"), "hand-drawn-sheet-bytes");
+    assert.equal(await readFile(outside, "utf8"), "hand-drawn-sheet-bytes", "the user's own file is left alone");
+    // Straight into the take, so there is no second copy loose in the world to explain.
+    await assert.rejects(readFile(join(dir, "references", "maren-kest", "incoming", "character-sheet-upload-a1.png")));
+
+    await acceptCharacterSheet(store, live, {
+      file: `takes/${take.id}/${take.media}`,
+      takeId: take.id,
+      sheetVersion: live.version,
+      artDirectionVersion: 3,
+      review: referenceReviewDecision(store.now(), take, "accept"),
+    });
+    const kit = (await readKit(store, "maren-kest"))!.kit;
+    const compilation = designatedCompilation(kit)!;
+    assert.equal(compilation.file, `takes/${take.id}/${take.media}`);
+    assert.equal(compilation.source, take.id);
+    assert.equal(compilation.anchorFile, undefined, "an upload claims no lineage it does not have");
+    assert.equal(
+      store.getBundle().referenceReviews.find((candidate) => candidate.takeId === take.id)?.decision,
+      "accept",
+      "the human's own action reviews itself; nothing is left waiting",
+    );
+
+    // Replacing the identity afterwards must not tell the user to regenerate their own artwork.
+    await chooseAnchor(store, "maren-kest", {
+      file: "new-main-photo.png",
+      sheetVersion: live.version,
+      artDirectionVersion: 3,
+      acceptedAt: CLOCK(),
+    });
+    const after = (await readKit(store, "maren-kest"))!.kit;
+    assert.equal(compilationIsStale(after, designatedCompilation(after)!, live.version), false);
+    await store.close();
+  });
+
+  it("gives each hand-carried sheet its own take, so a corrected export never keeps the old bytes", async () => {
+    const { dir, store } = await open();
+    const outside = join(await tempDir("arke-upload-"), "my-own-sheet.png");
+    await writeFile(outside, "first-export");
+    const first = await recordUploadedCharacterSheetTake(store, "maren-kest", outside, "character-sheet-upload-a1.png");
+    await writeFile(outside, "corrected-export");
+    const second = await recordUploadedCharacterSheetTake(store, "maren-kest", outside, "character-sheet-upload-a2.png");
+
+    assert.notEqual(second.id, first.id, "the same path picked twice is two deliberate acts");
+    assert.equal(
+      await readFile(join(dir, "references", "maren-kest", "takes", second.id, second.media!), "utf8"),
+      "corrected-export",
+    );
+    assert.equal(
+      await readFile(join(dir, "references", "maren-kest", "takes", first.id, first.media!), "utf8"),
+      "first-export",
+      "and the earlier one stays explicable",
+    );
+    await store.close();
+  });
+
+  it("refuses a media name that would climb out of the take directory", async () => {
+    const { store } = await open();
+    const outside = join(await tempDir("arke-upload-"), "my-own-sheet.png");
+    await writeFile(outside, "hand-drawn-sheet-bytes");
+    await assert.rejects(
+      recordUploadedCharacterSheetTake(store, "maren-kest", outside, "../../world.json"),
+      /unsafe media name/,
+    );
+    await store.close();
   });
 
   it("records immutable reference takes and accepts review plus kit designation atomically", async () => {

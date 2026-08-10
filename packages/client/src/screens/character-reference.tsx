@@ -23,14 +23,18 @@ import {
   acceptCharacterSheet,
   attachCharacterLook,
   chooseAnchor,
+  clearCharacterSheetAcceptance,
   clearMainPhotoAcceptance,
   generateCharacterLooks,
   generateCharacterSheet,
   generateMainPhoto,
+  importCharacterSheet,
+  importMainPhoto,
   importMainPhotoCandidate,
   promoteCharacterLook,
   rejectReferenceTake,
   subscribeQueueResults,
+  useCharacterSheetAcceptance,
   useMainPhotoAcceptance,
   useStore,
 } from "../lib/store.js";
@@ -154,13 +158,36 @@ function carriesIdentity(model: ManifestModel | null): boolean {
   return model !== null && model.unverified !== true && model.accepts.referenceImages > 0;
 }
 
+/**
+ * Whether this build can open a file dialog at all. The picker belongs to the host, so in the
+ * browser there is nothing to open — and the button says which build has it rather than going
+ * quietly dead.
+ */
+function canPickFiles(): boolean {
+  return typeof window !== "undefined" && window.arke !== undefined;
+}
+
+const UPLOAD_UNAVAILABLE = "Upload is available in the desktop app";
+
 export function CharacterReferenceScreen() {
   const { worldId, sheetId } = useParams();
   const navigate = useNavigate();
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);
   const { state } = useStore();
+  const photoUpload = useMainPhotoAcceptance()[sheetId ?? ""];
+  const sheetUpload = useCharacterSheetAcceptance()[sheetId ?? ""];
+  // A success says itself — the card changes. What it must not do is linger: the replace screen
+  // reads this same slot and leaves the moment it sees "accepted", so a success left here would
+  // make the next press of Replace bounce straight back.
+  useEffect(() => {
+    if (sheetId && photoUpload?.status === "accepted") clearMainPhotoAcceptance(sheetId);
+  }, [photoUpload?.status, sheetId]);
+  useEffect(() => {
+    if (sheetId && sheetUpload?.status === "accepted") clearCharacterSheetAcceptance(sheetId);
+  }, [sheetUpload?.status, sheetId]);
   if (!world || !sheet || !sheetId) return null;
+  const canUpload = canPickFiles();
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId) ?? null;
   const photo = kit ? mainPhotoFor(kit) : null;
   const compilation = kit ? designatedCompilation(kit) : null;
@@ -220,10 +247,21 @@ export function CharacterReferenceScreen() {
               <h2>Main photo</h2>
               <p>the face and physical identity to preserve</p>
             </div>
+            <Button
+              variant="ghost"
+              disabled={!canUpload}
+              title={canUpload ? "Use an image from this computer — nothing is generated" : UPLOAD_UNAVAILABLE}
+              onClick={() => importMainPhoto(world.meta.worldId, sheetId)}
+            >
+              Upload
+            </Button>
             <Button onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/main-photo`)}>
               {photo ? "Replace" : "Create"}
             </Button>
           </div>
+          {photoUpload?.status === "failed" && (
+            <p className="fy-reference-fallback">{photoUpload.reason ?? "The main photo was not changed."}</p>
+          )}
         </section>
         <section className="fy-reference-card">
           <div className="fy-reference-card__image fy-reference-card__image--sheet">
@@ -256,10 +294,24 @@ export function CharacterReferenceScreen() {
               <h2>Character sheet</h2>
               <p>multiple views · one composite image</p>
             </div>
+            {/* Not gated on the main photo, unlike Generate: a sheet drawn elsewhere owes this
+                world's identity anchor nothing, and waiting on one would be a rule with no
+                purpose behind it. */}
+            <Button
+              variant="ghost"
+              disabled={!canUpload}
+              title={canUpload ? "Use a composite from this computer — nothing is generated" : UPLOAD_UNAVAILABLE}
+              onClick={() => importCharacterSheet(world.meta.worldId, sheetId)}
+            >
+              Upload
+            </Button>
             <Button disabled={!photo || runningSheet} onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/model-sheet`)}>
               {runningSheet ? "Generating" : compilation ? "Regenerate" : "Generate"}
             </Button>
           </div>
+          {sheetUpload?.status === "failed" && (
+            <p className="fy-reference-fallback">{sheetUpload.reason ?? "The character sheet was not changed."}</p>
+          )}
           {pendingSheetTakes.length > 0 && (
             <div className="fy-reference-candidates">
               <span>{pendingSheetTakes.length} new composite{pendingSheetTakes.length === 1 ? " is" : "s are"} ready for review.</span>
@@ -535,7 +587,10 @@ export function ReplaceMainPhotoScreen() {
   const [prompt, setPrompt] = useState(() => mainPhotoPromptFor(sheet));
   const [count, setCount] = useState(4);
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier }>({});
-  const [uploaded, setUploaded] = useState(false);
+  // Whether the accepted main photo rides along as an identity reference. Its own control, and
+  // not the upload button's business: one press used to do both, and the refs strip then showed
+  // the *current* photo captioned as though it were the file just chosen.
+  const [carryIdentity, setCarryIdentity] = useState(false);
   const [worldRef, setWorldRef] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   // The click itself flips the panel (the WorldKeyArt pattern): between the press and the
@@ -605,8 +660,8 @@ export function ReplaceMainPhotoScreen() {
   // prevent, and it has to be visible where the references are, not only in the bar's own line.
   const model = shownImageModel(state, choice.modelId);
   const carriesReferences = model !== null && model.unverified !== true && model.accepts.referenceImages > 0;
-  const canImport = typeof window !== "undefined" && window.arke !== undefined;
-  const refs = uploaded && photo && carriesReferences ? [`references/${sheetId}/${photo.file}`] : [];
+  const canImport = canPickFiles();
+  const refs = carryIdentity && photo && carriesReferences ? [`references/${sheetId}/${photo.file}`] : [];
   return (
     <div className="fy-mainphoto-scrim" data-screen="replace-main-photo">
       <div className="fy-mainphoto-dialog">
@@ -630,20 +685,34 @@ export function ReplaceMainPhotoScreen() {
             </button>
           </div>
           <div className="fy-mainphoto-dialog__refbuttons">
+            {/* Two different things, so two buttons: one decides what travels with the
+                generation, the other brings in a finished image that needs no generation. */}
             <Button
-              disabled={!canImport}
-              title={canImport ? "Choose an image from this computer" : "Upload is available in the desktop app"}
-              onClick={() => {
-                importMainPhotoCandidate(world.meta.worldId, sheetId);
-                setUploaded(true);
-              }}
+              disabled={!photo}
+              title={
+                photo
+                  ? "Carry the accepted main photo into the generation, so the new one keeps the face"
+                  : "There is no accepted main photo to carry yet"
+              }
+              onClick={() => setCarryIdentity(!carryIdentity)}
             >
-              Upload reference
+              Use current photo
             </Button>
             <Button onClick={() => setWorldRef(!worldRef)}>Choose from world</Button>
+            <Button
+              disabled={!canImport}
+              title={
+                canImport
+                  ? "Choose an image from this computer; it joins the previews to pick from"
+                  : UPLOAD_UNAVAILABLE
+              }
+              onClick={() => importMainPhotoCandidate(world.meta.worldId, sheetId)}
+            >
+              Upload your own
+            </Button>
           </div>
           <div className="fy-mainphoto-dialog__refs">
-            {uploaded && photo && (
+            {carryIdentity && photo && (
               <div className={carriesReferences ? undefined : "is-dropped"}>
                 <Portrait
                   worldSlug={world.meta.slug}
@@ -666,7 +735,7 @@ export function ReplaceMainPhotoScreen() {
               </div>
             )}
           </div>
-          {uploaded && !carriesReferences && model && (
+          {carryIdentity && !carriesReferences && model && (
             <Callout tone="warning" title={`${model.displayName} accepts no reference images`}>
               {sheet.name}&apos;s main photo will not ride along. The generation sees the written
               description and the world look as text, and nothing of the face.

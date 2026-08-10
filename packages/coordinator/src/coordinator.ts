@@ -112,6 +112,7 @@ import {
   pendingReferenceTake,
   recordReferenceReview,
   recordReferenceTake,
+  recordUploadedCharacterSheetTake,
   referenceReviewDecision,
 } from "./references/takes.js";
 import {
@@ -175,6 +176,31 @@ import type { WorldStore } from "./world/store.js";
  * (SPEC-001 D2) — never a separately launched server. Wires the world provider, read model,
  * transport, change log, harness adapter and child supervisors into one lifecycle.
  */
+
+/**
+ * What a hand-carried reference image may be. Deliberately narrower than what the media route
+ * will serve: the host's dialog offers an "All files" filter, so the extension arriving here is
+ * whatever the user typed, and it is checked again rather than trusted.
+ */
+const IMPORTABLE_IMAGES = [".png", ".jpg", ".jpeg", ".webp"] as const;
+
+const UNSUPPORTED_IMAGE = "That file is not an image the studio can hold. Choose a PNG, JPEG or WebP.";
+
+function importableImage(extension: string): boolean {
+  return (IMPORTABLE_IMAGES as readonly string[]).includes(extension);
+}
+
+/** Copy a picked file into a sheet's candidate set under a name of our making, never the user's. */
+async function landUploadedImage(
+  store: WorldStore,
+  sheetId: string,
+  source: string,
+  name: string,
+): Promise<void> {
+  const dir = join(store.dir, "references", sheetId, "candidates");
+  await mkdir(toExtendedLength(dir), { recursive: true });
+  await copyFile(toExtendedLength(source), toExtendedLength(join(dir, name)));
+}
 
 export interface CoordinatorOptions {
   provider: WorldProvider;
@@ -3333,24 +3359,134 @@ export class Coordinator {
       case "import-main-photo-candidate": {
         const store = this.opts.provider.openStore?.();
         const pick = this.opts.pickFiles;
-        if (!store || !pick) return;
-        const [source] = await pick({ accept: [".png", ".jpg", ".jpeg", ".webp"] }).catch(() => []);
+        // The open world must be the world the frame was written for. Sheet slugs recur across
+        // worlds, so a frame from a screen the user has since navigated away from would file the
+        // image under the same-named character somewhere else entirely — and the only sign would
+        // be a candidate nobody put there. Every other reference handler already checks this.
+        if (!store || store.worldId !== msg.worldId || !pick) return;
+        const [source] = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
         if (!source) return;
         const extension = extname(source).toLowerCase();
-        if (![".png", ".jpg", ".jpeg", ".webp"].includes(extension)) return;
+        if (!importableImage(extension)) return;
         await store
           .gateOp(async () => {
-            const name = `upload-${Date.now().toString(36)}${extension}`;
-            await mkdir(toExtendedLength(join(store.dir, "references", msg.sheetId, "candidates")), {
-              recursive: true,
-            });
-            await copyFile(
-              toExtendedLength(source),
-              toExtendedLength(join(store.dir, "references", msg.sheetId, "candidates", name)),
-            );
+            await landUploadedImage(store, msg.sheetId, source, `upload-${Date.now().toString(36)}${extension}`);
           })
           .catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "import-main-photo": {
+        const store = this.opts.provider.openStore?.();
+        const pick = this.opts.pickFiles;
+        const report = (status: "accepted" | "failed", candidateRetained: boolean, reason?: string) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "main-photo.acceptance",
+            worldId: msg.worldId,
+            sheetId: msg.sheetId,
+            status,
+            ...(reason ? { reason } : {}),
+            candidateRetained,
+          });
+        if (!store || store.worldId !== msg.worldId || !pick) return;
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
+        if (!sheet) {
+          report("failed", false, "The main photo was not changed because the character is unavailable.");
+          return;
+        }
+        const [source] = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
+        // A closed dialog is not a failure. Reporting one would put an error under a card the
+        // user just decided to leave alone.
+        if (!source) return;
+        const extension = extname(source).toLowerCase();
+        if (!importableImage(extension)) {
+          report("failed", false, UNSUPPORTED_IMAGE);
+          return;
+        }
+        const file = `upload-${Date.now().toString(36)}${extension}`;
+        const landed = await store
+          .gateOp(() => landUploadedImage(store, msg.sheetId, source, file))
+          .then(
+            () => true,
+            () => false,
+          );
+        if (!landed) {
+          report("failed", false, "The main photo was not changed because that file could not be copied in.");
+          return;
+        }
+        // gateOp rescans on the way out, so the bundle already lists the candidate that
+        // acceptMainPhoto is about to validate against — and from here the upload takes the
+        // identical path a chosen candidate takes, staged failures and cleanup included.
+        const result = await acceptMainPhoto(store, sheet, store.getBundle(), { source: "candidate", file });
+        await this.refreshWorldSnapshot(msg.worldId);
+        if (result.status === "failed") {
+          void this.appLog?.append(mainPhotoLogRecord(msg.worldId, msg.sheetId, result.stage, "upload"));
+          report("failed", result.candidateRetained, mainPhotoFailureReason(result.stage));
+          return;
+        }
+        if (result.cleanupError) {
+          void this.appLog?.append(mainPhotoLogRecord(msg.worldId, msg.sheetId, "candidate-cleanup", "upload"));
+          report("accepted", true);
+          return;
+        }
+        report("accepted", false);
+        return;
+      }
+      case "import-character-sheet": {
+        const store = this.opts.provider.openStore?.();
+        const pick = this.opts.pickFiles;
+        const report = (status: "accepted" | "failed", reason?: string) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "character-sheet.acceptance",
+            worldId: msg.worldId,
+            sheetId: msg.sheetId,
+            status,
+            ...(reason ? { reason } : {}),
+          });
+        if (!store || store.worldId !== msg.worldId || !pick) return;
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
+        if (!sheet) {
+          report("failed", "The character sheet was not changed because the character is unavailable.");
+          return;
+        }
+        const [source] = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
+        if (!source) return;
+        const extension = extname(source).toLowerCase();
+        if (!importableImage(extension)) {
+          report("failed", UNSUPPORTED_IMAGE);
+          return;
+        }
+        const media = `character-sheet-upload-${Date.now().toString(36)}${extension}`;
+        const take = await recordUploadedCharacterSheetTake(store, msg.sheetId, source, media).catch(() => null);
+        if (!take) {
+          await this.refreshWorldSnapshot(msg.worldId);
+          report(
+            "failed",
+            "The character sheet was not changed because its permanent copy could not be made. Try again.",
+          );
+          return;
+        }
+        // No anchorFile: this sheet was not drawn from the main photo, so it claims no lineage
+        // and no later main photo can call it out of date. Accepted in the same motion as the
+        // upload — the human's own action rule, the same one the generated sheet gets at
+        // finalization. Nobody needs to review a file they just chose by hand.
+        const accepted = await acceptCharacterSheet(store, sheet, {
+          file: `takes/${take.id}/${media}`,
+          takeId: take.id,
+          sheetVersion: sheet.version,
+          artDirectionVersion: store.getBundle().artDirection.version,
+          review: referenceReviewDecision(store.now(), take, "accept"),
+        }).then(
+          () => true,
+          () => false,
+        );
+        await this.refreshWorldSnapshot(msg.worldId);
+        report(
+          accepted ? "accepted" : "failed",
+          accepted ? undefined : "The character sheet was copied in but could not be recorded. Try again.",
+        );
         return;
       }
       case "generate-main-photo": {

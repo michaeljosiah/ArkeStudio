@@ -172,6 +172,8 @@ interface StoreState {
     string,
     { status: "accepted" | "failed" | null; reason?: string; candidateRetained: boolean }
   >;
+  /** Last hand-carried character sheet result by sheet; null status means the picker is open. */
+  characterSheetAcceptance: Record<string, { status: "accepted" | "failed" | null; reason?: string }>;
   /** SPEC-013: export lifecycle by exportId. */
   exportsState: Record<string, ExportState>;
   /** SPEC-015: the last import report and filing notices — transient. */
@@ -229,6 +231,7 @@ let current: StoreState = {
   voiceSidecar: null,
   voiceRuntimeTest: null,
   mainPhotoAcceptance: {},
+  characterSheetAcceptance: {},
   exportsState: {},
   importReport: null,
   artifactNotices: [],
@@ -588,6 +591,7 @@ function handleFrame(json: string): void {
     let voiceSidecar = current.voiceSidecar;
     let voiceRuntimeTest = current.voiceRuntimeTest;
     let mainPhotoAcceptance = current.mainPhotoAcceptance;
+    let characterSheetAcceptance = current.characterSheetAcceptance;
     if (event.type === "voice.candidates") {
       voiceCandidates = {
         ...voiceCandidates,
@@ -644,6 +648,11 @@ function handleFrame(json: string): void {
           ...(event.reason ? { reason: event.reason } : {}),
           candidateRetained: event.candidateRetained,
         },
+      };
+    } else if (event.type === "character-sheet.acceptance") {
+      characterSheetAcceptance = {
+        ...characterSheetAcceptance,
+        [event.sheetId]: { status: event.status, ...(event.reason ? { reason: event.reason } : {}) },
       };
     }
     let importReport = current.importReport;
@@ -754,6 +763,7 @@ function handleFrame(json: string): void {
       voiceSidecar,
       voiceRuntimeTest,
       mainPhotoAcceptance,
+      characterSheetAcceptance,
       exportsState,
       importReport,
       artifactNotices,
@@ -1393,6 +1403,32 @@ export function importMainPhotoCandidate(worldId: string, sheetId: string): void
   send({ kind: "import-main-photo-candidate", worldId, sheetId });
 }
 
+/**
+ * Bring the whole main photo in from a file, no generation involved.
+ *
+ * No optimistic in-flight state, unlike `chooseAnchor`: the host's file dialog is modal to the
+ * window, so it is its own feedback and a second press is not possible while it is open. An
+ * optimistic flip would also have no way back — a cancelled dialog reports nothing, by design,
+ * and the button would read "uploading" for the rest of the session.
+ */
+export function importMainPhoto(worldId: string, sheetId: string): void {
+  send({ kind: "import-main-photo", worldId, sheetId });
+}
+
+export function importCharacterSheet(worldId: string, sheetId: string): void {
+  send({ kind: "import-character-sheet", worldId, sheetId });
+}
+
+export function useCharacterSheetAcceptance() {
+  return useStore().characterSheetAcceptance;
+}
+
+export function clearCharacterSheetAcceptance(sheetId: string): void {
+  const characterSheetAcceptance = { ...current.characterSheetAcceptance };
+  delete characterSheetAcceptance[sheetId];
+  emitChange({ ...current, characterSheetAcceptance });
+}
+
 export function generateMainPhoto(
   worldId: string,
   sheetId: string,
@@ -1891,6 +1927,7 @@ export function __setStateForTest(state: ClientState): void {
     voiceSidecar: null,
     voiceRuntimeTest: null,
     mainPhotoAcceptance: {},
+    characterSheetAcceptance: {},
     exportsState: {},
     importReport: null,
     artifactNotices: [],
@@ -1908,6 +1945,10 @@ export function __applyEventForTest(event: DomainEvent): void {
 
 export function __mainPhotoAcceptanceForTest() {
   return current.mainPhotoAcceptance;
+}
+
+export function __characterSheetAcceptanceForTest() {
+  return current.characterSheetAcceptance;
 }
 
 export function __pendingQueueRequestsForTest(): string[] {

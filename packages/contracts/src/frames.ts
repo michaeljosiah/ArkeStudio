@@ -658,6 +658,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("import-main-photo-candidate"), worldId: UlidSchema, sheetId: SlugSchema })
     .strict(),
+  /**
+   * The whole main photo, brought in by hand (PR #241).
+   *
+   * Distinct from `import-main-photo-candidate`, which adds one option to a set the user then
+   * chooses from. Here the choosing already happened — in the host's own file dialog, on a file
+   * the user pointed at — so the picked image becomes the identity anchor in the same motion.
+   * The dialog IS the confirmation; a second "are you sure" would be asking twice.
+   */
+  z.object({ kind: z.literal("import-main-photo"), worldId: UlidSchema, sheetId: SlugSchema }).strict(),
+  /** The same hand-carried route for the composite: no provider, no cost, no review step. */
+  z.object({ kind: z.literal("import-character-sheet"), worldId: UlidSchema, sheetId: SlugSchema }).strict(),
   z
     .object({
       kind: z.literal("generate-main-photo"),

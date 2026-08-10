@@ -200,6 +200,24 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /**
+   * Result of bringing a character sheet in by hand (PR #241).
+   *
+   * A generated sheet reports through the queue and then through its review; an uploaded one
+   * passes neither, so without this the only answer to "did my file take?" is whether the card
+   * happens to change. The main photo learned that lesson as `main-photo.acceptance`.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("character-sheet.acceptance"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      status: z.enum(["accepted", "failed"]),
+      reason: z.string().optional(),
+    })
+    .strict(),
+
   /** A provider queue paused, resumed, or its held count moved (SPEC-009 R-8, R-11). */
   z.object({ ...base, type: z.literal("queue.status"), queue: QueueStatusSchema }).strict(),
   /** What start-up reconciliation resolved, reported once (SPEC-009 R-18). */
