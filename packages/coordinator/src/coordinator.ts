@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import {
   DomainEventSchema,
   JobSchema,
+  REFERENCE_FINALIZATION_TARGETS,
   LedgerEntrySchema,
   type ClientMessage,
   type Capability,
@@ -998,11 +999,13 @@ export class Coordinator {
         const withinKit = job.landedFiles[0].replace(`references/${sheetId}/`, "");
         await supersedeTile(store, sheetId, angle, { file: withinKit, sheetVersion: sheet.version });
       }
-      if (
-        ["main-photo-candidate", "establish-candidate", "character-sheet", "character-look"].includes(
-          job.target.kind,
-        )
-      ) {
+      // The shared set, not a copy of it. This branch used to carry its own inline list of the
+      // four kinds that existed when it was written, while contracts already published the same
+      // list as REFERENCE_FINALIZATION_TARGETS. A fifth kind (location-view-candidate) was added
+      // to the published set and not to the copy, so its finalization fell straight through,
+      // recorded no take, and reported "complete" — the image sat in candidates/ with no way to
+      // review it, and the whole accept path was unreachable in a shipped build.
+      if (REFERENCE_FINALIZATION_TARGETS.has(job.target.kind)) {
         const ledgerEntry = this.ledger
           ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
           : undefined;
