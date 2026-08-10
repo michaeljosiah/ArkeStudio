@@ -519,6 +519,84 @@ describe("a wrap-up the app died in the middle of", () => {
   });
 
   /*
+   * Send-back writes its entry against the conversation and removes the proposal after, so a
+   * discard that failed leaves the log settled and the proposal still on the approvals screen. The
+   * leftovers guard refuses on either, so a sweep that took "the log has spoken" as nothing left
+   * to do would leave that conversation unable to wrap up ever again.
+   */
+  it("removes a leftover the log has settled but the gate still holds", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir);
+    const gate = new ProposalManager(store);
+    const conversationId = newId("cv") as ConversationId;
+    const log = new WorldChatStore(conversationDir(dir, conversationId));
+    await log.create(conversationId, AT);
+    await log.append(
+      { type: "conversation.created", title: "t", entryContext: { kind: "world" } },
+      { at: AT },
+    );
+    const proposition = candidate();
+    await withCandidates(log, [proposition]);
+
+    const orphan = await gate.stage({
+      kind: "worldbuilding",
+      summary: "Bells",
+      source: `world-chat:${conversationId}`,
+      targets: [
+        {
+          path: "canon/CANON-904.md",
+          content:
+            "---\nid: CANON-904\ntype: lore\ntitle: B\nstatus: settled\nintroducedAt: 0\nlinks: []\n---\n\nBody.\n",
+        },
+      ],
+      worldChatOrigins: [
+        {
+          requestId: "req-stuck",
+          conversationId,
+          candidateId: proposition.id,
+          candidateRevision: 1,
+          targetPaths: ["canon/CANON-904.md"],
+          fields: ["statement"],
+        },
+      ],
+    });
+    await log.append(
+      {
+        type: "wrapup.failed",
+        requestId: "req-stuck",
+        safeDetail: "materialise; 1 left staged",
+        leftovers: [{ proposalId: orphan.id, candidateIds: [proposition.id] }],
+      },
+      { at: AT },
+    );
+    // Send-back's first half, without the removal that follows it.
+    await log.append(
+      {
+        type: "conversation.reopened",
+        proposalId: orphan.id,
+        restoredCandidateIds: [proposition.id],
+      },
+      { at: AT },
+    );
+
+    await recoverWrapUps(store, gate, NOW);
+
+    assert.equal(
+      (await gate.listOpen()).some((p) => p.id === orphan.id),
+      false,
+      "the half that did not finish is finished, so the guard has nothing left to refuse over",
+    );
+    const meta = await log.readMeta();
+    const view = foldConversation(meta!.id, meta!.createdAt, (await log.read()).events).view;
+    assert.equal(
+      view.candidates.find((c) => c.id === proposition.id)?.status,
+      "live",
+      "and the proposition stays where the reopen put it",
+    );
+    await store.close();
+  });
+
+  /*
    * Accepting commits the change and removes the proposal directory afterwards, so a process that
    * stopped between the two leaves an accepted proposal still staged. Read as a rollback it would
    * be sent back, its propositions returned to live, and the entry it had already written to the

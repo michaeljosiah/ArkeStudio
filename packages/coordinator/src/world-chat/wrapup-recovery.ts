@@ -151,7 +151,29 @@ export async function recoverWrapUps(
       const stuck: string[] = [];
 
       for (const leftover of leftovers) {
-        if (settled.has(leftover.proposalId)) continue;
+        const isStaged = staged.some((p) => p.id === leftover.proposalId);
+
+        if (settled.has(leftover.proposalId)) {
+          /*
+           * The conversation has already said what became of this one.
+           *
+           * Usually that is the end of it. But send-back writes its entry before removing the
+           * proposal, so a discard that failed after it leaves the log settled and the proposal
+           * still on the approvals screen — and the guard refuses on either. Skipped here, as it
+           * was, that conversation could never be wrapped up again: nothing would come back for
+           * the half that did not finish. The log is the half that is right; this removes the
+           * other, and says nothing more.
+           */
+          if (!isStaged) continue;
+          try {
+            await gate.discard(leftover.proposalId);
+            reconciled.push(leftover.proposalId);
+          } catch {
+            stuck.push(leftover.proposalId);
+          }
+          continue;
+        }
+
         const landed = landedInJournal(journal, leftover.proposalId);
         const account = landed
           ? ({
@@ -166,7 +188,7 @@ export async function recoverWrapUps(
               restoredCandidateIds: leftover.candidateIds as CandidateId[],
             } as const);
 
-        if (staged.some((p) => p.id === leftover.proposalId)) {
+        if (isStaged) {
           /*
            * Still on the approvals screen — but not necessarily unaccepted.
            *
