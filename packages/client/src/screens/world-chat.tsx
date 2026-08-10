@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
 import { Composer } from "../components/composer.js";
@@ -21,6 +21,7 @@ import {
   useStore,
   useWorldChatProgress,
   useWorldChatRefusals,
+  useWorldChatWrapUpRefusal,
   worldChatAttachFiles,
   worldChatAttachTarget,
   wrapUpWorldChat,
@@ -262,7 +263,7 @@ export function WorldChatScreen() {
 export function WorldChatConversationScreen() {
   const { worldId, conversationId } = useParams();
   useOpenWorldGuard(worldId);
-  const { state } = useStore();
+  const { state, connection } = useStore();
   const navigate = useNavigate();
   const [draft, setDraft] = useState("");
   /**
@@ -275,6 +276,9 @@ export function WorldChatConversationScreen() {
    */
   const [dismissed, setDismissed] = useState<string[]>([]);
   const refusals = useWorldChatRefusals(conversationId);
+  const wrapUpRefusal = useWorldChatWrapUpRefusal(conversationId);
+  /** Set while a wrap-up is in flight, so the button cannot be pressed twice into the same log. */
+  const [wrappingUp, setWrappingUp] = useState(false);
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
@@ -293,6 +297,37 @@ export function WorldChatConversationScreen() {
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
   // Gated on the run's own start so a label from the previous turn is not shown for this one.
   const progress = useWorldChatProgress(conversationId, loaded?.runStartedAt ?? null);
+
+  /**
+   * Go to the proposals once there are proposals to go to.
+   *
+   * This used to navigate on the click itself. That reads well when the wrap-up works and lies
+   * when it does not: the coordinator can refuse — the conversation moved on, nothing is settled
+   * enough, a change would not write — and the screen had already left for an approvals list that
+   * was empty, which is indistinguishable from a button that does nothing. Closing is the
+   * coordinator's own signal that every proposal is durable (R-42a), so it is the thing to wait
+   * for. The wait is a few file writes, not a model call.
+   *
+   * The connection ends the *waiting look* but not the errand. A socket that drops mid-wrap-up
+   * takes the answer with it, and leaving the button on "Turning this into proposals…" for the
+   * rest of the session is the failure this whole change is about — but the coordinator may well
+   * have finished, and the closed workspace that proves it arrives on the next connection. So the
+   * asking is remembered in a ref that no reconnection clears, and the button is freed meanwhile.
+   */
+  const closed = loaded?.status === "closed";
+  /** The attempt this window made, if any: an answer naming another one is somebody else's. */
+  const asked = useRef<string | null>(null);
+  const refusedMine = wrapUpRefusal !== null && wrapUpRefusal.requestId === asked.current;
+  useEffect(() => {
+    if (!worldId) return;
+    if (asked.current && closed) {
+      asked.current = null;
+      setWrappingUp(false);
+      navigate(`/w/${worldId}/proposals`);
+    } else if (wrappingUp && (refusedMine || connection !== "open")) {
+      setWrappingUp(false);
+    }
+  }, [wrappingUp, closed, refusedMine, connection, worldId, navigate]);
 
   if (!world) return null;
   /**
@@ -387,15 +422,19 @@ export function WorldChatConversationScreen() {
                 {failure && !running && (
                   <div className="fy-chat__failed" role="status">
                     <div className="fy-chat__failedtext">{failureLine(failure)}</div>
-                    <button
-                      type="button"
-                      className="fy-chat__retry"
-                      onClick={() =>
-                        worldId && conversationId && retryWorldChatTurn(worldId, conversationId, failure.turnId)
-                      }
-                    >
-                      Try that again
-                    </button>
+                    {/* Retrying a turn is saying something again, so it is held back for the same
+                        reason the composer is while a wrap-up is running. */}
+                    {!wrappingUp && (
+                      <button
+                        type="button"
+                        className="fy-chat__retry"
+                        onClick={() =>
+                          worldId && conversationId && retryWorldChatTurn(worldId, conversationId, failure.turnId)
+                        }
+                      >
+                        Try that again
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -408,7 +447,7 @@ export function WorldChatConversationScreen() {
               onChange={setDraft}
               onSubmit={() => {
                 const text = draft.trim();
-                if (!text || !worldId || running) return;
+                if (!text || !worldId || running || wrappingUp) return;
                 sendWorldChat(worldId, conversationId!, text, chips.map((c) => c.id));
                 setDraft("");
               }}
@@ -420,10 +459,10 @@ export function WorldChatConversationScreen() {
               // Appended to whatever is already typed, never sent: speaking gets you to a draft,
               // and the draft is still corrected and sent by hand (SPEC-018 R-2, R-5).
               onDictate={(text) => setDraft((prev) => (prev ? `${prev} ${text}` : text))}
-              {...(worldId && conversationId
+              {...(worldId && conversationId && !wrappingUp
                 ? { onAttach: () => worldChatAttachFiles(worldId, conversationId) }
                 : {})}
-              {...(worldId && conversationId && hostCanAttach()
+              {...(worldId && conversationId && hostCanAttach() && !wrappingUp
                 ? {
                     onAttachFiles: (files: readonly File[]) =>
                       attachHostFiles(worldChatAttachTarget(worldId, conversationId), files),
@@ -436,7 +475,20 @@ export function WorldChatConversationScreen() {
                   }
                 : {})}
               onRemoveAttachment={(id) => setDismissed((prev) => [...prev, id])}
-              disabledReason={composerReason(state)}
+              /*
+               * Nothing may be said to a conversation that is being turned into proposals.
+               *
+               * The window is new: the screen used to leave for the approvals list on the press,
+               * so there was no composer left to type into. Now that it waits here, a message or
+               * a file landing mid-wrap-up would be appended around `wrapup.completed` — in the
+               * conversation but absent from the proposals just made from it, or written after it
+               * closed. The coordinator does not refuse it, so the screen must not offer it.
+               */
+              disabledReason={
+                wrappingUp
+                  ? "This conversation is being turned into proposals."
+                  : (composerReason(state) ?? closedReason(loaded?.status))
+              }
             />
             {/* Stop lives on the working line in the transcript now, beside what it would stop. */}
             <div className="fy-chat__composernote">
@@ -500,17 +552,35 @@ export function WorldChatConversationScreen() {
             <Button
               variant="primary"
               size="lg"
-              disabled={carried === 0 || loaded === null || running}
+              disabled={carried === 0 || loaded === null || running || wrappingUp}
               onClick={() => {
                 if (!worldId || !loaded) return;
-                wrapUpWorldChat(worldId, conversationId!, loaded.seq);
-                // Straight to the proposals, with no step in between: the earlier design had a
-                // confirmation sheet here that said less than the screen it stood in front of.
-                navigate(`/w/${worldId}/proposals`);
+                // Waiting only on a command that was actually sent. A press made after the socket
+                // dropped transmits nothing, and nothing can then arrive to end the wait — the
+                // button would sit on "Turning this into proposals…" for the rest of the session.
+                //
+                // No confirmation sheet, and no navigation yet either: an earlier design had a
+                // sheet here that said less than the screen it stood in front of, and the version
+                // after it left for the proposals before knowing there were any. The effect above
+                // goes when the conversation closes.
+                const attempt = wrapUpWorldChat(worldId, conversationId!, loaded.seq);
+                if (!attempt) return;
+                asked.current = attempt;
+                setWrappingUp(true);
               }}
             >
-              Turn this into proposals
+              {wrappingUp ? "Turning this into proposals…" : "Turn this into proposals"}
             </Button>
+            {/*
+              A refused wrap-up is the one thing this rail must not swallow. Nothing was written,
+              so the panel above is unchanged and says nothing about it — without this line the
+              press leaves no trace at all.
+            */}
+            {wrapUpRefusal && !wrappingUp && (
+              <div className="fy-panel__refused" role="status">
+                {wrapUpRefusal.detail}
+              </div>
+            )}
             <div className="fy-panel__caption">
               {carried === 0
                 ? "Nothing is settled enough to propose yet."
@@ -586,5 +656,18 @@ function composerReason(state: ReturnType<typeof useStore>["state"]): string | u
   if (state.app.health.harness.status !== "healthy") {
     return "Chat needs OpenCode running. Everything already understood is still here.";
   }
+  return undefined;
+}
+
+/**
+ * A conversation that has been wrapped up takes nothing more (§11.3).
+ *
+ * Its propositions are proposals now, and a message arriving after the fact would be in the
+ * transcript but in nothing the transcript produced — read back later as though it had been
+ * considered. Send-back is how a closed conversation is reopened, and it is on the proposal.
+ */
+function closedReason(status: string | undefined): string | undefined {
+  if (status === "closed") return "This conversation was turned into proposals. Send one back to carry on.";
+  if (status === "archived") return "This conversation is archived. Restore it to carry on.";
   return undefined;
 }

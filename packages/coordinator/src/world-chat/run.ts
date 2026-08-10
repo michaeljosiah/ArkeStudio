@@ -326,7 +326,9 @@ export class WorldChatRunner {
     const run: WorldChatRun = {
       id: runId,
       turnId,
-      basedOnConversationSeq: events.length,
+      // A sequence number, not a count of records — the two agree only while the numbering is
+      // unbroken, and this is written into the log beside real sequence numbers.
+      basedOnConversationSeq: events.length > 0 ? events[events.length - 1]!.seq : 0,
       status: "running",
       adapter: adapter.id,
       harnessCleanup: "pending",

@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import {
   type CandidateId,
   type ConversationId,
@@ -10,7 +11,8 @@ import type { WorldStore } from "../world/store.js";
 import { foldConversation } from "./fold.js";
 import { canonIdsNeeded, materialiseCandidate, MaterialiseError, planIdentities } from "./materialise.js";
 import { evaluateReadiness, type NotCarried } from "./readiness.js";
-import { WorldChatStore } from "./store.js";
+import { conversationDir, WorldChatStore } from "./store.js";
+import { openIntentOf } from "./wrapup-recovery.js";
 
 /**
  * Turning a conversation into proposals, once (#70 §11.3).
@@ -44,7 +46,7 @@ export interface WrapUpResult {
 
 export class WrapUpError extends Error {
   constructor(
-    readonly reason: "stale" | "nothing-to-carry" | "materialise" | "too-many",
+    readonly reason: "stale" | "nothing-to-carry" | "materialise" | "too-many" | "in-flight",
     message: string,
   ) {
     super(message);
@@ -89,18 +91,83 @@ export interface WrapUpInput {
   now: () => string;
 }
 
+/**
+ * The conversations being wrapped up by this process, right now.
+ *
+ * The durable check below cannot see these. An intent is only appended after the pre-flight has
+ * passed, so two frames arriving together both read a log with no open intent, both agree there
+ * is nothing in the way, and both go on to stage a set of proposals for the same propositions.
+ * The transport starts a handler per frame without waiting for the one before it — the same shape
+ * as the append race this change fixes a layer down.
+ *
+ * A Set is enough because the question and the claim are one synchronous step: nothing is awaited
+ * between them, so no second call can arrive in between. The durable check remains the one that
+ * matters across a restart, where this is empty and the log is all there is.
+ */
+const inFlight = new Set<string>();
+
 export async function wrapUp(input: WrapUpInput): Promise<WrapUpResult> {
-  const log = new WorldChatStore(conversationDirOf(input.store, input.conversationId));
+  // Built through the shared helper rather than spelled out here, so this store reaches the same
+  // per-directory writer as every other one on this conversation (see `writerFor`).
+  const dir = conversationDir(input.store.dir, input.conversationId);
+  const claim = resolve(dir);
+  if (inFlight.has(claim)) {
+    throw new WrapUpError(
+      "in-flight",
+      "This conversation is already being turned into proposals. Wait for that to finish.",
+    );
+  }
+  inFlight.add(claim);
+  try {
+    return await wrapUpOnce(dir, input);
+  } finally {
+    inFlight.delete(claim);
+  }
+}
+
+async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult> {
+  const log = new WorldChatStore(dir);
   const meta = await log.readMeta();
   if (!meta) throw new WrapUpError("stale", "That conversation is no longer here.");
 
   const { events } = await log.read();
   // Refused outright rather than silently re-planned: what is written must be what the person
   // was last shown in the panel, not whatever arrived while they were deciding.
-  if (events.length !== input.expectedConversationSeq) {
+  //
+  // Against the last sequence number, because that is the number the panel was given: the fold
+  // reports the seq it last read, not how many lines it read to get there. Comparing the count
+  // instead held only while the numbers ran 1..N unbroken, so a log that had ever been written
+  // by two writers at once could never be wrapped up again — the count stayed permanently ahead
+  // of the sequence, and every attempt came back stale with nothing to act on.
+  //
+  // The number is a sound revision token because an append takes the highest sequence in the file
+  // and adds one, so the last one always moves when anything is written — including on a log an
+  // older race left with a repeat in the middle, which is the case this has to keep working.
+  const lastSeq = events.length > 0 ? events[events.length - 1]!.seq : 0;
+  if (lastSeq !== input.expectedConversationSeq) {
     throw new WrapUpError(
       "stale",
       "This conversation moved on while you were looking at it. Open it again and wrap up from there.",
+    );
+  }
+
+  /**
+   * One intent at a time (R-42a).
+   *
+   * An intent with no outcome after it means a wrap-up is still running, or one died after
+   * staging some of its proposals and never recorded how it ended. Starting a second would stage
+   * a second set for the same propositions, because their `candidate.status-changed` events are
+   * only appended once every proposal is durable — until then they still read as live and would
+   * be carried again.
+   *
+   * The refusal, rather than resuming here: recovery reconciles an open intent against the
+   * proposals actually on disk, and it will not guess when they do not match. Doing that inside a
+   * button press would be repair by accident.
+   */
+  if (openIntentOf(events)) {
+    throw new WrapUpError(
+      "in-flight",
+      "This conversation is already being turned into proposals. If that did not finish, restart the studio and it will be resolved before anything else is written.",
     );
   }
 
@@ -237,8 +304,4 @@ export async function wrapUp(input: WrapUpInput): Promise<WrapUpResult> {
     mediaIdeaIds: mediaIdeas.map((c) => c.id),
     openChoices,
   };
-}
-
-function conversationDirOf(store: WorldStore, conversationId: ConversationId): string {
-  return `${store.dir}/.conversations/${conversationId}`;
 }

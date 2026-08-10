@@ -425,6 +425,32 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
 
   /**
+   * A wrap-up the coordinator would not perform (#70 §11.3).
+   *
+   * Like a refused attachment, this has no durable home: a refused wrap-up writes nothing, closes
+   * nothing and leaves the conversation exactly as it was, so the next workspace load carries no
+   * trace of it. Without this the refusal reached only the log, and the screen — which had already
+   * moved to the proposals it was promised — showed an empty list. That is the same thing a
+   * broken button looks like.
+   *
+   * `reason` is the machine-readable why; `detail` is already the words to show.
+   *
+   * `requestId` names the attempt this answers. Events reach every connected client, and two
+   * windows on one conversation would otherwise have the second one's refusal settle the first
+   * one's wrap-up — freeing a screen whose proposals are still being written.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("world-chat.wrap-up-refused"),
+      conversationId: z.string().min(1),
+      requestId: z.string().min(1),
+      reason: z.enum(["stale", "nothing-to-carry", "materialise", "too-many", "in-flight", "unknown"]),
+      detail: z.string().min(1).max(300),
+    })
+    .strict(),
+
+  /**
    * What the studio is doing, while it is doing it (#70 §15.3).
    *
    * A turn takes as long as a model takes, and until this existed the screen showed nothing at

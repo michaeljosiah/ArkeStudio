@@ -3218,6 +3218,12 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 /* No control on a point, by design: a point is corrected by saying so, not by pressing anything. */
 .fy-panel__point { font: 400 12.5px/1.6 var(--font-sans); color: var(--foreground); margin-top: 6px; }
 .fy-panel__caption { font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); text-align: center; }
+/* A wrap-up that was refused. Quiet like the failed turn it rhymes with: nothing was written and
+   nothing was lost, so this is the app explaining itself, not raising an alarm. */
+.fy-panel__refused {
+  font: 400 11.5px/1.5 var(--font-sans); color: var(--muted-foreground); text-align: center;
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--background);
+}
 
 /* Narrow: one sheet, never a layer on a layer (design 41c). The rail moves below the
    conversation rather than over it, so nothing is hidden behind anything else. */

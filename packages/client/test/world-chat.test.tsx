@@ -5,7 +5,12 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __applyEventForTest, __setStateForTest } from "../src/lib/store.js";
+import {
+  __applyEventForTest,
+  __connectionStatusForTest,
+  __setStateForTest,
+  wrapUpWorldChat,
+} from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { byPendingConsequence } from "../src/screens/world-chat.js";
@@ -512,5 +517,104 @@ describe("arriving at a conversation the list has not caught up with", () => {
       worldChat: null,
     } as ClientState;
     assert.match(renderAt(state, CV), /That conversation is not here/);
+  });
+});
+
+/**
+ * A wrap-up the coordinator would not do (#70 §11.3).
+ *
+ * This is the failure the feature could least afford, because it presented as nothing at all: the
+ * screen left for the proposals on the press itself, the coordinator refused, and the person
+ * arrived at an empty approvals list having been told nothing. A refused wrap-up writes nothing,
+ * so the workspace that follows is identical to the one before and cannot carry the reason — the
+ * event is the only thing that has it, and the path from it to the rail is what is worth pinning.
+ */
+describe("a wrap-up that was refused", () => {
+  const CV = "cv_01J8F3K2QW9VZX4N7M0RTYB6HC";
+
+  function render(): string {
+    return renderToString(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CV}`]}>
+        <App />
+      </MemoryRouter>,
+    ).replaceAll("<!-- -->", "");
+  }
+
+  function openConversation(): void {
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      world: {
+        ...FIXTURE_STATE.world!,
+        conversations: [
+          {
+            id: CV as never,
+            title: "The bells",
+            status: "open",
+            updatedAt: AT,
+            pointCount: 1,
+            openProposalCount: 0,
+            notCarried: [],
+          },
+        ],
+      },
+      worldChat: {
+        conversationId: CV,
+        status: "open",
+        messages: [],
+        hasMore: false,
+        seq: 1,
+        points: [],
+        attachments: [],
+        runStatus: null,
+        runStartedAt: null,
+        retrievalUnavailable: false,
+      } as never,
+    });
+  }
+
+  it("says why, on the rail it was pressed from", () => {
+    openConversation();
+    __applyEventForTest({
+      at: AT,
+      type: "world-chat.wrap-up-refused",
+      conversationId: CV,
+      requestId: "req-1",
+      reason: "stale",
+      detail: "This conversation moved on while you were looking at it. Open it again and wrap up from there.",
+    } as never);
+
+    const html = render();
+    assert.match(html, /fy-panel__refused/, "the reason has somewhere to be shown");
+    assert.match(html, /moved on while you were looking at it/);
+  });
+
+
+  /*
+   * The screen enters its waiting state on the strength of this, so a command that never left
+   * must say so. Otherwise a press made a moment after the socket dropped starts a wait that
+   * nothing can end: no conversation closes, no refusal arrives, and the button reads "Turning
+   * this into proposals…" for the rest of the session — the same silence, one layer up.
+   */
+  it("says when the command could not be sent at all", () => {
+    openConversation();
+    __connectionStatusForTest("closed");
+    try {
+      assert.equal(wrapUpWorldChat(FIXTURE_WORLD_ID, CV, 1), null, "no attempt id, because no attempt");
+    } finally {
+      __connectionStatusForTest("open");
+    }
+  });
+
+  it("keeps one conversation's refusal off another's rail", () => {
+    openConversation();
+    __applyEventForTest({
+      at: AT,
+      type: "world-chat.wrap-up-refused",
+      conversationId: "cv_01J8F3K2QW9VZX4N7M0RTYB6HZ",
+      reason: "nothing-to-carry",
+      detail: "Nothing in this conversation is settled enough to propose yet.",
+    } as never);
+
+    assert.doesNotMatch(render(), /fy-panel__refused/, "a refusal belongs to the conversation it came from");
   });
 });

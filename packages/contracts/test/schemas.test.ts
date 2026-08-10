@@ -615,6 +615,27 @@ describe("domain events and frames", () => {
     assert.throws(() => DomainEventSchema.parse({ ...event, type: "health.exploded" }));
   });
 
+  /*
+   * A refused wrap-up has to name the attempt it answers. Events reach every connected client, so
+   * an anonymous one lets a second window's refusal settle the first window's wrap-up while its
+   * proposals are still being written. Required at the boundary rather than trusted, because
+   * nothing downstream can tell an absent id from one that happens to match.
+   */
+  it("makes a refused wrap-up name its attempt", () => {
+    const refused = {
+      at: "2026-08-09T22:33:29Z",
+      type: "world-chat.wrap-up-refused",
+      conversationId: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
+      requestId: "c9f1b0e2-0000-4000-8000-000000000000",
+      reason: "in-flight",
+      detail: "This conversation is already being turned into proposals. Wait for that to finish.",
+    } as const;
+    assert.deepEqual(DomainEventSchema.parse(refused), refused);
+
+    const { requestId: _dropped, ...anonymous } = refused;
+    assert.throws(() => DomainEventSchema.parse(anonymous));
+  });
+
   it("validates snapshot and event frames", () => {
     const state = {
       app: {

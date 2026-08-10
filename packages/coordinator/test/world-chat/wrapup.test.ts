@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
@@ -14,6 +14,7 @@ import { evaluateReadiness } from "../../src/world-chat/readiness.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
 import { WorldStore } from "../../src/world/store.js";
+import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
 
 /**
@@ -118,7 +119,10 @@ async function withCandidates(
     },
     { at: AT },
   );
-  return (await log.read()).events.length;
+  // The number the panel is given, and so the number the client hands back — the last sequence,
+  // not how many lines it took to reach it.
+  const { events } = await log.read();
+  return events[events.length - 1]!.seq;
 }
 
 function failsToMaterialise(): WorldChangeCandidate {
@@ -271,6 +275,115 @@ describe("what wrap-up refuses", () => {
     );
     assert.deepEqual(await w.ours(), [], "and stages nothing");
     await w.store.close();
+  });
+
+  it("still wraps up a log an older race left with a repeated sequence number", async () => {
+    const w = await world();
+    // Closed by the sweep rather than at the end of the test: an open store holds the event loop,
+    // so an assertion failing before the close hangs the file instead of reporting.
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [candidate()]);
+
+    /*
+     * Appends were once serialised per store instance rather than per conversation, so two that
+     * overlapped read the same tail and wrote the same number. The damage outlives the race: from
+     * then on the file holds one more record than its highest sequence, forever. Wrap-up compared
+     * the count against the sequence the panel was shown, so every attempt on such a conversation
+     * came back stale — a button that did nothing, with the reason only in a log file.
+     *
+     * Copied into a second conversation because this log was written by something else: appending
+     * over the top of one this process has already written is a foreign write, and rightly caught.
+     */
+    const lines = (await readFile(w.log.eventsPath, "utf8")).split("\n").filter(Boolean);
+    const damaged = lines.map((line) => JSON.parse(line) as { seq: number });
+    damaged[damaged.length - 1]!.seq = damaged[damaged.length - 2]!.seq;
+
+    const twin = newId("cv") as ConversationId;
+    const twinLog = new WorldChatStore(conversationDir(w.dir, twin));
+    await twinLog.create(twin, AT);
+    await writeFile(twinLog.eventsPath, damaged.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
+
+    const { events } = await twinLog.read();
+    const lastSeq = events[events.length - 1]!.seq;
+    assert.equal(lastSeq, seq - 1, "the repeat costs the log a number it never gets back");
+    assert.equal(events.length, lastSeq + 1, "one more record than the highest sequence — the real shape");
+
+    const result = await wrapUp({
+      store: w.store,
+      gate: w.gate,
+      conversationId: twin,
+      requestId: "req-repeated-seq",
+      // What the panel showed, which is the last sequence and not the number of records.
+      expectedConversationSeq: lastSeq,
+      now: NOW,
+    });
+
+    assert.equal(result.proposalIds.length, 1);
+  });
+
+  /*
+   * The second press, after a wrap-up that died between staging its proposals and recording how
+   * it ended. Its propositions are still `live` — their status events are only appended once every
+   * proposal is durable — so a second run would carry them again and stage a duplicate set beside
+   * the ones already on disk.
+   */
+  it("refuses a second wrap-up while one is still unaccounted for", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    await withCandidates(w.log, [candidate()]);
+    await w.log.append(
+      {
+        type: "wrapup.intent-recorded",
+        requestId: "req-died",
+        expectedConversationSeq: 2,
+        plannedProposalIds: [],
+      },
+      { at: AT },
+    );
+
+    const { events } = await w.log.read();
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "req-second",
+          expectedConversationSeq: events[events.length - 1]!.seq,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "in-flight",
+    );
+    assert.equal((await w.ours()).length, 0, "and stages nothing while it refuses");
+  });
+
+  /*
+   * Two frames arriving together. The durable guard cannot catch this on its own: an intent is
+   * only appended once the pre-flight has passed, so both reads see a log with nothing in the way
+   * and both would go on to stage a set of proposals for the same propositions.
+   */
+  it("stages one set of proposals when two wrap-ups arrive at once", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [candidate()]);
+
+    const both = await Promise.allSettled(
+      ["req-a", "req-b"].map((requestId) =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId,
+          expectedConversationSeq: seq,
+          now: NOW,
+        }),
+      ),
+    );
+
+    assert.equal(both.filter((r) => r.status === "fulfilled").length, 1, "exactly one of them ran");
+    const refused = both.find((r) => r.status === "rejected");
+    assert.ok(refused?.status === "rejected" && refused.reason instanceof WrapUpError);
+    assert.equal((await w.ours()).length, 1, "and one set of proposals exists, not two");
   });
 
   it("refuses a conversation that moved on while it was being read", async () => {

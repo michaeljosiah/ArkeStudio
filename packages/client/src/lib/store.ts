@@ -141,6 +141,18 @@ interface StoreState {
    */
   worldChatRefusals: Record<string, Array<{ name: string; reason: string }>>;
   /**
+   * A wrap-up that was refused, by conversation (#70 §11.3).
+   *
+   * Here for the same reason as a refused file: a refused wrap-up writes nothing, so the workspace
+   * that arrives afterwards is identical to the one before and cannot carry the reason. One at a
+   * time, not a list — the next attempt replaces it, and there is only ever one button to answer.
+   *
+   * It carries the id of the attempt it answers. The reason is worth showing whoever is looking,
+   * but only the window that made that attempt may act on it: these events reach every client,
+   * and a second window's refusal must not end the first window's wait.
+   */
+  worldChatWrapUpRefusals: Record<string, { requestId: string; detail: string }>;
+  /**
    * What the studio is doing right now, by conversation (#70 §15.3).
    *
    * Transient: it is cleared when the turn ends, and nothing is lost if it never arrives — the
@@ -212,6 +224,7 @@ let current: StoreState = {
   voiceAudio: {},
   dictation: {},
   worldChatRefusals: {},
+  worldChatWrapUpRefusals: {},
   worldChatProgress: {},
   voiceSidecar: null,
   voiceRuntimeTest: null,
@@ -570,6 +583,7 @@ function handleFrame(json: string): void {
     let voiceAudio = current.voiceAudio;
     let dictation = current.dictation;
     let worldChatRefusals = current.worldChatRefusals;
+    let worldChatWrapUpRefusals = current.worldChatWrapUpRefusals;
     let worldChatProgress = current.worldChatProgress;
     let voiceSidecar = current.voiceSidecar;
     let voiceRuntimeTest = current.voiceRuntimeTest;
@@ -602,6 +616,11 @@ function handleFrame(json: string): void {
           ...(worldChatRefusals[event.conversationId] ?? []).slice(-2),
           { name: event.name, reason: event.reason },
         ],
+      };
+    } else if (event.type === "world-chat.wrap-up-refused") {
+      worldChatWrapUpRefusals = {
+        ...worldChatWrapUpRefusals,
+        [event.conversationId]: { requestId: event.requestId, detail: event.detail },
       };
     } else if (event.type === "world-chat.progress") {
       worldChatProgress = {
@@ -730,6 +749,7 @@ function handleFrame(json: string): void {
       voiceAudio,
       dictation,
       worldChatRefusals,
+      worldChatWrapUpRefusals,
       worldChatProgress,
       voiceSidecar,
       voiceRuntimeTest,
@@ -1866,6 +1886,7 @@ export function __setStateForTest(state: ClientState): void {
     voiceAudio: {},
     dictation: {},
     worldChatRefusals: {},
+    worldChatWrapUpRefusals: {},
     worldChatProgress: {},
     voiceSidecar: null,
     voiceRuntimeTest: null,
@@ -1947,19 +1968,35 @@ export function retryWorldChatTurn(worldId: string, conversationId: string, turn
   send({ kind: "world-chat-retry-turn", worldId, requestId: crypto.randomUUID(), conversationId, turnId });
 }
 
-/** Turn the conversation into proposals and close it. */
+/**
+ * Turn the conversation into proposals and close it.
+ *
+ * Returns the id of the attempt, or null when the command did not go out at all. The screen waits
+ * on the answer to this: a command that was never transmitted has nothing to wait for, and an
+ * answer that names a different attempt belongs to another window.
+ */
 export function wrapUpWorldChat(
   worldId: string,
   conversationId: string,
   expectedConversationSeq: number,
-): void {
-  send({
+): string | null {
+  const requestId = crypto.randomUUID();
+  const sent = send({
     kind: "world-chat-wrap-up",
     worldId,
-    requestId: crypto.randomUUID(),
+    requestId,
     conversationId,
     expectedConversationSeq,
   });
+  // A fresh attempt clears the last refusal rather than standing beside it, but only once one has
+  // actually gone: a press that transmitted nothing has no answer coming to replace it, and
+  // taking the old reason away would leave the screen saying nothing about either.
+  if (sent && current.worldChatWrapUpRefusals[conversationId] !== undefined) {
+    const cleared = { ...current.worldChatWrapUpRefusals };
+    delete cleared[conversationId];
+    emitChange({ ...current, worldChatWrapUpRefusals: cleared });
+  }
+  return sent ? requestId : null;
 }
 
 /**
@@ -1992,6 +2029,14 @@ export function worldChatAttachTarget(worldId: string, conversationId: string): 
 export function useWorldChatRefusals(conversationId: string | undefined): Array<{ name: string; reason: string }> {
   const refusals = useStore().worldChatRefusals;
   return conversationId ? (refusals[conversationId] ?? []) : [];
+}
+
+/** Why the last wrap-up did not happen, and which attempt it answers. */
+export function useWorldChatWrapUpRefusal(
+  conversationId: string | undefined,
+): { requestId: string; detail: string } | null {
+  const refusals = useStore().worldChatWrapUpRefusals;
+  return conversationId ? (refusals[conversationId] ?? null) : null;
 }
 
 /**

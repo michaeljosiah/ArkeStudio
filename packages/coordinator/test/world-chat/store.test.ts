@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFile, readFile, writeFile } from "node:fs/promises";
+import { appendFile, open, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { newId, type WorldChatStoredEvent } from "@arke-studio/contracts";
@@ -52,6 +52,98 @@ describe("world chat store", () => {
       [1, 2],
     );
     assert.equal(problems.length, 0);
+  });
+
+  it("gives every append its own sequence, even from stores built separately", async () => {
+    const s = await store();
+    // Three files dropped into a conversation at once is three client frames, three handlers
+    // started without waiting for the one before, and three stores built on the same directory.
+    // Each append reads the tail to find its number, so unserialised they read the same tail and
+    // claimed the same number — which is how a real conversation ended up with two seq 16s and
+    // could never be wrapped up again.
+    const concurrent = [new WorldChatStore(s.dir), new WorldChatStore(s.dir), new WorldChatStore(s.dir)];
+    await Promise.all(concurrent.map((w, i) => w.append(message(`file ${i}`), { at: AT })));
+
+    const { events, problems } = await new WorldChatStore(s.dir).read();
+    assert.equal(events.length, 3);
+    assert.deepEqual(
+      events.map((e) => e.seq),
+      [1, 2, 3],
+      "one sequence number per record, however many stores were holding the file",
+    );
+    assert.deepEqual(problems, [], "and no writer mistook another's append for a foreign one");
+  });
+
+  it("forgets the tail when an append fails after the bytes may have landed", async () => {
+    const s = await store();
+    await s.append(message("ours"), { at: AT });
+
+    // `sync` failing stands for every step that can throw once the record may be down — close,
+    // and the digest read after it. The writer cannot know whether the bytes are there, and a
+    // tail it merely believes would make it call the studio's own record a foreign write and
+    // refuse every later append to this conversation until the app was restarted.
+    const probe = await open(s.eventsPath, "r");
+    const handles = Object.getPrototypeOf(probe) as { sync: () => Promise<void> };
+    await probe.close();
+    const real = handles.sync;
+    handles.sync = () => Promise.reject(new Error("the device is having a moment"));
+    try {
+      await assert.rejects(() => s.append(message("during the wobble"), { at: AT }));
+    } finally {
+      handles.sync = real;
+    }
+
+    // Whatever landed, a fresh look at the file is the recovery — not a permanent refusal.
+    await s.append(message("after"), { at: AT });
+    const { events } = await new WorldChatStore(s.dir).read();
+    assert.ok(
+      events.some((e) => JSON.stringify(e).includes("after")),
+      "the conversation can still be written to",
+    );
+    assert.deepEqual(
+      events.map((e) => e.seq),
+      events.map((_, i) => i + 1),
+      "and its numbering is still one per record",
+    );
+  });
+
+  it("re-checks a tail it may itself have torn, however often it has checked before", async () => {
+    const s = await store();
+    await s.append(message("ours"), { at: AT });
+
+    // A write that puts down part of its line and then fails leaves exactly what a crash leaves —
+    // but the process carries on, and this store has already spent its one repair. Without that
+    // being reconsidered the retry extends the fragment, and the two halves become one line that
+    // nothing can read while the append reports success.
+    const probe = await open(s.eventsPath, "r");
+    const handles = Object.getPrototypeOf(probe) as { appendFile: (data: string) => Promise<void> };
+    await probe.close();
+    const real = handles.appendFile;
+    handles.appendFile = async function (this: unknown, data: string) {
+      await real.call(this, data.slice(0, 30));
+      throw new Error("no room left on the device");
+    };
+    try {
+      await assert.rejects(() => s.append(message("cut in half"), { at: AT }));
+    } finally {
+      handles.appendFile = real;
+    }
+
+    await s.append(message("after"), { at: AT });
+    const { events, problems } = await new WorldChatStore(s.dir).read();
+    assert.ok(
+      events.every((e) => typeof e.seq === "number"),
+      "every line still parses — the fragment was cut, not extended",
+    );
+    assert.ok(
+      events.some((e) => JSON.stringify(e).includes("after")),
+      "and the record written after it is there",
+    );
+    assert.deepEqual(
+      problems.filter((p) => p.kind === "interior-corruption"),
+      [],
+      "with no half-record left in the middle of the log",
+    );
   });
 
   it("has the bytes on disk before the append resolves", async () => {

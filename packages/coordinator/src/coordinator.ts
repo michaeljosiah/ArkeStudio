@@ -1509,12 +1509,31 @@ export class Coordinator {
             now: () => new Date().toISOString(),
           });
         } catch (err) {
-          // The refusal is the answer: nothing was written, and the conversation is still open
-          // and still says what it understood.
-          void this.appLog?.append({
-            level: "warn",
-            event: "world-chat.wrap-up-refused",
-            reason: err instanceof WrapUpError ? err.reason : "unknown",
+          // A refusal is the answer: nothing was written, and the conversation is still open and
+          // still says what it understood. It is said to the screen as well as to the log, because
+          // the person is standing in front of the button that did nothing, and a reason only the
+          // log can see is not a reason they were given.
+          //
+          // Only a WrapUpError carries that promise. Wrap-up is a recoverable saga, not one
+          // transaction, so anything else — an I/O failure part-way through staging — may have
+          // left proposals behind, and saying "nothing was written" there would be a guess
+          // presented as a fact. That case says what is known and where to look instead.
+          const reason = err instanceof WrapUpError ? err.reason : "unknown";
+          void this.appLog?.append({ level: "warn", event: "world-chat.wrap-up-refused", reason });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "world-chat.wrap-up-refused",
+            conversationId: msg.conversationId,
+            // Named, because this goes to every client: without it a second window's refusal
+            // would settle the first window's wrap-up while its proposals were still being made.
+            requestId: msg.requestId,
+            reason,
+            // Every WrapUpError message is already written for a person to read; anything else is
+            // ours to explain and not theirs to decode.
+            detail:
+              err instanceof WrapUpError
+                ? err.message
+                : "This did not finish. Check the proposals before trying again — some of them may already be there.",
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);
