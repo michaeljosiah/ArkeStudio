@@ -196,6 +196,33 @@ describe("the location reference tab (#243)", () => {
     assert.ok(!empty.includes(">Replace<"));
   });
 
+  it("shows the establishing view on the location's card and its detail hero, not a file it never had", () => {
+    // sheetPortraitPath names `references/<id>/head-front.png` — a character's front tile, which
+    // a location has never had and never will. Both surfaces rendered the placeholder forever.
+    const establishing = view(1, "Establishing view", "2026-08-01T10:00:00Z");
+    const world = FIXTURE_STATE.world!;
+    const state: ClientState = {
+      ...FIXTURE_STATE,
+      world: { ...world, referenceKits: [kit([establishing, view(2, "Reverse angle", "2026-08-02T10:00:00Z")], "lv_01")] },
+    };
+    __setStateForTest(state);
+    const at = (path: string) =>
+      renderToString(
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+        </MemoryRouter>,
+      ).replace(/<!-- -->/g, "");
+
+    for (const [where, path] of [
+      ["the locations list", `/w/${WORLD_ID}/locations`],
+      ["the detail hero", `/w/${WORLD_ID}/locations/the-vigil`],
+    ] as const) {
+      const html = at(path);
+      assert.ok(html.includes(establishing.file), `${where} should show the establishing view`);
+      assert.ok(!html.includes("the-vigil/head-front.png"), `${where} must not reach for a character's front tile`);
+    }
+  });
+
   it("says what to do first when there is nothing at all", () => {
     const html = render([]);
     assert.ok(html.includes("Start with the establishing view"));

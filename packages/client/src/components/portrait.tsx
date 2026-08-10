@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { mainPhotoFor, type WorldBundle } from "@arke-studio/contracts";
+import { mainPhotoFor, orderedLocationViews, type WorldBundle } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
 
 /**
@@ -84,6 +84,22 @@ export function sheetPortraitPath(sheetId: string): string {
 /** The accepted character identity, preserving immutable nested take paths. */
 export function characterPortraitPath(world: WorldBundle | null | undefined, sheetId: string): string {
   const kit = world?.referenceKits.find((candidate) => candidate.sheetId === sheetId);
+  const photo = kit ? mainPhotoFor(kit) : null;
+  return photo ? `references/${sheetId}/${photo.file}` : sheetPortraitPath(sheetId);
+}
+
+/**
+ * A location's establishing view — what a card and the detail hero show (issue 243, turn 57).
+ *
+ * Three steps down, and the last two are only for worlds that predate location kits. A location
+ * that has accepted a view shows it; one that was given a main photo before views existed shows
+ * that; anything else falls back to the conventional path, which for a location names a file that
+ * has never existed and so renders as the quiet placeholder rather than a broken image.
+ */
+export function locationPortraitPath(world: WorldBundle | null | undefined, sheetId: string): string {
+  const kit = world?.referenceKits.find((candidate) => candidate.sheetId === sheetId);
+  const establishing = kit ? orderedLocationViews(kit)[0] : undefined;
+  if (establishing) return `references/${sheetId}/${establishing.file}`;
   const photo = kit ? mainPhotoFor(kit) : null;
   return photo ? `references/${sheetId}/${photo.file}` : sheetPortraitPath(sheetId);
 }
