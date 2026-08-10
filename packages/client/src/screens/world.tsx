@@ -2893,7 +2893,10 @@ export function CanonThreadScreen() {
               {...(worldId !== undefined && hostCanAttach()
                 ? {
                     onAttachFiles: (files: readonly File[]) =>
-                      attachHostFiles({ kind: "file-artifact", worldId }, files),
+                      // Dropped on the world's own shelf, so it says so — same statement the
+                      // "Copy it anyway" button makes, and the one dedup needs to re-home a
+                      // scoped artifact rather than silently leave it scoped (SPEC-020 §2.5).
+                      attachHostFiles({ kind: "file-artifact", worldId, production: null }, files),
                     onAttachText: (text: string) =>
                       attachHostText({ kind: "file-artifact", worldId }, text, "pasted-note.txt"),
                   }

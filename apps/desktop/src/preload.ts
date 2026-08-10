@@ -39,7 +39,12 @@ const startupListeners = new Set<(state: StartupState) => void>();
  * `ClientMessage`. World Chat's copy stays inside the conversation rather than being filed.
  */
 type AttachTarget =
-  | { kind: "file-artifact"; worldId: string }
+  /**
+   * `production` is SPEC-020 ownership, carried straight through: both attach paths spread the
+   * target into the frame, so dropping and pasting file exactly where the surface says they do.
+   * `null` is the world stated out loud, which is what re-homes a scoped artifact on dedup.
+   */
+  | { kind: "file-artifact"; worldId: string; production?: string | null }
   | { kind: "genesis-attach"; genesisId: string }
   | { kind: "world-chat-attach"; worldId: string; conversationId: string };
 
