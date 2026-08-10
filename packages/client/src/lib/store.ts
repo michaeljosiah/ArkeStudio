@@ -2011,6 +2011,8 @@ export function rejectWorldChatPoint(
   conversationId: string,
   candidateId: string,
   expectedRevision: number,
+  /** As for a save: rejecting a grouped point drops its siblings, so it names them too. */
+  groupMembers: ReadonlyArray<{ candidateId: string; revision: number }> = [],
 ): boolean {
   return send({
     kind: "world-chat-reject-point",
@@ -2019,6 +2021,7 @@ export function rejectWorldChatPoint(
     conversationId,
     candidateId,
     expectedCandidateRevision: expectedRevision,
+    ...(groupMembers.length > 0 ? { expectedGroupRevisions: [...groupMembers] } : {}),
   });
 }
 

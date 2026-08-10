@@ -136,12 +136,11 @@ import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
-import { savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
+import { rejectPoint, savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
 import { titleFrom } from "./world-chat/title.js";
 import { describeEntryContext } from "./world-chat/entry-context.js";
-import { foldConversation } from "./world-chat/fold.js";
 import { currentLookContext } from "./world-chat/context.js";
 import { discoverConversations } from "./world-chat/discover.js";
 import { recordResolution, sendBack } from "./world-chat/resolution.js";
@@ -1540,7 +1539,22 @@ export class Coordinator {
              * create silently and put a duplicate in the world. It stays a proposal, which is
              * where that question can be put.
              */
-            if (staged?.openChoices?.length) continue;
+            if (staged?.openChoices?.length) {
+              /*
+               * Said, not swallowed. The rail promised Save would write this, and instead it has
+               * become a question — the point leaves the rail either way, so without this it
+               * simply disappears and the promise is what the person remembers.
+               */
+              this.emit({
+                at: new Date().toISOString(),
+                type: "world-chat.wrap-up-refused",
+                conversationId: msg.conversationId,
+                requestId: msg.requestId,
+                reason: "unknown",
+                detail: `${staged.openChoices[0]!.question} It is waiting on the proposals screen, where you can answer it.`,
+              });
+              continue;
+            }
             const outcome = await gate.accept(proposalId, {});
             const at = new Date().toISOString();
             if (outcome.status === "accepted" && staged) {
@@ -1584,65 +1598,25 @@ export class Coordinator {
       case "world-chat-reject-point": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        /*
-         * Dropped, not corrected. A point that is nearly right is fixed by saying so; this is for
-         * one that should not exist, and `discarded` is the status the fold already understands —
-         * it stops being live, so it leaves the rail and is never carried by anything later.
-         *
-         * Read and compared before it is written, for the same reason a save is. The fold applies
-         * `candidate.status-changed` by candidate id and pays no attention to the revision on the
-         * event, so an unchecked reject would discard the corrected point rather than the one the
-         * button was rendered against — and say nothing about it.
-         */
-        const log = new WorldChatStore(conversationDir(store.dir, msg.conversationId));
-        const meta = await log.readMeta();
-        if (meta) {
-          const { events } = await log.read();
-          const view = foldConversation(meta.id, meta.createdAt, events).view;
-          const point = view.candidates.find((c) => c.id === msg.candidateId);
-          const fresh = point?.status === "live" && point.revision === msg.expectedCandidateRevision;
-          if (!fresh) {
-            this.emit({
-              at: new Date().toISOString(),
-              type: "world-chat.wrap-up-refused",
-              conversationId: msg.conversationId,
-              requestId: msg.requestId,
-              reason: "stale",
-              detail: "That point changed since you saw it, so it was left alone. Look again.",
-            });
-          } else {
-            /*
-             * A group is rejected as a unit.
-             *
-             * Its members land together, so leaving one discarded inside a live group would make
-             * the group unsaveable — every later save fails its own all-or-nothing check — while
-             * Accept all would skip the discarded one and write the rest. Neither keeps the
-             * promise the group exists to make, so rejecting one rejects them all.
-             */
-            const group = point.groupId
-              ? view.groups.find((g) => g.id === point.groupId && g.status === "live")
-              : undefined;
-            const dropping = group
-              ? view.candidates.filter((c) =>
-                  group.members.some((m) => m.candidateId === c.id) && c.status === "live",
-                )
-              : [point];
-            for (const candidate of dropping) {
-              await log
-                .append(
-                  {
-                    type: "candidate.status-changed",
-                    candidateId: candidate.id,
-                    revision: candidate.revision,
-                    status: "discarded",
-                  },
-                  { at: new Date().toISOString() },
-                )
-                .catch(() => {
-                  /* the refreshed workspace below is authoritative either way */
-                });
-            }
-          }
+        try {
+          await rejectPoint({
+            store,
+            conversationId: msg.conversationId,
+            candidateId: msg.candidateId,
+            expectedCandidateRevision: msg.expectedCandidateRevision,
+            ...(msg.expectedGroupRevisions ? { expectedGroupRevisions: msg.expectedGroupRevisions } : {}),
+            now: () => new Date().toISOString(),
+          });
+        } catch (err) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "world-chat.wrap-up-refused",
+            conversationId: msg.conversationId,
+            requestId: msg.requestId,
+            reason: err instanceof WrapUpError ? err.reason : "unknown",
+            detail:
+              err instanceof WrapUpError ? err.message : "That point could not be dropped, so it was left alone.",
+          });
         }
         // The list counts live points and orders by what is waiting, so it moves when one goes.
         await this.refreshConversations(store);

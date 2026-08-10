@@ -401,7 +401,7 @@ export function WorldChatConversationScreen() {
     const sent =
       action === "save"
         ? saveWorldChatPoint(worldId, conversationId, point.id, point.revision, members) !== null
-        : rejectWorldChatPoint(worldId, conversationId, point.id, point.revision);
+        : rejectWorldChatPoint(worldId, conversationId, point.id, point.revision, members);
     if (sent) setBusyPoints((prev) => [...prev, point.id]);
   };
 

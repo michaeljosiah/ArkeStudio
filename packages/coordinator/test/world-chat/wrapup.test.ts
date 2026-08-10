@@ -11,9 +11,10 @@ import {
   type WorldChangeCandidate,
 } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
+import { foldConversation } from "../../src/world-chat/fold.js";
 import { evaluateReadiness } from "../../src/world-chat/readiness.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import { savePoint, wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
+import { rejectPoint, savePoint, wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
 import { WorldStore } from "../../src/world/store.js";
 import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -994,5 +995,111 @@ describe("what a point save will not write from", () => {
       (err: unknown) => err instanceof WrapUpError && /archived/.test(err.message),
     );
     assert.deepEqual(await w.ours(), [], "an archived conversation writes nothing");
+  });
+});
+
+/**
+ * What deciding immediately does to the states either side of it.
+ *
+ * Each of these is a window that only exists because the decision writes at once: between staging
+ * and the status that takes a point off the rail, between one accept and the next, and between a
+ * save reading the conversation and a reject writing to it.
+ */
+describe("the windows either side of a decision", () => {
+  it("refuses a save for a point a proposal already holds", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+
+    /*
+     * The crash window, made directly: a proposal staged and durable while the point still reads
+     * live, because the status that would take it off the rail never landed. In the ordinary case
+     * that status is what refuses a second press; this is the case where it is not there, and
+     * pressing again would allocate a second Canon id and leave two entries for one sentence.
+     */
+    await w.gate.stage({
+      kind: "worldbuilding",
+      summary: point.title,
+      source: `world-chat:${w.conversationId}`,
+      targets: [{ path: "canon/CANON-001.md" }],
+      worldChatOrigins: [
+        {
+          requestId: "died-mid-save",
+          conversationId: w.conversationId,
+          candidateId: point.id,
+          candidateRevision: point.revision,
+          targetPaths: ["canon/CANON-001.md"],
+          fields: ["statement"],
+        },
+      ],
+    });
+
+    await assert.rejects(
+      () =>
+        savePoint({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "save-again",
+          candidateId: point.id,
+          expectedCandidateRevision: point.revision,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "in-flight",
+    );
+    assert.equal((await w.ours()).length, 1, "one proposal, not two");
+  });
+
+  it("puts points back on the rail when accept all could not write them", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [candidate()]);
+
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "accept-all-fails",
+          expectedConversationSeq: seq,
+          now: NOW,
+          // Nothing lands, as a stale or unconfirmed accept would answer.
+          writeThrough: async () => false,
+        }),
+      (err: unknown) => err instanceof WrapUpError,
+    );
+
+    const { events } = await w.log.read();
+    const view = foldConversation((await w.log.readMeta())!.id, AT, events).view;
+    assert.equal(view.status, "open", "the conversation is not closed over work it did not write");
+    assert.equal(view.candidates.filter((c) => c.status === "live").length, 1, "and the point is decidable again");
+    assert.deepEqual(await w.ours(), [], "with no proposal left offering the same change twice");
+  });
+
+  it("refuses a reject whose revision is not the one the rail showed", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+
+    await assert.rejects(
+      () =>
+        rejectPoint({
+          store: w.store,
+          conversationId: w.conversationId,
+          candidateId: point.id,
+          expectedCandidateRevision: point.revision + 1,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "stale",
+    );
+
+    const { events } = await w.log.read();
+    assert.ok(
+      !events.some((e) => e.event.type === "candidate.status-changed"),
+      "the corrected point was left alone rather than discarded in its place",
+    );
   });
 });

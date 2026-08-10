@@ -285,6 +285,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       conversationId: ConversationIdSchema,
       candidateId: z.string().min(1),
       expectedCandidateRevision: z.number().int().min(1),
+      /** As for a save: rejecting a grouped point drops its siblings, so it names them too. */
+      expectedGroupRevisions: z
+        .array(z.object({ candidateId: z.string().min(1), revision: z.number().int().min(1) }).strict())
+        .max(40)
+        .optional(),
     })
     .strict(),
   /**

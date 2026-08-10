@@ -213,6 +213,23 @@ async function buildAndStage(input: {
   try {
     for (const bucket of buckets) {
       const lead = bucket.items[0]!;
+      /*
+       * Two members of a group writing the same file cannot be flattened into one proposal.
+       *
+       * Each was materialised as a whole file from the same base, so handing both to the gate
+       * writes one over the other and calls both origins resolved — the earlier edit gone, with
+       * nothing anywhere saying so. Merging them properly means materialising the second against
+       * the first rather than against the world, which this does not do yet; until it does, the
+       * honest answer is to refuse rather than to write half of what was asked for.
+       */
+      const paths = bucket.items.flatMap((item) => item.targets.map((t) => t.path));
+      const collision = paths.find((path, index) => paths.indexOf(path) !== index);
+      if (collision !== undefined) {
+        throw new WrapUpError(
+          "materialise",
+          `These land together and two of them rewrite ${collision}, which cannot be written as one change yet. Say which one you want and the other can follow.`,
+        );
+      }
       const choices = bucket.items.flatMap((item) => {
         const choice = openChoiceFor(item.candidate);
         return choice ? [choice] : [];
@@ -437,12 +454,40 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
    * and the refusal says which did not.
    */
   if (input.writeThrough) {
-    const left: string[] = [];
+    const left: Proposal[] = [];
     for (const proposal of proposals) {
       const landed = await input.writeThrough(proposal.id);
-      if (!landed) left.push(proposal.id);
+      if (!landed) left.push(proposal);
     }
     if (left.length > 0) {
+      /*
+       * Points that were not written go back on the rail.
+       *
+       * Staging marked every carried proposition `proposed`, which takes it off the rail — right
+       * for one that landed, and wrong for one that did not: the conversation stays open with
+       * nothing left to decide from, and a later Accept all answers nothing-to-carry forever. The
+       * proposal goes with them, because leaving it waiting would offer the same change twice,
+       * once here and once on the approvals screen.
+       */
+      for (const proposal of left) {
+        await input.gate.discard(proposal.id).catch(() => {
+          /* a proposal that will not go is still better restored on the rail than lost from both */
+        });
+        for (const origin of proposal.worldChatOrigins ?? []) {
+          const candidate = carried.find((c) => c.id === origin.candidateId);
+          if (!candidate) continue;
+          await log.append(
+            {
+              type: "candidate.status-changed",
+              candidateId: candidate.id,
+              revision: candidate.revision,
+              status: "live",
+            },
+            { at: input.now() },
+          );
+        }
+      }
+
       await log.append(
         { type: "wrapup.failed", requestId: input.requestId, safeDetail: "some changes could not be written" },
         { at: input.now() },
@@ -450,8 +495,8 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
       throw new WrapUpError(
         "materialise",
         left.length === proposals.length
-          ? "None of these could be written. They are waiting as proposals, and the conversation is still open."
-          : `${left.length} of these could not be written and are waiting as proposals. The conversation is still open.`,
+          ? "None of these could be written, so they are all still here. The conversation is still open."
+          : `${left.length} of these could not be written and are back on the rail. The rest were written, and the conversation is still open.`,
       );
     }
   }
@@ -617,6 +662,26 @@ export async function savePoint(input: SavePointInput): Promise<SavePointResult>
     }
 
     const bundle = input.store.getBundle();
+    /*
+     * A proposal already holding this point.
+     *
+     * There is no intent record on this path — a save stages at most a group, and a crash between
+     * staging and accepting leaves what a waiting proposal already is. What that reasoning missed
+     * is the window between staging and the `proposed` status being appended: the proposal is
+     * durable, the point still reads live, and pressing Save again would stage a second one and
+     * allocate a second Canon id for the same sentence. The proposals themselves record which
+     * propositions they came from, so they are the record to consult.
+     */
+    const already = bundle.proposals.find((staged) =>
+      staged.proposal.worldChatOrigins?.some((origin) => selected.some((c) => c.id === origin.candidateId)),
+    );
+    if (already) {
+      throw new WrapUpError(
+        "in-flight",
+        "This is already waiting as a proposal. Decide it there — saving again would write it twice.",
+      );
+    }
+
     const { carried, notCarried } = evaluateReadiness(selected, bundle);
     if (carried.length === 0) {
       const why = notCarried.find((n) => n.candidateId === input.candidateId);
@@ -659,6 +724,89 @@ export async function savePoint(input: SavePointInput): Promise<SavePointResult>
       proposalIds: proposals.map((p) => p.id),
       candidateIds: carried.map((c) => c.id),
     };
+  } finally {
+    inFlight.delete(claim);
+  }
+}
+
+export interface RejectPointInput {
+  store: WorldStore;
+  conversationId: ConversationId;
+  candidateId: string;
+  expectedCandidateRevision: number;
+  /** As for a save: every member of the point's group, at the revision the rail showed. */
+  expectedGroupRevisions?: ReadonlyArray<{ candidateId: string; revision: number }>;
+  now: () => string;
+}
+
+/**
+ * Drop one point, and its group if it has one.
+ *
+ * Through the same per-conversation claim as saving, and for a sharper reason than tidiness: a
+ * reject arriving while a save is between its readiness check and its staging would append
+ * `discarded` under it, and the save would then go on to stage, accept and mark the same point
+ * `proposed` — putting into the world the sentence somebody had just rejected. Whichever arrives
+ * second has to see what the first did.
+ *
+ * Every member's revision is checked, not only the clicked one's. Rejecting a group discards
+ * siblings the person may not have looked at, and a sibling corrected in another window would
+ * otherwise be discarded at a revision nobody read.
+ */
+export async function rejectPoint(input: RejectPointInput): Promise<void> {
+  const dir = conversationDir(input.store.dir, input.conversationId);
+  const claim = resolve(dir);
+  if (inFlight.has(claim)) {
+    throw new WrapUpError("in-flight", "This conversation is already writing something. Wait for that to finish.");
+  }
+  inFlight.add(claim);
+  try {
+    const log = new WorldChatStore(dir);
+    const meta = await log.readMeta();
+    if (!meta) throw new WrapUpError("stale", "That conversation is no longer here.");
+
+    const { events } = await log.read();
+    const view = foldConversation(meta.id, meta.createdAt, events).view;
+    if (view.status !== "open") {
+      throw new WrapUpError("stale", "This conversation is not open, so nothing can be decided from it.");
+    }
+
+    const point = view.candidates.find((c) => c.id === input.candidateId);
+    if (!point || point.status !== "live" || point.revision !== input.expectedCandidateRevision) {
+      throw new WrapUpError("stale", "That point changed since you saw it, so it was left alone. Look again.");
+    }
+
+    const group = point.groupId
+      ? view.groups.find((g) => g.id === point.groupId && g.status === "live")
+      : undefined;
+    const dropping = group
+      ? view.candidates.filter(
+          (c) => c.status === "live" && group.members.some((m) => m.candidateId === c.id),
+        )
+      : [point];
+
+    if (group) {
+      const shown = new Map((input.expectedGroupRevisions ?? []).map((m) => [m.candidateId, m.revision]));
+      for (const member of dropping) {
+        if (shown.get(member.id) !== member.revision) {
+          throw new WrapUpError(
+            "stale",
+            "These go together, and one of them changed since you saw it. Look again and decide from there.",
+          );
+        }
+      }
+    }
+
+    for (const candidate of dropping) {
+      await log.append(
+        {
+          type: "candidate.status-changed",
+          candidateId: candidate.id,
+          revision: candidate.revision,
+          status: "discarded",
+        },
+        { at: input.now() },
+      );
+    }
   } finally {
     inFlight.delete(claim);
   }
