@@ -220,6 +220,13 @@ export interface CoordinatorOptions {
   };
   /** SPEC-008: credential cipher (Electron safeStorage in the desktop; a fake in tests). */
   cipher?: Cipher;
+  /**
+   * The credential file's name inside the app root. Only dev overrides it, and only because its
+   * cipher is not safeStorage: `ARKE_STUDIO_ROOT` can point the dev coordinator at a real app
+   * root, and two ciphers sharing one file would leave whichever wrote last unreadable by the
+   * other. Separate names keep dev out of the desktop's way entirely.
+   */
+  credentialsFileName?: string;
   /** Shared with provider-call capture so known credentials are scrubbed from owner-visible payloads. */
   secretRegistry?: SecretRegistry;
   providerCalls?: ProviderCallStore;
@@ -370,7 +377,11 @@ export class Coordinator {
     this.appLog = opts.appRoot ? new AppLog(join(opts.appRoot, "logs", "app.jsonl"), this.secrets) : null;
     this.credentials =
       opts.appRoot && opts.cipher
-        ? new CredentialStore(join(opts.appRoot, "credentials.dat"), opts.cipher, this.secrets)
+        ? new CredentialStore(
+            join(opts.appRoot, opts.credentialsFileName ?? "credentials.dat"),
+            opts.cipher,
+            this.secrets,
+          )
         : null;
     this.providerService = new ProviderService(this.credentials, opts.validators ?? {}, this.appLog);
     for (const [id, probe] of Object.entries(opts.toolProbes ?? {})) {
@@ -1987,7 +1998,21 @@ export class Coordinator {
       case "set-credential": {
         // Write-only (R-5, R-8): the plaintext is registered with the redaction boundary,
         // encrypted, stored under a user-only ACL, and never travels back in any frame.
-        if (!this.credentials) return;
+        //
+        // A write that does not land says so (R-6, issue #227). This used to return early with
+        // no error, no event and no log line whenever the coordinator had been built without a
+        // store: Settings accepted the key, every generation surface went on reporting "no
+        // provider with a key", and nothing on screen connected the two. Dropping a write the
+        // user just performed, in silence, is the worst of the available behaviours — it is
+        // indistinguishable from a rejected key, a typo, or a broken provider.
+        if (!this.credentials) {
+          const reason = this.opts.appRoot
+            ? "this build has no credential storage, so the key was not saved"
+            : "this session has no app root, so there is nowhere to save a key";
+          // reportProviderFault logs it too — one line, not two.
+          this.reportProviderFault(msg.provider, reason);
+          return;
+        }
         try {
           await this.credentials.set(msg.provider, msg.key);
           this.providerService.setConfigured(msg.provider, true);
@@ -1997,11 +2022,11 @@ export class Coordinator {
             providers: this.providerService.list(),
           });
         } catch (err) {
-          void this.appLog?.append({
-            kind: "credential.store-failed",
-            provider: msg.provider,
-            message: err instanceof Error ? err.message : String(err),
-          });
+          const message = err instanceof Error ? err.message : String(err);
+          void this.appLog?.append({ kind: "credential.store-failed", provider: msg.provider, message });
+          // The log alone left the same silence on screen: the store threw, the key was not
+          // written, and Settings showed exactly what it had shown a moment earlier.
+          this.reportProviderFault(msg.provider, `the key was not saved — ${message}`);
         }
         return;
       }
@@ -4089,6 +4114,10 @@ export class Coordinator {
       await this.opts.providerCalls?.drain();
       await this.ledger?.drain();
       await this.changeLog.drain();
+      // The operational log drains with the rest. It was the one writer with a drain nobody
+      // called, so a fault recorded in the last moments of a run — the kind most worth having,
+      // because the run ended — could still be in the queue when the process left.
+      await this.appLog?.drain();
     })();
     try {
       await this.stopPromise;

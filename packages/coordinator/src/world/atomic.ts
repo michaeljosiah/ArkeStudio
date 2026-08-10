@@ -22,18 +22,18 @@ export interface AtomicDeps {
   rename?: (from: string, to: string) => Promise<void>;
 }
 
-export async function renameWithRetry(
-  from: string,
-  to: string,
-  deps: AtomicDeps = {},
-): Promise<void> {
-  const doRename = deps.rename ?? ((f: string, t: string) => rename(toExtendedLength(f), toExtendedLength(t)));
+/**
+ * Run a filesystem operation through the same backoff (D7): Defender and the search indexer
+ * hold transient handles on files in a user profile, and any operation that needs exclusive
+ * access to one — renaming onto it, unlinking it — can fail EPERM/EBUSY for a moment and
+ * succeed immediately after. Anything else throws on the first attempt.
+ */
+export async function withTransientRetry<T>(operation: () => Promise<T>): Promise<T> {
   let lastError: unknown;
   for (const delay of RETRY_DELAYS_MS) {
     if (delay > 0) await sleep(delay);
     try {
-      await doRename(from, to);
-      return;
+      return await operation();
     } catch (err) {
       lastError = err;
       const code = (err as NodeJS.ErrnoException).code ?? "";
@@ -41,6 +41,15 @@ export async function renameWithRetry(
     }
   }
   throw lastError;
+}
+
+export async function renameWithRetry(
+  from: string,
+  to: string,
+  deps: AtomicDeps = {},
+): Promise<void> {
+  const doRename = deps.rename ?? ((f: string, t: string) => rename(toExtendedLength(f), toExtendedLength(t)));
+  await withTransientRetry(() => doRename(from, to));
 }
 
 /**

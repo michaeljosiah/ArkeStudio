@@ -414,11 +414,48 @@ function imageOutput(model: ManifestModel, landscape: boolean, tier?: SizeTier):
   // the picker said 4K. Per-megapixel estimates read these dimensions as well, so the figure
   // would have been wrong in the same direction.
   const scaled = tier !== undefined ? scaleToTier(dimensions, tier, resolution) : dimensions;
-  return { ...scaled, aspect, ...(resolution ? { resolution } : {}) };
+  return { ...snapToAcceptedSize(model.provider, scaled), aspect, ...(resolution ? { resolution } : {}) };
 }
 
 /** Long edge per tier, the aspect kept. 1K is the size these defaults were already written at. */
 const TIER_LONG_EDGE: Record<SizeTier, number> = { "1K": 1536, "2K": 2048, "4K": 4096 };
+
+/**
+ * OpenAI's image routes take `size` from a fixed list, not a width and a height (#223). These
+ * three are the list.
+ */
+const OPENAI_IMAGE_SIZES = [
+  { width: 1024, height: 1024 },
+  { width: 1536, height: 1024 },
+  { width: 1024, height: 1536 },
+] as const;
+
+/**
+ * The last stop before dimensions become a request. Long-edge scaling is right for a route that
+ * takes real numbers — fal, higgsfield — and wrong for one whose size is an enum: a 2K tier
+ * scaled 1024x1536 to 1366x2048, which OpenAI rejected at validation with HTTP 400 in 1.3s,
+ * every time, before any rendering started.
+ *
+ * The manifest is the first line of defence — a model declares only the tiers it reaches, so the
+ * picker never offers this one. This is the backstop, so no future row can put an unsendable
+ * size on the wire. Shape decides first: a portrait request must come back portrait, because a
+ * cropped subject is a worse answer than a smaller one. Area only breaks the tie.
+ */
+function snapToAcceptedSize(
+  provider: ManifestModel["provider"],
+  dimensions: { width: number; height: number },
+): { width: number; height: number } {
+  if (provider !== "openai") return dimensions;
+  const aspect = dimensions.width / dimensions.height;
+  const area = dimensions.width * dimensions.height;
+  const shapeOf = (size: { width: number; height: number }) => Math.abs(size.width / size.height - aspect);
+  const best = [...OPENAI_IMAGE_SIZES].sort((a, b) => {
+    const shape = shapeOf(a) - shapeOf(b);
+    if (Math.abs(shape) > 0.01) return shape;
+    return Math.abs(a.width * a.height - area) - Math.abs(b.width * b.height - area);
+  })[0]!;
+  return { width: best.width, height: best.height };
+}
 
 /**
  * The tier as dimensions. Which axis to scale depends on what the model means by the tier: fal's

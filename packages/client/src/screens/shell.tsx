@@ -83,6 +83,7 @@ import {
   deriveCapabilityAvailability,
   formatMicroUsd,
   jobActions,
+  jobOrigin,
   modelCapabilityCopy,
   modelPriceCopy,
   PROVIDERS as PROVIDER_TABLE,
@@ -908,14 +909,27 @@ export function NewWorldScreen() {
               </>
             ) : (
               <>
+            {/*
+              Placeholders say the shape of an answer, never an answer (issue 230). Every field
+              here used to hold the sample world's real values — "The Undersong", its logline,
+              its genre, Maren Kest, The Vigil — sitting exactly where the user's own words go,
+              so an entirely empty form looked filled in and Begin read as ready to press. They
+              also anchored the author to one world's genre and naming at the moment they were
+              meant to be inventing their own, and made that world's fiction feel like part of
+              the app rather than one example among the worlds they could write.
+            */}
             <div>
               <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>Name</div>
-              <Input placeholder="The Undersong" value={name} onChange={(e) => setName(e.target.value)} />
+              <Input
+                placeholder="What this world is called"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
             </div>
             <div>
               <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>Logline</div>
               <Textarea
-                placeholder="A coastal city where a drowned god still sings, and some people can hear it."
+                placeholder="One sentence about this world"
                 value={logline}
                 onChange={(e) => setLogline(e.target.value)}
                 style={{ minHeight: 52 }}
@@ -946,7 +960,7 @@ export function NewWorldScreen() {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>Genre</div>
-                <Input placeholder="Coastal fantasy" value={genre} onChange={(e) => setGenre(e.target.value)} />
+                <Input placeholder="A genre" value={genre} onChange={(e) => setGenre(e.target.value)} />
               </div>
             </div>
             <div style={{ display: "flex", gap: 14 }}>
@@ -954,8 +968,10 @@ export function NewWorldScreen() {
                 <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>
                   First character <span className="fy-mono">optional</span>
                 </div>
+                {/* The separator is load-bearing — parseSeed splits on it — so the shape has to
+                    teach it where the example used to demonstrate it. */}
                 <Input
-                  placeholder="Maren Kest · tide-caller, the last one"
+                  placeholder="Their name · one line about them"
                   value={firstCharacter}
                   onChange={(e) => setFirstCharacter(e.target.value)}
                 />
@@ -970,7 +986,7 @@ export function NewWorldScreen() {
                   First location <span className="fy-mono">optional</span>
                 </div>
                 <Input
-                  placeholder="The Vigil · the lighthouse that listens back"
+                  placeholder="Its name · one line about it"
                   value={firstLocation}
                   onChange={(e) => setFirstLocation(e.target.value)}
                 />
@@ -1489,7 +1505,11 @@ function ProviderKeyLine({ id }: { id: ProviderId }) {
       {status?.fault && (
         <div className="fy-set__why">
           <span className="fy-set__dot fy-set__dot--warn" />
-          <span>{status.fault} — the work was not the problem; the credential was.</span>
+          {/* The reassurance is only true while a key is stored: then a fault is that key
+              failing in use, and the generation it interrupted was not at fault. With nothing
+              stored the fault is about the store itself (issue 227), and pointing at the
+              credential would send the user to try a different key. */}
+          <span>{status.fault}{stored ? " — the work was not the problem; the credential was." : ""}</span>
         </div>
       )}
       <ProbeChips status={status} />
@@ -2494,9 +2514,23 @@ export function ActivityScreen() {
           {recent.slice(0, 20).map((job) => (
             <div key={job.id} className="fy-activityrow" style={{ display: "block" }}>
               <JobRow job={job} />
-              {jobActions(job).includes("retry") && (
-                <span className="scr-field__hint">failed — retry from its production's dispatch dialog</span>
-              )}
+              {/* Where this one is re-run from, which is not one place (issue 226). The row used
+                  to name the production's dispatch dialog under every failure, including the
+                  reference work that belongs to no production and has no such dialog. */}
+              {jobActions(job).includes("retry") &&
+                (() => {
+                  const origin = jobOrigin(job);
+                  return origin ? (
+                    <>
+                      <span className="scr-field__hint">failed — run it again from {origin.where}</span>
+                      <Button variant="ghost" onClick={() => navigate(origin.path)}>
+                        {origin.label}
+                      </Button>
+                    </>
+                  ) : (
+                    <span className="scr-field__hint">failed — run it again from wherever you started it</span>
+                  );
+                })()}
               <Button variant="ghost" onClick={() => setInspectedJobId(job.id)}>Provider calls</Button>
               {/* Two clicks and no dialog, like archiving a world: the second click is the consent,
                   and the words say what survives it. Offered only where the state permits it

@@ -7,6 +7,8 @@ import {
   computeNeedsYou,
   computeRunning,
   jobActions,
+  jobOrigin,
+  REFERENCE_FINALIZATION_TARGETS,
   spendSummary,
   type ClientState,
   type Job,
@@ -247,6 +249,63 @@ describe("actions offered only where the state permits (R-13, D10, §3.2)", () =
     assert.deepEqual(jobActions(job({ status: "needs-reconciliation" })), ["resolve"]);
     assert.deepEqual(jobActions(job({ status: "succeeded" })), ["delete"], "no cancel on a completed job");
     assert.deepEqual(jobActions(job({ status: "cancelled" })), ["delete"]);
+  });
+
+  it("sends a failed job back to the surface that dispatched it, not always a production (issue 226)", () => {
+    // The hint under every failure named "its production's dispatch dialog". Reference work
+    // belongs to no production and has no such dialog, so a failed look was a dead end: the
+    // character's own page reads `0 productions`, and the row's only instruction pointed at a
+    // screen that does not exist for that job.
+    const cast = (kind: string, id: string) => jobOrigin(job({ status: "failed", target: { kind, id } }));
+    assert.equal(cast("character-look", "timi-j/msm7pzlb/1")?.path, `/w/${WORLD}/cast/timi-j/looks`);
+    assert.equal(cast("main-photo-candidate", "timi-j/msm7pzlb/2")?.path, `/w/${WORLD}/cast/timi-j/main-photo`);
+    assert.equal(cast("character-sheet", "timi-j/msm67mgg")?.path, `/w/${WORLD}/cast/timi-j/model-sheet`);
+    assert.equal(cast("reference-tile", "timi-j/head-front")?.path, `/w/${WORLD}/cast/timi-j/kit`);
+    assert.equal(cast("establish-candidate", "timi-j/1")?.path, `/w/${WORLD}/cast/timi-j/kit`);
+    assert.equal(cast("voice-preview", "timi-j/elevenlabs/rachel")?.path, `/w/${WORLD}/cast/timi-j/voice`);
+    // A section read is queued as a voice preview but did not start in the picker, and cannot
+    // be re-run there — that screen auditions and assigns voices, and has no way to ask for
+    // this paragraph again.
+    const sectionRead = jobOrigin(
+      job({
+        status: "failed",
+        target: { kind: "voice-preview", id: "timi-j/elevenlabs/rachel" },
+        params: { purpose: "sheet-section", sectionHeading: "Essence" },
+      }),
+    );
+    assert.equal(sectionRead?.path, `/w/${WORLD}/cast/timi-j`);
+    // Every reference kind the queue can finalize is one Activity can route home, or the row it
+    // leaves behind is the dead end this issue was about.
+    for (const kind of REFERENCE_FINALIZATION_TARGETS) {
+      assert.ok(cast(kind, "timi-j/1"), `${kind} names somewhere to run it again`);
+    }
+    // And production work still points where it always did.
+    const shot = jobOrigin(job({ status: "failed", productionId: "saltlight", target: { kind: "shot", id: "sh_12" } }));
+    assert.equal(shot?.path, `/w/${WORLD}/p/saltlight/generate/dispatch`);
+    assert.match(shot!.where, /production/);
+    // Except a line, which has a dialog of its own. The shot dispatch dialog carries no
+    // dialogue or delivery controls, so sending a failed line there is the same dead end.
+    const line = jobOrigin(
+      job({ status: "failed", productionId: "saltlight", target: { kind: "voice-line", id: "sh_12" } }),
+    );
+    assert.equal(line?.path, `/w/${WORLD}/p/saltlight/generate/voice-line`);
+    // A world's key art is dispatched from the world screen, and nothing else claims it.
+    assert.equal(jobOrigin(job({ target: { kind: "world-image", id: WORLD } }))?.path, `/w/${WORLD}`);
+    // Nothing to name beats naming the wrong place: a production-less job of an unknown kind,
+    // and a reference job whose target carries no sheet, both say so.
+    assert.equal(jobOrigin(job({ target: { kind: "extraction", id: "af_1" } })), null);
+    assert.equal(jobOrigin(job({ target: { kind: "character-look" } })), null);
+  });
+
+  it("names a destination a button can say and a sentence can hold", () => {
+    // One string cannot do both: "Open its production's dispatch dialog" is not a button, and
+    // "run it again from Looks" reads as a stray proper noun.
+    for (const kind of ["character-look", "main-photo-candidate", "character-sheet", "voice-preview"]) {
+      const origin = jobOrigin(job({ status: "failed", target: { kind, id: "timi-j/x/1" } }));
+      assert.ok(origin, kind);
+      assert.match(origin!.label, /^[A-Z]/, `${kind}: the button starts a label, not a sentence`);
+      assert.match(origin!.where, /^(the|its) /, `${kind}: the sentence fragment reads as one`);
+    }
   });
 
   it("offers delete only on finished work that owes the user nothing", () => {

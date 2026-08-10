@@ -313,6 +313,73 @@ export function jobActions(job: Job): JobAction[] {
   }
 }
 
+/** The surface a job was dispatched from: where to go, and what that place is called. */
+export interface JobOrigin {
+  path: string;
+  /** The destination as a button says it — a place, not an instruction. */
+  label: string;
+  /** The same place inside a sentence, where "Looks" would read as a stray proper noun. */
+  where: string;
+}
+
+/**
+ * Reference work is dispatched from a sheet's own screens, one per kind — the screen that owns
+ * the dialog, not the sheet's overview, because a retry means opening that dialog again.
+ */
+const REFERENCE_ORIGINS: Record<string, Omit<JobOrigin, "path"> & { segment: string }> = {
+  "main-photo-candidate": { segment: "main-photo", label: "Main photo", where: "the main photo screen" },
+  "character-sheet": { segment: "model-sheet", label: "Character sheet", where: "the character sheet screen" },
+  "character-look": { segment: "looks", label: "Looks", where: "the looks screen" },
+  "reference-tile": { segment: "kit", label: "Reference kit", where: "the reference kit" },
+  "establish-candidate": { segment: "kit", label: "Reference kit", where: "the reference kit" },
+  "voice-preview": { segment: "voice", label: "Voice", where: "the voice screen" },
+};
+
+/**
+ * Where a failed job can be run again from (issue 226).
+ *
+ * Activity printed one line under every failure — "retry from its production's dispatch dialog"
+ * — and character looks, character sheets and main photos belong to no production and have no
+ * such dialog. The only instruction on the row pointed at a screen that does not exist for that
+ * job, so a failed look was a dead end: the character's own page reads `0 productions`.
+ *
+ * Null is the honest answer where the origin cannot be named from the job alone, and the row
+ * then says that a retry costs again and leaves it there, rather than sending someone
+ * somewhere wrong.
+ */
+export function jobOrigin(job: Job): JobOrigin | null {
+  const reference = REFERENCE_ORIGINS[job.target.kind];
+  if (reference) {
+    // Every reference target id is the sheet's slug followed by whatever distinguishes this
+    // one request from its siblings — the generation key, the candidate number, the voice.
+    const sheetId = job.target.id?.split("/")[0] ?? "";
+    if (sheetId.length === 0) return null;
+    // Reading a sheet's Essence or Appearance aloud is queued as a voice preview too, but it
+    // did not start in the voice picker and cannot be re-run there: that screen auditions and
+    // assigns voices, and has no way to ask for this paragraph again. The sheet does.
+    if (job.target.kind === "voice-preview" && job.params["purpose"] === "sheet-section") {
+      return { path: `/w/${job.worldId}/cast/${sheetId}`, label: "Character", where: "the character's own page" };
+    }
+    const { segment, label, where } = reference;
+    return { path: `/w/${job.worldId}/cast/${sheetId}/${segment}`, label, where };
+  }
+  if (job.target.kind === "world-image") {
+    return { path: `/w/${job.worldId}`, label: "World", where: "the world's own screen" };
+  }
+  // Shots, scene passes, storyboards and lines are the production's. A line is the exception
+  // among them: it has its own dialog, and the shot dispatch dialog carries no dialogue or
+  // delivery controls, so sending a failed line there would be the same dead end again.
+  if (job.productionId !== undefined) {
+    const line = job.target.kind === "voice-line";
+    return {
+      path: `/w/${job.worldId}/p/${job.productionId}/generate/${line ? "voice-line" : "dispatch"}`,
+      label: line ? "Voice line" : "Dispatch",
+      where: line ? "its production's voice-line dialog" : "its production's dispatch dialog",
+    };
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Spend (R-8, R-10, R-12, D8, D9)
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir } from "node:fs/promises";
+import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -9,9 +9,13 @@ import {
   OpenCodeAdapter,
   ROSTER,
 } from "@arke-studio/adapter-opencode";
+import { createProviderClients, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { KOKORO_PRESETS, localCandidates } from "@arke-studio/voice";
 import { ChildLedger } from "./child-ledger.js";
 import { Coordinator } from "./coordinator.js";
+import { devCipher } from "./credentials/dev-cipher.js";
+import { ProviderCallStore } from "./providers/call-store.js";
+import { SecretRegistry } from "./redact.js";
 import { ChildSupervisor, registerExitBackstop } from "./supervisor.js";
 import { nodeSetupDeps } from "./setup/node-deps.js";
 import { FsWorldProvider } from "./world/provider.js";
@@ -95,9 +99,40 @@ console.log(
     : "[arke-studio] OpenCode: not found — authoring disabled",
 );
 
+// Generation works in dev (issue #227). Three things were missing, and any one of them alone
+// left the stack unable to produce a single image: a cipher, so a key can be stored at all; the
+// manifest, so a model exists to choose; and the clients, so a chosen model can be dispatched.
+// The first was the silent one — Settings accepted keys and dropped them, with no error, no
+// event and no log line — and it is why end-to-end work had to happen against the packaged
+// build. The other two would have made a working key look broken instead.
+//
+// The dev cipher's key lives in this process and nowhere else, so last run's ciphertext is
+// unreadable now. Clearing it is the honest move: left in place, Settings would show a stored
+// key that no dispatch could ever decrypt. The file is dev's own — the desktop writes
+// credentials.dat — so this deletes nothing a real app root owns, even when ARKE_STUDIO_ROOT
+// points at one.
+const DEV_CREDENTIALS = "credentials.dev.dat";
+await rm(join(devRoot, DEV_CREDENTIALS), { force: true });
+
+// The same store the desktop wires, for the same reason: when a provider call fails, its
+// request and response are on disk to read rather than gone (SPEC-008 R-7). Dev is where that
+// question gets asked most.
+const providerSecrets = new SecretRegistry();
+const providerCalls = new ProviderCallStore(join(devRoot, "provider-calls", "calls.jsonl"), providerSecrets);
+// No Higgsfield runner: its credential lives in a CLI, and discovering one here would make dev
+// depend on what happens to be installed. Every Higgsfield call then fails with the remedy.
+const providerClients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: providerCalls });
+
 const coordinator = new Coordinator({
   provider,
   adapter,
+  cipher: devCipher(),
+  credentialsFileName: DEV_CREDENTIALS,
+  secretRegistry: providerSecrets,
+  providerCalls,
+  validators: providerClients,
+  dispatchClients: providerClients,
+  manifest: SHIPPED_MANIFEST,
   changeLogPath: join(devRoot, "logs", "coordinator.jsonl"),
   appVersion: "0.1.0-dev",
   jobsSeedPath: join(devRoot, "queue", "jobs.jsonl"),
@@ -117,6 +152,9 @@ coordinator.superviseAs("harness", opencodeSupervisor);
 
 const { port } = await coordinator.start(DEV_PORT);
 console.log(`[arke-studio] dev coordinator on ws://127.0.0.1:${port} (root: ${devRoot})`);
+// Said out loud, because the packaged app behaves differently here and a key that vanished
+// without explanation is the failure this whole seam exists to prevent.
+console.log("[arke-studio] provider keys: stored for this run only — the dev cipher's key is never written to disk");
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
