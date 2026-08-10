@@ -722,7 +722,23 @@ export async function savePoint(input: SavePointInput): Promise<SavePointResult>
     }
 
     const at = input.now();
-    const { proposals } = await buildAndStage({
+    /*
+     * Durable before the first awaited write, and settled however this ends.
+     *
+     * Nothing else can see a save in progress: the claim above is private to this process, so a
+     * second window could delete the conversation while this one is allocating ids, and the change
+     * would land in a world whose conversation — and whose record of why — was gone. The fold
+     * reads this pair to block deletion, and recovery reads it to reconcile a save that died
+     * between accepting and saying so.
+     */
+    await log.append(
+      { type: "save.intent-recorded", requestId: input.requestId, candidateIds: carried.map((c) => c.id) },
+      { at },
+    );
+
+    let staged: Awaited<ReturnType<typeof buildAndStage>>;
+    try {
+      staged = await buildAndStage({
       log,
       store: input.store,
       gate: input.gate,
@@ -732,12 +748,21 @@ export async function savePoint(input: SavePointInput): Promise<SavePointResult>
       bundle,
       at,
       now: input.now,
-      // Nothing to record: no intent was opened, and the refusal itself is the whole answer.
-      onFailure: async () => {},
-    });
+        onFailure: async () => {},
+      });
+    } catch (err) {
+      // Settled with nothing, so the conversation is not left holding a save that never was.
+      await log.append({ type: "save.settled", requestId: input.requestId, proposalIds: [] }, { at: input.now() });
+      throw err;
+    }
+
+    await log.append(
+      { type: "save.settled", requestId: input.requestId, proposalIds: staged.proposals.map((p) => p.id) },
+      { at: input.now() },
+    );
 
     return {
-      proposalIds: proposals.map((p) => p.id),
+      proposalIds: staged.proposals.map((p) => p.id),
       candidateIds: carried.map((c) => c.id),
     };
   } finally {

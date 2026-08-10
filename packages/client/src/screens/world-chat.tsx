@@ -92,7 +92,12 @@ function whatItIsWaitingOn(row: WorldChatSummary): string {
    * every conversation still produced a pile of them.
    */
   if (row.openProposalCount > 0) {
-    return `${row.openProposalCount} question${row.openProposalCount === 1 ? "" : "s"} waiting on you`;
+    /*
+     * "Waiting on you", not "a question": most are questions a press could not answer, but one
+     * left by an accept that came back stale or unconfirmed is not — it wants a rebase or a look,
+     * and sending somebody hunting for a question that does not exist is worse than saying less.
+     */
+    return `${row.openProposalCount} waiting on you`;
   }
   if (row.status === "closed") return "closed · everything decided";
   if (row.status === "archived") return "archived";

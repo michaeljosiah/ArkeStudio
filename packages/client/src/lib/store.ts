@@ -2014,7 +2014,7 @@ export function rejectWorldChatPoint(
   /** As for a save: rejecting a grouped point drops its siblings, so it names them too. */
   groupMembers: ReadonlyArray<{ candidateId: string; revision: number }> = [],
 ): boolean {
-  return send({
+  const sent = send({
     kind: "world-chat-reject-point",
     worldId,
     requestId: crypto.randomUUID(),
@@ -2023,6 +2023,14 @@ export function rejectWorldChatPoint(
     expectedCandidateRevision: expectedRevision,
     ...(groupMembers.length > 0 ? { expectedGroupRevisions: [...groupMembers] } : {}),
   });
+  // As for a save: a decision that went out replaces the last refusal rather than standing under
+  // it, or the rail keeps explaining a failure beneath a point that has just been dealt with.
+  if (sent && current.worldChatWrapUpRefusals[conversationId] !== undefined) {
+    const cleared = { ...current.worldChatWrapUpRefusals };
+    delete cleared[conversationId];
+    emitChange({ ...current, worldChatWrapUpRefusals: cleared });
+  }
+  return sent;
 }
 
 /**

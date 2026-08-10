@@ -94,9 +94,23 @@ export async function recoverWrapUps(
        * conversation's own log distinguishes them, because each accept is recorded on it as it
        * happens.
        */
-      const accepted = events.flatMap((e) =>
-        e.event.type === "proposal.resolved" && e.event.outcome === "accepted" ? [e.event.proposalId] : [],
+      /*
+       * Only what this intent produced, and only after it opened.
+       *
+       * A conversation that saved a point last week also carries a `proposal.resolved` — read as
+       * proof that this wrap-up landed, it would close a conversation whose current points were
+       * never written at all. The intent's own position in the log is the boundary.
+       */
+      const openedAt = events.findIndex(
+        (e) =>
+          e.event.type === "wrapup.intent-recorded" &&
+          (e.event as { requestId?: string }).requestId === intent.requestId,
       );
+      const accepted = events
+        .slice(openedAt + 1)
+        .flatMap((e) =>
+          e.event.type === "proposal.resolved" && e.event.outcome === "accepted" ? [e.event.proposalId] : [],
+        );
       if (accepted.length > 0) {
         await log.append(
           {

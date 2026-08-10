@@ -1150,3 +1150,67 @@ describe("recovering an accept all that wrote and then died", () => {
     assert.equal(view.status, "open", "nothing was written, so there is still everything to decide");
   });
 });
+
+/**
+ * A save is a thing the conversation knows it is doing.
+ *
+ * It was built without a durable record, on the reasoning that it stages at most a group and a
+ * crash leaves what a waiting proposal already is. That covered the proposal and nothing around
+ * it: while a save is in flight nothing else could see it, so a conversation could be deleted out
+ * from under one, and a proposal a save left waiting was counted nowhere.
+ */
+describe("a save the conversation can see", () => {
+  it("blocks deletion while it is writing, and stops blocking when it is done", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+
+    const before = foldConversation((await w.log.readMeta())!.id, AT, (await w.log.read()).events).view;
+    assert.equal(before.deletionBlock, null, "nothing is happening yet");
+
+    await w.log.append(
+      { type: "save.intent-recorded", requestId: "mid-save", candidateIds: [point.id] },
+      { at: AT },
+    );
+    const during = foldConversation((await w.log.readMeta())!.id, AT, (await w.log.read()).events).view;
+    assert.equal(
+      during.deletionBlock,
+      "wrap-up-in-flight",
+      "a conversation being written from cannot be deleted under the write",
+    );
+
+    await w.log.append({ type: "save.settled", requestId: "mid-save", proposalIds: [] }, { at: AT });
+    const after = foldConversation((await w.log.readMeta())!.id, AT, (await w.log.read()).events).view;
+    assert.equal(after.deletionBlock, null);
+  });
+
+  it("counts a proposal a save left waiting, so the conversation cannot be deleted from under it", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+
+    const result = await savePoint({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "save-waiting",
+      candidateId: point.id,
+      expectedCandidateRevision: point.revision,
+      now: NOW,
+    });
+
+    const view = foldConversation((await w.log.readMeta())!.id, AT, (await w.log.read()).events).view;
+    assert.deepEqual(
+      view.proposalIds,
+      result.proposalIds,
+      "a save announces its proposal on the status change, since it has no completion event",
+    );
+    assert.equal(
+      view.deletionBlock,
+      "unresolved-proposals",
+      "and the proposal keeps the conversation alive, because send-back has nowhere else to go",
+    );
+  });
+});

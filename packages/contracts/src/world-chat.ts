@@ -772,6 +772,32 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
       sourceMessageIds: z.array(MessageIdSchema),
     })
     .strict(),
+  /**
+   * One point being written, from the moment it is decided until it has landed (#70, revised).
+   *
+   * A save was designed without a durable record: it stages at most a group, and a crash between
+   * staging and accepting leaves what a waiting proposal already is. That reasoning covered the
+   * proposal and nothing around it. Without a record, nothing can see a save in flight — so a
+   * second window can delete the conversation while one is allocating, and the change lands in a
+   * world whose conversation is gone; a crash after acceptance but before the resolution is
+   * written leaves a point that is neither on the rail nor waiting anywhere; and recovery has
+   * nothing to reconcile against. The pair costs one append each side and answers all three.
+   */
+  z
+    .object({
+      type: z.literal("save.intent-recorded"),
+      requestId: z.string().min(1),
+      candidateIds: z.array(CandidateIdSchema).min(1),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("save.settled"),
+      requestId: z.string().min(1),
+      /** Empty when the save was refused before anything was staged. */
+      proposalIds: z.array(ProposalIdSchema),
+    })
+    .strict(),
   z.object({ type: z.literal("deletion.intent-recorded"), requestId: z.string().min(1) }).strict(),
 ]);
 export type WorldChatStoredEvent = z.infer<typeof WorldChatStoredEventSchema>;
