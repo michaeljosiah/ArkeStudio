@@ -200,6 +200,34 @@ describe("accept: one commit, versions derived (R-11, R-12)", () => {
  * everything was. Both of these are about the JSON surviving a path built for prose.
  */
 describe("a world look through the generic gate", () => {
+  /**
+   * Move the world's look on without staging a second proposal.
+   *
+   * Only one look change may wait at a time now, so a test that needs a *stale* proposal cannot
+   * make one by staging a rival — it writes the next accepted look straight to disk, which is what
+   * another accept would have left behind anyway.
+   */
+  async function moveLookOn(dir: string, description: string): Promise<void> {
+    const path = join(dir, "art-direction", "art-direction.json");
+    const current = JSON.parse(await readFile(path, "utf8")) as {
+      version: number;
+      description: string;
+      acceptedAt: string;
+      history: Array<{ version: number; description: string; acceptedAt: string }>;
+    };
+    const next = {
+      version: current.version + 1,
+      description,
+      acceptedAt: CLOCK(),
+      history: [
+        ...current.history,
+        { version: current.version, description: current.description, acceptedAt: current.acceptedAt },
+      ],
+    };
+    await writeFile(path, `${JSON.stringify(next, null, 2)}
+`, "utf8");
+  }
+
   /** An open store holds the event loop, so a failure before close hangs the file (see test/tmp). */
   async function openGateSafely() {
     const opened = await openGate();
@@ -302,8 +330,7 @@ describe("a world look through the generic gate", () => {
       "utf8",
     );
     // Move the live look on so the rebase is not a no-op.
-    const other = await gate.stageArtDirectionChange("Ink and wash.", null);
-    await gate.accept(other.id, {});
+    await moveLookOn(dir, "Ink and wash.");
 
     const { conflicts } = await gate.rebase(mine.id);
     assert.equal(conflicts.length, 1, "a side has to be chosen; it cannot be merged");
@@ -366,12 +393,11 @@ describe("a world look through the generic gate", () => {
   });
 
   it("rebases by restating the look, not by merging it as prose", async () => {
-    const { store, gate } = await openGateSafely();
+    const { dir, store, gate } = await openGateSafely();
     const mine = await gate.stageArtDirectionChange("Painterly and hand-animated, with visible brushwork.", null);
 
-    // Somebody else changes the look first, so mine is stale.
-    const theirs = await gate.stageArtDirectionChange("Ink and wash: brush contour, washed tone.", null);
-    await gate.accept(theirs.id, {});
+    // Somebody else's look lands first, so mine is stale.
+    await moveLookOn(dir, "Ink and wash: brush contour, washed tone.");
 
     assert.equal((await gate.accept(mine.id, {})).status, "stale");
     const { conflicts } = await gate.rebase(mine.id);

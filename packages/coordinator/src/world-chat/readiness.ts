@@ -131,22 +131,6 @@ export function evaluateReadiness(
       fail("look-moved");
       continue;
     }
-    /*
-     * One look change waiting at a time.
-     *
-     * There is a single world look, and the screen that reviews a proposed one finds it by kind
-     * rather than by id — so a second would be reviewed, accepted or discarded in place of the
-     * first, arbitrarily. Held back rather than staged: the conversation keeps the proposition,
-     * and it can be asked for again once the one already waiting has been dealt with.
-     */
-    if (
-      candidate.classification === "art-direction.change" &&
-      (carriedALook || bundle.proposals.some((staged) => staged.proposal.kind === "art-direction"))
-    ) {
-      fail("look-already-proposed");
-      continue;
-    }
-    if (candidate.classification === "art-direction.change") carriedALook = true;
     if (!hasIntentEvidence(candidate) || !checksAllow(candidate)) {
       fail("invalid");
       continue;
@@ -156,6 +140,25 @@ export function evaluateReadiness(
       // so it cannot become a fact" is the difference between a bug and a design.
       fail("tentative");
       continue;
+    }
+    /*
+     * One look change waiting at a time.
+     *
+     * There is a single world look, and the screen that reviews a proposed one finds it by kind
+     * rather than by id — so a second would be reviewed, accepted or discarded in place of the
+     * first, arbitrarily. Held back rather than staged: the conversation keeps the proposition,
+     * and it can be asked for again once the one already waiting has been dealt with.
+     *
+     * Last, and only over candidates that have earned a place: claiming the slot any earlier let
+     * a tentative look — one that was never going to carry — spend it, and the settled look
+     * behind it was refused for a proposal that never existed.
+     */
+    if (candidate.classification === "art-direction.change") {
+      if (carriedALook || bundle.proposals.some((staged) => staged.proposal.kind === "art-direction")) {
+        fail("look-already-proposed");
+        continue;
+      }
+      carriedALook = true;
     }
     carried.push(candidate);
   }

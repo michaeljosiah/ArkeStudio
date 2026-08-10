@@ -345,9 +345,17 @@ export function ArtDirectionProposalScreen() {
             <i />
             {direction.reach.productions} productions inherit v{nextVersion} next dispatch
           </div>
+          {/*
+            Everything already behind, plus everything made under the look this replaces.
+
+            The gate's own preview counts both; this screen counted only the first, so the number
+            immediately before Accept was the smaller one — and it is the takes made since the
+            last change, usually the ones being thought about, that the omission dropped.
+          */}
           <div>
             <i className="fy-artproposal__dot-muted" />
-            {direction.reach.earlierAcceptedTakes} accepted takes remain pinned to their original look
+            {direction.reach.earlierAcceptedTakes + (direction.reach.acceptedTakesAtCurrentVersion ?? 0)} accepted
+            takes remain pinned to their original look
           </div>
           {direction.overrides.length > 0 && (
             <div>

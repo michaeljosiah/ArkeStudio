@@ -64,6 +64,14 @@ export type DraftRecovery = {
   dropped: number;
 };
 
+/** A second world look cannot wait beside the first — see stage(). */
+export class LookAlreadyProposedError extends Error {
+  constructor(readonly proposalId: string) {
+    super(`a change to the world look is already waiting (${proposalId}); decide that one first`);
+    this.name = "LookAlreadyProposedError";
+  }
+}
+
 /**
  * Thrown by the paths that have no outcome type to carry a refusal.
  *
@@ -152,6 +160,21 @@ export class ProposalManager {
   /** Materialise a proposal: copies, bases, `_base/` snapshots, reservation, preview (R-1, R-2). */
   async stage(input: StageInput): Promise<Proposal> {
     return this.store.gateOp(async () => {
+      /*
+       * One open look proposal, enforced where it is actually atomic.
+       *
+       * Readiness checks this too, but from a bundle read before any staging — two conversations
+       * wrapping up together both see none and both proceed. Inside the gate operation the check
+       * and the write cannot be separated, and this is the only place that is true. It matters
+       * because the screen that reviews a proposed look finds it by kind rather than by id, so a
+       * second one is reviewed, accepted or discarded in place of the first, arbitrarily.
+       */
+      if (input.kind === "art-direction") {
+        const open = this.store.getBundle().proposals.find((p) => p.proposal.kind === "art-direction");
+        if (open) {
+          throw new LookAlreadyProposedError(open.proposal.id);
+        }
+      }
       const id = newId("pr");
       const at = this.store.now();
 
@@ -687,10 +710,21 @@ export class ProposalManager {
           );
         }
       }
-      const resolved =
-        path === ART_DIRECTION_PATH
-          ? ((choice === "mine" ? conflict.mine : conflict.theirs) ?? current)
-          : applyResolution(path, current, conflict, choice);
+      let resolved: string;
+      if (path === ART_DIRECTION_PATH) {
+        // The side being written has to be a look as well. Guarding only the live document left
+        // "mine" free to write the malformed staged one, which the commit gate then throws on —
+        // after this had reported the conflict resolved.
+        const chosen = (choice === "mine" ? conflict.mine : conflict.theirs) ?? current;
+        if (!parsesAsLook(chosen)) {
+          throw new Error(
+            `the ${choice} side of ${path} cannot be read as a world look, so it cannot be accepted`,
+          );
+        }
+        resolved = chosen;
+      } else {
+        resolved = applyResolution(path, current, conflict, choice);
+      }
       await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(path)), resolved);
       const conflicts = (proposal.conflicts ?? []).map((c) =>
         c.path === path && c.field === field ? { ...c, resolution: choice } : c,
