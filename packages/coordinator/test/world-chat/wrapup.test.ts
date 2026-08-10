@@ -664,6 +664,54 @@ describe("what wrap-up refuses", () => {
     );
   });
 
+  /*
+   * The same filesystem trouble that makes a discard fail is what would make reading `.proposals`
+   * fail. `listOpen` answers that with an empty list — the same answer it gives when nothing is
+   * staged — so verifying through it would report every proposal gone at the moment they are
+   * certainly not, and the leftovers would go unrecorded.
+   */
+  it("records the leftovers when it cannot tell whether they are still there", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [
+      candidate({ title: "A rule that stages first" }),
+      candidate({ title: "A rule that never gets that far" }),
+    ]);
+
+    const realStage = w.gate.stage.bind(w.gate);
+    let staged = 0;
+    w.gate.stage = async (input) => {
+      staged += 1;
+      if (staged === 2) throw new Error("the disk went away");
+      return realStage(input);
+    };
+    w.gate.discard = async () => {
+      throw new Error("and it is still away");
+    };
+    // The disk is unreadable in both directions, which is the point: an unanswerable question is
+    // not a "no".
+    w.gate.isStaged = async () => {
+      throw new Error("cannot read .proposals either");
+    };
+
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "req-cannot-tell",
+          expectedConversationSeq: seq,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "leftovers",
+    );
+
+    const named = (await failureIn(w.log))?.leftovers ?? [];
+    assert.equal(named.length, 1, "recorded rather than assumed gone, so recovery still comes back for it");
+    assert.deepEqual(named.map((one) => one.proposalId), (await w.ours()).map((p) => p.id));
+  });
+
   it("refuses to go again while a proposal it could not take back is still waiting", async () => {
     const w = await world();
     closeOnCleanup(() => w.store.close());

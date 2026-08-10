@@ -380,15 +380,19 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
      * recorded below would name a proposal that does not exist, and the guard above would refuse
      * every later wrap-up on its account for good. So the gate is asked what actually remains.
      *
-     * If that question cannot be answered either, every one of them is recorded. Naming a
-     * proposal that has gone costs a startup sweep, which reconciles it against the world's own
-     * journal; missing one that is still there costs a proposal nothing accounts for.
+     * Asked one proposal at a time rather than through `listOpen`, which answers "I could not
+     * read `.proposals`" and "nothing is there" with the same empty list — and the filesystem
+     * trouble that made the discard fail is exactly what would make that listing fail, so the
+     * verification would report every proposal gone at the moment they certainly are not.
+     *
+     * When even that cannot be answered the proposal is recorded. Naming one that has gone costs
+     * a startup sweep, which reconciles it against the world's own journal; missing one that is
+     * still there costs a proposal nothing accounts for.
      */
-    const stillOpen = wouldNotGo.length > 0 ? await input.gate.listOpen().catch(() => null) : [];
-    const leftBehind =
-      stillOpen === null
-        ? wouldNotGo
-        : wouldNotGo.filter((one) => stillOpen.some((p) => p.id === one.proposalId));
+    const leftBehind: typeof wouldNotGo = [];
+    for (const one of wouldNotGo) {
+      if (await input.gate.isStaged(one.proposalId).catch(() => true)) leftBehind.push(one);
+    }
     const cause =
       err instanceof WrapUpError
         ? err

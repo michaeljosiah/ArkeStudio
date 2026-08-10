@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ART_DIRECTION_PATH,
@@ -891,6 +891,26 @@ export class ProposalManager {
   }
 
   /** Restart recovery (§2.11): validate manifests; report proposals whose target retired. */
+  /**
+   * Whether one proposal is still staged, or a throw when that cannot be read.
+   *
+   * `listOpen` is the wrong instrument for this question: it swallows a failure to read
+   * `.proposals` and returns an empty list, so "nothing is there" and "I could not look" arrive
+   * as the same answer. That is fine for painting a screen and wrong for a caller deciding
+   * whether a proposal it failed to discard is still standing — the filesystem trouble that made
+   * the discard fail is exactly what would make the listing fail too, and it would report the
+   * proposal gone at the moment it certainly is not.
+   */
+  async isStaged(proposalId: string): Promise<boolean> {
+    try {
+      await stat(toExtendedLength(this.proposalDir(proposalId)));
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw err;
+    }
+  }
+
   async listOpen(): Promise<Proposal[]> {
     const out: Proposal[] = [];
     let entries: string[] = [];
