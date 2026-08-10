@@ -42,6 +42,7 @@ export const REFERENCE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
   "establish-candidate",
   "character-sheet",
   "character-look",
+  "location-view-candidate",
 ]);
 
 /**

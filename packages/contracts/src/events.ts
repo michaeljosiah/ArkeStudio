@@ -51,6 +51,7 @@ export const QueueCommandSchema = z.enum([
   "establish-look",
   "generate-main-photo",
   "generate-character-sheet",
+  "generate-location-view",
   "generate-character-looks",
   "generate-missing-tiles",
   "regenerate-tile",

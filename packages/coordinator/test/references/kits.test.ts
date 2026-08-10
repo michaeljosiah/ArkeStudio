@@ -25,6 +25,7 @@ import {
   characterSheetRequest,
   establishRequests,
   imageModelFor,
+  locationViewRequests,
   mainPhotoRequests,
   referenceBudgetFor,
   tierFor,
@@ -1210,5 +1211,101 @@ describe("location views and the sheet they assemble (#243)", () => {
 
     assert.equal(a, b, "content-addressed: the same views in the same order are the same file");
     assert.deepEqual(bytesA, bytesB);
+  });
+});
+
+describe("generating a location view (#243)", () => {
+  const VIGIL = {
+    id: "the-vigil",
+    type: "location",
+    name: "The Vigil",
+    version: 3,
+    status: "locked",
+    sections: [
+      { heading: "Look", body: "A watchtower of black stone at the harbour mouth, ringed by a worn rail." },
+      { heading: "Sound", body: "The bell, and water under it." },
+    ],
+  } as unknown as Sheet;
+  const WORLD = { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", canonRevision: 12 } as never;
+  const DIRECTION = { version: 4, description: "Painterly, tidal, restrained." } as never;
+  const noRefs: ManifestModel = { ...MODEL, id: "no-refs", accepts: { ...MODEL.accepts, referenceImages: 0 } };
+
+  it("generates the establishing view from the location's own words, unanchored", () => {
+    const [request] = locationViewRequests(WORLD, DIRECTION, VIGIL, null, MODEL, {
+      name: "Establishing view",
+      count: 1,
+      generationKey: "k1",
+    });
+    const params = request!.input.params as Record<string, unknown>;
+    assert.equal(request!.input.target.kind, "location-view-candidate");
+    assert.match(request!.input.target.id!, /^the-vigil\/k1\/1$/);
+    assert.deepEqual(params["references"], [], "the first angle has nothing to be anchored to");
+    assert.match(params["prompt"] as string, /A watchtower of black stone/, "the Look is what a place is generated from");
+    assert.match(params["prompt"] as string, /Painterly, tidal, restrained/, "under the world's art direction");
+    assert.match(params["prompt"] as string, /no people in frame/, "a location view is a place, not a scene");
+    assert.deepEqual((params["locationView"] as { name: string }).name, "Establishing view");
+    assert.match((request!.input.landing as { dir: string }).dir, /references\/the-vigil\/candidates$/);
+  });
+
+  it("anchors every later angle to the accepted establishing view", () => {
+    const [request] = locationViewRequests(WORLD, DIRECTION, VIGIL, null, MODEL, {
+      name: "Reverse angle",
+      prompt: "from the seaward stair looking back",
+      count: 1,
+      anchorFile: "takes/tk_a/view.png",
+      generationKey: "k2",
+    });
+    const params = request!.input.params as Record<string, unknown>;
+    assert.deepEqual(params["references"], ["takes/tk_a/view.png"]);
+    assert.deepEqual(params["referenceRoles"], [{ file: "takes/tk_a/view.png", role: "environment" }]);
+    assert.match(
+      params["prompt"] as string,
+      /same place; keep its architecture, materials, light and time of day/,
+      "the anchor is stated as the same room rather than a mood board",
+    );
+    assert.match(params["prompt"] as string, /from the seaward stair looking back/);
+    assert.equal((params["provenance"] as { anchorFile?: string }).anchorFile, "takes/tk_a/view.png");
+  });
+
+  it("refuses to make an unanchored angle on a model that cannot carry the reference", () => {
+    // Unanchored is fine on any model — the establishing view needs no reference.
+    assert.doesNotThrow(() =>
+      locationViewRequests(WORLD, DIRECTION, VIGIL, null, noRefs, { name: "Establishing view", count: 1, generationKey: "k3" }),
+    );
+    // Anchored is not: silently dropping the anchor would produce a second room that merely
+    // answers the same description, which is the failure the feature exists to prevent.
+    assert.throws(
+      () =>
+        locationViewRequests(WORLD, DIRECTION, VIGIL, null, noRefs, {
+          name: "Reverse angle",
+          count: 1,
+          anchorFile: "takes/tk_a/view.png",
+          generationKey: "k4",
+        }),
+      /cannot be anchored to the establishing view/,
+    );
+  });
+
+  it("refuses a sheet that is not a location", () => {
+    const maren = { id: "maren-kest", type: "character", name: "Maren Kest", version: 4, sections: [] } as unknown as Sheet;
+    assert.throws(
+      () => locationViewRequests(WORLD, DIRECTION, maren, null, MODEL, { name: "Establishing view", count: 1, generationKey: "k5" }),
+      /is not a location/,
+    );
+  });
+
+  it("fans out one job per candidate, priced individually", () => {
+    const requests = locationViewRequests(WORLD, DIRECTION, VIGIL, null, MODEL, {
+      name: "Day",
+      count: 3,
+      anchorFile: "takes/tk_a/view.png",
+      generationKey: "k6",
+    });
+    assert.equal(requests.length, 3, "a failure must not take the candidates that already arrived with it");
+    assert.deepEqual(
+      requests.map((r) => r.input.target.id),
+      ["the-vigil/k6/1", "the-vigil/k6/2", "the-vigil/k6/3"],
+    );
+    assert.ok(requests.every((r) => r.estimatedMicroUsd === requests[0]!.estimatedMicroUsd));
   });
 });
