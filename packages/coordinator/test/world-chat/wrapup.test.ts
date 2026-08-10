@@ -445,6 +445,58 @@ describe("what wrap-up refuses", () => {
     assert.equal((await w.ours()).length, 1, "and one set of proposals exists, not two");
   });
 
+  /*
+   * The look moving between readiness and the base that staging captures.
+   *
+   * Readiness cannot close that window on its own — there are awaited writes and an id allocation
+   * after it — so the check is repeated once the captured base is known. What matters as much as
+   * the refusal is what it leaves: nothing staged, and no open intent, or the conversation would
+   * refuse every later wrap-up as in-flight until the studio restarted.
+   */
+  it("leaves nothing staged and nothing in flight when the look moves mid-wrap-up", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const seq = await withCandidates(w.log, [
+      candidate({
+        classification: "art-direction.change",
+        title: "The world takes a painterly look",
+        draft: { description: "Painterly and hand-animated." },
+        checks: { ...candidate().checks, required: [], completed: [], basedOnArtDirectionVersion: 3 },
+      } as Partial<WorldChangeCandidate>),
+      candidate({ title: "A rule that would have carried" }),
+    ]);
+
+    // The look moves after readiness has run: the bundle reports a version the draft never saw.
+    const realBundle = w.store.getBundle.bind(w.store);
+    let readinessDone = false;
+    w.store.getBundle = () => {
+      const bundle = realBundle();
+      if (!readinessDone) {
+        readinessDone = true;
+        return bundle;
+      }
+      return { ...bundle, artDirection: { ...bundle.artDirection, version: 99 } };
+    };
+
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "req-look-moved",
+          expectedConversationSeq: seq,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "stale",
+    );
+
+    assert.deepEqual(await w.ours(), [], "the rule staged beside it went too — all or nothing");
+    const { events } = await w.log.read();
+    const last = events.map((e) => e.event.type);
+    assert.ok(last.includes("wrapup.failed"), "the intent is closed, so the next wrap-up is not refused as in-flight");
+  });
+
   it("refuses a conversation that moved on while it was being read", async () => {
     const w = await world();
     const seq = await withCandidates(w.log, [candidate()]);
@@ -559,6 +611,13 @@ describe("readiness on its own", () => {
    * There is one world look, and the screen that reviews a proposed one finds it by kind rather
    * than by id — so a second would be reviewed, accepted or discarded in place of the first.
    */
+  it("holds back a second look change from the same wrap-up", () => {
+    const world = { canon: [], sheets: [], proposals: [], artDirection: { version: 5 } } as never;
+    const { carried, notCarried } = evaluateReadiness([lookChange(5), lookChange(5)], world);
+    assert.equal(carried.length, 1, "the staged set cannot see itself, so this pass has to");
+    assert.equal(notCarried[0]!.reason, "look-already-proposed");
+  });
+
   it("holds back a second look change while one is already waiting", () => {
     const world = {
       canon: [],

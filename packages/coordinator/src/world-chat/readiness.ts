@@ -86,6 +86,14 @@ export function evaluateReadiness(
   const carried: WorldChangeCandidate[] = [];
   const mediaIdeas: WorldChangeCandidate[] = [];
   const notCarried: NotCarried[] = [];
+  /**
+   * One look change per wrap-up as well as per world.
+   *
+   * `bundle.proposals` cannot see what this same pass is about to stage, so without this two
+   * look propositions in one conversation would both carry and produce the pair of proposals the
+   * check below exists to prevent.
+   */
+  let carriedALook = false;
 
   for (const candidate of candidates) {
     if (candidate.status !== "live") continue;
@@ -133,11 +141,12 @@ export function evaluateReadiness(
      */
     if (
       candidate.classification === "art-direction.change" &&
-      bundle.proposals.some((staged) => staged.proposal.kind === "art-direction")
+      (carriedALook || bundle.proposals.some((staged) => staged.proposal.kind === "art-direction"))
     ) {
       fail("look-already-proposed");
       continue;
     }
+    if (candidate.classification === "art-direction.change") carriedALook = true;
     if (!hasIntentEvidence(candidate) || !checksAllow(candidate)) {
       fail("invalid");
       continue;

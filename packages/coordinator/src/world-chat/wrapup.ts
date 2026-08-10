@@ -277,7 +277,28 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
       const basedOn = item.candidate.checks.basedOnArtDirectionVersion;
       const now = input.store.getBundle().artDirection.version;
       if (basedOn !== undefined && basedOn !== now) {
-        await input.gate.discard(proposal.id);
+        /*
+         * Everything this wrap-up staged goes, not only the look.
+         *
+         * R-42a is all-or-nothing: either every planned proposal is durable and the conversation
+         * closes, or nothing was created. Refusing here without clearing the ones already staged
+         * would leave a half-done wrap-up on the approvals screen with no account of itself — and
+         * without the failure event the intent stays open, which refuses every later wrap-up on
+         * this conversation as in-flight until the studio is restarted.
+         */
+        for (const staged of [...proposals, proposal]) {
+          await input.gate.discard(staged.id).catch(() => {
+            /* recovery reconciles what will not go now; the refusal below is the answer either way */
+          });
+        }
+        await log.append(
+          {
+            type: "wrapup.failed",
+            requestId: input.requestId,
+            safeDetail: "the world look changed while this was being written",
+          },
+          { at: input.now() },
+        );
         throw new WrapUpError(
           "stale",
           "The world look changed while this was being written, so nothing was. Open the conversation again and ask for the look you want from where it is now.",
