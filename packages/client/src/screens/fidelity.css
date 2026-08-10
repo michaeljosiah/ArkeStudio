@@ -3248,3 +3248,33 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   font: 400 12.5px/1.7 var(--font-sans); color: var(--muted-foreground);
 }
 .fy-proposals__note strong { color: var(--foreground); font-weight: 550; }
+
+/*
+ * Work that has been asked for and has not arrived (issue 228).
+ *
+ * A drafting card sits in the grid where the sheet will be, so the list reads as "one on the
+ * way" rather than as empty. It is deliberately quiet — dashed and unfilled, the same language
+ * the new-world screen uses for "No world image yet" — because it is a placeholder for
+ * something real, not a thing in its own right.
+ *
+ * Every colour here is a semantic token. A --neutral-* surface would stay white on a near-black
+ * background, since .dark overrides the semantic tokens and leaves the ramp alone.
+ */
+.fy-gridcard--pending,
+.fy-row--pending {
+  border-style: dashed;
+}
+.fy-gridcard__frame--pending,
+.fy-row__thumb--pending,
+.fy-polaroid__frame--pending {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed var(--border);
+  border-radius: 8px;
+  background: var(--muted);
+}
+.fy-gridcard__pendingnote {
+  font: 400 11px var(--font-sans);
+  color: var(--muted-foreground);
+}

@@ -6,7 +6,9 @@ import {
   designatedCompilation,
   formatMicroUsd,
   mainPhotoFor,
+  pendingSheets,
   type CanonEntry,
+  type PendingSheet,
   type Sheet,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
@@ -81,6 +83,7 @@ import {
   useVoiceAudio,
   useVoiceSidecar,
   useWorld,
+  type AuthoringActivity,
 } from "../lib/store.js";
 
 /** World screens (§2.9): the world is the home, productions are lenses over it. */
@@ -366,6 +369,8 @@ export function WorldOverviewScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
+  // Before the guard: hooks cannot run behind a return.
+  const authoring = useAuthoring();
   if (!world) {
     return (
       <Screen id="world-overview">
@@ -375,6 +380,10 @@ export function WorldOverviewScreen() {
   }
   const slug = world.meta.slug;
   const characters = world.sheets.filter((s) => s.type === "character" && s.retired !== true).slice(0, 5);
+  // The fan is where "1 awaiting you" and "No one lives here yet" used to sit on screen at the
+  // same time, saying opposite things about the same world (issue 228). The one awaiting is a
+  // character being drafted, so it takes a card in the fan like any other.
+  const pendingCast = pendingSheets(world.proposals, "character").slice(0, Math.max(0, 5 - characters.length));
   const threads = world.canon.filter((c) => c.status === "open");
   const proposals = world.proposals;
   const production = world.productions[0];
@@ -428,7 +437,32 @@ export function WorldOverviewScreen() {
             </div>
           );
         })}
-        {characters.length === 0 && (
+        {pendingCast.map((sheet, i) => {
+          const slot = FAN[characters.length + i] ?? FAN[2]!;
+          const state = pendingSheetState(authoring[sheet.proposalId]);
+          return (
+            <div
+              key={sheet.proposalId}
+              className="fy-fan__slot"
+              style={{ marginLeft: slot.left, top: slot.top, zIndex: slot.z }}
+            >
+              <div className="fy-fan__drift" style={{ animationDuration: `${slot.dur}s`, animationDelay: `${slot.delay}s` }}>
+                <div
+                  className="fy-polaroid fy-polaroid--pending"
+                  style={{ transform: `rotate(${slot.rotate}deg)` }}
+                  onClick={() => navigate(`/w/${worldId}/proposals`)}
+                >
+                  <div className="fy-polaroid__frame fy-polaroid__frame--pending">
+                    {state.tone === "live" && <Loading size={28} />}
+                  </div>
+                  <div className="fy-polaroid__name">{sheet.name}</div>
+                  <div className="fy-polaroid__role">{state.foot}</div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {characters.length === 0 && pendingCast.length === 0 && (
           <div style={{ textAlign: "center", paddingTop: 120 }}>
             <EmptyState title="No one lives here yet" hint="Start with a sentence — a character grows from it." />
           </div>
@@ -516,6 +550,147 @@ function SheetKindNav({ active }: { active: Sheet["type"] }) {
 }
 
 /** The ledger layout (prototype 1d): one featured portrait, the rest as quiet rows. */
+/**
+ * What to say about a sheet that has been asked for and has not arrived (issue 228).
+ *
+ * Four states, and the fourth is the one worth being careful about. `authoring` is folded from
+ * events, so it holds only what this client has seen: reload mid-draft and the map comes back
+ * empty while the run carries on. Reading that absence as "drafted" would state, of a sheet
+ * still being written, that it is finished and waiting — the same class of false claim this
+ * whole issue is about, just pointing the other way. So an unknown run says where to look and
+ * claims nothing about where it got to.
+ *
+ * (Whether the studio is still on a proposal is genuinely absent from the snapshot rather than
+ * merely unread here — see the follow-up filed from this PR.)
+ */
+function pendingSheetState(activity: AuthoringActivity | undefined): {
+  foot: string;
+  body: string;
+  tone: "live" | "sketch" | "warn";
+} {
+  if (activity === undefined) {
+    return { foot: "in Proposals", body: "open it to see where it got to", tone: "sketch" };
+  }
+  if (activity.status === "running") {
+    return { foot: "drafting", body: "the studio is writing this from your sentence", tone: "live" };
+  }
+  if (activity.status === "completed") {
+    return { foot: "drafted · awaiting your yes", body: "ready in Proposals", tone: "sketch" };
+  }
+  return {
+    foot: `drafting ${activity.status}`,
+    body: activity.detail ?? "open Proposals to see what happened",
+    tone: "warn",
+  };
+}
+
+/**
+ * The sheets on their way, drawn on the surface they will land on (issue 228).
+ *
+ * Drafting takes seconds to minutes, and for all of it the sheet lives in `.proposals/` rather
+ * than in `world.sheets` — so this list showed its empty state, and a submitted action looked
+ * like a failed one. The card is the whole fix: it sits in the grid where the sheet will be,
+ * says which of the three things is true, and opens Proposals, because that is where the yes
+ * it is waiting for gets given.
+ */
+function PendingSheetCards({
+  worldId,
+  pending,
+  frameHeight,
+}: {
+  worldId: string | undefined;
+  pending: readonly PendingSheet[];
+  frameHeight: number;
+}) {
+  const authoring = useAuthoring();
+  const navigate = useNavigate();
+  return (
+    <>
+      {pending.map((sheet) => {
+        const state = pendingSheetState(authoring[sheet.proposalId]);
+        return (
+          <button
+            key={sheet.proposalId}
+            type="button"
+            className="fy-gridcard fy-gridcard--media fy-gridcard--fixed fy-gridcard--pending"
+            onClick={() => navigate(`/w/${worldId}/proposals`)}
+            aria-label={`${sheet.name} — ${state.foot}. Open Proposals.`}
+          >
+            <div className="fy-gridcard__frame fy-gridcard__frame--pending" style={{ height: frameHeight }}>
+              {state.tone === "live" ? (
+                <Loading label={`Drafting ${sheet.name}`} size={40} />
+              ) : (
+                <span className="fy-gridcard__pendingnote">{state.tone === "warn" ? "not drafted" : "no sheet yet"}</span>
+              )}
+            </div>
+            <div className="fy-gridcard__pad">
+              <div className="fy-gridcard__title">
+                <span className="fy-gridcard__name">{sheet.name}</span>
+                <span className={`fy-dot fy-dot--${state.tone}`} style={{ width: 6, height: 6 }} />
+              </div>
+              <div className="fy-gridcard__body">{state.body}</div>
+              <div className="fy-gridcard__foot" style={{ marginTop: 9 }}>
+                {state.foot}
+              </div>
+            </div>
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+/** The same thing in the ledger's shape, for the surfaces that list rows rather than cards. */
+function PendingSheetRows({ worldId, pending }: { worldId: string | undefined; pending: readonly PendingSheet[] }) {
+  const authoring = useAuthoring();
+  const navigate = useNavigate();
+  return (
+    <>
+      {pending.map((sheet) => {
+        const state = pendingSheetState(authoring[sheet.proposalId]);
+        return (
+          <button
+            key={sheet.proposalId}
+            type="button"
+            className="fy-row fy-row--pending"
+            aria-label={`${sheet.name}, ${state.foot}. Open Proposals.`}
+            onClick={() => navigate(`/w/${worldId}/proposals`)}
+          >
+            <div className="fy-row__thumb fy-row__thumb--pending">
+              {state.tone === "live" && <Loading size={18} />}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div className="fy-row__name">
+                {sheet.name}
+                <span className={`fy-dot fy-dot--${state.tone}`} style={{ width: 6, height: 6 }} aria-hidden="true" />
+              </div>
+              <div className="fy-row__sub">{state.body}</div>
+            </div>
+            <span className="fy-row__meta">{state.foot}</span>
+            <span className="fy-row__chev">
+              <ChevronRight />
+            </span>
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * " · 2 in Proposals", or nothing at all.
+ *
+ * Not "drafting", which would be a claim about work that in several cases never happens: a
+ * duplicated sheet is staged whole and synchronously, and a World Chat candidate is
+ * materialised before it is staged. Neither ever runs an agent, so a heading counting them as
+ * drafting would say so for as long as they sat there — and would disagree with the card
+ * beneath it, which says what it actually knows. Where they all are is the one thing true of
+ * every pending sheet, so that is what the count says.
+ */
+function pendingSuffix(pending: readonly PendingSheet[]): string {
+  return pending.length > 0 ? ` · ${pending.length} in Proposals` : "";
+}
+
 function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
   kind: Sheet["type"];
   screenId: string;
@@ -529,6 +704,7 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
   const navigate = useNavigate();
   const sheetRefs = useSheetRefs();
   const sheets = world?.sheets.filter((s) => s.type === kind && s.retired !== true) ?? [];
+  const pending = pendingSheets(world?.proposals ?? [], kind);
   const retired = world?.sheets.filter((s) => s.type === kind && s.retired === true).length ?? 0;
   const locked = sheets.filter((s) => s.status === "locked").length;
   const sketches = sheets.filter((s) => s.status === "sketch").length;
@@ -562,7 +738,9 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
         </Button>
       </div>
       <SheetKindNav active={kind} />
-      {sheets.length === 0 ? (
+      {/* An empty state means "nothing here", never "something is on its way" (issue 228). One
+          drafting row is enough to make this list a list. */}
+      {sheets.length === 0 && pending.length === 0 ? (
         <div style={{ paddingTop: 140 }}>
           <EmptyState title={`No ${kind}s yet`} hint={hint} />
         </div>
@@ -618,9 +796,11 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
               <span className="fy-ledgerhead__meta">
                 {locked} canon-locked · {sketches} sketch{sketches === 1 ? "" : "es"}
                 {retired > 0 ? ` · ${retired} retired` : ""}
+                {pendingSuffix(pending)}
               </span>
             </div>
             <div className="fy-ledger">
+              <PendingSheetRows worldId={worldId} pending={pending} />
               {sheets.map((sheet) => (
                 <button
                   key={sheet.id}
@@ -706,6 +886,7 @@ export function LocationsScreen() {
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const places = (world?.sheets ?? []).filter((s) => s.type === "location" && !s.retired);
+  const pending = pendingSheets(world?.proposals ?? [], "location");
   return (
     <div data-screen="locations">
       <div className="fy-corner">
@@ -717,6 +898,7 @@ export function LocationsScreen() {
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {places.length} place{places.length === 1 ? "" : "s"}
+          {pendingSuffix(pending)}
         </div>
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Locations
@@ -725,7 +907,14 @@ export function LocationsScreen() {
           Every place is a sheet, look, sound, customs. Scenes inherit them; generations cite them.
         </p>
       </div>
-      <div className="fy-cardgrid" style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(places.length, 2), 4)}, minmax(0, 1fr))` }}>
+      <div
+        className="fy-cardgrid"
+        style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(places.length + pending.length, 2), 4)}, minmax(0, 1fr))` }}
+      >
+        {/* Pending cards lead, and it has to be the markup rather than a comment: a world with
+            a screen's worth of places would otherwise put the one just submitted below the
+            fold, which is the same "did that work?" the empty state caused (issue 228). */}
+        <PendingSheetCards worldId={worldId} pending={pending} frameHeight={270} />
         {places.map((s) => (
           <button key={s.id} type="button" className="fy-gridcard fy-gridcard--media fy-gridcard--fixed" onClick={() => navigate(`/w/${worldId}/locations/${s.id}`)}>
             <div className="fy-gridcard__frame" style={{ height: 270 }}>
@@ -744,7 +933,10 @@ export function LocationsScreen() {
             </div>
           </button>
         ))}
-        {places.length === 0 && <EmptyState title="No locations yet" hint="Where the world happens — look, sound, customs." />}
+        {/* An empty state means "nothing here", never "something is on its way" (issue 228). */}
+        {places.length === 0 && pending.length === 0 && (
+          <EmptyState title="No locations yet" hint="Where the world happens — look, sound, customs." />
+        )}
       </div>
     </div>
   );
@@ -755,6 +947,7 @@ export function FactionsScreen() {
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const factions = (world?.sheets ?? []).filter((s) => s.type === "faction" && !s.retired);
+  const pending = pendingSheets(world?.proposals ?? [], "faction");
   const facet = (s: (typeof factions)[number], heading: string) =>
     s.sections.find((x) => x.heading.toLowerCase().includes(heading))?.body ?? null;
   return (
@@ -763,6 +956,7 @@ export function FactionsScreen() {
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {factions.length} faction{factions.length === 1 ? "" : "s"}
+          {pendingSuffix(pending)}
         </div>
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Factions
@@ -771,7 +965,14 @@ export function FactionsScreen() {
           Who wants what, and what they'd never admit. Scenes borrow their pressure.
         </p>
       </div>
-      <div className="fy-cardgrid" style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(factions.length, 2), 3)}, minmax(0, 1fr))`, padding: "32px 150px 46px" }}>
+      <div
+        className="fy-cardgrid"
+        style={{
+          gridTemplateColumns: `repeat(${Math.min(Math.max(factions.length + pending.length, 2), 3)}, minmax(0, 1fr))`,
+          padding: "32px 150px 46px",
+        }}
+      >
+        <PendingSheetCards worldId={worldId} pending={pending} frameHeight={210} />
         {factions.map((s) => {
           const wants = facet(s, "want");
           const fears = facet(s, "fear");
@@ -814,7 +1015,9 @@ export function FactionsScreen() {
             </button>
           );
         })}
-        {factions.length === 0 && <EmptyState title="No factions yet" hint="Groups with wants and fears." />}
+        {factions.length === 0 && pending.length === 0 && (
+          <EmptyState title="No factions yet" hint="Groups with wants and fears." />
+        )}
       </div>
     </div>
   );
