@@ -296,7 +296,7 @@ function PointRow({
   onSave,
   onReject,
 }: {
-  point: { id: string; text: string; settled: boolean; kind: string };
+  point: { id: string; text: string; settled: boolean; kind: string; revision: number; groupId?: string };
   busy: boolean;
   onSave: () => void;
   onReject: () => void;
@@ -388,19 +388,34 @@ export function WorldChatConversationScreen() {
    * A decision on one point. Save writes it; Reject drops it. Both send the revision the rail is
    * showing, so a point corrected by talking since is refused rather than acted on as it was.
    */
-  const decide = (point: { id: string; revision: number }, action: "save" | "reject") => {
+  const decide = (point: { id: string; revision: number; groupId?: string }, action: "save" | "reject") => {
     if (!worldId || !conversationId) return;
+    /*
+     * A grouped point writes its siblings too, so the request carries what the rail was showing
+     * for each of them. Checking only the point that was pressed would let a sibling corrected in
+     * another window be written unseen, as part of a save nobody made about it.
+     */
+    const members = point.groupId
+      ? points.filter((p) => p.groupId === point.groupId).map((p) => ({ candidateId: p.id, revision: p.revision }))
+      : [];
     const sent =
       action === "save"
-        ? saveWorldChatPoint(worldId, conversationId, point.id, point.revision) !== null
+        ? saveWorldChatPoint(worldId, conversationId, point.id, point.revision, members) !== null
         : rejectWorldChatPoint(worldId, conversationId, point.id, point.revision);
     if (sent) setBusyPoints((prev) => [...prev, point.id]);
   };
 
-  // The workspace arriving is the answer: whatever it now holds is what survived the decision.
+  /*
+   * The workspace arriving is the answer: whatever it now holds is what survived the decision.
+   *
+   * A refusal is an answer too, and several arrive without appending anything to the conversation
+   * — a readiness that moved, a staging that was refused. The sequence is then unchanged and a
+   * point would sit on "Saving…" until something unrelated happened, so the refusal clears it as
+   * surely as a new sequence does.
+   */
   useEffect(() => {
     setBusyPoints([]);
-  }, [loaded?.seq]);
+  }, [loaded?.seq, wrapUpRefusal]);
 
   const closed = loaded?.status === "closed";
   /** The attempt this window made, if any: an answer naming another one is somebody else's. */
@@ -624,7 +639,7 @@ export function WorldChatConversationScreen() {
                       <PointRow
                         key={p.id}
                         point={p}
-                        busy={busyPoints.includes(p.id)}
+                        busy={busyPoints.includes(p.id) || running || wrappingUp}
                         onSave={() => decide(p, "save")}
                         onReject={() => decide(p, "reject")}
                       />
@@ -641,7 +656,7 @@ export function WorldChatConversationScreen() {
                       <PointRow
                         key={p.id}
                         point={p}
-                        busy={busyPoints.includes(p.id)}
+                        busy={busyPoints.includes(p.id) || running || wrappingUp}
                         onSave={() => decide(p, "save")}
                         onReject={() => decide(p, "reject")}
                       />

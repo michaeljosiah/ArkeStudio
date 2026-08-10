@@ -141,6 +141,7 @@ import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
 import { titleFrom } from "./world-chat/title.js";
 import { describeEntryContext } from "./world-chat/entry-context.js";
+import { foldConversation } from "./world-chat/fold.js";
 import { currentLookContext } from "./world-chat/context.js";
 import { discoverConversations } from "./world-chat/discover.js";
 import { recordResolution, sendBack } from "./world-chat/resolution.js";
@@ -1526,10 +1527,20 @@ export class Coordinator {
             requestId: msg.requestId,
             candidateId: msg.candidateId,
             expectedCandidateRevision: msg.expectedCandidateRevision,
+            ...(msg.expectedGroupRevisions ? { expectedGroupRevisions: msg.expectedGroupRevisions } : {}),
             now: () => new Date().toISOString(),
           });
           for (const proposalId of saved.proposalIds) {
             const staged = await gate.readManifest(proposalId).catch(() => null);
+            /*
+             * A proposal asking a question is never answered by a press.
+             *
+             * "This looks close to Bray Half-Hitch — is it a new rule, or a change to that one?"
+             * has exactly one person who can answer it, and accepting past it would pick the
+             * create silently and put a duplicate in the world. It stays a proposal, which is
+             * where that question can be put.
+             */
+            if (staged?.openChoices?.length) continue;
             const outcome = await gate.accept(proposalId, {});
             const at = new Date().toISOString();
             if (outcome.status === "accepted" && staged) {
@@ -1577,23 +1588,64 @@ export class Coordinator {
          * Dropped, not corrected. A point that is nearly right is fixed by saying so; this is for
          * one that should not exist, and `discarded` is the status the fold already understands —
          * it stops being live, so it leaves the rail and is never carried by anything later.
+         *
+         * Read and compared before it is written, for the same reason a save is. The fold applies
+         * `candidate.status-changed` by candidate id and pays no attention to the revision on the
+         * event, so an unchecked reject would discard the corrected point rather than the one the
+         * button was rendered against — and say nothing about it.
          */
         const log = new WorldChatStore(conversationDir(store.dir, msg.conversationId));
-        if (await log.readMeta()) {
-          await log
-            .append(
-              {
-                type: "candidate.status-changed",
-                candidateId: msg.candidateId as never,
-                revision: msg.expectedCandidateRevision,
-                status: "discarded",
-              },
-              { at: new Date().toISOString(), requestId: msg.requestId },
-            )
-            .catch(() => {
-              /* the refreshed workspace below is authoritative either way */
+        const meta = await log.readMeta();
+        if (meta) {
+          const { events } = await log.read();
+          const view = foldConversation(meta.id, meta.createdAt, events).view;
+          const point = view.candidates.find((c) => c.id === msg.candidateId);
+          const fresh = point?.status === "live" && point.revision === msg.expectedCandidateRevision;
+          if (!fresh) {
+            this.emit({
+              at: new Date().toISOString(),
+              type: "world-chat.wrap-up-refused",
+              conversationId: msg.conversationId,
+              requestId: msg.requestId,
+              reason: "stale",
+              detail: "That point changed since you saw it, so it was left alone. Look again.",
             });
+          } else {
+            /*
+             * A group is rejected as a unit.
+             *
+             * Its members land together, so leaving one discarded inside a live group would make
+             * the group unsaveable — every later save fails its own all-or-nothing check — while
+             * Accept all would skip the discarded one and write the rest. Neither keeps the
+             * promise the group exists to make, so rejecting one rejects them all.
+             */
+            const group = point.groupId
+              ? view.groups.find((g) => g.id === point.groupId && g.status === "live")
+              : undefined;
+            const dropping = group
+              ? view.candidates.filter((c) =>
+                  group.members.some((m) => m.candidateId === c.id) && c.status === "live",
+                )
+              : [point];
+            for (const candidate of dropping) {
+              await log
+                .append(
+                  {
+                    type: "candidate.status-changed",
+                    candidateId: candidate.id,
+                    revision: candidate.revision,
+                    status: "discarded",
+                  },
+                  { at: new Date().toISOString() },
+                )
+                .catch(() => {
+                  /* the refreshed workspace below is authoritative either way */
+                });
+            }
+          }
         }
+        // The list counts live points and orders by what is waiting, so it moves when one goes.
+        await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
         return;
       }
@@ -1602,37 +1654,40 @@ export class Coordinator {
         const gate = this.opts.provider.gate?.();
         if (!store || !gate) return;
         try {
-          const wrapped = await wrapUp({
+          await wrapUp({
             store,
             gate,
             conversationId: msg.conversationId,
             requestId: msg.requestId,
             expectedConversationSeq: msg.expectedConversationSeq,
             now: () => new Date().toISOString(),
+            /*
+             * Accept all writes; it does not stage for a screen the person then has to visit.
+             *
+             * The conversation is where the deciding happens now, and pressing a button labelled
+             * Accept and being taken somewhere else to accept again was the two-step this design
+             * removed. Each still goes through the gate, so what lands is identical to a reviewed
+             * proposal — only the review is the press that just happened. Handed to wrap-up rather
+             * than run after it, because a proposal that will not land has to keep the
+             * conversation open, and only wrap-up can still decide not to close.
+             *
+             * A proposal carrying an open choice is left standing and counted as landed: it is
+             * asking a question only the person can answer, so it is not a failure to write — it
+             * is the one thing this press was never allowed to decide.
+             */
+            writeThrough: async (proposalId) => {
+              const staged = await gate.readManifest(proposalId).catch(() => null);
+              if (staged?.openChoices?.length) return true;
+              const outcome = await gate.accept(proposalId, {});
+              const at = new Date().toISOString();
+              if (outcome.status !== "accepted") return false;
+              if (staged) {
+                await recordResolution(store, staged, "accepted", () => at);
+                this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId, outcome: "accepted" });
+              }
+              return true;
+            },
           });
-          /*
-           * Accept all writes; it does not stage for a screen the person then has to visit.
-           *
-           * The conversation is where the deciding happens now, and pressing a button labelled
-           * Accept and being taken somewhere else to accept again was the two-step this design
-           * removed. Each still goes through the gate, so what lands is identical to a reviewed
-           * proposal — only the review is the press that just happened.
-           *
-           * One kind cannot be written this way and is left standing: a proposal carrying an open
-           * choice is asking a question only the person can answer — "is this a new rule, or a
-           * change to that one?" — and accepting it would be answering on their behalf. Those
-           * stay as proposals, and the screen says where they went.
-           */
-          for (const proposalId of wrapped.proposalIds) {
-            const staged = await gate.readManifest(proposalId).catch(() => null);
-            if (staged?.openChoices?.length) continue;
-            const outcome = await gate.accept(proposalId, {});
-            const at = new Date().toISOString();
-            if (outcome.status === "accepted" && staged) {
-              await recordResolution(store, staged, "accepted", () => at);
-              this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId, outcome: "accepted" });
-            }
-          }
         } catch (err) {
           // A refusal is the answer: nothing was written, and the conversation is still open and
           // still says what it understood. It is said to the screen as well as to the log, because

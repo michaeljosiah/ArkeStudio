@@ -258,6 +258,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       conversationId: ConversationIdSchema,
       candidateId: z.string().min(1),
       expectedCandidateRevision: z.number().int().min(1),
+      /**
+       * What the rail was showing for every member of this point's atomic group.
+       *
+       * A group lands together, so saving one writes all of them. Without the revisions it showed
+       * for each, a sibling corrected in another window would be written unseen as part of a save
+       * nobody made about it.
+       */
+      expectedGroupRevisions: z
+        .array(z.object({ candidateId: z.string().min(1), revision: z.number().int().min(1) }).strict())
+        .max(40)
+        .optional(),
     })
     .strict(),
   /**

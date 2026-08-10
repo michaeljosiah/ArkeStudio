@@ -847,3 +847,152 @@ describe("what accept all leaves behind", () => {
     );
   });
 });
+
+/**
+ * An atomic group, through a path that writes as soon as it is asked to.
+ *
+ * "These land together or not at all" was true of staging and only of staging: as one proposal
+ * per member, accepting them is one gate call each, so the first changes the targets the second
+ * was based on and the second comes back stale — half a group written, which is the single
+ * outcome the group exists to prevent.
+ */
+describe("a group is one change", () => {
+  /** Two propositions that must land together, and the group that says so. */
+  async function withGroup(log: WorldChatStore, members: WorldChangeCandidate[]) {
+    const groupId = newId("grp");
+    const grouped = members.map((m) => ({ ...m, groupId }) as WorldChangeCandidate);
+    const turnId = newId("turn");
+    await log.append(
+      {
+        type: "turn.completed",
+        message: { id: newId("msg") as MessageId, turnId, role: "studio", text: "Noted.", attachmentIds: [], createdAt: AT },
+        run: {
+          id: newId("run"),
+          turnId,
+          basedOnConversationSeq: 1,
+          status: "completed",
+          adapter: "fake",
+          harnessCleanup: "not-required",
+          contextDigest: `sha256:${"a".repeat(64)}`,
+          startedAt: AT,
+          endedAt: AT,
+        },
+        receipts: [],
+        candidates: grouped,
+        groups: [
+          {
+            id: groupId,
+            conversationId: grouped[0]!.conversationId,
+            revision: 1,
+            title: "These two go together",
+            rationale: "One refers to the other.",
+            members: grouped.map((m) => ({ candidateId: m.id, revision: m.revision })),
+            atomic: true,
+            status: "live",
+          },
+        ],
+        tombstones: [],
+      } as never,
+      { at: AT },
+    );
+    return { groupId, grouped };
+  }
+
+  it("stages a group as one proposal, so accepting it is one commit", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const { grouped } = await withGroup(w.log, [candidate({ title: "First half" }), candidate({ title: "Second half" })]);
+
+    const result = await savePoint({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "save-group",
+      candidateId: grouped[0]!.id,
+      expectedCandidateRevision: grouped[0]!.revision,
+      expectedGroupRevisions: grouped.map((c) => ({ candidateId: c.id, revision: c.revision })),
+      now: NOW,
+    });
+
+    assert.equal(result.proposalIds.length, 1, "one proposal, not one per member");
+    assert.equal(result.candidateIds.length, 2, "and it carries both");
+    const staged = (await w.ours()).find((p) => p.id === result.proposalIds[0]);
+    assert.equal(staged?.worldChatOrigins?.length, 2, "each proposition says it became this one");
+  });
+
+  it("refuses when a member changed behind a rail that still shows the old one", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const { grouped } = await withGroup(w.log, [candidate({ title: "First half" }), candidate({ title: "Second half" })]);
+
+    await assert.rejects(
+      () =>
+        savePoint({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "save-group-stale",
+          candidateId: grouped[0]!.id,
+          expectedCandidateRevision: grouped[0]!.revision,
+          // The rail saw the sibling a revision ago — it was corrected in another window since.
+          expectedGroupRevisions: [
+            { candidateId: grouped[0]!.id, revision: grouped[0]!.revision },
+            { candidateId: grouped[1]!.id, revision: grouped[1]!.revision + 1 },
+          ],
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "stale",
+    );
+    assert.deepEqual(await w.ours(), [], "and nothing was written");
+  });
+});
+
+describe("what a point save will not write from", () => {
+  it("refuses while a wrap-up that never finished is still open", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+    await w.log.append(
+      { type: "wrapup.intent-recorded", requestId: "died", expectedConversationSeq: 2, plannedProposalIds: [] },
+      { at: AT },
+    );
+
+    await assert.rejects(
+      () =>
+        savePoint({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "save-after-crash",
+          candidateId: point.id,
+          expectedCandidateRevision: point.revision,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "in-flight",
+    );
+  });
+
+  it("refuses in an archived conversation, which keeps its live points", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+    await w.log.append({ type: "conversation.archived" }, { at: AT });
+
+    await assert.rejects(
+      () =>
+        savePoint({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "save-archived",
+          candidateId: point.id,
+          expectedCandidateRevision: point.revision,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && /archived/.test(err.message),
+    );
+    assert.deepEqual(await w.ours(), [], "an archived conversation writes nothing");
+  });
+});

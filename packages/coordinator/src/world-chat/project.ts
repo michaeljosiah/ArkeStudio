@@ -185,6 +185,7 @@ export function projectPoints(
       text: candidate.title.slice(0, 400),
       settled: wouldCarry(candidate, options),
       revision: candidate.revision,
+      ...(candidate.groupId ? { groupId: candidate.groupId } : {}),
     }));
 }
 

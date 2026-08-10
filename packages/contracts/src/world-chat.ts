@@ -1058,6 +1058,13 @@ export const WorldChatPointSchema = z
      * at the size a single decision now works on.
      */
     revision: z.number().int().min(1),
+    /**
+     * Set when this point lands together with others.
+     *
+     * Saving or rejecting one of these acts on all of them, so the rail has to know which points
+     * share a fate before it offers a decision on any of them.
+     */
+    groupId: z.string().min(1).optional(),
   })
   .strict();
 export type WorldChatPoint = z.infer<typeof WorldChatPointSchema>;

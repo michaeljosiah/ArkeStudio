@@ -1982,6 +1982,8 @@ export function saveWorldChatPoint(
   conversationId: string,
   candidateId: string,
   expectedRevision: number,
+  /** What the rail was showing for this point's atomic group, if it has one. */
+  groupMembers: ReadonlyArray<{ candidateId: string; revision: number }> = [],
 ): string | null {
   const requestId = crypto.randomUUID();
   const sent = send({
@@ -1991,7 +1993,15 @@ export function saveWorldChatPoint(
     conversationId,
     candidateId,
     expectedCandidateRevision: expectedRevision,
+    ...(groupMembers.length > 0 ? { expectedGroupRevisions: [...groupMembers] } : {}),
   });
+  // A decision replaces the last refusal rather than standing beside it — the reason on screen has
+  // to belong to the press just made, and a stale one over a point that then wrote is a lie.
+  if (sent && current.worldChatWrapUpRefusals[conversationId] !== undefined) {
+    const cleared = { ...current.worldChatWrapUpRefusals };
+    delete cleared[conversationId];
+    emitChange({ ...current, worldChatWrapUpRefusals: cleared });
+  }
   return sent ? requestId : null;
 }
 

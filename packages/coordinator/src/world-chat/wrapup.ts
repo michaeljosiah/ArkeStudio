@@ -95,6 +95,17 @@ export interface WrapUpInput {
   conversationId: ConversationId;
   requestId: string;
   expectedConversationSeq: number;
+  /**
+   * Write each proposal as it is staged, and close only if every one of them landed.
+   *
+   * Accept all writes; it does not stage for a screen to visit afterwards. The accepting has to
+   * happen before the conversation closes, because two ready points editing the same file are
+   * staged against one base — the first accept makes the second stale, and a conversation closed
+   * on that would have written half its contents while saying it was done.
+   *
+   * Absent, wrap-up stages and closes as it always did.
+   */
+  writeThrough?: (proposalId: string) => Promise<boolean>;
   now: () => string;
 }
 
@@ -169,6 +180,8 @@ async function buildAndStage(input: {
   const proposals: Proposal[] = [];
   const openChoices: WrapUpResult["openChoices"] = [];
   const threadProposalIds: string[] = [];
+  /** Which proposal each proposition ended up in — a group's members share one. */
+  const staged = new Map<string, string>();
 
   /*
    * Everything staged, or nothing (R-42a).
@@ -178,9 +191,32 @@ async function buildAndStage(input: {
    * reason, stopping half way must not leave proposals on the approvals screen with no account of
    * themselves, so the cleanup is around the whole loop rather than at any one refusal inside it.
    */
+  /*
+   * One proposal per atomic group, not one per proposition.
+   *
+   * A group lands together or not at all, and staging its members separately made that true only
+   * of the staging: accepting them is one gate call each, so the first changes the targets the
+   * second was based on and the second comes back stale — half a group written, which is the one
+   * outcome the group exists to prevent. As one proposal with every member's targets it is one
+   * commit, and atomic by construction rather than by hope.
+   *
+   * Ungrouped propositions are groups of one, so there is a single path.
+   */
+  const buckets: Array<{ key: string; items: typeof built }> = [];
+  for (const item of built) {
+    const key = item.candidate.groupId ?? `solo:${item.candidate.id}`;
+    const existing = buckets.find((b) => b.key === key);
+    if (existing) existing.items.push(item);
+    else buckets.push({ key, items: [item] });
+  }
+
   try {
-    for (const item of built) {
-      const choice = openChoiceFor(item.candidate);
+    for (const bucket of buckets) {
+      const lead = bucket.items[0]!;
+      const choices = bucket.items.flatMap((item) => {
+        const choice = openChoiceFor(item.candidate);
+        return choice ? [choice] : [];
+      });
       const proposal = await gate.stage({
         /*
          * A world-look change is an art-direction proposal wherever it came from.
@@ -189,33 +225,35 @@ async function buildAndStage(input: {
          * which reference kits see the new look, which productions inherit it, which accepted
          * takes stay pinned to the old one.
          */
-        kind: item.candidate.classification === "art-direction.change" ? "art-direction" : "worldbuilding",
-        summary: item.candidate.title,
+        kind: bucket.items.some((i) => i.candidate.classification === "art-direction.change")
+          ? "art-direction"
+          : "worldbuilding",
+        summary: bucket.items.length === 1 ? lead.candidate.title : `${lead.candidate.title} (+${bucket.items.length - 1})`,
         source: `world-chat:${input.conversationId}`,
-        targets: item.targets,
-        preReservedCanonIds: item.reservedCanonIds,
-        worldChatOrigins: [
-          {
-            requestId: input.requestId,
-            conversationId: input.conversationId,
-            candidateId: item.candidate.id,
-            candidateRevision: item.candidate.revision,
-            ...(item.candidate.groupId ? { groupId: item.candidate.groupId } : {}),
-            targetPaths: item.targets.map((t) => t.path),
-            fields: item.fields,
-          },
-        ],
-        ...(choice ? { openChoices: [choice] } : {}),
+        targets: bucket.items.flatMap((item) => item.targets),
+        preReservedCanonIds: bucket.items.flatMap((item) => item.reservedCanonIds),
+        worldChatOrigins: bucket.items.map((item) => ({
+          requestId: input.requestId,
+          conversationId: input.conversationId,
+          candidateId: item.candidate.id,
+          candidateRevision: item.candidate.revision,
+          ...(item.candidate.groupId ? { groupId: item.candidate.groupId } : {}),
+          targetPaths: item.targets.map((t) => t.path),
+          fields: item.fields,
+        })),
+        ...(choices.length > 0 ? { openChoices: choices } : {}),
       });
       // Recorded before anything else can fail, so the rollback below knows about it.
       proposals.push(proposal);
+      for (const item of bucket.items) staged.set(item.candidate.id, proposal.id);
 
       /*
        * The look was materialised from a bundle read before any of this, and staging captures its
        * base now — so a look accepted in between would be replaced by a record computed against
        * the one before it, and nothing downstream would call that stale.
        */
-      if (item.candidate.classification === "art-direction.change") {
+      for (const item of bucket.items) {
+        if (item.candidate.classification !== "art-direction.change") continue;
         const basedOn = item.candidate.checks.basedOnArtDirectionVersion;
         const now = input.store.getBundle().artDirection.version;
         if (basedOn !== undefined && basedOn !== now) {
@@ -226,12 +264,14 @@ async function buildAndStage(input: {
         }
       }
 
-      if (choice) openChoices.push({ ...choice, proposalId: proposal.id });
-      if (item.candidate.classification === "canon.thread") threadProposalIds.push(proposal.id);
+      for (const choice of choices) openChoices.push({ ...choice, proposalId: proposal.id });
+      for (const item of bucket.items) {
+        if (item.candidate.classification === "canon.thread") threadProposalIds.push(proposal.id);
+      }
     }
   } catch (err) {
-    for (const staged of proposals) {
-      await gate.discard(staged.id).catch(() => {
+    for (const proposal of proposals) {
+      await gate.discard(proposal.id).catch(() => {
         /* recovery reconciles what will not go now; the refusal below is the answer either way */
       });
     }
@@ -254,14 +294,16 @@ async function buildAndStage(input: {
    * Without this the panel would still show them as live, because it renders live ones and
    * nothing else had moved them. It also gives send-back the link it needs to put them back.
    */
-  for (const [index, item] of built.entries()) {
+  for (const item of built) {
     await log.append(
       {
         type: "candidate.status-changed",
         candidateId: item.candidate.id,
         revision: item.candidate.revision,
         status: "proposed",
-        proposalId: proposals[index]!.id,
+        // From the map, not by position: a group's members share one proposal now, so index
+        // matching would attribute every member after the first to the wrong one.
+        proposalId: staged.get(item.candidate.id)!,
       },
       { at: input.now() },
     );
@@ -386,6 +428,34 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
     },
   });
 
+  /*
+   * Written before it is closed, when the caller writes at all.
+   *
+   * A proposal that will not land keeps the conversation open: its points are still that
+   * conversation's to settle, and closing over them would strand work with nothing left to
+   * decide it from. The ones that did land stay landed — they are commits, not a transaction —
+   * and the refusal says which did not.
+   */
+  if (input.writeThrough) {
+    const left: string[] = [];
+    for (const proposal of proposals) {
+      const landed = await input.writeThrough(proposal.id);
+      if (!landed) left.push(proposal.id);
+    }
+    if (left.length > 0) {
+      await log.append(
+        { type: "wrapup.failed", requestId: input.requestId, safeDetail: "some changes could not be written" },
+        { at: input.now() },
+      );
+      throw new WrapUpError(
+        "materialise",
+        left.length === proposals.length
+          ? "None of these could be written. They are waiting as proposals, and the conversation is still open."
+          : `${left.length} of these could not be written and are waiting as proposals. The conversation is still open.`,
+      );
+    }
+  }
+
   // Step 6: the conversation closes here, once every proposal is durable — and not one step
   // earlier.
   await log.append(
@@ -422,6 +492,15 @@ export interface SavePointInput {
   candidateId: string;
   /** The revision the rail was showing. A point corrected since is refused, not written as it was. */
   expectedCandidateRevision: number;
+  /**
+   * Every point the rail was showing for this one's atomic group, and the revision it showed.
+   *
+   * A group lands together, so saving one writes all of them — including members the person may
+   * not have looked at since. Checking only the point that was clicked would let a sibling
+   * corrected in another window be written as part of this save, unseen. Empty for a point that
+   * belongs to no group.
+   */
+  expectedGroupRevisions?: ReadonlyArray<{ candidateId: string; revision: number }>;
   now: () => string;
 }
 
@@ -463,7 +542,35 @@ export async function savePoint(input: SavePointInput): Promise<SavePointResult>
     if (!meta) throw new WrapUpError("stale", "That conversation is no longer here.");
 
     const { events } = await log.read();
+    /*
+     * A durable intent from a wrap-up that never finished.
+     *
+     * The process-local claim above is empty after a restart, while an interrupted wrap-up's
+     * intent and its staged proposals both survive — so without this a save could stage a second
+     * proposal for work the unfinished wrap-up already represents. Recovery reconciles that
+     * intent; until it has, nothing else may write from this conversation.
+     */
+    if (openIntentOf(events)) {
+      throw new WrapUpError(
+        "in-flight",
+        "This conversation has a wrap-up that did not finish. Restart the studio and it will be resolved before anything else is written.",
+      );
+    }
+
     const view = foldConversation(meta.id, meta.createdAt, events).view;
+    /*
+     * Archived conversations keep their live points, so the rail can still be opened on one — and
+     * the composer's own guard is about talking, not writing. A conversation has to be restored
+     * before it changes the world.
+     */
+    if (view.status !== "open") {
+      throw new WrapUpError(
+        "stale",
+        view.status === "archived"
+          ? "This conversation is archived. Restore it before writing anything from it."
+          : "This conversation is closed, so nothing more can be written from it.",
+      );
+    }
 
     const point = view.candidates.find((c) => c.id === input.candidateId);
     if (!point || point.status !== "live") {
@@ -487,6 +594,27 @@ export async function savePoint(input: SavePointInput): Promise<SavePointResult>
       group ? group.members.map((m) => m.candidateId as string) : [input.candidateId],
     );
     const selected = view.candidates.filter((c) => wanted.has(c.id));
+
+    /*
+     * Every member at the revision the rail showed, not only the one that was clicked.
+     *
+     * Saving a grouped point writes its siblings too. If one of those was corrected in another
+     * window while the clicked point stood still, this save would write the correction nobody has
+     * read — the same failure the single-point check prevents, arriving through the members the
+     * person did not press.
+     */
+    if (group) {
+      const shown = new Map((input.expectedGroupRevisions ?? []).map((m) => [m.candidateId, m.revision]));
+      for (const member of selected) {
+        const seen = shown.get(member.id);
+        if (seen === undefined || seen !== member.revision) {
+          throw new WrapUpError(
+            "stale",
+            "These land together, and one of them changed since you saw it. Look again and save from there.",
+          );
+        }
+      }
+    }
 
     const bundle = input.store.getBundle();
     const { carried, notCarried } = evaluateReadiness(selected, bundle);
