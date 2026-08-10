@@ -222,6 +222,22 @@ async function buildAndStage(input: {
        * the first rather than against the world, which this does not do yet; until it does, the
        * honest answer is to refuse rather than to write half of what was asked for.
        */
+      /*
+       * A look change cannot travel in a group with anything else.
+       *
+       * The proposal takes one kind, and the gate computes an art-direction proposal's ripple and
+       * returns — so the sheet or Canon targets riding along would be committed with their own
+       * consequences never worked out or shown. Two kinds of change in one commit is also two
+       * kinds of ripple, and the gate offers one.
+       */
+      const looks = bucket.items.filter((i) => i.candidate.classification === "art-direction.change");
+      if (looks.length > 0 && looks.length !== bucket.items.length) {
+        throw new WrapUpError(
+          "materialise",
+          "A change to the world look cannot land together with other changes. Decide the look on its own, then the rest.",
+        );
+      }
+
       const paths = bucket.items.flatMap((item) => item.targets.map((t) => t.path));
       const collision = paths.find((path, index) => paths.indexOf(path) !== index);
       if (collision !== undefined) {
@@ -765,6 +781,20 @@ export async function rejectPoint(input: RejectPointInput): Promise<void> {
     if (!meta) throw new WrapUpError("stale", "That conversation is no longer here.");
 
     const { events } = await log.read();
+    /*
+     * The same durable guard a save applies, for the mirror reason.
+     *
+     * An interrupted wrap-up's proposal may already represent this point. Discarding the point
+     * under it would leave the proposal to be accepted later — writing, as a change nobody now
+     * wants, the very sentence that was just rejected.
+     */
+    if (openIntentOf(events)) {
+      throw new WrapUpError(
+        "in-flight",
+        "This conversation has a wrap-up that did not finish. Restart the studio and it will be resolved before anything else is decided.",
+      );
+    }
+
     const view = foldConversation(meta.id, meta.createdAt, events).view;
     if (view.status !== "open") {
       throw new WrapUpError("stale", "This conversation is not open, so nothing can be decided from it.");

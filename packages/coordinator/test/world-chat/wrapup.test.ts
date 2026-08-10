@@ -12,6 +12,7 @@ import {
 } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
+import { recoverWrapUps } from "../../src/world-chat/wrapup-recovery.js";
 import { evaluateReadiness } from "../../src/world-chat/readiness.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { rejectPoint, savePoint, wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
@@ -1101,5 +1102,51 @@ describe("the windows either side of a decision", () => {
       !events.some((e) => e.event.type === "candidate.status-changed"),
       "the corrected point was left alone rather than discarded in its place",
     );
+  });
+});
+
+/** The two states recovery has to tell apart when a wrap-up died with nothing left open. */
+describe("recovering an accept all that wrote and then died", () => {
+  it("closes a conversation whose changes had already landed", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    await withCandidates(w.log, [candidate()]);
+    /*
+     * The shape a crash leaves after the last accept: the intent is open, no proposal is left to
+     * find because acceptance removed it, and the log records that it landed. Read as "nothing was
+     * created", this closed nothing and left a conversation no later Accept all could finish.
+     */
+    await w.log.append(
+      { type: "wrapup.intent-recorded", requestId: "wrote-then-died", expectedConversationSeq: 2, plannedProposalIds: [] },
+      { at: AT },
+    );
+    await w.log.append(
+      { type: "proposal.resolved", proposalId: newId("pr") as never, outcome: "accepted", candidateIds: [] },
+      { at: AT },
+    );
+
+    const { repaired } = await recoverWrapUps(w.store, w.gate, NOW);
+    const mine = repaired.find((r) => r.conversationId === w.conversationId);
+    assert.equal(mine?.outcome, "completed", "what was written is what happened");
+
+    const { events } = await w.log.read();
+    const view = foldConversation((await w.log.readMeta())!.id, AT, events).view;
+    assert.equal(view.status, "closed");
+  });
+
+  it("still reports one that created nothing as failed, leaving it open", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    await withCandidates(w.log, [candidate()]);
+    await w.log.append(
+      { type: "wrapup.intent-recorded", requestId: "died-early", expectedConversationSeq: 2, plannedProposalIds: [] },
+      { at: AT },
+    );
+
+    const { repaired } = await recoverWrapUps(w.store, w.gate, NOW);
+    assert.equal(repaired.find((r) => r.conversationId === w.conversationId)?.outcome, "failed");
+    const { events } = await w.log.read();
+    const view = foldConversation((await w.log.readMeta())!.id, AT, events).view;
+    assert.equal(view.status, "open", "nothing was written, so there is still everything to decide");
   });
 });
