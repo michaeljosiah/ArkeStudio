@@ -348,6 +348,32 @@ describe("takes and reviews", () => {
     assert.throws(() => TakeSchema.parse({ ...take, status: "accepted" }));
   });
 
+  it("take QC is optional, strict, and accepts the adjacent-framemd5-v1 record", () => {
+    // Absent is the legacy and the unmeasured state, and both must keep parsing (#248).
+    assert.equal(TakeSchema.parse(take).qc, undefined);
+
+    const qc = {
+      method: "adjacent-framemd5-v1",
+      scope: "source-media",
+      status: "degraded",
+      nominalFps: 24,
+      effectiveFps: 14,
+      duplicateFrames: 10,
+      duplicateRatio: 0.416667,
+      sampledFrames: 25,
+      thresholdRatio: 0.8,
+    };
+    assert.deepEqual(TakeSchema.parse({ ...take, qc }).qc, qc);
+
+    // Strict about what a measurement claims to be: a different method or scope is a different
+    // number, and a take that mislabels one is worse than a take that records none.
+    assert.throws(() => TakeSchema.parse({ ...take, qc: { ...qc, method: "some-other-metric" } }));
+    assert.throws(() => TakeSchema.parse({ ...take, qc: { ...qc, scope: "segment" } }));
+    assert.throws(() => TakeSchema.parse({ ...take, qc: { ...qc, thresholdRatio: 0.5 } }));
+    assert.throws(() => TakeSchema.parse({ ...take, qc: { ...qc, extra: true } }));
+    assert.throws(() => TakeSchema.parse({ ...take, qc: { ...qc, sampledFrames: 1 } }), "two rows describe one transition; one row describes nothing");
+  });
+
   it("rejects floating-point money", () => {
     assert.throws(() =>
       TakeSchema.parse({ ...take, cost: { estimatedMicroUsd: 0.13, actualMicroUsd: null } }),

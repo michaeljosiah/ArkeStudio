@@ -52,6 +52,34 @@ export const ProvenanceSchema = z
   .strict();
 export type Provenance = z.infer<typeof ProvenanceSchema>;
 
+/**
+ * What arrival measured about the decoded media, when it could measure anything (#248).
+ *
+ * A provider can return a file that declares an ordinary frame rate and contains runs of
+ * byte-identical frames — nominally 24 fps, effectively half that, and it reads as stutter to
+ * the person watching it rather than to anything that inspected it. This records that signal
+ * before review, so a clip's motion is known before somebody spends attention discovering it.
+ *
+ * Deliberately non-authoritative. The measurement cannot tell a provider's duplicated frames
+ * from a deliberately motionless shot, so it never rejects, repairs, or hides a take — and it
+ * is optional, because a machine without ffmpeg is a supported way to run this application.
+ */
+export const TakeQcSchema = z
+  .object({
+    method: z.literal("adjacent-framemd5-v1"),
+    /** The decoded media file, not editorial intent and not a separately decoded segment. */
+    scope: z.literal("source-media"),
+    status: z.enum(["clean", "degraded"]),
+    nominalFps: z.number().positive(),
+    effectiveFps: z.number().min(0),
+    duplicateFrames: z.number().int().min(0),
+    duplicateRatio: z.number().min(0).max(1),
+    sampledFrames: z.number().int().min(2),
+    thresholdRatio: z.literal(0.8),
+  })
+  .strict();
+export type TakeQc = z.infer<typeof TakeQcSchema>;
+
 export const TakeSchema = z
   .object({
     id: TakeIdSchema,
@@ -99,6 +127,12 @@ export const TakeSchema = z
      * a second hop, since §1.4 settles v1 on a single link.
      */
     continuedFrom: TakeIdSchema.optional(),
+    /**
+     * Absent means "not measured" — no analyzer configured, or the measurement could not be
+     * made — and never "measured clean". Legacy takes have none and are not backfilled: a take
+     * is immutable, and inventing a measurement nobody took would be worse than saying nothing.
+     */
+    qc: TakeQcSchema.optional(),
   })
   .strict();
 export type Take = z.infer<typeof TakeSchema>;

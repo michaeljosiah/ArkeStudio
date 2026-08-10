@@ -76,7 +76,20 @@ export {
   type ImportReport,
 } from "./artifacts/filing.js";
 export { spoolBytes, spoolDir, spoolName, SPOOL_LIMIT_BYTES, sweepSpool } from "./artifacts/spool.js";
-export { recordTakesFromJob } from "./takes/arrival.js";
+export { recordTakesFromJob, type TakeArrivalOptions } from "./takes/arrival.js";
+export {
+  createTakeQcAnalyzer,
+  measureFramemd5,
+  parseFramemd5,
+  takeQcArgs,
+  QC_MAX_OUTPUT_BYTES,
+  QC_THRESHOLD_RATIO,
+  QC_TIMEOUT_MS,
+  type MediaProbeRunner,
+  type TakeQcAnalysis,
+  type TakeQcAnalyzer,
+  type TakeQcUnavailableReason,
+} from "./takes/qc.js";
 export { exportWorld, runExport, WORLD_EXPORT_EXCLUDED, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 export { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
 export {
