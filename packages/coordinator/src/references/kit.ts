@@ -3,9 +3,14 @@ import { join } from "node:path";
 import {
   headGate,
   lockedTiles,
+  MAX_ACTIVE_LOCATION_VIEWS,
+  locationViewSlotAt,
+  normalizeViewName,
+  orderedLocationViews,
   ReferenceKitSchema,
   type Job,
   type Compilation,
+  type LocationView,
   type ReferenceAngle,
   type ReferenceKit,
   type ReviewDecision,
@@ -17,6 +22,7 @@ import { sha256 } from "../world/text-files.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "./png.js";
+import { composeLocationSheet, type LocationSheetPanel } from "./location-sheet.js";
 
 /**
  * Kit operations (SPEC-010): every mutation goes through the world's one commit primitive, so
@@ -242,6 +248,136 @@ export async function acceptCharacterSheet(
     raw,
     input.review,
   );
+}
+
+/**
+ * Accept one angle on a location, and rebuild the sheet it belongs to (#243, design turn 57).
+ *
+ * The order below is the whole of the "a failed assembly changes nothing" rule: the sheet's
+ * pixels are composed and its PNG written *before* the kit is committed, so the designation can
+ * never point at a file that does not exist. If composition throws, nothing has been written —
+ * the candidate stays unreviewed, the previous sheet stays the one shots carry, and retrying
+ * costs nothing because no provider was involved.
+ */
+export async function acceptLocationView(
+  store: WorldStore,
+  sheet: Sheet,
+  input: {
+    id: string;
+    name: string;
+    /** Relative to `references/<sheetId>/` — inside the take directory, never a loose file. */
+    file: string;
+    takeId: Take["id"];
+    sheetVersion: number;
+    artDirectionVersion: number;
+    /** Replace the establishing view rather than appending an additional angle. */
+    establishing?: boolean;
+    /**
+     * The caller confirmed the replacement of an active view by this name. Without it a
+     * collision refuses, because silently superseding an angle somebody may still want is a
+     * loss they would only notice much later.
+     */
+    replaceExistingName?: boolean;
+    review?: ReviewDecision;
+  },
+): Promise<void> {
+  const { kit, raw } = await loadOrEmpty(store, sheet.id);
+  const views = kit.locationViews ?? [];
+  const active = views.filter((view) => view.status === "active");
+  const collision = active.find((view) => normalizeViewName(view.name) === normalizeViewName(input.name));
+  const isFirst = active.length === 0;
+  const establishing = input.establishing === true || isFirst;
+
+  if (collision !== undefined && input.replaceExistingName !== true) {
+    throw new Error(`"${input.name}" is already an active view of ${sheet.name}; confirm the replacement`);
+  }
+  // The ceiling is checked against what this acceptance would leave behind: replacing a view
+  // costs nothing, adding one does.
+  const supersededByThis = new Set<string>();
+  if (collision !== undefined) supersededByThis.add(collision.id);
+  if (establishing && kit.establishingViewId !== undefined) supersededByThis.add(kit.establishingViewId);
+  if (active.length - supersededByThis.size + 1 > MAX_ACTIVE_LOCATION_VIEWS) {
+    throw new Error(`${sheet.name} already has ${MAX_ACTIVE_LOCATION_VIEWS} active views`);
+  }
+
+  const now = store.now();
+  const accepted: LocationView = {
+    id: input.id,
+    name: input.name.trim().replace(/\s+/g, " "),
+    file: input.file,
+    sourceTakeId: input.takeId,
+    sheetVersion: input.sheetVersion,
+    artDirectionVersion: input.artDirectionVersion,
+    acceptedAt: now,
+    // A replacement takes over the panel the superseded view held, which is what design turn 57
+    // means by leaving the panel order unchanged. Ordering on acceptedAt alone would sort the
+    // replacement — always the newest thing here — to the bottom of the sheet, and a prompt that
+    // already cited panel 2 would be describing a different side of the room.
+    slotAt: collision !== undefined ? locationViewSlotAt(collision) : now,
+    status: "active",
+  };
+  const nextViews: LocationView[] = [
+    ...views.map((view) => (supersededByThis.has(view.id) ? { ...view, status: "superseded" as const } : view)),
+    accepted,
+  ];
+  const nextKit: ReferenceKit = {
+    ...kit,
+    locationViews: nextViews,
+    // Replacing the establishing view leaves the additional views' order untouched: they are
+    // ordered by their own acceptance, and this one was not theirs.
+    establishingViewId: establishing ? accepted.id : kit.establishingViewId,
+  };
+
+  const sheetFile = await rebuildLocationSheet(store, sheet, nextKit);
+  await writeKit(
+    store,
+    sheet.id,
+    {
+      ...nextKit,
+      compilations: [
+        ...nextKit.compilations.filter((candidate) => candidate.format !== "location-sheet"),
+        sheetFile.compilation,
+      ],
+      designatedCompilation: sheetFile.compilation.file,
+    },
+    raw,
+    input.review,
+  );
+}
+
+/**
+ * Compose the sheet from a kit's active views and write the PNG. Returns the compilation record
+ * to commit alongside it. Writes no kit state itself — the caller commits, so a throw here
+ * leaves the world exactly as it was.
+ */
+async function rebuildLocationSheet(
+  store: WorldStore,
+  sheet: Sheet,
+  kit: ReferenceKit,
+): Promise<{ compilation: Compilation }> {
+  const ordered = orderedLocationViews(kit);
+  if (ordered.length === 0) throw new Error("no active views to assemble");
+
+  const panels: LocationSheetPanel[] = [];
+  for (const view of ordered) {
+    const bytes = await readFile(
+      toExtendedLength(join(store.dir, fromPortable(`references/${sheet.id}/${view.file}`))),
+    );
+    panels.push({ id: view.id, name: view.name, image: decodePng(bytes) });
+  }
+  const composed = composeLocationSheet(panels);
+  await atomicWriteFile(join(store.dir, "references", sheet.id, composed.file), Buffer.from(composed.png));
+  return {
+    compilation: {
+      file: composed.file,
+      format: "location-sheet",
+      sheetVersion: sheet.version,
+      tiles: ordered.map((view) => view.file),
+      compiledAt: store.now(),
+      source: "local",
+      accepted: true,
+    },
+  };
 }
 
 export async function acceptCharacterLook(
