@@ -13,7 +13,7 @@ import {
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { evaluateReadiness } from "../../src/world-chat/readiness.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import { wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
+import { savePoint, wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
 import { WorldStore } from "../../src/world/store.js";
 import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -708,5 +708,95 @@ describe("readiness on its own", () => {
       userOverride: { at: AT, reason: "create-anyway" },
     };
     assert.equal(evaluateReadiness([overridden], bundle).carried.length, 1);
+  });
+});
+
+/**
+ * Writing one point from the rail (#70, revised).
+ *
+ * The design this replaces decided twice, and both decisions were about everything at once: a
+ * conversation produced a dozen points of which two were wrong, and the only way to say so was to
+ * carry all twelve to another screen and reject two there. These are about the difference — one
+ * point, written where it is shown, with the conversation still open afterwards.
+ */
+describe("saving one point", () => {
+  it("writes only the point it was asked for, and leaves the rest live", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const wanted = candidate({ title: "Bells may pass sideways" });
+    const other = candidate({ title: "A separate rule nobody asked to save" });
+    await withCandidates(w.log, [wanted, other]);
+
+    const result = await savePoint({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "save-1",
+      candidateId: wanted.id,
+      expectedCandidateRevision: wanted.revision,
+      now: NOW,
+    });
+
+    assert.deepEqual(result.candidateIds, [wanted.id]);
+    assert.equal(result.proposalIds.length, 1);
+    assert.equal((await w.ours()).length, 1, "the other point was not written");
+
+    const { events } = await w.log.read();
+    const moved = events.flatMap((e) =>
+      e.event.type === "candidate.status-changed" ? [e.event.candidateId] : [],
+    );
+    assert.deepEqual(moved, [wanted.id], "and only the saved one left the rail");
+    assert.ok(
+      !events.some((e) => e.event.type === "wrapup.completed"),
+      "the conversation stays open — only Accept all closes it",
+    );
+  });
+
+  /*
+   * A point is corrected by talking, and a correction is a new revision of the same proposition.
+   * Saving whatever is current would write the correction the person has not read yet.
+   */
+  it("refuses a point that changed since the rail showed it", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+
+    await assert.rejects(
+      () =>
+        savePoint({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "save-stale",
+          candidateId: point.id,
+          expectedCandidateRevision: point.revision + 1,
+          now: NOW,
+        }),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "stale",
+    );
+    assert.deepEqual(await w.ours(), [], "and nothing was written");
+  });
+
+  it("says why a point that is not settled enough cannot be written", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const maybe = candidate({ settledness: "tentative", title: "Whether the bells are whale bone" });
+    await withCandidates(w.log, [maybe]);
+
+    await assert.rejects(
+      () =>
+        savePoint({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "save-tentative",
+          candidateId: maybe.id,
+          expectedCandidateRevision: maybe.revision,
+          now: NOW,
+        }),
+      (err: unknown) =>
+        err instanceof WrapUpError && err.reason === "nothing-to-carry" && /still a maybe/.test(err.message),
+    );
   });
 });

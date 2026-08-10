@@ -91,6 +91,7 @@ function stateWithConversation(): ClientState {
           subjectKind: "sheet · v4",
           text: "Her aunt taught her the bells, not her mother.",
           settled: true,
+          revision: 1,
         },
         {
           id: "cand_01J8F3K2QW9VZX4N7M0RTYB6HD" as never,
@@ -99,6 +100,7 @@ function stateWithConversation(): ClientState {
           subjectKind: "sheet · v4",
           text: "She was given them rather than entitled to them.",
           settled: true,
+          revision: 1,
         },
         {
           id: "cand_01J8F3K2QW9VZX4N7M0RTYB6HE" as never,
@@ -107,6 +109,7 @@ function stateWithConversation(): ClientState {
           subjectKind: "not settled",
           text: "Who objects when the bells pass sideways?",
           settled: false,
+          revision: 1,
         },
       ],
     },
@@ -237,14 +240,30 @@ describe("the transcript", () => {
 });
 
 describe("the understanding panel", () => {
-  it("carries no control on a point — a point is corrected by talking", () => {
+  /*
+   * The design's original rule was that a point carried no control at all: deciding happened
+   * twice, and both times about everything at once. In practice a conversation produces a dozen
+   * points of which two are wrong, and the only way to say so was to carry all twelve to another
+   * screen and reject two there. The rule now is that a decision belongs where the point is —
+   * every point offers one, and the rail's own action accepts what is left.
+   */
+  it("offers a decision on every point, and one for the rest", () => {
     const rail = railHtml(renderConversation());
-    const buttons = rail.split("<button").length - 1;
-    assert.equal(
-      buttons,
-      1,
-      "the rail holds exactly one action, the wrap-up; anything else is asking for approval mid-conversation",
-    );
+    const saves = rail.split(">Save<").length - 1;
+    const rejects = rail.split(">Reject<").length - 1;
+    assert.equal(saves, 2, "both settled points can be written from here");
+    assert.equal(rejects, 3, "and every point, settled or not, can be dropped");
+    assert.match(rail, /Accept all/, "with one action for everything still standing");
+  });
+
+  /*
+   * A point that is not ready shows why, in the space its Save would have taken. Offering a Save
+   * the coordinator would refuse is the promise this whole change exists to stop making.
+   */
+  it("says why a point cannot be written instead of offering to write it", () => {
+    const rail = railHtml(renderConversation());
+    assert.match(rail, /still open/, "the open question says what it is");
+    assert.ok(rail.includes("fy-panel__pointwhy"), "and it reads as a reason, not as a disabled control");
   });
 
   /*
@@ -270,10 +289,16 @@ describe("the understanding panel", () => {
     assert.match(CSS, /\.fy-panel__count\s*\{[^}]*color:\s*var\(--warning\)/s, "nothing here is settled yet");
   });
 
-  it("says out loud that nothing here is a decision", () => {
+  /*
+   * The panel used to say "nothing decided" and "there is nothing to approve here", which was the
+   * truth when it was. It now writes to the world, and saying otherwise over a Save button would
+   * be the screen contradicting the button on it.
+   */
+  it("says what the rail now does, rather than that it decides nothing", () => {
     const html = renderConversation();
-    assert.ok(html.includes("nothing decided"));
-    assert.ok(html.includes("There is nothing to approve here."));
+    assert.ok(html.includes("Save writes a line to the world"), "the rail says what saving does");
+    assert.ok(!html.includes("There is nothing to approve here."), "and no longer claims otherwise");
+    assert.ok(html.includes("talking changes nothing until you save"), "talking is still safe, and says so");
   });
 
   it("groups points under the thing they are about, with what that thing is", () => {
@@ -296,18 +321,18 @@ describe("the wrap-up action", () => {
   it("sits at the rail's foot as a large primary button with a caption beneath", () => {
     const rail = railHtml(renderConversation());
     assert.match(rail, /ui-btn--primary[^"]*ui-btn--lg|ui-btn--lg[^"]*ui-btn--primary/);
-    assert.ok(rail.includes("Turn this into proposals"));
+    assert.ok(rail.includes("Accept all"));
     const caption = rail.indexOf("fy-panel__caption");
-    const button = rail.indexOf("Turn this into proposals");
+    const button = rail.indexOf("Accept all");
     assert.ok(caption > button, "the caption sits beneath the action, as it does in Genesis");
   });
 
   it("says what pressing it would actually do", () => {
     const rail = railHtml(renderConversation());
-    assert.ok(rail.includes("Closes the conversation"), "wrap-up ends the conversation, and says so");
+    assert.ok(rail.includes("closes this conversation"), "accept-all ends the conversation, and says so");
     assert.ok(
-      rail.includes("nothing is written to the world until you accept"),
-      "and that the world is still untouched afterwards",
+      rail.includes("Writes the 2 ready to the world"),
+      "and that this one writes, rather than staging for a screen that no longer stands between",
     );
   });
 });

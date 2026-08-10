@@ -136,7 +136,7 @@ import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
-import { wrapUp, WrapUpError } from "./world-chat/wrapup.js";
+import { savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
 import { titleFrom } from "./world-chat/title.js";
@@ -1504,6 +1504,96 @@ export class Coordinator {
         await inFlight;
         await this.refreshWorldSnapshot(msg.worldId);
         await this.refreshConversations(store);
+        await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "world-chat-save-point": {
+        const store = this.opts.provider.openStore?.();
+        const gate = this.opts.provider.gate?.();
+        if (!store || !gate) return;
+        try {
+          /*
+           * Staged and accepted in one motion — the assign-voice rule, which the art-direction
+           * form already follows: being asked to approve a change you just approved is two steps
+           * for one decision. The gate still does the whole job, so the history, the ripples and
+           * the change log are identical to a proposal reviewed on the approvals screen; the only
+           * thing removed is the screen.
+           */
+          const saved = await savePoint({
+            store,
+            gate,
+            conversationId: msg.conversationId,
+            requestId: msg.requestId,
+            candidateId: msg.candidateId,
+            expectedCandidateRevision: msg.expectedCandidateRevision,
+            now: () => new Date().toISOString(),
+          });
+          for (const proposalId of saved.proposalIds) {
+            const staged = await gate.readManifest(proposalId).catch(() => null);
+            const outcome = await gate.accept(proposalId, {});
+            const at = new Date().toISOString();
+            if (outcome.status === "accepted" && staged) {
+              // The conversation's own account of what became of its propositions (§6.5).
+              await recordResolution(store, staged, "accepted", () => at);
+              this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId, outcome: "accepted" });
+            } else if (outcome.status !== "accepted") {
+              /*
+               * Staged but not accepted: it is a proposal waiting on the approvals screen, which
+               * is a state a person can finish. Said out loud rather than left to be discovered —
+               * the rail promised to write this, and it did not.
+               */
+              this.emit({
+                at,
+                type: "world-chat.wrap-up-refused",
+                conversationId: msg.conversationId,
+                requestId: msg.requestId,
+                reason: "unknown",
+                detail: `This is waiting on the proposals screen instead — the gate answered "${outcome.status}".`,
+              });
+            }
+          }
+        } catch (err) {
+          const reason = err instanceof WrapUpError ? err.reason : "unknown";
+          void this.appLog?.append({ level: "warn", event: "world-chat.save-point-refused", reason });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "world-chat.wrap-up-refused",
+            conversationId: msg.conversationId,
+            requestId: msg.requestId,
+            reason,
+            detail:
+              err instanceof WrapUpError ? err.message : "This could not be written, so nothing was.",
+          });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        await this.refreshConversations(store);
+        await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "world-chat-reject-point": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        /*
+         * Dropped, not corrected. A point that is nearly right is fixed by saying so; this is for
+         * one that should not exist, and `discarded` is the status the fold already understands —
+         * it stops being live, so it leaves the rail and is never carried by anything later.
+         */
+        const log = new WorldChatStore(conversationDir(store.dir, msg.conversationId));
+        if (await log.readMeta()) {
+          await log
+            .append(
+              {
+                type: "candidate.status-changed",
+                candidateId: msg.candidateId as never,
+                revision: msg.expectedCandidateRevision,
+                status: "discarded",
+              },
+              { at: new Date().toISOString(), requestId: msg.requestId },
+            )
+            .catch(() => {
+              /* the refreshed workspace below is authoritative either way */
+            });
+        }
         await this.openWorldChat(store, msg.conversationId);
         return;
       }

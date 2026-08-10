@@ -1969,6 +1969,50 @@ export function retryWorldChatTurn(worldId: string, conversationId: string, turn
 }
 
 /**
+ * Write one point into the world, from the rail it is shown on.
+ *
+ * Returns the attempt's id, or null when nothing was transmitted — the rail waits on the answer
+ * to this, and a command that never left has no answer coming.
+ *
+ * `expectedRevision` is the revision the rail is showing. A point corrected by talking since is
+ * refused rather than written as it was.
+ */
+export function saveWorldChatPoint(
+  worldId: string,
+  conversationId: string,
+  candidateId: string,
+  expectedRevision: number,
+): string | null {
+  const requestId = crypto.randomUUID();
+  const sent = send({
+    kind: "world-chat-save-point",
+    worldId,
+    requestId,
+    conversationId,
+    candidateId,
+    expectedCandidateRevision: expectedRevision,
+  });
+  return sent ? requestId : null;
+}
+
+/** Drop one point. It is not written, and it stops being offered. */
+export function rejectWorldChatPoint(
+  worldId: string,
+  conversationId: string,
+  candidateId: string,
+  expectedRevision: number,
+): boolean {
+  return send({
+    kind: "world-chat-reject-point",
+    worldId,
+    requestId: crypto.randomUUID(),
+    conversationId,
+    candidateId,
+    expectedCandidateRevision: expectedRevision,
+  });
+}
+
+/**
  * Turn the conversation into proposals and close it.
  *
  * Returns the id of the attempt, or null when the command did not go out at all. The screen waits

@@ -1050,6 +1050,14 @@ export const WorldChatPointSchema = z
     text: z.string().min(1).max(400),
     /** Whether it is settled enough to become a proposal at wrap-up. */
     settled: z.boolean(),
+    /**
+     * The revision this point is showing.
+     *
+     * Sent back when it is saved or rejected, so a point corrected by talking since is refused
+     * rather than written as it was — the same guard wrap-up applies to the whole conversation,
+     * at the size a single decision now works on.
+     */
+    revision: z.number().int().min(1),
   })
   .strict();
 export type WorldChatPoint = z.infer<typeof WorldChatPointSchema>;

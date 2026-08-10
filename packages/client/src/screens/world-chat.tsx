@@ -20,6 +20,8 @@ import {
   unarchiveWorldChat,
   useStore,
   useWorldChatProgress,
+  rejectWorldChatPoint,
+  saveWorldChatPoint,
   useWorldChatRefusals,
   useWorldChatWrapUpRefusal,
   worldChatAttachFiles,
@@ -260,6 +262,49 @@ export function WorldChatScreen() {
  * while the conversation was still going, which meant deciding twelve times about things that had
  * not settled yet. Reading is not deciding, so there is nothing here to press.
  */
+/**
+ * One point, and the two things that can now be done to it.
+ *
+ * The design this replaces had no controls on a point at all — deciding happened twice, and both
+ * times about everything at once. That was right when a decision meant a whole conversation and
+ * wrong in practice: a dozen points of which two are wrong took twelve to another screen to reject
+ * two there. Save writes this line to the world; Reject drops it; talking still corrects it.
+ *
+ * A point that is not ready shows why instead of a Save it cannot honour. The reason is the same
+ * one wrap-up would have given, said where it can be acted on rather than after the fact.
+ */
+function PointRow({
+  point,
+  busy,
+  onSave,
+  onReject,
+}: {
+  point: { id: string; text: string; settled: boolean; kind: string };
+  busy: boolean;
+  onSave: () => void;
+  onReject: () => void;
+}) {
+  return (
+    <div className="fy-panel__point">
+      <div className="fy-panel__pointtext">{point.text}</div>
+      <div className="fy-panel__pointacts">
+        {point.settled ? (
+          <Button variant="ghost" size="sm" disabled={busy} onClick={onSave}>
+            {busy ? "Saving…" : "Save"}
+          </Button>
+        ) : (
+          <span className="fy-panel__pointwhy">
+            {point.kind === "question" ? "still open" : "still a maybe"}
+          </span>
+        )}
+        <Button variant="ghost" size="sm" disabled={busy} onClick={onReject}>
+          Reject
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function WorldChatConversationScreen() {
   const { worldId, conversationId } = useParams();
   useOpenWorldGuard(worldId);
@@ -279,6 +324,14 @@ export function WorldChatConversationScreen() {
   const wrapUpRefusal = useWorldChatWrapUpRefusal(conversationId);
   /** Set while a wrap-up is in flight, so the button cannot be pressed twice into the same log. */
   const [wrappingUp, setWrappingUp] = useState(false);
+  /**
+   * Points with a decision in flight.
+   *
+   * Held per point rather than for the rail, because deciding one is no reason to freeze the
+   * other eleven — the whole change is that these are separate decisions. Cleared when the
+   * workspace comes back, which is the only thing that knows whether the point survived.
+   */
+  const [busyPoints, setBusyPoints] = useState<string[]>([]);
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
@@ -314,6 +367,24 @@ export function WorldChatConversationScreen() {
    * have finished, and the closed workspace that proves it arrives on the next connection. So the
    * asking is remembered in a ref that no reconnection clears, and the button is freed meanwhile.
    */
+  /*
+   * A decision on one point. Save writes it; Reject drops it. Both send the revision the rail is
+   * showing, so a point corrected by talking since is refused rather than acted on as it was.
+   */
+  const decide = (point: { id: string; revision: number }, action: "save" | "reject") => {
+    if (!worldId || !conversationId) return;
+    const sent =
+      action === "save"
+        ? saveWorldChatPoint(worldId, conversationId, point.id, point.revision) !== null
+        : rejectWorldChatPoint(worldId, conversationId, point.id, point.revision);
+    if (sent) setBusyPoints((prev) => [...prev, point.id]);
+  };
+
+  // The workspace arriving is the answer: whatever it now holds is what survived the decision.
+  useEffect(() => {
+    setBusyPoints([]);
+  }, [loaded?.seq]);
+
   const closed = loaded?.status === "closed";
   /** The attempt this window made, if any: an answer naming another one is somebody else's. */
   const asked = useRef<string | null>(null);
@@ -492,7 +563,7 @@ export function WorldChatConversationScreen() {
             />
             {/* Stop lives on the working line in the transcript now, beside what it would stop. */}
             <div className="fy-chat__composernote">
-              world author · talking changes nothing until you wrap up
+              world author · talking changes nothing until you save
             </div>
           </div>
         </div>
@@ -502,11 +573,11 @@ export function WorldChatConversationScreen() {
             <div className="fy-panel__headline">
               <div className="fy-panel__title">What I&rsquo;ve understood</div>
               <div className="fy-panel__count">
-                {points.length} point{points.length === 1 ? "" : "s"} · nothing decided
+                {carried} of {points.length} ready
               </div>
             </div>
             <div className="fy-panel__note">
-              If a line is wrong, say so and it changes. There is nothing to approve here.
+              Save writes a line to the world. If one is wrong, say so and it changes — or reject it.
             </div>
           </div>
 
@@ -524,9 +595,13 @@ export function WorldChatConversationScreen() {
                       <div className="fy-panel__kind">{group.kind}</div>
                     </div>
                     {group.items.map((p) => (
-                      <div key={p.id} className="fy-panel__point">
-                        {p.text}
-                      </div>
+                      <PointRow
+                        key={p.id}
+                        point={p}
+                        busy={busyPoints.includes(p.id)}
+                        onSave={() => decide(p, "save")}
+                        onReject={() => decide(p, "reject")}
+                      />
                     ))}
                   </div>
                 ))}
@@ -537,9 +612,13 @@ export function WorldChatConversationScreen() {
                       <div className="fy-panel__kind">not settled</div>
                     </div>
                     {openThreads.map((p) => (
-                      <div key={p.id} className="fy-panel__point">
-                        {p.text}
-                      </div>
+                      <PointRow
+                        key={p.id}
+                        point={p}
+                        busy={busyPoints.includes(p.id)}
+                        onSave={() => decide(p, "save")}
+                        onReject={() => decide(p, "reject")}
+                      />
                     ))}
                   </div>
                 )}
@@ -569,7 +648,7 @@ export function WorldChatConversationScreen() {
                 setWrappingUp(true);
               }}
             >
-              {wrappingUp ? "Turning this into proposals…" : "Turn this into proposals"}
+              {wrappingUp ? "Writing them…" : `Accept all${carried > 0 ? ` · ${carried}` : ""}`}
             </Button>
             {/*
               A refused wrap-up is the one thing this rail must not swallow. Nothing was written,
@@ -583,8 +662,8 @@ export function WorldChatConversationScreen() {
             )}
             <div className="fy-panel__caption">
               {carried === 0
-                ? "Nothing is settled enough to propose yet."
-                : `${carried} of ${points.length} points become proposals. Closes the conversation and takes you to them, where nothing is written to the world until you accept.`}
+                ? "Nothing is ready to write yet."
+                : `Writes the ${carried} ready to the world and closes this conversation. Save them one at a time above to keep talking.`}
             </div>
           </div>
         </div>
@@ -609,15 +688,15 @@ function aboutLabel(context: NonNullable<WorldChatSummary["entryContext"]>): str
 }
 
 /** Points group under the thing they are about, per R-15 — not under what kind of change they are. */
-function groupBySubject(
-  points: ReadonlyArray<{ id: string; kind: string; subject: string; subjectKind: string; text: string }>,
-): Array<{ subject: string; kind: string; items: Array<{ id: string; text: string }> }> {
-  const groups: Array<{ subject: string; kind: string; items: Array<{ id: string; text: string }> }> = [];
+function groupBySubject<P extends { id: string; kind: string; subject: string; subjectKind: string }>(
+  points: readonly P[],
+): Array<{ subject: string; kind: string; items: P[] }> {
+  const groups: Array<{ subject: string; kind: string; items: P[] }> = [];
   for (const point of points) {
     if (point.kind === "question") continue;
     const existing = groups.find((g) => g.subject === point.subject);
-    if (existing) existing.items.push({ id: point.id, text: point.text });
-    else groups.push({ subject: point.subject, kind: point.subjectKind, items: [{ id: point.id, text: point.text }] });
+    if (existing) existing.items.push(point);
+    else groups.push({ subject: point.subject, kind: point.subjectKind, items: [point] });
   }
   return groups;
 }

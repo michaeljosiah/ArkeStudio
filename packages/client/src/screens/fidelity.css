@@ -3215,8 +3215,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-panel__grouphead { display: flex; align-items: baseline; gap: 8px; }
 .fy-panel__subject { font: 600 12.5px var(--font-sans); flex: 1; min-width: 0; }
 .fy-panel__kind { font: 400 10px var(--font-mono); color: var(--neutral-400); }
-/* No control on a point, by design: a point is corrected by saying so, not by pressing anything. */
+/*
+ * A point now carries its own decision. The controls sit on a second line rather than beside the
+ * text: a point is a sentence, often two lines of one, and putting buttons on its right squeezed
+ * the sentence into a column narrower than the words it has to hold.
+ */
 .fy-panel__point { font: 400 12.5px/1.6 var(--font-sans); color: var(--foreground); margin-top: 6px; }
+.fy-panel__pointtext { color: var(--foreground); }
+.fy-panel__pointacts { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+/* Why there is no Save, in the space the Save would have taken. */
+.fy-panel__pointwhy { font: 400 10px var(--font-mono); color: var(--neutral-400); padding: 0 6px; }
 .fy-panel__caption { font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); text-align: center; }
 /* A wrap-up that was refused. Quiet like the failed turn it rhymes with: nothing was written and
    nothing was lost, so this is the app explaining itself, not raising an alarm. */
