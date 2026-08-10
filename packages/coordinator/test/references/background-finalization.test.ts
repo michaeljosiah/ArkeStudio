@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Job } from "@arke-studio/contracts";
+import { REFERENCE_FINALIZATION_TARGETS, type Job } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { acceptCharacterSheet } from "../../src/references/kit.js";
 import { recordUploadedCharacterSheetTake, referenceReviewDecision } from "../../src/references/takes.js";
@@ -161,5 +161,69 @@ describe("background world finalization", () => {
     const reviews = await readFile(join(worldDir, "references", "reviews.jsonl"), "utf8").catch(() => "");
     assert.equal(reviews.includes(`tk_${job.id.slice(3)}`), false, "and is left undecided, not accepted");
     await provider.close();
+  });
+
+  /**
+   * Every kind the published set names must actually reach the take recorder.
+   *
+   * This is the test that was missing. `finalize` carried its own inline list of the four kinds
+   * that existed when it was written, while contracts published the same list as
+   * REFERENCE_FINALIZATION_TARGETS. A fifth was added to the published set and not to the copy,
+   * so `location-view-candidate` finalization fell through, recorded nothing, and reported
+   * "complete" — the image sat in candidates/ and the accept path was unreachable. It shipped in
+   * v0.5.0 and was found by running the app, because nothing here disagreed with it.
+   *
+   * Driven through the real onJobTerminal rather than asserting on the branch, so a future kind
+   * added to the set fails here unless finalization genuinely records its take.
+   */
+  it("records a take for every reference kind the published set names", async () => {
+    for (const kind of REFERENCE_FINALIZATION_TARGETS) {
+      const { root, worldDir } = await makeTempRoot();
+      const provider = new FsWorldProvider(root, { clock: () => CLOCK });
+      await provider.loadWorld(WORLD_ID);
+      const sheetId = kind === "location-view-candidate" ? "the-vigil" : "maren-kest";
+      const landed = `references/${sheetId}/incoming/${kind}.png`;
+      await mkdir(join(worldDir, "references", sheetId, "incoming"), { recursive: true });
+      await writeFile(join(worldDir, landed), pngBytes());
+
+      const coordinator = new Coordinator({
+        provider,
+        adapter: null,
+        changeLogPath: join(root, "logs", "changes.jsonl"),
+        appVersion: "test",
+      });
+      const sheetVersion = provider.openStore()?.getBundle().sheets.find((s) => s.id === sheetId)?.version ?? 1;
+      const job: Job = {
+        id: `jb_01J8E00000000000000000${String([...REFERENCE_FINALIZATION_TARGETS].indexOf(kind)).padStart(3, "0")}`,
+        idempotencyKey: `01J8E10000000000000000${String([...REFERENCE_FINALIZATION_TARGETS].indexOf(kind)).padStart(3, "0")}`,
+        worldId: WORLD_ID,
+        target: { kind, id: `${sheetId}/cover` },
+        capability: "image",
+        provider: "fal",
+        model: "flux-2-pro",
+        params: {
+          prompt: "one image",
+          references: [],
+          provenance: { canonRevision: 42, sheets: { [sheetId]: sheetVersion }, artDirectionVersion: 1 },
+        },
+        estimatedMicroUsd: 47000,
+        status: "succeeded",
+        providerJobId: `remote-${kind}`,
+        attempt: 1,
+        landing: { dir: `references/${sheetId}/incoming` },
+        landedFiles: [landed],
+        error: null,
+        createdAt: CLOCK,
+        updatedAt: CLOCK,
+      };
+      await (coordinator as unknown as { onJobTerminal(terminal: Job): Promise<void> }).onJobTerminal(job);
+
+      const takes = await readdir(join(worldDir, "references", sheetId, "takes")).catch(() => [] as string[]);
+      assert.ok(
+        takes.includes(`tk_${job.id.slice(3)}`),
+        `${kind} finalization recorded no take — its image would sit in the landing dir with nothing able to review it`,
+      );
+      await provider.close();
+    }
   });
 });
