@@ -1002,6 +1002,23 @@ describe("a per-generation model and size (SPEC-008, design turn 39)", () => {
 describe("location views and the sheet they assemble (#243)", () => {
   const VIGIL = { id: "the-vigil", name: "The Vigil", version: 3 } as unknown as Sheet;
 
+  /**
+   * A clock that moves, unlike the frozen one the rest of this file uses.
+   *
+   * Panel order is an ordering over acceptance instants, and under a frozen clock every view is
+   * accepted at the same instant — so the order fell through to the id tie-break and these tests
+   * passed without ever exercising the thing they are named after. A minute per acceptance is
+   * enough to tell "ordered by when it happened" from "ordered by v1, v2, v3".
+   */
+  async function openTicking() {
+    let minute = 0;
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, {
+      clock: () => `2026-08-01T12:${String(minute++).padStart(2, "0")}:00.000Z`,
+    });
+    return { dir, store };
+  }
+
   /** Write a distinguishable PNG where an accepted view file would live. */
   async function landView(dir: string, takeId: string, rgb: [number, number, number]): Promise<string> {
     const rel = `takes/${takeId}/view.png`;
@@ -1034,7 +1051,7 @@ describe("location views and the sheet they assemble (#243)", () => {
   }
 
   it("makes the first accepted view the establishing one and designates a sheet", async () => {
-    const { dir, store } = await open();
+    const { dir, store } = await openTicking();
     await acceptView(store, dir, 1, "Establishing view");
 
     const kit = (await readKit(store, VIGIL.id))!.kit;
@@ -1052,7 +1069,7 @@ describe("location views and the sheet they assemble (#243)", () => {
   });
 
   it("keeps panel order establishing-first and rebuilds the sheet on every acceptance", async () => {
-    const { dir, store } = await open();
+    const { dir, store } = await openTicking();
     await acceptView(store, dir, 1, "Establishing view");
     const first = (await readKit(store, VIGIL.id))!.kit.designatedCompilation;
 
@@ -1077,7 +1094,7 @@ describe("location views and the sheet they assemble (#243)", () => {
   });
 
   it("asks before replacing a name, then supersedes without reordering the rest", async () => {
-    const { dir, store } = await open();
+    const { dir, store } = await openTicking();
     await acceptView(store, dir, 1, "Establishing view");
     await acceptView(store, dir, 2, "Reverse angle");
     await acceptView(store, dir, 3, "Day");
@@ -1098,14 +1115,20 @@ describe("location views and the sheet they assemble (#243)", () => {
     assert.deepEqual(superseded.map((v) => v.id), ["v2"], "history keeps the take that was replaced");
     assert.deepEqual(
       orderedLocationViews(kit).map((v) => v.name),
-      ["Establishing view", "Day", "Reverse angle"],
-      "the replacement takes its own acceptance position; Day does not move",
+      ["Establishing view", "Reverse angle", "Day"],
+      "the replacement inherits panel 2 from the view it superseded, and Day stays panel 3",
     );
+    // Stated as the slot rather than as a position, because that is the invariant: a prompt that
+    // already cited panel 2 is describing the same side of the room after the replacement.
+    const replacement = kit.locationViews!.find((v) => v.id === "v4")!;
+    const replaced = kit.locationViews!.find((v) => v.id === "v2")!;
+    assert.equal(replacement.slotAt, replaced.acceptedAt, "the slot is inherited, not the timestamp");
+    assert.notEqual(replacement.acceptedAt, replaced.acceptedAt, "while acceptedAt still says when it really arrived");
     await store.close();
   });
 
   it("replaces the establishing view without disturbing the additional ones", async () => {
-    const { dir, store } = await open();
+    const { dir, store } = await openTicking();
     await acceptView(store, dir, 1, "Establishing view");
     await acceptView(store, dir, 2, "Reverse angle");
     await acceptView(store, dir, 3, "Day");
@@ -1123,7 +1146,7 @@ describe("location views and the sheet they assemble (#243)", () => {
   });
 
   it("refuses the seventh active view and leaves the sixth sheet standing", async () => {
-    const { dir, store } = await open();
+    const { dir, store } = await openTicking();
     await acceptView(store, dir, 1, "Establishing view");
     for (let n = 2; n <= 6; n += 1) await acceptView(store, dir, n, `View ${n}`);
 
@@ -1140,7 +1163,7 @@ describe("location views and the sheet they assemble (#243)", () => {
   });
 
   it("a failed assembly changes nothing at all", async () => {
-    const { dir, store } = await open();
+    const { dir, store } = await openTicking();
     await acceptView(store, dir, 1, "Establishing view");
     const before = (await readKit(store, VIGIL.id))!;
     const filesBefore = (await readdir(join(dir, "references", VIGIL.id))).sort();
@@ -1171,14 +1194,14 @@ describe("location views and the sheet they assemble (#243)", () => {
   });
 
   it("assembles the same bytes when the same views are accepted again", async () => {
-    const { dir: dirA, store: storeA } = await open();
+    const { dir: dirA, store: storeA } = await openTicking();
     await acceptView(storeA, dirA, 1, "Establishing view");
     await acceptView(storeA, dirA, 2, "Reverse angle");
     const a = (await readKit(storeA, VIGIL.id))!.kit.designatedCompilation!;
     const bytesA = await readFile(join(dirA, "references", VIGIL.id, a));
     await storeA.close();
 
-    const { dir: dirB, store: storeB } = await open();
+    const { dir: dirB, store: storeB } = await openTicking();
     await acceptView(storeB, dirB, 1, "Establishing view");
     await acceptView(storeB, dirB, 2, "Reverse angle");
     const b = (await readKit(storeB, VIGIL.id))!.kit.designatedCompilation!;

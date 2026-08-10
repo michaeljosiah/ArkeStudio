@@ -4,6 +4,7 @@ import {
   headGate,
   lockedTiles,
   MAX_ACTIVE_LOCATION_VIEWS,
+  locationViewSlotAt,
   normalizeViewName,
   orderedLocationViews,
   ReferenceKitSchema,
@@ -299,6 +300,7 @@ export async function acceptLocationView(
     throw new Error(`${sheet.name} already has ${MAX_ACTIVE_LOCATION_VIEWS} active views`);
   }
 
+  const now = store.now();
   const accepted: LocationView = {
     id: input.id,
     name: input.name.trim().replace(/\s+/g, " "),
@@ -306,7 +308,12 @@ export async function acceptLocationView(
     sourceTakeId: input.takeId,
     sheetVersion: input.sheetVersion,
     artDirectionVersion: input.artDirectionVersion,
-    acceptedAt: store.now(),
+    acceptedAt: now,
+    // A replacement takes over the panel the superseded view held, which is what design turn 57
+    // means by leaving the panel order unchanged. Ordering on acceptedAt alone would sort the
+    // replacement — always the newest thing here — to the bottom of the sheet, and a prompt that
+    // already cited panel 2 would be describing a different side of the room.
+    slotAt: collision !== undefined ? locationViewSlotAt(collision) : now,
     status: "active",
   };
   const nextViews: LocationView[] = [
