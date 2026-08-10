@@ -553,21 +553,28 @@ function SheetKindNav({ active }: { active: Sheet["type"] }) {
 /**
  * What to say about a sheet that has been asked for and has not arrived (issue 228).
  *
- * Three states, because they need three different answers: the studio is still writing it, it
- * is written and waiting on a yes, or the run ended badly and the row is the only place that
- * would ever say so. `undefined` is the fourth case and reads as the second — a proposal with
- * no authoring activity is one whose draft was never started or has already finished, and both
- * are waiting for the same yes.
+ * Four states, and the fourth is the one worth being careful about. `authoring` is folded from
+ * events, so it holds only what this client has seen: reload mid-draft and the map comes back
+ * empty while the run carries on. Reading that absence as "drafted" would state, of a sheet
+ * still being written, that it is finished and waiting — the same class of false claim this
+ * whole issue is about, just pointing the other way. So an unknown run says where to look and
+ * claims nothing about where it got to.
+ *
+ * (Whether the studio is still on a proposal is genuinely absent from the snapshot rather than
+ * merely unread here — see the follow-up filed from this PR.)
  */
 function pendingSheetState(activity: AuthoringActivity | undefined): {
   foot: string;
   body: string;
   tone: "live" | "sketch" | "warn";
 } {
-  if (activity?.status === "running") {
+  if (activity === undefined) {
+    return { foot: "in Proposals", body: "open it to see where it got to", tone: "sketch" };
+  }
+  if (activity.status === "running") {
     return { foot: "drafting", body: "the studio is writing this from your sentence", tone: "live" };
   }
-  if (activity === undefined || activity.status === "completed") {
+  if (activity.status === "completed") {
     return { foot: "drafted · awaiting your yes", body: "ready in Proposals", tone: "sketch" };
   }
   return {

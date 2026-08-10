@@ -71,7 +71,21 @@ describe("an entity being drafted shows as pending, not as nothing (issue 228)",
     );
     assert.ok(html.includes("Ojuelegba Junction"), "the place the user just asked for is on the screen");
     assert.equal(html.includes("No locations yet"), false, "an empty state never means 'something is on its way'");
-    assert.ok(html.includes("drafting"), "and it says which of the three things is true");
+    assert.ok(html.includes("1 drafting"), "and the heading says one is on the way");
+  });
+
+  it("does not claim a sheet is drafted when it has not seen the run", () => {
+    // `authoring` is folded from events, so it holds only what this client has seen. Reload
+    // mid-draft and it comes back empty while the run carries on. Calling that "drafted"
+    // states, of a sheet still being written, that it is finished and waiting on a yes — the
+    // same false claim as the empty state, pointing the other way.
+    const html = render(
+      emptyWorldWith([draftingProposal("locations/ojuelegba-junction.md", "Ojuelegba Junction")]),
+      `${W}/locations`,
+      <LocationsScreen />,
+    );
+    assert.equal(html.includes("drafted"), false, "nothing is asserted about where the run got to");
+    assert.ok(html.includes("in Proposals"), "it says where to look instead");
   });
 
   it("keeps the empty state when there is genuinely nothing", () => {

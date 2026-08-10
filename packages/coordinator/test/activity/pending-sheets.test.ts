@@ -65,8 +65,8 @@ describe("sheets that have been asked for and have not arrived (issue 228)", () 
     assert.deepEqual(pendingSheets(proposals, "faction").map((p) => p.path), ["factions/the-ebb-council.md"]);
   });
 
-  it("counts nothing that is not a new sheet", () => {
-    for (const kind of ["sheet-amend", "canon", "art-direction"] as const) {
+  it("counts nothing that is not a sheet arriving", () => {
+    for (const kind of ["sheet-edit", "new-canon", "art-direction", "scene-draft"] as const) {
       const proposals = [staged({ kind, paths: ["locations/the-bell-market.md"] })];
       assert.deepEqual(pendingSheets(proposals, "location"), [], `${kind} is not a sheet arriving`);
     }
@@ -87,6 +87,56 @@ describe("sheets that have been asked for and have not arrived (issue 228)", () 
       }),
     ];
     assert.deepEqual(pendingSheets(proposals, "location").map((p) => p.name), ["The Bell Market"]);
+  });
+
+  it("counts a sheet a World Chat wrap-up created, which is not a new-sheet proposal", () => {
+    // wrapUpConversation stages every candidate — sheet.create included — as `worldbuilding`.
+    // Dropping those left the exact failure this whole change is about: wrap up a conversation
+    // that invents a character and the hub still says both "1 awaiting you" and "no one lives
+    // here yet".
+    const pending = pendingSheets(
+      [
+        staged({
+          kind: "worldbuilding",
+          summary: "The market that keeps the tide's hours",
+          paths: ["locations/the-bell-market.md"],
+          review: review("locations/the-bell-market.md", "The Bell Market"),
+        }),
+      ],
+      "location",
+    );
+    assert.deepEqual(pending.map((p) => p.name), ["The Bell Market"]);
+  });
+
+  it("takes only the creations out of a wrap-up that also amends", () => {
+    // One conversation stages several changes together. The amended sheet is already in the
+    // list under its own name, and a drafting card for it would be that sheet twice.
+    const pending = pendingSheets(
+      [
+        staged({
+          kind: "worldbuilding",
+          paths: ["locations/the-bell-market.md", "locations/the-vigil.md"],
+          review: {
+            targets: [
+              { path: "locations/the-bell-market.md", label: "The Bell Market", kind: "new location sheet", action: "create", fields: [] },
+              { path: "locations/the-vigil.md", label: "The Vigil", kind: "location sheet · v4", action: "amend", fields: [] },
+            ],
+          },
+        }),
+      ],
+      "location",
+    );
+    assert.deepEqual(pending.map((p) => p.name), ["The Bell Market"]);
+  });
+
+  it("declines to guess when a wrap-up target has no review to say create or amend", () => {
+    // A `new-sheet` is a creation by definition, so it counts without one. A `worldbuilding`
+    // target could be either, and inventing a drafting card for an edit would double a sheet
+    // that is already on the screen.
+    const unreviewed = (kind: StagedProposal["proposal"]["kind"]) =>
+      pendingSheets([staged({ kind, paths: ["locations/the-bell-market.md"] })], "location").length;
+    assert.equal(unreviewed("new-sheet"), 1);
+    assert.equal(unreviewed("worldbuilding"), 0);
   });
 
   it("still shows a row when the review could not be computed", () => {

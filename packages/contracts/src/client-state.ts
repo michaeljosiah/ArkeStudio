@@ -366,22 +366,28 @@ function nameFromPath(path: string): string {
  * The sheets of one kind that are on their way (issue 228).
  *
  * Matched on the target path, because that is what decides which list a sheet lands in — the
- * summary is display copy and the slug is not a type. A proposal whose review could not be
- * computed still counts: a file that will not parse is exactly when someone most needs to see
- * that something is there, so the name degrades through summary to slug rather than the row
- * disappearing.
+ * summary is display copy and the slug is not a type.
+ *
+ * Two kinds of proposal can bring a sheet into being, and they are read differently. A
+ * `new-sheet` is a creation by definition — the form staged one skeleton — so its target counts
+ * even when the review could not be computed; a file that will not parse is exactly when
+ * someone most needs to see that something is there, and the name degrades through the summary
+ * to the slug rather than the row disappearing. A `worldbuilding` proposal is the several
+ * changes one World Chat turned into, and it mixes creations with amendments freely, so only a
+ * target the review calls a create counts. Without a review there is no way to tell those
+ * apart, and inventing a drafting card for an edit to a sheet already in the list would double
+ * it on screen.
  */
 export function pendingSheets(proposals: readonly StagedProposal[], kind: SheetKind): PendingSheet[] {
   const prefix = `${sheetDir(kind)}/`;
   const pending: PendingSheet[] = [];
   for (const staged of proposals) {
-    if (staged.proposal.kind !== "new-sheet") continue;
+    const creation = staged.proposal.kind === "new-sheet";
+    if (!creation && staged.proposal.kind !== "worldbuilding") continue;
     for (const target of staged.proposal.targets) {
       if (!target.path.startsWith(prefix)) continue;
       const reviewed = staged.review?.targets.find((candidate) => candidate.path === target.path);
-      // An amend under a new-sheet proposal is a ripple onto an existing sheet, and that sheet
-      // is already in the list under its own name.
-      if (reviewed && reviewed.action !== "create") continue;
+      if (reviewed ? reviewed.action !== "create" : !creation) continue;
       pending.push({
         proposalId: staged.proposal.id,
         name: reviewed?.label ?? nameFromSummary(staged.proposal.summary) ?? nameFromPath(target.path),
