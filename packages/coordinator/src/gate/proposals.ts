@@ -561,6 +561,29 @@ export class ProposalManager {
         const base = await this.readProposalFile(proposalId, `_base/${target.path}`);
 
         if (live === null) {
+          /*
+           * A deleted look file does not mean the world has no look.
+           *
+           * Delete it and the world falls back to the one derived from its tone and genre, so the
+           * generic create branch would leave this proposal restating a version that is no longer
+           * anywhere — reviewed against the deleted file and accepted against the derived one,
+           * which are two different looks. Restating against what the world actually resolves to
+           * keeps the thing reviewed and the thing written the same thing.
+           */
+          if (target.path === ART_DIRECTION_PATH) {
+            const resolvedNow = `${JSON.stringify(currentLookRecord(this.store.getBundle().artDirection), null, 2)}
+`;
+            const restated = restateArtDirection(mine, resolvedNow, this.store.now());
+            if (restated !== null) {
+              await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(target.path)), restated);
+              await atomicWriteFile(
+                join(this.proposalDir(proposalId), "_base", fromPortable(target.path)),
+                resolvedNow,
+              );
+              targets.push({ path: target.path, baseVersion: null, baseHash: null });
+              continue;
+            }
+          }
           // The live file vanished (retired files stay; this is create-vs-nothing): keep mine.
           targets.push({ path: target.path, baseVersion: null, baseHash: null });
           continue;
@@ -648,6 +671,22 @@ export class ProposalManager {
        * chosen JSON in frontmatter and produce something no longer readable as a look, which is
        * the failure the conflict was raised to prevent.
        */
+      if (path === ART_DIRECTION_PATH) {
+        /*
+         * Neither side is choosable while the live look is unreadable.
+         *
+         * The commit gate parses the live record before writing the next version, so it would
+         * throw whichever side was picked — and the screen would have said the conflict was
+         * resolved. A control that reports success and cannot succeed is worse than no control:
+         * the file has to be repaired first, and saying so is the only honest answer here.
+         */
+        const live = await this.readLive(path);
+        if (live === null || !parsesAsLook(live)) {
+          throw new Error(
+            `${path} cannot be read as a world look, so neither side can be accepted; repair the file first`,
+          );
+        }
+      }
       const resolved =
         path === ART_DIRECTION_PATH
           ? ((choice === "mine" ? conflict.mine : conflict.theirs) ?? current)
@@ -860,6 +899,39 @@ function isRetired(path: string, raw: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Whether a file on disk can still be read as a world look. */
+function parsesAsLook(raw: string): boolean {
+  try {
+    ArtDirectionRecordSchema.parse(JSON.parse(raw));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The world's resolved look as a record, for the case where no file holds it.
+ *
+ * A world without an explicit art-direction file still has a look, derived from its tone and
+ * genre. `ResolvedArtDirection` carries everything the record needs plus reach and overrides,
+ * which are computed rather than stored — so this is the narrowing, not a new fact.
+ */
+function currentLookRecord(resolved: {
+  version: number;
+  description: string;
+  masterLook?: string;
+  acceptedAt?: string;
+  history: ReadonlyArray<{ version: number; description: string; masterLook?: string; acceptedAt: string }>;
+}): unknown {
+  return {
+    version: resolved.version,
+    description: resolved.description,
+    ...(resolved.masterLook ? { masterLook: resolved.masterLook } : {}),
+    acceptedAt: resolved.acceptedAt ?? new Date(0).toISOString(),
+    history: resolved.history,
+  };
 }
 
 /**

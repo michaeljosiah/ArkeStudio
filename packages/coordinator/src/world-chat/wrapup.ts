@@ -262,6 +262,29 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
       ],
       ...(choice ? { openChoices: [choice] } : {}),
     });
+    /*
+     * The look was materialised from a bundle read before any of this, and staging captures its
+     * base now — so a look accepted in between would be replaced by a record computed against the
+     * one before it, and nothing downstream would call that stale: the proposal's base is the new
+     * file. Readiness cannot close that window on its own, because there are awaited writes and
+     * an id allocation between it and here.
+     *
+     * Checked after staging rather than before, because only afterwards is it known what base was
+     * captured. The proposal is discarded before the refusal, so a refused wrap-up still leaves
+     * nothing behind.
+     */
+    if (item.candidate.classification === "art-direction.change") {
+      const basedOn = item.candidate.checks.basedOnArtDirectionVersion;
+      const now = input.store.getBundle().artDirection.version;
+      if (basedOn !== undefined && basedOn !== now) {
+        await input.gate.discard(proposal.id);
+        throw new WrapUpError(
+          "stale",
+          "The world look changed while this was being written, so nothing was. Open the conversation again and ask for the look you want from where it is now.",
+        );
+      }
+    }
+
     proposals.push(proposal);
     if (choice) openChoices.push({ ...choice, proposalId: proposal.id });
     if (item.candidate.classification === "canon.thread") threadProposalIds.push(proposal.id);

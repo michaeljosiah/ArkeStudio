@@ -293,18 +293,48 @@ describe("a world look through the generic gate", () => {
     const { dir, gate } = await openGateSafely();
     const mine = await gate.stageArtDirectionChange("Painterly, with visible brushwork.", null);
 
-    // The live look becomes unreadable, so there is nothing to restate against.
-    await writeFile(join(dir, "art-direction", "art-direction.json"), "{ this is not a look", "utf8");
+    // The staged side is the unreadable one this time, so the live look can still be chosen.
+    const staged = join(dir, ".proposals", mine.id, "art-direction", "art-direction.json");
+    await writeFile(staged, "{ this is not a look", "utf8");
+    await writeFile(
+      join(dir, "art-direction", "art-direction.json"),
+      await readFile(join(dir, ".proposals", mine.id, "_base", "art-direction", "art-direction.json"), "utf8"),
+      "utf8",
+    );
+    // Move the live look on so the rebase is not a no-op.
+    const other = await gate.stageArtDirectionChange("Ink and wash.", null);
+    await gate.accept(other.id, {});
+
     const { conflicts } = await gate.rebase(mine.id);
     assert.equal(conflicts.length, 1, "a side has to be chosen; it cannot be merged");
     assert.equal(conflicts[0]!.field, "Look");
 
-    await gate.resolveConflict(mine.id, ART_DIRECTION_PATH, "Look", "mine");
+    await gate.resolveConflict(mine.id, ART_DIRECTION_PATH, "Look", "theirs");
 
-    const resolved = await readFile(join(dir, ".proposals", mine.id, "art-direction", "art-direction.json"), "utf8");
+    const resolved = await readFile(staged, "utf8");
     assert.doesNotMatch(resolved, /^---/, "no frontmatter was wrapped around it");
     const record = ArtDirectionRecordSchema.parse(JSON.parse(resolved));
-    assert.match(record.description, /visible brushwork/, "and it is the side that was chosen");
+    assert.match(record.description, /Ink and wash/, "and it is the side that was chosen");
+  });
+
+  /*
+   * The commit gate parses the live record before writing the next version, so with an unreadable
+   * one on disk neither side can actually be accepted. Offering a choice that reports success and
+   * then cannot commit is worse than refusing: the file has to be repaired first, and only this
+   * says so.
+   */
+  it("refuses to resolve a look conflict while the live look is unreadable", async () => {
+    const { dir, gate } = await openGateSafely();
+    const mine = await gate.stageArtDirectionChange("Painterly, with visible brushwork.", null);
+
+    await writeFile(join(dir, "art-direction", "art-direction.json"), "{ this is not a look", "utf8");
+    const { conflicts } = await gate.rebase(mine.id);
+    assert.equal(conflicts.length, 1);
+
+    await assert.rejects(
+      () => gate.resolveConflict(mine.id, ART_DIRECTION_PATH, "Look", "mine"),
+      /repair the file first/,
+    );
   });
 
   /*

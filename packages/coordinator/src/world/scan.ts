@@ -392,9 +392,12 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
   // earlier ones the moment it lands — see acceptedTakesAtCurrentVersion.
   let acceptedTakesAtCurrentVersion = 0;
   const countTake = (version: number | undefined): void => {
-    if (version === undefined) return;
-    if (version < resolved.version) earlierAcceptedTakes += 1;
-    else if (version === resolved.version) acceptedTakesAtCurrentVersion += 1;
+    // A take with no recorded version is a legacy or uploaded one, and the rest of the app
+    // resolves that to the current look — accepting a character reference does exactly this.
+    // Dropping it from both counts told somebody less work would be pinned than actually is.
+    const at = version ?? resolved.version;
+    if (at < resolved.version) earlierAcceptedTakes += 1;
+    else if (at === resolved.version) acceptedTakesAtCurrentVersion += 1;
   };
 
   const latestReferenceReviews = new Map<string, "accept" | "reject">();

@@ -24,5 +24,7 @@ export function explainNotCarried(reason: WorldChatNotCarried["reason"]): string
       return "There was not enough behind it to write it down";
     case "look-moved":
       return "The world look changed after this was written — writing it now would undo that change";
+    case "look-already-proposed":
+      return "A change to the world look is already waiting on a decision";
   }
 }

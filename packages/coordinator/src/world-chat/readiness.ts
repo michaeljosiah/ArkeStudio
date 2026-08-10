@@ -13,7 +13,13 @@ import type { WorldBundle, WorldChangeCandidate } from "@arke-studio/contracts";
  * and the four have to be answerable.
  */
 
-export type NotCarriedReason = "tentative" | "undecided" | "target-missing" | "invalid" | "look-moved";
+export type NotCarriedReason =
+  | "tentative"
+  | "undecided"
+  | "target-missing"
+  | "invalid"
+  | "look-moved"
+  | "look-already-proposed";
 
 export interface NotCarried {
   candidateId: string;
@@ -117,6 +123,21 @@ export function evaluateReadiness(
       fail("look-moved");
       continue;
     }
+    /*
+     * One look change waiting at a time.
+     *
+     * There is a single world look, and the screen that reviews a proposed one finds it by kind
+     * rather than by id — so a second would be reviewed, accepted or discarded in place of the
+     * first, arbitrarily. Held back rather than staged: the conversation keeps the proposition,
+     * and it can be asked for again once the one already waiting has been dealt with.
+     */
+    if (
+      candidate.classification === "art-direction.change" &&
+      bundle.proposals.some((staged) => staged.proposal.kind === "art-direction")
+    ) {
+      fail("look-already-proposed");
+      continue;
+    }
     if (!hasIntentEvidence(candidate) || !checksAllow(candidate)) {
       fail("invalid");
       continue;
@@ -145,6 +166,8 @@ export function explainNotCarried(reason: NotCarriedReason): string {
       return "still a maybe, so it cannot become a fact yet";
     case "look-moved":
       return "the world look changed after this was written, so it would undo that change";
+    case "look-already-proposed":
+      return "a change to the world look is already waiting to be decided";
     case "undecided":
       return "it is not clear yet what kind of change this is";
     case "target-missing":

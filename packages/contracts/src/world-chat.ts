@@ -630,7 +630,14 @@ export const WorldChatNotCarriedSchema = z
   .object({
     candidateId: CandidateIdSchema,
     summary: z.string().min(1).max(300),
-    reason: z.enum(["tentative", "undecided", "target-missing", "invalid", "look-moved"]),
+    reason: z.enum([
+      "tentative",
+      "undecided",
+      "target-missing",
+      "invalid",
+      "look-moved",
+      "look-already-proposed",
+    ]),
   })
   .strict();
 export type WorldChatNotCarried = z.infer<typeof WorldChatNotCarriedSchema>;

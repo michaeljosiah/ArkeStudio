@@ -542,17 +542,33 @@ describe("readiness on its own", () => {
   }
 
   it("holds back a look written against a look that has since changed", () => {
-    const world = { canon: [], sheets: [], artDirection: { version: 5 } } as never;
+    const world = { canon: [], sheets: [], proposals: [], artDirection: { version: 5 } } as never;
     const { carried, notCarried } = evaluateReadiness([lookChange(4)], world);
     assert.deepEqual(carried, []);
     assert.equal(notCarried[0]!.reason, "look-moved");
   });
 
   it("carries one written against the look that is still current", () => {
-    const world = { canon: [], sheets: [], artDirection: { version: 5 } } as never;
+    const world = { canon: [], sheets: [], proposals: [], artDirection: { version: 5 } } as never;
     const { carried, notCarried } = evaluateReadiness([lookChange(5)], world);
     assert.equal(carried.length, 1);
     assert.deepEqual(notCarried, []);
+  });
+
+  /*
+   * There is one world look, and the screen that reviews a proposed one finds it by kind rather
+   * than by id — so a second would be reviewed, accepted or discarded in place of the first.
+   */
+  it("holds back a second look change while one is already waiting", () => {
+    const world = {
+      canon: [],
+      sheets: [],
+      proposals: [{ proposal: { kind: "art-direction" } }],
+      artDirection: { version: 5 },
+    } as never;
+    const { carried, notCarried } = evaluateReadiness([lookChange(5)], world);
+    assert.deepEqual(carried, []);
+    assert.equal(notCarried[0]!.reason, "look-already-proposed");
   });
 
   it("holds back an undecided proposition", () => {
