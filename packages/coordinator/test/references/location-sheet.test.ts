@@ -6,7 +6,6 @@ import {
   fitLabel,
   normalizeLabel,
   panelLabel,
-  panelMapSentence,
   PANEL_HEIGHT,
   PANEL_IMAGE_HEIGHT,
   SHEET_WIDTH,
@@ -145,17 +144,5 @@ describe("the location sheet is assembled, not generated (#243)", () => {
     assert.equal(six.labels[5], "PANEL 06 - VIEW 5");
 
     assert.throws(() => composeLocationSheet([]), /at least one view/);
-  });
-
-  it("states the panel map a prompt cites", () => {
-    assert.equal(
-      panelMapSentence("The Vigil", 3, ["Establishing view", "Reverse angle", "Day"]),
-      "Image 3: The Vigil location sheet - panel 1 (top), Establishing view; panel 2, Reverse angle; panel 3 (bottom), Day.",
-    );
-    // One view still reads correctly rather than calling the only panel both top and bottom.
-    assert.equal(
-      panelMapSentence("The Bell Market", 2, ["Establishing view"]),
-      "Image 2: The Bell Market location sheet - panel 1 (top), Establishing view.",
-    );
   });
 });

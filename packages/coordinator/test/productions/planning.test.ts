@@ -22,8 +22,11 @@ import {
   overrideStaleAgainst,
   SceneSchema,
   type ManifestModel,
+  type ReferenceKit,
   type Scene,
+  type Sheet,
   type Shot,
+  type WorldMeta,
 } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import {
@@ -1456,6 +1459,118 @@ describe("SPEC-019 skill-family mismatch at dispatch (R-21, T-14)", () => {
     const content = await readFile(join(store.dir, ".proposals", draft.proposalId, ...draft.path.split("/")), "utf8");
     const parsed = SceneSchema.parse(JSON.parse(content));
     assert.deepEqual(parsed.draftedWith, { skillId: "seedance-scene-drafting", version: 1, family: "seedance" });
+    await store.close();
+  });
+});
+
+describe("a location sheet at dispatch (#243)", () => {
+  const VIEWS = [
+    { id: "lv_a", name: "Establishing view", file: "takes/tk_a/view.png" },
+    { id: "lv_b", name: "Reverse angle", file: "takes/tk_b/view.png" },
+    { id: "lv_c", name: "Night", file: "takes/tk_c/view.png" },
+  ];
+  const kitWithSheet = (): ReferenceKit => ({
+    sheetId: "the-vigil",
+    tiles: [],
+    mainPhoto: {
+      file: "main-photo.png",
+      sheetVersion: 1,
+      acceptedAt: "2026-08-01T12:00:00.000Z",
+      source: "upload",
+    },
+    locationViews: VIEWS.map((view) => ({
+      ...view,
+      sourceTakeId: "tk_01J8F3K2QW9VZX4N7M0RTYB6HC",
+      sheetVersion: 1,
+      artDirectionVersion: 1,
+      acceptedAt: "2026-08-01T12:00:00.000Z",
+      status: "active" as const,
+    })),
+    establishingViewId: "lv_a",
+    compilations: [
+      {
+        file: "location-sheet-abc123def456.png",
+        format: "location-sheet" as const,
+        sheetVersion: 1,
+        tiles: VIEWS.map((view) => view.file),
+        compiledAt: "2026-08-01T12:00:00.000Z",
+        source: "local" as const,
+        accepted: true,
+      },
+    ],
+  });
+  const scene = (): Scene => ({
+    id: "sc_243",
+    number: 243,
+    slug: "t",
+    title: "T",
+    status: "draft",
+    version: 1,
+    inherits: { location: "the-vigil", timeOfDay: "night" },
+    shots: [shot(1, 5, "@maren-kest at the rail")],
+  });
+  const plan = (kits: ReferenceKit[], bundle: { meta: WorldMeta; sheets: Sheet[] }) =>
+    planScene(
+      { world: bundle.meta, sheets: bundle.sheets, kits, scene: scene(), selections: {}, model: VIDEO_MODEL },
+      "per-shot",
+    );
+
+  it("the location sheet replaces the single view, and the panel map matches what is sent", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const others = bundle.referenceKits.filter((kit) => kit.sheetId !== "the-vigil");
+
+    // Before: a location with only a main photo carries that one image, described generically.
+    const single = plan([...others, { ...kitWithSheet(), locationViews: undefined, compilations: [] }], bundle);
+    const singleVigil = single.shots[0]!.bound.find((reference) => reference.sheetId === "the-vigil")!;
+    assert.equal(singleVigil.file, "references/the-vigil/main-photo.png");
+    assert.match(singleVigil.rolePhrase, /^location reference/);
+
+    // After: the same slot carries the assembled sheet instead — one image, not four fighting
+    // for the same budget — and the prompt says which angle is in which band of it.
+    const sheeted = plan([...others, kitWithSheet()], bundle);
+    const shotPlan = sheeted.shots[0]!;
+    const vigil = shotPlan.bound.find((reference) => reference.sheetId === "the-vigil")!;
+    assert.equal(vigil.file, "references/the-vigil/location-sheet-abc123def456.png");
+    assert.equal(
+      shotPlan.bound.filter((reference) => reference.sheetId === "the-vigil").length,
+      1,
+      "a place takes one slot however many angles it has",
+    );
+    assert.equal(
+      vigil.rolePhrase,
+      "location sheet: panel 1 (top), Establishing view; panel 2, Reverse angle; panel 3 (bottom), Night",
+    );
+
+    // The map is only true if the numbering it uses is the numbering the request uses.
+    const preamble = shotPlan.parts.preamble!;
+    assert.ok(
+      preamble.includes(`Image ${vigil.index}: The Vigil — ${vigil.rolePhrase}.`),
+      `panel map is bound to the image it describes:\n${preamble}`,
+    );
+    assert.equal(
+      boundFiles(shotPlan.bound)[vigil.index - 1],
+      vigil.file,
+      "and the numbered image is the one actually transmitted",
+    );
+    await store.close();
+  });
+
+  it("says nothing about panels it cannot name, rather than guessing them", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const others = bundle.referenceKits.filter((kit) => kit.sheetId !== "the-vigil");
+    // A tile with no view behind it: the sheet is still carried, but a map that misnames a band
+    // is worse than none — the model would trust it and bind the wrong angle.
+    const kit = kitWithSheet();
+    const orphaned: ReferenceKit = {
+      ...kit,
+      compilations: [{ ...kit.compilations[0]!, tiles: [...kit.compilations[0]!.tiles, "takes/tk_gone/view.png"] }],
+    };
+    const shotPlan = plan([...others, orphaned], bundle).shots[0]!;
+    const vigil = shotPlan.bound.find((reference) => reference.sheetId === "the-vigil")!;
+    assert.equal(vigil.file, "references/the-vigil/location-sheet-abc123def456.png");
+    assert.match(vigil.rolePhrase, /^location reference/, "carried, unmapped");
     await store.close();
   });
 });

@@ -1,4 +1,10 @@
-import { compilationIsStale, designatedCompilation, mainPhotoFor, type ReferenceKit } from "./reference.js";
+import {
+  compilationIsStale,
+  designatedCompilation,
+  mainPhotoFor,
+  type Compilation,
+  type ReferenceKit,
+} from "./reference.js";
 import type { ResolvedArtDirection } from "./art-direction.js";
 import {
   payloadVerdict,
@@ -458,6 +464,12 @@ export interface AttachmentDecision {
   mode: "designated" | "main-photo" | "scoped-look" | "sketch-citation";
   role: "primary" | "secondary";
   staleGap: string | null;
+  /**
+   * For a location sheet: the panel names top to bottom, read off the compilation actually
+   * being sent rather than the kit's current views (#243). One image arrives carrying several
+   * angles, and a model given no map treats the stack as a collage to blend.
+   */
+  panels?: readonly string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -489,8 +501,31 @@ export interface BoundReference {
  * look are three different claims, and the vendor guidance asks specifically that the part of an
  * asset being referenced is named rather than left to be inferred.
  */
+/**
+ * The panel map for a location sheet (#243): which angle is where in the stacked image. Named
+ * top and bottom because those are the two positions a model can locate without counting, and
+ * the count is what a long stack gets wrong.
+ */
+export function panelMapPhrase(names: readonly string[]): string {
+  const parts = names.map((name, index) => {
+    const position =
+      index === 0
+        ? "panel 1 (top)"
+        : index === names.length - 1
+          ? `panel ${index + 1} (bottom)`
+          : `panel ${index + 1}`;
+    return `${position}, ${name}`;
+  });
+  return `location sheet: ${parts.join("; ")}`;
+}
+
 function rolePhraseFor(sheet: Sheet, decision: AttachmentDecision): string {
-  if (sheet.type === "location") return "location reference — environment and composition";
+  if (sheet.type === "location") {
+    // The map replaces the generic phrase rather than joining it: a sheet *is* the environment
+    // reference, and saying so twice buys nothing the panel names do not already say.
+    if (decision.panels && decision.panels.length > 0) return panelMapPhrase(decision.panels);
+    return "location reference — environment and composition";
+  }
   if (sheet.type === "faction") return "faction reference — insignia, dress and materials";
   if (decision.role === "secondary") return "additional reference for the same subject";
   switch (decision.mode) {
@@ -708,6 +743,7 @@ export function attachmentFor(
       : { sheetId: sheet.id, file: null, mode: "sketch-citation", role, staleGap: null };
   }
   const stale = compilationIsStale(kit, designated, sheet.version);
+  const panels = locationSheetPanels(kit, designated);
   return {
     sheetId: sheet.id,
     file: `references/${sheet.id}/${designated.file}`,
@@ -716,7 +752,22 @@ export function attachmentFor(
     staleGap: stale
       ? `model sheet is v${designated.sheetVersion}; ${sheet.name} is at v${sheet.version}`
       : null,
+    ...(panels ? { panels } : {}),
   };
+}
+
+/**
+ * The panel names of a location sheet, in the order they were composed into it. Read off the
+ * compilation's own tile list and not the kit's current views, so the map describes the image
+ * being sent even if the views have moved on since (#243).
+ */
+function locationSheetPanels(kit: ReferenceKit, designated: Compilation): string[] | null {
+  if (designated.format !== "location-sheet") return null;
+  const views = kit.locationViews ?? [];
+  const names = designated.tiles.map((file) => views.find((view) => view.file === file)?.name);
+  // A tile with no view behind it means the map would misname a panel, which is worse than no
+  // map at all — the model would trust it and bind the wrong angle.
+  return names.every((name): name is string => name !== undefined) ? names : null;
 }
 
 // ---------------------------------------------------------------------------
