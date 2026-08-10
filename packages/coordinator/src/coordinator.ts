@@ -29,6 +29,7 @@ import {
   type ModelManifest,
   type ProviderId,
   type ProviderToolStatus,
+  orderedLocationViews,
   type QueueCommand,
   type RuntimeProbes,
   type VoiceCandidate,
@@ -88,6 +89,7 @@ import {
   characterSheetRequest,
   establishRequests,
   imageModelFor,
+  locationViewRequests,
   mainPhotoRequests,
   missingTileAngles,
   tileRequest,
@@ -102,6 +104,7 @@ import {
 import {
   acceptCharacterLook,
   acceptCharacterSheet,
+  acceptLocationView,
   attachCharacterLook,
   compileGrid,
   designate,
@@ -3845,6 +3848,99 @@ export class Coordinator {
           msg.kind,
           requests.map((request) => request.input),
         );
+        return;
+      }
+      case "generate-location-view": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.opts.manifest) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Location-view generation is unavailable.");
+          return;
+        }
+        const bundle = store.getBundle();
+        const sheet = bundle.sheets.find((candidate) => candidate.id === msg.sheetId);
+        const kit = (await readKit(store, msg.sheetId))?.kit ?? null;
+        const model = imageModelFor(
+          this.appSettings ? await this.appSettings.load() : null,
+          this.opts.manifest,
+          "modelId" in msg ? msg.modelId : undefined,
+        );
+        if (!sheet || sheet.type !== "location" || !model) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The location or image model is no longer available.");
+          return;
+        }
+        // Every angle after the first is anchored to the accepted establishing view, so it is
+        // the same room from somewhere else rather than a second room answering the same
+        // description. Replacing the establishing view is itself unanchored.
+        const establishing = kit ? orderedLocationViews(kit)[0] : undefined;
+        const anchorFile = msg.establishing === true ? undefined : establishing?.file;
+        if (anchorFile === undefined && msg.establishing !== true && establishing !== undefined) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "This location has no accepted establishing view to anchor to.");
+          return;
+        }
+        let requests;
+        try {
+          requests = locationViewRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
+            name: msg.name,
+            ...(msg.prompt !== undefined ? { prompt: msg.prompt } : {}),
+            count: msg.count,
+            ...(anchorFile !== undefined ? { anchorFile } : {}),
+            generationKey: Date.now().toString(36),
+            ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
+          });
+        } catch (err) {
+          // The named refusals matter here: a model with no reference capacity cannot be
+          // anchored, and saying so beats generating an unanchored angle nobody asked for.
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            err instanceof Error ? `${err.message}. Nothing was queued.` : "Nothing was queued.",
+          );
+          return;
+        }
+        await this.enqueueBatch(
+          msg.requestId,
+          msg.kind,
+          requests.map((request) => request.input),
+        );
+        return;
+      }
+      case "accept-location-view": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const bundle = store.getBundle();
+        const sheet = bundle.sheets.find((candidate) => candidate.id === msg.sheetId);
+        const take = pendingReferenceTake(
+          bundle.referenceTakes,
+          bundle.referenceReviews,
+          msg.takeId,
+          msg.sheetId,
+          "location-view",
+        );
+        if (!sheet || sheet.type !== "location" || !take?.media) return;
+        const media = `references/${msg.sheetId}/takes/${take.id}/${take.media}`;
+        if (
+          basename(take.media) !== take.media ||
+          !(await stat(toExtendedLength(join(store.dir, media))).catch(() => null))
+        )
+          return;
+        const frozen = take.params["provenance"] as { sheets?: Record<string, number> } | undefined;
+        const sheetVersion = frozen?.sheets?.[msg.sheetId] ?? take.provenance.sheets[msg.sheetId];
+        if (sheetVersion === undefined) return;
+        // A refusal — an unconfirmed name, a full location, a view that will not decode — leaves
+        // the world exactly as it was, and the candidate still there to accept once the reason
+        // is dealt with. The snapshot below re-renders whichever of those two happened.
+        await acceptLocationView(store, sheet, {
+          id: `lv_${take.id.slice(3)}`,
+          name: msg.name,
+          file: `takes/${take.id}/${take.media}`,
+          takeId: take.id,
+          sheetVersion,
+          artDirectionVersion: take.provenance.artDirectionVersion ?? bundle.artDirection.version,
+          ...(msg.establishing !== undefined ? { establishing: msg.establishing } : {}),
+          ...(msg.replaceExistingName !== undefined ? { replaceExistingName: msg.replaceExistingName } : {}),
+          review: referenceReviewDecision(store.now(), take, "accept"),
+        }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "generate-character-sheet": {

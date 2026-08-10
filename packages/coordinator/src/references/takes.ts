@@ -107,6 +107,7 @@ function kindFor(job: Job): Take["kind"] | null {
   if (job.target.kind === "main-photo-candidate" || job.target.kind === "establish-candidate") return "main-photo";
   if (job.target.kind === "character-sheet") return "sheet";
   if (job.target.kind === "character-look") return "look";
+  if (job.target.kind === "location-view-candidate") return "location-view";
   return null;
 }
 
@@ -183,7 +184,7 @@ export function pendingReferenceTake(
   reviews: readonly ReviewDecision[],
   takeId: Take["id"],
   sheetId: string,
-  kind: "main-photo" | "sheet" | "look",
+  kind: "main-photo" | "sheet" | "look" | "location-view",
 ): Take | null {
   const take = takes.find(
     (candidate) => candidate.id === takeId && candidate.kind === kind && candidate.reference?.sheetId === sheetId,

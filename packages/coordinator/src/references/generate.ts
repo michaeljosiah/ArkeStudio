@@ -425,3 +425,94 @@ export function tierFor(model: ManifestModel, requested?: SizeTier): SizeTier | 
   if (model.unverified === true) return undefined;
   return requested !== undefined && nativeResolution(model, requested) !== undefined ? requested : undefined;
 }
+
+// ---------------------------------------------------------------------------
+// Location views (#243, design turn 57)
+// ---------------------------------------------------------------------------
+
+/** A location's own words, which is what a view is generated from. */
+function locationDescription(sheet: Sheet): string {
+  const look = sheet.sections.find((s) => s.heading === "Look")?.body ?? "";
+  return look.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Generate one or more candidate views of a place (#243).
+ *
+ * The establishing view is generated from the location's own Look and nothing else. Every later
+ * angle carries the accepted establishing view as an environment reference, so it is the same
+ * room seen from somewhere else rather than a second room that answers the same description —
+ * which is the failure the whole feature exists to prevent.
+ *
+ * A model that cannot take a reference image is therefore refused for additional views by name,
+ * rather than quietly producing an unanchored angle nobody asked for.
+ */
+export function locationViewRequests(
+  world: WorldMeta,
+  direction: ResolvedArtDirection,
+  sheet: Sheet,
+  kit: ReferenceKit | null,
+  model: ManifestModel,
+  input: {
+    /** What this angle is called. Rides in the prompt, and becomes the view's name on accept. */
+    name: string;
+    /** Extra direction for this angle, if the user gave any. */
+    prompt?: string;
+    count: number;
+    /** Relative path of the accepted establishing view; absent only for the first one. */
+    anchorFile?: string;
+    generationKey: string;
+    tier?: SizeTier;
+  },
+): CharacterGenerationRequest[] {
+  if (sheet.type !== "location") {
+    throw new Error(`${sheet.name} is not a location`);
+  }
+  const budget = referenceBudgetFor(model);
+  if (input.anchorFile !== undefined && budget === 0) {
+    throw new Error(
+      `${model.displayName} cannot receive reference images, so it cannot be anchored to the establishing view`,
+    );
+  }
+  const style = kit?.styleOverride ?? direction.description;
+  const references = input.anchorFile !== undefined ? [input.anchorFile] : [];
+  const tier = tierFor(model, input.tier);
+  const estimatedMicroUsd = pricedCharacterImage(model, "main-photo", references.length, tier);
+
+  const anchored =
+    input.anchorFile !== undefined
+      ? " The reference image is this same place; keep its architecture, materials, light and time of day, and show it from the stated angle."
+      : "";
+  const angle = input.prompt !== undefined && input.prompt.trim().length > 0 ? ` ${input.prompt.trim()}.` : "";
+
+  // One job per candidate, for the reason main photos fan out: a failure that took every
+  // candidate with it would re-spend on the ones that had already arrived (#138).
+  return Array.from({ length: input.count }, (_, index) => ({
+    estimatedMicroUsd,
+    input: {
+      worldId: world.worldId,
+      target: { kind: "location-view-candidate", id: `${sheet.id}/${input.generationKey}/${index + 1}` },
+      capability: "image",
+      provider: model.provider,
+      model: model.id,
+      params: {
+        prompt: `${style}. ${sheet.name} — ${locationDescription(sheet)}.${angle} ${input.name}: an establishing photograph of this place with no people in frame, architecture and spatial layout legible, no text or montage.${anchored}`,
+        references,
+        referenceRoles: references.map((file) => ({ file, role: "environment" as const })),
+        output: characterImageOutput(model, "main-photo", tier),
+        artDirection: {
+          version: direction.version,
+          source: kit?.styleOverride ? "sheet" : "world",
+          transport: "text",
+        },
+        provenance: generationProvenance(world, direction, sheet, input.anchorFile),
+        locationView: { name: input.name },
+      },
+      estimatedMicroUsd,
+      landing: {
+        dir: `references/${sheet.id}/candidates`,
+        name: `location-view-${input.generationKey}-${index + 1}.png`,
+      },
+    },
+  }));
+}

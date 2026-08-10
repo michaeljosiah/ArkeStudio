@@ -351,6 +351,7 @@ const REFERENCE_ORIGINS: Record<string, Omit<JobOrigin, "path"> & { segment: str
   "main-photo-candidate": { segment: "main-photo", label: "Main photo", where: "the main photo screen" },
   "character-sheet": { segment: "model-sheet", label: "Character sheet", where: "the character sheet screen" },
   "character-look": { segment: "looks", label: "Looks", where: "the looks screen" },
+  "location-view-candidate": { segment: "reference", label: "Location views", where: "the location's reference tab" },
   "reference-tile": { segment: "kit", label: "Reference kit", where: "the reference kit" },
   "establish-candidate": { segment: "kit", label: "Reference kit", where: "the reference kit" },
   "voice-preview": { segment: "voice", label: "Voice", where: "the voice screen" },

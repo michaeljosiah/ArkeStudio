@@ -712,6 +712,47 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       ]),
     })
     .strict(),
+  /**
+   * Location views (#243, design turn 57). Deliberately their own commands rather than the
+   * character ones with a different sheet id: a location is generated from its Look, anchored to
+   * an establishing view rather than a face, and named — none of which the main-photo commands
+   * carry, and pretending otherwise would make one screen's copy wrong on the other.
+   */
+  z
+    .object({
+      kind: z.literal("generate-location-view"),
+      modelId: z.string().min(1).optional(),
+      tier: SizeTierSchema.optional(),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      /** What this angle is called; becomes the view's name when it is accepted. */
+      name: z.string().trim().min(1).max(80),
+      /** Optional extra direction for this angle. */
+      prompt: z.string().trim().max(2000).optional(),
+      count: z.number().int().min(1).max(4),
+      /** Replace the establishing view rather than adding an angle beside it. */
+      establishing: z.boolean().optional(),
+    })
+    .strict(),
+  /**
+   * Accept a candidate as an active view and rebuild the sheet.
+   *
+   * `replaceExistingName` is the confirmation the design turn requires: without it a colliding
+   * name refuses, because superseding an angle somebody may still want is a loss they would
+   * only notice later, in a shot.
+   */
+  z
+    .object({
+      kind: z.literal("accept-location-view"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      takeId: TakeIdSchema,
+      name: z.string().trim().min(1).max(80),
+      establishing: z.boolean().optional(),
+      replaceExistingName: z.boolean().optional(),
+    })
+    .strict(),
   /** Ask the trusted host picker for an image; it lands as a candidate, never straight as identity. */
   z
     .object({ kind: z.literal("import-main-photo-candidate"), worldId: UlidSchema, sheetId: SlugSchema })
