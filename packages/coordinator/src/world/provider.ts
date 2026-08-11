@@ -1,6 +1,13 @@
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { ulid, worldSheets, type ArtDirectionRecord, type WorldBundle, type WorldSummary } from "@arke-studio/contracts";
+import {
+  DEFAULT_AUDIO_POLICY,
+  ulid,
+  worldSheets,
+  type ArtDirectionRecord,
+  type WorldBundle,
+  type WorldSummary,
+} from "@arke-studio/contracts";
 import { ProposalManager } from "../gate/proposals.js";
 import { AppIndex } from "../index-db/app-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
@@ -245,6 +252,8 @@ export class FsWorldProvider implements WorldProvider {
         version: 1,
         description: input.artDirection,
         acceptedAt: at,
+        audio: DEFAULT_AUDIO_POLICY,
+        failureModes: [],
         history: [],
       };
       await mkdir(toExtendedLength(join(dir, "art-direction")), { recursive: true });

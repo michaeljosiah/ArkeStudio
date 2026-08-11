@@ -140,6 +140,8 @@ const state: ClientState = {
         "Painterly, tidal, restrained. Weathered maritime realism, visible brushwork, slate and sea-glass colour, one warm practical light, fog with real depth.",
       masterLook: "world-art.png",
       acceptedAt: "2026-07-18T10:00:00Z",
+      audio: { music: "environmental-only", subtitles: "never" },
+      failureModes: ["Do not drift the Polaroid — it stays where it was placed."],
       derived: false,
       history: [
         {
@@ -147,12 +149,16 @@ const state: ClientState = {
           description: "First world image",
           masterLook: "world-art.png",
           acceptedAt: "2026-05-19T10:00:00Z",
+          audio: { music: "environmental-only", subtitles: "never" },
+          failureModes: [],
         },
         {
           version: 2,
           description: "Cold-water realism",
           masterLook: "world-art.png",
           acceptedAt: "2026-06-04T10:00:00Z",
+          audio: { music: "environmental-only", subtitles: "never" },
+          failureModes: [],
         },
       ],
       reach: { visualAssets: 24, referenceKits: 6, productions: 3, earlierAcceptedTakes: 15 },
@@ -293,6 +299,7 @@ const state: ClientState = {
           title: "Saltlight",
           logline: "One night on the Vigil, the verse rises early.",
           status: "in-progress",
+          failureModes: [],
           created: "2026-06-01T10:00:00Z",
           updated: AT,
         },

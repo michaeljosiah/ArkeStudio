@@ -5,7 +5,7 @@ import {
   type Compilation,
   type ReferenceKit,
 } from "./reference.js";
-import type { ResolvedArtDirection } from "./art-direction.js";
+import { DEFAULT_AUDIO_POLICY, type AudioPolicy, type ResolvedArtDirection } from "./art-direction.js";
 import {
   payloadVerdict,
   referenceBudget,
@@ -610,6 +610,12 @@ export interface NegativeInput {
   shots?: readonly Shot[];
   audioDesign?: AudioDesign;
   /**
+   * The merged world-then-production policy (#244). Absent — a preview assembled before either
+   * was resolved — behaves exactly as it did before this existed, which is the only safe reading
+   * of "nobody told me": state no constraint rather than invent one.
+   */
+  constraints?: ReturnType<typeof standingConstraints>;
+  /**
    * Raw byte size of each attachable reference file, measured by the caller (SPEC-019 R-43).
    *
    * Planning stays pure — it cannot stat a file — so the sizes are supplied. Absent means the
@@ -626,6 +632,29 @@ export interface NegativeInput {
  * per-shot negative is a per-shot thing to forget, and the failure stays silent until an export
  * has titles burned into the picture.
  */
+/**
+ * The standing constraints a dispatch carries, world first and then production (#244, turn 59).
+ *
+ * One function, because the production screen shows this and dispatch sends it. Two ways of
+ * computing the same merge is how a screen comes to promise something the request does not say —
+ * and the whole value of writing a policy down is that it is the same policy everywhere.
+ *
+ * A production may only strengthen: `musicPolicy` can say `environmental-only` and nothing else,
+ * so the merge is a floor rather than a choice. Failure modes are concatenated, world first,
+ * because the world's are the ones every production is entitled to assume.
+ */
+export function standingConstraints(
+  direction: { audio?: AudioPolicy; failureModes?: readonly string[] } | null | undefined,
+  production?: { musicPolicy?: "environmental-only"; failureModes?: readonly string[] } | null,
+): { music: AudioPolicy["music"]; subtitles: "never"; failureModes: string[] } {
+  const worldMusic = direction?.audio?.music ?? DEFAULT_AUDIO_POLICY.music;
+  return {
+    music: production?.musicPolicy === "environmental-only" ? "environmental-only" : worldMusic,
+    subtitles: "never",
+    failureModes: [...(direction?.failureModes ?? []), ...(production?.failureModes ?? [])],
+  };
+}
+
 export function derivedNegatives(input: NegativeInput): string | null {
   if (input.capability !== "video") return null;
   // Always. A take is immutable, so burned-in text is damage with no version of the take without
@@ -637,11 +666,20 @@ export function derivedNegatives(input: NegativeInput): string | null {
   const silent = covered.length > 0 && covered.every((s) => s.audio?.kind === "silence");
   if (silent) {
     parts.push("No audio.");
-  } else if (input.audioDesign?.scoreTrack === true) {
+  } else if (input.audioDesign?.scoreTrack === true || input.constraints?.music === "environmental-only") {
     // Score only. Environmental and action sound belong to the shot and replacing them would
     // mean sourcing foley for every clip (R-11, D9).
+    //
+    // Now reachable two ways (#244): a cut that composes its own score has always implied it, and
+    // a world or production may now say it standing, before any cut exists. The condition is an
+    // or rather than a replacement — a policy that stopped applying the moment somebody added a
+    // score track would be a policy that switches itself off exactly when it matters most.
     parts.push("No background music — environmental and action sound only.");
   }
+  // Standing failure modes last, after the audio direction: they are the world's accumulated
+  // "this keeps going wrong", and a model reading in order should meet the specific request, then
+  // what must not happen to it.
+  for (const mode of input.constraints?.failureModes ?? []) parts.push(mode);
   return parts.join(" ");
 }
 

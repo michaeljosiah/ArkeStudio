@@ -123,6 +123,8 @@ const DIRECTION = {
   description: "Painterly, tidal, restrained.",
   masterLook: "world-art.png",
   acceptedAt: "2026-07-18T10:00:00Z",
+  audio: { music: "environmental-only" as const, subtitles: "never" as const },
+  failureModes: [],
   history: [],
   derived: false,
   reach: { visualAssets: 1, referenceKits: 1, productions: 1, earlierAcceptedTakes: 0 },

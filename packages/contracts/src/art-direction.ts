@@ -2,6 +2,37 @@ import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
 import type { WorldMeta } from "./world.js";
 
+/**
+ * What a generation must obey, beyond how it should look (#244, design turn 59).
+ *
+ * Music is here because a video model returns one mixed track: score it added cannot be
+ * separated from dialogue or environmental sound afterwards, so the only moment the decision can
+ * be made is before the request. Subtitles has one value in v1 and is still written down rather
+ * than assumed — Arke's cut owns titles, and burned-in text cannot be moved, translated or
+ * removed, so `never` is a policy the prompt states rather than a default nobody recorded.
+ */
+export const AudioPolicySchema = z
+  .object({
+    music: z.enum(["environmental-only", "allow-model-score"]),
+    subtitles: z.literal("never"),
+  })
+  .strict();
+export type AudioPolicy = z.infer<typeof AudioPolicySchema>;
+
+export const DEFAULT_AUDIO_POLICY: AudioPolicy = {
+  music: "environmental-only",
+  subtitles: "never",
+};
+
+/**
+ * Standing failures worth saying every time — "do not drift the Polaroid", "hands stay whole".
+ *
+ * Bounded at 20 because a constraint block longer than the shot it constrains stops being read,
+ * by a model or a person; and at 300 characters each because a failure mode that needs a
+ * paragraph is a scene note wearing a rule's clothes.
+ */
+export const FailureModesSchema = z.array(z.string().trim().min(1).max(300)).max(20).default([]);
+
 /** One accepted look that is no longer current. Its image remains where that version put it. */
 export const ArtDirectionHistoryEntrySchema = z
   .object({
@@ -9,6 +40,11 @@ export const ArtDirectionHistoryEntrySchema = z
     description: z.string().trim().min(1),
     masterLook: z.string().min(1).optional(),
     acceptedAt: IsoDateTimeSchema,
+    // On history too, not only on the current record: a take made under v3 was made under v3's
+    // policy, and answering "why does this clip have music in it" a month later means being able
+    // to read what was in force then rather than what is in force now.
+    audio: AudioPolicySchema.default(DEFAULT_AUDIO_POLICY),
+    failureModes: FailureModesSchema,
   })
   .strict();
 export type ArtDirectionHistoryEntry = z.infer<typeof ArtDirectionHistoryEntrySchema>;
@@ -29,6 +65,13 @@ export const ArtDirectionRecordSchema = z
     description: z.string().trim().min(1),
     masterLook: z.string().min(1).optional(),
     acceptedAt: IsoDateTimeSchema,
+    /**
+     * Defaults are the read-compatibility policy, not a migration. A record written before this
+     * existed resolves to environmental-only, never and no failure modes in memory; merely
+     * opening that world neither rewrites its file nor bumps its version.
+     */
+    audio: AudioPolicySchema.default(DEFAULT_AUDIO_POLICY),
+    failureModes: FailureModesSchema,
     history: z.array(ArtDirectionHistoryEntrySchema).default([]),
   })
   .strict()
@@ -95,6 +138,8 @@ export const ResolvedArtDirectionSchema = z
     description: z.string().trim().min(1),
     masterLook: z.string().min(1).optional(),
     acceptedAt: IsoDateTimeSchema.optional(),
+    audio: AudioPolicySchema.default(DEFAULT_AUDIO_POLICY),
+    failureModes: FailureModesSchema,
     history: z.array(ArtDirectionHistoryEntrySchema),
     derived: z.boolean(),
     reach: ArtDirectionReachSchema,
@@ -120,9 +165,13 @@ export function resolveArtDirection(
   record: ArtDirectionRecord | null,
 ): Omit<ResolvedArtDirection, "reach" | "overrides"> {
   if (record) return { ...record, derived: false };
+  // A world with no record still has a policy: the defaults. Resolving to "no policy" would
+  // make the absence of a file mean something different from the presence of an unedited one.
   return {
     version: 1,
     description: deriveArtDirectionDescription(meta),
+    audio: DEFAULT_AUDIO_POLICY,
+    failureModes: [],
     history: [],
     derived: true,
   };

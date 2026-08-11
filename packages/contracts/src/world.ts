@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { CanonIdSchema, IsoDateSchema, IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
+// The same bound the world's list uses, shared rather than restated: two copies of one
+// constraint is how a list and its copy come to disagree (issue 243's finalization bug).
+import { FailureModesSchema } from "./art-direction.js";
 
 /**
  * The world entity model (master spec §2). Prose lives in Markdown with YAML frontmatter,
@@ -211,6 +214,18 @@ export const ProductionSchema = z
      * world's default applies.
      */
     aspect: z.string().min(1).optional(),
+    /**
+     * Strengthen the world's music policy, never relax it (#244, design turn 59).
+     *
+     * One optional literal rather than the world's two-valued enum, because that is the whole
+     * rule: the only thing a production may say is "stricter than the world". Absent means
+     * inherit. There is deliberately no way to express `allow-model-score` here — a production
+     * able to relax the world's policy would make the world's policy a suggestion, and the
+     * schema is a better place to make that impossible than a screen is.
+     */
+    musicPolicy: z.literal("environmental-only").optional(),
+    /** Added to the world's failure modes at dispatch, never instead of them. */
+    failureModes: FailureModesSchema,
     created: IsoDateTimeSchema,
     updated: IsoDateTimeSchema,
   })

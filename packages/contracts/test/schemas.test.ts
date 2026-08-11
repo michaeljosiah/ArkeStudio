@@ -20,6 +20,7 @@ import {
   type ClientState,
   type Job,
   ProposalSchema,
+  ProductionSchema,
   ReferenceKitSchema,
   compilationIsStale,
   orderedLocationViews,
@@ -127,7 +128,14 @@ describe("world art direction", () => {
         },
       ],
     };
-    assert.deepEqual(ArtDirectionRecordSchema.parse(record), record);
+    // Not a round trip any more (#244): parsing fills the standing constraints a record written
+    // before them does not carry. Everything the file did say survives untouched — the defaults
+    // are added in memory, and nothing here rewrites the file or moves the version.
+    const parsed = ArtDirectionRecordSchema.parse(record);
+    const { audio, failureModes, ...asWritten } = parsed;
+    assert.deepEqual(asWritten, { ...record, history: record.history.map((h) => ({ ...h, audio, failureModes })) });
+    assert.deepEqual(audio, { music: "environmental-only", subtitles: "never" });
+    assert.deepEqual(failureModes, []);
   });
 
   it("derives a non-blank description even when tone and genre are absent", () => {
@@ -800,6 +808,62 @@ describe("reference kits", () => {
       media: "view.png",
     };
     assert.deepEqual(TakeSchema.parse(take), take);
+  });
+});
+
+describe("art direction's standing constraints (#244)", () => {
+  const base = {
+    version: 2,
+    description: "Painterly, tidal, restrained.",
+    acceptedAt: "2026-07-18T10:00:00Z",
+  };
+
+  it("reads a record written before the policy existed, without changing it", () => {
+    // The whole compatibility story: an old file parses, resolves to the defaults in memory, and
+    // is not rewritten or re-versioned by having been read.
+    const parsed = ArtDirectionRecordSchema.parse({ ...base, history: [] });
+    assert.deepEqual(parsed.audio, { music: "environmental-only", subtitles: "never" });
+    assert.deepEqual(parsed.failureModes, []);
+    assert.equal(parsed.version, 2, "reading is not a version bump");
+  });
+
+  it("carries the policy on history too, so a take can be explained later", () => {
+    const parsed = ArtDirectionRecordSchema.parse({
+      ...base,
+      audio: { music: "environmental-only", subtitles: "never" },
+      history: [{ version: 1, description: "First look", acceptedAt: "2026-05-19T10:00:00Z" }],
+    });
+    assert.deepEqual(parsed.history[0]!.audio, { music: "environmental-only", subtitles: "never" });
+  });
+
+  it("refuses a subtitle policy other than never, and an unbounded failure list", () => {
+    assert.throws(() =>
+      ArtDirectionRecordSchema.parse({ ...base, audio: { music: "environmental-only", subtitles: "burn-in" } }),
+    );
+    // 21 is one past the ceiling: a constraint block longer than the shot it constrains stops
+    // being read, by a model or by a person.
+    assert.throws(() =>
+      ArtDirectionRecordSchema.parse({ ...base, failureModes: Array.from({ length: 21 }, (_, i) => `rule ${i}`) }),
+    );
+    assert.throws(() => ArtDirectionRecordSchema.parse({ ...base, failureModes: ["x".repeat(301)] }));
+    // Blank is not a rule: trim-then-min(1) refuses whitespace that would ride as an empty line.
+    assert.throws(() => ArtDirectionRecordSchema.parse({ ...base, failureModes: ["  "] }));
+  });
+
+  it("gives a production one way to tighten and no way to loosen", () => {
+    const production = {
+      id: "saltlight",
+      format: "video",
+      title: "Saltlight",
+      status: "in-progress",
+      created: "2026-06-01T10:00:00Z",
+      updated: "2026-06-01T10:00:00Z",
+    };
+    assert.deepEqual(ProductionSchema.parse(production).failureModes, []);
+    assert.equal(ProductionSchema.parse({ ...production, musicPolicy: "environmental-only" }).musicPolicy, "environmental-only");
+    // The relaxing value does not exist in the schema at all, which is a better place to make it
+    // impossible than a screen is.
+    assert.throws(() => ProductionSchema.parse({ ...production, musicPolicy: "allow-model-score" }));
   });
 });
 
