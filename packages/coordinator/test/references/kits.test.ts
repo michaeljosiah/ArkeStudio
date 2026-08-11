@@ -1256,8 +1256,18 @@ describe("generating a location view (#243)", () => {
       generationKey: "k2",
     });
     const params = request!.input.params as Record<string, unknown>;
-    assert.deepEqual(params["references"], ["takes/tk_a/view.png"]);
-    assert.deepEqual(params["referenceRoles"], [{ file: "takes/tk_a/view.png", role: "environment" }]);
+    // World-relative, because that is what the dispatcher resolves against. The view's own
+    // `file` is kit-relative, and this assertion used to repeat it verbatim — so the test agreed
+    // with the bug, and every anchored angle failed in a shipped build with "an image reference
+    // is missing" while the suite stayed green.
+    assert.deepEqual(params["references"], ["references/the-vigil/takes/tk_a/view.png"]);
+    assert.deepEqual(params["referenceRoles"], [
+      { file: "references/the-vigil/takes/tk_a/view.png", role: "environment" },
+    ]);
+    assert.ok(
+      (params["references"] as string[]).every((file) => file.startsWith("references/")),
+      "a reference the dispatcher cannot resolve is the same as no reference at all",
+    );
     assert.match(
       params["prompt"] as string,
       /same place; keep its architecture, materials, light and time of day/,
