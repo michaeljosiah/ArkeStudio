@@ -277,12 +277,20 @@ export class Committer {
         const worldMeta = WorldMetaSchema.parse(worldDoc.value);
         fromVersion = base?.version ?? 1;
         toVersion = fromVersion + 1;
+        // Rebuilt field by field, which is why the standing constraints have to be named here
+        // too (#244). This is the authoritative author of the record — the version and the
+        // history are decided here, not by whatever the proposal staged — so a field the rebuild
+        // does not mention is a field that does not survive being accepted, however carefully
+        // the gate composed it. The schema's defaults would then quietly restore a permissive
+        // world to the strict default, and the first sign would be a clip with music under it.
         const previous = base
           ? {
               version: base.version,
               description: base.description,
               ...(base.masterLook ? { masterLook: base.masterLook } : {}),
               acceptedAt: base.acceptedAt,
+              audio: base.audio,
+              failureModes: base.failureModes,
             }
           : {
               version: 1,
@@ -294,6 +302,8 @@ export class Committer {
           description: proposed.description,
           ...(proposed.masterLook ? { masterLook: proposed.masterLook } : {}),
           acceptedAt: at,
+          audio: proposed.audio,
+          failureModes: proposed.failureModes,
           history: [...(base?.history ?? []), previous],
         });
         newContent = `${JSON.stringify(next, null, 2)}\n`;

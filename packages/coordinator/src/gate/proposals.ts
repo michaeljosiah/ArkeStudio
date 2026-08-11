@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
+  type AudioPolicy,
   CHARACTER_ROLE_MAX,
   newId,
   ProposalSchema,
@@ -275,7 +276,18 @@ export class ProposalManager {
   }
 
   /** Stage the next world-look version. Acceptance, not this form write, stamps the version. */
-  async stageArtDirectionChange(description: string, masterLook: string | null | undefined): Promise<Proposal> {
+  async stageArtDirectionChange(
+    description: string,
+    masterLook: string | null | undefined,
+    /**
+     * The standing constraints, when this change is editing them (#244). Absent means unchanged,
+     * which has to be carried explicitly: the schema fills its defaults on parse, so a record
+     * rebuilt without them would silently return a world set to `allow-model-score` to
+     * `environmental-only` — a policy reverted by an unrelated edit to the description, with
+     * nothing said and nothing to notice until a clip came back with music under it.
+     */
+    policy?: { audio?: AudioPolicy; failureModes?: readonly string[] },
+  ): Promise<Proposal> {
     const bundle = this.store.getBundle();
     const current = bundle.artDirection;
     const acceptedAt = current.acceptedAt ?? bundle.meta.created;
@@ -284,6 +296,8 @@ export class ProposalManager {
       description,
       ...(masterLook ? { masterLook } : {}),
       acceptedAt: this.store.now(),
+      audio: policy?.audio ?? current.audio,
+      failureModes: [...(policy?.failureModes ?? current.failureModes)],
       history: [
         ...current.history,
         {
@@ -291,6 +305,10 @@ export class ProposalManager {
           description: current.description,
           ...(current.masterLook ? { masterLook: current.masterLook } : {}),
           acceptedAt,
+          // The outgoing policy, kept with the version it belonged to. Reading history to explain
+          // an old take is the whole reason these fields are on history at all.
+          audio: current.audio,
+          failureModes: [...current.failureModes],
         },
       ],
     });
@@ -1033,6 +1051,13 @@ function restateArtDirection(mine: string, live: string, now: string): string | 
       description: proposed.description,
       ...(proposed.masterLook ? { masterLook: proposed.masterLook } : {}),
       acceptedAt: now,
+      // The third place that rebuilds this record field by field, after the gate and the commit
+      // (#244). What the proposal decided about the policy is kept; the live record's is what it
+      // is being restated *onto*, and goes to history with the version it belonged to. Omitting
+      // either here would revert a policy specifically when two people had touched the look at
+      // once — the case nobody re-reads afterwards because the rebase already "handled it".
+      audio: proposed.audio,
+      failureModes: proposed.failureModes,
       history: [
         ...current.history,
         {
@@ -1040,6 +1065,8 @@ function restateArtDirection(mine: string, live: string, now: string): string | 
           description: current.description,
           ...(current.masterLook ? { masterLook: current.masterLook } : {}),
           acceptedAt: current.acceptedAt,
+          audio: current.audio,
+          failureModes: current.failureModes,
         },
       ],
     });

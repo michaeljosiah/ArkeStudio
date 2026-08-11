@@ -108,6 +108,52 @@ describe("proposal lifecycle (R-1..R-4, R-16)", () => {
   });
 });
 
+describe("standing constraints through the gate (#244)", () => {
+  it("an edit to the description does not quietly revert the policy", async () => {
+    // The failure this exists to prevent: the gate rebuilds the record from its arguments, the
+    // schema fills its defaults on parse, and a world set to allow-model-score would come back
+    // environmental-only — reverted by an edit that never mentioned music, with nothing said.
+    const { store, gate } = await openGate();
+    const permissive = await gate.stageArtDirectionChange("Score is welcome here.", null, {
+      audio: { music: "allow-model-score", subtitles: "never" },
+      failureModes: ["Hands stay whole and countable."],
+    });
+    await gate.accept(permissive.id);
+    assert.equal(store.getBundle().artDirection.audio.music, "allow-model-score");
+
+    // Now an ordinary look change that says nothing about policy.
+    const unrelated = await gate.stageArtDirectionChange("Ink and wash, colder.", null);
+    await gate.accept(unrelated.id);
+    const now = store.getBundle().artDirection;
+    assert.equal(now.audio.music, "allow-model-score", "carried, not defaulted back");
+    assert.deepEqual(now.failureModes, ["Hands stay whole and countable."]);
+  });
+
+  it("keeps the outgoing policy with the version it belonged to", async () => {
+    const { store, gate } = await openGate();
+    const first = await gate.stageArtDirectionChange("Score is welcome here.", null, {
+      audio: { music: "allow-model-score", subtitles: "never" },
+      failureModes: ["Old rule."],
+    });
+    await gate.accept(first.id);
+    const versionWithScore = store.getBundle().artDirection.version;
+
+    const tightened = await gate.stageArtDirectionChange("Now we compose our own.", null, {
+      audio: { music: "environmental-only", subtitles: "never" },
+      failureModes: ["New rule."],
+    });
+    await gate.accept(tightened.id);
+
+    const current = store.getBundle().artDirection;
+    assert.equal(current.audio.music, "environmental-only");
+    assert.deepEqual(current.failureModes, ["New rule."]);
+    // History answers "why does that clip from last month have music in it".
+    const previous = current.history.find((entry) => entry.version === versionWithScore);
+    assert.equal(previous?.audio.music, "allow-model-score", "the version keeps the policy it was made under");
+    assert.deepEqual(previous?.failureModes, ["Old rule."]);
+  });
+});
+
 describe("accept: one commit, versions derived (R-11, R-12)", () => {
   it("stages art direction without changing the world, then accepts the next immutable version", async () => {
     const { dir, store, gate } = await openGate();
@@ -287,6 +333,42 @@ describe("a world look through the generic gate", () => {
    * this used to refresh the hash and leave a record whose version and history had been computed
    * against nothing, presented for review as though it followed the look now on disk.
    */
+  it("a rebase keeps the policy the proposal decided, and files the live one under its version", async () => {
+    // The third rebuilder, after the gate and the commit (#244). Dropping the fields here would
+    // revert a policy specifically when two people touched the look at once — the case nobody
+    // re-reads afterwards, because the rebase already said it handled it.
+    const { dir, gate, store } = await openGateSafely();
+
+    // Somebody else lands a permissive policy while my proposal is open.
+    const theirs = await gate.stageArtDirectionChange("Score is welcome.", null, {
+      audio: { music: "allow-model-score", subtitles: "never" },
+      failureModes: ["Live rule."],
+    });
+    await gate.accept(theirs.id);
+    const liveVersion = store.getBundle().artDirection.version;
+
+    // Mine was staged to tighten it, and now has to be restated onto theirs.
+    const mine = await gate.stageArtDirectionChange("Ink and wash.", null, {
+      audio: { music: "environmental-only", subtitles: "never" },
+      failureModes: ["My rule."],
+    });
+    const { conflicts } = await gate.rebase(mine.id);
+    assert.deepEqual(conflicts, []);
+
+    const restated = JSON.parse(
+      await readFile(join(dir, ".proposals", mine.id, "art-direction", "art-direction.json"), "utf8"),
+    ) as {
+      audio: { music: string };
+      failureModes: string[];
+      history: Array<{ version: number; audio: { music: string }; failureModes: string[] }>;
+    };
+    assert.equal(restated.audio.music, "environmental-only", "my decision survives the restatement");
+    assert.deepEqual(restated.failureModes, ["My rule."]);
+    const theirEntry = restated.history.find((entry) => entry.version === liveVersion);
+    assert.equal(theirEntry?.audio.music, "allow-model-score", "and theirs goes to history under its own version");
+    assert.deepEqual(theirEntry?.failureModes, ["Live rule."]);
+  });
+
   it("restates a look staged before the world had one", async () => {
     const { dir, gate } = await openGateSafely();
     const noLook = join(dir, "art-direction", "art-direction.json");
