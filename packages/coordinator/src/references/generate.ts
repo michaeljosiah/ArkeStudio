@@ -476,7 +476,13 @@ export function locationViewRequests(
     );
   }
   const style = kit?.styleOverride ?? direction.description;
-  const references = input.anchorFile !== undefined ? [input.anchorFile] : [];
+  // World-relative, like every other reference this file builds. A view's `file` is stored
+  // relative to the kit (`takes/<id>/view.png`) because that is where the kit reads it from, and
+  // handing that path to the dispatcher unchanged asked it for a file that does not exist from
+  // the world root — so every anchored angle failed with "an image reference is missing" while
+  // the unanchored establishing view, which carries no reference at all, worked fine.
+  const references =
+    input.anchorFile !== undefined ? [`references/${sheet.id}/${input.anchorFile}`] : [];
   const tier = tierFor(model, input.tier);
   const estimatedMicroUsd = pricedCharacterImage(model, "location-view", references.length, tier);
 
