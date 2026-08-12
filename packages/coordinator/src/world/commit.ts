@@ -312,6 +312,14 @@ export class Committer {
         fieldsChanged = [
           ...(base?.description !== next.description ? ["description"] : []),
           ...(base?.masterLook !== next.masterLook ? ["master-look"] : []),
+          // A policy-only commit changed neither of the above, so it logged no fieldsChanged at
+          // all — the audit record could not say the generation policy had moved (#244, round 3).
+          // Compared by value: failureModes is an array, and identity would call every commit a
+          // change.
+          ...(JSON.stringify(base?.audio) !== JSON.stringify(next.audio) ? ["audio-policy"] : []),
+          ...(JSON.stringify(base?.failureModes ?? []) !== JSON.stringify(next.failureModes)
+            ? ["failure-modes"]
+            : []),
         ];
         versions[f.path] = toVersion;
       }

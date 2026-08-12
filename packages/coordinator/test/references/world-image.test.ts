@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ManifestModel, WorldMeta } from "@arke-studio/contracts";
+import { imageConstraintSuffix } from "@arke-studio/contracts";
 import { buildSessionConfig } from "@arke-studio/adapter-opencode";
 import type { HarnessEvent } from "@arke-studio/contracts";
 import { makeArtDirector, worldBrief } from "../../src/references/art-director.js";
@@ -81,6 +82,16 @@ describe("the world's key image", () => {
       String(worldImageRequest(meta(), model, direction).params["prompt"]),
       String(worldImageRequest(meta(), model, { ...direction, failureModes: [] }).params["prompt"]),
     );
+  });
+
+  it("keeps the constraints when the art director rewrites the prompt", () => {
+    // Round 3's P2: the directed path replaces the composed prompt wholesale, so composing the
+    // suffix inside worldImageRequest bound only the fallback. This asserts the shape the
+    // coordinator builds for the directed branch.
+    const constrained = { ...direction, failureModes: ["No lens flare on the harbour lamps."] };
+    const directed = `${constrained.description}. A drawn prompt from the art director.${imageConstraintSuffix(constrained)}`;
+    assert.match(directed, /No lens flare on the harbour lamps\.$/);
+    assert.match(directed, /A drawn prompt from the art director\./, "the director's words survive");
   });
 
   it("is an ordinary image job, so the queue can estimate, ledger and cancel it", () => {

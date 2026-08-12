@@ -1446,6 +1446,14 @@ export function DispatchDialogScreen() {
       world: world.meta,
       artDirection: world.artDirection,
       productionId: production.meta.id,
+      // The production's standing constraints, so the dialog plans what the coordinator executes
+      // (issue 244, round 3). Without it the preview showed a prompt missing the production's own
+      // negatives while the server sent them — and this screen's whole claim is that it runs the
+      // same function on the same inputs.
+      production: {
+        ...(production.meta.musicPolicy !== undefined ? { musicPolicy: production.meta.musicPolicy } : {}),
+        failureModes: production.meta.failureModes,
+      },
       sheets: world.sheets,
       kits: world.referenceKits,
       scene,

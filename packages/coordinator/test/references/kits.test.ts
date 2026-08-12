@@ -1027,6 +1027,14 @@ describe("standing failure modes ride every reference generation (#244, round 2)
     })[0]!;
     assert.match(String(view.input.params["prompt"]), /Hands stay whole and countable\.$/);
 
+    // The two builders I wrongly called unreachable last round (round 3's P2): the coordinator
+    // dispatches both — establishRequests for initial character establishment, tileRequest for a
+    // missing angle — so they spend money and must obey the same rules.
+    const establish = establishRequests(WORLD_META, SHEET, null, MODEL, 1, MODES)[0]!;
+    assert.match(String(establish.input.params["prompt"]), /Hands stay whole and countable\.$/);
+    const tile = tileRequest(WORLD_META, SHEET, null, MODEL, "head-front", MODES);
+    assert.match(String(tile.input.params["prompt"]), /Hands stay whole and countable\.$/);
+
     // And a world with none leaves the prompt exactly as it was — no trailing space, no empty
     // clause. The suffix is "" then, not " ".
     const bare = mainPhotoRequests(WORLD_META, DIRECTION, SHEET, null, MODEL, {

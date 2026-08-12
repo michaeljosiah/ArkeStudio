@@ -68,6 +68,8 @@ export function tileRequest(
   kit: ReferenceKit | null,
   model: ManifestModel,
   angle: ReferenceAngle,
+  /** Optional so existing callers compile; the coordinator passes it, so a real tile is bound. */
+  direction?: ResolvedArtDirection,
 ): TileRequest {
   const references: string[] = [];
   if (kit) {
@@ -92,7 +94,7 @@ export function tileRequest(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: `${styleLine(world, kit)}. ${sheet.name} — ${sheetDescription(sheet)}. ${ANGLE_PROMPT[angle]}, character reference sheet tile.`,
+        prompt: `${styleLine(world, kit)}. ${sheet.name} — ${sheetDescription(sheet)}. ${ANGLE_PROMPT[angle]}, character reference sheet tile.${imageConstraintSuffix(direction)}`,
         references,
         output: characterImageOutput(model, "reference-tile"),
       },
@@ -126,7 +128,7 @@ export function establishRequests(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${ANGLE_PROMPT["head-front"]}, character reference, candidate ${i + 1} of ${count}, distinct interpretation.`,
+        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${ANGLE_PROMPT["head-front"]}, character reference, candidate ${i + 1} of ${count}, distinct interpretation.${imageConstraintSuffix(direction)}`,
         references: [],
         output: characterImageOutput(model, "reference-tile"),
         ...(direction ? { provenance: generationProvenance(world, direction, sheet) } : {}),

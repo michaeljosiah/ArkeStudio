@@ -6,6 +6,7 @@ import {
   DomainEventSchema,
   JobSchema,
   REFERENCE_FINALIZATION_TARGETS,
+  imageConstraintSuffix,
   LedgerEntrySchema,
   type ClientMessage,
   type Capability,
@@ -3441,7 +3442,11 @@ export class Coordinator {
                 ...request,
                 params: {
                   ...request.params,
-                  prompt: `${bundle.artDirection.description}. ${prompt}`,
+                  // The suffix survives the art-director's rewrite (#244, round 3). This branch
+                  // replaces the composed prompt wholesale, so composing constraints upstream in
+                  // worldImageRequest bound only the fallback path — the directed path, which is
+                  // the normal one, quietly dropped them.
+                  prompt: `${bundle.artDirection.description}. ${prompt}${imageConstraintSuffix(bundle.artDirection)}`,
                 },
               }
             : request,
@@ -4276,7 +4281,7 @@ export class Coordinator {
         let requests;
         try {
           requests = angles.map(
-            (angle) => tileRequest(store.getBundle().meta, sheet, kit, model, angle).input,
+            (angle) => tileRequest(store.getBundle().meta, sheet, kit, model, angle, store.getBundle().artDirection).input,
           );
         } catch {
           this.rejectEnqueue(

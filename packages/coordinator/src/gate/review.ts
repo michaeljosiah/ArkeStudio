@@ -57,6 +57,7 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
       // Named even though it is rarely set: a look that quietly loses its master image would
       // otherwise change every generation with nothing on screen to show for it.
       if (record.masterLook) fields.set("Master look", record.masterLook);
+      policyFields(fields, record);
       return { label: `World look v${record.version}`, kind: "art direction", fields };
     } catch {
       return null;
@@ -126,6 +127,32 @@ export interface ReviewInput {
  * resolving to. Null when the staged record is the world's very first look and supersedes
  * nothing — then "create" is the honest word.
  */
+/**
+ * The standing constraints as review fields (#244, round 3).
+ *
+ * A policy-only change moves neither the description nor the master look, so the review had no
+ * changed fields at all — a reviewer could accept a change binding every future generation while
+ * the screen showed them nothing. Rendered as prose because that is what the panel diffs; the
+ * failure modes are numbered so a reordering reads as the change it is.
+ */
+function policyFields(
+  fields: Map<string, string>,
+  record: { audio: { music: string }; failureModes: readonly string[] },
+): void {
+  fields.set(
+    "Music",
+    record.audio.music === "environmental-only"
+      ? "Environmental and action sound only"
+      : "Allow model-generated score",
+  );
+  fields.set(
+    "Failure modes",
+    record.failureModes.length === 0
+      ? "None"
+      : record.failureModes.map((mode, i) => `${i + 1}. ${mode}`).join("\n"),
+  );
+}
+
 function inheritedLookBase(proposedRaw: string): { label: string; kind: string; fields: Map<string, string> } | null {
   try {
     const record = ArtDirectionRecordSchema.parse(JSON.parse(proposedRaw));
@@ -133,6 +160,7 @@ function inheritedLookBase(proposedRaw: string): { label: string; kind: string; 
     if (!previous) return null;
     const fields = new Map<string, string>([["Look", previous.description]]);
     if (previous.masterLook) fields.set("Master look", previous.masterLook);
+    policyFields(fields, previous);
     return { label: `World look v${previous.version}`, kind: "art direction", fields };
   } catch {
     return null;

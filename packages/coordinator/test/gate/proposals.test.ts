@@ -344,6 +344,50 @@ describe("a world look through the generic gate", () => {
    * this used to refresh the hash and leave a record whose version and history had been computed
    * against nothing, presented for review as though it followed the look now on disk.
    */
+  it("a policy-only commit says so in the change log", async () => {
+    // Round 3's P2: fieldsChanged compared only description and master look, so a policy-only
+    // commit logged nothing changed — the audit trail could not say the generation policy moved.
+    const { dir, gate, store } = await openGateSafely();
+    const before = store.getBundle().artDirection;
+    const proposal = await gate.stageArtDirectionChange(before.description, before.masterLook ?? null, {
+      audio: { music: "allow-model-score", subtitles: "never" },
+      failureModes: ["Hands stay whole and countable."],
+    });
+    await gate.accept(proposal.id);
+
+    const raw = await readFile(join(dir, ".arke", "changes.jsonl"), "utf8").catch(async () =>
+      readFile(join(dir, "changes.jsonl"), "utf8"),
+    );
+    const entry = raw
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { entity?: string; fieldsChanged?: string[] })
+      .reverse()
+      .find((e) => e.entity?.includes("art-direction"));
+    assert.ok(entry, "the commit is in the change log");
+    assert.deepEqual([...(entry.fieldsChanged ?? [])].sort(), ["audio-policy", "failure-modes"]);
+  });
+
+  it("a policy-only change is visible on the review, not an empty panel", async () => {
+    // Round 3's P2: the projection showed only Look and Master look, so a change binding every
+    // future generation arrived as a review with no changed fields at all.
+    const { dir, gate, store } = await openGateSafely();
+    const before = store.getBundle().artDirection;
+    const proposal = await gate.stageArtDirectionChange(before.description, before.masterLook ?? null, {
+      audio: { music: "allow-model-score", subtitles: "never" },
+      failureModes: ["Hands stay whole and countable."],
+    });
+    const staged = await readFile(join(dir, ".proposals", proposal.id, "art-direction", "art-direction.json"), "utf8");
+    const review = projectReview({ proposal, proposed: () => staged, base: () => null });
+    const target = review.targets.find((t) => t.path === ART_DIRECTION_PATH);
+    const music = target?.fields.find((f) => f.field === "Music");
+    assert.equal(music?.proposed, "Allow model-generated score", "the reviewer sees what they are accepting");
+    assert.equal(music?.before, "Environmental and action sound only", "and what it replaces");
+    const modes = target?.fields.find((f) => f.field === "Failure modes");
+    assert.match(modes?.proposed ?? "", /1\. Hands stay whole and countable\./);
+    assert.equal(modes?.before, "None");
+  });
+
   it("a description-only proposal, rebased over a policy change, does not drag the policy back", async () => {
     // Round 2's P1. Staging copies the then-current policy into the staged record, so "did not
     // touch it" and "set it to what it already was" serialize identically. The base snapshot is
