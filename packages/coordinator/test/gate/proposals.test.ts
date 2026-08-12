@@ -113,44 +113,55 @@ describe("standing constraints through the gate (#244)", () => {
     // The failure this exists to prevent: the gate rebuilds the record from its arguments, the
     // schema fills its defaults on parse, and a world set to allow-model-score would come back
     // environmental-only — reverted by an edit that never mentioned music, with nothing said.
+    // Closed in finally: a leaked store's watcher keeps the event loop alive, and these two
+    // tests leaking theirs is what held the whole coordinator suite open — locally and for six
+    // billable hours on CI, where the runner had no timeout to save it.
     const { store, gate } = await openGate();
-    const permissive = await gate.stageArtDirectionChange("Score is welcome here.", null, {
-      audio: { music: "allow-model-score", subtitles: "never" },
-      failureModes: ["Hands stay whole and countable."],
-    });
-    await gate.accept(permissive.id);
-    assert.equal(store.getBundle().artDirection.audio.music, "allow-model-score");
+    try {
+      const permissive = await gate.stageArtDirectionChange("Score is welcome here.", null, {
+        audio: { music: "allow-model-score", subtitles: "never" },
+        failureModes: ["Hands stay whole and countable."],
+      });
+      await gate.accept(permissive.id);
+      assert.equal(store.getBundle().artDirection.audio.music, "allow-model-score");
 
-    // Now an ordinary look change that says nothing about policy.
-    const unrelated = await gate.stageArtDirectionChange("Ink and wash, colder.", null);
-    await gate.accept(unrelated.id);
-    const now = store.getBundle().artDirection;
-    assert.equal(now.audio.music, "allow-model-score", "carried, not defaulted back");
-    assert.deepEqual(now.failureModes, ["Hands stay whole and countable."]);
+      // Now an ordinary look change that says nothing about policy.
+      const unrelated = await gate.stageArtDirectionChange("Ink and wash, colder.", null);
+      await gate.accept(unrelated.id);
+      const now = store.getBundle().artDirection;
+      assert.equal(now.audio.music, "allow-model-score", "carried, not defaulted back");
+      assert.deepEqual(now.failureModes, ["Hands stay whole and countable."]);
+    } finally {
+      await store.close();
+    }
   });
 
   it("keeps the outgoing policy with the version it belonged to", async () => {
     const { store, gate } = await openGate();
-    const first = await gate.stageArtDirectionChange("Score is welcome here.", null, {
-      audio: { music: "allow-model-score", subtitles: "never" },
-      failureModes: ["Old rule."],
-    });
-    await gate.accept(first.id);
-    const versionWithScore = store.getBundle().artDirection.version;
+    try {
+      const first = await gate.stageArtDirectionChange("Score is welcome here.", null, {
+        audio: { music: "allow-model-score", subtitles: "never" },
+        failureModes: ["Old rule."],
+      });
+      await gate.accept(first.id);
+      const versionWithScore = store.getBundle().artDirection.version;
 
-    const tightened = await gate.stageArtDirectionChange("Now we compose our own.", null, {
-      audio: { music: "environmental-only", subtitles: "never" },
-      failureModes: ["New rule."],
-    });
-    await gate.accept(tightened.id);
+      const tightened = await gate.stageArtDirectionChange("Now we compose our own.", null, {
+        audio: { music: "environmental-only", subtitles: "never" },
+        failureModes: ["New rule."],
+      });
+      await gate.accept(tightened.id);
 
-    const current = store.getBundle().artDirection;
-    assert.equal(current.audio.music, "environmental-only");
-    assert.deepEqual(current.failureModes, ["New rule."]);
-    // History answers "why does that clip from last month have music in it".
-    const previous = current.history.find((entry) => entry.version === versionWithScore);
-    assert.equal(previous?.audio.music, "allow-model-score", "the version keeps the policy it was made under");
-    assert.deepEqual(previous?.failureModes, ["Old rule."]);
+      const current = store.getBundle().artDirection;
+      assert.equal(current.audio.music, "environmental-only");
+      assert.deepEqual(current.failureModes, ["New rule."]);
+      // History answers "why does that clip from last month have music in it".
+      const previous = current.history.find((entry) => entry.version === versionWithScore);
+      assert.equal(previous?.audio.music, "allow-model-score", "the version keeps the policy it was made under");
+      assert.deepEqual(previous?.failureModes, ["Old rule."]);
+    } finally {
+      await store.close();
+    }
   });
 });
 
