@@ -4,6 +4,8 @@ import { join } from "node:path";
 import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
+  DEFAULT_AUDIO_POLICY,
+  type AudioPolicy,
   CHARACTER_ROLE_MAX,
   newId,
   ProposalSchema,
@@ -275,7 +277,18 @@ export class ProposalManager {
   }
 
   /** Stage the next world-look version. Acceptance, not this form write, stamps the version. */
-  async stageArtDirectionChange(description: string, masterLook: string | null | undefined): Promise<Proposal> {
+  async stageArtDirectionChange(
+    description: string,
+    masterLook: string | null | undefined,
+    /**
+     * The standing constraints, when this change is editing them (#244). Absent means unchanged,
+     * which has to be carried explicitly: the schema fills its defaults on parse, so a record
+     * rebuilt without them would silently return a world set to `allow-model-score` to
+     * `environmental-only` — a policy reverted by an unrelated edit to the description, with
+     * nothing said and nothing to notice until a clip came back with music under it.
+     */
+    policy?: { audio?: AudioPolicy; failureModes?: readonly string[] },
+  ): Promise<Proposal> {
     const bundle = this.store.getBundle();
     const current = bundle.artDirection;
     const acceptedAt = current.acceptedAt ?? bundle.meta.created;
@@ -284,6 +297,8 @@ export class ProposalManager {
       description,
       ...(masterLook ? { masterLook } : {}),
       acceptedAt: this.store.now(),
+      audio: policy?.audio ?? current.audio,
+      failureModes: [...(policy?.failureModes ?? current.failureModes)],
       history: [
         ...current.history,
         {
@@ -291,6 +306,10 @@ export class ProposalManager {
           description: current.description,
           ...(current.masterLook ? { masterLook: current.masterLook } : {}),
           acceptedAt,
+          // The outgoing policy, kept with the version it belonged to. Reading history to explain
+          // an old take is the whole reason these fields are on history at all.
+          audio: current.audio,
+          failureModes: [...current.failureModes],
         },
       ],
     });
@@ -603,7 +622,7 @@ export class ProposalManager {
           if (target.path === ART_DIRECTION_PATH) {
             const resolvedNow = `${JSON.stringify(currentLookRecord(this.store.getBundle().artDirection), null, 2)}
 `;
-            const restated = restateArtDirection(mine, resolvedNow, this.store.now());
+            const restated = restateArtDirection(mine, resolvedNow, base, this.store.now());
             if (restated === null) {
               /*
                * The staged document will not parse, and falling through would keep it.
@@ -647,7 +666,7 @@ export class ProposalManager {
          * were computed against nothing.
          */
         if (target.path === ART_DIRECTION_PATH && sha256(live) !== target.baseHash) {
-          const restated = restateArtDirection(mine, live, this.store.now());
+          const restated = restateArtDirection(mine, live, base, this.store.now());
           if (restated === null) {
             conflicts.push({ path: target.path, field: "Look", base, mine, theirs: live });
             targets.push({ path: target.path, baseVersion: readVersion(target.path, live), baseHash: sha256(live) });
@@ -1024,15 +1043,35 @@ function currentLookRecord(resolved: {
  * Null when either side will not parse. That is a real conflict rather than something to paper
  * over: writing a guess here would put an unreadable look behind an Accept button.
  */
-function restateArtDirection(mine: string, live: string, now: string): string | null {
+function restateArtDirection(mine: string, live: string, base: string | null, now: string): string | null {
   try {
     const proposed = ArtDirectionRecordSchema.parse(JSON.parse(mine));
     const current = ArtDirectionRecordSchema.parse(JSON.parse(live));
+    /*
+     * Did this proposal actually edit the policy, or only inherit it? (#244, Codex round 2.)
+     *
+     * Staging copies the then-current policy into the staged record, so by the time a rebase
+     * reads `mine` the difference between "changed it" and "carried it" has been serialized
+     * away. Taking `mine`'s policy unconditionally meant a description-only proposal, rebased
+     * over someone else's policy change, wrote the stale inherited values back — a concurrent
+     * edit erased by a proposal that never touched the field. The staged base snapshot still
+     * knows what the proposal saw, so intent is recovered by comparison: differs from base
+     * means edited, equals base means inherited, and inherited fields take the live values.
+     * A proposal staged as a create has no base; there the comparison is against the defaults
+     * staging would have copied.
+     */
+    const saw = base !== null ? ArtDirectionRecordSchema.parse(JSON.parse(base)) : null;
+    const sawAudio = saw?.audio ?? DEFAULT_AUDIO_POLICY;
+    const sawModes = saw?.failureModes ?? [];
+    const editedAudio = JSON.stringify(proposed.audio) !== JSON.stringify(sawAudio);
+    const editedModes = JSON.stringify(proposed.failureModes) !== JSON.stringify(sawModes);
     const rebased = ArtDirectionRecordSchema.parse({
       version: current.version + 1,
       description: proposed.description,
       ...(proposed.masterLook ? { masterLook: proposed.masterLook } : {}),
       acceptedAt: now,
+      audio: editedAudio ? proposed.audio : current.audio,
+      failureModes: editedModes ? proposed.failureModes : current.failureModes,
       history: [
         ...current.history,
         {
@@ -1040,6 +1079,8 @@ function restateArtDirection(mine: string, live: string, now: string): string | 
           description: current.description,
           ...(current.masterLook ? { masterLook: current.masterLook } : {}),
           acceptedAt: current.acceptedAt,
+          audio: current.audio,
+          failureModes: current.failureModes,
         },
       ],
     });

@@ -9,6 +9,7 @@ import {
   boundFiles,
   composePrompt,
   derivedNegatives,
+  standingConstraints,
   packScene,
   parseMentions,
   planScene,
@@ -1572,5 +1573,121 @@ describe("a location sheet at dispatch (#243)", () => {
     assert.equal(vigil.file, "references/the-vigil/location-sheet-abc123def456.png");
     assert.match(vigil.rolePhrase, /^location reference/, "carried, unmapped");
     await store.close();
+  });
+});
+
+describe("standing constraints (#244, design turn 59)", () => {
+  const world = (music: "environmental-only" | "allow-model-score", failureModes: string[] = []) => ({
+    audio: { music, subtitles: "never" as const },
+    failureModes,
+  });
+
+  it("a production may tighten the world's music policy and can never loosen it", () => {
+    // The type is the guard: `musicPolicy` is the single literal "environmental-only", so there
+    // is no value a production could set that relaxes a strict world. What is testable is that
+    // the merge honours a tightening and ignores nothing else.
+    assert.equal(standingConstraints(world("allow-model-score")).music, "allow-model-score");
+    assert.equal(
+      standingConstraints(world("allow-model-score"), { musicPolicy: "environmental-only" }).music,
+      "environmental-only",
+      "a production that composes its own score tightens a permissive world",
+    );
+    assert.equal(
+      standingConstraints(world("environmental-only"), {}).music,
+      "environmental-only",
+      "and a strict world stays strict when the production says nothing",
+    );
+  });
+
+  it("stacks failure modes world-first, and adds rather than replaces", () => {
+    const merged = standingConstraints(world("environmental-only", ["World rule."]), {
+      failureModes: ["Production rule."],
+    });
+    assert.deepEqual(merged.failureModes, ["World rule.", "Production rule."]);
+    assert.equal(merged.subtitles, "never", "one value in v1, and stated rather than assumed");
+  });
+
+  it("resolves a world that predates the policy to the defaults, not to nothing", () => {
+    const merged = standingConstraints(null);
+    assert.deepEqual(merged, { music: "environmental-only", subtitles: "never", failureModes: [] });
+  });
+
+  it("puts the policy into the negatives a video dispatch actually carries", () => {
+    const strict = derivedNegatives({
+      capability: "video",
+      constraints: standingConstraints(world("environmental-only", ["Hands stay whole and countable."])),
+    })!;
+    assert.match(strict, /^No subtitles\./);
+    assert.match(strict, /No background music — environmental and action sound only\./);
+    assert.match(strict, /Hands stay whole and countable\.$/, "failure modes come last, after the audio direction");
+
+    // A permissive world says nothing about music, which is not the same as permitting it twice.
+    const permissive = derivedNegatives({ capability: "video", constraints: standingConstraints(world("allow-model-score")) })!;
+    assert.ok(!permissive.includes("No background music"));
+
+    // Stills are unaffected: these are constraints on a clip's soundtrack.
+    assert.equal(derivedNegatives({ capability: "image", constraints: standingConstraints(world("environmental-only")) }), null);
+  });
+
+  it("keeps the cut's own score condition when the standing policy is permissive", () => {
+    // The two reasons are an OR, not a replacement. A policy that switched itself off the moment
+    // somebody added a score track would switch off exactly where it matters most.
+    const withCut = derivedNegatives({
+      capability: "video",
+      audioDesign: { scoreTrack: true },
+      constraints: standingConstraints(world("allow-model-score")),
+    })!;
+    assert.match(withCut, /No background music/, "a composed score still forbids a generated one");
+  });
+
+  it("reaches a real dispatch — both per-shot and whole-scene", async () => {
+    // The gap the review caught: the merge existed and planScene never called it, so a policy
+    // was durable, versioned, displayed — and absent from every request it was written for.
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const base = production.scenes[0]!;
+    const scene: Scene = { ...base, shots: [shot(1, 5, "@maren-kest at the rail"), shot(2, 5, "@maren-kest turns")] };
+    const input = {
+      world: bundle.meta,
+      productionId: production.meta.id,
+      artDirection: { ...bundle.artDirection, audio: { music: "environmental-only" as const, subtitles: "never" as const }, failureModes: ["Hands stay whole and countable."] },
+      production: { failureModes: ["The lamp is always lit from the left."] },
+      sheets: bundle.sheets,
+      kits: bundle.referenceKits,
+      scene,
+      selections: {},
+      model: VIDEO_MODEL,
+    };
+
+    const perShot = planScene(input, "per-shot");
+    const negatives = perShot.shots[0]!.parts.negatives!;
+    assert.match(negatives, /No background music/, "the world's policy reaches the request");
+    assert.match(negatives, /Hands stay whole and countable\./);
+    assert.match(negatives, /The lamp is always lit from the left\.$/, "and the production's, after it");
+
+    const whole = planScene(input, "whole-scene");
+    assert.match(whole.passReferences[0]!.negatives!, /No background music/, "the pass carries the same clip's constraints");
+    assert.match(whole.passReferences[0]!.negatives!, /The lamp is always lit from the left\./);
+    await store.close();
+  });
+
+  it("carries visual failure modes onto stills, and the soundtrack clauses only onto video", () => {
+    // "Hands stay whole" is not a soundtrack rule. A world that wrote it down meant it for every
+    // generation, and derivedNegatives used to return before stills could ever see it.
+    const constraints = standingConstraints(world("environmental-only", ["Hands stay whole and countable."]));
+    const still = derivedNegatives({ capability: "image", constraints })!;
+    assert.equal(still, "Hands stay whole and countable.", "the visual rule, and nothing about audio");
+    assert.ok(!still.includes("No subtitles"), "a still has no soundtrack and burns in no titles");
+
+    // And a still with nothing to say still says nothing, exactly as before this existed.
+    assert.equal(derivedNegatives({ capability: "image", constraints: standingConstraints(world("environmental-only")) }), null);
+    assert.equal(derivedNegatives({ capability: "image" }), null);
+  });
+
+  it("behaves exactly as it did before the policy existed when nobody resolved one", () => {
+    // A preview assembled before the world was read carries no constraints. Stating one nobody
+    // asked for would be inventing policy from absence.
+    assert.equal(derivedNegatives({ capability: "video" }), "No subtitles.");
   });
 });

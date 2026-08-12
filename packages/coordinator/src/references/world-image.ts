@@ -1,5 +1,5 @@
 import type { ManifestModel, ResolvedArtDirection, WorldMeta } from "@arke-studio/contracts";
-import { estimateMicroUsd } from "@arke-studio/contracts";
+import { estimateMicroUsd, imageConstraintSuffix } from "@arke-studio/contracts";
 
 /**
  * The world's key image, from what the world already says about itself.
@@ -41,7 +41,7 @@ export function worldImageRequest(meta: WorldMeta, model: ManifestModel, directi
     // No references: a world has no reference kit. Sending an empty list would be a field the
     // provider has to know to ignore, and OpenAI does not — it answers unknown fields with 400.
     params: {
-      prompt: worldImagePrompt(meta, direction),
+      prompt: `${worldImagePrompt(meta, direction)}${imageConstraintSuffix(direction)}`,
       ...(direction
         ? {
             artDirection: {

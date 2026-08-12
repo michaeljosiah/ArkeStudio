@@ -294,6 +294,12 @@ export function materialiseCandidate(
         version: current.version + 1,
         description: String(draft["description"]).trim(),
         acceptedAt: at,
+        // The fourth place that rebuilds this record (#244), and the one talking about the look
+        // in a chat rather than on a form. A conversation that never mentioned music must not
+        // decide anything about it: the standing constraints are carried unchanged, and the
+        // outgoing ones go to history with the version they belonged to.
+        audio: current.audio,
+        failureModes: [...current.failureModes],
         history: [
           ...current.history,
           {
@@ -301,6 +307,8 @@ export function materialiseCandidate(
             description: current.description,
             ...(current.masterLook ? { masterLook: current.masterLook } : {}),
             acceptedAt: current.acceptedAt ?? bundle.meta.created,
+            audio: current.audio,
+            failureModes: [...current.failureModes],
           },
         ],
       });

@@ -142,6 +142,31 @@ describe("storyboard dispatch (R-25)", () => {
     await store.close();
   });
 
+  it("a board obeys the standing failure modes too — the world's and the production's (#244)", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const constrained = {
+      ...bundle,
+      artDirection: { ...bundle.artDirection, failureModes: ["Hands stay whole and countable."] },
+      productions: bundle.productions.map((production) => ({
+        ...production,
+        meta: { ...production.meta, failureModes: ["The lamp is always lit from the left."] },
+      })),
+    };
+    const request = storyboardRequest(
+      constrained,
+      bundle.productions[0]!.meta.id,
+      sceneWith([shot(1, "@maren-kest grips the rail")]),
+      DRAWER,
+      TARGET,
+    );
+    const prompt = String(request.input.params["prompt"]);
+    assert.match(prompt, /Hands stay whole and countable\./, "the world's rule reaches line art");
+    assert.match(prompt, /The lamp is always lit from the left\.$/, "the production's after it, world first");
+    assert.equal(request.plan.prompt, prompt, "the plan a reviewer reads is the prompt the model gets");
+    await store.close();
+  });
+
   it("refuses to be drawn by a model that cannot draw, and refuses an empty scene", async () => {
     const { store } = await open();
     const bundle = store.getBundle();

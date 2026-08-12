@@ -20,6 +20,11 @@ jobs:
   gate:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    # A healthy run is 6–14 minutes. Without a ceiling, a test that leaks a file watcher holds
+    # the runner at "in progress" until GitHub's 6-hour default kills it — which is six billable
+    # hours to learn what a 25-minute ceiling reports the same morning (one leaked WorldStore
+    # cost exactly that on 2026-08-11).
+    timeout-minutes: 25
     strategy:
       # One platform failing should still tell us about the other.
       fail-fast: false

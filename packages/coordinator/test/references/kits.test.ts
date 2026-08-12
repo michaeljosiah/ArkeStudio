@@ -123,6 +123,8 @@ const DIRECTION = {
   description: "Painterly, tidal, restrained.",
   masterLook: "world-art.png",
   acceptedAt: "2026-07-18T10:00:00Z",
+  audio: { music: "environmental-only" as const, subtitles: "never" as const },
+  failureModes: [],
   history: [],
   derived: false,
   reach: { visualAssets: 1, referenceKits: 1, productions: 1, earlierAcceptedTakes: 0 },
@@ -999,6 +1001,48 @@ describe("a per-generation model and size (SPEC-008, design turn 39)", () => {
 // Location reference kits (#243, design turn 57). Every rule the turn made
 // binding, exercised against a real store.
 // ---------------------------------------------------------------------------
+
+describe("standing failure modes ride every reference generation (#244, round 2)", () => {
+  const MODES = { ...DIRECTION, failureModes: ["Hands stay whole and countable."] };
+  const VIGIL = { id: "the-vigil", type: "location", name: "The Vigil", version: 3,
+    sections: [{ heading: "Look", body: "A watchtower of black stone." }] } as unknown as Sheet;
+
+  it("main photos, sheets, looks and location views all carry them; none invents one", () => {
+    const photo = mainPhotoRequests(WORLD_META, MODES, SHEET, null, MODEL, {
+      prompt: "A clear portrait.", count: 1, identityReferences: [], generationKey: "fm1",
+    })[0]!;
+    assert.match(String(photo.input.params["prompt"]), /Hands stay whole and countable\.$/);
+
+    const kit = kitOf([], { anchor: "main-photo.png", mainPhoto: { file: "main-photo.png", source: "generated", sheetVersion: 4 } });
+    const sheet = characterSheetRequest(WORLD_META, MODES, SHEET, kit, MODEL, "fm2");
+    assert.match(String(sheet.input.params["prompt"]), /Hands stay whole and countable\.$/);
+
+    const look = characterLookRequests(WORLD_META, MODES, SHEET, kit, MODEL, {
+      kind: "costume", mode: "stay-close", prompt: "Council coat", count: 1, generationKey: "fm3",
+    })[0]!;
+    assert.match(String(look.input.params["prompt"]), /Hands stay whole and countable\.$/);
+
+    const view = locationViewRequests(WORLD_META, MODES, VIGIL, null, MODEL, {
+      name: "Establishing view", count: 1, generationKey: "fm4",
+    })[0]!;
+    assert.match(String(view.input.params["prompt"]), /Hands stay whole and countable\.$/);
+
+    // The two builders I wrongly called unreachable last round (round 3's P2): the coordinator
+    // dispatches both — establishRequests for initial character establishment, tileRequest for a
+    // missing angle — so they spend money and must obey the same rules.
+    const establish = establishRequests(WORLD_META, SHEET, null, MODEL, 1, MODES)[0]!;
+    assert.match(String(establish.input.params["prompt"]), /Hands stay whole and countable\.$/);
+    const tile = tileRequest(WORLD_META, SHEET, null, MODEL, "head-front", MODES);
+    assert.match(String(tile.input.params["prompt"]), /Hands stay whole and countable\.$/);
+
+    // And a world with none leaves the prompt exactly as it was — no trailing space, no empty
+    // clause. The suffix is "" then, not " ".
+    const bare = mainPhotoRequests(WORLD_META, DIRECTION, SHEET, null, MODEL, {
+      prompt: "A clear portrait.", count: 1, identityReferences: [], generationKey: "fm5",
+    })[0]!;
+    assert.match(String(bare.input.params["prompt"]), /no text or montage\.$/);
+  });
+});
 
 describe("location views and the sheet they assemble (#243)", () => {
   const VIGIL = { id: "the-vigil", name: "The Vigil", version: 3 } as unknown as Sheet;

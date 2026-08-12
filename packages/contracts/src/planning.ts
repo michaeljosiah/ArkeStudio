@@ -5,7 +5,7 @@ import {
   type Compilation,
   type ReferenceKit,
 } from "./reference.js";
-import type { ResolvedArtDirection } from "./art-direction.js";
+import { DEFAULT_AUDIO_POLICY, type AudioPolicy, type ResolvedArtDirection } from "./art-direction.js";
 import {
   payloadVerdict,
   referenceBudget,
@@ -610,6 +610,12 @@ export interface NegativeInput {
   shots?: readonly Shot[];
   audioDesign?: AudioDesign;
   /**
+   * The merged world-then-production policy (#244). Absent — a preview assembled before either
+   * was resolved — behaves exactly as it did before this existed, which is the only safe reading
+   * of "nobody told me": state no constraint rather than invent one.
+   */
+  constraints?: ReturnType<typeof standingConstraints>;
+  /**
    * Raw byte size of each attachable reference file, measured by the caller (SPEC-019 R-43).
    *
    * Planning stays pure — it cannot stat a file — so the sizes are supplied. Absent means the
@@ -626,23 +632,81 @@ export interface NegativeInput {
  * per-shot negative is a per-shot thing to forget, and the failure stays silent until an export
  * has titles burned into the picture.
  */
+/**
+ * The standing constraints a dispatch carries, world first and then production (#244, turn 59).
+ *
+ * One function, because the production screen shows this and dispatch sends it. Two ways of
+ * computing the same merge is how a screen comes to promise something the request does not say —
+ * and the whole value of writing a policy down is that it is the same policy everywhere.
+ *
+ * A production may only strengthen: `musicPolicy` can say `environmental-only` and nothing else,
+ * so the merge is a floor rather than a choice. Failure modes are concatenated, world first,
+ * because the world's are the ones every production is entitled to assume.
+ */
+export function standingConstraints(
+  direction: { audio?: AudioPolicy; failureModes?: readonly string[] } | null | undefined,
+  production?: { musicPolicy?: "environmental-only"; failureModes?: readonly string[] } | null,
+): { music: AudioPolicy["music"]; subtitles: "never"; failureModes: string[] } {
+  const worldMusic = direction?.audio?.music ?? DEFAULT_AUDIO_POLICY.music;
+  return {
+    music: production?.musicPolicy === "environmental-only" ? "environmental-only" : worldMusic,
+    subtitles: "never",
+    failureModes: [...(direction?.failureModes ?? []), ...(production?.failureModes ?? [])],
+  };
+}
+
+/**
+ * The standing-constraint suffix a reference or board prompt carries, or "" (#244, round 2).
+ *
+ * Scene dispatch reaches the failure modes through planScene; nothing else did, so key art,
+ * main photos, character sheets, looks, location views and storyboards were all outside a rule
+ * named "what every generation must obey". One composer keeps the ordering and the byte-shape
+ * identical everywhere — and returns "" rather than a lone space, so a world with no failure
+ * modes leaves every prompt byte-identical to what it was before this existed.
+ */
+export function imageConstraintSuffix(
+  direction: { audio?: AudioPolicy; failureModes?: readonly string[] } | null | undefined,
+  production?: { musicPolicy?: "environmental-only"; failureModes?: readonly string[] } | null,
+): string {
+  const negatives = derivedNegatives({ capability: "image", constraints: standingConstraints(direction, production) });
+  return negatives === null ? "" : ` ${negatives}`;
+}
+
 export function derivedNegatives(input: NegativeInput): string | null {
-  if (input.capability !== "video") return null;
-  // Always. A take is immutable, so burned-in text is damage with no version of the take without
-  // it; no surface asks for subtitles and the cut renders its own titles (R-10, D8).
-  const parts = ["No subtitles."];
+  const parts: string[] = [];
+  // The audio and subtitle clauses are about a clip's soundtrack and its burned-in text, so they
+  // are video's alone. A standing failure mode is not: "hands stay whole and countable" and "no
+  // lens flare on the harbour lamps" are things a still gets wrong just as readily, and a world
+  // that wrote them down meant them for every generation (#244). So the video-only guard moved
+  // off the whole function and onto the two clauses that are genuinely video-only.
+  if (input.capability === "video") {
+    // Always. A take is immutable, so burned-in text is damage with no version of the take
+    // without it; no surface asks for subtitles and the cut renders its own titles (R-10, D8).
+    parts.push("No subtitles.");
   // Silence has to be said. Omitting the audio direction asks for a clip with no stated
   // soundtrack, which is a clip whose soundtrack the model chooses.
-  const covered = input.shots ?? (input.shot ? [input.shot] : []);
-  const silent = covered.length > 0 && covered.every((s) => s.audio?.kind === "silence");
-  if (silent) {
-    parts.push("No audio.");
-  } else if (input.audioDesign?.scoreTrack === true) {
+    const covered = input.shots ?? (input.shot ? [input.shot] : []);
+    const silent = covered.length > 0 && covered.every((s) => s.audio?.kind === "silence");
+    if (silent) {
+      parts.push("No audio.");
+    } else if (input.audioDesign?.scoreTrack === true || input.constraints?.music === "environmental-only") {
     // Score only. Environmental and action sound belong to the shot and replacing them would
     // mean sourcing foley for every clip (R-11, D9).
-    parts.push("No background music — environmental and action sound only.");
+    //
+    // Now reachable two ways (#244): a cut that composes its own score has always implied it, and
+    // a world or production may now say it standing, before any cut exists. The condition is an
+    // or rather than a replacement — a policy that stopped applying the moment somebody added a
+    // score track would be a policy that switches itself off exactly when it matters most.
+      parts.push("No background music — environmental and action sound only.");
+    }
   }
-  return parts.join(" ");
+  // Standing failure modes last, after the audio direction: they are the world's accumulated
+  // "this keeps going wrong", and a model reading in order should meet the specific request, then
+  // what must not happen to it.
+  for (const mode of input.constraints?.failureModes ?? []) parts.push(mode);
+  // Null rather than "" when there is nothing to say, so a still with no failure modes carries
+  // exactly the prompt it carried before this existed.
+  return parts.length > 0 ? parts.join(" ") : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -857,6 +921,12 @@ export interface ScenePlanInput {
   productionId?: string;
   artDirection?: ResolvedArtDirection;
   /**
+   * The production's standing constraints, for the merge with the world's (#244). Separate from
+   * `productionId` because planning is pure and cannot look a production up — the caller holds
+   * the bundle. Absent means the production adds nothing, which is the common case.
+   */
+  production?: { musicPolicy?: "environmental-only"; failureModes?: readonly string[] };
+  /**
    * The production's audio design, which is where the score negative comes from (R-11). Absent
    * means no score track is known, and only the subtitle negative is emitted.
    */
@@ -971,6 +1041,11 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const capSec = model.limits.maxDurationSec ?? Number.POSITIVE_INFINITY;
   const pack = packScene(scene.shots, capSec);
 
+  // Merged once for the whole plan (#244). Both dispatch shapes are the same clip's constraints,
+  // and computing it twice is how the per-shot and whole-scene paths come to disagree about what
+  // the world forbids.
+  const constraints = standingConstraints(input.artDirection, input.production);
+
   const shots: ShotDispatchPlan[] = scene.shots.map((shot) => {
     const cast = perShot.get(shot.id)!;
     const budget = budgetFor(cast.cast, kits, scene, sheets, model, input.productionId);
@@ -1022,6 +1097,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       negatives: derivedNegatives({
         capability: model.capability,
         shot,
+        constraints,
         ...(input.audioDesign !== undefined ? { audioDesign: input.audioDesign } : {}),
       }),
     };
@@ -1066,6 +1142,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
             shots: pass.plan
               .map((entry) => scene.shots.find((s) => s.id === entry.shotId))
               .filter((s): s is Shot => s !== undefined),
+            constraints,
             ...(input.audioDesign !== undefined ? { audioDesign: input.audioDesign } : {}),
           }),
         };

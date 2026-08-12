@@ -1,6 +1,7 @@
 import {
   characterImageEstimateIsUsable,
   characterImageOutput,
+  imageConstraintSuffix,
   estimateCharacterImageMicroUsd,
   headGate,
   lockedTiles,
@@ -67,6 +68,8 @@ export function tileRequest(
   kit: ReferenceKit | null,
   model: ManifestModel,
   angle: ReferenceAngle,
+  /** Optional so existing callers compile; the coordinator passes it, so a real tile is bound. */
+  direction?: ResolvedArtDirection,
 ): TileRequest {
   const references: string[] = [];
   if (kit) {
@@ -91,7 +94,7 @@ export function tileRequest(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: `${styleLine(world, kit)}. ${sheet.name} — ${sheetDescription(sheet)}. ${ANGLE_PROMPT[angle]}, character reference sheet tile.`,
+        prompt: `${styleLine(world, kit)}. ${sheet.name} — ${sheetDescription(sheet)}. ${ANGLE_PROMPT[angle]}, character reference sheet tile.${imageConstraintSuffix(direction)}`,
         references,
         output: characterImageOutput(model, "reference-tile"),
       },
@@ -125,7 +128,7 @@ export function establishRequests(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${ANGLE_PROMPT["head-front"]}, character reference, candidate ${i + 1} of ${count}, distinct interpretation.`,
+        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${ANGLE_PROMPT["head-front"]}, character reference, candidate ${i + 1} of ${count}, distinct interpretation.${imageConstraintSuffix(direction)}`,
         references: [],
         output: characterImageOutput(model, "reference-tile"),
         ...(direction ? { provenance: generationProvenance(world, direction, sheet) } : {}),
@@ -216,7 +219,7 @@ export function mainPhotoRequests(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}. Head-and-shoulders identity portrait, face and physical identity clear, restrained neutral expression, no text or montage.`,
+        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}. Head-and-shoulders identity portrait, face and physical identity clear, restrained neutral expression, no text or montage.${imageConstraintSuffix(direction)}`,
         references: identityReferences,
         referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
         output: characterImageOutput(model, "main-photo", tier),
@@ -265,7 +268,7 @@ export function characterSheetRequest(
       model: model.id,
       params: {
         characterName: sheet.name,
-        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. One composite character sheet on a clean neutral field: front, three-quarter, profile and back turnaround; expression studies; costume and prop details; clear relative proportions. Preserve the supplied identity exactly.`,
+        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. One composite character sheet on a clean neutral field: front, three-quarter, profile and back turnaround; expression studies; costume and prop details; clear relative proportions. Preserve the supplied identity exactly.${imageConstraintSuffix(direction)}`,
         references: identityReferences,
         referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
         output: characterImageOutput(model, "character-sheet", tier),
@@ -319,7 +322,7 @@ export function characterLookRequests(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}. ${input.mode === "stay-close" ? "Stay close to the accepted identity and proportions." : "Push the styling while preserving the accepted identity."} Optional ${input.kind.replace("-", " ")} exploration; do not redefine identity.`,
+        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}. ${input.mode === "stay-close" ? "Stay close to the accepted identity and proportions." : "Push the styling while preserving the accepted identity."} Optional ${input.kind.replace("-", " ")} exploration; do not redefine identity.${imageConstraintSuffix(direction)}`,
         references: identityReferences,
         referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
         output: characterImageOutput(model, "character-look", tier),
@@ -503,7 +506,7 @@ export function locationViewRequests(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: `${style}. ${sheet.name} — ${locationDescription(sheet)}.${angle} ${input.name}: an establishing photograph of this place with no people in frame, architecture and spatial layout legible, no text or montage.${anchored}`,
+        prompt: `${style}. ${sheet.name} — ${locationDescription(sheet)}.${angle} ${input.name}: an establishing photograph of this place with no people in frame, architecture and spatial layout legible, no text or montage.${anchored}${imageConstraintSuffix(direction)}`,
         references,
         referenceRoles: references.map((file) => ({ file, role: "environment" as const })),
         output: characterImageOutput(model, "location-view", tier),
