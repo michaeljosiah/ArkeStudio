@@ -73,6 +73,16 @@ describe("the world's key image", () => {
     assert.ok(!bare.includes("undefined"));
   });
 
+  it("carries the world's standing failure modes, which key art can violate too", () => {
+    const request = worldImageRequest(meta(), model, { ...direction, failureModes: ["No lens flare on the harbour lamps."] });
+    assert.match(String(request.params["prompt"]), /No lens flare on the harbour lamps\.$/);
+    // None to say, nothing said: the bare prompt is byte-identical to before the field existed.
+    assert.equal(
+      String(worldImageRequest(meta(), model, direction).params["prompt"]),
+      String(worldImageRequest(meta(), model, { ...direction, failureModes: [] }).params["prompt"]),
+    );
+  });
+
   it("is an ordinary image job, so the queue can estimate, ledger and cancel it", () => {
     const request = worldImageRequest(meta(), model, direction);
     assert.equal(request.capability, "image");

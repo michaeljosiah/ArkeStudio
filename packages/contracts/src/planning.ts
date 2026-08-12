@@ -655,6 +655,23 @@ export function standingConstraints(
   };
 }
 
+/**
+ * The standing-constraint suffix a reference or board prompt carries, or "" (#244, round 2).
+ *
+ * Scene dispatch reaches the failure modes through planScene; nothing else did, so key art,
+ * main photos, character sheets, looks, location views and storyboards were all outside a rule
+ * named "what every generation must obey". One composer keeps the ordering and the byte-shape
+ * identical everywhere — and returns "" rather than a lone space, so a world with no failure
+ * modes leaves every prompt byte-identical to what it was before this existed.
+ */
+export function imageConstraintSuffix(
+  direction: { audio?: AudioPolicy; failureModes?: readonly string[] } | null | undefined,
+  production?: { musicPolicy?: "environmental-only"; failureModes?: readonly string[] } | null,
+): string {
+  const negatives = derivedNegatives({ capability: "image", constraints: standingConstraints(direction, production) });
+  return negatives === null ? "" : ` ${negatives}`;
+}
+
 export function derivedNegatives(input: NegativeInput): string | null {
   const parts: string[] = [];
   // The audio and subtitle clauses are about a clip's soundtrack and its burned-in text, so they

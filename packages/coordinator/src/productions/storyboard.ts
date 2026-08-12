@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  imageConstraintSuffix,
   estimateMicroUsd,
   planStoryboard,
   sceneImageOutput,
@@ -76,7 +77,7 @@ export function storyboardRequest(
   if (drawnBy.capability !== "image") {
     throw new Error(`${drawnBy.displayName} cannot draw a storyboard — it is not an image model`);
   }
-  const plan = planStoryboard({
+  const planned = planStoryboard({
     world: world.meta,
     sheets: world.sheets,
     scene,
@@ -85,6 +86,23 @@ export function storyboardRequest(
       ? { artDirection: world.artDirection.description }
       : {}),
   });
+  // Standing failure modes ride the board too (#244, round 2): "hands stay whole" fails in line
+  // art as readily as in a render. Appended onto the plan rather than at params, so the prompt a
+  // reviewer reads is the prompt the model gets. Production constraints included — a board is
+  // production work, unlike a kit, which belongs to the world.
+  const production = world.productions.find((candidate) => candidate.meta.id === productionId)?.meta;
+  const plan = {
+    ...planned,
+    prompt: `${planned.prompt}${imageConstraintSuffix(
+      world.artDirection,
+      production
+        ? {
+            ...(production.musicPolicy !== undefined ? { musicPolicy: production.musicPolicy } : {}),
+            failureModes: production.failureModes,
+          }
+        : null,
+    )}`,
+  };
   const output = sceneImageOutput(drawnBy);
   const estimatedMicroUsd = estimateMicroUsd(drawnBy, {
     images: 1,

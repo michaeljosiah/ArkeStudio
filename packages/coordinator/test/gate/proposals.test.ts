@@ -344,6 +344,38 @@ describe("a world look through the generic gate", () => {
    * this used to refresh the hash and leave a record whose version and history had been computed
    * against nothing, presented for review as though it followed the look now on disk.
    */
+  it("a description-only proposal, rebased over a policy change, does not drag the policy back", async () => {
+    // Round 2's P1. Staging copies the then-current policy into the staged record, so "did not
+    // touch it" and "set it to what it already was" serialize identically. The base snapshot is
+    // what still tells them apart: equal-to-base means inherited, and inherited takes the live
+    // value — otherwise rebasing a proposal about *wording* reverts someone else's policy edit.
+    const { dir, gate, store } = await openGateSafely();
+
+    // Mine first: a description-only change, staged while the world is on the defaults.
+    const mine = await gate.stageArtDirectionChange("Ink and wash, colder.", null);
+
+    // Theirs lands while mine waits. Only one look proposal may be open at a time, so the
+    // concurrent edit is written the way an accepted one leaves the world: the live file moves.
+    const live = JSON.parse(await readFile(join(dir, "art-direction", "art-direction.json"), "utf8")) as Record<string, unknown>;
+    const moved = {
+      ...live,
+      audio: { music: "allow-model-score", subtitles: "never" },
+      failureModes: ["Live rule."],
+    };
+    await writeFile(join(dir, "art-direction", "art-direction.json"), `${JSON.stringify(moved, null, 2)}
+`, "utf8");
+
+    const { conflicts } = await gate.rebase(mine.id);
+    assert.deepEqual(conflicts, []);
+    const restated = JSON.parse(
+      await readFile(join(dir, ".proposals", mine.id, "art-direction", "art-direction.json"), "utf8"),
+    ) as { description: string; audio: { music: string }; failureModes: string[] };
+    assert.match(restated.description, /Ink and wash/, "the wording is still mine");
+    assert.equal(restated.audio.music, "allow-model-score", "the policy is still theirs");
+    assert.deepEqual(restated.failureModes, ["Live rule."], "and so are the failure modes");
+    void store;
+  });
+
   it("a rebase keeps the policy the proposal decided, and files the live one under its version", async () => {
     // The third rebuilder, after the gate and the commit (#244). Dropping the fields here would
     // revert a policy specifically when two people touched the look at once — the case nobody
