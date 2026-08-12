@@ -1640,6 +1640,51 @@ describe("standing constraints (#244, design turn 59)", () => {
     assert.match(withCut, /No background music/, "a composed score still forbids a generated one");
   });
 
+  it("reaches a real dispatch — both per-shot and whole-scene", async () => {
+    // The gap the review caught: the merge existed and planScene never called it, so a policy
+    // was durable, versioned, displayed — and absent from every request it was written for.
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const base = production.scenes[0]!;
+    const scene: Scene = { ...base, shots: [shot(1, 5, "@maren-kest at the rail"), shot(2, 5, "@maren-kest turns")] };
+    const input = {
+      world: bundle.meta,
+      productionId: production.meta.id,
+      artDirection: { ...bundle.artDirection, audio: { music: "environmental-only" as const, subtitles: "never" as const }, failureModes: ["Hands stay whole and countable."] },
+      production: { failureModes: ["The lamp is always lit from the left."] },
+      sheets: bundle.sheets,
+      kits: bundle.referenceKits,
+      scene,
+      selections: {},
+      model: VIDEO_MODEL,
+    };
+
+    const perShot = planScene(input, "per-shot");
+    const negatives = perShot.shots[0]!.parts.negatives!;
+    assert.match(negatives, /No background music/, "the world's policy reaches the request");
+    assert.match(negatives, /Hands stay whole and countable\./);
+    assert.match(negatives, /The lamp is always lit from the left\.$/, "and the production's, after it");
+
+    const whole = planScene(input, "whole-scene");
+    assert.match(whole.passReferences[0]!.negatives!, /No background music/, "the pass carries the same clip's constraints");
+    assert.match(whole.passReferences[0]!.negatives!, /The lamp is always lit from the left\./);
+    await store.close();
+  });
+
+  it("carries visual failure modes onto stills, and the soundtrack clauses only onto video", () => {
+    // "Hands stay whole" is not a soundtrack rule. A world that wrote it down meant it for every
+    // generation, and derivedNegatives used to return before stills could ever see it.
+    const constraints = standingConstraints(world("environmental-only", ["Hands stay whole and countable."]));
+    const still = derivedNegatives({ capability: "image", constraints })!;
+    assert.equal(still, "Hands stay whole and countable.", "the visual rule, and nothing about audio");
+    assert.ok(!still.includes("No subtitles"), "a still has no soundtrack and burns in no titles");
+
+    // And a still with nothing to say still says nothing, exactly as before this existed.
+    assert.equal(derivedNegatives({ capability: "image", constraints: standingConstraints(world("environmental-only")) }), null);
+    assert.equal(derivedNegatives({ capability: "image" }), null);
+  });
+
   it("behaves exactly as it did before the policy existed when nobody resolved one", () => {
     // A preview assembled before the world was read carries no constraints. Stating one nobody
     // asked for would be inventing policy from absence.

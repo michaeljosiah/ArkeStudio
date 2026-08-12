@@ -2713,6 +2713,12 @@ export class Coordinator {
             world: bundle.meta,
             artDirection: bundle.artDirection,
             productionId: production.meta.id,
+            // The production's own standing constraints, merged with the world's inside planning
+            // (#244). Passed as the record rather than looked up there, because planning is pure.
+            production: {
+              ...(production.meta.musicPolicy !== undefined ? { musicPolicy: production.meta.musicPolicy } : {}),
+              failureModes: production.meta.failureModes,
+            },
             sheets: bundle.sheets,
             kits: bundle.referenceKits,
             scene,
