@@ -21,6 +21,15 @@ import {
   type Job,
   ProposalSchema,
   ProductionSchema,
+  ProductionSpineSchema,
+  SpineAnchorSchema,
+  SpineMarkerImportSchema,
+  MediaInfoSchema,
+  TakeMediaInfoRecordSchema,
+  anchorProblems,
+  anchorBudgetSec,
+  orderedAnchors,
+  orderedMarkers,
   ReferenceKitSchema,
   compilationIsStale,
   orderedLocationViews,
@@ -305,10 +314,17 @@ describe("scenes and selection", () => {
     assert.throws(() => SceneSchema.parse(withSelection));
   });
 
-  it("validates selections.json", () => {
+  it("validates selections.json, defaulting the trim to the start of the media", () => {
     const selections = { sh_12: { acceptedTakeId: newId("tk"), startFrameTakeId: newId("tk") } };
-    assert.deepEqual(SelectionsSchema.parse(selections), selections);
+    // No longer a round trip (#253): a selection written before trims existed reads as trimmed
+    // from zero, which is what it always meant. Nothing rewrites the file to say so.
+    assert.deepEqual(SelectionsSchema.parse(selections), {
+      sh_12: { ...selections.sh_12, trimInSec: 0 },
+    });
+    assert.equal(SelectionsSchema.parse({ sh_12: { trimInSec: 4.25 } })["sh_12"]?.trimInSec, 4.25);
     assert.throws(() => SelectionsSchema.parse({ sh_12: { acceptedTakeId: "not-a-take" } }));
+    // A negative in-point is a cut before the file begins.
+    assert.throws(() => SelectionsSchema.parse({ sh_12: { trimInSec: -1 } }));
   });
 });
 
@@ -1133,5 +1149,108 @@ describe("domain events and frames", () => {
       HarnessEventSchema.parse({ type: "message.completed", sessionId: "s1", text: "done" }),
     );
     assert.throws(() => HarnessEventSchema.parse({ type: "message.completed", sessionId: 1, text: "x" }));
+  });
+});
+
+describe("the audio spine (#253, design turn 60)", () => {
+  const spine = (anchors: Record<string, unknown>, markers: unknown[] = []) =>
+    ProductionSpineSchema.parse({
+      schemaVersion: 1,
+      revision: 1,
+      trackArtifactId: newId("ar"),
+      markers,
+      anchors,
+      updatedAt: "2026-08-12T10:00:00Z",
+    });
+
+  it("refuses an anchor that ends before it starts, and mutes a clip unless told otherwise", () => {
+    assert.throws(() => SpineAnchorSchema.parse({ startSec: 10, endSec: 10 }), /endSec/);
+    assert.throws(() => SpineAnchorSchema.parse({ startSec: 10, endSec: 4 }), /endSec/);
+    // Mute is the default because a generated clip's soundtrack is the model's invention and the
+    // song is the thing being cut to.
+    assert.deepEqual(SpineAnchorSchema.parse({ startSec: 0, endSec: 8 }).clipAudio, { mode: "mute" });
+    assert.deepEqual(SpineAnchorSchema.parse({ startSec: 0, endSec: 8, clipAudio: { mode: "keep-diegetic" } }).clipAudio, {
+      mode: "keep-diegetic",
+      gainDb: -12,
+    });
+    // The master never ducks, so a clip cannot be mixed above it.
+    assert.throws(() =>
+      SpineAnchorSchema.parse({ startSec: 0, endSec: 8, clipAudio: { mode: "keep-diegetic", gainDb: 3 } }),
+    );
+  });
+
+  it("treats touching anchors as legal and overlapping ones as a refusal", () => {
+    const shots = new Set(["sh_1", "sh_2"]);
+    // Half-open [start, end): 8.0 belongs to sh_2 alone, so this is not an overlap.
+    const touching = spine({ sh_1: { startSec: 0, endSec: 8 }, sh_2: { startSec: 8, endSec: 16 } });
+    assert.deepEqual(anchorProblems(touching, 60, shots), []);
+
+    const overlapping = spine({ sh_1: { startSec: 0, endSec: 8 }, sh_2: { startSec: 6.5, endSec: 16 } });
+    const problems = anchorProblems(overlapping, 60, shots);
+    assert.equal(problems.length, 1);
+    assert.equal(problems[0]?.kind, "overlaps");
+    assert.match(problems[0]?.detail ?? "", /overlaps sh_1 by 1\.500s/, "says how much, not just that");
+  });
+
+  it("reports an anchor whose shot is gone rather than dropping it", () => {
+    // Deleting a shot must not silently delete twelve seconds of the song nobody agreed to give up.
+    const orphaned = spine({ sh_1: { startSec: 0, endSec: 8 }, sh_gone: { startSec: 20, endSec: 32 } });
+    const problems = anchorProblems(orphaned, 60, new Set(["sh_1"]));
+    assert.deepEqual(problems.map((p) => p.kind), ["orphaned"]);
+    assert.match(problems[0]?.detail ?? "", /sh_gone/);
+  });
+
+  it("refuses an anchor that runs past the end of the song", () => {
+    const past = spine({ sh_1: { startSec: 50, endSec: 70 } });
+    const problems = anchorProblems(past, 60, new Set(["sh_1"]));
+    assert.deepEqual(problems.map((p) => p.kind), ["out-of-bounds"]);
+    assert.match(problems[0]?.detail ?? "", /past the track's 60\.000s/);
+  });
+
+  it("plays in anchor order, not scene order, and states each shot's budget", () => {
+    // sh_9 is a later shot number sitting earlier in the song. Anchor order is what the cut uses.
+    const out = spine({ sh_9: { startSec: 5, endSec: 12 }, sh_2: { startSec: 30, endSec: 38 } });
+    assert.deepEqual(orderedAnchors(out).map((a) => a.shotId), ["sh_9", "sh_2"]);
+    assert.equal(anchorBudgetSec(out.anchors["sh_9"]!), 7);
+  });
+
+  it("orders markers by time and keeps insertion order on a tie", () => {
+    const marker = (kind: "section" | "lyric", at: number, label: string) =>
+      kind === "section"
+        ? { kind, id: newId("mk"), label, atSec: at, source: "manual" as const }
+        : { kind, id: newId("mk"), text: label, atSec: at, source: "lrc" as const };
+    const parsed = spine({}, [
+      marker("lyric", 30.25, "second by time"),
+      marker("section", 0, "Intro"),
+      marker("lyric", 30.25, "tied, and stays second"),
+    ]);
+    const ordered = orderedMarkers(parsed.markers);
+    assert.deepEqual(
+      ordered.map((m) => (m.kind === "section" ? m.label : m.text)),
+      ["Intro", "second by time", "tied, and stays second"],
+    );
+  });
+
+  it("accepts exactly the documented import shape and nothing adjacent to it", () => {
+    const valid = { sections: [{ label: "Intro", atSec: 0 }], lyrics: [{ text: "forgive me", atSec: 30.25 }] };
+    assert.deepEqual(SpineMarkerImportSchema.parse(valid), valid);
+    // Both arrays are required: an omitted `lyrics` and an empty one would otherwise mean the
+    // same thing going in and different things coming out.
+    assert.throws(() => SpineMarkerImportSchema.parse({ sections: [] }));
+    assert.throws(() => SpineMarkerImportSchema.parse({ sections: [], lyrics: [], bpm: 92 }));
+    assert.throws(() => SpineMarkerImportSchema.parse({ sections: [], lyrics: [{ text: " ", atSec: 1 }] }));
+    assert.throws(() => SpineMarkerImportSchema.parse({ sections: [], lyrics: [{ text: "x", atSec: -1 }] }));
+  });
+
+  it("measures media rather than believing a filename, and keeps the probe beside the take", () => {
+    assert.throws(() => MediaInfoSchema.parse({ durationSec: 0, hasAudio: true }), /positive|greater/i);
+    const record = {
+      sourceHash: `sha256:${"a".repeat(64)}`,
+      mediaInfo: { durationSec: 222.14, hasAudio: true, audioChannels: 2, audioSampleRateHz: 48000 },
+      probedAt: "2026-08-12T10:00:00Z",
+    };
+    assert.deepEqual(TakeMediaInfoRecordSchema.parse(record), record);
+    // A short hash would make a record that outlived its media indistinguishable from a current one.
+    assert.throws(() => TakeMediaInfoRecordSchema.parse({ ...record, sourceHash: "sha256:abc" }));
   });
 });

@@ -264,7 +264,22 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       ? ((await tryParse(`productions/${id}/selections.json`, (raw) => SelectionsSchema.parse(JSON.parse(raw)))) ?? {})
       : {};
 
-    productions.push({ meta: metaDoc, story, treatment, chapters, scenes, takes, reviews, selections });
+    // spine.json, cut.json and the per-take media-info sidecars are loaded in the next slice.
+    // Stated explicitly rather than left to a default so the absence is a decision on the page
+    // rather than a surprise at the first read: no spine means the legacy scene-order cut.
+    productions.push({
+      meta: metaDoc,
+      story,
+      treatment,
+      chapters,
+      scenes,
+      takes,
+      reviews,
+      selections,
+      spine: null,
+      cut: { audio: [] },
+      takeMediaInfo: {},
+    });
   }
 
   let referenceReviews: WorldBundle["referenceReviews"] = [];

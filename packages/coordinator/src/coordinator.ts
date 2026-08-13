@@ -2781,7 +2781,7 @@ export class Coordinator {
             worldId: msg.worldId,
             productionId: msg.productionId,
             shotId: msg.shotId,
-            selection: { acceptedTakeId: msg.takeId as never },
+            selection: { acceptedTakeId: msg.takeId as never, trimInSec: 0 },
           });
           await this.refreshWorldSnapshot(msg.worldId);
         } catch {

@@ -142,6 +142,13 @@ export const ShotSelectionSchema = z
   .object({
     acceptedTakeId: TakeIdSchema.nullable().optional(),
     startFrameTakeId: TakeIdSchema.nullable().optional(),
+    /**
+     * Where this shot starts inside its selected media (#253). Operational selection state, not
+     * an edit to the take: the take is immutable and this says which part of it is being used.
+     * Changing the selected take resets it to 0 — a trim measured against different footage is
+     * a number that means nothing, and silently keeping it would cut into the wrong frame.
+     */
+    trimInSec: z.number().min(0).default(0),
   })
   .strict();
 export type ShotSelection = z.infer<typeof ShotSelectionSchema>;

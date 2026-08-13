@@ -26,6 +26,8 @@ export * from "./planning.js";
 export * from "./cut.js";
 export * from "./activity.js";
 export * from "./art-direction.js";
+export * from "./media.js";
+export * from "./spine.js";
 export * from "./provider-call.js";
 export * from "./update.js";
 export * from "./storyboard.js";

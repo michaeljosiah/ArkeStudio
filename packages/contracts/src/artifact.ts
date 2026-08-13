@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MediaInfoSchema } from "./media.js";
 import { ArtifactIdSchema, IsoDateTimeSchema, Sha256Schema, SlugSchema } from "./ids.js";
 
 /**
@@ -70,6 +71,12 @@ export const ArtifactSidecarSchema = z
      * existing links keep pointing at the old one; pickers derive exclusion from this field.
      */
     supersedes: ArtifactIdSchema.optional(),
+    /**
+     * What the file measurably is (#253). A sidecar is already replaceable while its media bytes
+     * stay immutable, so a measurement can land here without touching what was filed. Absent
+     * means nobody has measured it — which is why assigning a master track probes first.
+     */
+    mediaInfo: MediaInfoSchema.optional(),
     /**
      * Extraction state (SPEC-015 R-15..R-17): verified candidates awaiting the batch review,
      * and the hashes already decided so a re-run never re-offers them (D12).
