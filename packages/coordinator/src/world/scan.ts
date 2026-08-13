@@ -21,6 +21,7 @@ import {
   ProductionSpineSchema,
   CutFileSchema,
   TakeMediaInfoRecordSchema,
+  type TakeMediaInfoRecord,
   SheetSchema,
   StoryOverviewSchema,
   TakeSchema,
@@ -318,16 +319,34 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       // record of what was dispatched and what came back, and a measurement taken afterwards is
       // neither. A take with no sidecar is simply one nobody has measured.
       if (take?.media !== undefined) {
-        // Read straight through rather than stat-then-read. Most takes have no sidecar, and an
-        // existence check on every one of them is a second syscall per take spent proving a
-        // negative — enough to push a 500-take world past its cold-scan budget. A missing file
-        // is simply a take nobody measured, so it is not a world problem either.
-        const record = await readFile(
-          toExtendedLength(join(pdir, "takes", takeDir, "media-info.json")),
-          "utf8",
-        )
-          .then((raw) => TakeMediaInfoRecordSchema.parse(JSON.parse(raw)))
-          .catch(() => null);
+        /*
+         * One read, and everything tryParse used to give (Codex round 2).
+         *
+         * Read straight through rather than stat-then-read: most takes have no sidecar, and an
+         * existence check on each is a second syscall spent proving a negative — enough to push
+         * a 500-take world past its cold-scan budget.
+         *
+         * But absence is the *only* thing that may pass quietly. A sidecar that is present and
+         * malformed is a file somebody has to fix, so it keeps the scanner's per-file error
+         * contract; and a sidecar that was read must enter the manifest, or editing one while
+         * the world is open changes nothing reconciliation can see and the old duration is
+         * served until an unrelated reload.
+         */
+        const rel = `productions/${id}/takes/${takeDir}/media-info.json`;
+        const raw = await readFile(toExtendedLength(join(dir, rel)), "utf8").catch(
+          (err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : err),
+        );
+        let record: TakeMediaInfoRecord | null = null;
+        if (raw instanceof Error) {
+          problems.push({ path: toPortable(rel), message: raw.message.slice(0, 500) });
+        } else if (raw !== null) {
+          manifest[toPortable(rel)] = sha256(raw);
+          try {
+            record = TakeMediaInfoRecordSchema.parse(JSON.parse(raw));
+          } catch (err) {
+            problems.push({ path: toPortable(rel), message: (err as Error).message.slice(0, 500) });
+          }
+        }
         /*
          * The hash is checked, not merely stored (Codex round 1).
          *
