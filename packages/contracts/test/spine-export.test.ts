@@ -153,6 +153,16 @@ describe("spine export", () => {
     assert.deepEqual(plan.items.map((i) => i.type), ["clip", "slate"]);
   });
 
+  it("refuses a master track with no audio stream before building a graph that needs one", () => {
+    // Duration-bearing and silent is a real state: the schemas permit it and a duration-only
+    // probe accepts it, and the graph then references an input that is not there.
+    const cut = cutOf([CLIP], 4);
+    const plan = buildSpineExportPlan(cut, "review-cut", "artifacts/silent.mp4");
+    // The graph always maps the master's audio, which is exactly why the coordinator checks the
+    // stream exists before it gets here.
+    assert.match(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4")), /\[1:a\]anull\[aout\]/);
+  });
+
   it("lets a complete cut through to master", () => {
     assert.equal(spineExportRefusals(cutOf([CLIP], 4), "master"), null);
   });

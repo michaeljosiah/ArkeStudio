@@ -474,6 +474,8 @@ export class Coordinator {
   private readonly voiceService: VoiceService | null;
   /** SPEC-013: exports in flight, cancellable by id (R-21). */
   private readonly exports = new Map<string, ExportHandle>();
+  /** Productions whose export is being set up or is already running — one at a time. */
+  private readonly exportsInFlight = new Set<string>();
 
   constructor(private readonly opts: CoordinatorOptions) {
     this.secrets = opts.secretRegistry ?? new SecretRegistry();
@@ -2848,6 +2850,18 @@ export class Coordinator {
         if (!store) return;
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production) return;
+        /*
+         * One export per production at a time (Codex round 3).
+         *
+         * Measuring the master happens before runExport hands back an id, and ffprobe waits up
+         * to twenty seconds on a file it cannot read. In that window the client has no export to
+         * cancel and every further click starts another probe, each of which goes on to launch
+         * its own encode. The claim is taken before the first await and released on every exit.
+         */
+        if (this.exportsInFlight.has(msg.productionId)) return;
+        this.exportsInFlight.add(msg.productionId);
+        let started = false;
+        try {
         const runner = this.opts.ffmpeg;
         const emitProgress = (
           exportId: string,
@@ -2889,15 +2903,27 @@ export class Coordinator {
         const trackFile = spine
           ? store.getBundle().artifacts.find((a) => a.id === spine.trackArtifactId)?.file
           : undefined;
-        const trackDurationSec =
-          trackFile !== undefined && this.opts.mediaProbe
-            ? // Extended-length like every other path this repository hands to a tool: a world
-              // nested past 260 characters on Windows would otherwise report its master as
-              // unreadable and refuse the export for where it lives (Codex round 2).
-              await this.opts.mediaProbe.durationSec(
-                toExtendedLength(join(store.dir, "artifacts", fromPortable(trackFile))),
-              )
+        // Extended-length like every other path this repository hands to a tool: a world nested
+        // past 260 characters on Windows would otherwise report its master as unreadable and
+        // refuse the export for where it lives (Codex round 2).
+        const trackPath =
+          trackFile !== undefined ? toExtendedLength(join(store.dir, "artifacts", fromPortable(trackFile))) : null;
+        // The whole measurement rather than the duration alone: a master with no audio stream
+        // measures a perfectly good length and then fails the encode on a missing input, which is
+        // a refusal that belongs here in words rather than in ffmpeg's (Codex round 3).
+        const trackInfo =
+          trackPath !== null && this.opts.mediaProbe?.info
+            ? await this.opts.mediaProbe.info(trackPath)
             : null;
+        const trackDurationSec =
+          trackInfo?.durationSec ??
+          (trackPath !== null && this.opts.mediaProbe && !this.opts.mediaProbe.info
+            ? await this.opts.mediaProbe.durationSec(trackPath)
+            : null);
+        if (spine && trackInfo !== null && !trackInfo.hasAudio) {
+          emitProgress("ex_none", "failed", 0, null, "the master track has no audio stream — assign a track that does");
+          return;
+        }
 
         let buildArgs: (stage: string) => string[];
         if (spine && trackFile !== undefined && trackDurationSec !== null) {
@@ -2938,12 +2964,19 @@ export class Coordinator {
         );
         this.exports.set(handle.id, handle);
         emitProgress(handle.id, "running", 0, null, null);
+        started = true;
         this.trackBackground(handle.done.then((result) => {
           this.exports.delete(handle.id);
+          // Released when the encode ends, not when this handler returns: the claim covers the
+          // running export too, or a second click during it launches a duplicate.
+          this.exportsInFlight.delete(msg.productionId);
           if (result.status === "done") emitProgress(handle.id, "done", 100, result.output, null);
           else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
           else emitProgress(handle.id, "failed", 0, null, result.error);
         }));
+        } finally {
+          if (!started) this.exportsInFlight.delete(msg.productionId);
+        }
         return;
       }
       case "cancel-export": {
