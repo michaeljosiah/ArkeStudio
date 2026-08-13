@@ -184,6 +184,18 @@ describe("importing a marker map somebody else made (#253)", () => {
       assert.ok(!past.ok);
     });
 
+    it("does not round the track's length up when checking the bound", () => {
+      // Codex round 5, a regression from round 4's own fix: quantising the *bound* to
+      // milliseconds rounded 30.0206s up to 30021ms and admitted a marker at 30.021s — past the
+      // end of the song. The arithmetic stays integer; the comparison uses the measured duration.
+      const past = parseLrc("[00:30.021]x", 30.0206);
+      assert.ok(!past.ok, "30.021s is after a 30.0206s track ends");
+
+      // And the exact boundary is still allowed, which is what round 4 fixed.
+      const exact = parseLrc(["[offset:+946]", "[00:29.074]x"].join(NL), 30.02);
+      assert.ok(exact.ok);
+    });
+
     it("refuses a lyric past the end of the song, while the line number still exists", () => {
       // Codex round 2 P1: the duration bound lived only in the JSON-shaped helper, which can say
       // `lyrics[7]` and not "line 12" — so LRC had no upper bound at all.

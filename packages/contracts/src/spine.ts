@@ -364,7 +364,12 @@ export function parseLrc(
           },
         };
       }
-      if (trackDurationSec !== undefined && shiftedMs > Math.round(trackDurationSec * 1000)) {
+      // The shift is integer milliseconds; the *bound* is compared in seconds against the
+      // duration as measured (Codex round 5). Rounding the duration to milliseconds rounded it
+      // *up* — a 30.0206s track became 30021ms and admitted a marker at 30.021s, past the end of
+      // the song. ffprobe reports whatever precision the container carries, and quantising the
+      // thing being compared against is not the same as quantising the arithmetic.
+      if (trackDurationSec !== undefined && shifted > trackDurationSec) {
         return {
           ok: false,
           refusal: {
