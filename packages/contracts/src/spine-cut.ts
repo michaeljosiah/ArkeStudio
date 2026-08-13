@@ -21,6 +21,9 @@ import { anchorBudgetSec, anchorProblems, orderedAnchors, type ClipAudioPolicy, 
 /** Below a millionth of a second is float noise, not a gap — one frame at 24fps is 0.0417s. */
 const EPSILON = 1e-6;
 
+/** Kinds a picture renderer can decode as video. A voice take has media and no frames. */
+const PICTURE_KINDS: ReadonlySet<Take["kind"]> = new Set(["clip", "frame", "still"]);
+
 export type SpineCutSegmentKind = "clip" | "slate" | "black";
 
 export interface SpineCutSegment {
@@ -70,6 +73,14 @@ interface Material {
   inSec: number;
   /** How much is usable from `inSec`, or undefined when the file has never been measured. */
   availableSec: number | undefined;
+  /**
+   * A boundary the material may never be read past, whatever the anchor asks for.
+   *
+   * Distinct from `availableSec` because a measurement can be missing while a boundary is still
+   * authoritative: a pass segment's planned end is where the next shot begins, and reading past
+   * it plays somebody else's shot regardless of how long the file turns out to be.
+   */
+  limitSec: number | undefined;
 }
 
 /**
@@ -88,6 +99,11 @@ interface Material {
  */
 function materialFor(take: Take, production: ProductionBundle, takesById: ReadonlyMap<string, Take>): Material | null {
   const productionId = production.meta.id;
+  // A voice take covers its shot and is offered by the same Accept action as a clip, so an
+  // audio-only file reaches here as a candidate for picture (Codex round 2). Having media is not
+  // the question; being something a picture renderer can decode is. Anything else is not
+  // material, and the shot slates rather than being counted as covered by a file with no frames.
+  if (!PICTURE_KINDS.has(take.kind)) return null;
   if (take.segment) {
     const pass = takesById.get(take.segment.passTakeId);
     if (!pass?.media) return null;
@@ -97,6 +113,7 @@ function materialFor(take: Take, production: ProductionBundle, takesById: Readon
       path: `productions/${productionId}/takes/${pass.id}/${pass.media}`,
       inSec: take.segment.inSec,
       availableSec: probed === undefined ? undefined : Math.max(0, Math.min(planned, probed - take.segment.inSec)),
+      limitSec: planned,
     };
   }
   if (!take.media) return null;
@@ -104,6 +121,7 @@ function materialFor(take: Take, production: ProductionBundle, takesById: Readon
     path: `productions/${productionId}/takes/${take.id}/${take.media}`,
     inSec: 0,
     availableSec: production.takeMediaInfo[take.id]?.mediaInfo.durationSec,
+    limitSec: undefined,
   };
 }
 
@@ -205,15 +223,30 @@ export function deriveSpineCut(
     const discarded = start - anchor.startSec;
     const inSec = material.inSec + trim + discarded;
     const usable = material.availableSec === undefined ? undefined : material.availableSec - trim - discarded;
+    const limited = material.limitSec === undefined ? undefined : material.limitSec - trim - discarded;
 
-    if (usable !== undefined && usable <= EPSILON) {
+    /*
+     * Everything that can shorten the clip, resolved once (Codex round 2).
+     *
+     * The boundary binds whether or not a measurement exists: making an unprobed segment's
+     * availability unknown was right, and letting unknown then mean "take the whole window" read
+     * an unprobed [12,18) segment as [14,20) and played two seconds of the next shot. Checking
+     * only `usable` for exhaustion had the same blind spot from the other side -- a cap that
+     * leaves nothing produces a zero-length clip rather than a slate.
+     */
+    const capped = [budget, usable, limited]
+      .filter((v): v is number => v !== undefined)
+      .reduce((a, b) => Math.min(a, b));
+
+    if (capped <= EPSILON) {
+      const consumed = discarded > EPSILON ? `trim of ${trim.toFixed(3)}s and ${discarded.toFixed(3)}s covered by an earlier anchor` : `trim of ${trim.toFixed(3)}s`;
       problems.push({
         shotId,
         kind: "short",
         detail:
-          discarded > EPSILON
-            ? `trim of ${trim.toFixed(3)}s and ${discarded.toFixed(3)}s covered by an earlier anchor leave nothing of a ${material.availableSec?.toFixed(3)}s take`
-            : `trim of ${trim.toFixed(3)}s leaves nothing of a ${material.availableSec?.toFixed(3)}s take`,
+          usable !== undefined && usable <= EPSILON
+            ? `${consumed} leave nothing of a ${material.availableSec?.toFixed(3)}s take`
+            : `${consumed} leave nothing inside the take's ${material.limitSec?.toFixed(3)}s segment`,
       });
       segments.push({ kind: "slate", startSec: start, endSec: end, label: `${label} · ${budget.toFixed(1)}s`, shotId, sceneNumber: shot.sceneNumber });
       cursor = end;
@@ -226,7 +259,10 @@ export function deriveSpineCut(
       problems.push({ shotId, kind: "unmeasured", detail: `take ${take.id} has not been probed, so its length is assumed to cover the window` });
     }
 
-    const used = usable === undefined ? budget : Math.min(usable, budget);
+    // Snapped rather than dropped: a take falling a millionth of a second short of its window is
+    // float noise, but leaving the clip at its measured end while the cursor moved to the anchor's
+    // opened a hole in a timeline this function promises has none (Codex round 2).
+    const used = budget - capped <= EPSILON ? budget : capped;
     const clipEnd = start + used;
     segments.push({
       kind: "clip",

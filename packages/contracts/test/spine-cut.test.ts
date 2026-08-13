@@ -272,6 +272,70 @@ describe("deriveSpineCut", () => {
     assert.ok(cut.problems.some((p) => p.kind === "orphaned"));
   });
 
+  it("keeps an unprobed segment inside its planned boundary", () => {
+    // The measurement is missing; the boundary is not. [12,18) with a 2s trim in a 6s window must
+    // read [14,18) and slate the rest, never [14,20) — which is two seconds of the next shot.
+    const cut = deriveSpineCut(
+      bundle({
+        shots: SHOTS,
+        takes: [take(TKP, { media: "pass.mp4" }), take(TKS, { segment: { passTakeId: TKP, inSec: 12, outSec: 18 } })],
+        selections: { [SH1]: { acceptedTakeId: TKS, trimInSec: 2 } },
+      }),
+      spine({ [SH1]: { startSec: 0, endSec: 6, clipAudio: { mode: "mute" } } }),
+      6,
+    );
+    assert.deepEqual(cut.segments[0]!.media, { path: `productions/prod-1/takes/${TKP}/pass.mp4`, inSec: 14, outSec: 18 });
+    assert.deepEqual(cut.segments.map((s) => [s.kind, s.startSec, s.endSec]), [["clip", 0, 4], ["slate", 4, 6]]);
+    assert.ok(cut.problems.some((p) => p.kind === "unmeasured"));
+  });
+
+  it("slates rather than emitting a zero-length clip when the boundary leaves nothing", () => {
+    const cut = deriveSpineCut(
+      bundle({
+        shots: SHOTS,
+        takes: [take(TKP, { media: "pass.mp4" }), take(TKS, { segment: { passTakeId: TKP, inSec: 12, outSec: 18 } })],
+        selections: { [SH1]: { acceptedTakeId: TKS, trimInSec: 6 } },
+      }),
+      spine({ [SH1]: { startSec: 0, endSec: 6, clipAudio: { mode: "mute" } } }),
+      6,
+    );
+    assert.deepEqual(cut.segments.map((s) => s.kind), ["slate"]);
+    assert.ok(cut.problems.some((p) => p.kind === "short"));
+  });
+
+  it("keeps the timeline gapless when a take falls a hair short of its window", () => {
+    const cut = deriveSpineCut(
+      bundle({
+        shots: SHOTS,
+        takes: [take(TK1, { media: "clip.mp4" })],
+        selections: { [SH1]: { acceptedTakeId: TK1 } },
+        takeMediaInfo: { [TK1]: 9.9999995 },
+      }),
+      spine({ [SH1]: { startSec: 0, endSec: 10, clipAudio: { mode: "mute" } } }),
+      10,
+    );
+    assert.deepEqual(cut.segments.map((s) => [s.kind, s.startSec, s.endSec]), [["clip", 0, 10]]);
+    for (let i = 1; i < cut.segments.length; i += 1) assert.equal(cut.segments[i]!.startSec, cut.segments[i - 1]!.endSec);
+    assert.equal(cut.segments.at(-1)!.endSec, 10);
+  });
+
+  it("will not use a voice take as picture just because it has a file", () => {
+    // A voice arrival covers its shot and the Generate workspace offers the same Accept action
+    // for it. Counting it as covered puts an audio path where a picture renderer expects frames.
+    const cut = deriveSpineCut(
+      bundle({
+        shots: SHOTS,
+        takes: [take(TK1, { kind: "voice", media: "line.wav" })],
+        selections: { [SH1]: { acceptedTakeId: TK1 } },
+        takeMediaInfo: { [TK1]: 30 },
+      }),
+      spine({ [SH1]: { startSec: 0, endSec: 6, clipAudio: { mode: "mute" } } }),
+      6,
+    );
+    assert.deepEqual(cut.segments.map((s) => s.kind), ["slate"]);
+    assert.equal(cut.problems.find((p) => p.kind === "no-take")?.shotId, SH1);
+  });
+
   it("truncates at the end of the track and names the anchor that ran past it", () => {
     const cut = deriveSpineCut(
       bundle({
