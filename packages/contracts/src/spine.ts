@@ -283,16 +283,10 @@ export function parseLrc(
     const stamps: number[] = [];
     let match: RegExpExecArray | null;
     let consumed = 0;
-    let strayStamp: string | null = null;
     while ((match = LRC_STAMP.exec(line)) !== null) {
-      if (match.index !== consumed) {
-        // The loop already knows a timestamp sits somewhere it should not. Round 1 answered this
-        // by sniffing whether the body *began* with a bracket, which caught
-        // `[00:30][00:61]first` and missed `[00:30]first[00:40]second` — one marker whose words
-        // were "first[00:40]second", the second stamp silently discarded.
-        strayStamp = match[0];
-        break;
-      }
+      // Stop at the first stamp that is not contiguous with the run; whatever it is, the body
+      // scan below decides whether the row is refused.
+      if (match.index !== consumed) break;
       consumed = match.index + match[0].length;
       consumed = match.index + match[0].length;
       const minutes = Number(match[1]);
@@ -313,18 +307,29 @@ export function parseLrc(
     // `[00:30][00:61]first` would otherwise keep the first stamp and make `[00:61]first` the
     // lyric, quietly dropping the repeat the file asked for and burying a malformed row inside
     // text. Refusing is the only reading consistent with importing wholesale or not at all.
-    if (strayStamp !== null) {
+    /*
+     * One rule, because the narrow ones kept missing a corner (Codex rounds 1-3).
+     *
+     * The failures form a square: a stamp may be well-formed or malformed, and it may sit at the
+     * start of the words or later in them. Round 1 guarded malformed-at-start, round 2 guarded
+     * well-formed-later, and malformed-later — `[00:30]first[00:61]second` — fell through both,
+     * keeping one marker whose words were "first[00:61]second" and losing the intended one.
+     *
+     * So the body is scanned for anything timestamp-*shaped* anywhere in it: an open bracket, a
+     * one-to-three digit number, a colon. That covers all four corners at once and refuses the
+     * whole row, which is the promise. Bracketed lyric text that is not shaped like a time —
+     * "[chorus]", "[ad lib]" — still passes, because the point is catching mistyped times rather
+     * than punishing brackets.
+     */
+    const timestampish = /\[\s*\d{1,3}\s*:/.exec(body);
+    if (timestampish !== null) {
+      const token = body.slice(timestampish.index).split("]")[0];
       return {
         ok: false,
-        refusal: { line: index + 1, message: `${strayStamp} is a timestamp inside the words, not before them` },
-      };
-    }
-    // And a bracket the stamp pattern never matched at all — `[00:61]` is not a timestamp, so the
-    // loop above saw nothing to break on and would have made it part of the lyric.
-    if (body.startsWith("[")) {
-      return {
-        ok: false,
-        refusal: { line: index + 1, message: `${body.split("]")[0]}] is not a timestamp this parser accepts` },
+        refusal: {
+          line: index + 1,
+          message: `${token}] is a timestamp among the words — every stamp belongs before them`,
+        },
       };
     }
     for (const atSec of stamps) {

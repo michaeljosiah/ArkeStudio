@@ -98,7 +98,7 @@ describe("importing a marker map somebody else made (#253)", () => {
       const bad = parseLrc("[00:30][00:61]first");
       assert.ok(!bad.ok);
       assert.equal(bad.refusal.line, 1);
-      assert.match(bad.refusal.message, /not a timestamp this parser accepts/);
+      assert.match(bad.refusal.message, /timestamp among the words/);
 
       // A good repeat still works — this is about malformed follow-ons, not about repeats.
       const good = parseLrc("[00:30][01:10]first");
@@ -131,7 +131,25 @@ describe("importing a marker map somebody else made (#253)", () => {
       const stray = parseLrc("[00:30]first[00:40]second");
       assert.ok(!stray.ok);
       assert.equal(stray.refusal.line, 1);
-      assert.match(stray.refusal.message, /timestamp inside the words/);
+      assert.match(stray.refusal.message, /timestamp among the words/);
+    });
+
+    it("refuses a timestamp-shaped token anywhere after the leading stamps", () => {
+      // Three rounds found three corners of one square: malformed-at-start, well-formed-later,
+      // and malformed-later. All four are one rule now, so the family is closed rather than
+      // patched a case at a time.
+      for (const line of ["[00:30][00:61]first", "[00:30]first[00:40]second", "[00:30]first[00:61]second"]) {
+        const result = parseLrc(line);
+        assert.ok(!result.ok, `${line} should refuse`);
+        assert.equal(result.refusal.line, 1);
+        assert.match(result.refusal.message, /timestamp among the words|not a timestamped lyric/);
+      }
+
+      // Brackets that are not shaped like a time are ordinary words — the point is catching a
+      // mistyped timestamp, not punishing punctuation.
+      const bracketed = parseLrc("[00:30][chorus] forgive me");
+      assert.ok(bracketed.ok, "a bracketed word is lyric text");
+      assert.equal(bracketed.value[0]?.text, "[chorus] forgive me");
     });
 
     it("refuses a lyric past the end of the song, while the line number still exists", () => {
