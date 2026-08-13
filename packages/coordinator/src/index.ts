@@ -48,6 +48,13 @@ export {
   supersedeTile,
   type GridResult,
 } from "./references/kit.js";
+export {
+  ffprobeArgs,
+  measureDurationSec,
+  measureMediaInfo,
+  parseFfprobeJson,
+  type MediaProbe,
+} from "./media/probe.js";
 export { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "./references/png.js";
 export {
   composeLocationSheet,

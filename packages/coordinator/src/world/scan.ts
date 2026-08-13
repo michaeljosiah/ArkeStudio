@@ -1,4 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
+import { basename } from "node:path";
+import { createReadStream } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { discoverConversations } from "../world-chat/discover.js";
 import {
@@ -15,6 +18,9 @@ import {
   RipplePreviewSchema,
   SceneSchema,
   SelectionsSchema,
+  ProductionSpineSchema,
+  CutFileSchema,
+  TakeMediaInfoRecordSchema,
   SheetSchema,
   StoryOverviewSchema,
   TakeSchema,
@@ -59,6 +65,8 @@ export interface ScanResult {
   problems: WorldProblem[];
   /** Gated text files only — the reconciliation surface. Portable paths. */
   manifest: Record<string, string>;
+  /** Hashes of measured take media — for staleness only; never an adoptable text path. */
+  mediaManifest: Record<string, string>;
 }
 
 const SHEET_DIRS: ReadonlyArray<{ dir: string; type: SheetKind }> = [
@@ -66,6 +74,53 @@ const SHEET_DIRS: ReadonlyArray<{ dir: string; type: SheetKind }> = [
   { dir: "locations", type: "location" },
   { dir: "factions", type: "faction" },
 ];
+
+/**
+ * The media hash a scan checks a measurement against, streamed and cached (Codex round 2).
+ *
+ * Read whole into a Buffer first, which is fine for a sidecar and ruinous for footage: a world
+ * reload happens after routine mutations, so a multi-gigabyte take was re-read and re-hashed into
+ * memory on every one of them — stalling the Electron main process to rebuild a snapshot.
+ *
+ * Streamed so the file never lands in memory at once, and memoised on identity — path, size and
+ * mtime — so an unchanged take is hashed once per session rather than once per scan. Identity is
+ * a cheap proxy and deliberately not the authority: when it changes the file is re-hashed, and
+ * the hash is still what decides whether the measurement is believed.
+ */
+const mediaHashCache = new Map<string, { size: number; mtimeMs: number; ctimeMs: number; hash: string }>();
+
+async function hashMedia(absolutePath: string): Promise<string | null> {
+  const path = toExtendedLength(absolutePath);
+  let identity;
+  try {
+    identity = await stat(path);
+  } catch {
+    return null;
+  }
+  const cached = mediaHashCache.get(path);
+  // ctime as well as size and mtime (Codex round 3): copy, restore and repair tools preserve
+  // mtime, and a same-size rewrite with a restored timestamp would otherwise return the previous
+  // digest and keep a stale measurement alive. ctime moves whenever the bytes are written.
+  // A heuristic still — a filesystem that reports none of the three faithfully would defeat it —
+  // but one that costs nothing and closes the case a backup tool actually produces.
+  if (
+    cached &&
+    cached.size === identity.size &&
+    cached.mtimeMs === identity.mtimeMs &&
+    cached.ctimeMs === identity.ctimeMs
+  ) {
+    return cached.hash;
+  }
+  try {
+    const digest = createHash("sha256");
+    for await (const chunk of createReadStream(path)) digest.update(chunk as Buffer);
+    const hash = `sha256:${digest.digest("hex")}`;
+    mediaHashCache.set(path, { size: identity.size, mtimeMs: identity.mtimeMs, ctimeMs: identity.ctimeMs, hash });
+    return hash;
+  } catch {
+    return null;
+  }
+}
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -116,6 +171,17 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
   const meta = await readWorldMeta(dir);
   const problems: WorldProblem[] = [];
   const manifest: Record<string, string> = {};
+  /*
+   * Media identities, kept out of the text manifest (Codex round 3).
+   *
+   * Round 2 put them *in* it so reconciliation could see replaced footage — and the manifest is
+   * also where external edits come from, so a changed take offered an Adopt button that reads the
+   * whole file as UTF-8. That is the buffering hazard again, moved from the scanner into the
+   * adoption path, where it would freeze the coordinator on a gigabyte of video.
+   *
+   * Compared for staleness, never adopted as text.
+   */
+  const mediaManifest: Record<string, string> = {};
 
   const tryParse = async <T>(rel: string, parse: (raw: string) => T): Promise<T | null> => {
     try {
@@ -241,12 +307,52 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     }
 
     const takes = [];
+    const takeMediaInfo: ProductionBundle["takeMediaInfo"] = {};
     for (const takeDir of await listDir(join(pdir, "takes"))) {
       if (!(await exists(join(pdir, "takes", takeDir, "take.json")))) continue;
       const take = await tryParse(`productions/${id}/takes/${takeDir}/take.json`, (raw) =>
         TakeSchema.parse(JSON.parse(raw)),
       );
       if (take) takes.push(take);
+      // The probe result lives beside take.json, never inside it (#253): a take is the immutable
+      // record of what was dispatched and what came back, and a measurement taken afterwards is
+      // neither. A take with no sidecar is simply one nobody has measured.
+      if (take && (await exists(join(pdir, "takes", takeDir, "media-info.json")))) {
+        const record = await tryParse(`productions/${id}/takes/${takeDir}/media-info.json`, (raw) =>
+          TakeMediaInfoRecordSchema.parse(JSON.parse(raw)),
+        );
+        /*
+         * The hash is checked, not merely stored (Codex round 1).
+         *
+         * `sourceHash` exists so a record that outlived its media is detectable — and nothing
+         * detected it, so a replaced or re-landed file kept reporting the old duration as a
+         * current measurement. A stale duration is worse than none: the spine would anchor a
+         * shot to a window it fits, and the export would find footage of another length.
+         *
+         * Keyed by the take's own id rather than the directory name, because the snapshot is
+         * validated against `TakeIdSchema` — a hand-renamed directory would otherwise put a key
+         * in the map that no frame can carry, and the world would stop sending snapshots
+         * entirely rather than losing one measurement.
+         */
+        // `take.media` is an unrestricted string in the schema, so a hand-edited or imported
+        // take.json can name `../../..` and make every scan stream a file outside the world.
+        // A take's media is a plain filename inside its own directory; anything else is not it.
+        const safeMedia = take.media !== undefined && basename(take.media) === take.media && take.media !== "..";
+        if (record && take.media && safeMedia) {
+          const mediaPath = join(pdir, "takes", takeDir, take.media);
+          const actual = await hashMedia(mediaPath);
+          if (actual === record.sourceHash) takeMediaInfo[take.id] = record;
+          /*
+           * The media's identity joins the manifest (Codex round 2).
+           *
+           * Reconciliation compares manifests, not bundles — so replacing a take's media while
+           * the world was open changed nothing the watcher could see, and the stale measurement
+           * stayed in the live snapshot until an unrelated rescan or a restart. The manifest is
+           * what "did anything change" is asked of, so what changed has to be in it.
+           */
+          mediaManifest[`productions/${id}/takes/${takeDir}/${take.media}`] = actual ?? "missing";
+        }
+      }
     }
     takes.sort((a, b) => a.dispatchedAt.localeCompare(b.dispatchedAt));
 
@@ -264,9 +370,23 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       ? ((await tryParse(`productions/${id}/selections.json`, (raw) => SelectionsSchema.parse(JSON.parse(raw)))) ?? {})
       : {};
 
-    // spine.json, cut.json and the per-take media-info sidecars are loaded in the next slice.
-    // Stated explicitly rather than left to a default so the absence is a decision on the page
-    // rather than a surprise at the first read: no spine means the legacy scene-order cut.
+    // No spine is the ordinary case, not a fault: a short film or a dialogue production keeps the
+    // scene-order cut it has always had, and absence needs no migration and no rewrite (#253).
+    // A spine.json that will not parse also reads as null here — tryParse reports it as a world
+    // problem, and a production is better off on the legacy path than on half a timeline.
+    const spine = (await exists(join(pdir, "spine.json")))
+      ? ((await tryParse(`productions/${id}/spine.json`, (raw) => ProductionSpineSchema.parse(JSON.parse(raw)))) ??
+        null)
+      : null;
+
+    // cut.json keeps owning dialogue, score and ambience placement; the spine owns the master
+    // track alone. Loading it here is what lets the two be mixed in one graph at export.
+    const cut = (await exists(join(pdir, "cut.json")))
+      ? ((await tryParse(`productions/${id}/cut.json`, (raw) => CutFileSchema.parse(JSON.parse(raw)))) ?? {
+          audio: [],
+        })
+      : { audio: [] };
+
     productions.push({
       meta: metaDoc,
       story,
@@ -276,9 +396,9 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       takes,
       reviews,
       selections,
-      spine: null,
-      cut: { audio: [] },
-      takeMediaInfo: {},
+      spine,
+      cut,
+      takeMediaInfo,
     });
   }
 
@@ -466,5 +586,5 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     externalEdits: [],
     stale: false,
   };
-  return { meta, bundle, problems, manifest };
+  return { meta, bundle, problems, manifest, mediaManifest };
 }

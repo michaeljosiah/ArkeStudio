@@ -71,6 +71,7 @@ import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
+import type { MediaProbe } from "./media/probe.js";
 import { acceptTake, audioDesignFor, rejectTake, saveAudioTracks } from "./takes/review.js";
 import {
   normalizeSpeechText,
@@ -350,6 +351,12 @@ export interface CoordinatorOptions {
   dispatchClients?: Record<string, DispatchClient>;
   /** SPEC-013 R-19: the local encoder for exports; absent → exports state the reason. */
   ffmpeg?: FfmpegRunner;
+  /**
+   * Measuring media on this machine (#253). Wired by the desktop host when it can resolve
+   * ffprobe. Absent means nothing can be measured — a master track cannot be assigned and take
+   * durations stay unknown, which the spine states rather than guessing around.
+   */
+  mediaProbe?: MediaProbe;
   /** SPEC-015: the extraction model seam; every candidate is re-verified regardless (R-13). */
   extractor?: (text: string, artifactFile: string, signal?: AbortSignal) => Promise<RawCandidate[]>;
   /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */

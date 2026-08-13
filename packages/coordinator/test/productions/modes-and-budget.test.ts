@@ -22,9 +22,9 @@ import {
 } from "@arke-studio/contracts";
 import {
   continuationAvailable,
-  measureDurationSec,
   supersededBy,
 } from "../../src/productions/continuation.js";
+import { measureDurationSec } from "../../src/media/probe.js";
 import { referenceByteSizes, productionAspect } from "../../src/productions/ops.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";

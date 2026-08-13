@@ -4,6 +4,9 @@ import type { Selections, Take } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import type { FfmpegRunner } from "../takes/export.js";
+// The probe seam moved to media/probe.ts (#253): the spine, the cut and #248 all measure media,
+// so it is no longer continuation's to own. Nothing is imported back — this file defined the
+// seam for others and never called it, which is exactly why it was the wrong home.
 
 /**
  * Continuation (SPEC-019 §2.13, R-49..R-54, D33..D36).
@@ -16,34 +19,6 @@ import type { FfmpegRunner } from "../takes/export.js";
  * that: takes are immutable, carry no review state, and each retries alone, but a continued take
  * depends on a *specific* predecessor take.
  */
-
-/**
- * Reading a media file's duration on this machine (SPEC-019 R-39, T-26).
- *
- * A seam, not an implementation: the binaries belong to the shell that ships them, exactly as
- * `FfmpegRunner` does. Returning null is a first-class answer — an input whose length cannot be
- * read refuses the mode rather than being estimated, because a dispatch priced on a guess is
- * worse than a dispatch not offered.
- */
-export interface MediaProbe {
-  durationSec(absolutePath: string): Promise<number | null>;
-}
-
-/** Measure an input's length, or null when nothing can read it (R-39). */
-export async function measureDurationSec(
-  store: WorldStore,
-  worldRelativePath: string,
-  probe: MediaProbe | null,
-): Promise<number | null> {
-  if (!probe) return null;
-  try {
-    const seconds = await probe.durationSec(toExtendedLength(join(store.dir, fromPortable(worldRelativePath))));
-    return seconds !== null && Number.isFinite(seconds) && seconds > 0 ? seconds : null;
-  } catch {
-    // An unreadable input is a refusal, never a default: the mode is withdrawn with a reason.
-    return null;
-  }
-}
 
 export type ContinuationAvailability =
   | { available: true; predecessor: Take }

@@ -363,7 +363,10 @@ export class WorldStore {
         let changed = false;
         try {
           const current = await scanWorld(this.dir);
-          changed = !sameManifest(this.scan.manifest, current.manifest);
+          // Both manifests: text for adoption, media for staleness (#253, Codex round 3).
+          changed =
+            !sameManifest(this.scan.manifest, current.manifest) ||
+            !sameManifest(this.scan.mediaManifest, current.mediaManifest);
         } catch {
           // A malformed or missing world.json is itself a verified byte-level change.
           changed = true;
