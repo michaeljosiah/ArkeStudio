@@ -181,6 +181,15 @@ describe("importing a marker map somebody else made (#253)", () => {
       assert.match(unsafe.refusal.message, /not a number of milliseconds/);
     });
 
+    it("refuses a shifted total that overflows, not merely an offset that does", () => {
+      // Codex round 4: the offset was legal and the stamp was legal and the sum was not. Five
+      // rounds validated inputs one at a time; the check now sits on the value that becomes the
+      // marker time, so any combination producing an inexact millisecond is refused.
+      const sum = parseLrc(["[offset:+9007199254740991]", "[00:00.002]x"].join(NL));
+      assert.ok(!sum.ok);
+      assert.match(sum.refusal.message, /cannot be represented exactly/);
+    });
+
     it("accepts a shifted stamp that lands exactly on the last instant of the track", () => {
       // In seconds this computed 30.020000000000003 and was refused against a 30.02s track.
       // LRC has millisecond resolution and nothing finer, so the arithmetic is integers now.

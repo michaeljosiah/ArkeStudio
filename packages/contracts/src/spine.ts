@@ -357,6 +357,28 @@ export function parseLrc(
        */
       const shiftedMs = atMs + offsetMs;
       const shifted = shiftedMs / 1000;
+      /*
+       * One gate on the value that becomes a marker time (Codex round 4).
+       *
+       * Five rounds of this were spent validating inputs one at a time — the offset literal, then
+       * the offset's finiteness, then its exactness — and each time the *sum* went unchecked. A
+       * legal offset near MAX_SAFE_INTEGER plus a legal stamp still lands on a millisecond
+       * JavaScript cannot hold, and every marker in the file is then a millisecond away from
+       * what it says.
+       *
+       * So the check moved to where the number is finally made, rather than being added once per
+       * way of making it. Anything that is not an exact, non-negative millisecond is refused
+       * here, whatever combination produced it.
+       */
+      if (!Number.isSafeInteger(shiftedMs)) {
+        return {
+          ok: false,
+          refusal: {
+            line: index + 1,
+            message: `${body} lands at a millisecond that cannot be represented exactly`,
+          },
+        };
+      }
       if (shiftedMs < 0) {
         return {
           ok: false,
