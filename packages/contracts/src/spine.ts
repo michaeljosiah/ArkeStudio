@@ -182,17 +182,21 @@ export function anchorProblems(
       });
     }
   }
-  for (let i = 1; i < ordered.length; i += 1) {
-    const previous = ordered[i - 1]!;
-    const current = ordered[i]!;
+  // Compared against the furthest endpoint seen so far, not merely the previous anchor.
+  // Sorting by start puts a long anchor first, so [0,100) [1,2) [3,4) would report the second and
+  // clear the third — it is checked against [1,2) and looks fine, while sitting inside [0,100)
+  // all along. A running maximum is what makes every conflicting shot get named.
+  let furthest: { shotId: string; endSec: number } | null = null;
+  for (const { shotId, anchor } of ordered) {
     // Half-open ranges: touching is legal, so this is a strict comparison on purpose.
-    if (current.anchor.startSec < previous.anchor.endSec) {
+    if (furthest !== null && anchor.startSec < furthest.endSec) {
       problems.push({
-        shotId: current.shotId,
+        shotId,
         kind: "overlaps",
-        detail: `overlaps ${previous.shotId} by ${(previous.anchor.endSec - current.anchor.startSec).toFixed(3)}s`,
+        detail: `overlaps ${furthest.shotId} by ${(furthest.endSec - anchor.startSec).toFixed(3)}s`,
       });
     }
+    if (furthest === null || anchor.endSec > furthest.endSec) furthest = { shotId, endSec: anchor.endSec };
   }
   return problems;
 }

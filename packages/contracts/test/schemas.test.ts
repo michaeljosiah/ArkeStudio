@@ -1192,6 +1192,24 @@ describe("the audio spine (#253, design turn 60)", () => {
     assert.match(problems[0]?.detail ?? "", /overlaps sh_1 by 1\.500s/, "says how much, not just that");
   });
 
+  it("names every anchor caught inside a longer one, not just the one after it", () => {
+    // Codex round 1: sorting by start puts the long anchor first, so comparing each anchor with
+    // only its predecessor cleared sh_3 — checked against [1,2), sitting inside [0,100) the whole
+    // time. A running furthest-endpoint is what catches it.
+    const nested = spine({
+      sh_1: { startSec: 0, endSec: 100 },
+      sh_2: { startSec: 1, endSec: 2 },
+      sh_3: { startSec: 3, endSec: 4 },
+    });
+    const problems = anchorProblems(nested, 200, new Set(["sh_1", "sh_2", "sh_3"]));
+    assert.deepEqual(
+      problems.filter((p) => p.kind === "overlaps").map((p) => p.shotId).sort(),
+      ["sh_2", "sh_3"],
+      "both are inside sh_1 and both are refused",
+    );
+    assert.ok(problems.every((p) => p.detail.includes("sh_1")), "and each names what it collides with");
+  });
+
   it("reports an anchor whose shot is gone rather than dropping it", () => {
     // Deleting a shot must not silently delete twelve seconds of the song nobody agreed to give up.
     const orphaned = spine({ sh_1: { startSec: 0, endSec: 8 }, sh_gone: { startSec: 20, endSec: 32 } });

@@ -49,11 +49,28 @@ export async function acceptTake(
   };
 
   const map = JSON.parse(selections.raw) as Selections;
-  // trimInSec defaults where the shot had no selection yet: a new selection starts at the
-  // beginning of its media, and a trim measured against other footage would mean nothing here.
+  /*
+   * A trim belongs to the footage it was measured against (#253).
+   *
+   * Accepting a *different* take resets it to zero: 4.2 seconds into one clip is not 4.2 seconds
+   * into another, and carrying the number over starts the cut at an unrelated moment — with the
+   * coordinator's own selection.changed event reporting a zero trim it did not write.
+   *
+   * The reset therefore comes *after* the spread, not before it. Written the other way round the
+   * copied selection silently overwrote the reset, which is the same bug wearing a comment that
+   * claimed otherwise. Re-accepting the take already selected leaves the trim alone, because
+   * nothing about the footage changed.
+   */
+  const previous = map[input.shotId];
+  const takeChanged = previous?.acceptedTakeId !== decision.takeId;
   let next: Selections = {
     ...map,
-    [input.shotId]: { trimInSec: 0, ...map[input.shotId], acceptedTakeId: decision.takeId },
+    [input.shotId]: {
+      trimInSec: 0,
+      ...previous,
+      acceptedTakeId: decision.takeId,
+      ...(takeChanged ? { trimInSec: 0 } : {}),
+    },
   };
 
   // SPEC-019 R-54, D36: anything built by extending the take this shot was using is no longer
