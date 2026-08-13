@@ -229,8 +229,14 @@ export interface MarkerImportRefusal {
 
 export type MarkerImportResult<T> = { ok: true; value: T } | { ok: false; refusal: MarkerImportRefusal };
 
-/** Standard LRC metadata, and the only tags ignored rather than refused. */
-const LRC_METADATA = /^\[(ar|al|ti|by):/i;
+/**
+ * Standard LRC metadata, and the only tags ignored rather than refused.
+ *
+ * Anchored at both ends on purpose. Matching the prefix alone swallowed `[ar:Artist` — unclosed,
+ * and therefore a line somebody mistyped — and worse, `[ar:Artist][00:30]words`, which would
+ * discard a real lyric marker as though the whole line were a tag.
+ */
+const LRC_METADATA = /^\[(ar|al|ti|by):[^\]]*\]$/i;
 const LRC_OFFSET = /^\[offset:\s*([+-]?\d+)\s*\]$/i;
 /** `[mm:ss]`, `[mm:ss.xx]`, `[mm:ss.xxx]` — nothing looser, because a guess here moves a lyric. */
 const LRC_STAMP = /\[(\d{1,3}):([0-5]\d)(?:\.(\d{1,3}))?\]/g;
@@ -284,6 +290,16 @@ export function parseLrc(text: string): MarkerImportResult<Array<{ text: string;
     const body = line.slice(consumed).trim();
     if (body.length === 0) {
       return { ok: false, refusal: { line: index + 1, message: `line ${index + 1} has a timestamp and no words` } };
+    }
+    // A second bracket where the words should start is a timestamp this parser did not accept —
+    // `[00:30][00:61]first` would otherwise keep the first stamp and make `[00:61]first` the
+    // lyric, quietly dropping the repeat the file asked for and burying a malformed row inside
+    // text. Refusing is the only reading consistent with importing wholesale or not at all.
+    if (body.startsWith("[")) {
+      return {
+        ok: false,
+        refusal: { line: index + 1, message: `${body.split("]")[0]}] is not a timestamp this parser accepts` },
+      };
     }
     for (const atSec of stamps) {
       const shifted = atSec + offsetMs / 1000;

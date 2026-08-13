@@ -92,6 +92,38 @@ describe("importing a marker map somebody else made (#253)", () => {
       assert.ok(!bad.ok);
     });
 
+    it("refuses a malformed stamp that follows a good one, instead of eating it as lyric text", () => {
+      // Codex round 1 P1: `[00:30]` was accepted and `[00:61]first` became the words, so a
+      // malformed row was buried inside a marker and the repeat the file asked for vanished.
+      const bad = parseLrc("[00:30][00:61]first");
+      assert.ok(!bad.ok);
+      assert.equal(bad.refusal.line, 1);
+      assert.match(bad.refusal.message, /not a timestamp this parser accepts/);
+
+      // A good repeat still works — this is about malformed follow-ons, not about repeats.
+      const good = parseLrc("[00:30][01:10]first");
+      assert.ok(good.ok);
+      assert.equal(good.value.length, 2);
+    });
+
+    it("requires a complete metadata tag, so a mistyped or trailing one is not swallowed", () => {
+      // Codex round 1 P2: matching the prefix alone ignored an unclosed `[ar:Artist`, and worse,
+      // treated `[ar:Artist][00:30]words` as metadata — discarding a real lyric marker.
+      const unclosed = parseLrc("[ar:Artist");
+      assert.ok(!unclosed.ok, "an unclosed tag is a mistyped line, not metadata");
+
+      const trailing = parseLrc("[ar:Artist][00:30]words");
+      assert.ok(!trailing.ok, "a tag with a timestamp after it is refused rather than dropping the lyric");
+
+      const spurious = parseLrc("[ti:Forgive Me] and then some");
+      assert.ok(!spurious.ok);
+
+      // The four real tags, complete, are still ignored.
+      const fine = parseLrc(["[ti:Forgive Me]", "[00:30]x"].join("\n"));
+      assert.ok(fine.ok);
+      assert.equal(fine.value.length, 1);
+    });
+
     it("keeps duplicate timestamps in source order", () => {
       const parsed = parseLrc(["[00:30.00]first", "[00:30.00]second"].join("\n"));
       assert.ok(parsed.ok);
