@@ -78,7 +78,7 @@ describe("ReadModel", () => {
       worldId: WORLD_ID,
       productionId: "saltlight",
       shotId: "sh_13",
-      selection: { acceptedTakeId: "tk_01J8D0000000000000000000D4" },
+      selection: { acceptedTakeId: "tk_01J8D0000000000000000000D4", trimInSec: 0 },
     });
     const saltlight = model.getState().world!.productions[0]!;
     assert.equal(saltlight.selections["sh_13"]?.acceptedTakeId, "tk_01J8D0000000000000000000D4");

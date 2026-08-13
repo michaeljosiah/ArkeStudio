@@ -384,8 +384,14 @@ const state: ClientState = {
           sh_12: {
             acceptedTakeId: "tk_01J8F0000000000000000000B2",
             startFrameTakeId: "tk_01J8A0000000000000000000A1",
+            trimInSec: 0,
           },
         },
+        // The fixture production is a short film, not a music video: no spine, which is exactly
+        // the legacy path #253 must leave untouched.
+        spine: null,
+        cut: { audio: [] },
+        takeMediaInfo: {},
       },
     ],
     proposals: [

@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { ProductionSpineSchema } from "./spine.js";
+import { TakeMediaInfoRecordSchema } from "./media.js";
+import { TakeIdSchema } from "./ids.js";
+import { CutFileSchema } from "./cut.js";
 import { WorldChatSummarySchema, WorldChatWorkspaceSchema } from "./world-chat.js";
 import { ArtifactSidecarSchema } from "./artifact.js";
 import { ArtDirectionRecordSchema, ResolvedArtDirectionSchema } from "./art-direction.js";
@@ -104,6 +108,16 @@ export const ProductionBundleSchema = z
     takes: z.array(TakeSchema),
     reviews: z.array(ReviewDecisionSchema),
     selections: SelectionsSchema,
+    /** `spine.json`, or null for every production that is not cut to a track (#253). */
+    spine: ProductionSpineSchema.nullable().default(null),
+    /** `cut.json` — dialogue/score/ambience placement, which the spine does not own. */
+    cut: CutFileSchema.default({ audio: [] }),
+    /**
+     * Measured media per take, read from the sidecars beside them (#253). Carried on the bundle
+     * rather than on `TakeSchema` so the client and the pure cut helpers can see a duration
+     * without anything having rewritten an immutable take to put it there.
+     */
+    takeMediaInfo: z.record(TakeIdSchema, TakeMediaInfoRecordSchema).default({}),
   })
   .strict();
 export type ProductionBundle = z.infer<typeof ProductionBundleSchema>;

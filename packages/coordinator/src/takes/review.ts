@@ -49,7 +49,29 @@ export async function acceptTake(
   };
 
   const map = JSON.parse(selections.raw) as Selections;
-  let next: Selections = { ...map, [input.shotId]: { ...map[input.shotId], acceptedTakeId: decision.takeId } };
+  /*
+   * A trim belongs to the footage it was measured against (#253).
+   *
+   * Accepting a *different* take resets it to zero: 4.2 seconds into one clip is not 4.2 seconds
+   * into another, and carrying the number over starts the cut at an unrelated moment — with the
+   * coordinator's own selection.changed event reporting a zero trim it did not write.
+   *
+   * The reset therefore comes *after* the spread, not before it. Written the other way round the
+   * copied selection silently overwrote the reset, which is the same bug wearing a comment that
+   * claimed otherwise. Re-accepting the take already selected leaves the trim alone, because
+   * nothing about the footage changed.
+   */
+  const previous = map[input.shotId];
+  const takeChanged = previous?.acceptedTakeId !== decision.takeId;
+  let next: Selections = {
+    ...map,
+    [input.shotId]: {
+      trimInSec: 0,
+      ...previous,
+      acceptedTakeId: decision.takeId,
+      ...(takeChanged ? { trimInSec: 0 } : {}),
+    },
+  };
 
   // SPEC-019 R-54, D36: anything built by extending the take this shot was using is no longer
   // describing the cut. Marking it is not enough — the cut is derived from selections, so a take
@@ -58,7 +80,7 @@ export async function acceptTake(
   // keeps its media, its provenance and its own review decisions, because a reselection is one
   // the user may undo a minute later and paid-for footage should not die for it.
   for (const { shotId } of supersededBy({ changedShotId: input.shotId, selections: map, takes: production.takes })) {
-    next = { ...next, [shotId]: { ...next[shotId], acceptedTakeId: null } };
+    next = { ...next, [shotId]: { trimInSec: 0, ...next[shotId], acceptedTakeId: null } };
   }
 
   // Continuity (R-12, D8): the accepted take's final frame seeds the FOLLOWING shot. For a
@@ -69,7 +91,7 @@ export async function acceptTake(
   const following = index >= 0 ? ordered[index + 1] : undefined;
   if (following) {
     const frameSourceTakeId = take.segment?.passTakeId ?? take.id;
-    next[following.id] = { ...next[following.id], startFrameTakeId: frameSourceTakeId as never };
+    next[following.id] = { trimInSec: 0, ...next[following.id], startFrameTakeId: frameSourceTakeId as never };
   }
 
   await store.commit({

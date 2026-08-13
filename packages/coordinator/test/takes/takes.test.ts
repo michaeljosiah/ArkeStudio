@@ -136,6 +136,46 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
     await store.close();
   });
 
+  it("a trim belongs to the footage it was measured against, so a new take resets it (#253)", async () => {
+    // Codex round 1 P1. The reset was written *before* the spread of the existing selection, so a
+    // nonzero trim from the old media survived onto the newly selected take — the cut would start
+    // at an unrelated moment while the coordinator's own event reported a zero trim.
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const takes = await recordTakesFromJob(store, passJob(landed), null);
+    let production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+
+    await acceptTake(store, production, { takeId: takes[0]!.id, shotId: "sh_12", by: "user" });
+    // The user trims into the footage they selected.
+    const withTrim = JSON.parse(
+      await readFile(join(dir, "productions/saltlight/selections.json"), "utf8"),
+    ) as Record<string, { acceptedTakeId?: string; trimInSec?: number }>;
+    withTrim["sh_12"] = { ...withTrim["sh_12"], trimInSec: 4.25 };
+    await writeFile(
+      join(dir, "productions/saltlight/selections.json"),
+      JSON.stringify(withTrim, null, 2),
+      "utf8",
+    );
+    await store.reload();
+
+    // Re-accepting the same take changes nothing about the footage, so the in-point stands.
+    production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await acceptTake(store, production, { takeId: takes[0]!.id, shotId: "sh_12", by: "user" });
+    assert.equal(
+      store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.selections["sh_12"]?.trimInSec,
+      4.25,
+      "same take, same footage, same in-point",
+    );
+
+    // A different take is different footage: 4.25s into one clip is not 4.25s into another.
+    production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await acceptTake(store, production, { takeId: takes[1]!.id, shotId: "sh_12", by: "user" });
+    const after = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.selections["sh_12"];
+    assert.equal(after?.acceptedTakeId, takes[1]!.id);
+    assert.equal(after?.trimInSec, 0, "the in-point is reset, not carried onto unrelated footage");
+    await store.close();
+  });
+
   it("rejecting requires a cited sheet and field, and touches no selection (R-10)", async () => {
     const { dir, store } = await open();
     const production = store.getBundle().productions[0]!;
