@@ -318,7 +318,11 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       // The probe result lives beside take.json, never inside it (#253): a take is the immutable
       // record of what was dispatched and what came back, and a measurement taken afterwards is
       // neither. A take with no sidecar is simply one nobody has measured.
-      if (take?.media !== undefined) {
+      // Every take, not only those with media (Codex round 3). Guarding on `take.media` meant a
+      // valid take whose media never landed kept a leftover malformed sidecar that was neither
+      // reported nor in the manifest — contradicting the "only absence passes quietly" contract
+      // the previous commit claimed to restore, one line above where it said so.
+      if (take) {
         /*
          * One read, and everything tryParse used to give (Codex round 2).
          *

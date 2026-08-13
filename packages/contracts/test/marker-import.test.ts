@@ -172,6 +172,15 @@ describe("importing a marker map somebody else made (#253)", () => {
       assert.match(overflow.refusal.message, /not a number of milliseconds/);
     });
 
+    it("refuses an offset JavaScript cannot hold exactly", () => {
+      // Codex round 3: finite is not representable. 9007199254740993 parses to ...992, so every
+      // marker would shift by a different millisecond than the file asked for, while the integer
+      // arithmetic downstream looked exact.
+      const unsafe = parseLrc(["[offset:+9007199254740993]", "[00:30]x"].join(NL));
+      assert.ok(!unsafe.ok);
+      assert.match(unsafe.refusal.message, /not a number of milliseconds/);
+    });
+
     it("accepts a shifted stamp that lands exactly on the last instant of the track", () => {
       // In seconds this computed 30.020000000000003 and was refused against a 30.02s track.
       // LRC has millisecond resolution and nothing finer, so the arithmetic is integers now.

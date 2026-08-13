@@ -273,9 +273,11 @@ export function parseLrc(
     const match = LRC_OFFSET.exec(raw.trim());
     if (!match) continue;
     const parsed = Number(match[1]);
-    // Enough digits and Number gives Infinity, which would ride through every later check and
-    // land as `atSec: Infinity` — a marker at a time JSON cannot even write down.
-    if (!Number.isFinite(parsed)) {
+    // Safe-integer, not merely finite: 9007199254740993 parses to ...992, so every marker in the
+    // file would be shifted to the wrong millisecond while the integer arithmetic below looked
+    // exact. Finite was the check for Infinity; this is the check for the value being the number
+    // the file actually said.
+    if (!Number.isSafeInteger(parsed)) {
       return { ok: false, refusal: { line: index + 1, message: `offset ${match[1]}ms is not a number of milliseconds` } };
     }
     offsetMs = parsed;
