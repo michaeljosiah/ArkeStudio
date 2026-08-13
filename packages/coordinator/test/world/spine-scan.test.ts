@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { newId } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
+import { sha256 } from "../../src/world/text-files.js";
 import { makeTempWorld } from "./helpers.js";
 
 const CLOCK = () => "2026-08-12T12:00:00.000Z";
@@ -89,17 +90,48 @@ describe("the spine is loaded, and its absence is not a fault (#253)", () => {
     await store.close();
   });
 
+  it("ignores a measurement whose media has moved on, rather than reporting a stale duration", async () => {
+    // Codex round 1: sourceHash existed so staleness was *detectable* and nothing detected it,
+    // so a replaced or re-landed file kept reporting the old length as a current measurement.
+    // A stale duration is worse than none — the spine anchors a shot to a window it fits, and
+    // the export finds footage of another length.
+    const { dir, store, production } = await open();
+    const take = production.takes.find((t) => t.media);
+    assert.ok(take?.media, "the fixture production has a take with media");
+    const takeDir = join(dir, "productions", production.meta.id, "takes", take.id);
+    await mkdir(takeDir, { recursive: true });
+    await writeFile(
+      join(takeDir, "media-info.json"),
+      JSON.stringify({
+        sourceHash: `sha256:${"c".repeat(64)}`,
+        mediaInfo: { durationSec: 999, hasAudio: true },
+        probedAt: "2026-08-12T11:30:00.000Z",
+      }),
+      "utf8",
+    );
+    await store.reload();
+    assert.equal(
+      store.getBundle().productions[0]!.takeMediaInfo[take.id],
+      undefined,
+      "the hash does not match the bytes, so there is no measurement",
+    );
+    await store.close();
+  });
+
   it("reads a take's measurement from beside it, never from inside take.json", async () => {
     const { dir, store, production } = await open();
     const takeId = production.takes[0]?.id;
     assert.ok(takeId, "the fixture production has a take to measure");
+    const take = production.takes.find((t) => t.id === takeId)!;
+    const takeDir = join(dir, "productions", production.meta.id, "takes", takeId);
+    await mkdir(takeDir, { recursive: true });
+    // Hashed from the real bytes: the record is only believed when it still describes them.
+    const media = await readFile(join(takeDir, take.media!));
     const record = {
-      sourceHash: `sha256:${"b".repeat(64)}`,
+      sourceHash: sha256(media),
       mediaInfo: { durationSec: 8.5, hasAudio: true, audioChannels: 2, audioSampleRateHz: 48000 },
       probedAt: "2026-08-12T11:30:00.000Z",
     };
-    const takeDir = join(dir, "productions", production.meta.id, "takes", takeId);
-    await mkdir(takeDir, { recursive: true });
     await writeFile(join(takeDir, "media-info.json"), JSON.stringify(record, null, 2), "utf8");
     await store.reload();
 

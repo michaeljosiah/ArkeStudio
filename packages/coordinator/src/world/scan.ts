@@ -254,11 +254,30 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       // The probe result lives beside take.json, never inside it (#253): a take is the immutable
       // record of what was dispatched and what came back, and a measurement taken afterwards is
       // neither. A take with no sidecar is simply one nobody has measured.
-      if (await exists(join(pdir, "takes", takeDir, "media-info.json"))) {
+      if (take && (await exists(join(pdir, "takes", takeDir, "media-info.json")))) {
         const record = await tryParse(`productions/${id}/takes/${takeDir}/media-info.json`, (raw) =>
           TakeMediaInfoRecordSchema.parse(JSON.parse(raw)),
         );
-        if (record) takeMediaInfo[takeDir] = record;
+        /*
+         * The hash is checked, not merely stored (Codex round 1).
+         *
+         * `sourceHash` exists so a record that outlived its media is detectable — and nothing
+         * detected it, so a replaced or re-landed file kept reporting the old duration as a
+         * current measurement. A stale duration is worse than none: the spine would anchor a
+         * shot to a window it fits, and the export would find footage of another length.
+         *
+         * Keyed by the take's own id rather than the directory name, because the snapshot is
+         * validated against `TakeIdSchema` — a hand-renamed directory would otherwise put a key
+         * in the map that no frame can carry, and the world would stop sending snapshots
+         * entirely rather than losing one measurement.
+         */
+        if (record && take.media) {
+          const mediaPath = join(pdir, "takes", takeDir, take.media);
+          const bytes = await readFile(toExtendedLength(mediaPath)).catch(() => null);
+          if (bytes !== null && sha256(bytes) === record.sourceHash) {
+            takeMediaInfo[take.id] = record;
+          }
+        }
       }
     }
     takes.sort((a, b) => a.dispatchedAt.localeCompare(b.dispatchedAt));

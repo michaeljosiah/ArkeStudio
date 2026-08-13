@@ -33,6 +33,28 @@ export default async function verifyPackagedRuntimes(context) {
     }
   }
 
+  /*
+   * ffmpeg and ffprobe are one runtime, verified together (#253, Codex round 1).
+   *
+   * They are copied by one wholesale directory rule, so it is easy to believe staging ffmpeg
+   * stages both. It does not: a build carrying only ffmpeg.exe installs cleanly, logs the probe
+   * as unavailable, and silently disables every measurement — no track can become a clock and no
+   * take gets a duration. Asserted here because that failure is invisible until somebody opens
+   * the spine, by which time the installer has shipped.
+   */
+  const ffmpegDir = join(resources, "ffmpeg");
+  const staged = ["ffmpeg.exe", "ffprobe.exe"].filter((binary) => existsSync(join(ffmpegDir, binary)));
+  // Neither is the existing local-build case: no media runtime, honestly reported at startup.
+  // One is the state worth failing on — half a runtime that installs cleanly and then disables
+  // whichever half is missing without saying so.
+  if (staged.length === 1) {
+    const missing = staged[0] === "ffmpeg.exe" ? "ffprobe.exe" : "ffmpeg.exe";
+    throw new Error(
+      `resources/ffmpeg has ${staged[0]} but not ${missing} — they are one runtime, and shipping half of it ` +
+        `disables ${missing === "ffprobe.exe" ? "every media measurement" : "export"} with nothing on screen to say so`,
+    );
+  }
+
   const forbidden = new Set(["kokoro-82m", "whisper-base-en", "model_quantized.onnx", "ggml-base.en.bin"]);
   const inspect = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
