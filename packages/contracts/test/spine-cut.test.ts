@@ -12,8 +12,8 @@ const TK1 = "tk_01J8D0000000000000000000A1";
 const TK2 = "tk_01J8D0000000000000000000A2";
 const TKP = "tk_01J8D0000000000000000000B1";
 const TKS = "tk_01J8D0000000000000000000B2";
-const SH1 = "sh_01J8D0000000000000000000C1";
-const SH2 = "sh_01J8D0000000000000000000C2";
+const SH1 = "sh_1";
+const SH2 = "sh_2";
 
 function take(id: string, over: Partial<Take> = {}): Take {
   return TakeSchema.parse({
@@ -263,7 +263,7 @@ describe("deriveSpineCut", () => {
         takeMediaInfo: { [TK1]: 30 },
       }),
       spine({
-        "sh_01J8D0000000000000000000C9": { startSec: 2, endSec: 8, clipAudio: { mode: "mute" } },
+        "sh_9": { startSec: 2, endSec: 8, clipAudio: { mode: "mute" } },
         [SH1]: { startSec: 5, endSec: 10, clipAudio: { mode: "mute" } },
       }),
       10,
@@ -336,6 +336,69 @@ describe("deriveSpineCut", () => {
     assert.equal(cut.problems.find((p) => p.kind === "no-take")?.shotId, SH1);
   });
 
+  it("will not freeze a single image into a moving-picture window", () => {
+    // Image jobs produce `frame` takes and the contact sheet offers Accept for them. A still has
+    // no duration, so laying it in as a clip invents an outSec and asks for a freeze nobody chose.
+    const cut = deriveSpineCut(
+      bundle({
+        shots: SHOTS,
+        takes: [take(TK1, { kind: "frame", media: "still.png" })],
+        selections: { [SH1]: { acceptedTakeId: TK1 } },
+      }),
+      spine({ [SH1]: { startSec: 0, endSec: 6, clipAudio: { mode: "mute" } } }),
+      6,
+    );
+    assert.deepEqual(cut.segments.map((s) => s.kind), ["slate"]);
+    assert.match(cut.problems.find((p) => p.kind === "no-take")!.detail, /single image/);
+  });
+
+  it("refuses a whole-scene pass as one shot's material", () => {
+    // The primary pass take covers every shot in the scene and has no range of its own. Read from
+    // zero it puts the top of the scene into whichever shot accepted it — wrong picture, clean export.
+    const cut = deriveSpineCut(
+      bundle({
+        shots: SHOTS,
+        takes: [take(TKP, { media: "pass.mp4", coversShots: [SH1, SH2] })],
+        selections: { [SH2]: { acceptedTakeId: TKP } },
+        takeMediaInfo: { [TKP]: 60 },
+      }),
+      spine({ [SH2]: { startSec: 0, endSec: 6, clipAudio: { mode: "mute" } } }),
+      6,
+    );
+    assert.deepEqual(cut.segments.map((s) => s.kind), ["slate"]);
+    assert.match(cut.problems.find((p) => p.kind === "no-take")!.detail, /whole-scene pass/);
+  });
+
+  it("stays gapless when the first anchor starts a hair past zero", () => {
+    const cut = deriveSpineCut(
+      bundle({
+        shots: SHOTS,
+        takes: [take(TK1, { media: "clip.mp4" })],
+        selections: { [SH1]: { acceptedTakeId: TK1 } },
+        takeMediaInfo: { [TK1]: 30 },
+      }),
+      spine({ [SH1]: { startSec: 0.0000005, endSec: 10, clipAudio: { mode: "mute" } } }),
+      10,
+    );
+    assert.equal(cut.segments[0]!.startSec, 0);
+    assert.equal(cut.segments.at(-1)!.endSec, 10);
+  });
+
+  it("stays gapless when the last anchor ends a hair before the track does", () => {
+    const cut = deriveSpineCut(
+      bundle({
+        shots: SHOTS,
+        takes: [take(TK1, { media: "clip.mp4" })],
+        selections: { [SH1]: { acceptedTakeId: TK1 } },
+        takeMediaInfo: { [TK1]: 30 },
+      }),
+      spine({ [SH1]: { startSec: 0, endSec: 9.9999995, clipAudio: { mode: "mute" } } }),
+      10,
+    );
+    assert.equal(cut.segments.at(-1)!.endSec, 10);
+    for (let i = 1; i < cut.segments.length; i += 1) assert.equal(cut.segments[i]!.startSec, cut.segments[i - 1]!.endSec);
+  });
+
   it("truncates at the end of the track and names the anchor that ran past it", () => {
     const cut = deriveSpineCut(
       bundle({
@@ -373,7 +436,7 @@ describe("deriveSpineCut", () => {
   });
 
   it("leaves an orphaned anchor's window black rather than giving it to a deleted shot", () => {
-    const cut = deriveSpineCut(bundle({ shots: SHOTS }), spine({ "sh_01J8D0000000000000000000C9": { startSec: 2, endSec: 5, clipAudio: { mode: "mute" } } }), 10);
+    const cut = deriveSpineCut(bundle({ shots: SHOTS }), spine({ "sh_9": { startSec: 2, endSec: 5, clipAudio: { mode: "mute" } } }), 10);
     assert.deepEqual(cut.segments.map((s) => [s.kind, s.startSec, s.endSec]), [["black", 0, 10]]);
     assert.ok(cut.problems.some((p) => p.kind === "orphaned"));
   });

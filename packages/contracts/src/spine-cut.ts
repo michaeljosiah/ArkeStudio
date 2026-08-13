@@ -21,8 +21,16 @@ import { anchorBudgetSec, anchorProblems, orderedAnchors, type ClipAudioPolicy, 
 /** Below a millionth of a second is float noise, not a gap — one frame at 24fps is 0.0417s. */
 const EPSILON = 1e-6;
 
-/** Kinds a picture renderer can decode as video. A voice take has media and no frames. */
-const PICTURE_KINDS: ReadonlySet<Take["kind"]> = new Set(["clip", "frame", "still"]);
+/**
+ * The only kind that is moving picture.
+ *
+ * `frame` and `still` are single images produced by image jobs and offered by the same Accept
+ * action; they have a file and no duration, so laying one in as a clip spanning its anchor
+ * invents an outSec and asks the renderer to freeze or loop something nobody chose to freeze
+ * (Codex round 3). Everything else -- voice, sheets, looks, main photos, location views -- is
+ * reference or audio.
+ */
+const MOVING_PICTURE_KINDS: ReadonlySet<Take["kind"]> = new Set(["clip"]);
 
 export type SpineCutSegmentKind = "clip" | "slate" | "black";
 
@@ -84,46 +92,72 @@ interface Material {
 }
 
 /**
- * What a take actually offers, in the source file's own time.
+ * Why a take cannot be this shot's picture, named rather than collapsed into "none".
+ *
+ * Three rounds of review each found a different take reaching the cut as material it was not:
+ * an audio file, a static image, and the backing pass of a whole-scene job. Each was fixed as a
+ * missing case in a whitelist, which is the wrong shape -- the question is not "is this kind
+ * allowed" but "is this a moving picture whose start is this shot's start". So the conditions
+ * are enumerated in one predicate that answers with a reason, and the reason reaches the user
+ * instead of a shot silently reading as uncovered.
+ */
+export type MaterialRefusal = "not-picture" | "static" | "backing-pass" | "no-media";
+
+type MaterialResult = { ok: true; material: Material } | { ok: false; reason: MaterialRefusal };
+
+/**
+ * What a take offers as this shot's picture, in the source file's own time.
  *
  * A segment's in/out range is the *plan* -- boundaries chosen before dispatch (R-4, D3) -- and a
- * plan is not a measurement. A provider that returned a shorter pass than asked for leaves a
- * range whose end is past the end of the file, and trusting it emits an outSec pointing at
- * nothing: an export that truncates or fails, with no `short` problem raised because the
- * arithmetic all agreed (Codex round 1). So availability is the measured pass, capped to the
- * planned range, and unknown when the pass has never been probed.
- *
- * Unknown is reported rather than assumed everywhere here. Guessing that material covers its
- * window is the assumption that produces a cut running short against the song with nothing in
- * the diagnostics to say why.
+ * plan is not a measurement: a provider returning a shorter pass leaves a range ending past the
+ * end of the file. It is still a boundary, because the far side of it is the next shot. Those
+ * are separate facts and they are carried separately.
  */
-function materialFor(take: Take, production: ProductionBundle, takesById: ReadonlyMap<string, Take>): Material | null {
+function materialFor(take: Take, production: ProductionBundle, takesById: ReadonlyMap<string, Take>): MaterialResult {
   const productionId = production.meta.id;
-  // A voice take covers its shot and is offered by the same Accept action as a clip, so an
-  // audio-only file reaches here as a candidate for picture (Codex round 2). Having media is not
-  // the question; being something a picture renderer can decode is. Anything else is not
-  // material, and the shot slates rather than being counted as covered by a file with no frames.
-  if (!PICTURE_KINDS.has(take.kind)) return null;
+  if (take.kind === "frame" || take.kind === "still") return { ok: false, reason: "static" };
+  if (!MOVING_PICTURE_KINDS.has(take.kind)) return { ok: false, reason: "not-picture" };
+
   if (take.segment) {
     const pass = takesById.get(take.segment.passTakeId);
-    if (!pass?.media) return null;
+    if (!pass?.media) return { ok: false, reason: "no-media" };
     const probed = production.takeMediaInfo[pass.id]?.mediaInfo.durationSec;
     const planned = take.segment.outSec - take.segment.inSec;
     return {
-      path: `productions/${productionId}/takes/${pass.id}/${pass.media}`,
-      inSec: take.segment.inSec,
-      availableSec: probed === undefined ? undefined : Math.max(0, Math.min(planned, probed - take.segment.inSec)),
-      limitSec: planned,
+      ok: true,
+      material: {
+        path: `productions/${productionId}/takes/${pass.id}/${pass.media}`,
+        inSec: take.segment.inSec,
+        availableSec: probed === undefined ? undefined : Math.max(0, Math.min(planned, probed - take.segment.inSec)),
+        limitSec: planned,
+      },
     };
   }
-  if (!take.media) return null;
+
+  // The primary take of a whole-scene pass carries every shot it covers and no range of its own,
+  // and the Generate workspace offers it for each of them. Read from zero it puts the top of the
+  // scene into whichever shot accepted it -- wrong picture, exported clean (Codex round 3). Its
+  // per-shot segment takes are the material; the pass itself never is.
+  if (take.coversShots.length > 1) return { ok: false, reason: "backing-pass" };
+
+  if (!take.media) return { ok: false, reason: "no-media" };
   return {
-    path: `productions/${productionId}/takes/${take.id}/${take.media}`,
-    inSec: 0,
-    availableSec: production.takeMediaInfo[take.id]?.mediaInfo.durationSec,
-    limitSec: undefined,
+    ok: true,
+    material: {
+      path: `productions/${productionId}/takes/${take.id}/${take.media}`,
+      inSec: 0,
+      availableSec: production.takeMediaInfo[take.id]?.mediaInfo.durationSec,
+      limitSec: undefined,
+    },
   };
 }
+
+const REFUSAL_DETAIL: Record<MaterialRefusal, string> = {
+  "not-picture": "accepted take is not moving picture",
+  static: "accepted take is a single image, which has no duration to fill the window",
+  "backing-pass": "accepted take is a whole-scene pass; its per-shot segment is the material",
+  "no-media": "accepted take has no media file",
+};
 
 /**
  * Derive the picture timeline from the spine.
@@ -157,8 +191,23 @@ export function deriveSpineCut(
    * spares the exporter a second source producing the identical nothing.
    */
   const black = (to: number): void => {
-    if (to - cursor <= EPSILON) return;
+    if (to <= cursor) return;
     const last = segments.at(-1);
+    if (to - cursor <= EPSILON) {
+      // Float noise, not a gap -- but returning here left the noise *in* the timeline: a track
+      // ending 0.0000005s past the last anchor stopped the cut short of the song, and an anchor
+      // starting that far past zero started it late (Codex round 3). It is absorbed by the
+      // neighbour rather than dropped, because "contiguous and gapless" is this function's
+      // contract and a hole of any size breaks it.
+      // With a neighbour, the noise is absorbed into it. Without one -- a first anchor starting a
+      // hair past zero -- the cursor stays put, so the opening segment begins at 0 rather than at
+      // the noise, and the song's first instant belongs to the shot rather than to nothing.
+      if (last) {
+        last.endSec = to;
+        cursor = to;
+      }
+      return;
+    }
     if (last?.kind === "black") last.endSec = to;
     else segments.push({ kind: "black", startSec: cursor, endSec: to, label: "" });
     cursor = to;
@@ -194,23 +243,29 @@ export function deriveSpineCut(
     }
 
     black(start);
+    // Whatever `black` absorbed, the picture picks up from where the timeline actually is.
+    const from = cursor;
 
-    const budget = end - start;
+    const budget = end - from;
     // Null and absent both mean "nothing accepted": a selection row can exist with the take
     // cleared, and treating that as a take id is a lookup on the string "null".
     const takeId = production.selections[shotId]?.acceptedTakeId ?? null;
     const take = takeId === null ? undefined : takesById.get(takeId);
-    const material = take ? materialFor(take, production, takesById) : null;
+    const found = take ? materialFor(take, production, takesById) : null;
+    const material = found?.ok === true ? found.material : null;
 
     if (!take || !material) {
       // R-20: a labelled black slate beats a silent omission. The budget is in the label because
       // the number a user needs is how long the missing shot has to be, not that it is missing.
+      // When a take was accepted but is not usable, saying which is the difference between a user
+      // regenerating a shot and a user re-accepting the same wrong take.
+      const why = found?.ok === false ? `: ${REFUSAL_DETAIL[found.reason]}` : "";
       problems.push({
         shotId,
         kind: "no-take",
-        detail: `has no accepted take for its ${anchorBudgetSec(anchor).toFixed(3)}s window`,
+        detail: `has no usable picture for its ${anchorBudgetSec(anchor).toFixed(3)}s window${why}`,
       });
-      segments.push({ kind: "slate", startSec: start, endSec: end, label: `${label} · ${budget.toFixed(1)}s`, shotId, sceneNumber: shot.sceneNumber });
+      segments.push({ kind: "slate", startSec: from, endSec: end, label: `${label} · ${budget.toFixed(1)}s`, shotId, sceneNumber: shot.sceneNumber });
       cursor = end;
       continue;
     }
@@ -220,7 +275,7 @@ export function deriveSpineCut(
     // source has to move with it. Leaving the in-point alone plays the take's first frame two
     // seconds late -- different content than the anchor asked for, and a shortfall hidden because
     // the discarded head still counted as usable material (Codex round 1).
-    const discarded = start - anchor.startSec;
+    const discarded = from - anchor.startSec;
     const inSec = material.inSec + trim + discarded;
     const usable = material.availableSec === undefined ? undefined : material.availableSec - trim - discarded;
     const limited = material.limitSec === undefined ? undefined : material.limitSec - trim - discarded;
@@ -248,7 +303,7 @@ export function deriveSpineCut(
             ? `${consumed} leave nothing of a ${material.availableSec?.toFixed(3)}s take`
             : `${consumed} leave nothing inside the take's ${material.limitSec?.toFixed(3)}s segment`,
       });
-      segments.push({ kind: "slate", startSec: start, endSec: end, label: `${label} · ${budget.toFixed(1)}s`, shotId, sceneNumber: shot.sceneNumber });
+      segments.push({ kind: "slate", startSec: from, endSec: end, label: `${label} · ${budget.toFixed(1)}s`, shotId, sceneNumber: shot.sceneNumber });
       cursor = end;
       continue;
     }
@@ -263,10 +318,10 @@ export function deriveSpineCut(
     // float noise, but leaving the clip at its measured end while the cursor moved to the anchor's
     // opened a hole in a timeline this function promises has none (Codex round 2).
     const used = budget - capped <= EPSILON ? budget : capped;
-    const clipEnd = start + used;
+    const clipEnd = from + used;
     segments.push({
       kind: "clip",
-      startSec: start,
+      startSec: from,
       endSec: clipEnd,
       label,
       shotId,
