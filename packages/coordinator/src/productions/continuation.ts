@@ -5,9 +5,8 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import type { FfmpegRunner } from "../takes/export.js";
 // The probe seam moved to media/probe.ts (#253): the spine, the cut and #248 all measure media,
-// so it is no longer continuation's to own. Imported rather than re-exported — one name for one
-// thing is the whole point of moving it.
-import { measureDurationSec, type MediaProbe } from "../media/probe.js";
+// so it is no longer continuation's to own. Nothing is imported back — this file defined the
+// seam for others and never called it, which is exactly why it was the wrong home.
 
 /**
  * Continuation (SPEC-019 §2.13, R-49..R-54, D33..D36).

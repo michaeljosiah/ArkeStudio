@@ -1,4 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { discoverConversations } from "../world-chat/discover.js";
 import {
@@ -69,6 +71,41 @@ const SHEET_DIRS: ReadonlyArray<{ dir: string; type: SheetKind }> = [
   { dir: "locations", type: "location" },
   { dir: "factions", type: "faction" },
 ];
+
+/**
+ * The media hash a scan checks a measurement against, streamed and cached (Codex round 2).
+ *
+ * Read whole into a Buffer first, which is fine for a sidecar and ruinous for footage: a world
+ * reload happens after routine mutations, so a multi-gigabyte take was re-read and re-hashed into
+ * memory on every one of them — stalling the Electron main process to rebuild a snapshot.
+ *
+ * Streamed so the file never lands in memory at once, and memoised on identity — path, size and
+ * mtime — so an unchanged take is hashed once per session rather than once per scan. Identity is
+ * a cheap proxy and deliberately not the authority: when it changes the file is re-hashed, and
+ * the hash is still what decides whether the measurement is believed.
+ */
+const mediaHashCache = new Map<string, { size: number; mtimeMs: number; hash: string }>();
+
+async function hashMedia(absolutePath: string): Promise<string | null> {
+  const path = toExtendedLength(absolutePath);
+  let identity;
+  try {
+    identity = await stat(path);
+  } catch {
+    return null;
+  }
+  const cached = mediaHashCache.get(path);
+  if (cached && cached.size === identity.size && cached.mtimeMs === identity.mtimeMs) return cached.hash;
+  try {
+    const digest = createHash("sha256");
+    for await (const chunk of createReadStream(path)) digest.update(chunk as Buffer);
+    const hash = `sha256:${digest.digest("hex")}`;
+    mediaHashCache.set(path, { size: identity.size, mtimeMs: identity.mtimeMs, hash });
+    return hash;
+  } catch {
+    return null;
+  }
+}
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -273,10 +310,17 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
          */
         if (record && take.media) {
           const mediaPath = join(pdir, "takes", takeDir, take.media);
-          const bytes = await readFile(toExtendedLength(mediaPath)).catch(() => null);
-          if (bytes !== null && sha256(bytes) === record.sourceHash) {
-            takeMediaInfo[take.id] = record;
-          }
+          const actual = await hashMedia(mediaPath);
+          if (actual === record.sourceHash) takeMediaInfo[take.id] = record;
+          /*
+           * The media's identity joins the manifest (Codex round 2).
+           *
+           * Reconciliation compares manifests, not bundles — so replacing a take's media while
+           * the world was open changed nothing the watcher could see, and the stale measurement
+           * stayed in the live snapshot until an unrelated rescan or a restart. The manifest is
+           * what "did anything change" is asked of, so what changed has to be in it.
+           */
+          manifest[`productions/${id}/takes/${takeDir}/${take.media}`] = actual ?? "missing";
         }
       }
     }
