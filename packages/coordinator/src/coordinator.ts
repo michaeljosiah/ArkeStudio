@@ -2891,7 +2891,12 @@ export class Coordinator {
           : undefined;
         const trackDurationSec =
           trackFile !== undefined && this.opts.mediaProbe
-            ? await this.opts.mediaProbe.durationSec(join(store.dir, "artifacts", trackFile))
+            ? // Extended-length like every other path this repository hands to a tool: a world
+              // nested past 260 characters on Windows would otherwise report its master as
+              // unreadable and refuse the export for where it lives (Codex round 2).
+              await this.opts.mediaProbe.durationSec(
+                toExtendedLength(join(store.dir, "artifacts", fromPortable(trackFile))),
+              )
             : null;
 
         let buildArgs: (stage: string) => string[];

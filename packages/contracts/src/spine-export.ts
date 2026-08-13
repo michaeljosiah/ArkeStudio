@@ -107,11 +107,17 @@ function itemFor(segment: SpineCutSegment, durationSec: number): SpineExportItem
     label: segment.label,
     // Mute is the default because the sound is the model's invention. Keeping it is a decision
     // recorded on the anchor, and it arrives here as the gain that decision named.
-    // Only when the file actually carries a stream: keep-diegetic on a silent clip built a graph
-    // referencing an audio input that is not there, and ffmpeg fails the whole export rather than
-    // the one shot (Codex round 1). A clip with nothing to keep keeps nothing.
+    /*
+     * Only when the file is *known* to carry a stream (Codex rounds 1 and 2).
+     *
+     * Referencing an audio input that is not there fails the whole export rather than the one
+     * shot. `!== false` handled a measured silence and still treated the unknown state as
+     * present -- and unknown is exactly the state a review cut is allowed to be in, since it
+     * tolerates the `unmeasured` problem a master refuses. An unprobed clip is not evidence of
+     * audio, so nothing is kept from it.
+     */
     audio:
-      segment.clipAudio?.mode === "keep-diegetic" && segment.hasAudio !== false
+      segment.clipAudio?.mode === "keep-diegetic" && segment.hasAudio === true
         ? { gainDb: segment.clipAudio.gainDb, atSec: segment.startSec }
         : null,
   };
@@ -134,14 +140,28 @@ export function buildSpineFfmpegArgs(plan: SpineExportPlan, worldDir: string, ou
 
   for (const item of plan.items) {
     if (item.type === "clip") {
-      // Input-level seeking so the audio arrives windowed exactly like the picture.
+      // Input-level seeking so the audio arrives windowed exactly like the picture. The read
+      // stays inside [inSec, outSec) because the far side of a pass segment is the next shot.
       args.push("-ss", String(item.inSec), "-to", String(item.outSec), "-i", `${worldDir}/${item.path}`);
+      /*
+       * Conformed to the planned duration, not merely resampled to the frame rate (Codex round 2).
+       *
+       * Quantising the plan's boundaries fixed the arithmetic and not the render: `fps` rounds
+       * each clip from its own source length independently, so sixty 1.02s segments each became
+       * 24 frames and the drift the boundaries had just eliminated came back through the filter
+       * graph. Padding by cloning the last frame and then trimming yields exactly the planned
+       * length whether the source ran a fraction long or a fraction short -- a sub-frame conform,
+       * which is what the residue the derivation refused to round always was.
+       */
+      const d = item.durationSec;
       filters.push(
-        `[${index}:v]scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${p.fps}[v${index}]`,
+        `[${index}:v]scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${p.fps},tpad=stop_mode=clone:stop_duration=${d},trim=duration=${d},setpts=PTS-STARTPTS[v${index}]`,
       );
       if (item.audio) {
         const delayMs = Math.round(item.audio.atSec * 1000);
-        filters.push(`[${index}:a]adelay=${delayMs}:all=1,volume=${item.audio.gainDb}dB[a${index}]`);
+        filters.push(
+          `[${index}:a]apad=whole_dur=${d},atrim=duration=${d},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,volume=${item.audio.gainDb}dB[a${index}]`,
+        );
         audioLabels.push(`[a${index}]`);
       }
     } else {

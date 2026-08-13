@@ -101,7 +101,7 @@ describe("spine export", () => {
   });
 
   it("rides kept clip audio under the master at its stated gain, without ducking the song", () => {
-    const kept = { ...CLIP, startSec: 10, endSec: 14, clipAudio: { mode: "keep-diegetic" as const, gainDb: -9 } };
+    const kept = { ...CLIP, startSec: 10, endSec: 14, hasAudio: true, clipAudio: { mode: "keep-diegetic" as const, gainDb: -9 } };
     const plan = buildSpineExportPlan(cutOf([{ kind: "black", startSec: 0, endSec: 10, label: "" }, kept], 14), "review-cut", "audio/master.mp3");
     const args = buildSpineFfmpegArgs(plan, "/w", "/o.mp4");
     const filters = filtersOf(args);
@@ -109,6 +109,34 @@ describe("spine export", () => {
     // normalize=0 is load-bearing: amix's default divides by input count, which would pull the
     // song down for exactly the length of any shot that kept its audio.
     assert.match(filters, /amix=inputs=2:normalize=0/);
+  });
+
+  it("keeps nothing from an unprobed clip, since unknown is not evidence of audio", () => {
+    // A review cut tolerates the `unmeasured` problem a master refuses, so the unknown state is
+    // reachable here. Referencing a stream that turns out not to exist fails the whole export.
+    const unprobed = { ...CLIP, clipAudio: { mode: "keep-diegetic" as const, gainDb: -9 } };
+    const plan = buildSpineExportPlan(cutOf([unprobed], 4), "review-cut", "a/m.mp3");
+    assert.equal(plan.items[0]!.type === "clip" ? plan.items[0]!.audio : "n/a", null);
+    assert.doesNotMatch(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4")), /amix/);
+  });
+
+  it("conforms each clip's render to its planned length, not to its own source length", () => {
+    // Quantising the plan is not enough: `fps` rounds every clip independently from its source,
+    // which puts the accumulated drift straight back into the filter graph.
+    const segs = Array.from({ length: 3 }, (_, i) => ({
+      ...CLIP,
+      startSec: i * 1.02,
+      endSec: (i + 1) * 1.02,
+      media: { path: "productions/p/takes/t/clip.mp4", inSec: 0, outSec: 1.02 },
+    }));
+    const plan = buildSpineExportPlan(cutOf(segs, 3.06), "review-cut", "a/m.mp3");
+    const filters = filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4"));
+    for (const item of plan.items) {
+      assert.match(filters, new RegExp(`tpad=stop_mode=clone:stop_duration=${item.durationSec},trim=duration=${item.durationSec}`));
+    }
+    // The source read never crosses the window it was given, whatever the conform needs.
+    const args = buildSpineFfmpegArgs(plan, "/w", "/o.mp4");
+    assert.deepEqual(args.slice(args.indexOf("-ss"), args.indexOf("-ss") + 4), ["-ss", "0", "-to", "1.02"]);
   });
 
   it("renders a review cut with its holes and refuses a master with the same holes", () => {
