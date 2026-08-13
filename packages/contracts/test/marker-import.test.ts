@@ -124,6 +124,29 @@ describe("importing a marker map somebody else made (#253)", () => {
       assert.equal(fine.value.length, 1);
     });
 
+    it("refuses a timestamp that appears after the words, not only before them", () => {
+      // Codex round 2 P1: round 1 checked whether the body *started* with a bracket, which
+      // caught `[00:30][00:61]first` and missed this — one marker whose words were
+      // "first[00:40]second", the second stamp silently discarded. The loop already knew.
+      const stray = parseLrc("[00:30]first[00:40]second");
+      assert.ok(!stray.ok);
+      assert.equal(stray.refusal.line, 1);
+      assert.match(stray.refusal.message, /timestamp inside the words/);
+    });
+
+    it("refuses a lyric past the end of the song, while the line number still exists", () => {
+      // Codex round 2 P1: the duration bound lived only in the JSON-shaped helper, which can say
+      // `lyrics[7]` and not "line 12" — so LRC had no upper bound at all.
+      const past = parseLrc(["[00:30]first", "[10:00]last line"].join("\n"), 222.14);
+      assert.ok(!past.ok);
+      assert.equal(past.refusal.line, 2, "the line the user is looking at");
+      assert.match(past.refusal.message, /past the track's 222\.140s/);
+
+      // Without a known duration nothing is bounded — the caller has not measured the track yet.
+      const unbounded = parseLrc("[10:00]last line");
+      assert.ok(unbounded.ok);
+    });
+
     it("keeps duplicate timestamps in source order", () => {
       const parsed = parseLrc(["[00:30.00]first", "[00:30.00]second"].join("\n"));
       assert.ok(parsed.ok);
@@ -144,6 +167,21 @@ describe("importing a marker map somebody else made (#253)", () => {
         ["Intro", "forgive me", "Chorus"],
       );
       assert.ok(result.value.every((m) => m.id.startsWith("mk_")), "fresh ids, not the file's");
+    });
+
+    it("mints no ids at all when any row is refused", () => {
+      // Codex round 2 P2: ids were minted as the rows were walked, so a refused import had
+      // already advanced a stateful allocator — an id burned for a marker that never existed,
+      // from a function whose contract is that a refusal changes nothing.
+      let minted = 0;
+      const counting = () => { minted += 1; return newId("mk"); };
+      const imported = SpineMarkerImportSchema.parse({
+        sections: [{ label: "Intro", atSec: 0 }],
+        lyrics: [{ text: "fine", atSec: 30 }, { text: "past the end", atSec: 400 }],
+      });
+      const result = markersFromImport(imported, 222.14, counting);
+      assert.ok(!result.ok);
+      assert.equal(minted, 0, "not one id spent on an import that was refused");
     });
 
     it("refuses a marker past the end of the song, naming the row", () => {

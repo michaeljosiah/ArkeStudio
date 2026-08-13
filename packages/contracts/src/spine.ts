@@ -253,7 +253,16 @@ const LRC_STAMP = /\[(\d{1,3}):([0-5]\d)(?:\.(\d{1,3}))?\]/g;
  * Refusing wholesale rather than skipping bad rows is the same argument: half a lyric sheet is
  * worse than none, because the markers you kept are the ones the file happened to list first.
  */
-export function parseLrc(text: string): MarkerImportResult<Array<{ text: string; atSec: number }>> {
+export function parseLrc(
+  text: string,
+  /**
+   * The measured master duration, when there is one. A lyric past the end of the song belongs to
+   * a different recording, and refusing it *here* is the only place the offending line number
+   * still exists — the JSON-shaped helper can only say `lyrics[7]`, which is not what the person
+   * is looking at.
+   */
+  trackDurationSec?: number,
+): MarkerImportResult<Array<{ text: string; atSec: number }>> {
   const lines = text.split(/\r?\n/);
   let offsetMs = 0;
   const rows: Array<{ text: string; atSec: number; order: number }> = [];
@@ -274,8 +283,17 @@ export function parseLrc(text: string): MarkerImportResult<Array<{ text: string;
     const stamps: number[] = [];
     let match: RegExpExecArray | null;
     let consumed = 0;
+    let strayStamp: string | null = null;
     while ((match = LRC_STAMP.exec(line)) !== null) {
-      if (match.index !== consumed) break; // a timestamp after the words is not a timestamped line
+      if (match.index !== consumed) {
+        // The loop already knows a timestamp sits somewhere it should not. Round 1 answered this
+        // by sniffing whether the body *began* with a bracket, which caught
+        // `[00:30][00:61]first` and missed `[00:30]first[00:40]second` — one marker whose words
+        // were "first[00:40]second", the second stamp silently discarded.
+        strayStamp = match[0];
+        break;
+      }
+      consumed = match.index + match[0].length;
       consumed = match.index + match[0].length;
       const minutes = Number(match[1]);
       const seconds = Number(match[2]);
@@ -295,6 +313,14 @@ export function parseLrc(text: string): MarkerImportResult<Array<{ text: string;
     // `[00:30][00:61]first` would otherwise keep the first stamp and make `[00:61]first` the
     // lyric, quietly dropping the repeat the file asked for and burying a malformed row inside
     // text. Refusing is the only reading consistent with importing wholesale or not at all.
+    if (strayStamp !== null) {
+      return {
+        ok: false,
+        refusal: { line: index + 1, message: `${strayStamp} is a timestamp inside the words, not before them` },
+      };
+    }
+    // And a bracket the stamp pattern never matched at all — `[00:61]` is not a timestamp, so the
+    // loop above saw nothing to break on and would have made it part of the lyric.
     if (body.startsWith("[")) {
       return {
         ok: false,
@@ -309,6 +335,15 @@ export function parseLrc(text: string): MarkerImportResult<Array<{ text: string;
           refusal: {
             line: index + 1,
             message: `offset ${offsetMs}ms moves ${body} to ${shifted.toFixed(3)}s, before the song starts`,
+          },
+        };
+      }
+      if (trackDurationSec !== undefined && shifted > trackDurationSec) {
+        return {
+          ok: false,
+          refusal: {
+            line: index + 1,
+            message: `${body} at ${shifted.toFixed(3)}s is past the track's ${trackDurationSec.toFixed(3)}s`,
           },
         };
       }
@@ -332,7 +367,9 @@ export function markersFromImport(
   trackDurationSec: number,
   mintId: () => string,
 ): MarkerImportResult<SpineMarker[]> {
-  const markers: SpineMarker[] = [];
+  // Every row is checked before a single id is minted (Codex round 2). Minting as it went meant a
+  // refused import had already advanced a stateful allocator — an id burned for a marker that
+  // never existed, from a function whose whole contract is that it changes nothing on refusal.
   for (const [index, section] of imported.sections.entries()) {
     if (section.atSec > trackDurationSec) {
       return {
@@ -343,7 +380,6 @@ export function markersFromImport(
         },
       };
     }
-    markers.push({ kind: "section", id: mintId(), label: section.label, atSec: section.atSec, source: "json" });
   }
   for (const [index, lyric] of imported.lyrics.entries()) {
     if (lyric.atSec > trackDurationSec) {
@@ -355,8 +391,15 @@ export function markersFromImport(
         },
       };
     }
-    markers.push({ kind: "lyric", id: mintId(), text: lyric.text, atSec: lyric.atSec, source: "json" });
   }
+  const markers: SpineMarker[] = [
+    ...imported.sections.map((section): SpineMarker => ({
+      kind: "section", id: mintId(), label: section.label, atSec: section.atSec, source: "json",
+    })),
+    ...imported.lyrics.map((lyric): SpineMarker => ({
+      kind: "lyric", id: mintId(), text: lyric.text, atSec: lyric.atSec, source: "json",
+    })),
+  ];
   return { ok: true, value: orderedMarkers(markers) };
 }
 
