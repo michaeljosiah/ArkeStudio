@@ -1208,6 +1208,10 @@ describe("the audio spine (#253, design turn 60)", () => {
       "both are inside sh_1 and both are refused",
     );
     assert.ok(problems.every((p) => p.detail.includes("sh_1")), "and each names what it collides with");
+    // Codex round 2: the intersection, not the distance to sh_1's end. [0,100) and [1,2) overlap
+    // by one second; reporting 99 tells the user to move something 99 seconds.
+    const nestedDetail = problems.find((p) => p.shotId === "sh_2")?.detail ?? "";
+    assert.match(nestedDetail, /by 1\.000s/, `expected the intersection, got: ${nestedDetail}`);
   });
 
   it("reports an anchor whose shot is gone rather than dropping it", () => {

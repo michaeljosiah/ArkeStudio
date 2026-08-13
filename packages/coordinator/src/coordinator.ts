@@ -2781,7 +2781,12 @@ export class Coordinator {
             worldId: msg.worldId,
             productionId: msg.productionId,
             shotId: msg.shotId,
-            selection: { acceptedTakeId: msg.takeId as never, trimInSec: 0 },
+            // The committed selection, not a guess at it (Codex round 2). Re-accepting the same take
+            // preserves its trim on disk, and both read models replace the whole selection with
+            // this payload — so a hard-coded zero made every observer contradict the file until
+            // the next snapshot, and left an inaccurate line in the durable audit log.
+            selection: store.getBundle().productions.find((p) => p.meta.id === msg.productionId)
+              ?.selections[msg.shotId] ?? { acceptedTakeId: msg.takeId as never, trimInSec: 0 },
           });
           await this.refreshWorldSnapshot(msg.worldId);
         } catch {

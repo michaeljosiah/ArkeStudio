@@ -193,7 +193,10 @@ export function anchorProblems(
       problems.push({
         shotId,
         kind: "overlaps",
-        detail: `overlaps ${furthest.shotId} by ${(furthest.endSec - anchor.startSec).toFixed(3)}s`,
+        // The intersection, not the distance to the furthest end (Codex round 2): [0,100) then
+        // [1,2) overlap by one second, and reporting 99 tells the user to move something 99
+        // seconds. The number is there to be acted on.
+        detail: `overlaps ${furthest.shotId} by ${(Math.min(furthest.endSec, anchor.endSec) - anchor.startSec).toFixed(3)}s`,
       });
     }
     if (furthest === null || anchor.endSec > furthest.endSec) furthest = { shotId, endSec: anchor.endSec };
