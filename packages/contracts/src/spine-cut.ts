@@ -75,20 +75,28 @@ interface Material {
 /**
  * What a take actually offers, in the source file's own time.
  *
- * A segment take carries its own range, so its length is known exactly without probing anything.
- * A whole take's length is only known if its media has been measured, and an unmeasured take is
- * reported rather than assumed: guessing that it covers is the assumption that produces a cut
- * running short against the song with nothing in the diagnostics.
+ * A segment's in/out range is the *plan* -- boundaries chosen before dispatch (R-4, D3) -- and a
+ * plan is not a measurement. A provider that returned a shorter pass than asked for leaves a
+ * range whose end is past the end of the file, and trusting it emits an outSec pointing at
+ * nothing: an export that truncates or fails, with no `short` problem raised because the
+ * arithmetic all agreed (Codex round 1). So availability is the measured pass, capped to the
+ * planned range, and unknown when the pass has never been probed.
+ *
+ * Unknown is reported rather than assumed everywhere here. Guessing that material covers its
+ * window is the assumption that produces a cut running short against the song with nothing in
+ * the diagnostics to say why.
  */
 function materialFor(take: Take, production: ProductionBundle, takesById: ReadonlyMap<string, Take>): Material | null {
   const productionId = production.meta.id;
   if (take.segment) {
     const pass = takesById.get(take.segment.passTakeId);
     if (!pass?.media) return null;
+    const probed = production.takeMediaInfo[pass.id]?.mediaInfo.durationSec;
+    const planned = take.segment.outSec - take.segment.inSec;
     return {
       path: `productions/${productionId}/takes/${pass.id}/${pass.media}`,
       inSec: take.segment.inSec,
-      availableSec: take.segment.outSec - take.segment.inSec,
+      availableSec: probed === undefined ? undefined : Math.max(0, Math.min(planned, probed - take.segment.inSec)),
     };
   }
   if (!take.media) return null;
@@ -124,12 +132,31 @@ export function deriveSpineCut(
   // never disagree about whether a set of anchors is sound.
   const problems: SpineCutProblem[] = anchorProblems(spine, trackDurationSec, new Set(shotsById.keys()));
 
+  /**
+   * Black is emitted from three places -- the gap before an anchor, an orphan's held window, and
+   * the tail after the last anchor -- and two of them can land back to back. Extending the run
+   * rather than appending keeps one stretch of black as one segment, which is what it is, and
+   * spares the exporter a second source producing the identical nothing.
+   */
+  const black = (to: number): void => {
+    if (to - cursor <= EPSILON) return;
+    const last = segments.at(-1);
+    if (last?.kind === "black") last.endSec = to;
+    else segments.push({ kind: "black", startSec: cursor, endSec: to, label: "" });
+    cursor = to;
+  };
+
   let cursor = 0;
   for (const { shotId, anchor } of orderedAnchors(spine)) {
     const shot = shotsById.get(shotId);
-    // Orphaned anchors are already reported by anchorProblems; they hold no picture, so the song
-    // underneath them stays black rather than being handed to a shot that no longer exists.
-    if (!shot) continue;
+    if (!shot) {
+      // Orphaned anchors are already reported by anchorProblems. Skipping to the next anchor left
+      // the cursor where it was, so a later shot overlapping the orphan simply moved into the
+      // deleted shot's window -- reallocating time nobody agreed to give up, which is the exact
+      // thing reporting the orphan was meant to prevent (Codex round 1). The window is held black.
+      black(Math.min(anchor.endSec, trackDurationSec));
+      continue;
+    }
 
     const label = `SHOT ${shot.number} · ${shot.title}`;
     const start = Math.max(anchor.startSec, cursor);
@@ -148,9 +175,7 @@ export function deriveSpineCut(
       continue;
     }
 
-    if (start - cursor > EPSILON) {
-      segments.push({ kind: "black", startSec: cursor, endSec: start, label: "" });
-    }
+    black(start);
 
     const budget = end - start;
     // Null and absent both mean "nothing accepted": a selection row can exist with the take
@@ -173,14 +198,22 @@ export function deriveSpineCut(
     }
 
     const trim = production.selections[shotId]?.trimInSec ?? 0;
-    const inSec = material.inSec + trim;
-    const usable = material.availableSec === undefined ? undefined : material.availableSec - trim;
+    // When an earlier anchor already covered the head of this one, `start` moved forward but the
+    // source has to move with it. Leaving the in-point alone plays the take's first frame two
+    // seconds late -- different content than the anchor asked for, and a shortfall hidden because
+    // the discarded head still counted as usable material (Codex round 1).
+    const discarded = start - anchor.startSec;
+    const inSec = material.inSec + trim + discarded;
+    const usable = material.availableSec === undefined ? undefined : material.availableSec - trim - discarded;
 
     if (usable !== undefined && usable <= EPSILON) {
       problems.push({
         shotId,
         kind: "short",
-        detail: `trim of ${trim.toFixed(3)}s leaves nothing of a ${material.availableSec?.toFixed(3)}s take`,
+        detail:
+          discarded > EPSILON
+            ? `trim of ${trim.toFixed(3)}s and ${discarded.toFixed(3)}s covered by an earlier anchor leave nothing of a ${material.availableSec?.toFixed(3)}s take`
+            : `trim of ${trim.toFixed(3)}s leaves nothing of a ${material.availableSec?.toFixed(3)}s take`,
       });
       segments.push({ kind: "slate", startSec: start, endSec: end, label: `${label} · ${budget.toFixed(1)}s`, shotId, sceneNumber: shot.sceneNumber });
       cursor = end;
@@ -227,9 +260,7 @@ export function deriveSpineCut(
     cursor = end;
   }
 
-  if (trackDurationSec - cursor > EPSILON) {
-    segments.push({ kind: "black", startSec: cursor, endSec: trackDurationSec, label: "" });
-  }
+  black(trackDurationSec);
 
   const anchored = new Set(Object.keys(spine.anchors));
   const total = (kind: SpineCutSegmentKind): number =>

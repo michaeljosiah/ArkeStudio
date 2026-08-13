@@ -185,7 +185,40 @@ describe("deriveSpineCut", () => {
     assert.deepEqual(cut.segments.map((s) => [s.kind, s.endSec]), [["clip", 9]]);
   });
 
-  it("uses a segment take's own range, which needs no probe", () => {
+  it("uses a segment's range against the measured pass", () => {
+    const cut = deriveSpineCut(
+      bundle({
+        shots: SHOTS,
+        takes: [take(TKP, { media: "pass.mp4" }), take(TKS, { segment: { passTakeId: TKP, inSec: 12, outSec: 18 } })],
+        selections: { [SH1]: { acceptedTakeId: TKS } },
+        takeMediaInfo: { [TKP]: 30 },
+      }),
+      spine({ [SH1]: { startSec: 0, endSec: 6, clipAudio: { mode: "mute" } } }),
+      6,
+    );
+    assert.equal(cut.problems.length, 0);
+    assert.deepEqual(cut.segments[0]!.media, { path: `productions/prod-1/takes/${TKP}/pass.mp4`, inSec: 12, outSec: 18 });
+  });
+
+  it("does not trust a segment's planned range past the end of the pass it came from", () => {
+    // The range is authored before dispatch (R-4). A provider that returned a shorter pass leaves
+    // an outSec pointing past the end of the file, and the arithmetic all agrees.
+    const cut = deriveSpineCut(
+      bundle({
+        shots: SHOTS,
+        takes: [take(TKP, { media: "pass.mp4" }), take(TKS, { segment: { passTakeId: TKP, inSec: 12, outSec: 18 } })],
+        selections: { [SH1]: { acceptedTakeId: TKS } },
+        takeMediaInfo: { [TKP]: 15 },
+      }),
+      spine({ [SH1]: { startSec: 0, endSec: 6, clipAudio: { mode: "mute" } } }),
+      6,
+    );
+    assert.deepEqual(cut.segments[0]!.media, { path: `productions/prod-1/takes/${TKP}/pass.mp4`, inSec: 12, outSec: 15 });
+    assert.deepEqual(cut.segments.map((s) => [s.kind, s.startSec, s.endSec]), [["clip", 0, 3], ["slate", 3, 6]]);
+    assert.ok(cut.problems.some((p) => p.kind === "short"));
+  });
+
+  it("reports an unprobed pass rather than reading its length off the plan", () => {
     const cut = deriveSpineCut(
       bundle({
         shots: SHOTS,
@@ -195,8 +228,48 @@ describe("deriveSpineCut", () => {
       spine({ [SH1]: { startSec: 0, endSec: 6, clipAudio: { mode: "mute" } } }),
       6,
     );
-    assert.equal(cut.problems.length, 0);
-    assert.deepEqual(cut.segments[0]!.media, { path: `productions/prod-1/takes/${TKP}/pass.mp4`, inSec: 12, outSec: 18 });
+    assert.ok(cut.problems.some((p) => p.kind === "unmeasured"));
+  });
+
+  it("advances the source in-point when an earlier anchor covered the head", () => {
+    // [0,5) then [3,8): the second shot starts at master time 5, so its first two seconds were
+    // covered. Playing from its first frame would show content the anchor did not ask for.
+    const cut = deriveSpineCut(
+      bundle({
+        shots: SHOTS,
+        takes: [take(TK1, { media: "a.mp4" }), take(TK2, { media: "b.mp4" })],
+        selections: { [SH1]: { acceptedTakeId: TK1 }, [SH2]: { acceptedTakeId: TK2 } },
+        takeMediaInfo: { [TK1]: 30, [TK2]: 30 },
+      }),
+      spine({
+        [SH1]: { startSec: 0, endSec: 5, clipAudio: { mode: "mute" } },
+        [SH2]: { startSec: 3, endSec: 8, clipAudio: { mode: "mute" } },
+      }),
+      8,
+    );
+    const second = cut.segments[1]!;
+    assert.deepEqual([second.startSec, second.endSec], [5, 8]);
+    assert.deepEqual(second.media, { path: `productions/prod-1/takes/${TK2}/b.mp4`, inSec: 2, outSec: 5 });
+  });
+
+  it("holds an orphaned anchor's window black instead of handing it to a later shot", () => {
+    // An orphan at [2,8) and a live shot at [5,10): reporting the orphan while letting the next
+    // shot move into its window reallocates time nobody agreed to give up.
+    const cut = deriveSpineCut(
+      bundle({
+        shots: SHOTS,
+        takes: [take(TK1, { media: "a.mp4" })],
+        selections: { [SH1]: { acceptedTakeId: TK1 } },
+        takeMediaInfo: { [TK1]: 30 },
+      }),
+      spine({
+        "sh_01J8D0000000000000000000C9": { startSec: 2, endSec: 8, clipAudio: { mode: "mute" } },
+        [SH1]: { startSec: 5, endSec: 10, clipAudio: { mode: "mute" } },
+      }),
+      10,
+    );
+    assert.deepEqual(cut.segments.map((s) => [s.kind, s.startSec, s.endSec]), [["black", 0, 8], ["clip", 8, 10]]);
+    assert.ok(cut.problems.some((p) => p.kind === "orphaned"));
   });
 
   it("truncates at the end of the track and names the anchor that ran past it", () => {
