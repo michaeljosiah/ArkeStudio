@@ -14,6 +14,9 @@ import {
  * Marker import (#253). Strictness is the point: a lyric marker is what a shot gets anchored to,
  * so a timestamp read generously moves a shot to the wrong bar and nobody can tell.
  */
+/** A newline, without an escape sequence to mistype. */
+const NL = String.fromCharCode(10);
+
 describe("importing a marker map somebody else made (#253)", () => {
   const mint = () => newId("mk");
 
@@ -150,6 +153,65 @@ describe("importing a marker map somebody else made (#253)", () => {
       const bracketed = parseLrc("[00:30][chorus] forgive me");
       assert.ok(bracketed.ok, "a bracketed word is lyric text");
       assert.equal(bracketed.value[0]?.text, "[chorus] forgive me");
+    });
+
+    it("refuses a timestamp-shaped token whatever its minute width", () => {
+      // Codex round 4: the "general" rule from round 3 still capped the minutes at three digits,
+      // so `[0000:31]` read as lyric text — the fourth corner of the square, found after I had
+      // called the family closed.
+      const wide = parseLrc("[00:30]first[0000:31]second");
+      assert.ok(!wide.ok);
+      assert.match(wide.refusal.message, /timestamp among the words/);
+    });
+
+    it("refuses an offset that is not a number of milliseconds", () => {
+      // Enough digits and Number gives Infinity, which rode through every later check and landed
+      // as atSec: Infinity — a marker at a time JSON cannot write down.
+      const overflow = parseLrc([`[offset:+${"9".repeat(400)}]`, "[00:30]first"].join(NL));
+      assert.ok(!overflow.ok);
+      assert.match(overflow.refusal.message, /not a number of milliseconds/);
+    });
+
+    it("refuses an offset JavaScript cannot hold exactly", () => {
+      // Codex round 3: finite is not representable. 9007199254740993 parses to ...992, so every
+      // marker would shift by a different millisecond than the file asked for, while the integer
+      // arithmetic downstream looked exact.
+      const unsafe = parseLrc(["[offset:+9007199254740993]", "[00:30]x"].join(NL));
+      assert.ok(!unsafe.ok);
+      assert.match(unsafe.refusal.message, /not a number of milliseconds/);
+    });
+
+    it("refuses a shifted total that overflows, not merely an offset that does", () => {
+      // Codex round 4: the offset was legal and the stamp was legal and the sum was not. Five
+      // rounds validated inputs one at a time; the check now sits on the value that becomes the
+      // marker time, so any combination producing an inexact millisecond is refused.
+      const sum = parseLrc(["[offset:+9007199254740991]", "[00:00.002]x"].join(NL));
+      assert.ok(!sum.ok);
+      assert.match(sum.refusal.message, /cannot be represented exactly/);
+    });
+
+    it("accepts a shifted stamp that lands exactly on the last instant of the track", () => {
+      // In seconds this computed 30.020000000000003 and was refused against a 30.02s track.
+      // LRC has millisecond resolution and nothing finer, so the arithmetic is integers now.
+      const exact = parseLrc(["[offset:+946]", "[00:29.074]x"].join(NL), 30.02);
+      assert.ok(exact.ok, `expected the boundary to be allowed, got: ${JSON.stringify(exact)}`);
+      assert.equal(exact.value[0]?.atSec, 30.02);
+
+      // One millisecond past it is still past it.
+      const past = parseLrc(["[offset:+947]", "[00:29.074]x"].join(NL), 30.02);
+      assert.ok(!past.ok);
+    });
+
+    it("does not round the track's length up when checking the bound", () => {
+      // Codex round 5, a regression from round 4's own fix: quantising the *bound* to
+      // milliseconds rounded 30.0206s up to 30021ms and admitted a marker at 30.021s — past the
+      // end of the song. The arithmetic stays integer; the comparison uses the measured duration.
+      const past = parseLrc("[00:30.021]x", 30.0206);
+      assert.ok(!past.ok, "30.021s is after a 30.0206s track ends");
+
+      // And the exact boundary is still allowed, which is what round 4 fixed.
+      const exact = parseLrc(["[offset:+946]", "[00:29.074]x"].join(NL), 30.02);
+      assert.ok(exact.ok);
     });
 
     it("refuses a lyric past the end of the song, while the line number still exists", () => {

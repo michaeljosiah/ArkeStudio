@@ -269,9 +269,18 @@ export function parseLrc(
 
   // The offset applies to every timestamp in the file including ones read before it, so it is
   // resolved in its own pass rather than mid-parse.
-  for (const raw of lines) {
+  for (const [index, raw] of lines.entries()) {
     const match = LRC_OFFSET.exec(raw.trim());
-    if (match) offsetMs = Number(match[1]);
+    if (!match) continue;
+    const parsed = Number(match[1]);
+    // Safe-integer, not merely finite: 9007199254740993 parses to ...992, so every marker in the
+    // file would be shifted to the wrong millisecond while the integer arithmetic below looked
+    // exact. Finite was the check for Infinity; this is the check for the value being the number
+    // the file actually said.
+    if (!Number.isSafeInteger(parsed)) {
+      return { ok: false, refusal: { line: index + 1, message: `offset ${match[1]}ms is not a number of milliseconds` } };
+    }
+    offsetMs = parsed;
   }
 
   for (const [index, raw] of lines.entries()) {
@@ -293,8 +302,8 @@ export function parseLrc(
       const seconds = Number(match[2]);
       // ".5" is five tenths and ".05" is five hundredths — padding right, not left, is the
       // difference between a marker at 30.5s and one at 30.05s.
-      const fraction = match[3] ? Number(match[3].padEnd(3, "0")) / 1000 : 0;
-      stamps.push(minutes * 60 + seconds + fraction);
+      const fractionMs = match[3] ? Number(match[3].padEnd(3, "0")) : 0;
+      stamps.push((minutes * 60 + seconds) * 1000 + fractionMs);
     }
     if (stamps.length === 0) {
       return { ok: false, refusal: { line: index + 1, message: `${line} is not a timestamped lyric line` } };
@@ -321,7 +330,11 @@ export function parseLrc(
      * "[chorus]", "[ad lib]" — still passes, because the point is catching mistyped times rather
      * than punishing brackets.
      */
-    const timestampish = /\[\s*\d{1,3}\s*:/.exec(body);
+    // Any digit-length before the colon (Codex round 4). Capping it at three let `[0000:31]`
+    // through as lyric text — the fourth corner of a square the previous round was supposed to
+    // have closed. A token shaped like a time is refused whether or not this parser would have
+    // accepted the time itself; being unable to read it is the reason to refuse, not to allow.
+    const timestampish = /\[\s*\d+\s*:/.exec(body);
     if (timestampish !== null) {
       const token = body.slice(timestampish.index).split("]")[0];
       return {
@@ -332,9 +345,41 @@ export function parseLrc(
         },
       };
     }
-    for (const atSec of stamps) {
-      const shifted = atSec + offsetMs / 1000;
-      if (shifted < 0) {
+    for (const atMs of stamps) {
+      /*
+       * Milliseconds throughout, converted to seconds only at the end (Codex round 4).
+       *
+       * Working in seconds put the offset through a division and the comparison through binary
+       * floating point: `[00:29.074]` shifted by +946ms came out as 30.020000000000003 and was
+       * refused against a 30.02s track, though it lands exactly on the last allowed instant. LRC
+       * has millisecond resolution and nothing finer, so integers are the honest representation
+       * and the boundary case stops depending on how the arithmetic rounds.
+       */
+      const shiftedMs = atMs + offsetMs;
+      const shifted = shiftedMs / 1000;
+      /*
+       * One gate on the value that becomes a marker time (Codex round 4).
+       *
+       * Five rounds of this were spent validating inputs one at a time — the offset literal, then
+       * the offset's finiteness, then its exactness — and each time the *sum* went unchecked. A
+       * legal offset near MAX_SAFE_INTEGER plus a legal stamp still lands on a millisecond
+       * JavaScript cannot hold, and every marker in the file is then a millisecond away from
+       * what it says.
+       *
+       * So the check moved to where the number is finally made, rather than being added once per
+       * way of making it. Anything that is not an exact, non-negative millisecond is refused
+       * here, whatever combination produced it.
+       */
+      if (!Number.isSafeInteger(shiftedMs)) {
+        return {
+          ok: false,
+          refusal: {
+            line: index + 1,
+            message: `${body} lands at a millisecond that cannot be represented exactly`,
+          },
+        };
+      }
+      if (shiftedMs < 0) {
         return {
           ok: false,
           refusal: {
@@ -343,6 +388,11 @@ export function parseLrc(
           },
         };
       }
+      // The shift is integer milliseconds; the *bound* is compared in seconds against the
+      // duration as measured (Codex round 5). Rounding the duration to milliseconds rounded it
+      // *up* — a 30.0206s track became 30021ms and admitted a marker at 30.021s, past the end of
+      // the song. ffprobe reports whatever precision the container carries, and quantising the
+      // thing being compared against is not the same as quantising the arithmetic.
       if (trackDurationSec !== undefined && shifted > trackDurationSec) {
         return {
           ok: false,

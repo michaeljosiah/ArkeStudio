@@ -118,6 +118,24 @@ describe("the spine is loaded, and its absence is not a fault (#253)", () => {
     await store.close();
   });
 
+  it("reports a malformed sidecar rather than treating it as an unmeasured take", async () => {
+    // Codex round 2: dropping tryParse for one syscall also dropped its error contract, so a
+    // corrupt media-info.json read as "nobody measured this" — indistinguishable from absence,
+    // and invisible. Absence is the only thing allowed to pass quietly.
+    const { dir, store, production } = await open();
+    const take = production.takes.find((t) => t.media)!;
+    const takeDir = join(dir, "productions", production.meta.id, "takes", take.id);
+    await mkdir(takeDir, { recursive: true });
+    await writeFile(join(takeDir, "media-info.json"), "{ not json", "utf8");
+    await store.reload();
+    const problems = store.getBundle().problems ?? [];
+    assert.ok(
+      problems.some((p) => p.path.endsWith(`takes/${take.id}/media-info.json`)),
+      `expected the malformed sidecar to be reported, saw: ${JSON.stringify(problems)}`,
+    );
+    await store.close();
+  });
+
   it("reads a take's measurement from beside it, never from inside take.json", async () => {
     const { dir, store, production } = await open();
     const takeId = production.takes[0]?.id;
