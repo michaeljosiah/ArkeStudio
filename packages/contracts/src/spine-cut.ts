@@ -101,7 +101,7 @@ interface Material {
  * are enumerated in one predicate that answers with a reason, and the reason reaches the user
  * instead of a shot silently reading as uncovered.
  */
-export type MaterialRefusal = "not-picture" | "static" | "backing-pass" | "no-media";
+export type MaterialRefusal = "not-picture" | "static" | "backing-pass" | "no-media" | "other-shot";
 
 type MaterialResult = { ok: true; material: Material } | { ok: false; reason: MaterialRefusal };
 
@@ -113,8 +113,18 @@ type MaterialResult = { ok: true; material: Material } | { ok: false; reason: Ma
  * end of the file. It is still a boundary, because the far side of it is the next shot. Those
  * are separate facts and they are carried separately.
  */
-function materialFor(take: Take, production: ProductionBundle, takesById: ReadonlyMap<string, Take>): MaterialResult {
+function materialFor(
+  take: Take,
+  shotId: string,
+  production: ProductionBundle,
+  takesById: ReadonlyMap<string, Take>,
+): MaterialResult {
   const productionId = production.meta.id;
+  // acceptTake verifies that the take exists, not that it belongs to the shot, so a frame pairing
+  // an existing take with another valid shotId persists and the cut would export that shot's
+  // footage under this anchor with nothing to say so (Codex round 4). The take says which shots
+  // it covers; that is the answer, and it is cheap to ask.
+  if (!take.coversShots.includes(shotId)) return { ok: false, reason: "other-shot" };
   if (take.kind === "frame" || take.kind === "still") return { ok: false, reason: "static" };
   if (!MOVING_PICTURE_KINDS.has(take.kind)) return { ok: false, reason: "not-picture" };
 
@@ -157,6 +167,7 @@ const REFUSAL_DETAIL: Record<MaterialRefusal, string> = {
   static: "accepted take is a single image, which has no duration to fill the window",
   "backing-pass": "accepted take is a whole-scene pass; its per-shot segment is the material",
   "no-media": "accepted take has no media file",
+  "other-shot": "accepted take does not cover this shot",
 };
 
 /**
@@ -184,30 +195,22 @@ export function deriveSpineCut(
   // never disagree about whether a set of anchors is sound.
   const problems: SpineCutProblem[] = anchorProblems(spine, trackDurationSec, new Set(shotsById.keys()));
 
-  /**
-   * Black is emitted from three places -- the gap before an anchor, an orphan's held window, and
-   * the tail after the last anchor -- and two of them can land back to back. Extending the run
-   * rather than appending keeps one stretch of black as one segment, which is what it is, and
-   * spares the exporter a second source producing the identical nothing.
+  /*
+   * Black comes from three places -- the gap before an anchor, an orphan's held window, and the
+   * tail after the last anchor -- and two of them can land back to back, so a run is extended
+   * rather than appended to.
+   *
+   * Nothing here rounds (Codex round 4). An earlier attempt absorbed sub-epsilon residue into a
+   * neighbouring segment to avoid emitting a half-microsecond of black, and that one convenience
+   * produced three separate defects: a clip whose master duration no longer matched its source
+   * window, a negative source in-point when the residue sat at the head, and a snap that crossed
+   * a pass segment's boundary the type documents as inviolable. Tolerance belongs in comparisons,
+   * never in the geometry. The derivation emits exactly what the numbers say and the exporter
+   * quantises to the frame grid, where "too small to render" is a question with an answer.
    */
   const black = (to: number): void => {
     if (to <= cursor) return;
     const last = segments.at(-1);
-    if (to - cursor <= EPSILON) {
-      // Float noise, not a gap -- but returning here left the noise *in* the timeline: a track
-      // ending 0.0000005s past the last anchor stopped the cut short of the song, and an anchor
-      // starting that far past zero started it late (Codex round 3). It is absorbed by the
-      // neighbour rather than dropped, because "contiguous and gapless" is this function's
-      // contract and a hole of any size breaks it.
-      // With a neighbour, the noise is absorbed into it. Without one -- a first anchor starting a
-      // hair past zero -- the cursor stays put, so the opening segment begins at 0 rather than at
-      // the noise, and the song's first instant belongs to the shot rather than to nothing.
-      if (last) {
-        last.endSec = to;
-        cursor = to;
-      }
-      return;
-    }
     if (last?.kind === "black") last.endSec = to;
     else segments.push({ kind: "black", startSec: cursor, endSec: to, label: "" });
     cursor = to;
@@ -243,7 +246,6 @@ export function deriveSpineCut(
     }
 
     black(start);
-    // Whatever `black` absorbed, the picture picks up from where the timeline actually is.
     const from = cursor;
 
     const budget = end - from;
@@ -251,7 +253,7 @@ export function deriveSpineCut(
     // cleared, and treating that as a take id is a lookup on the string "null".
     const takeId = production.selections[shotId]?.acceptedTakeId ?? null;
     const take = takeId === null ? undefined : takesById.get(takeId);
-    const found = take ? materialFor(take, production, takesById) : null;
+    const found = take ? materialFor(take, shotId, production, takesById) : null;
     const material = found?.ok === true ? found.material : null;
 
     if (!take || !material) {
@@ -275,7 +277,7 @@ export function deriveSpineCut(
     // source has to move with it. Leaving the in-point alone plays the take's first frame two
     // seconds late -- different content than the anchor asked for, and a shortfall hidden because
     // the discarded head still counted as usable material (Codex round 1).
-    const discarded = from - anchor.startSec;
+    const discarded = Math.max(0, from - anchor.startSec);
     const inSec = material.inSec + trim + discarded;
     const usable = material.availableSec === undefined ? undefined : material.availableSec - trim - discarded;
     const limited = material.limitSec === undefined ? undefined : material.limitSec - trim - discarded;
@@ -314,10 +316,10 @@ export function deriveSpineCut(
       problems.push({ shotId, kind: "unmeasured", detail: `take ${take.id} has not been probed, so its length is assumed to cover the window` });
     }
 
-    // Snapped rather than dropped: a take falling a millionth of a second short of its window is
-    // float noise, but leaving the clip at its measured end while the cursor moved to the anchor's
-    // opened a hole in a timeline this function promises has none (Codex round 2).
-    const used = budget - capped <= EPSILON ? budget : capped;
+    // No snap to the budget: `capped` already respects every boundary that binds, and rounding it
+    // up was what crossed a segment limit into the next shot (Codex round 4). A residue too small
+    // to be a frame is emitted honestly and quantised downstream.
+    const used = capped;
     const clipEnd = from + used;
     segments.push({
       kind: "clip",
@@ -331,14 +333,18 @@ export function deriveSpineCut(
       clipAudio: anchor.clipAudio,
     });
 
-    if (end - clipEnd > EPSILON) {
+    if (end > clipEnd) {
       // The take is shorter than the window it was anchored to. The shortfall is a slate rather
       // than a held frame: a frozen frame reads as a creative choice, and this is unfinished work.
-      problems.push({
-        shotId,
-        kind: "short",
-        detail: `take runs ${used.toFixed(3)}s against a ${budget.toFixed(3)}s window, ${(end - clipEnd).toFixed(3)}s short`,
-      });
+      // The segment is emitted at its true size whatever that is; only the *diagnostic* has a
+      // threshold, since telling a user a shot is 0.0000005s short is not telling them anything.
+      if (end - clipEnd > EPSILON) {
+        problems.push({
+          shotId,
+          kind: "short",
+          detail: `take runs ${used.toFixed(3)}s against a ${budget.toFixed(3)}s window, ${(end - clipEnd).toFixed(3)}s short`,
+        });
+      }
       segments.push({
         kind: "slate",
         startSec: clipEnd,

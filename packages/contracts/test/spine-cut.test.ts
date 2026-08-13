@@ -15,10 +15,11 @@ const TKS = "tk_01J8D0000000000000000000B2";
 const SH1 = "sh_1";
 const SH2 = "sh_2";
 
+/** Takes cover the shot they were generated for; a take covering nothing is not a real arrival. */
 function take(id: string, over: Partial<Take> = {}): Take {
   return TakeSchema.parse({
     id,
-    coversShots: [],
+    coversShots: [SH1],
     kind: "clip",
     provider: "test",
     model: "test-model",
@@ -237,7 +238,7 @@ describe("deriveSpineCut", () => {
     const cut = deriveSpineCut(
       bundle({
         shots: SHOTS,
-        takes: [take(TK1, { media: "a.mp4" }), take(TK2, { media: "b.mp4" })],
+        takes: [take(TK1, { media: "a.mp4" }), take(TK2, { media: "b.mp4", coversShots: [SH2] })],
         selections: { [SH1]: { acceptedTakeId: TK1 }, [SH2]: { acceptedTakeId: TK2 } },
         takeMediaInfo: { [TK1]: 30, [TK2]: 30 },
       }),
@@ -314,9 +315,57 @@ describe("deriveSpineCut", () => {
       spine({ [SH1]: { startSec: 0, endSec: 10, clipAudio: { mode: "mute" } } }),
       10,
     );
-    assert.deepEqual(cut.segments.map((s) => [s.kind, s.startSec, s.endSec]), [["clip", 0, 10]]);
-    for (let i = 1; i < cut.segments.length; i += 1) assert.equal(cut.segments[i]!.startSec, cut.segments[i - 1]!.endSec);
+    // Emitted at its true size rather than rounded up: the timeline stays exactly contiguous and
+    // every clip's master duration still equals the source window it reads.
+    assert.equal(cut.segments[0]!.startSec, 0);
     assert.equal(cut.segments.at(-1)!.endSec, 10);
+    for (let i = 1; i < cut.segments.length; i += 1) assert.equal(cut.segments[i]!.startSec, cut.segments[i - 1]!.endSec);
+    // Too small to be worth telling anyone about.
+    assert.equal(cut.problems.filter((p) => p.kind === "short").length, 0);
+  });
+
+  it("keeps every clip's master duration equal to the source window it reads", () => {
+    // The invariant three separate epsilon convenience fixes broke, asserted directly.
+    for (const [trackSec, anchors] of [
+      [10, { [SH1]: { startSec: 0.0000005, endSec: 10 } }],
+      [10, { [SH1]: { startSec: 0, endSec: 9.9999995 } }],
+      [6.0000005, { [SH1]: { startSec: 0, endSec: 6.0000005 } }],
+    ] as const) {
+      const cut = deriveSpineCut(
+        bundle({
+          shots: SHOTS,
+          takes: [take(TKP, { media: "pass.mp4" }), take(TKS, { segment: { passTakeId: TKP, inSec: 12, outSec: 18 } })],
+          selections: { [SH1]: { acceptedTakeId: TKS } },
+          takeMediaInfo: { [TKP]: 30 },
+        }),
+        spine(Object.fromEntries(Object.entries(anchors).map(([k, v]) => [k, { ...v, clipAudio: { mode: "mute" as const } }]))),
+        trackSec,
+      );
+      for (const seg of cut.segments) {
+        if (seg.kind !== "clip") continue;
+        assert.equal(Number((seg.media!.outSec - seg.media!.inSec).toFixed(9)), Number((seg.endSec - seg.startSec).toFixed(9)));
+        assert.ok(seg.media!.inSec >= 12, `inSec ${seg.media!.inSec} went before the segment start`);
+        assert.ok(seg.media!.outSec <= 18, `outSec ${seg.media!.outSec} crossed the segment boundary`);
+      }
+      assert.equal(cut.segments[0]!.startSec, 0);
+      assert.equal(cut.segments.at(-1)!.endSec, trackSec);
+    }
+  });
+
+  it("refuses a take accepted for a different shot", () => {
+    // acceptTake checks that the take exists, not that it belongs to the shot.
+    const cut = deriveSpineCut(
+      bundle({
+        shots: SHOTS,
+        takes: [take(TK1, { media: "clip.mp4", coversShots: [SH2] })],
+        selections: { [SH1]: { acceptedTakeId: TK1 } },
+        takeMediaInfo: { [TK1]: 30 },
+      }),
+      spine({ [SH1]: { startSec: 0, endSec: 6, clipAudio: { mode: "mute" } } }),
+      6,
+    );
+    assert.deepEqual(cut.segments.map((s) => s.kind), ["slate"]);
+    assert.match(cut.problems.find((p) => p.kind === "no-take")!.detail, /does not cover this shot/);
   });
 
   it("will not use a voice take as picture just because it has a file", () => {
@@ -420,7 +469,7 @@ describe("deriveSpineCut", () => {
     const cut = deriveSpineCut(
       bundle({
         shots: SHOTS,
-        takes: [take(TK1, { media: "a.mp4" }), take(TK2, { media: "b.mp4" })],
+        takes: [take(TK1, { media: "a.mp4" }), take(TK2, { media: "b.mp4", coversShots: [SH2] })],
         selections: { [SH1]: { acceptedTakeId: TK1 }, [SH2]: { acceptedTakeId: TK2 } },
         takeMediaInfo: { [TK1]: 100, [TK2]: 100 },
       }),
