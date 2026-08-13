@@ -15,6 +15,9 @@ import {
   RipplePreviewSchema,
   SceneSchema,
   SelectionsSchema,
+  ProductionSpineSchema,
+  CutFileSchema,
+  TakeMediaInfoRecordSchema,
   SheetSchema,
   StoryOverviewSchema,
   TakeSchema,
@@ -241,12 +244,22 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     }
 
     const takes = [];
+    const takeMediaInfo: ProductionBundle["takeMediaInfo"] = {};
     for (const takeDir of await listDir(join(pdir, "takes"))) {
       if (!(await exists(join(pdir, "takes", takeDir, "take.json")))) continue;
       const take = await tryParse(`productions/${id}/takes/${takeDir}/take.json`, (raw) =>
         TakeSchema.parse(JSON.parse(raw)),
       );
       if (take) takes.push(take);
+      // The probe result lives beside take.json, never inside it (#253): a take is the immutable
+      // record of what was dispatched and what came back, and a measurement taken afterwards is
+      // neither. A take with no sidecar is simply one nobody has measured.
+      if (await exists(join(pdir, "takes", takeDir, "media-info.json"))) {
+        const record = await tryParse(`productions/${id}/takes/${takeDir}/media-info.json`, (raw) =>
+          TakeMediaInfoRecordSchema.parse(JSON.parse(raw)),
+        );
+        if (record) takeMediaInfo[takeDir] = record;
+      }
     }
     takes.sort((a, b) => a.dispatchedAt.localeCompare(b.dispatchedAt));
 
@@ -264,9 +277,23 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       ? ((await tryParse(`productions/${id}/selections.json`, (raw) => SelectionsSchema.parse(JSON.parse(raw)))) ?? {})
       : {};
 
-    // spine.json, cut.json and the per-take media-info sidecars are loaded in the next slice.
-    // Stated explicitly rather than left to a default so the absence is a decision on the page
-    // rather than a surprise at the first read: no spine means the legacy scene-order cut.
+    // No spine is the ordinary case, not a fault: a short film or a dialogue production keeps the
+    // scene-order cut it has always had, and absence needs no migration and no rewrite (#253).
+    // A spine.json that will not parse also reads as null here — tryParse reports it as a world
+    // problem, and a production is better off on the legacy path than on half a timeline.
+    const spine = (await exists(join(pdir, "spine.json")))
+      ? ((await tryParse(`productions/${id}/spine.json`, (raw) => ProductionSpineSchema.parse(JSON.parse(raw)))) ??
+        null)
+      : null;
+
+    // cut.json keeps owning dialogue, score and ambience placement; the spine owns the master
+    // track alone. Loading it here is what lets the two be mixed in one graph at export.
+    const cut = (await exists(join(pdir, "cut.json")))
+      ? ((await tryParse(`productions/${id}/cut.json`, (raw) => CutFileSchema.parse(JSON.parse(raw)))) ?? {
+          audio: [],
+        })
+      : { audio: [] };
+
     productions.push({
       meta: metaDoc,
       story,
@@ -276,9 +303,9 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       takes,
       reviews,
       selections,
-      spine: null,
-      cut: { audio: [] },
-      takeMediaInfo: {},
+      spine,
+      cut,
+      takeMediaInfo,
     });
   }
 

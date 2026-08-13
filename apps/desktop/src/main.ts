@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { appendFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
@@ -122,6 +123,16 @@ function ffmpegPath(): string | null {
   if (process.env["ARKE_FFMPEG"]) return process.env["ARKE_FFMPEG"];
   const bundled = app.isPackaged ? join(process.resourcesPath, "ffmpeg", "ffmpeg.exe") : null;
   return bundled !== null && existsSync(bundled) ? bundled : null;
+}
+
+/**
+ * The bundled ffprobe (#253), or an explicit one, or nothing with a reason.
+ *
+ * It ships in the same `build-resources/ffmpeg` directory as ffmpeg — electron-builder copies
+ * that whole directory, so staging the pair together is all the packaging this needs.
+ */
+function ffprobeResolution(): { path: string } | { path: null; reason: string } {
+  return resolveFfprobe({ packagedDir: app.isPackaged ? join(process.resourcesPath, "ffmpeg") : null });
 }
 
 function windowsArchitecture(): "x64" | "arm64" | null {
@@ -719,6 +730,18 @@ async function initialize(): Promise<{ port: number }> {
           ...takeQcOptions(ffmpegPath()),
         }
       : {}),
+    // Measuring media (#253): the spine cannot make a clock out of a track whose length is
+    // unknown, and the cut cannot check a take against the window it was cut for. Wired
+    // separately from ffmpeg because a machine may resolve one and not the other, and a missing
+    // probe should cost measurement rather than export.
+    ...((): { mediaProbe?: ReturnType<typeof createFfprobe> } => {
+      const resolved = ffprobeResolution();
+      if (resolved.path === null) {
+        traceDesktop("media-probe.unavailable", { reason: resolved.reason });
+        return {};
+      }
+      return { mediaProbe: createFfprobe(resolved.path) };
+    })(),
     updates: {
       check: () => updateController!.check(),
       download: () => updateController!.download(),
