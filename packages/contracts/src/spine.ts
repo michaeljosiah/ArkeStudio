@@ -208,3 +208,155 @@ export function anchorProblems(
 export function anchorBudgetSec(anchor: SpineAnchor): number {
   return anchor.endSec - anchor.startSec;
 }
+
+// ---------------------------------------------------------------------------
+// Marker import (#253): a map somebody else made, read exactly or not at all
+// ---------------------------------------------------------------------------
+
+/**
+ * Why an import was refused, in terms of the file the user is looking at.
+ *
+ * `line` is one-based because that is what an editor shows. A parser that reports "index 16" for
+ * the seventeenth line is a parser nobody can act on without counting.
+ */
+export interface MarkerImportRefusal {
+  message: string;
+  /** One-based line of the offending row, for LRC. Absent for a whole-document JSON failure. */
+  line?: number;
+  /** Dotted path of the offending row, for JSON. Absent for LRC. */
+  path?: string;
+}
+
+export type MarkerImportResult<T> = { ok: true; value: T } | { ok: false; refusal: MarkerImportRefusal };
+
+/** Standard LRC metadata, and the only tags ignored rather than refused. */
+const LRC_METADATA = /^\[(ar|al|ti|by):/i;
+const LRC_OFFSET = /^\[offset:\s*([+-]?\d+)\s*\]$/i;
+/** `[mm:ss]`, `[mm:ss.xx]`, `[mm:ss.xxx]` — nothing looser, because a guess here moves a lyric. */
+const LRC_STAMP = /\[(\d{1,3}):([0-5]\d)(?:\.(\d{1,3}))?\]/g;
+
+/**
+ * Parse an LRC lyric sheet into timed lines (#253).
+ *
+ * Strict on purpose. A lyric marker is what a shot gets anchored to, so a timestamp read
+ * generously — `[1:0d.20]` taken as 1:00, a three-minute mark parsed as three seconds — silently
+ * moves a shot to the wrong bar, and the person who imported it has no way to know. Any nonblank
+ * line that is neither metadata, offset, nor at least one timestamp followed by text refuses the
+ * whole file and says which line.
+ *
+ * Refusing wholesale rather than skipping bad rows is the same argument: half a lyric sheet is
+ * worse than none, because the markers you kept are the ones the file happened to list first.
+ */
+export function parseLrc(text: string): MarkerImportResult<Array<{ text: string; atSec: number }>> {
+  const lines = text.split(/\r?\n/);
+  let offsetMs = 0;
+  const rows: Array<{ text: string; atSec: number; order: number }> = [];
+
+  // The offset applies to every timestamp in the file including ones read before it, so it is
+  // resolved in its own pass rather than mid-parse.
+  for (const raw of lines) {
+    const match = LRC_OFFSET.exec(raw.trim());
+    if (match) offsetMs = Number(match[1]);
+  }
+
+  for (const [index, raw] of lines.entries()) {
+    const line = raw.trim();
+    if (line.length === 0) continue;
+    if (LRC_METADATA.test(line) || LRC_OFFSET.test(line)) continue;
+
+    LRC_STAMP.lastIndex = 0;
+    const stamps: number[] = [];
+    let match: RegExpExecArray | null;
+    let consumed = 0;
+    while ((match = LRC_STAMP.exec(line)) !== null) {
+      if (match.index !== consumed) break; // a timestamp after the words is not a timestamped line
+      consumed = match.index + match[0].length;
+      const minutes = Number(match[1]);
+      const seconds = Number(match[2]);
+      // ".5" is five tenths and ".05" is five hundredths — padding right, not left, is the
+      // difference between a marker at 30.5s and one at 30.05s.
+      const fraction = match[3] ? Number(match[3].padEnd(3, "0")) / 1000 : 0;
+      stamps.push(minutes * 60 + seconds + fraction);
+    }
+    if (stamps.length === 0) {
+      return { ok: false, refusal: { line: index + 1, message: `${line} is not a timestamped lyric line` } };
+    }
+    const body = line.slice(consumed).trim();
+    if (body.length === 0) {
+      return { ok: false, refusal: { line: index + 1, message: `line ${index + 1} has a timestamp and no words` } };
+    }
+    for (const atSec of stamps) {
+      const shifted = atSec + offsetMs / 1000;
+      if (shifted < 0) {
+        return {
+          ok: false,
+          refusal: {
+            line: index + 1,
+            message: `offset ${offsetMs}ms moves ${body} to ${shifted.toFixed(3)}s, before the song starts`,
+          },
+        };
+      }
+      // Multiple stamps on one line are one marker each, all carrying the same words — that is
+      // what a repeated chorus line looks like in every LRC file in the wild.
+      rows.push({ text: body, atSec: shifted, order: rows.length });
+    }
+  }
+  return { ok: true, value: rows.map(({ text: body, atSec }) => ({ text: body, atSec })) };
+}
+
+/**
+ * Turn imported rows into markers, refusing anything past the end of the song.
+ *
+ * A marker at 4:10 of a 3:42 track is not a late lyric, it is a file that belongs to a different
+ * recording — and accepting it would put a section label somewhere no shot can ever be anchored.
+ * `mintId` is injected so the caller owns id generation and this stays pure.
+ */
+export function markersFromImport(
+  imported: SpineMarkerImport,
+  trackDurationSec: number,
+  mintId: () => string,
+): MarkerImportResult<SpineMarker[]> {
+  const markers: SpineMarker[] = [];
+  for (const [index, section] of imported.sections.entries()) {
+    if (section.atSec > trackDurationSec) {
+      return {
+        ok: false,
+        refusal: {
+          path: `sections[${index}]`,
+          message: `${section.label} at ${section.atSec}s is past the track's ${trackDurationSec.toFixed(3)}s`,
+        },
+      };
+    }
+    markers.push({ kind: "section", id: mintId(), label: section.label, atSec: section.atSec, source: "json" });
+  }
+  for (const [index, lyric] of imported.lyrics.entries()) {
+    if (lyric.atSec > trackDurationSec) {
+      return {
+        ok: false,
+        refusal: {
+          path: `lyrics[${index}]`,
+          message: `${lyric.text} at ${lyric.atSec}s is past the track's ${trackDurationSec.toFixed(3)}s`,
+        },
+      };
+    }
+    markers.push({ kind: "lyric", id: mintId(), text: lyric.text, atSec: lyric.atSec, source: "json" });
+  }
+  return { ok: true, value: orderedMarkers(markers) };
+}
+
+/**
+ * What the spine's markers become after an import is accepted.
+ *
+ * A JSON import owns both kinds and replaces both. An LRC file is a lyric sheet and says nothing
+ * about song structure, so it replaces lyrics alone — importing one must not cost the sections
+ * somebody placed by hand. Neither touches anchors: markers describe the song, anchors describe
+ * the film, and re-importing a corrected lyric sheet should never move a shot.
+ */
+export function applyMarkerImport(
+  existing: readonly SpineMarker[],
+  imported: readonly SpineMarker[],
+  scope: "sections-and-lyrics" | "lyrics-only",
+): SpineMarker[] {
+  const kept = scope === "lyrics-only" ? existing.filter((marker) => marker.kind === "section") : [];
+  return orderedMarkers([...kept, ...imported]);
+}
