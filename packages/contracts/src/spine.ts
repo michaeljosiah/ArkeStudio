@@ -269,9 +269,16 @@ export function parseLrc(
 
   // The offset applies to every timestamp in the file including ones read before it, so it is
   // resolved in its own pass rather than mid-parse.
-  for (const raw of lines) {
+  for (const [index, raw] of lines.entries()) {
     const match = LRC_OFFSET.exec(raw.trim());
-    if (match) offsetMs = Number(match[1]);
+    if (!match) continue;
+    const parsed = Number(match[1]);
+    // Enough digits and Number gives Infinity, which would ride through every later check and
+    // land as `atSec: Infinity` — a marker at a time JSON cannot even write down.
+    if (!Number.isFinite(parsed)) {
+      return { ok: false, refusal: { line: index + 1, message: `offset ${match[1]}ms is not a number of milliseconds` } };
+    }
+    offsetMs = parsed;
   }
 
   for (const [index, raw] of lines.entries()) {
@@ -293,8 +300,8 @@ export function parseLrc(
       const seconds = Number(match[2]);
       // ".5" is five tenths and ".05" is five hundredths — padding right, not left, is the
       // difference between a marker at 30.5s and one at 30.05s.
-      const fraction = match[3] ? Number(match[3].padEnd(3, "0")) / 1000 : 0;
-      stamps.push(minutes * 60 + seconds + fraction);
+      const fractionMs = match[3] ? Number(match[3].padEnd(3, "0")) : 0;
+      stamps.push((minutes * 60 + seconds) * 1000 + fractionMs);
     }
     if (stamps.length === 0) {
       return { ok: false, refusal: { line: index + 1, message: `${line} is not a timestamped lyric line` } };
@@ -321,7 +328,11 @@ export function parseLrc(
      * "[chorus]", "[ad lib]" — still passes, because the point is catching mistyped times rather
      * than punishing brackets.
      */
-    const timestampish = /\[\s*\d{1,3}\s*:/.exec(body);
+    // Any digit-length before the colon (Codex round 4). Capping it at three let `[0000:31]`
+    // through as lyric text — the fourth corner of a square the previous round was supposed to
+    // have closed. A token shaped like a time is refused whether or not this parser would have
+    // accepted the time itself; being unable to read it is the reason to refuse, not to allow.
+    const timestampish = /\[\s*\d+\s*:/.exec(body);
     if (timestampish !== null) {
       const token = body.slice(timestampish.index).split("]")[0];
       return {
@@ -332,9 +343,19 @@ export function parseLrc(
         },
       };
     }
-    for (const atSec of stamps) {
-      const shifted = atSec + offsetMs / 1000;
-      if (shifted < 0) {
+    for (const atMs of stamps) {
+      /*
+       * Milliseconds throughout, converted to seconds only at the end (Codex round 4).
+       *
+       * Working in seconds put the offset through a division and the comparison through binary
+       * floating point: `[00:29.074]` shifted by +946ms came out as 30.020000000000003 and was
+       * refused against a 30.02s track, though it lands exactly on the last allowed instant. LRC
+       * has millisecond resolution and nothing finer, so integers are the honest representation
+       * and the boundary case stops depending on how the arithmetic rounds.
+       */
+      const shiftedMs = atMs + offsetMs;
+      const shifted = shiftedMs / 1000;
+      if (shiftedMs < 0) {
         return {
           ok: false,
           refusal: {
@@ -343,7 +364,7 @@ export function parseLrc(
           },
         };
       }
-      if (trackDurationSec !== undefined && shifted > trackDurationSec) {
+      if (trackDurationSec !== undefined && shiftedMs > Math.round(trackDurationSec * 1000)) {
         return {
           ok: false,
           refusal: {
