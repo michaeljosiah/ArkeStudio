@@ -14,11 +14,6 @@ import type { DerivedSpineCut, SpineCutSegment } from "./spine-cut.js";
  * whenever a clip has audio is a mix nobody chose, arriving at export.
  */
 
-/** The frame grid is where "too small to render" becomes a question with an answer. */
-function frameFloor(sec: number, fps: number): number {
-  return Math.round(sec * fps) / fps;
-}
-
 export type SpineExportItem =
   | { type: "clip"; path: string; inSec: number; outSec: number; durationSec: number; label: string; audio: { gainDb: number; atSec: number } | null }
   | { type: "slate"; label: string; durationSec: number }
@@ -48,14 +43,29 @@ export interface SpineExportRefusal {
 export function spineExportRefusals(cut: DerivedSpineCut, preset: ExportPreset): SpineExportRefusal | null {
   if (preset === "review-cut") return null;
   const missingSec = cut.slateSec + cut.blackSec;
-  if (missingSec <= 0) return null;
+  /*
+   * Any named problem disqualifies, not merely visible holes (Codex round 1).
+   *
+   * Counting slate and black seconds asks "does picture cover the song", which a cut can pass
+   * while still being unfit to deliver: an `unmeasured` take fills its window on an assumption
+   * nobody verified, and `overlaps` means two shots claim the same seconds and one of them was
+   * silently dropped. Both leave the timeline visually complete. A master is a claim that the
+   * film is finished, and every problem the derivation names is a reason that claim is not yet
+   * true -- so the check is for problems, and the seconds are only how it is described.
+   */
+  if (missingSec <= 0 && cut.problems.length === 0) return null;
+
+  const kinds = [...new Set(cut.problems.map((p) => p.kind))].sort();
   const shots = cut.segments.filter((s) => s.kind === "slate").length;
+  const holes =
+    shots > 0
+      ? `${shots} shot${shots === 1 ? "" : "s"} and ${cut.blackSec.toFixed(1)}s of unanchored song have no picture`
+      : missingSec > 0
+        ? `${cut.blackSec.toFixed(1)}s of the song has no picture`
+        : "picture covers the song";
   return {
     reason: "incomplete",
-    detail:
-      shots > 0
-        ? `${shots} shot${shots === 1 ? "" : "s"} and ${cut.blackSec.toFixed(1)}s of unanchored song have no picture`
-        : `${cut.blackSec.toFixed(1)}s of the song has no picture`,
+    detail: kinds.length > 0 ? `${holes}; unresolved: ${kinds.join(", ")}` : holes,
     missingSec,
   };
 }
@@ -63,22 +73,25 @@ export function spineExportRefusals(cut: DerivedSpineCut, preset: ExportPreset):
 /**
  * Lay the derived segments out as render items.
  *
- * Durations are quantised to the preset's frame grid here rather than in the derivation, which
- * reports exact seconds on purpose. A segment shorter than a frame collapses to nothing and is
- * dropped — that is the honest place for the rounding the derivation refuses to do, because a
- * frame is a real unit and a millionth of a second is not.
+ * Boundaries are quantised, not durations (Codex round 1). Rounding each length independently
+ * lets error accumulate: sixty contiguous 1.02s segments each round to 1s, and the export ends a
+ * minute into a song that runs 61.2s, truncated by its own `-t`. Snapping absolute positions to
+ * the grid keeps adjacent items sharing a frame boundary and keeps the total equal to the song.
+ *
+ * This is where rounding belongs. The derivation reports exact seconds on purpose; a frame is a
+ * real unit and a millionth of a second is not, so a segment that lands between two frame
+ * boundaries collapses and is dropped here rather than being invented into a frame it never had.
  */
 export function buildSpineExportPlan(cut: DerivedSpineCut, preset: ExportPreset, trackPath: string): SpineExportPlan {
   const { fps } = PRESETS[preset];
+  const grid = (sec: number): number => Math.round(sec * fps) / fps;
   const items: SpineExportItem[] = [];
-  let totalSec = 0;
   for (const segment of cut.segments) {
-    const durationSec = frameFloor(segment.endSec - segment.startSec, fps);
+    const durationSec = grid(segment.endSec) - grid(segment.startSec);
     if (durationSec <= 0) continue;
     items.push(itemFor(segment, durationSec));
-    totalSec += durationSec;
   }
-  return { preset, trackPath, items, totalSec };
+  return { preset, trackPath, items, totalSec: grid(cut.trackDurationSec) };
 }
 
 function itemFor(segment: SpineCutSegment, durationSec: number): SpineExportItem {
@@ -94,8 +107,11 @@ function itemFor(segment: SpineCutSegment, durationSec: number): SpineExportItem
     label: segment.label,
     // Mute is the default because the sound is the model's invention. Keeping it is a decision
     // recorded on the anchor, and it arrives here as the gain that decision named.
+    // Only when the file actually carries a stream: keep-diegetic on a silent clip built a graph
+    // referencing an audio input that is not there, and ffmpeg fails the whole export rather than
+    // the one shot (Codex round 1). A clip with nothing to keep keeps nothing.
     audio:
-      segment.clipAudio?.mode === "keep-diegetic"
+      segment.clipAudio?.mode === "keep-diegetic" && segment.hasAudio !== false
         ? { gainDb: segment.clipAudio.gainDb, atSec: segment.startSec }
         : null,
   };
@@ -132,8 +148,13 @@ export function buildSpineFfmpegArgs(plan: SpineExportPlan, worldDir: string, ou
       args.push("-f", "lavfi", "-t", String(item.durationSec), "-i", `color=c=black:s=${p.width}x${p.height}:r=${p.fps}`);
       if (item.type === "slate") {
         // A black slate reading "SHOT 15 · 6.0s" beats a silent omission (R-20, D10).
+        // expansion=none: a shot titled "100% Practical" is a label, not a drawtext expression.
+        // ffmpeg expands %{...} in text by default, so a percent sign in somebody's own shot
+        // title could fail their review cut instead of appearing on the slate (Codex round 1).
         const text = item.label.replace(/[':\\]/g, " ");
-        filters.push(`[${index}:v]drawtext=text='${text}':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v${index}]`);
+        filters.push(
+          `[${index}:v]drawtext=expansion=none:text='${text}':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v${index}]`,
+        );
       } else {
         filters.push(`[${index}:v]null[v${index}]`);
       }

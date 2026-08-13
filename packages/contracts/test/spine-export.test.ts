@@ -33,7 +33,48 @@ const CLIP = {
 };
 
 describe("spine export", () => {
-  it("quantises segment lengths to the preset frame grid and drops what cannot be a frame", () => {
+  it("quantises boundaries so error cannot accumulate across a long cut", () => {
+    // Sixty contiguous 1.02s segments: rounding each length independently makes a 61.2s song
+    // export as 60s, truncated by its own -t.
+    const segs = Array.from({ length: 60 }, (_, i) => ({
+      ...CLIP,
+      startSec: i * 1.02,
+      endSec: (i + 1) * 1.02,
+      media: { path: "productions/p/takes/t/clip.mp4", inSec: 0, outSec: 1.02 },
+    }));
+    const plan = buildSpineExportPlan(cutOf(segs, 61.2), "review-cut", "a/m.mp3");
+    assert.equal(plan.items.length, 60);
+    assert.equal(Number(plan.items.reduce((a, i) => a + i.durationSec, 0).toFixed(6)), Number(plan.totalSec.toFixed(6)));
+    assert.equal(Number(plan.totalSec.toFixed(3)), 61.208);
+  });
+
+  it("refuses a master when the picture covers the song but a problem remains", () => {
+    // No visible hole: an unmeasured take filled its window on an assumption nobody verified.
+    const cut = { ...cutOf([CLIP], 4), problems: [{ shotId: "sh_1", kind: "unmeasured" as const, detail: "not probed" }] };
+    assert.equal(spineExportRefusals(cut, "review-cut"), null);
+    const refusal = spineExportRefusals(cut, "master");
+    assert.equal(refusal?.reason, "incomplete");
+    assert.match(refusal!.detail, /unmeasured/);
+  });
+
+  it("keeps nothing when a clip has no audio stream to keep", () => {
+    const silent = { ...CLIP, hasAudio: false, clipAudio: { mode: "keep-diegetic" as const, gainDb: -9 } };
+    const plan = buildSpineExportPlan(cutOf([silent], 4), "review-cut", "a/m.mp3");
+    assert.equal(plan.items[0]!.type === "clip" ? plan.items[0]!.audio : "n/a", null);
+    // Referencing an absent audio input fails the whole export, not the one shot.
+    assert.doesNotMatch(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4")), /\[0:a\]/);
+  });
+
+  it("does not let a percent sign in a shot title fail the review cut", () => {
+    const plan = buildSpineExportPlan(
+      cutOf([{ kind: "slate", startSec: 0, endSec: 4, label: "SHOT 2 - 100% Practical", shotId: "sh_2" }], 4),
+      "review-cut",
+      "a/m.mp3",
+    );
+    assert.match(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4")), /drawtext=expansion=none:/);
+  });
+
+  it("drops a segment too short to be a frame", () => {
     const plan = buildSpineExportPlan(
       cutOf([{ ...CLIP, endSec: 4 }, { kind: "black", startSec: 4, endSec: 4.0000005, label: "" }], 4.0000005),
       "review-cut",

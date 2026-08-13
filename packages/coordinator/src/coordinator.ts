@@ -15,6 +15,11 @@ import {
   type HarnessAdapter,
   type HealthComponent,
   buildExportPlan,
+  buildFfmpegArgs,
+  buildSpineExportPlan,
+  buildSpineFfmpegArgs,
+  deriveSpineCut,
+  spineExportRefusals,
   CutFileSchema,
   deriveCut,
   designatedCompilation,
@@ -2872,15 +2877,56 @@ export class Coordinator {
           );
           return;
         }
-        const cut = deriveCut(production);
-        const plan = buildExportPlan(cut, msg.preset);
+        /*
+         * A production cut to a track renders against the song, not against scene order (#253).
+         *
+         * The spine assembly existed and nothing called it, so exporting a spine production
+         * still produced the scene-order cut with no master under it -- a renderer that was
+         * unreachable from the product it was written for (Codex round 1). The old path stays
+         * exactly as it was for everything else, which is most productions.
+         */
+        const spine = production.spine;
+        const trackFile = spine
+          ? store.getBundle().artifacts.find((a) => a.id === spine.trackArtifactId)?.file
+          : undefined;
+        const trackDurationSec =
+          trackFile !== undefined && this.opts.mediaProbe
+            ? await this.opts.mediaProbe.durationSec(join(store.dir, "artifacts", trackFile))
+            : null;
+
+        let buildArgs: (stage: string) => string[];
+        if (spine && trackFile !== undefined && trackDurationSec !== null) {
+          const spineCut = deriveSpineCut(production, spine, trackDurationSec);
+          const refusal = spineExportRefusals(spineCut, msg.preset);
+          if (refusal) {
+            // Said before the encode rather than after somebody has sent the file on.
+            emitProgress("ex_none", "failed", 0, null, `cut is not ready for ${msg.preset}: ${refusal.detail}`);
+            return;
+          }
+          const spinePlan = buildSpineExportPlan(spineCut, msg.preset, `artifacts/${trackFile}`);
+          buildArgs = (stage) => buildSpineFfmpegArgs(spinePlan, store.dir, stage);
+        } else {
+          if (spine && trackDurationSec === null) {
+            // Falling through silently would export a spine production as though it had none.
+            emitProgress(
+              "ex_none",
+              "failed",
+              0,
+              null,
+              "export needs the master track measured — ffprobe could not read it (SPEC-016)",
+            );
+            return;
+          }
+          const plan = buildExportPlan(deriveCut(production), msg.preset);
+          buildArgs = (stage) => buildFfmpegArgs(plan, store.dir, stage);
+        }
         const stamp = new Date()
           .toISOString()
           .replace(/[-:TZ.]/g, "")
           .slice(0, 14);
         const handle = runExport(
           store.dir,
-          plan,
+          buildArgs,
           `${msg.productionId}-${msg.preset}-${stamp}.mp4`,
           runner,
           (percent) => emitProgress(handle.id, "running", percent, null, null),
