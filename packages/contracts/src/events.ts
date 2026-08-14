@@ -48,6 +48,8 @@ export const QueueCommandSchema = z.enum([
   "voice-preview",
   "read-sheet-section",
   "generate-world-image",
+  "generate-master-look",
+  "upload-master-look",
   "establish-look",
   "generate-main-photo",
   "generate-character-sheet",
@@ -655,7 +657,15 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("manifest.drift"), reports: z.array(ManifestDriftSchema) }).strict(),
 
   /** Another program changed world files while open — reload required, never merged (SPEC-002 R-23). */
-  z.object({ ...base, type: z.literal("world.stale"), worldId: UlidSchema }).strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("world.stale"),
+      worldId: UlidSchema,
+      /** The world-relative paths that differed, so the log can be read after the fact. */
+      paths: z.array(z.string().min(1)).default([]),
+    })
+    .strict(),
 
   /** Agent progress in product language: canon checks, drafting steps (SPEC-005 R-15). */
   z

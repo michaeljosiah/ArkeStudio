@@ -45,7 +45,7 @@ export class FsWorldProvider implements WorldProvider {
   private store: WorldStore | null = null;
   private closing = false;
   private readonly scopedOperations = new Set<Promise<unknown>>();
-  private onStaleCb: ((worldId: string) => void) | null = null;
+  private onStaleCb: ((worldId: string, paths: string[]) => void) | null = null;
   private appIndex: AppIndex | null = null;
   private appIndexReady = false;
   readonly pathBudget: PathBudget;
@@ -107,7 +107,7 @@ export class FsWorldProvider implements WorldProvider {
     return this.store ? new ProposalManager(this.store) : null;
   }
 
-  onWorldStale(cb: (worldId: string) => void): void {
+  onWorldStale(cb: (worldId: string, paths: string[]) => void): void {
     this.onStaleCb = cb;
   }
 
@@ -310,7 +310,7 @@ export class FsWorldProvider implements WorldProvider {
     this.store = await WorldStore.open(dir, {
       clock: this.clock,
       ...(this.sqlite ? { sqlite: this.sqlite } : {}),
-      events: { onStale: () => this.onStaleCb?.(worldId) },
+      events: { onStale: (paths) => this.onStaleCb?.(worldId, paths) },
     });
     const bundle = this.store.getBundle();
     this.refreshRegistry(bundle);

@@ -86,6 +86,35 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("use-world-image"), worldId: UlidSchema }).strict(),
   /** Or do not: the candidate is deleted and the world keeps the image it had. */
   z.object({ kind: z.literal("discard-world-image"), worldId: UlidSchema }).strict(),
+  /**
+   * SPEC-017: the world look as a picture. The record has carried a `masterLook` since the look
+   * was versioned; these four are the first way to put one there.
+   *
+   * The prompt is the look's own description, unedited — a picture of the look written from
+   * different words than the look would not be a picture of it.
+   */
+  z
+    .object({
+      kind: z.literal("generate-master-look"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      /** Override the routed model for this generation only. */
+      modelId: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
+   * Or bring your own. Opens the host's file picker: the renderer never handles the bytes, and
+   * the format is decided by reading them rather than by trusting the name.
+   */
+  z.object({ kind: z.literal("upload-master-look"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  /**
+   * Keep the candidate. Accepting is a look change, not a file copy: the image lands as the next
+   * version's master look, with the same history, ripples and change record any other look
+   * change produces.
+   */
+  z.object({ kind: z.literal("use-master-look"), worldId: UlidSchema }).strict(),
+  /** Or do not: the candidate is deleted and the look keeps the image it had, or none. */
+  z.object({ kind: z.literal("discard-master-look"), worldId: UlidSchema }).strict(),
   z.object({ kind: z.literal("archive-world"), worldId: UlidSchema }).strict(),
   /**
    * Install the sample world (SPEC-016 R-6). No arguments: which world ships is a property of

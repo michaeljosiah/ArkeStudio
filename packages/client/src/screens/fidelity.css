@@ -2639,7 +2639,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   font: 400 9px var(--font-mono);
 }
 .fy-artdirection__master-caption p { font: 400 12px var(--font-mono); color: color-mix(in srgb, var(--media-overlay-fg) 62%, transparent); margin-top: 6px; }
-.fy-artdirection__detail { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 4px 0; }
+/* The column that grows: reach, overrides and history all live below the fold on a short window,
+   and the screen is a fixed-height flex row, so without this they are simply unreachable. */
+.fy-artdirection__detail { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; padding: 4px 0; }
 .fy-artdirection__eyebrow,
 .fy-artproposal__eyebrow { font: 500 10.5px var(--font-sans); letter-spacing: .15em; color: var(--muted-foreground); }
 .fy-artdirection__detail > h1 { margin: 12px 0 0; font: 650 42px/1.04 var(--font-sans); letter-spacing: -.03em; }
@@ -2647,11 +2649,19 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-artdirection__badges { display: flex; gap: 8px; margin-top: 22px; }
 .fy-artdirection__badges span { padding: 5px 11px; border-radius: 999px; background: var(--secondary); font: 400 10.5px var(--font-mono); }
 .fy-artdirection__badges span + span { border: 1px solid var(--border); background: var(--background); color: var(--muted-foreground); }
+.fy-artdirection__carries { font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); margin-top: 10px; max-width: 460px; }
 .fy-artdirection__safety,
 .fy-artdirection__derived { font: 400 11px/1.6 var(--font-sans); color: var(--muted-foreground); margin-top: 14px; border-left: 2px solid var(--border); padding-left: 12px; }
 .fy-artdirection__derived { border-color: var(--warning); color: var(--neutral-600); }
 .fy-artdirection__action { margin-top: 28px; }
 .fy-artdirection__action .ui-btn { width: 180px; height: 40px; justify-content: center; }
+.fy-artdirection__masterlook { margin-top: 18px; }
+.fy-artdirection__masterlook-shot { width: 220px; height: 124px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); margin-bottom: 10px; }
+.fy-artdirection__masterlook-shot .fy-portrait { border-radius: 0; object-fit: cover; }
+.fy-artdirection__masterlook > p { font: 400 11px/1.6 var(--font-sans); color: var(--muted-foreground); max-width: 460px; }
+.fy-artdirection__masterlook-row { display: flex; gap: 8px; margin-top: 10px; }
+.fy-artdirection__masterlook-row .ui-btn { height: 34px; }
+.fy-artdirection__masterlook-why { margin-top: 8px; font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); }
 .fy-artdirection__spacer { flex: 1; min-height: 6px; }
 .fy-artdirection__section { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
 .fy-artdirection__section h2 { font: 500 10px var(--font-mono); letter-spacing: .14em; color: var(--neutral-400); }
@@ -2670,7 +2680,10 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 /* art direction proposal (36b) */
 .fy-artproposal { height: 100%; min-height: 0; display: flex; background: var(--background); }
-.fy-artproposal__main { flex: 1; min-width: 0; padding: 54px 58px; display: flex; flex-direction: column; }
+/* Both columns scroll independently. Neither did, and both end in the control the screen exists
+   for — Set the look on the left, Accept on the right — so a short window did not crop the page,
+   it removed the decision. */
+.fy-artproposal__main { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 54px 58px; display: flex; flex-direction: column; }
 .fy-artproposal__header { display: flex; align-items: baseline; }
 .fy-artproposal__header h1 { margin-top: 10px; font: 650 34px var(--font-sans); letter-spacing: -.03em; }
 .fy-artproposal__header > span { margin-left: auto; font: 400 10px var(--font-mono); color: var(--warning); }
@@ -2689,7 +2702,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-artproposal__buttons { display: flex; gap: 8px; margin-top: 22px; }
 .fy-artproposal__buttons .ui-btn:first-child { width: 90px; }
 .fy-artproposal__buttons .ui-btn:last-child { width: 140px; justify-content: center; }
-.fy-artproposal__ripple { width: 380px; flex: none; border-left: 1px solid var(--border); background: var(--muted); padding: 54px 34px; display: flex; flex-direction: column; }
+.fy-artproposal__ripple { width: 380px; flex: none; min-height: 0; overflow-y: auto; border-left: 1px solid var(--border); background: var(--muted); padding: 54px 34px; display: flex; flex-direction: column; }
 .fy-artproposal__ripple > strong { font: 650 28px var(--font-sans); margin-top: 12px; }
 .fy-artproposal__ripple > p { font: 400 12px/1.6 var(--font-sans); color: var(--muted-foreground); margin-top: 5px; }
 .fy-artproposal__ripple-list { margin-top: 24px; border-top: 1px solid var(--border); }

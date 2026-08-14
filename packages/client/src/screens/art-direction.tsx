@@ -2,16 +2,67 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import type { ArtDirectionHistoryEntry, ResolvedArtDirection } from "@arke-studio/contracts";
 import { ArtStyleGrid } from "../components/art-style-picker.js";
+import { resolveModel } from "../components/dispatch-bar.js";
 import { seedFrom } from "../lib/art-styles.js";
 import { Button } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
 import { shortDate } from "../lib/format.js";
-import { acceptProposal, discardProposal, setArtDirection, useWorld } from "../lib/store.js";
+import {
+  acceptProposal,
+  discardMasterLook,
+  discardProposal,
+  generateMasterLook,
+  setArtDirection,
+  uploadMasterLook,
+  useMasterLook,
+  useStore,
+  useWorld,
+} from "../lib/store.js";
 
-function splitDescription(description: string): { title: string; body: string } {
-  const first = /^(.+?[.!?])(?:\s+|$)(.*)$/s.exec(description.trim());
-  if (!first) return { title: description.trim(), body: description.trim() };
-  return { title: first[1]!, body: first[2]?.trim() || first[1]! };
+/**
+ * Longest heading the 42px display type can carry before it stops reading as a heading.
+ *
+ * Not a truncation: whatever the heading gives up starts the paragraph underneath, so the words
+ * on screen are the same words either way. This only decides where the type size changes.
+ */
+const TITLE_MAX = 120;
+
+/** Where a run-on first sentence is willing to be broken, in the order we would rather break it. */
+const CLAUSE_BREAKS = [":", ";", "—"];
+
+/**
+ * The heading is the description's first sentence — until the first sentence is the description.
+ *
+ * A look is often written as one long comma-spliced line ("Cinematic painterly 3D animation with
+ * an Arcane-like sensibility: premium production quality, hand-painted textures, …"), and the
+ * sentence rule then promoted ninety words to 42px and left the paragraph beneath it empty. So a
+ * first sentence too long to be a heading is broken at its own first structural break instead,
+ * and everything past that point becomes the body. Nothing is dropped in either case: title plus
+ * body is always the whole description.
+ */
+export function splitDescription(description: string): { title: string; body: string } {
+  const text = description.trim();
+  const sentence = /^(.+?[.!?])(?:\s+|$)(.*)$/s.exec(text);
+  const head = sentence ? sentence[1]! : text;
+  const tail = (sentence ? (sentence[2] ?? "") : "").trim();
+  if (head.length <= TITLE_MAX) return { title: head, body: tail };
+
+  const at = clauseBreak(head);
+  if (at === null) return { title: head, body: tail };
+  const rest = head.slice(at + 1).trim();
+  return { title: head.slice(0, at).trim(), body: [rest, tail].filter((part) => part !== "").join(" ") };
+}
+
+/** The index of the character to break a too-long heading at, or null if it offers nowhere. */
+function clauseBreak(head: string): number | null {
+  for (const mark of CLAUSE_BREAKS) {
+    const at = head.indexOf(mark);
+    if (at > 0 && at <= TITLE_MAX) return at;
+  }
+  // No structural break, so the last comma that still fits — as much of the opening as the
+  // heading can hold, rather than the first fragment of it.
+  const at = head.lastIndexOf(",", TITLE_MAX);
+  return at > 0 ? at : null;
 }
 
 /**
@@ -110,6 +161,108 @@ function History({ worldSlug, history }: { worldSlug: string; history: ArtDirect
   );
 }
 
+/**
+ * Setting the master look — the thing this screen has always described and never offered.
+ *
+ * The record has carried a `masterLook` since the look was versioned: history keeps one per
+ * version, the reach counts it, the review names it, and the copy above explains how it travels
+ * into other work. Nothing in the app could put one there, so every world's was empty and the
+ * page stood in the world's key art instead.
+ *
+ * Two doors, because the two are genuinely different intentions. Generating asks the look to
+ * illustrate itself, from its own words and nothing else. Uploading is for an author who already
+ * knows what the world looks like — a frame grab, a painting, a photograph — and does not need a
+ * model's opinion about it.
+ */
+function MasterLook({
+  worldId,
+  slug,
+  version,
+  proposalOpen,
+}: {
+  worldId: string;
+  slug: string;
+  version: number;
+  /** A look change already staged. The gate allows one, so accepting here would be refused. */
+  proposalOpen: boolean;
+}) {
+  const { state } = useStore();
+  const candidate = state?.world?.masterLookCandidate ?? null;
+  const [dismissed, setDismissed] = useState<readonly string[]>([]);
+  const model = resolveModel(state, "image").model;
+  const stranded = resolveModel(state, "image").stranded;
+  const usable = model !== null && stranded === null;
+
+  const mine = (state?.app.jobs ?? []).filter(
+    (job) => job.worldId === worldId && job.target.kind === "master-look",
+  );
+  const running = mine.find(
+    (job) => job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled",
+  );
+  const newest = [...mine].reverse()[0];
+  const failed = newest?.status === "failed" && !dismissed.includes(newest.id) ? newest : undefined;
+
+  // The offer, whenever there is one: a candidate outranks a running job, because a candidate is
+  // a decision waiting on the person and a job is only the studio being busy.
+  if (candidate !== null) {
+    return (
+      <section className="fy-artdirection__masterlook">
+        <div className="fy-artdirection__masterlook-shot">
+          <Portrait worldSlug={slug} path={candidate} label="Master look, just made" radius={8} />
+        </div>
+        <p>
+          Keep this as the world's master look? It lands as v{version + 1} — earlier work keeps the
+          look it was made under.
+        </p>
+        <div className="fy-artdirection__masterlook-row">
+          <Button variant="primary" onClick={() => useMasterLook(worldId)} disabled={proposalOpen}>
+            Use this · v{version + 1}
+          </Button>
+          <Button variant="ghost" onClick={() => discardMasterLook(worldId)}>
+            Not this one
+          </Button>
+        </div>
+        {/* The gate allows one open look change at a time. Without this the button was live, the
+            gate refused it, and the candidate simply stayed on screen saying nothing. */}
+        {proposalOpen && (
+          <p className="fy-artdirection__masterlook-why">
+            A change to this look is already proposed. Settle it first — this image waits.
+          </p>
+        )}
+      </section>
+    );
+  }
+
+  return (
+    <section className="fy-artdirection__masterlook">
+      {failed && (
+        <p className="fy-artdirection__masterlook-why">
+          The master look did not come back — {failed.error ?? "the provider refused it"}
+        </p>
+      )}
+      <div className="fy-artdirection__masterlook-row">
+        <Button
+          onClick={() => {
+            if (failed) setDismissed((prev) => [...prev, failed.id]);
+            generateMasterLook(worldId, model?.id);
+          }}
+          disabled={!usable || running !== undefined}
+        >
+          {running ? "Making one…" : failed ? "Try again" : "Generate from this look"}
+        </Button>
+        <Button variant="ghost" onClick={() => uploadMasterLook(worldId)}>
+          Upload an image
+        </Button>
+      </div>
+      <p className="fy-artdirection__masterlook-why">
+        {usable
+          ? "Generating sends this look's own words as the prompt, and nothing else."
+          : "No image model is available, so only an upload can set the look right now."}
+      </p>
+    </section>
+  );
+}
+
 export function ArtDirectionScreen() {
   const { worldId } = useParams();
   const navigate = useNavigate();
@@ -163,11 +316,19 @@ export function ArtDirectionScreen() {
       <div className="fy-artdirection__detail">
         <div className="fy-artdirection__eyebrow">WORLD ART DIRECTION</div>
         <h1>{display.title}</h1>
-        <p className="fy-artdirection__description">{display.body}</p>
+        {/* Only when there is one. A one-line look used to print the same sentence twice: once
+            as the heading and again as its own description. */}
+        {display.body !== "" && <p className="fy-artdirection__description">{display.body}</p>}
         <div className="fy-artdirection__badges">
           <span>WORLD LOOK · v{direction.version}</span>
           <span>CARRIES AS TEXT TOO</span>
         </div>
+        {/* The heading is a typographic split, and the screen has to say so. Somebody reading a
+            bold line above a grey one reasonably concludes the bold part is the one that counts. */}
+        <p className="fy-artdirection__carries">
+          Every word of this description goes into every new generation. The heading is just where
+          it starts — not a summary of it, and not the part that carries.
+        </p>
         {direction.derived ? (
           <div className="fy-artdirection__derived">
             This direction is derived from the world's tone and genre. No master look is set yet. Make it
@@ -188,6 +349,12 @@ export function ArtDirectionScreen() {
                 : "Propose a change"}
           </Button>
         </div>
+        <MasterLook
+          worldId={world.meta.worldId}
+          slug={world.meta.slug}
+          version={direction.version}
+          proposalOpen={proposed !== undefined}
+        />
         <div className="fy-artdirection__spacer" />
         <Reach direction={direction} />
         <Overrides direction={direction} />

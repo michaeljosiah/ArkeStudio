@@ -285,7 +285,7 @@ export class ReadModel {
       case "world.stale": {
         const world = this.state.world;
         if (!world || world.meta.worldId !== event.worldId) return;
-        this.state = { ...this.state, world: { ...world, stale: true } };
+        this.state = { ...this.state, world: { ...world, stale: true, stalePaths: event.paths } };
         return;
       }
       case "world.opened":
