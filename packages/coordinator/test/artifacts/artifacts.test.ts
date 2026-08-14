@@ -177,8 +177,10 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
           return { durationSec: 11, hasAudio: true };
         },
       });
+      // Only this artifact's outcome is asserted: the fixture's own media may measure fine, and
+      // a count here would be a claim about the fixture rather than about the swap.
+      void measured;
       assert.equal(store.getBundle().artifacts.find((a) => a.file === "swapped.mp3")?.mediaInfo, undefined);
-      assert.ok(measured === 0 || measured > 0, "other artifacts may still measure; this one must not");
     } finally {
       await store.close();
     }
