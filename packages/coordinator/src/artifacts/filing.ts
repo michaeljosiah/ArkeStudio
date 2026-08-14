@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { copyFile, readdir, readFile, stat, statfs } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
-import { ulid, type ArtifactKind, type ArtifactSidecar } from "@arke-studio/contracts";
+import { ArtifactSidecarSchema, ulid, type ArtifactKind, type ArtifactSidecar } from "@arke-studio/contracts";
+import { measureMediaInfo, type MediaProbe } from "../media/probe.js";
 import { toExtendedLength } from "../world/paths.js";
 import { slugify } from "../world/slug.js";
 import { sha256 } from "../world/text-files.js";
@@ -63,14 +64,49 @@ async function readSidecarRaw(store: WorldStore, file: string): Promise<string |
   }
 }
 
+/**
+ * The sidecar as it is on disk right now, or null if it is not one.
+ *
+ * Every writer here rebuilds a whole record from what it reads, so what it reads has to be a whole
+ * record. Casting instead of parsing meant a file hand-edited to `{"links":[]}` was spread into a
+ * replacement and committed, erasing id, hash and origin -- a rewrite triggered by somebody adding
+ * a link (Codex). The scan reports malformed sidecars without rewriting them; nothing here has a
+ * better claim, so a writer that cannot read one leaves it alone.
+ */
+async function currentSidecar(
+  store: WorldStore,
+  fallback: ArtifactSidecar,
+): Promise<{ sidecar: ArtifactSidecar; raw: string | null } | null> {
+  const raw = await readSidecarRaw(store, fallback.file);
+  // Absent is not malformed: the caller's copy is what a first write is compared against.
+  if (raw === null) return { sidecar: fallback, raw: null };
+  try {
+    const parsed = ArtifactSidecarSchema.safeParse(JSON.parse(raw));
+    // The raw bytes travel with it: the base hash has to be of what is actually on disk, not of a
+    // re-serialisation that may differ from it by a space.
+    return parsed.success ? { sidecar: parsed.data, raw } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Merge links into an existing artifact — dedupe keeps one copy, many uses (R-4, D9). */
 export async function addLinks(store: WorldStore, artifact: ArtifactSidecar, links: string[]): Promise<ArtifactSidecar> {
   const merged = [...new Set([...artifact.links, ...links])];
   if (merged.length === artifact.links.length) return artifact;
-  const next = { ...artifact, links: merged };
-  const raw = await readSidecarRaw(store, artifact.file);
-  await store.gateOp(async () => writeSidecar(store, next, raw));
-  return next;
+  // Merged onto the sidecar as it is *now*, inside the gate (Codex round 3). Building the
+  // replacement from the copy fetched before, while using the latest raw only as a base hash,
+  // meant the write succeeded and silently dropped anything added meanwhile -- a measurement the
+  // backfill had just recorded, erased by somebody adding a link.
+  return await store.gateOp(async () => {
+    const current = await currentSidecar(store, artifact);
+    // Malformed on disk: the scan already reports it, and adding a link is not worth rewriting a
+    // file whose id, hash and origin this would replace with whatever happened to parse.
+    if (current === null) return artifact;
+    const next = { ...current.sidecar, links: [...new Set([...current.sidecar.links, ...links])] };
+    await writeSidecar(store, next, current.raw);
+    return next;
+  });
 }
 
 /**
@@ -89,16 +125,40 @@ export async function setOwner(
   if (production === undefined) return artifact;
   const current = artifact.production ?? null;
   if (current === production) return artifact;
-  const next = { ...artifact };
-  if (production === null) delete next.production;
-  else next.production = production as ArtifactSidecar["production"];
-  const raw = await readSidecarRaw(store, artifact.file);
-  await store.gateOp(async () => writeSidecar(store, next, raw));
-  return next;
+  // Same merge-inside-the-gate rule as addLinks: ownership is one field, not a whole record.
+  return await store.gateOp(async () => {
+    const base = await currentSidecar(store, artifact);
+    if (base === null) return artifact;
+    const next = { ...base.sidecar };
+    if (production === null) delete next.production;
+    else next.production = production as ArtifactSidecar["production"];
+    await writeSidecar(store, next, base.raw);
+    return next;
+  });
 }
 
 export interface FileInput {
   sourcePath: string;
+  /**
+   * Measures audio and video as they are filed (#283).
+   *
+   * `ArtifactSidecarSchema` has carried `mediaInfo` since it was written and nothing ever wrote
+   * it, so every consumer fell through to probing the file again at the moment it was needed --
+   * export measuring the master on the export click, and the Cut screen unable to measure at all
+   * because it has no ffprobe to reach for. An artifact is immutable, so its length and whether
+   * it carries audio are true once and true forever; the honest time to record them is when the
+   * bytes are copied in.
+   */
+  mediaProbe?: MediaProbe;
+  /**
+   * Says this filing's world is no longer the one to commit to.
+   *
+   * The measurement happens after the gate is released and can outlive the world it belongs to:
+   * switching worlds mid-probe closes the store, and gateOp does not refuse work on a closed
+   * store -- it commits without the lock (Codex round 5). The backfill has carried this guard
+   * since round 3; filing needed the same one and was left with a predicate that never fired.
+   */
+  abandoned?: () => boolean;
   links?: string[];
   importedFrom?: string;
   /** The user has seen the size (R-6). Without it, large files come back needs-consent. */
@@ -165,9 +225,10 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
   let file = `${stem}${ext}`;
   for (let i = 2; taken.has(file); i++) file = `${stem}-${i}${ext}`;
 
+  const kind = kindForFile(original);
   const sidecar: ArtifactSidecar = {
     id: `ar_${ulid()}`,
-    kind: kindForFile(original),
+    kind,
     file,
     hash: hash as ArtifactSidecar["hash"],
     origin: { by: "user", ...(input.importedFrom !== undefined ? { importedFrom: input.importedFrom } : {}) },
@@ -186,6 +247,17 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
     await copyFile(toExtendedLength(input.sourcePath), toExtendedLength(join(store.dir, "artifacts", file)));
     await writeSidecar(store, sidecar, null);
   });
+  /*
+   * Measured after the gate is released, never inside it (Codex round 4).
+   *
+   * A probe can take twenty seconds on a file it cannot make sense of. Held inside the world's
+   * serialisation envelope that blocks every other edit and every world switch, and inside the
+   * message it blocks shutdown past the fifteen seconds the desktop allows before it reports that
+   * Arke could not close safely. The artifact is filed either way; the measurement catches up.
+   */
+  if (kind === "audio" || kind === "video") {
+    await measureInto(store, file, input.mediaProbe ?? null, input.abandoned);
+  }
   return { outcome: "filed", artifact: sidecar };
 }
 
@@ -209,7 +281,15 @@ export interface ImportReport {
   needsConsent: Array<{ name: string; sizeBytes: number }>;
 }
 
-export async function importFolder(store: WorldStore, sourceDir: string): Promise<ImportReport> {
+export async function importFolder(
+  store: WorldStore,
+  sourceDir: string,
+  // Threaded through so a folder import measures what a single attach measures (Codex round 1).
+  // Filing learned to measure and this path did not, which would have left a whole import
+  // unmeasured for no reason a user could see or name.
+  mediaProbe?: MediaProbe,
+  abandoned?: () => boolean,
+): Promise<ImportReport> {
   const report: ImportReport = { filed: [], deduplicated: [], excluded: [], needsConsent: [] };
   const walk = async (dir: string, rel: string): Promise<void> => {
     let entries;
@@ -220,6 +300,11 @@ export async function importFolder(store: WorldStore, sourceDir: string): Promis
       return;
     }
     for (const entry of entries) {
+      // Not merely the measurement (Codex round 6): guarding only the probe left the walk copying
+      // and committing the *next* file through a store whose world lock had already been
+      // released. An import abandoned halfway is a partial import, which the report already
+      // describes; an import writing to a closed world is two stores on one journal.
+      if (abandoned?.() === true) return;
       const name = entry.name;
       const relPath = rel ? `${rel}/${name}` : name;
       if (name.startsWith(".") || EXCLUDED_NAMES.has(name.toLowerCase())) {
@@ -232,6 +317,8 @@ export async function importFolder(store: WorldStore, sourceDir: string): Promis
         continue;
       }
       const outcome = await fileArtifact(store, {
+        ...(mediaProbe !== undefined ? { mediaProbe } : {}),
+        ...(abandoned !== undefined ? { abandoned } : {}),
         sourcePath: join(dir, name),
         importedFrom: rel || ".",
       });
@@ -243,4 +330,48 @@ export async function importFolder(store: WorldStore, sourceDir: string): Promis
   };
   await walk(sourceDir, "");
   return report;
+}
+
+/**
+ * Measure one artifact and record it, if it is not already recorded.
+ *
+ * Probing happens outside the world's gate and the write inside it. A probe can take twenty
+ * seconds on a file it cannot make sense of, and holding the serialisation envelope across that
+ * blocks every other edit, every world switch, and shutdown itself. The re-read inside the gate
+ * is what makes "recorded once" true against what is on disk rather than against a copy fetched
+ * before the probe began.
+ *
+ * `abandoned` is not optional in practice: the measurement outlives the gate, so it can outlive
+ * the world it belongs to. Switching worlds mid-probe closes the store, and gateOp does not
+ * refuse work on a closed one -- it commits without the world's lock, and reopening that world
+ * leaves two stores writing one journal.
+ *
+ * Only a full measurement is stored. `measureMediaInfo` answers a duration-only probe with
+ * `hasAudio: false`, which is the right conservative reading for a decision made in the moment
+ * and the wrong thing to write down: stored, it cannot be told from a measured silence, and spine
+ * export would refuse a real audio track on a machine that could have measured it properly.
+ */
+async function measureInto(
+  store: WorldStore,
+  file: string,
+  probe: MediaProbe | null,
+  abandoned: () => boolean = () => false,
+): Promise<boolean> {
+  if (!probe?.info) return false;
+  const info = await measureMediaInfo(store, `artifacts/${file}`, probe);
+  if (info === null) return false;
+  // Re-checked after the probe: the world can have closed during the very call that made this slow.
+  if (abandoned()) return false;
+  return await store.gateOp(async () => {
+    if (abandoned()) return false;
+    const raw = await readSidecarRaw(store, file);
+    if (raw === null) return false;
+    // Parsed, not cast: a sidecar edited to valid JSON of the wrong shape while the probe ran
+    // would otherwise be spread into a replacement and written back. The scanner reports
+    // malformed sidecars without rewriting them, and this has no better claim to overwrite one.
+    const parsed = ArtifactSidecarSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success || parsed.data.mediaInfo !== undefined) return false;
+    await writeSidecar(store, { ...parsed.data, mediaInfo: info }, raw);
+    return true;
+  }).catch(() => false);
 }

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { computeNeedsYou, type ClientState } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { candidateHash, resolveCandidate, storeBatch, verifyCandidates } from "../../src/artifacts/extraction.js";
-import { ATTACHABLE_EXTENSIONS, fileArtifact, importFolder, kindForFile, pickable } from "../../src/artifacts/filing.js";
+import { addLinks, ATTACHABLE_EXTENSIONS, fileArtifact, importFolder, kindForFile, pickable } from "../../src/artifacts/filing.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -37,6 +37,131 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     // The three kinds this app was asked to take are all in there.
     const kinds = new Set(ATTACHABLE_EXTENSIONS.map((e) => kindForFile(`x.${e}`)));
     for (const kind of ["image", "document", "audio"]) assert.ok(kinds.has(kind as never), `${kind} can be attached`);
+  });
+
+  it("records the measurement of audio and video as they are filed", async () => {
+    // The field existed and nothing wrote it, so every reader probed the file again later —
+    // export on the export click, and the Cut screen not at all, having no ffprobe to reach for.
+    const { store } = await open();
+    try {
+    const probed: string[] = [];
+    const mediaProbe = {
+      durationSec: async () => 12,
+      info: async (path: string) => {
+        probed.push(path);
+        return { durationSec: 12.5, hasAudio: true };
+      },
+    };
+    const song = await sourceFile("the-undersong.mp3", "not really an mp3");
+    assert.equal((await fileArtifact(store, { sourcePath: song, mediaProbe })).outcome, "filed");
+    const track = store.getBundle().artifacts.find((a) => a.file === "the-undersong.mp3");
+    assert.deepEqual(track?.mediaInfo, { durationSec: 12.5, hasAudio: true });
+    // Measured from the copy, so it describes the bytes the world holds rather than the source.
+    assert.ok(probed[0]?.includes("artifacts"), `measured ${probed[0]} rather than the world's copy`);
+
+    // A document is not media; probing it would be a tool call for nothing.
+    const notes = await sourceFile("notes.txt", "words");
+    await fileArtifact(store, { sourcePath: notes, mediaProbe });
+    assert.equal(probed.length, 1);
+    assert.equal(store.getBundle().artifacts.find((a) => a.file === "notes.txt")?.mediaInfo, undefined);
+    } finally {
+      // open() in this file does not close, and a live watcher holds the runner's event loop
+      // open long after the last assertion — two more leaked stores hung the whole sweep.
+      await store.close();
+    }
+  });
+
+  it("files media unmeasured rather than failing when nothing can read it", async () => {
+    // Absent already means "not measured" to every reader. Filing must not depend on a media
+    // tool being installed, and a probe that throws is not a reason to refuse somebody's file.
+    const { store } = await open();
+    try {
+    const song = await sourceFile("second-song.mp3", "also not an mp3");
+    const outcome = await fileArtifact(store, {
+      sourcePath: song,
+      mediaProbe: { durationSec: async () => null, info: async () => { throw new Error("ffprobe is not here"); } },
+    });
+    assert.equal(outcome.outcome, "filed");
+    assert.equal(store.getBundle().artifacts.find((a) => a.file === "second-song.mp3")?.mediaInfo, undefined);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("refuses a gate operation once the world has begun closing", async () => {
+    // The window every identity guard misses: the provider keeps returning this store until
+    // close() resolves, so "is this still the open store" is true while the lock is already gone.
+    // A closed world is not writable, and that is the store's own fact rather than each caller's.
+    const { store } = await open();
+    await store.close();
+    await assert.rejects(() => store.gateOp(async () => "written"), /closed/);
+  });
+
+  it("refuses to rewrite a sidecar it cannot read as one", async () => {
+    // Every writer here rebuilds a whole record from what it reads. A file hand-edited to
+    // {"links":[]} was spread into a replacement and committed, erasing id, hash and origin —
+    // a rewrite triggered by somebody adding a link.
+    const { dir, store } = await open();
+    try {
+      const doc = await sourceFile("fragile.txt", "a document with a sidecar somebody edited");
+      const filed = await fileArtifact(store, { sourcePath: doc, links: ["the-vigil"] });
+      assert.equal(filed.outcome, "filed");
+      const sidecarPath = join(dir, "artifacts", "fragile.txt.json");
+      await writeFile(sidecarPath, JSON.stringify({ links: [] }));
+
+      const artifact = filed.outcome === "filed" ? filed.artifact : null;
+      assert.ok(artifact);
+      const after = await addLinks(store, artifact, ["maren-kest"]);
+      // The caller gets its own copy back, and the malformed file is left for the scan to report.
+      assert.equal(after.id, artifact.id);
+      assert.deepEqual(JSON.parse(await readFile(sidecarPath, "utf8")), { links: [] });
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("does not commit a measurement to a world that closed while it was probing", async () => {
+    // The case five rounds kept finding one guard at a time: the probe outlives the gate, and
+    // gateOp does not refuse work on a closed store — it commits without the world's lock.
+    // Written as a test rather than a sixth guard, so the next path to forget it fails here.
+    const { store } = await open();
+    try {
+      const song = await sourceFile("switched-away.mp3", "the world moved on mid-probe");
+      let closedDuringProbe = false;
+      await fileArtifact(store, {
+        sourcePath: song,
+        mediaProbe: {
+          durationSec: async () => 3,
+          info: async () => {
+            // The world switch happens *during* the probe, which is the whole point.
+            closedDuringProbe = true;
+            return { durationSec: 3, hasAudio: true };
+          },
+        },
+        abandoned: () => closedDuringProbe,
+      });
+      assert.ok(closedDuringProbe, "the probe ran");
+      const filed = store.getBundle().artifacts.find((a) => a.file === "switched-away.mp3");
+      assert.ok(filed, "the artifact is still filed — only the measurement is abandoned");
+      assert.equal(filed?.mediaInfo, undefined, "no measurement committed after the world moved on");
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("records nothing from a probe that cannot say whether there is audio", async () => {
+    // measureMediaInfo answers a duration-only probe with hasAudio:false — the right conservative
+    // reading in the moment, and the wrong thing to write down. Stored, it is indistinguishable
+    // from a measured silence, the artifact is never revisited, and spine export would refuse a
+    // real audio track on a machine that could have measured it properly.
+    const { store } = await open();
+    try {
+      const song = await sourceFile("duration-only.mp3", "measured the shallow way");
+      await fileArtifact(store, { sourcePath: song, mediaProbe: { durationSec: async () => 41 } });
+      assert.equal(store.getBundle().artifacts.find((a) => a.file === "duration-only.mp3")?.mediaInfo, undefined);
+    } finally {
+      await store.close();
+    }
   });
 
   it("copies in — the artifact survives its source being deleted", async () => {

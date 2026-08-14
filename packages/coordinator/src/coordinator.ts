@@ -3161,7 +3161,9 @@ export class Coordinator {
       case "import-folder": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        const report = await importFolder(store, msg.sourcePath).catch(() => null);
+        const report = await importFolder(store, msg.sourcePath, this.opts.mediaProbe, () => !this.stillOpen(store) || this.stopping).catch(
+          () => null,
+        );
         if (report) {
           this.emit({ at: new Date().toISOString(), type: "import.report", worldId: msg.worldId, ...report });
           await this.refreshWorldSnapshot(msg.worldId);
@@ -4652,7 +4654,14 @@ export class Coordinator {
   ): Promise<void> {
     const store = this.opts.provider.openStore?.();
     if (!store) return;
-    const outcome = await fileArtifact(store, { sourcePath, ...opts }).catch((err) => ({
+    const outcome = await fileArtifact(store, {
+      sourcePath,
+      // Measured once, at the moment the bytes land, rather than by every reader afterwards (#283).
+      ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
+      // The measurement outlives the gate, so it must not outlive the world it belongs to.
+      abandoned: () => !this.stillOpen(store) || this.stopping,
+      ...opts,
+    }).catch((err) => ({
       outcome: "refused" as const,
       reason: err instanceof Error ? err.message : String(err),
     }));
@@ -4677,7 +4686,10 @@ export class Coordinator {
       kind: outcome.artifact.kind,
       deduplicated: outcome.outcome === "deduplicated",
     });
-    await this.refreshWorldSnapshot(worldId);
+    // Against the store that was filed into, never by world id: refreshWorldSnapshot calls
+    // loadWorld, so filing that finished after the user switched worlds would have closed the
+    // world they just chose and reopened the one they left (Codex round 6).
+    this.refreshIfStillOpen(store);
   }
 
   /**
