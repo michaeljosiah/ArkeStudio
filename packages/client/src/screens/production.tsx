@@ -3,6 +3,8 @@ import { NavLink, Outlet, useNavigate, useParams, useSearchParams } from "react-
 import {
   assemblePrompt,
   deriveCut,
+  deriveSpineCut,
+  spineExportRefusals,
   guestsOf,
   pendingGuestsOf,
   pendingSheets,
@@ -1972,6 +1974,31 @@ export function AudioScreen() {
 
 // ---- Exports (25b) ---------------------------------------------------------
 
+/**
+ * The cut this production actually exports (issue 283, design 60c).
+ *
+ * A spine production is cut to its song, so showing it the scene-order cut reported gaps and a
+ * runtime for a film it would not produce -- and could call a master complete a moment before the
+ * coordinator refused it. `null` means no spine and the scene-order cut stands, unchanged and
+ * unmigrated. `unmeasured` is its own answer rather than a zero: a track whose length nothing has
+ * measured cannot be laid against, and saying "0s" would be a number nobody measured.
+ */
+type SpineView =
+  | null
+  | { state: "unmeasured" }
+  | { state: "derived"; cut: ReturnType<typeof deriveSpineCut> };
+
+function spineViewFor(
+  world: { artifacts: readonly { id: string; mediaInfo?: { durationSec: number } }[] } | null | undefined,
+  production: Parameters<typeof deriveSpineCut>[0] | null | undefined,
+): SpineView {
+  const spine = production?.spine;
+  if (!production || !spine || !world) return null;
+  const durationSec = world.artifacts.find((a) => a.id === spine.trackArtifactId)?.mediaInfo?.durationSec;
+  if (durationSec === undefined) return { state: "unmeasured" };
+  return { state: "derived", cut: deriveSpineCut(production, spine, durationSec) };
+}
+
 export function ExportsScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
@@ -1981,8 +2008,14 @@ export function ExportsScreen() {
   // because the world folder export lives here, and the chapters travel whole inside it.
   const isStory = production?.meta.format === "story";
   const cut = production ? deriveCut(production) : null;
+  const spine = spineViewFor(world, production);
   const mine = Object.entries(exportsState).filter(([, e]) => e.productionId === prodId);
   const [preset, setPreset] = useState<keyof typeof PRESETS>("review-cut");
+  // The song's length, not the sum of the shots': a spine production's runtime is fixed before a
+  // single shot exists (design 60, binding).
+  const runtimeSec = spine?.state === "derived" ? spine.cut.trackDurationSec : cut?.totalSec;
+  const refusal = spine?.state === "derived" ? spineExportRefusals(spine.cut, preset) : null;
+  const blocked = spine?.state === "unmeasured" || refusal !== null;
   const presetCopy: Record<string, { label: string; sub: string }> = {
     "review-cut": { label: "Review cut", sub: `mp4 ${PRESETS["review-cut"].width}×${PRESETS["review-cut"].height} · timecode · fastest` },
     master: { label: "Master", sub: `${PRESETS.master.width}×${PRESETS.master.height} · clean` },
@@ -2048,7 +2081,32 @@ export function ExportsScreen() {
             </button>
           ))}
         </div>
-        {cut && cut.gaps > 0 && (
+        {spine?.state === "unmeasured" && (
+          <div className="fy-notecard">
+            <span className="fy-dot fy-dot--warn" />
+            The master track has not been measured yet, so there is no timeline to lay the picture against. Nothing is
+            lost — the measurement is taken when the track can be read, and the cut appears with it.
+          </div>
+        )}
+        {spine?.state === "derived" && (refusal !== null || spine.cut.slateSec > 0 || spine.cut.blackSec > 0) && (
+          <div className="fy-notecard">
+            <span className="fy-dot fy-dot--warn" />
+            {/* Design 60c: review renders the holes, a finished cut refuses them. The reasons are named
+                because "blocked" without them sends somebody looking through every shot. */}
+            {refusal !== null ? (
+              <>
+                A master cannot be made yet — {refusal.detail}. A review cut renders anyway: gaps become labelled black
+                and you are watching the song with the picture you have.
+              </>
+            ) : (
+              <>
+                {seconds(spine.cut.slateSec + spine.cut.blackSec)} of the song has no picture. It renders as labelled
+                black — an unfinished film still reviews.
+              </>
+            )}
+          </div>
+        )}
+        {spine === null && cut && cut.gaps > 0 && (
           <div className="fy-notecard">
             <span className="fy-dot fy-dot--warn" />
             The cut has {cut.gaps} gap{cut.gaps === 1 ? "" : "s"} ({seconds(cut.uncoveredSec)}). They export as black
@@ -2058,8 +2116,12 @@ export function ExportsScreen() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
           <span className="fy-mono">renders locally · no provider call</span>
           <span className="fy-h1row__push" />
-          <Button variant="primary" onClick={() => worldId && prodId && exportCut(worldId, prodId, preset)}>
-            Export · {seconds(cut?.totalSec)}
+          <Button
+            variant="primary"
+            disabled={blocked}
+            onClick={() => !blocked && worldId && prodId && exportCut(worldId, prodId, preset)}
+          >
+            Export · {seconds(runtimeSec)}
           </Button>
         </div>
       </div>
