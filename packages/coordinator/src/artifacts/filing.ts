@@ -420,7 +420,7 @@ async function insideArtifacts(store: WorldStore, file: string): Promise<boolean
 export async function backfillMediaInfo(
   store: WorldStore,
   probe: MediaProbe,
-  opts: { signal?: AbortSignal; stillOpen?: () => boolean; onMeasured?: (file: string) => void } = {},
+  opts: { signal?: AbortSignal; stillOpen?: () => boolean; onMeasured?: (files: readonly string[]) => void } = {},
 ): Promise<number> {
   const { signal, stillOpen, onMeasured } = opts;
   const abandoned = (): boolean => signal?.aborted === true || stillOpen?.() === false;
@@ -437,6 +437,15 @@ export async function backfillMediaInfo(
    * would restart from the first file forever and never finish. Bounded batches keep both
    * properties -- few rescans, and progress that survives being interrupted.
    */
+  /*
+   * Sidecars a person has been asked to reconcile are left alone (Codex round 4).
+   *
+   * A sidecar edited while the world was closed appears in `externalEdits` for explicit adoption.
+   * Rewriting it here -- normalising its bytes and recording an app-owned change -- would adopt
+   * part of somebody's edit on their behalf while the screen still shows it as pending, and their
+   * later Adopt would apply to a file this pass had already rewritten.
+   */
+  const pending = new Set(store.getBundle().externalEdits.map((edit) => edit.path));
   let measured = 0;
   let attempted = 0;
   let batch: Array<{ file: string; info: MediaInfo }> = [];
@@ -480,7 +489,10 @@ export async function backfillMediaInfo(
       })
       .catch(() => [] as string[]);
     measured += written.length;
-    for (const file of written) onMeasured?.(file);
+    // Once per committed batch, not once per file (Codex round 4). The coordinator's callback
+    // ignores the name and broadcasts a whole-world snapshot, so eight measurements in one commit
+    // meant eight identical snapshots and eight state folds for a single change on disk.
+    if (written.length > 0) onMeasured?.(written);
   };
 
   for (const artifact of store.getBundle().artifacts) {
@@ -504,7 +516,12 @@ export async function backfillMediaInfo(
      * somewhere else, which ffprobe follows. An imported world can carry one, and this pass runs
      * on open, so the read would be unsolicited either way.
      */
+    if (pending.has(`artifacts/${artifact.file}.json`)) continue;
     if (!(await insideArtifacts(store, artifact.file))) continue;
+    // Rechecked after that await: on a slow or network-backed world the containment check is
+    // itself I/O, and starting a fresh twenty-second probe against a world that has since closed
+    // is the one thing this pass is trying not to do.
+    if (abandoned()) break;
     attempted += 1;
     const info = await measureMediaInfo(store, `artifacts/${artifact.file}`, probe);
     if (info !== null) batch.push({ file: artifact.file, info });

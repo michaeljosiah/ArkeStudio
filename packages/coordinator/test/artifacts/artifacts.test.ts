@@ -256,20 +256,24 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     assert.equal(measured, 0);
   });
 
-  it("publishes each measurement as it lands rather than after the whole pass", async () => {
+  it("publishes once per committed batch rather than once per file", async () => {
     const { store } = await open();
     try {
       for (const name of ["one.mp3", "two.mp3"]) {
         await fileArtifact(store, { sourcePath: await sourceFile(name, name) });
       }
-      const landed: string[] = [];
+      const batches: string[][] = [];
       const measured = await backfillMediaInfo(
         store,
         { durationSec: async () => 4, info: async () => ({ durationSec: 4, hasAudio: true }) },
-        { onMeasured: (file) => landed.push(file) },
+        { onMeasured: (files) => batches.push([...files]) },
       );
+      const landed = batches.flat();
       assert.equal(landed.length, measured);
       assert.ok(landed.includes("one.mp3") && landed.includes("two.mp3"));
+      // The coordinator broadcasts a whole-world snapshot per notification, so a batch that
+      // committed once must not announce itself once per file.
+      assert.ok(batches.length < landed.length, `${batches.length} notifications for ${landed.length} files`);
     } finally {
       await store.close();
     }
