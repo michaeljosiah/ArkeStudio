@@ -53,7 +53,11 @@ export function queueToastCopy(result: QueueEnqueueResult): QueueToastCopy {
   }
   // An upload never reaches Activity: nothing was queued and nothing spends, so a failure that
   // sent the user there to look for it would be sending them to an empty screen.
-  if (result.command === "upload-master-look" || result.command === "upload-world-image") {
+  if (
+    result.command === "upload-master-look" ||
+    result.command === "upload-world-image" ||
+    result.command === "pick-master-look-reference"
+  ) {
     return {
       kind: "error",
       title: "That image could not be used",

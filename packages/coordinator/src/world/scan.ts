@@ -529,6 +529,11 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
    */
   const keyArtCandidate = await firstImageIn(dir, join("incoming", "world-image"), "incoming/world-image");
   const masterLookCandidate = await firstImageIn(dir, join("incoming", "master-look"), "incoming/master-look");
+  const masterLookReference = await firstImageIn(
+    dir,
+    join("incoming", "master-look-ref"),
+    "incoming/master-look-ref",
+  );
   const keyArt = await findKeyArt(dir);
 
   const resolved = resolveArtDirection(meta, artDirectionRecord);
@@ -632,6 +637,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     keyArtCandidate,
     keyArt,
     masterLookCandidate,
+    masterLookReference,
     sheets,
     canon,
     referenceKits,

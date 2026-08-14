@@ -1003,21 +1003,50 @@ export function discardWorldImage(worldId: string): void {
 }
 
 /**
- * The world look as a picture. The prompt is the look's own description, sent unedited — so the
- * image and the words it illustrates are written from the same sentence.
+ * The world look as a picture. The prompt defaults to the look's own description, so the image
+ * and the words it illustrates are written from the same sentence — and can be replaced for one
+ * generation from the dialog, where the words are still the author's rather than a model's.
  */
-export function generateMasterLook(worldId: string, modelId?: string): void {
+export function generateMasterLook(
+  worldId: string,
+  options: {
+    modelId?: string | undefined;
+    prompt?: string | undefined;
+    tier?: SizeTier | undefined;
+    aspect?: string | undefined;
+  } = {},
+): void {
   send({
     kind: "generate-master-look",
     worldId,
     requestId: queueRequest("generate-master-look"),
-    ...(modelId !== undefined ? { modelId } : {}),
+    ...(options.modelId !== undefined ? { modelId: options.modelId } : {}),
+    ...(options.prompt !== undefined ? { prompt: options.prompt } : {}),
+    ...(options.tier !== undefined ? { tier: options.tier } : {}),
+    ...(options.aspect !== undefined ? { aspect: options.aspect } : {}),
   });
 }
 
 /** Or bring your own: the host opens the picker, and the renderer never touches the bytes. */
 export function uploadMasterLook(worldId: string): void {
   send({ kind: "upload-master-look", worldId, requestId: queueRequest("upload-master-look") });
+}
+
+/**
+ * Stage an image for the next master-look generation to look at. Same picker, same one-way
+ * street: the renderer asks, and learns from the snapshot that a reference is now attached.
+ */
+export function pickMasterLookReference(worldId: string): void {
+  send({
+    kind: "pick-master-look-reference",
+    worldId,
+    requestId: queueRequest("pick-master-look-reference"),
+  });
+}
+
+/** Take it away again — the next generation is made from words alone. */
+export function clearMasterLookReference(worldId: string): void {
+  send({ kind: "clear-master-look-reference", worldId });
 }
 
 /** Accepting is a look change: the image lands as the next version's master look. */

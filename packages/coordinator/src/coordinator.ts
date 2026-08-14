@@ -113,6 +113,7 @@ import {
 import {
   MASTER_LOOK_DIR,
   MASTER_LOOK_DIR_ACCEPTED,
+  MASTER_LOOK_REFERENCE_DIR,
   masterLookFile,
   masterLookRequest,
 } from "./references/master-look.js";
@@ -3768,10 +3769,83 @@ export class Coordinator {
         const bundle = store.getBundle();
         // No art-director rewrite here, unlike key art. Key art is an image *of the world* and
         // benefits from a writing model turning a logline into light and lens; this is an image
-        // *of the look*, and the look is already the words every generation receives.
+        // *of the look*, and the look is already the words every generation receives. A prompt
+        // typed in the dialog replaces those words for this one image and is sent as written.
+        //
+        // The staged reference rides along only where the model can take one. Sending it to a
+        // model that declares no reference slots would not be refused by the provider — it would
+        // be quietly dropped, and the estimate would have charged for it.
+        const references =
+          bundle.masterLookReference !== null && model.accepts.referenceImages > 0
+            ? [bundle.masterLookReference]
+            : [];
         await this.enqueueBatch(msg.requestId, msg.kind, [
-          masterLookRequest(bundle.meta, model, bundle.artDirection),
+          masterLookRequest(bundle.meta, model, bundle.artDirection, {
+            ...(msg.prompt !== undefined ? { prompt: msg.prompt } : {}),
+            ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
+            ...(msg.aspect !== undefined ? { aspect: msg.aspect } : {}),
+            references,
+          }),
         ]);
+        return;
+      }
+      case "pick-master-look-reference": {
+        const store = this.opts.provider.openStore?.();
+        const pick = this.opts.pickFiles;
+        if (!store || store.worldId !== msg.worldId || !pick) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Reference images are unavailable.");
+          return;
+        }
+        const chosen = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
+        const [source] = chosen;
+        // A closed dialog is not a failure, here as everywhere else the host picker is opened.
+        if (!source) {
+          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+          return;
+        }
+        if (chosen.length > 1) {
+          this.rejectEnqueue(msg.requestId, msg.kind, ONE_IMAGE_ONLY);
+          return;
+        }
+        if (!this.stillOpen(store)) return;
+        const picked = await readPickedImage(source);
+        if (!this.stillOpen(store)) return;
+        if ("error" in picked) {
+          this.rejectEnqueue(msg.requestId, msg.kind, picked.error);
+          return;
+        }
+        const landed = await store
+          .gateOp(async () => {
+            // One reference at a time, and the extension follows the bytes — the same rule the
+            // candidate follows, for the same reason: a stale PNG beside a new JPEG is what the
+            // scan would find first.
+            await rm(toExtendedLength(join(store.dir, MASTER_LOOK_REFERENCE_DIR)), {
+              recursive: true,
+              force: true,
+            });
+            await atomicWriteFile(
+              join(store.dir, MASTER_LOOK_REFERENCE_DIR, `reference${picked.extension}`),
+              picked.data,
+            );
+          })
+          .then(
+            () => true,
+            () => false,
+          );
+        if (!landed) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That image could not be copied into the world.");
+          return;
+        }
+        // Nothing was queued: staging a reference spends nothing and reaches no provider.
+        this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "clear-master-look-reference": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await this.dropMasterLookReference(store);
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "upload-master-look": {
@@ -3885,6 +3959,7 @@ export class Coordinator {
             })
             .catch(() => {});
         }
+        if (accepted) await this.dropMasterLookReference(store);
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -3896,6 +3971,7 @@ export class Coordinator {
             rm(toExtendedLength(join(store.dir, MASTER_LOOK_DIR)), { recursive: true, force: true }),
           )
           .catch(() => {});
+        await this.dropMasterLookReference(store);
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -5188,6 +5264,22 @@ export class Coordinator {
    */
   private stillOpen(store: WorldStore): boolean {
     return this.opts.provider.openStore?.() === store;
+  }
+
+  /**
+   * Throw away the image staged for the next master look.
+   *
+   * Called when the offer it helped make is settled either way, as well as on an explicit
+   * removal: a reference kept past the picture it produced would silently join the *next*
+   * generation, which nobody asked it to, and the dialog would open with an attachment the
+   * person does not remember making.
+   */
+  private async dropMasterLookReference(store: WorldStore): Promise<void> {
+    await store
+      .gateOp(async () =>
+        rm(toExtendedLength(join(store.dir, MASTER_LOOK_REFERENCE_DIR)), { recursive: true, force: true }),
+      )
+      .catch(() => {});
   }
 
   /**

@@ -9,6 +9,7 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import {
   MASTER_LOOK_CANDIDATE,
   MASTER_LOOK_DIR,
+  MASTER_LOOK_REFERENCE_DIR,
   masterLookFile,
   masterLookPrompt,
   masterLookRequest,
@@ -50,7 +51,9 @@ const model: ManifestModel = {
   capability: "image",
   displayName: "Flux 2 Pro",
   accepts: { referenceImages: 4, startFrame: false, endFrame: false },
-  limits: {},
+  // Declared shapes, because the dialog only ever offers what a row declares — a fixture with
+  // none would exercise the fallback and never the control.
+  limits: { aspects: ["16:9", "1:1", "4:3"] },
   pricing: { kind: "perMegapixel", microUsdPerMegapixel: 30000 },
 };
 
@@ -97,11 +100,89 @@ describe("asking the look to illustrate itself", () => {
     assert.deepEqual(request.params.artDirection, { version: 3, source: "world", transport: "text" });
   });
 
+  /*
+   * A real output spec, where this job used to send none.
+   *
+   * Without one the clients fell back to the provider's own default and the estimate assumed a
+   * flat 1MP — so the size and shape controls in the dialog would have moved nothing but their
+   * own highlight, and the figure beside them would have been the same number regardless.
+   */
+  it("carries the size and shape the dialog chose, and prices them", () => {
+    const plain = masterLookRequest(meta(), model, direction);
+    assert.ok(plain.params.output.width > 0 && plain.params.output.height > 0);
+    assert.ok(plain.params.output.width > plain.params.output.height, "a look plate is landscape by default");
+
+    const shaped = masterLookRequest(meta(), model, direction, { tier: "2K", aspect: "1:1" });
+    assert.equal(shaped.params.output.aspect, "1:1");
+    assert.equal(shaped.params.output.width, shaped.params.output.height);
+
+    const big = masterLookRequest(meta(), model, direction, { tier: "4K", aspect: "1:1" });
+    assert.ok(
+      big.params.output.width > shaped.params.output.width,
+      "the tier still decides the size once the shape is chosen",
+    );
+    // The money follows the pixels on a per-megapixel row, which is what this model is.
+    assert.ok(big.estimatedMicroUsd > shaped.estimatedMicroUsd);
+  });
+
+  it("will not send a shape the model does not offer", () => {
+    // The dialog never offers one, so this is the backstop rather than the gate — but a stale
+    // saved choice reaching the wire would be refused by the provider after the estimate was
+    // accepted, which is the expensive way to find out.
+    const narrow: ManifestModel = { ...model, limits: { ...model.limits, aspects: ["1:1"] } };
+    const request = masterLookRequest(meta(), narrow, direction, { aspect: "16:9" });
+    assert.notEqual(request.params.output.aspect, "16:9", "the request does not claim it");
+    const { width, height } = request.params.output;
+    assert.ok(Math.abs(width / height - 16 / 9) > 0.1, `nor is it 16:9 in the dimensions (${width}x${height})`);
+  });
+
   it("lands where it waits for a yes, never straight into the record", () => {
     const request = masterLookRequest(meta(), model, direction);
     assert.equal(request.landing.dir, MASTER_LOOK_DIR);
     assert.equal(request.landing.name, MASTER_LOOK_CANDIDATE);
     assert.ok(!request.landing.dir.startsWith("art-direction"), "the accepted look is not written to by a job");
+  });
+
+  /*
+   * The dialog's own words, when there are any.
+   *
+   * The look's description is a brief for every generation; this is a brief for one image, and an
+   * author who wants this picture to be the harbour at dusk rather than a swatch should be able to
+   * say so without editing the look. What they may not do is drop the clause below — that is the
+   * one thing this asset must carry, because it is the one that rides along with a portrait.
+   */
+  it("sends the author's own prompt when the dialog carried one", () => {
+    const prompt = masterLookPrompt(direction, "The harbour at dusk, from the water.");
+    assert.ok(prompt.startsWith("The harbour at dusk, from the water."), "sent as written");
+    assert.ok(!prompt.includes(direction.description), "and instead of the look, not after it");
+    assert.match(prompt, /No people, no faces/i, "the standing clause is not the author's to drop");
+  });
+
+  it("falls back to the look for an absent or blank override", () => {
+    for (const override of [undefined, "", "   "]) {
+      assert.ok(masterLookPrompt(direction, override).startsWith(direction.description), `for ${JSON.stringify(override)}`);
+    }
+  });
+
+  it("carries a staged reference and prices it, or carries none at all", () => {
+    const withRef = masterLookRequest(meta(), model, direction, {
+      references: ["incoming/master-look-ref/reference.png"],
+    });
+    assert.deepEqual(withRef.params.references, ["incoming/master-look-ref/reference.png"]);
+    const without = masterLookRequest(meta(), model, direction);
+    assert.ok(!("references" in without.params), "an absent reference is absent, not an empty array");
+
+    // On a row that charges for them, the estimate has to move: a reference is billable work, and
+    // an estimate that ignores it is a figure the ledger will later disagree with. (This model is
+    // priced per megapixel, which is why the count is asserted against one that is not.)
+    const perImage: ManifestModel = {
+      ...model,
+      pricing: { kind: "perImage", microUsdPerImage: 40000, microUsdPerReferenceImage: 5000 },
+    };
+    assert.ok(
+      masterLookRequest(meta(), perImage, direction, { references: ["incoming/master-look-ref/reference.png"] })
+        .estimatedMicroUsd > masterLookRequest(meta(), perImage, direction).estimatedMicroUsd,
+    );
   });
 });
 
@@ -293,6 +374,96 @@ describe("bringing a master look in by hand", () => {
       await send({ kind: "discard-master-look", worldId: WORLD_ID });
       assert.equal(provider.openStore()!.getBundle().masterLookCandidate, null);
       assert.equal(provider.openStore()!.getBundle().artDirection.version, before, "discarding is not a change");
+    } finally {
+      await provider.close();
+    }
+  });
+});
+
+/**
+ * The picture you hand the model before it starts.
+ *
+ * Staged on disk rather than held in the renderer, for the same reason the candidate is: the
+ * renderer never touches bytes, and an attachment that survives a reload is one the person can
+ * still see they made.
+ */
+describe("staging a reference for the next master look", () => {
+  it("copies the picked file into the world and shows it as attached", async () => {
+    const picked = await fileOutsideTheWorld("mood.png");
+    const { provider, send } = await harness(() => [picked]);
+    try {
+      await send({
+        kind: "pick-master-look-reference",
+        worldId: WORLD_ID,
+        requestId: "01J8F3K2QW9VZX4N7M0RTYB62A",
+      });
+      assert.equal(
+        provider.openStore()!.getBundle().masterLookReference,
+        `${MASTER_LOOK_REFERENCE_DIR}/reference.png`,
+      );
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("keeps one reference rather than accumulating one per pick", async () => {
+    const first = await fileOutsideTheWorld("first.png");
+    const second = await fileOutsideTheWorld("second.png");
+    let next = first;
+    const { provider, worldDir, send } = await harness(() => [next]);
+    try {
+      await send({
+        kind: "pick-master-look-reference",
+        worldId: WORLD_ID,
+        requestId: "01J8F3K2QW9VZX4N7M0RTYB62B",
+      });
+      next = second;
+      await send({
+        kind: "pick-master-look-reference",
+        worldId: WORLD_ID,
+        requestId: "01J8F3K2QW9VZX4N7M0RTYB62C",
+      });
+      assert.deepEqual(await readdir(join(worldDir, "incoming", "master-look-ref")), ["reference.png"]);
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("unstages on request", async () => {
+    const picked = await fileOutsideTheWorld("mood.png");
+    const { provider, send } = await harness(() => [picked]);
+    try {
+      await send({
+        kind: "pick-master-look-reference",
+        worldId: WORLD_ID,
+        requestId: "01J8F3K2QW9VZX4N7M0RTYB62D",
+      });
+      await send({ kind: "clear-master-look-reference", worldId: WORLD_ID });
+      assert.equal(provider.openStore()!.getBundle().masterLookReference, null);
+    } finally {
+      await provider.close();
+    }
+  });
+
+  /*
+   * A reference kept past the picture it produced would silently join the next generation, which
+   * nobody asked it to — and the dialog would open with an attachment the person does not
+   * remember making.
+   */
+  it("is thrown away once the offer it helped make is settled", async () => {
+    const picked = await fileOutsideTheWorld("mood.png");
+    const { provider, send } = await harness(() => [picked]);
+    try {
+      await send({
+        kind: "pick-master-look-reference",
+        worldId: WORLD_ID,
+        requestId: "01J8F3K2QW9VZX4N7M0RTYB62E",
+      });
+      await send({ kind: "upload-master-look", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB62F" });
+      assert.ok(provider.openStore()!.getBundle().masterLookReference !== null, "still staged while it waits");
+
+      await send({ kind: "discard-master-look", worldId: WORLD_ID });
+      assert.equal(provider.openStore()!.getBundle().masterLookReference, null);
     } finally {
       await provider.close();
     }

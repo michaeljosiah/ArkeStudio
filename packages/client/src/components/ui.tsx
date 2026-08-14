@@ -1,4 +1,4 @@
-import { useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
+import { useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref, type TextareaHTMLAttributes } from "react";
 
 /**
  * The SpecOne component layer, reimplemented as React against the token contract
@@ -14,9 +14,22 @@ export function Button({
   size = "default",
   className,
   type = "button",
+  ref,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant; size?: ButtonSize }) {
-  return <button type={type} className={cx("ui-btn", `ui-btn--${variant}`, `ui-btn--${size}`, className)} {...rest} />;
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  /** For the callers that have to put focus back on this button — a dialog returning it, say. */
+  ref?: Ref<HTMLButtonElement>;
+}) {
+  return (
+    <button
+      ref={ref}
+      type={type}
+      className={cx("ui-btn", `ui-btn--${variant}`, `ui-btn--${size}`, className)}
+      {...rest}
+    />
+  );
 }
 
 export function IconButton({

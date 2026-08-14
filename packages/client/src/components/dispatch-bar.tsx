@@ -1,8 +1,12 @@
 import { useState } from "react";
 import {
+  aspectOffered,
   deriveCapabilityAvailability,
   estimateCharacterImageMicroUsd,
+  estimateImageMicroUsd,
   formatMicroUsd,
+  isLandscapeWorkflow,
+  offeredAspects,
   PROVIDERS,
   tiersFor,
   type CharacterImageWorkflow,
@@ -10,6 +14,7 @@ import {
   type SizeTier,
 } from "@arke-studio/contracts";
 import { useStore } from "../lib/store.js";
+import { ChevronDown } from "./icons.js";
 import { Button } from "./ui.js";
 
 /**
@@ -40,6 +45,8 @@ export interface DispatchChoice {
   tier?: SizeTier;
   /** Video: the provider's own word, because 720p is what that surface means. */
   resolution?: string;
+  /** The shape, where the surface offered one and the model declared which it takes. */
+  aspect?: string;
 }
 
 const TIERS: SizeTier[] = ["1K", "2K", "4K"];
@@ -125,27 +132,67 @@ function strandReason(state: ReturnType<typeof useStore>["state"], model: Manife
 }
 
 /**
- * The choice after picking a model from the list. A tier the new model cannot reach is dropped
- * rather than carried: the bar falls back to that model's first size on screen, and a host that
- * reads the tier out of its own state would otherwise plan and dispatch at a size nothing on the
- * screen was showing.
+ * The choice after picking a model from the list. A tier or a shape the new model cannot reach is
+ * dropped rather than carried: the bar falls back to that model's own first option on screen, and
+ * a host that reads either out of its own state would otherwise plan and dispatch at a size or an
+ * aspect nothing on the screen was showing.
  */
 export function choiceForModel(
   candidate: ManifestModel,
-  choice: { tier?: SizeTier },
-): { modelId: string; tier?: SizeTier } {
-  const keep = choice.tier !== undefined && tiersFor(candidate).includes(choice.tier);
-  return { modelId: candidate.id, ...(keep ? { tier: choice.tier } : {}) };
+  choice: { tier?: SizeTier; aspect?: string },
+): { modelId: string; tier?: SizeTier; aspect?: string } {
+  const keepTier = choice.tier !== undefined && tiersFor(candidate).includes(choice.tier);
+  const keepAspect = choice.aspect !== undefined && aspectOffered(candidate, choice.aspect);
+  return {
+    modelId: candidate.id,
+    ...(keepTier ? { tier: choice.tier } : {}),
+    ...(keepAspect ? { aspect: choice.aspect } : {}),
+  };
+}
+
+/**
+ * The size and shape this bar will actually send, for a model and a choice.
+ *
+ * Exported because the host has to send them and the bar has to draw them, and those two answers
+ * must be one answer. A choice is not the same as what will run: a model change can leave a tier
+ * or an aspect selected that the new row does not reach, and both fall back to that row's own
+ * first option — on screen and on the wire, or the request disagrees with the picture of it.
+ */
+export function resolveOutputChoice(
+  model: ManifestModel,
+  choice: { tier?: SizeTier; aspect?: string },
+  options: { size?: boolean; aspect?: boolean; landscape?: boolean } = {},
+): { tier?: SizeTier; aspect?: string } {
+  const tiers = tiersFor(model);
+  // Orientation matters here and not only for display: it decides which shape is first, and the
+  // first shape is the default this returns when nothing was chosen.
+  const aspects =
+    options.aspect === true ? offeredAspects(model, { landscape: options.landscape ?? false }) : [];
+  const tier =
+    options.size === false
+      ? undefined
+      : choice.tier !== undefined && tiers.includes(choice.tier)
+        ? choice.tier
+        : tiers[0];
+  const aspect =
+    choice.aspect !== undefined && aspects.includes(choice.aspect) ? choice.aspect : aspects[0];
+  return { ...(tier !== undefined ? { tier } : {}), ...(aspect !== undefined ? { aspect } : {}) };
 }
 
 /** What the chosen model will carry, said once the choice is made rather than argued in the list. */
-export function modelDetail(model: ManifestModel, tier: SizeTier | undefined, isDefault: boolean): string {
+export function modelDetail(
+  model: ManifestModel,
+  tier: SizeTier | undefined,
+  isDefault: boolean,
+  aspect?: string,
+): string {
   const references =
     model.unverified === true || model.accepts.referenceImages === 0
       ? "no references"
       : `up to ${model.accepts.referenceImages} references`;
   const size = tier ?? "provider default";
   const parts = [model.displayName, references, `${size}`];
+  if (aspect !== undefined) parts.push(aspect);
   if (model.unverified === true) parts.push("unverified");
   if (!isDefault) parts.push("one-shot, default unchanged");
   return parts.join(" · ");
@@ -165,6 +212,8 @@ export function DispatchBar({
   primaryDisabled = false,
   variant = "full",
   size = true,
+  aspect = false,
+  landscape,
 }: {
   workflow: CharacterImageWorkflow;
   capability?: "image" | "video";
@@ -173,8 +222,8 @@ export function DispatchBar({
   onCount?: (count: number) => void;
   /** Per generated image, for the estimate. The bar does not decide what rides along. */
   referenceImages?: number;
-  choice: { modelId?: string; tier?: SizeTier; resolution?: string };
-  onChoice: (choice: { modelId?: string; tier?: SizeTier; resolution?: string }) => void;
+  choice: { modelId?: string; tier?: SizeTier; resolution?: string; aspect?: string };
+  onChoice: (choice: { modelId?: string; tier?: SizeTier; resolution?: string; aspect?: string }) => void;
   onCancel?: () => void;
   primaryLabel?: string;
   onPrimary?: (chosen: DispatchChoice) => void;
@@ -191,6 +240,20 @@ export function DispatchBar({
    * provider's default ran. A control that cannot reach the request has no business being drawn.
    */
   size?: boolean;
+  /**
+   * Whether the shape is the author's to choose. Off by default, because most surfaces have a
+   * shape the work itself decides — a head-and-shoulders portrait is not a 16:9 decision — and
+   * only where the picture is the deliverable does asking make sense. Even then the control
+   * appears only if the model declares which shapes it takes.
+   */
+  aspect?: boolean;
+  /**
+   * Which way round this surface's output is. Defaults to what the workflow implies, which is
+   * right wherever the workflow is the real one; a host that borrowed a workflow for its price
+   * band while making something the other way round says so here, because orientation decides
+   * the default shape and the base the estimate is computed from.
+   */
+  landscape?: boolean;
 }) {
   const { state } = useStore();
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -232,17 +295,33 @@ export function DispatchBar({
   // when the model reaches any at all. A model that takes a free width and height (fal's GPT
   // Image 2) declares no tiers, and greying out all three would state a limit it does not have.
   const sizeOptions: string[] = isVideo ? videoSizes : reachable.length > 0 ? TIERS : [];
+  const wide = landscape ?? isLandscapeWorkflow(workflow);
+  // One resolver for the highlight and for the wire, so the segment cannot show 2K while the
+  // request carries 1K after a model change dropped an unreachable tier.
+  const resolved = resolveOutputChoice(model, choice, { aspect, landscape: wide });
   const active = isVideo
     ? (choice.resolution !== undefined && videoSizes.includes(choice.resolution)
         ? choice.resolution
         : videoSizes[0])
-    : (choice.tier !== undefined && reachable.includes(choice.tier) ? choice.tier : reachable[0]);
+    : resolved.tier;
   // No size control means no size travels: the estimate and the detail line say provider default
   // because that is what will run, rather than pricing a tier the request cannot carry.
-  const tier = isVideo || !size ? undefined : (active as SizeTier | undefined);
+  const tier = isVideo || !size ? undefined : resolved.tier;
+  // What this model will actually take, in its own order — an empty list is a model that has not
+  // said, and the control is then absent rather than drawn over a guess.
+  const aspects = aspect && !isVideo ? offeredAspects(model, { landscape: wide }) : [];
+  const chosenAspect = isVideo ? undefined : resolved.aspect;
   const images = count ?? 1;
   const carried = model.unverified === true ? 0 : Math.min(referenceImages, model.accepts.referenceImages);
-  const estimate = estimateCharacterImageMicroUsd(model, workflow, images, carried * images, tier);
+  const estimate = isVideo
+    ? estimateCharacterImageMicroUsd(model, workflow, images, carried * images, tier)
+    : estimateImageMicroUsd(model, {
+        images,
+        referenceImages: carried * images,
+        landscape: wide,
+        ...(tier !== undefined ? { tier } : {}),
+        ...(chosenAspect !== undefined ? { aspect: chosenAspect } : {}),
+      });
   // DEFAULT means the saved routing default. With none saved nothing is the default — the model
   // showing is simply the first that can run, and calling that a default would invent a setting.
   const isDefault = model.id === routedId;
@@ -279,11 +358,25 @@ export function DispatchBar({
         </div>
       )}
       <div className="fy-dispatchbar__row">
+        {/*
+          A pill that opens a list, and looks like one.
+
+          It has always been a button with a listbox behind it, and it read as a badge: no
+          chevron, nothing saying there was anything else to pick. People took the routed default
+          for a fixed fact about the surface. The count is the other half of that — "1 of 4" is a
+          choice, "Flux 2 Pro" alone is an announcement — and both are dropped when there really
+          is only one model, because an affordance that opens a list of one is a small lie.
+        */}
         <button
           type="button"
           className="fy-dispatchbar__pill"
           aria-haspopup="listbox"
           aria-expanded={pickerOpen}
+          aria-label={
+            models.length > 1
+              ? `Model: ${model.displayName} · ${models.length} available`
+              : `Model: ${model.displayName}`
+          }
           onClick={() => setPickerOpen(!pickerOpen)}
         >
           <span className="fy-dispatchbar__provider">{PROVIDERS[model.provider].displayName}</span>
@@ -291,6 +384,16 @@ export function DispatchBar({
           {model.unverified === true && <em>UNVERIFIED</em>}
           {stranded && <em>UNAVAILABLE</em>}
           {isDefault && !stranded && <strong>DEFAULT</strong>}
+          {models.length > 1 && (
+            <>
+              {/* One interpolation, not a number beside a word: React splits the latter with a
+                  comment node, which puts a stray marker in the middle of the label. */}
+              <span className="fy-dispatchbar__more">{`${models.length} models`}</span>
+              <span className="fy-dispatchbar__chevron" aria-hidden>
+                <ChevronDown size={13} />
+              </span>
+            </>
+          )}
         </button>
 
         {count !== undefined && onCount && (
@@ -344,6 +447,27 @@ export function DispatchBar({
         </span>
         )}
 
+        {/* Only where the model said which shapes it takes. A row that never declared any is
+            unverified or uncatalogued, and a picker over it would promise what nobody checked. */}
+        {aspects.length > 0 && (
+          <span className="fy-dispatchbar__seg">
+            <span className="fy-dispatchbar__eyebrow">ASPECT</span>
+            <span>
+              {aspects.map((value) => (
+                <button
+                  type="button"
+                  key={value}
+                  aria-pressed={value === chosenAspect}
+                  className={value === chosenAspect ? "is-active" : ""}
+                  onClick={() => onChoice({ ...choice, aspect: value })}
+                >
+                  {value}
+                </button>
+              ))}
+            </span>
+          </span>
+        )}
+
         {variant === "full" && onCancel && primaryLabel && onPrimary && (
           <span className="fy-dispatchbar__group">
             <span className="fy-dispatchbar__estimate">~{formatMicroUsd(estimate)}</span>
@@ -358,6 +482,7 @@ export function DispatchBar({
                   model,
                   ...(count !== undefined ? { count } : {}),
                   ...(tier !== undefined ? { tier } : {}),
+                  ...(chosenAspect !== undefined ? { aspect: chosenAspect } : {}),
                   ...(isVideo && active !== undefined ? { resolution: active } : {}),
                 })
               }
@@ -368,7 +493,9 @@ export function DispatchBar({
         )}
       </div>
       <div className="fy-dispatchbar__detail">
-        {stranded ? `${model.displayName} · unavailable, ${strandReason(state, stranded)}` : modelDetail(model, tier, isDefault)}
+        {stranded
+          ? `${model.displayName} · unavailable, ${strandReason(state, stranded)}`
+          : modelDetail(model, tier, isDefault, chosenAspect)}
       </div>
     </div>
   );
