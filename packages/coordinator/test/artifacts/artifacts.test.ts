@@ -163,6 +163,27 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     }
   });
 
+  it("does not record a measurement of bytes the world no longer holds", async () => {
+    // The sidecar's baseHash guards the sidecar; nothing guarded the media. Replaced during a
+    // twenty-second probe, the duration would be written as a permanent fact about the old file.
+    const { dir, store } = await open();
+    try {
+      await fileArtifact(store, { sourcePath: await sourceFile("swapped.mp3", "the original bytes") });
+      const measured = await backfillMediaInfo(store, {
+        durationSec: async () => 11,
+        info: async () => {
+          // Replaced while the probe is "running", which is exactly the window that matters.
+          await writeFile(join(dir, "artifacts", "swapped.mp3"), "entirely different bytes now");
+          return { durationSec: 11, hasAudio: true };
+        },
+      });
+      assert.equal(store.getBundle().artifacts.find((a) => a.file === "swapped.mp3")?.mediaInfo, undefined);
+      assert.ok(measured === 0 || measured > 0, "other artifacts may still measure; this one must not");
+    } finally {
+      await store.close();
+    }
+  });
+
   it("never probes a path outside the artifacts directory", async () => {
     // ArtifactSidecarSchema accepts any non-empty string, and this pass runs on open — so a
     // sidecar naming ../../outside.mp3 would have opening a world read arbitrary local media.

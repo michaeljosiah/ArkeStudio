@@ -452,9 +452,28 @@ export async function backfillMediaInfo(
    */
   const isPending = (file: string): boolean =>
     store.getBundle().externalEdits.some((edit) => edit.path === `artifacts/${file}.json`);
+  /**
+   * Cheap evidence that the media is the same file the probe read (Codex round 6).
+   *
+   * The sidecar's `baseHash` guards the sidecar; nothing guarded the media. Replaced during a
+   * twenty-second probe, the measurement would be written as a permanent fact about bytes the
+   * world no longer holds, and every later cut and export would trust that duration. Re-hashing
+   * would be honest and costs a full read of every media file in the world; size and modification
+   * time answer "is this still the same file" well enough for a measurement that any later scan
+   * would supersede anyway.
+   */
+  const stamp = async (file: string): Promise<string | null> => {
+    try {
+      const info = await stat(toExtendedLength(join(store.dir, "artifacts", file)));
+      return `${info.size}:${info.mtimeMs}`;
+    } catch {
+      return null;
+    }
+  };
+
   let measured = 0;
   let attempted = 0;
-  let batch: Array<{ file: string; info: MediaInfo }> = [];
+  let batch: Array<{ file: string; info: MediaInfo; stamp: string | null }> = [];
 
   const flush = async (): Promise<void> => {
     if (batch.length === 0) return;
@@ -469,7 +488,9 @@ export async function backfillMediaInfo(
         if (abandoned()) return [];
         const files: CommitInput["files"] = [];
         const names: string[] = [];
-        for (const { file, info } of pendingBatch) {
+        for (const { file, info, stamp: before } of pendingBatch) {
+          // The media has to be the file that was measured, not merely a file with that name.
+          if (before === null || (await stamp(file)) !== before) continue;
           // Asked again inside the gate: an edit can arrive while a slow probe runs, and
           // committing over it here would make its bytes the rescan's new baseline -- quietly
           // resolving a staleness the app was about to raise.
@@ -533,8 +554,9 @@ export async function backfillMediaInfo(
     // is the one thing this pass is trying not to do.
     if (abandoned()) break;
     attempted += 1;
+    const before = await stamp(artifact.file);
     const info = await measureMediaInfo(store, `artifacts/${artifact.file}`, probe);
-    if (info !== null) batch.push({ file: artifact.file, info });
+    if (info !== null) batch.push({ file: artifact.file, info, stamp: before });
     /*
      * Flushed on attempts, not successes (Codex round 3): one readable track followed by a run of
      * unreadable ones left its measurement sitting in memory through twenty seconds of timeout
