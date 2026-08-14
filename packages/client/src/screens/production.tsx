@@ -2011,11 +2011,26 @@ export function ExportsScreen() {
   const spine = spineViewFor(world, production);
   const mine = Object.entries(exportsState).filter(([, e]) => e.productionId === prodId);
   const [preset, setPreset] = useState<keyof typeof PRESETS>("review-cut");
-  // The song's length, not the sum of the shots': a spine production's runtime is fixed before a
-  // single shot exists (design 60, binding).
-  const runtimeSec = spine?.state === "derived" ? spine.cut.trackDurationSec : cut?.totalSec;
+  /*
+   * The song's length, not the sum of the shots': a spine production's runtime is fixed before a
+   * single shot exists (design 60, binding).
+   *
+   * Undefined while the track is unmeasured, rather than falling back to the scene-order total.
+   * That number is the length of a different cut, and printing it beside a notice saying there is
+   * no timeline yet would be inventing a runtime nobody measured (Codex round 1).
+   */
+  const runtimeSec =
+    spine?.state === "derived" ? spine.cut.trackDurationSec : spine?.state === "unmeasured" ? undefined : cut?.totalSec;
   const refusal = spine?.state === "derived" ? spineExportRefusals(spine.cut, preset) : null;
-  const blocked = spine?.state === "unmeasured" || refusal !== null;
+  /*
+   * An unmeasured track does not block the button (Codex round 1).
+   *
+   * Exporting is what measures it: the coordinator probes an artifact with no stored measurement
+   * and renders from the result, or refuses in words a user can act on. Disabling here would have
+   * prevented the one path that resolves the state it was complaining about -- a screen refusing
+   * on the grounds that it lacks a number it was stopping anybody from fetching.
+   */
+  const blocked = refusal !== null;
   const presetCopy: Record<string, { label: string; sub: string }> = {
     "review-cut": { label: "Review cut", sub: `mp4 ${PRESETS["review-cut"].width}×${PRESETS["review-cut"].height} · timecode · fastest` },
     master: { label: "Master", sub: `${PRESETS.master.width}×${PRESETS.master.height} · clean` },
@@ -2084,8 +2099,8 @@ export function ExportsScreen() {
         {spine?.state === "unmeasured" && (
           <div className="fy-notecard">
             <span className="fy-dot fy-dot--warn" />
-            The master track has not been measured yet, so there is no timeline to lay the picture against. Nothing is
-            lost — the measurement is taken when the track can be read, and the cut appears with it.
+            The master track has not been measured yet, so its length is not known here. Exporting measures it first
+            and renders against it — or says why it cannot be read. Nothing about the production changes either way.
           </div>
         )}
         {spine?.state === "derived" && (refusal !== null || spine.cut.slateSec > 0 || spine.cut.blackSec > 0) && (
@@ -2095,8 +2110,10 @@ export function ExportsScreen() {
                 because "blocked" without them sends somebody looking through every shot. */}
             {refusal !== null ? (
               <>
-                A master cannot be made yet — {refusal.detail}. A review cut renders anyway: gaps become labelled black
-                and you are watching the song with the picture you have.
+                {/* Named, because saying "master" while social-excerpt is selected tells somebody
+                    about a preset they did not choose (Codex round 1). */}
+                {presetCopy[preset]?.label ?? "This export"} cannot be made yet — {refusal.detail}. A review cut renders
+                anyway: gaps become labelled black and you are watching the song with the picture you have.
               </>
             ) : (
               <>
@@ -2121,7 +2138,7 @@ export function ExportsScreen() {
             disabled={blocked}
             onClick={() => !blocked && worldId && prodId && exportCut(worldId, prodId, preset)}
           >
-            Export · {seconds(runtimeSec)}
+            {runtimeSec === undefined ? "Export" : <>Export · {seconds(runtimeSec)}</>}
           </Button>
         </div>
       </div>
