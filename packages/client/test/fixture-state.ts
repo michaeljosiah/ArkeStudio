@@ -438,8 +438,10 @@ const state: ClientState = {
     problems: [],
     keyArtCandidate: null,
     hasKeyArt: true,
+    masterLookCandidate: null,
     externalEdits: [],
     stale: false,
+    stalePaths: [],
   },
   // No conversation open by default: the workspace is loaded by id when one is chosen.
   worldChat: null,

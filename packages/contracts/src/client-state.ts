@@ -213,10 +213,21 @@ export const WorldBundleSchema = z
     keyArtCandidate: z.string().nullable().default(null),
     /** Whether accepted key art (world-art.png) exists — the disk is the truth here too. */
     hasKeyArt: z.boolean().default(false),
+    /**
+     * A master look waiting for a yes, world-relative. Generated or uploaded, the same offer
+     * either way: accepting it is a look change, so it lands as the next version's image.
+     */
+    masterLookCandidate: z.string().nullable().default(null),
     /** Closed-world edits awaiting reconciliation (SPEC-002 R-28). */
     externalEdits: z.array(ExternalEditSchema).default([]),
     /** Set when another program changed files while the world was open (SPEC-002 R-23). */
     stale: z.boolean().default(false),
+    /**
+     * Which world-relative paths differed when that was decided. A warning that cannot say what
+     * changed is a warning nobody can check — and when the report is wrong, as it was while the
+     * app could still mistake its own commit for somebody else's, this is the only evidence.
+     */
+    stalePaths: z.array(z.string().min(1)).default([]),
   })
   .strict();
 export type WorldBundle = z.infer<typeof WorldBundleSchema>;

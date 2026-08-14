@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
-import { copyFile, readFile, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { basename, join } from "node:path";
+import { basename, extname, join } from "node:path";
 import {
   DomainEventSchema,
   JobSchema,
@@ -110,6 +110,12 @@ import {
   WORLD_IMAGE_FILE,
   worldImageRequest,
 } from "./references/world-image.js";
+import {
+  MASTER_LOOK_DIR,
+  MASTER_LOOK_DIR_ACCEPTED,
+  masterLookFile,
+  masterLookRequest,
+} from "./references/master-look.js";
 import {
   acceptCharacterLook,
   acceptCharacterSheet,
@@ -732,8 +738,8 @@ export class Coordinator {
     this.started = true;
 
     // Out-of-band writes to the open world mark it stale for every client (SPEC-002 R-23).
-    this.opts.provider.onWorldStale?.((worldId) => {
-      this.emit({ at: new Date().toISOString(), type: "world.stale", worldId });
+    this.opts.provider.onWorldStale?.((worldId, paths) => {
+      this.emit({ at: new Date().toISOString(), type: "world.stale", worldId, paths });
     });
 
     await this.seed();
@@ -3672,6 +3678,159 @@ export class Coordinator {
         await store
           .gateOp(async () =>
             rm(toExtendedLength(join(store.dir, WORLD_IMAGE_DIR, WORLD_IMAGE_CANDIDATE)), { force: true }),
+          )
+          .catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "generate-master-look": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.opts.manifest) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Master look generation is unavailable.");
+          return;
+        }
+        const model = imageModelFor(
+          this.appSettings ? await this.appSettings.load() : null,
+          this.opts.manifest,
+          msg.modelId,
+        );
+        if (!model) {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "No image model is available. Check provider settings.",
+          );
+          return;
+        }
+        const bundle = store.getBundle();
+        // No art-director rewrite here, unlike key art. Key art is an image *of the world* and
+        // benefits from a writing model turning a logline into light and lens; this is an image
+        // *of the look*, and the look is already the words every generation receives.
+        await this.enqueueBatch(msg.requestId, msg.kind, [
+          masterLookRequest(bundle.meta, model, bundle.artDirection),
+        ]);
+        return;
+      }
+      case "upload-master-look": {
+        const store = this.opts.provider.openStore?.();
+        const pick = this.opts.pickFiles;
+        if (!store || store.worldId !== msg.worldId || !pick) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Master look upload is unavailable.");
+          return;
+        }
+        const chosen = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
+        const [source] = chosen;
+        // A closed dialog is not a failure. Nothing was queued and nothing is said.
+        if (!source) {
+          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+          return;
+        }
+        if (chosen.length > 1) {
+          this.rejectEnqueue(msg.requestId, msg.kind, ONE_IMAGE_ONLY);
+          return;
+        }
+        if (!this.stillOpen(store)) return;
+        const picked = await readPickedImage(source);
+        // Again after the read: 50 MB takes a moment, and a world switched during it leaves this
+        // holding a closed store, which would still accept writes.
+        if (!this.stillOpen(store)) return;
+        if ("error" in picked) {
+          this.rejectEnqueue(msg.requestId, msg.kind, picked.error);
+          return;
+        }
+        const landed = await store
+          .gateOp(async () => {
+            // One candidate at a time, and the extension follows the bytes — so replacing a PNG
+            // with a JPEG must not leave the PNG behind for the scan to find first.
+            await rm(toExtendedLength(join(store.dir, MASTER_LOOK_DIR)), { recursive: true, force: true });
+            await atomicWriteFile(
+              join(store.dir, MASTER_LOOK_DIR, `candidate${picked.extension}`),
+              picked.data,
+            );
+          })
+          .then(
+            () => true,
+            () => false,
+          );
+        if (!landed) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That image could not be copied into the world.");
+          return;
+        }
+        // Nothing was queued — the offer is on the screen, in the snapshot the gate op just
+        // refreshed. Reporting a job that does not exist would send the user to Activity to
+        // look for it.
+        this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "use-master-look": {
+        const store = this.opts.provider.openStore?.();
+        const gate = this.opts.provider.gate?.();
+        if (!store || !gate) return;
+        const candidate = store.getBundle().masterLookCandidate;
+        if (candidate === null) return;
+        /*
+         * Accepting a master look is a look change, taken through the gate like any other.
+         *
+         * The alternative — copying the file in and pointing the current record at it — would
+         * mutate an accepted version in place: every take made under v3 would suddenly claim a
+         * master look that did not exist when it was made, and the history entry for v3 would
+         * describe an image nobody working under v3 ever saw. So the image lands under the
+         * *next* version's name, and the record that names it is the next version.
+         */
+        const direction = store.getBundle().artDirection;
+        const next = direction.version + 1;
+        const file = masterLookFile(next, extname(candidate).toLowerCase() || ".png");
+        const moved = await store
+          .ownedWrite(async () => {
+            // A world whose look is still derived has no `art-direction/` at all — the folder
+            // arrives with the first record, and this can be what happens before that.
+            await mkdir(toExtendedLength(join(store.dir, MASTER_LOOK_DIR_ACCEPTED)), { recursive: true });
+            await copyFile(
+              toExtendedLength(join(store.dir, fromPortable(candidate))),
+              toExtendedLength(join(store.dir, fromPortable(file))),
+            );
+            await rm(toExtendedLength(join(store.dir, MASTER_LOOK_DIR)), { recursive: true, force: true });
+          })
+          .then(
+            () => true,
+            () => false,
+          );
+        if (!moved) {
+          await this.refreshWorldSnapshot(msg.worldId);
+          return;
+        }
+        const accepted = await (async () => {
+          const proposal = await gate.stageArtDirectionChange(direction.description, file);
+          const outcome = await gate.accept(proposal.id, {});
+          return outcome.status === "accepted";
+        })().catch(() => false);
+        if (!accepted) {
+          // An image the record does not name is an orphan nothing can show or remove. It goes
+          // back to being a candidate, so the offer is still on the screen and can be retried.
+          await store
+            .ownedWrite(async () => {
+              // The directory the forward step just deleted. Without recreating it the copy
+              // fails, the failure is swallowed, and the image stays exactly where the rollback
+              // exists to stop it staying.
+              await mkdir(toExtendedLength(join(store.dir, MASTER_LOOK_DIR)), { recursive: true });
+              await copyFile(
+                toExtendedLength(join(store.dir, fromPortable(file))),
+                toExtendedLength(join(store.dir, MASTER_LOOK_DIR, `candidate${extname(file)}`)),
+              );
+              await rm(toExtendedLength(join(store.dir, fromPortable(file))), { force: true });
+            })
+            .catch(() => {});
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "discard-master-look": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await store
+          .gateOp(async () =>
+            rm(toExtendedLength(join(store.dir, MASTER_LOOK_DIR)), { recursive: true, force: true }),
           )
           .catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);

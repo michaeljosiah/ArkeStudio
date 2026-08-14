@@ -361,7 +361,7 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       };
     case "world.stale":
       if (!state.world || state.world.meta.worldId !== event.worldId) return state;
-      return { ...state, world: { ...state.world, stale: true } };
+      return { ...state, world: { ...state.world, stale: true, stalePaths: event.paths } };
     case "take.recorded":
     case "review.recorded":
     case "selection.changed": {
@@ -995,6 +995,33 @@ export function useWorldImage(worldId: string): void {
 
 export function discardWorldImage(worldId: string): void {
   send({ kind: "discard-world-image", worldId });
+}
+
+/**
+ * The world look as a picture. The prompt is the look's own description, sent unedited — so the
+ * image and the words it illustrates are written from the same sentence.
+ */
+export function generateMasterLook(worldId: string, modelId?: string): void {
+  send({
+    kind: "generate-master-look",
+    worldId,
+    requestId: queueRequest("generate-master-look"),
+    ...(modelId !== undefined ? { modelId } : {}),
+  });
+}
+
+/** Or bring your own: the host opens the picker, and the renderer never touches the bytes. */
+export function uploadMasterLook(worldId: string): void {
+  send({ kind: "upload-master-look", worldId, requestId: queueRequest("upload-master-look") });
+}
+
+/** Accepting is a look change: the image lands as the next version's master look. */
+export function useMasterLook(worldId: string): void {
+  send({ kind: "use-master-look", worldId });
+}
+
+export function discardMasterLook(worldId: string): void {
+  send({ kind: "discard-master-look", worldId });
 }
 
 /** Move a world out of the library. The folder survives in archive/ — this is not a delete. */

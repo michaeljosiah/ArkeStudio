@@ -8,6 +8,8 @@ export interface QueueToastCopy {
   kind: "success" | "error" | "none";
   title: string;
   description?: string;
+  /** Whether Activity is where this outcome can be followed up. False for work that never queued. */
+  inActivity?: boolean;
 }
 
 function batchNoun(command: QueueEnqueueResult["command"]): string {
@@ -49,6 +51,16 @@ export function queueToastCopy(result: QueueEnqueueResult): QueueToastCopy {
       ...(description ? { description } : {}),
     };
   }
+  // An upload never reaches Activity: nothing was queued and nothing spends, so a failure that
+  // sent the user there to look for it would be sending them to an empty screen.
+  if (result.command === "upload-master-look") {
+    return {
+      kind: "error",
+      title: "That image could not be used",
+      inActivity: false,
+      ...(description ? { description } : {}),
+    };
+  }
   return {
     kind: "error",
     title: "Couldn’t add this to Activity",
@@ -82,7 +94,9 @@ export function QueueToaster() {
         if (copy.kind === "none") return;
         const options = {
           ...(copy.description ? { description: copy.description } : {}),
-          action: { label: "Activity", onClick: () => navigate("/activity") },
+          ...(copy.inActivity === false
+            ? {}
+            : { action: { label: "Activity", onClick: () => navigate("/activity") } }),
         };
         if (copy.kind === "success") toast.success(copy.title, options);
         else toast.error(copy.title, options);

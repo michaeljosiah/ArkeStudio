@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { basename } from "node:path";
+import { basename, extname } from "node:path";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -69,6 +69,9 @@ export interface ScanResult {
   /** Hashes of measured take media — for staleness only; never an adoptable text path. */
   mediaManifest: Record<string, string>;
 }
+
+/** What counts as an image when reading a candidate off the disk rather than out of a record. */
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 
 const SHEET_DIRS: ReadonlyArray<{ dir: string; type: SheetKind }> = [
   { dir: "characters", type: "character" },
@@ -499,6 +502,16 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
   const hasKeyArt = await stat(toExtendedLength(join(dir, "world-art.png")))
     .then(() => true)
     .catch(() => false);
+  /*
+   * A master look waiting for a yes. Read by listing rather than by stat, because this one
+   * candidate arrives two ways: generated, where the dispatcher writes the name the job asked
+   * for, and uploaded, where the file is named for the format its bytes actually carry. A stat
+   * on `candidate.png` would find the first and silently lose the second.
+   */
+  const masterLookCandidate = await readdir(toExtendedLength(join(dir, "incoming", "master-look")))
+    .then((entries) => entries.filter((entry) => IMAGE_EXTENSIONS.has(extname(entry).toLowerCase())).sort()[0])
+    .then((entry) => (entry === undefined ? null : `incoming/master-look/${entry}`))
+    .catch(() => null);
 
   const resolved = resolveArtDirection(meta, artDirectionRecord);
   const overrides: ArtDirectionOverride[] = [];
@@ -600,6 +613,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     },
     keyArtCandidate,
     hasKeyArt,
+    masterLookCandidate,
     sheets,
     canon,
     referenceKits,
@@ -615,6 +629,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     problems,
     externalEdits: [],
     stale: false,
+    stalePaths: [],
   };
   return { meta, bundle, problems, manifest, mediaManifest };
 }

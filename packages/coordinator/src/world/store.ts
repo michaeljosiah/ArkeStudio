@@ -26,9 +26,30 @@ interface ScanState {
 }
 
 export interface WorldStoreEvents {
-  /** Another program touched world files while open (R-23). */
-  onStale?: () => void;
+  /**
+   * Another program touched world files while open (R-23), with the portable paths that
+   * differed. The paths are the whole point: a report that only says "something changed"
+   * cannot be checked against, argued with, or debugged after the fact.
+   */
+  onStale?: (paths: string[]) => void;
 }
+
+/**
+ * How long a verified difference has to survive before it is reported.
+ *
+ * A difference seen once is not yet a difference: the comparison is against `this.scan`, which
+ * the app's own commit refreshes only *after* its bytes land, so a scan that happens to run
+ * between those two moments sees the app's own write as somebody else's. That window is real —
+ * it produced repeated "this world changed outside Arke Studio" reports against the app's own
+ * art-direction commits — and it closes on its own the instant the commit's rescan completes.
+ *
+ * So the second look happens *outside* the serialisation lock. Holding it would starve the very
+ * rescan that resolves the difference, and the confirmation would agree with the mistake.
+ */
+const CONFIRM_MS = 500;
+
+/** Enough to name the culprit without turning an event into a directory listing. */
+const MAX_REPORTED_PATHS = 20;
 
 export class WorldStore {
   private constructor(
@@ -42,6 +63,8 @@ export class WorldStore {
   ) {}
 
   private stale = false;
+  /** What differed when staleness was reported — carried to the banner, not just to a boolean. */
+  private stalePaths: string[] = [];
   private watcher: WorldWatcher | null = null;
   private mutex: Promise<unknown> = Promise.resolve();
   private index: WorldIndex | null = null;
@@ -157,7 +180,12 @@ export class WorldStore {
   }
 
   getBundle(): WorldBundle {
-    return { ...this.scan.bundle, externalEdits: this.externalEdits, stale: this.stale };
+    return {
+      ...this.scan.bundle,
+      externalEdits: this.externalEdits,
+      stale: this.stale,
+      stalePaths: [...this.stalePaths],
+    };
   }
 
   get worldId(): string {
@@ -293,6 +321,7 @@ export class WorldStore {
     await this.serialise(async () => {
       await this.rescan();
       this.stale = false;
+      this.stalePaths = [];
       await this.saveScanState();
     });
     return this.getBundle();
@@ -371,40 +400,75 @@ export class WorldStore {
       return;
     }
     this.verifying = true;
-    void this.serialise(async () => {
-      do {
-        this.verifyAgain = false;
-        let changed = false;
-        try {
-          const current = await scanWorld(this.dir);
-          // Both manifests: text for adoption, media for staleness (#253, Codex round 3).
-          changed =
-            !sameManifest(this.scan.manifest, current.manifest) ||
-            !sameManifest(this.scan.mediaManifest, current.mediaManifest);
-        } catch {
-          // A malformed or missing world.json is itself a verified byte-level change.
-          changed = true;
-        }
-        if (this.closed || this.stale) return;
-        if (changed) {
-          this.stale = true;
-          this.events.onStale?.();
-          return;
-        }
-      } while (this.verifyAgain);
-    }).finally(() => {
+    void this.runVerification().finally(() => {
       const rerun = this.verifyAgain;
       this.verifying = false;
       if (rerun) this.verifyExternalChange();
     });
   }
+
+  /**
+   * Two looks, and only the second one may accuse.
+   *
+   * The comparison runs under the serialisation lock so it never reads a world mid-commit; the
+   * wait between the two runs *without* it, so anything queued behind us — in practice the
+   * rescan belonging to the write that provoked this — gets to finish and update `this.scan`.
+   * A difference that was our own write in flight is gone by the second look. A difference that
+   * was somebody else's is still there, and still reported, one debounce later than before.
+   */
+  private async runVerification(): Promise<void> {
+    do {
+      this.verifyAgain = false;
+      const seen = await this.serialise(() => this.differingPaths());
+      if (this.closed || this.stale) return;
+      if (seen.length === 0) continue;
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, CONFIRM_MS).unref?.();
+      });
+      if (this.closed || this.stale) return;
+
+      const confirmed = await this.serialise(() => this.differingPaths());
+      if (this.closed || this.stale) return;
+      if (confirmed.length > 0) {
+        this.stale = true;
+        this.stalePaths = confirmed.slice(0, MAX_REPORTED_PATHS);
+        this.events.onStale?.([...this.stalePaths]);
+        return;
+      }
+      // Our own write, caught between landing and being rescanned. Nothing happened, and the
+      // next event is verified from scratch rather than held against this one.
+    } while (this.verifyAgain);
+  }
+
+  /** Portable paths where the world on disk no longer matches the scan this store is serving. */
+  private async differingPaths(): Promise<string[]> {
+    let current: ScanResult;
+    try {
+      current = await scanWorld(this.dir);
+    } catch {
+      // A malformed or missing world.json is itself a verified byte-level change, and the only
+      // path that can be named for it is the one that would not read.
+      return ["world.json"];
+    }
+    // Both manifests: text for adoption, media for staleness (#253, Codex round 3).
+    return [
+      ...manifestDifference(this.scan.manifest, current.manifest),
+      ...manifestDifference(this.scan.mediaManifest, current.mediaManifest),
+    ].sort();
+  }
 }
 
-function sameManifest(a: Record<string, string>, b: Record<string, string>): boolean {
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
-  if (aKeys.length !== bKeys.length) return false;
-  return aKeys.every((key) => a[key] === b[key]);
+/** Every path added, removed or rewritten between two manifests. */
+function manifestDifference(before: Record<string, string>, after: Record<string, string>): string[] {
+  const paths = new Set<string>();
+  for (const [path, hash] of Object.entries(after)) {
+    if (before[path] !== hash) paths.add(path);
+  }
+  for (const path of Object.keys(before)) {
+    if (!(path in after)) paths.add(path);
+  }
+  return [...paths];
 }
 
 /**

@@ -19,8 +19,12 @@ const CLOCK = () => "2026-08-01T12:00:00.000Z";
  * Only for the assertions that something does *not* happen — you cannot wait for a non-event, so
  * these have to spend the time. Everything asserting that a report *did* arrive waits on the
  * report itself via `until`, which is what stops a busy machine from failing the suite.
+ *
+ * It covers the debounce (400ms) *and* the confirmation window (500ms) a difference must survive
+ * before it is reported: sized to the shorter of the two, every negative assertion here would
+ * pass by simply finishing before the report it was meant to disprove.
  */
-const SETTLE_MS = 1000;
+const SETTLE_MS = 1800;
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, SETTLE_MS));
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -42,6 +46,50 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await writeFile(path, Buffer.concat([bytes, Buffer.from("\nexternal change\n")]));
     await until(() => reports === 1, "the changed bytes to be reported stale");
     assert.equal(store.getBundle().stale, true);
+    await store.close();
+  });
+
+  it("names the paths that differed", async () => {
+    const dir = await makeTempWorld();
+    let reported: string[] | null = null;
+    const store = await WorldStore.open(dir, {
+      clock: CLOCK,
+      events: { onStale: (paths) => (reported = paths) },
+    });
+    const path = join(dir, "characters", "maren-kest.md");
+    await writeFile(path, `${await readFile(path, "utf8")}\nexternal change\n`);
+    await until(() => reported !== null, "the report to arrive");
+    assert.deepEqual(reported, ["characters/maren-kest.md"]);
+    // On the bundle too: the banner names what changed rather than only that something did.
+    assert.deepEqual(store.getBundle().stalePaths, ["characters/maren-kest.md"]);
+    await store.close();
+  });
+
+  it("does not report a difference that resolves before it is confirmed", async () => {
+    /*
+     * The app's own commits used to arrive here as somebody else's.
+     *
+     * A verification scan that runs after a write lands but before the commit's rescan updates
+     * the store's own view sees a difference that is entirely ours, and reported it — repeatedly,
+     * against art-direction changes made in the app, telling the user another program had written
+     * to their world. Both looks have to agree now, and the window between them is exactly when
+     * the state that provoked the first one resolves.
+     */
+    const dir = await makeTempWorld();
+    let reports = 0;
+    const store = await WorldStore.open(dir, { clock: CLOCK, events: { onStale: () => reports++ } });
+    const path = join(dir, "characters", "maren-kest.md");
+    const bytes = await readFile(path);
+
+    await writeFile(path, Buffer.concat([bytes, Buffer.from("\nbriefly different\n")]));
+    // Inside the debounce-plus-confirmation window, so the second look finds the world as the
+    // store already understands it — which is the same shape a commit's own rescan produces.
+    await delay(500);
+    await writeFile(path, bytes);
+
+    await settle();
+    assert.equal(reports, 0, "a difference that did not survive confirmation is not a report");
+    assert.equal(store.getBundle().stale, false);
     await store.close();
   });
 

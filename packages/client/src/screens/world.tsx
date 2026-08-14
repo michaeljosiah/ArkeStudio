@@ -194,6 +194,13 @@ function WorldConditionBanners() {
         <Callout tone="warning" title="This world changed outside Arke Studio">
           Another program wrote to the world folder while it was open. Reload to pick the changes
           up — nothing is merged silently.
+          {world.stalePaths.length > 0 && (
+            /* Named, not merely counted. "Something changed" is a warning nobody can check;
+               the paths are what let the person decide whether they meant it. */
+            <div className="mono" style={{ fontSize: "var(--text-xs)", marginTop: "var(--space-2)" }}>
+              {world.stalePaths.join(" · ")}
+            </div>
+          )}
           <div style={{ marginTop: "var(--space-2)" }}>
             <Button variant="primary" onClick={() => reloadWorld(world.meta.worldId)}>
               Reload world
