@@ -1975,33 +1975,55 @@ export function AudioScreen() {
 // ---- Exports (25b) ---------------------------------------------------------
 
 /**
- * The cut this production actually exports (issue 283, design 60c).
+ * Everything the Exports pane needs to say, decided in one place (issue 283, design 60c).
  *
- * A spine production is cut to its song, so showing it the scene-order cut reported gaps and a
- * runtime for a film it would not produce -- and could call a master complete a moment before the
- * coordinator refused it. `null` means no spine and the scene-order cut stands, unchanged and
- * unmigrated. `unmeasured` is its own answer rather than a zero: a track whose length nothing has
- * measured cannot be laid against, and saying "0s" would be a number nobody measured.
+ * Three review rounds found the same class of defect: a state the screen had not enumerated,
+ * falling through a ternary to a number or a sentence belonging to a different state -- the
+ * scene-order runtime printed beside "there is no timeline", every missing second called
+ * "labelled black" when only slates carry labels, a shot anchored nowhere omitted from the film
+ * and from the warning. Each was fixed where it appeared, and the next round found another.
+ *
+ * So the states are named once, exhaustively, and the runtime, the block and the wording are all
+ * derived from the same value. A state that is not in this union cannot be rendered, and a
+ * sentence cannot outlive the condition it was written for.
  */
-type SpineView =
-  | null
-  | { state: "unmeasured" }
-  | { state: "silent" }
-  | { state: "derived"; cut: ReturnType<typeof deriveSpineCut> };
+type ExportView =
+  | { kind: "scene-order" }
+  | { kind: "no-track" }
+  | { kind: "unmeasured" }
+  | { kind: "silent"; durationSec: number }
+  | { kind: "spine"; cut: ReturnType<typeof deriveSpineCut> };
 
-function spineViewFor(
+function exportViewFor(
   world: { artifacts: readonly { id: string; mediaInfo?: { durationSec: number; hasAudio: boolean } }[] } | null | undefined,
   production: Parameters<typeof deriveSpineCut>[0] | null | undefined,
-): SpineView {
+): ExportView {
   const spine = production?.spine;
-  if (!production || !spine || !world) return null;
-  const measured = world.artifacts.find((a) => a.id === spine.trackArtifactId)?.mediaInfo;
-  if (measured === undefined) return { state: "unmeasured" };
-  // A measured track with no audio stream refuses every preset in the coordinator, so offering the
-  // export here would offer one that is certain to fail (Codex round 2). Measured is not the same
-  // as usable, and the length being known says nothing about there being a song.
-  if (!measured.hasAudio) return { state: "silent" };
-  return { state: "derived", cut: deriveSpineCut(production, spine, measured.durationSec) };
+  if (!production || !spine || !world) return { kind: "scene-order" };
+  const track = world.artifacts.find((a) => a.id === spine.trackArtifactId);
+  // A spine naming an artifact this world does not have is not the same as one nobody measured:
+  // the coordinator has no path to probe, so no export can succeed and none should be offered.
+  if (track === undefined) return { kind: "no-track" };
+  if (track.mediaInfo === undefined) return { kind: "unmeasured" };
+  // Measured is not usable. A track with no audio stream refuses every preset in the coordinator.
+  if (!track.mediaInfo.hasAudio) return { kind: "silent", durationSec: track.mediaInfo.durationSec };
+  return { kind: "spine", cut: deriveSpineCut(production, spine, track.mediaInfo.durationSec) };
+}
+
+/** What the review will actually contain, in the exporter's terms rather than the screen's. */
+function reviewNotes(cut: ReturnType<typeof deriveSpineCut>): string[] {
+  const notes: string[] = [];
+  if (cut.slateSec > 0) notes.push(`${seconds(cut.slateSec)} is a labelled slate naming the shot that is missing`);
+  // Plain black carries no label: the exporter draws text on slates only.
+  if (cut.blackSec > 0) notes.push(`${seconds(cut.blackSec)} is plain black, anchored to no shot at all`);
+  if (cut.unanchoredShotIds.length > 0) {
+    const n = cut.unanchoredShotIds.length;
+    notes.push(`${n} shot${n === 1 ? "" : "s"} anchored nowhere in the song, so ${n === 1 ? "it is" : "they are"} not in the film at all`);
+  }
+  if (cut.problems.length > 0) {
+    notes.push(`unresolved: ${[...new Set(cut.problems.map((p) => p.kind))].sort().join(", ")}`);
+  }
+  return notes;
 }
 
 export function ExportsScreen() {
@@ -2013,29 +2035,28 @@ export function ExportsScreen() {
   // because the world folder export lives here, and the chapters travel whole inside it.
   const isStory = production?.meta.format === "story";
   const cut = production ? deriveCut(production) : null;
-  const spine = spineViewFor(world, production);
+  const view = exportViewFor(world, production);
   const mine = Object.entries(exportsState).filter(([, e]) => e.productionId === prodId);
   const [preset, setPreset] = useState<keyof typeof PRESETS>("review-cut");
   /*
-   * The song's length, not the sum of the shots': a spine production's runtime is fixed before a
-   * single shot exists (design 60, binding).
-   *
-   * Undefined while the track is unmeasured, rather than falling back to the scene-order total.
-   * That number is the length of a different cut, and printing it beside a notice saying there is
-   * no timeline yet would be inventing a runtime nobody measured (Codex round 1).
+   * Runtime, block and refusal all read from the one view, so none can describe a state the screen
+   * is not in. The song's length is the runtime wherever there is a song (design 60, binding).
    */
+  const refusal = view.kind === "spine" ? spineExportRefusals(view.cut, preset) : null;
   const runtimeSec =
-    spine?.state === "derived" ? spine.cut.trackDurationSec : spine?.state === "unmeasured" ? undefined : cut?.totalSec;
-  const refusal = spine?.state === "derived" ? spineExportRefusals(spine.cut, preset) : null;
+    view.kind === "spine"
+      ? view.cut.trackDurationSec
+      : view.kind === "silent"
+        ? view.durationSec
+        : view.kind === "scene-order"
+          ? cut?.totalSec
+          : undefined;
   /*
-   * An unmeasured track does not block the button (Codex round 1).
-   *
-   * Exporting is what measures it: the coordinator probes an artifact with no stored measurement
-   * and renders from the result, or refuses in words a user can act on. Disabling here would have
-   * prevented the one path that resolves the state it was complaining about -- a screen refusing
-   * on the grounds that it lacks a number it was stopping anybody from fetching.
+   * An unmeasured track does not block: exporting is what measures it, and the coordinator probes
+   * an artifact with no stored measurement, then renders or refuses in words. A missing artifact
+   * and a silent one do block, because no probe rescues either.
    */
-  const blocked = refusal !== null || spine?.state === "silent";
+  const blocked = refusal !== null || view.kind === "no-track" || view.kind === "silent";
   const presetCopy: Record<string, { label: string; sub: string }> = {
     "review-cut": { label: "Review cut", sub: `mp4 ${PRESETS["review-cut"].width}×${PRESETS["review-cut"].height} · timecode · fastest` },
     master: { label: "Master", sub: `${PRESETS.master.width}×${PRESETS.master.height} · clean` },
@@ -2101,58 +2122,57 @@ export function ExportsScreen() {
             </button>
           ))}
         </div>
-        {spine?.state === "silent" && (
+        {view.kind === "no-track" && (
+          <div className="fy-notecard">
+            <span className="fy-dot fy-dot--warn" />
+            The spine names a track this world does not have, so there is nothing to measure or cut against. Assign a
+            track again — the anchors are unaffected.
+          </div>
+        )}
+        {view.kind === "silent" && (
           <div className="fy-notecard">
             <span className="fy-dot fy-dot--warn" />
             The master track has no audio stream, so there is no song to cut against. Assign a track that carries audio
             — nothing else about the production changes.
           </div>
         )}
-        {spine?.state === "unmeasured" && (
+        {view.kind === "unmeasured" && (
           <div className="fy-notecard">
             <span className="fy-dot fy-dot--warn" />
-            The master track has not been measured yet, so its length is not known here. Exporting measures it first
-            and renders against it — or says why it cannot be read. Nothing about the production changes either way.
+            The master track has not been measured yet, so its length is not known here. Exporting measures it first and
+            renders against it — or says why it cannot be read. Nothing about the production changes either way.
           </div>
         )}
-        {spine?.state === "derived" &&
-          (refusal !== null || spine.cut.problems.length > 0 || spine.cut.slateSec > 0 || spine.cut.blackSec > 0) && (
-          <div className="fy-notecard">
-            <span className="fy-dot fy-dot--warn" />
-            {/* Design 60c: review renders the holes, a finished cut refuses them. The reasons are named
-                because "blocked" without them sends somebody looking through every shot. */}
-            {refusal !== null ? (
-              <>
-                {/* Named, because saying "master" while social-excerpt is selected tells somebody
-                    about a preset they did not choose (Codex round 1). */}
-                {presetCopy[preset]?.label ?? "This export"} cannot be made yet — {refusal.detail}. A review cut renders
-                anyway: gaps become labelled black and you are watching the song with the picture you have.
-              </>
-            ) : (
-              <>
-                {/* Slates carry labels; plain black does not, and the exporter draws text only on
-                    slates. Promising a label on both left unexplained black in the review (Codex
-                    round 2). Problems that cost no visible time are named here too, because
-                    review renders past them and only the master says so otherwise. */}
-                {spine.cut.slateSec > 0 && (
-                  <>{seconds(spine.cut.slateSec)} of the song is a labelled slate naming the shot that is missing. </>
-                )}
-                {spine.cut.blackSec > 0 && (
-                  <>{seconds(spine.cut.blackSec)} is plain black, anchored to no shot at all. </>
-                )}
-                {spine.cut.problems.length > 0 && (
+        {view.kind === "spine" &&
+          (() => {
+            /*
+             * One sentence about what the review will contain, built from the cut rather than
+             * written per case. Three rounds were spent on copy that described a state the screen
+             * was not in -- gaps promised as labelled when only slates carry labels, shots
+             * anchored nowhere omitted from both the film and the warning, a refusal naming the
+             * master while another preset was selected.
+             */
+            const notes = reviewNotes(view.cut);
+            if (refusal === null && notes.length === 0) return null;
+            return (
+              <div className="fy-notecard">
+                <span className="fy-dot fy-dot--warn" />
+                {refusal !== null && (
                   <>
-                    {spine.cut.problems.length} unresolved{" "}
-                    {spine.cut.problems.length === 1 ? "problem" : "problems"} the review renders past:{" "}
-                    {[...new Set(spine.cut.problems.map((p) => p.kind))].sort().join(", ")}.{" "}
+                    {presetCopy[preset]?.label ?? "This export"} cannot be made yet — {refusal.detail}.{" "}
                   </>
                 )}
-                An unfinished film still reviews.
-              </>
-            )}
-          </div>
-        )}
-        {spine === null && cut && cut.gaps > 0 && (
+                {notes.length > 0 ? (
+                  <>
+                    A review cut renders anyway: {notes.join("; ")}. An unfinished film still reviews.
+                  </>
+                ) : (
+                  <>A review cut renders the whole song as it stands.</>
+                )}
+              </div>
+            );
+          })()}
+        {view.kind === "scene-order" && cut && cut.gaps > 0 && (
           <div className="fy-notecard">
             <span className="fy-dot fy-dot--warn" />
             The cut has {cut.gaps} gap{cut.gaps === 1 ? "" : "s"} ({seconds(cut.uncoveredSec)}). They export as black
