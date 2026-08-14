@@ -43,16 +43,33 @@ export default async function verifyPackagedRuntimes(context) {
    * the spine, by which time the installer has shipped.
    */
   const ffmpegDir = join(resources, "ffmpeg");
-  const staged = ["ffmpeg.exe", "ffprobe.exe"].filter((binary) => existsSync(join(ffmpegDir, binary)));
-  // Neither is the existing local-build case: no media runtime, honestly reported at startup.
-  // One is the state worth failing on — half a runtime that installs cleanly and then disables
-  // whichever half is missing without saying so.
-  if (staged.length === 1) {
-    const missing = staged[0] === "ffmpeg.exe" ? "ffprobe.exe" : "ffmpeg.exe";
-    throw new Error(
-      `resources/ffmpeg has ${staged[0]} but not ${missing} — they are one runtime, and shipping half of it ` +
-        `disables ${missing === "ffprobe.exe" ? "every media measurement" : "export"} with nothing on screen to say so`,
-    );
+  /*
+   * Both required now (#279). This previously tolerated *neither*, because neither was the state
+   * every build was in -- nothing staged ffmpeg at all, electron-builder logged that the source
+   * directory did not exist, and the installer shipped with export quietly unavailable. Two
+   * releases went out that way. Now that prepare-runtimes stages them, absence is a packaging
+   * failure rather than the status quo, and this is the check that keeps it from becoming the
+   * status quo again.
+   */
+  for (const binary of ["ffmpeg.exe", "ffprobe.exe"]) {
+    if (!existsSync(join(ffmpegDir, binary))) {
+      throw new Error(
+        `resources/ffmpeg is missing ${binary} — ffmpeg and ffprobe are one runtime, and a build without ` +
+          `${binary} disables ${binary === "ffprobe.exe" ? "every media measurement" : "export"} with nothing on screen to say so`,
+      );
+    }
+  }
+  /*
+   * The whole inventory, checksummed -- not one arbitrary library (Codex round 1).
+   *
+   * A shared build with any required DLL missing or corrupted leaves both executables present and
+   * neither able to start, and "some .dll exists" reports that as healthy. prepare-runtimes
+   * already writes the same checksum manifest the other runtimes are verified through, so this
+   * verifies it the same way rather than inventing a weaker check for the one runtime that ships
+   * its libraries loose.
+   */
+  if (verifyManifest(ffmpegDir).arch !== arch) {
+    throw new Error(`resources/ffmpeg was staged for a different architecture than ${arch}`);
   }
 
   const forbidden = new Set(["kokoro-82m", "whisper-base-en", "model_quantized.onnx", "ggml-base.en.bin"]);

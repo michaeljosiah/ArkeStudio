@@ -33,10 +33,18 @@ const work = resolve(value("--work") ?? join(repoRoot, ".runtime-work", arch));
 const staged = join(desktopRoot, "build-resources");
 const voxaStage = join(staged, "voxa", arch);
 const espeakStage = join(staged, "espeak-ng", arch);
+/*
+ * ffmpeg stages flat rather than per-architecture, because main.ts looks for
+ * `resources/ffmpeg/ffmpeg.exe` and electron-builder copies this directory wholesale. One
+ * architecture is prepared per invocation, so the directory is cleared and rewritten each time.
+ */
+const ffmpegStage = join(staged, "ffmpeg");
 rmSync(work, { recursive: true, force: true });
+rmSync(ffmpegStage, { recursive: true, force: true });
 rmSync(voxaStage, { recursive: true, force: true });
 rmSync(espeakStage, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
+mkdirSync(ffmpegStage, { recursive: true });
 mkdirSync(voxaStage, { recursive: true });
 mkdirSync(espeakStage, { recursive: true });
 
@@ -95,6 +103,39 @@ function pruneForeignRuntimes(root) {
   for (const entry of readdirSync(runtimes)) {
     if (entry !== keep) rmSync(join(runtimes, entry), { recursive: true, force: true });
   }
+}
+
+/**
+ * The GPLv2 section 3(b) offer, valid three years from the build that carries it.
+ *
+ * Written out with the build's own version and commit in it, so a copy found on a disk years
+ * from now names exactly which binaries it answers for rather than pointing at whatever the
+ * project happens to ship by then.
+ */
+function writtenOffer(ffmpeg) {
+  return [
+    "WRITTEN OFFER FOR CORRESPONDING SOURCE CODE",
+    "",
+    `This copy of Arke Studio includes ffmpeg ${ffmpeg.version} (build ${ffmpeg.release}), a GPL`,
+    "build which contains GPL-licensed components including libx264. ffmpeg is invoked as a",
+    "separate subprocess and is never linked into Arke Studio itself.",
+    "",
+    `The complete corresponding source for FFmpeg is included beside this file as`,
+    `SOURCE-ffmpeg-${ffmpeg.commit}.tar.gz.`,
+    "",
+    "For any other GPL-licensed component of these binaries -- including libx264 and the exact",
+    "build scripts, configuration and patches used to produce them -- the copyright holder hereby",
+    "offers, valid for three years from the date this copy was distributed, to give any third",
+    "party a complete machine-readable copy of the corresponding source code, for no more than",
+    "the cost of physically performing source distribution.",
+    "",
+    "To request it, open an issue at:",
+    "  https://github.com/michaeljosiah/ArkeStudio/issues",
+    "",
+    "This offer is made under section 3(b) of the GNU General Public License version 2, and",
+    "extends to anyone in possession of this copy, whether or not they obtained it directly.",
+    "",
+  ].join(String.fromCharCode(13, 10));
 }
 
 function writeManifest(root, component, extra) {
@@ -290,4 +331,58 @@ writeManifest(espeakStage, "espeak-ng", {
   sourceRevision: arch === "x64" ? metadata.espeakNg.commit : "MSYS2 g0d451f8c + pinned dependency packages",
 });
 
-console.log(`[prepare-runtimes] staged verified ${arch} Voxa and espeak-ng runtimes`);
+/*
+ * ffmpeg and ffprobe (#279).
+ *
+ * Nothing staged these before, so `build-resources/ffmpeg` never existed, electron-builder logged
+ * "file source doesn't exist" and packaged happily, and every released installer had export
+ * silently unavailable -- the absence was stated in the UI rather than crashed on, which is why it
+ * went unnoticed through two releases.
+ *
+ * A GPL build, deliberately: libx264 is GPL-only and the export presets are written around -crf,
+ * which an LGPL build accepts and then ignores, producing output whose quality setting means
+ * nothing. It is invoked as a separate executable and never linked, the arrangement espeak-ng
+ * already makes here.
+ */
+const ffmpegSource = metadata.ffmpeg[arch];
+if (!ffmpegSource) throw new Error(`no pinned ffmpeg build for ${arch}`);
+const ffmpegArchive = join(work, `ffmpeg-${arch}.zip`);
+await download(ffmpegSource.url, ffmpegArchive, ffmpegSource.sha256, `ffmpeg ${arch}`);
+const ffmpegWork = join(work, "ffmpeg");
+rmSync(ffmpegWork, { recursive: true, force: true });
+extract(ffmpegArchive, ffmpegWork);
+const ffmpegRoot = join(ffmpegWork, readdirSync(ffmpegWork)[0]);
+const ffmpegBin = join(ffmpegRoot, "bin");
+for (const entry of readdirSync(ffmpegBin)) {
+  // ffplay is a media player, not part of what Arke invokes; shipping it is 30MB of surface for
+  // a feature that does not exist.
+  if (entry === "ffplay.exe") continue;
+  cpSync(join(ffmpegBin, entry), join(ffmpegStage, entry));
+}
+for (const binary of ["ffmpeg.exe", "ffprobe.exe"]) {
+  const staged = join(ffmpegStage, binary);
+  if (!existsSync(staged)) throw new Error(`ffmpeg staging is missing ${binary}`);
+  assertPeArchitecture(staged, arch);
+}
+cpSync(join(ffmpegRoot, "LICENSE.txt"), join(ffmpegStage, "LICENSE.ffmpeg.txt"));
+/*
+ * GPL corresponding source, in two parts.
+ *
+ * FFmpeg's own source ships beside the binary, pinned to the commit the build reports. That is
+ * not the whole obligation: this is a GPL build, so libx264 is compiled *into* avcodec rather
+ * than sitting beside it as a separate file, and Arke redistributes x264's code whether or not
+ * it can point at a file containing it (Codex round 1). The revision BtbN built cannot be read
+ * off the release, and shipping some other x264 tarball would look like compliance without being
+ * it -- so everything the archive does not cover is carried by a written offer under GPLv2
+ * section 3(b), which is a real obligation with a real duration rather than a formality.
+ */
+await download(
+  metadata.ffmpeg.sourceUrl,
+  join(ffmpegStage, `SOURCE-ffmpeg-${metadata.ffmpeg.commit}.tar.gz`),
+  metadata.ffmpeg.sourceSha256,
+  "ffmpeg source",
+);
+writeFileSync(join(ffmpegStage, "WRITTEN-OFFER.ffmpeg.txt"), writtenOffer(metadata.ffmpeg));
+writeManifest(ffmpegStage, "ffmpeg", { version: metadata.ffmpeg.version, sourceRevision: metadata.ffmpeg.release });
+
+console.log(`[prepare-runtimes] staged verified ${arch} Voxa, espeak-ng and ffmpeg runtimes`);

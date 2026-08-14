@@ -49,5 +49,21 @@
         "sha256": "625884C08FC51745DE85DADA72DF39E6E926AE098407BDA716367E51DEC8D3BB"
       }
     ]
+  },
+  "ffmpeg": {
+    "_note": "GPL shared build: libx264 is GPL-only, and the export presets are written around -crf, which an LGPL build silently ignores. Invoked as a separate executable, never linked -- the same arrangement espeak-ng and Voxa make.",
+    "release": "autobuild-2026-08-13-17-03",
+    "version": "n8.1.2-34-g9b6c8969e0",
+    "x64": {
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-13-17-03/ffmpeg-n8.1.2-34-g9b6c8969e0-win64-gpl-shared-8.1.zip",
+      "sha256": "B677B5F4A22501F01DCE98663962DA8D10D2E8147AB4F27E6BFA8D8485E2315D"
+    },
+    "arm64": {
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-13-17-03/ffmpeg-n8.1.2-34-g9b6c8969e0-winarm64-gpl-shared-8.1.zip",
+      "sha256": "A8E5DCEB4CE339D38253281321147A4729828D70F49A4D1EC012E3E9041A3E6B"
+    },
+    "commit": "9b6c8969e0",
+    "sourceUrl": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/9b6c8969e0",
+    "sourceSha256": "DEA36E6B40D66C3825939B59906C0D6186ECE23F7F8961D0F2A9A0E904BF41A3"
   }
 }
