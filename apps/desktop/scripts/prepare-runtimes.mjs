@@ -105,6 +105,39 @@ function pruneForeignRuntimes(root) {
   }
 }
 
+/**
+ * The GPLv2 section 3(b) offer, valid three years from the build that carries it.
+ *
+ * Written out with the build's own version and commit in it, so a copy found on a disk years
+ * from now names exactly which binaries it answers for rather than pointing at whatever the
+ * project happens to ship by then.
+ */
+function writtenOffer(ffmpeg) {
+  return [
+    "WRITTEN OFFER FOR CORRESPONDING SOURCE CODE",
+    "",
+    `This copy of Arke Studio includes ffmpeg ${ffmpeg.version} (build ${ffmpeg.release}), a GPL`,
+    "build which contains GPL-licensed components including libx264. ffmpeg is invoked as a",
+    "separate subprocess and is never linked into Arke Studio itself.",
+    "",
+    `The complete corresponding source for FFmpeg is included beside this file as`,
+    `SOURCE-ffmpeg-${ffmpeg.commit}.tar.gz.`,
+    "",
+    "For any other GPL-licensed component of these binaries -- including libx264 and the exact",
+    "build scripts, configuration and patches used to produce them -- the copyright holder hereby",
+    "offers, valid for three years from the date this copy was distributed, to give any third",
+    "party a complete machine-readable copy of the corresponding source code, for no more than",
+    "the cost of physically performing source distribution.",
+    "",
+    "To request it, open an issue at:",
+    "  https://github.com/michaeljosiah/ArkeStudio/issues",
+    "",
+    "This offer is made under section 3(b) of the GNU General Public License version 2, and",
+    "extends to anyone in possession of this copy, whether or not they obtained it directly.",
+    "",
+  ].join(String.fromCharCode(13, 10));
+}
+
 function writeManifest(root, component, extra) {
   writeFileSync(
     join(root, "runtime-manifest.json"),
@@ -332,14 +365,24 @@ for (const binary of ["ffmpeg.exe", "ffprobe.exe"]) {
   assertPeArchitecture(staged, arch);
 }
 cpSync(join(ffmpegRoot, "LICENSE.txt"), join(ffmpegStage, "LICENSE.ffmpeg.txt"));
-// A GPL binary ships with the source it was built from, the same arrangement espeak-ng makes
-// here. Pinned to the commit the build reports, so the offer matches what is installed.
+/*
+ * GPL corresponding source, in two parts.
+ *
+ * FFmpeg's own source ships beside the binary, pinned to the commit the build reports. That is
+ * not the whole obligation: this is a GPL build, so libx264 is compiled *into* avcodec rather
+ * than sitting beside it as a separate file, and Arke redistributes x264's code whether or not
+ * it can point at a file containing it (Codex round 1). The revision BtbN built cannot be read
+ * off the release, and shipping some other x264 tarball would look like compliance without being
+ * it -- so everything the archive does not cover is carried by a written offer under GPLv2
+ * section 3(b), which is a real obligation with a real duration rather than a formality.
+ */
 await download(
   metadata.ffmpeg.sourceUrl,
   join(ffmpegStage, `SOURCE-ffmpeg-${metadata.ffmpeg.commit}.tar.gz`),
   metadata.ffmpeg.sourceSha256,
   "ffmpeg source",
 );
+writeFileSync(join(ffmpegStage, "WRITTEN-OFFER.ffmpeg.txt"), writtenOffer(metadata.ffmpeg));
 writeManifest(ffmpegStage, "ffmpeg", { version: metadata.ffmpeg.version, sourceRevision: metadata.ffmpeg.release });
 
 console.log(`[prepare-runtimes] staged verified ${arch} Voxa, espeak-ng and ffmpeg runtimes`);
