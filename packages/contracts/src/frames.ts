@@ -93,10 +93,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("discard-world-image"), worldId: UlidSchema }).strict(),
   /**
    * SPEC-017: the world look as a picture. The record has carried a `masterLook` since the look
-   * was versioned; these four are the first way to put one there.
+   * was versioned; these are the first way to put one there.
    *
-   * The prompt is the look's own description, unedited — a picture of the look written from
-   * different words than the look would not be a picture of it.
+   * The prompt defaults to the look's own description, unedited — a picture of the look written
+   * from different words would not be a picture of it. It can be overridden for one generation,
+   * because a description is a brief for every take and this is a brief for one image; the
+   * standing safety clause is added on top either way and is not the author's to drop.
    */
   z
     .object({
@@ -105,8 +107,30 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       /** Override the routed model for this generation only. */
       modelId: z.string().min(1).optional(),
+      /** Override the look's own words for this generation only. Absent means send the look. */
+      prompt: z.string().min(1).max(4000).optional(),
+      /** The size, in the normalised tier vocabulary. Absent leaves it to the provider. */
+      tier: SizeTierSchema.optional(),
+      /**
+       * The shape, as the model's own manifest spells it — "16:9". Validated against that model
+       * rather than against a list here: which ratios exist is a property of the row, and a
+       * shape it does not take is dropped rather than sent.
+       */
+      aspect: z.string().min(1).max(16).optional(),
     })
     .strict(),
+  /**
+   * Stage an image for the next master-look generation to look at. The host opens the picker and
+   * copies what comes back into the world, so no path and no bytes cross into the renderer — it
+   * learns only that a reference is now staged, from the snapshot.
+   *
+   * One at a time, like the candidate: picking again replaces it.
+   */
+  z
+    .object({ kind: z.literal("pick-master-look-reference"), worldId: UlidSchema, requestId: UlidSchema })
+    .strict(),
+  /** Unstage it. The next generation goes back to being made from words alone. */
+  z.object({ kind: z.literal("clear-master-look-reference"), worldId: UlidSchema }).strict(),
   /**
    * Or bring your own. Opens the host's file picker: the renderer never handles the bytes, and
    * the format is decided by reading them rather than by trusting the name.

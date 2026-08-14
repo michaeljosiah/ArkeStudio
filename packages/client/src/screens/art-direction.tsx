@@ -1,18 +1,25 @@
-import { useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { useNavigate, useParams } from "react-router";
-import type { ArtDirectionHistoryEntry, ResolvedArtDirection } from "@arke-studio/contracts";
+import type {
+  ArtDirectionHistoryEntry,
+  ResolvedArtDirection,
+  SizeTier,
+  WorldBundle,
+} from "@arke-studio/contracts";
 import { ArtStyleGrid } from "../components/art-style-picker.js";
-import { resolveModel } from "../components/dispatch-bar.js";
-import { WorldKeyArt } from "../components/key-art.js";
+import { resolveModel, resolveOutputChoice, usableModels } from "../components/dispatch-bar.js";
+import { GenerationDialog } from "../components/generation-dialog.js";
 import { seedFrom } from "../lib/art-styles.js";
 import { Button } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
 import { shortDate } from "../lib/format.js";
 import {
   acceptProposal,
+  clearMasterLookReference,
   discardMasterLook,
   discardProposal,
   generateMasterLook,
+  pickMasterLookReference,
   setArtDirection,
   uploadMasterLook,
   useMasterLook,
@@ -30,6 +37,14 @@ const TITLE_MAX = 120;
 
 /** Where a run-on first sentence is willing to be broken, in the order we would rather break it. */
 const CLAUSE_BREAKS = [":", ";", "—"];
+
+/**
+ * A master look is a plate — a palette, a light, a place — and everything downstream lays it
+ * beside other landscape work. Named rather than repeated, because the dialog and the coordinator
+ * both have to agree about it: `masterLookRequest` builds the job landscape, and a dialog that
+ * offered portrait shapes would have been choosing for a request that ignored the choice.
+ */
+const MASTER_LOOK_IS_LANDSCAPE = true;
 
 /**
  * The heading is the description's first sentence — until the first sentence is the description.
@@ -89,51 +104,17 @@ function directionImage(worldSlug: string, path: string | undefined, label: stri
   );
 }
 
-function Reach({ direction }: { direction: ResolvedArtDirection }) {
-  const rows = [
-    [`${direction.reach.visualAssets} visual assets`, `on v${direction.version}`],
-    [`${direction.reach.referenceKits} reference kits`, `on v${direction.version}`],
-    [`${direction.reach.productions} productions`, `on v${direction.version}`],
-    [`${direction.reach.earlierAcceptedTakes} accepted takes`, "made under earlier looks"],
-  ];
-  return (
-    <section className="fy-artdirection__section">
-      <h2>WHAT FOLLOWS THIS LOOK</h2>
-      {rows.map(([label, note]) => (
-        <div className="fy-artdirection__fact" key={label}>
-          <span>{label}</span>
-          <span>{note}</span>
-        </div>
-      ))}
-      <p>Earlier work is never re-rendered. It keeps the look it was made under.</p>
-    </section>
-  );
-}
-
-function Overrides({ direction }: { direction: ResolvedArtDirection }) {
-  return (
-    <section className="fy-artdirection__section">
-      <h2>NOT FOLLOWING IT</h2>
-      {direction.overrides.length === 0 ? (
-        <div className="fy-artdirection__fact">
-          <span>No overrides</span>
-          <span>one shared look</span>
-        </div>
-      ) : (
-        direction.overrides.map((override) => (
-          <div className="fy-artdirection__fact" key={`${override.kind}:${override.id}`}>
-            <span>{override.name}</span>
-            <span>{override.kind} · own look</span>
-          </div>
-        ))
-      )}
-      <p>
-        An override travels with its own work. Changing the world look leaves
-        {direction.overrides.length === 1 ? " it" : " these"} alone.
-      </p>
-    </section>
-  );
-}
+/*
+ * What this page no longer says.
+ *
+ * It used to end in two inventories — WHAT FOLLOWS THIS LOOK, counting the work riding the current
+ * version, and NOT FOLLOWING IT, listing the overrides that are not — plus a whole second section
+ * for the world's key art. All three were true, and none of them was why anybody came here. The
+ * reach counts are already stated where they change something (the propose screen's ripples, next
+ * to Accept), the overrides belong to the work that carries them, and key art is set on the world
+ * hub, where the image it feeds is the thing on screen. What is left is the look, its history, and
+ * the two decisions this page exists for.
+ */
 
 function History({ worldSlug, history }: { worldSlug: string; history: ArtDirectionHistoryEntry[] }) {
   return (
@@ -163,104 +144,134 @@ function History({ worldSlug, history }: { worldSlug: string; history: ArtDirect
 }
 
 /**
- * Setting the master look — the thing this screen has always described and never offered.
+ * The offer, once an image is back: keep it as the look's picture, or do not.
  *
- * The record has carried a `masterLook` since the look was versioned: history keeps one per
- * version, the reach counts it, the review names it, and the copy above explains how it travels
- * into other work. Nothing in the app could put one there, so every world's was empty and the
- * page stood in the world's key art instead.
- *
- * Two doors, because the two are genuinely different intentions. Generating asks the look to
- * illustrate itself, from its own words and nothing else. Uploading is for an author who already
- * knows what the world looks like — a frame grab, a painting, a photograph — and does not need a
- * model's opinion about it.
+ * A candidate outranks a running job, because a candidate is a decision waiting on the person and
+ * a job is only the studio being busy. This is all that is left in the column — the two doors that
+ * *start* a master look now live on the picture itself.
  */
-function MasterLook({
+function MasterLookCandidate({
   worldId,
   slug,
+  candidate,
   version,
   proposalOpen,
 }: {
   worldId: string;
   slug: string;
+  candidate: string;
   version: number;
   /** A look change already staged. The gate allows one, so accepting here would be refused. */
   proposalOpen: boolean;
 }) {
-  const { state } = useStore();
-  const candidate = state?.world?.masterLookCandidate ?? null;
-  const [dismissed, setDismissed] = useState<readonly string[]>([]);
-  const model = resolveModel(state, "image").model;
-  const stranded = resolveModel(state, "image").stranded;
-  const usable = model !== null && stranded === null;
-
-  const mine = (state?.app.jobs ?? []).filter(
-    (job) => job.worldId === worldId && job.target.kind === "master-look",
-  );
-  const running = mine.find(
-    (job) => job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled",
-  );
-  const newest = [...mine].reverse()[0];
-  const failed = newest?.status === "failed" && !dismissed.includes(newest.id) ? newest : undefined;
-
-  // The offer, whenever there is one: a candidate outranks a running job, because a candidate is
-  // a decision waiting on the person and a job is only the studio being busy.
-  if (candidate !== null) {
-    return (
-      <section className="fy-artdirection__masterlook">
-        <div className="fy-artdirection__masterlook-shot">
-          <Portrait worldSlug={slug} path={candidate} label="Master look, just made" radius={8} />
-        </div>
-        <p>
-          Keep this as the world's master look? It lands as v{version + 1} — earlier work keeps the
-          look it was made under.
-        </p>
-        <div className="fy-artdirection__masterlook-row">
-          <Button variant="primary" onClick={() => useMasterLook(worldId)} disabled={proposalOpen}>
-            Use this · v{version + 1}
-          </Button>
-          <Button variant="ghost" onClick={() => discardMasterLook(worldId)}>
-            Not this one
-          </Button>
-        </div>
-        {/* The gate allows one open look change at a time. Without this the button was live, the
-            gate refused it, and the candidate simply stayed on screen saying nothing. */}
-        {proposalOpen && (
-          <p className="fy-artdirection__masterlook-why">
-            A change to this look is already proposed. Settle it first — this image waits.
-          </p>
-        )}
-      </section>
-    );
-  }
-
   return (
     <section className="fy-artdirection__masterlook">
-      {failed && (
-        <p className="fy-artdirection__masterlook-why">
-          The master look did not come back — {failed.error ?? "the provider refused it"}
-        </p>
-      )}
+      <div className="fy-artdirection__masterlook-shot">
+        <Portrait worldSlug={slug} path={candidate} label="Master look, just made" radius={8} />
+      </div>
+      <p>
+        Keep this as the world's master look? It lands as v{version + 1} — earlier work keeps the
+        look it was made under.
+      </p>
       <div className="fy-artdirection__masterlook-row">
-        <Button
-          onClick={() => {
-            if (failed) setDismissed((prev) => [...prev, failed.id]);
-            generateMasterLook(worldId, model?.id);
-          }}
-          disabled={!usable || running !== undefined}
-        >
-          {running ? "Making one…" : failed ? "Try again" : "Generate from this look"}
+        <Button variant="primary" onClick={() => useMasterLook(worldId)} disabled={proposalOpen}>
+          Use this · v{version + 1}
         </Button>
-        <Button variant="ghost" onClick={() => uploadMasterLook(worldId)}>
-          Upload an image
+        <Button variant="ghost" onClick={() => discardMasterLook(worldId)}>
+          Not this one
         </Button>
       </div>
-      <p className="fy-artdirection__masterlook-why">
-        {usable
-          ? "Generating sends this look's own words as the prompt, and nothing else."
-          : "No image model is available, so only an upload can set the look right now."}
-      </p>
+      {/* The gate allows one open look change at a time. Without this the button was live, the
+          gate refused it, and the candidate simply stayed on screen saying nothing. */}
+      {proposalOpen && (
+        <p className="fy-artdirection__masterlook-why">
+          A change to this look is already proposed. Settle it first — this image waits.
+        </p>
+      )}
     </section>
+  );
+}
+
+/**
+ * The picture, and the two doors onto it.
+ *
+ * The doors used to be a row of buttons a third of the way down the other column, which put the
+ * verb a long way from its object: the thing being replaced was the large image on the left, and
+ * nothing on the left said so. They sit on the picture now and appear when the pointer is over it
+ * — or when the keyboard reaches them, which is why the overlay answers `focus-within` as well as
+ * `hover`, and why the buttons are always in the document rather than mounted on hover.
+ */
+function MasterLookHero({
+  world,
+  direction,
+  onGenerate,
+  generateRef,
+  running,
+}: {
+  world: WorldBundle;
+  direction: ResolvedArtDirection;
+  onGenerate: () => void;
+  generateRef: RefObject<HTMLButtonElement | null>;
+  running: boolean;
+}) {
+  const controls = (
+    <div className="fy-artdirection__hover">
+      <Button ref={generateRef} variant="primary" onClick={onGenerate} disabled={running}>
+        {running ? "Making one…" : "Generate"}
+      </Button>
+      <Button variant="secondary" onClick={() => uploadMasterLook(world.meta.worldId)}>
+        Upload
+      </Button>
+    </div>
+  );
+
+  if (direction.masterLook) {
+    return (
+      <div className="fy-artdirection__master">
+        {directionImage(world.meta.slug, direction.masterLook, `${world.meta.name} master look`, 0)}
+        {controls}
+        <div className="fy-artdirection__master-caption">
+          <div>
+            <strong>Master look</strong>
+            <span>v{direction.version}</span>
+          </div>
+          <p>
+            {direction.acceptedAt
+              ? `set ${shortDate(direction.acceptedAt)}`
+              : "derived from tone and genre"}{" "}
+            · used by new generations
+          </p>
+        </div>
+      </div>
+    );
+  }
+  if (world.keyArt) {
+    /* The accepted key art stands in while no master look is set. The user made and accepted
+       this image; a page about the world's visual language that refuses to show the world's one
+       image reads as a bug, not a distinction. */
+    return (
+      <div className="fy-artdirection__master">
+        {directionImage(world.meta.slug, world.keyArt, `${world.meta.name} key art`, 0)}
+        {controls}
+        <div className="fy-artdirection__master-caption">
+          <div>
+            <strong>World key art</strong>
+            <span>standing in</span>
+          </div>
+          <p>the master look is not set — generate or upload one here</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="fy-artdirection__master fy-artdirection__master--empty">
+      <div className="fy-artdirection__empty-mark">NO MASTER LOOK</div>
+      <div>
+        <strong>Make the world look concrete.</strong>
+        <p>The description currently comes from tone and genre.</p>
+      </div>
+      {controls}
+    </div>
   );
 }
 
@@ -268,52 +279,103 @@ export function ArtDirectionScreen() {
   const { worldId } = useParams();
   const navigate = useNavigate();
   const world = useWorld();
+  const { state } = useStore();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  // Null is "the look's own words", which is where the box always starts. A draft is kept only
+  // while the dialog is open; reopening it re-reads the look, because the look may have changed.
+  const [draft, setDraft] = useState<string | null>(null);
+  const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier; resolution?: string }>({});
+  const [dismissed, setDismissed] = useState<readonly string[]>([]);
+  const generateRef = useRef<HTMLButtonElement>(null);
   if (!world || world.meta.worldId !== worldId) return null;
   const direction = world.artDirection;
   const display = splitDescription(direction.description);
   const proposed = world.proposals.find((item) => item.proposal.kind === "art-direction");
+  const candidate = world.masterLookCandidate;
+
+  // The same resolver the bar in the dialog uses, so the button and the picker cannot disagree
+  // about which model this surface will send — and a stranded default blocks rather than quietly
+  // running as something else.
+  const resolved = resolveModel(state, "image", choice.modelId);
+  const model = resolved.stranded === null ? resolved.model : null;
+  // What the bar in the dialog will actually send, asked of the bar rather than read off the last
+  // click: switching models drops a size or a shape the new row cannot reach.
+  const sending = model
+    ? resolveOutputChoice(model, choice, { aspect: true, landscape: MASTER_LOOK_IS_LANDSCAPE })
+    : {};
+  // What the bar in the dialog does not already say. With nothing in the manifest at all the bar
+  // states it itself, and repeating it put the same sentence on screen twice; a routed default
+  // that is merely switched off is the case the bar shows a model row for and cannot explain.
+  const offered = usableModels(state, "image");
+  const why =
+    model !== null
+      ? undefined
+      : offered.length > 0
+        ? "The default image model is switched off — pick another one here, or upload an image instead."
+        : undefined;
+  const mine = (state?.app.jobs ?? []).filter(
+    (job) => job.worldId === world.meta.worldId && job.target.kind === "master-look",
+  );
+  const running = mine.some(
+    (job) => job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled",
+  );
+  const newest = [...mine].reverse()[0];
+  const failed = newest?.status === "failed" && !dismissed.includes(newest.id) ? newest : undefined;
+  const prompt = draft ?? direction.description;
 
   return (
     <div className="fy-artdirection" data-screen="world-art-direction">
-      {direction.masterLook ? (
-        <div className="fy-artdirection__master">
-          {directionImage(world.meta.slug, direction.masterLook, `${world.meta.name} master look`, 0)}
-          <div className="fy-artdirection__master-caption">
-            <div>
-              <strong>Master look</strong>
-              <span>v{direction.version}</span>
-            </div>
-            <p>
-              {direction.acceptedAt
-                ? `set ${shortDate(direction.acceptedAt)}`
-                : "derived from tone and genre"}{" "}
-              · used by new generations
-            </p>
-          </div>
-        </div>
-      ) : world.keyArt ? (
-        /* The accepted key art stands in while no master look is set. The user made and
-           accepted this image; a page about the world's visual language that refuses to show
-           the world's one image reads as a bug, not a distinction. */
-        <div className="fy-artdirection__master">
-          {directionImage(world.meta.slug, world.keyArt, `${world.meta.name} key art`, 0)}
-          <div className="fy-artdirection__master-caption">
-            <div>
-              <strong>World key art</strong>
-              <span>standing in</span>
-            </div>
-            <p>the master look is not set — Make it concrete below to author the shared look</p>
-          </div>
-        </div>
-      ) : (
-        <div className="fy-artdirection__master fy-artdirection__master--empty">
-          <div className="fy-artdirection__empty-mark">NO MASTER LOOK</div>
-          <div>
-            <strong>Make the world look concrete.</strong>
-            <p>The description currently comes from tone and genre.</p>
-          </div>
-        </div>
-      )}
+      <MasterLookHero
+        world={world}
+        direction={direction}
+        running={running}
+        generateRef={generateRef}
+        onGenerate={() => {
+          setDraft(null);
+          setDialogOpen(true);
+        }}
+      />
+      <GenerationDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        returnFocus={generateRef}
+        title="Generate the master look"
+        lede="One picture of this look, for other work to be made against."
+        prompt={prompt}
+        onPrompt={setDraft}
+        promptHint="Starts as the look's own words. Whatever is here is sent as written — with the standing clause forbidding people, faces, text and montage added after it, because this image rides along with other characters' portraits."
+        worldSlug={world.meta.slug}
+        reference={world.masterLookReference}
+        referenceHint="Optional. A palette, a frame or a lighting study for the model to look at while it works."
+        onAttachReference={() => pickMasterLookReference(world.meta.worldId)}
+        onClearReference={() => clearMasterLookReference(world.meta.worldId)}
+        // "main-photo" is borrowed for its price band only — a master look is not a portrait, and
+        // the coordinator builds this request landscape, so the orientation is stated rather than
+        // inferred from the workflow. Without it the dialog would default to a portrait shape and
+        // price a portrait base for a landscape plate.
+        workflow="main-photo"
+        landscape={MASTER_LOOK_IS_LANDSCAPE}
+        choice={choice}
+        onChoice={setChoice}
+        submitLabel="Generate"
+        submitDisabled={model === null || running}
+        {...(why !== undefined ? { why } : {})}
+        onSubmit={() => {
+          if (failed) setDismissed((prev) => [...prev, failed.id]);
+          generateMasterLook(world.meta.worldId, {
+            ...(model ? { modelId: model.id } : {}),
+            // Only when it is not simply the look read back. "Nothing was overridden" is a real
+            // state worth being able to see in the request, rather than a coincidence of strings.
+            ...(prompt.trim() !== direction.description.trim() ? { prompt } : {}),
+            // The size and shape as the bar resolved them, not as they were last clicked: a model
+            // change drops a tier or an aspect the new row cannot reach, and the request has to
+            // agree with what the screen is showing.
+            ...(sending.tier !== undefined ? { tier: sending.tier } : {}),
+            ...(sending.aspect !== undefined ? { aspect: sending.aspect } : {}),
+          });
+          setDialogOpen(false);
+        }}
+      />
       <div className="fy-artdirection__detail">
         <div className="fy-artdirection__eyebrow">WORLD ART DIRECTION</div>
         <h1>{display.title}</h1>
@@ -350,34 +412,22 @@ export function ArtDirectionScreen() {
                 : "Propose a change"}
           </Button>
         </div>
-        <MasterLook
-          worldId={world.meta.worldId}
-          slug={world.meta.slug}
-          version={direction.version}
-          proposalOpen={proposed !== undefined}
-        />
-        {/*
-          The world's other picture, and the one everything else shows.
-
-          Changing the master look here left the picker card, the hub hero and the settings scrim
-          exactly as they were, because those show the key art and this page had no way to touch
-          it. Both images now have a control on the page that talks about the world's images.
-        */}
-        <section className="fy-artdirection__keyart">
-          <h2>THE WORLD'S KEY ART</h2>
-          <p>
-            A picture of the world rather than of its treatment — this is the one on the worlds
-            list, the hub and the settings backdrop. It is not carried into generations.
-          </p>
-          <WorldKeyArt
+        {candidate !== null ? (
+          <MasterLookCandidate
             worldId={world.meta.worldId}
             slug={world.meta.slug}
-            hasLogline={Boolean(world.meta.logline)}
+            candidate={candidate}
+            version={direction.version}
+            proposalOpen={proposed !== undefined}
           />
-        </section>
+        ) : (
+          failed && (
+            <p className="fy-artdirection__masterlook-why">
+              The master look did not come back — {failed.error ?? "the provider refused it"}
+            </p>
+          )
+        )}
         <div className="fy-artdirection__spacer" />
-        <Reach direction={direction} />
-        <Overrides direction={direction} />
         <History worldSlug={world.meta.slug} history={direction.history} />
       </div>
     </div>

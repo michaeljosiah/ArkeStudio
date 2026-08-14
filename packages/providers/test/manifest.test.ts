@@ -9,11 +9,15 @@ import {
   estimateCharacterImageMicroUsd,
   estimateMicroUsd,
   formatMicroUsd,
+  aspectOffered,
   gateLocalRuntimes,
+  imageOutputFor,
   ModelManifestSchema,
   modelCapabilityCopy,
   modelForCapability,
   modelPriceCopy,
+  offeredAspects,
+  parseAspect,
   passesForDuration,
   reconcileStrategy,
   sceneImageOutput,
@@ -278,6 +282,143 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
     const banana = model("nano-banana-2");
     const fourK = characterImageOutput(banana, "main-photo", "4K");
     assert.equal(Math.max(fourK.width, fourK.height), 4096);
+  });
+
+  /*
+   * The shape, once it is the author's to choose.
+   *
+   * Aspect used to be decided entirely by provider and orientation, so a 16:9 plate was
+   * unreachable from any screen. These hold the two rules that make offering it safe: the picker
+   * offers only what the row declares, and a ratio the row never declared is ignored rather than
+   * sent and refused.
+   */
+  /*
+   * Three properties held over every shipped row at once, so no future row can reintroduce any
+   * of them by being added.
+   *
+   * The middle one is the reason the other two exist. `limits.aspects` is a *curated offer list*
+   * — the fal catalogue's own header says what a model accepts is curated because the API does
+   * not say, and nano-banana's entry deliberately omits ratios its route does have — so a shape
+   * outside that list is not an invalid request. What is invalid is having two different defaults
+   * for one model: the picker took the curated list's first entry, which made nano-banana default
+   * to a 21:9 crop on a screen with a shape control and 16:9 on every screen without one.
+   */
+  it("never derives a shape it would not also offer", () => {
+    for (const m of SHIPPED_MANIFEST.models.filter((x) => x.capability === "image")) {
+      for (const landscape of [true, false]) {
+        const offered = offeredAspects(m, { landscape });
+        if (offered.length === 0) continue;
+        const derived = imageOutputFor(m, { landscape }).aspect;
+        assert.ok(
+          offered.includes(derived),
+          `${m.id} ${landscape ? "landscape" : "portrait"} derives ${derived}, offers ${offered.join(",")}`,
+        );
+        assert.ok(aspectOffered(m, derived), `${m.id} would reject its own default`);
+      }
+    }
+  });
+
+  it("defaults a picker to the shape that surface already produced", () => {
+    // Opening a dialog and changing nothing must generate what pressing Generate generated before
+    // the dialog had controls. The default is therefore first in the offered list, not whichever
+    // preset the catalogue happened to list first.
+    for (const m of SHIPPED_MANIFEST.models.filter((x) => x.capability === "image")) {
+      for (const landscape of [true, false]) {
+        const offered = offeredAspects(m, { landscape });
+        if (offered.length === 0) continue;
+        assert.equal(
+          offered[0],
+          imageOutputFor(m, { landscape }).aspect,
+          `${m.id} ${landscape ? "landscape" : "portrait"} would open on a different shape`,
+        );
+      }
+    }
+  });
+
+  it("always reports an aspect that describes the pixels it is sending", () => {
+    // The string is user-visible and recorded in job params, and a client that submits
+    // `aspect_ratio` instead of width and height would send this one. It has to be the truth
+    // about the dimensions beside it, on every path — derived or chosen, at every tier.
+    for (const m of SHIPPED_MANIFEST.models.filter((x) => x.capability === "image")) {
+      for (const landscape of [true, false]) {
+        for (const aspect of [undefined, ...offeredAspects(m, { landscape })]) {
+          for (const tier of [undefined, "1K", "2K", "4K"] as const) {
+            const out = imageOutputFor(m, {
+              landscape,
+              ...(tier !== undefined ? { tier } : {}),
+              ...(aspect !== undefined ? { aspect } : {}),
+            });
+            const stated = parseAspect(out.aspect);
+            assert.ok(stated !== null, `${m.id} reported an unparseable aspect ${out.aspect}`);
+            const actual = out.width / out.height;
+            assert.ok(
+              Math.abs(actual - stated) / stated < 0.02,
+              `${m.id} says ${out.aspect} but sends ${out.width}x${out.height}`,
+            );
+          }
+        }
+      }
+    }
+  });
+
+  it("offers each row exactly the shapes it declares", () => {
+    // Enumerated rows pass through verbatim, including ones outside the standard set.
+    assert.deepEqual(offeredAspects(model("gpt-image-2")), ["1:1", "3:2", "2:3"]);
+    assert.ok(offeredAspects(model("nano-banana-2")).includes("21:9"), "its own list, not ours");
+    // And a row that declares nothing offers nothing, so no control is drawn over a guess.
+    const mute = { ...model("flux-2-pro"), limits: { ...model("flux-2-pro").limits, aspects: undefined } };
+    assert.deepEqual(offeredAspects(mute), []);
+    assert.deepEqual(offeredAspects({ ...model("flux-2-pro"), unverified: true }), [], "unverified claims nothing");
+  });
+
+  it("narrows the standard set to a continuous range, where that is how the row speaks", () => {
+    const ranged = { ...model("flux-2-pro"), limits: { ...model("flux-2-pro").limits, aspects: undefined }, aspectRange: { min: 0.9, max: 1.4 } };
+    const offered = offeredAspects(ranged);
+    assert.ok(offered.includes("1:1"), "1.0 is inside [0.9, 1.4]");
+    assert.ok(offered.includes("4:3"), "1.33 is inside");
+    assert.ok(!offered.includes("16:9"), "1.78 is not");
+    assert.ok(!offered.includes("9:16"), "nor is 0.56");
+  });
+
+  it("reshapes around the long edge, so a shape change is not also a size change", () => {
+    const flux = model("flux-2-pro");
+    for (const aspect of offeredAspects(flux)) {
+      const out = imageOutputFor(flux, { landscape: true, tier: "2K", aspect });
+      assert.equal(out.aspect, aspect, `${aspect} is what comes back`);
+      const [w, h] = [out.width, out.height];
+      const ratio = w / h;
+      const wanted = parseAspect(aspect)!;
+      assert.ok(Math.abs(ratio - wanted) / wanted < 0.02, `${aspect} arrives as ${w}x${h}`);
+      assert.equal(w % 2, 0, "even, because several providers reject odd dimensions");
+      assert.equal(h % 2, 0);
+      // Still the tier that was asked for: flux calls 2K "2MP", and the area is the target.
+      const mp = (w * h) / 1_000_000;
+      assert.ok(Math.abs(mp - 2) < 0.05, `${aspect} stays at the 2K tier, got ${mp.toFixed(2)}MP`);
+    }
+  });
+
+  it("ignores a shape the model never offered, rather than sending it", () => {
+    // The manifest is the first line of defence and the picker never offers this. This is the
+    // backstop: obeying it would put a request on the wire the route refuses after the estimate
+    // was accepted.
+    const openai = model("gpt-image-2");
+    assert.ok(!offeredAspects(openai).includes("16:9"));
+    const out = imageOutputFor(openai, { landscape: true, aspect: "16:9" });
+    assert.equal(out.aspect, "3:2", "its own landscape shape, not the one asked for");
+    assert.ok(["1024x1024", "1536x1024", "1024x1536"].includes(`${out.width}x${out.height}`));
+  });
+
+  it("prices the shape, not only the size, on a row billed by area", () => {
+    const flux = model("flux-2-pro");
+    const square = estimateCharacterImageMicroUsd(flux, "main-photo", 1, 0, "2K", "1:1");
+    const wide = estimateCharacterImageMicroUsd(flux, "main-photo", 1, 0, "2K", "16:9");
+    // Equal here rather than different, and that is the point: flux's tiers are megapixel
+    // targets, so every shape at 2K is 2MP and costs the same. The figure has to come from the
+    // dimensions the request will carry either way — a flat assumed 1MP was wrong for all of them.
+    assert.equal(square, wide, "same area, same money");
+    assert.ok(square > 0);
+    const longEdgeRow = model("nano-banana-2");
+    assert.ok(estimateCharacterImageMicroUsd(longEdgeRow, "main-photo", 1, 0, "2K", "16:9") > 0);
   });
 
   it("every size an OpenAI request can carry is one the route accepts (#223)", () => {

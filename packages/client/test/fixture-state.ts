@@ -440,6 +440,7 @@ const state: ClientState = {
     keyArtCandidate: null,
     keyArt: "world-art.png",
     masterLookCandidate: null,
+    masterLookReference: null,
     externalEdits: [],
     stale: false,
     stalePaths: [],

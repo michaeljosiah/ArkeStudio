@@ -230,6 +230,12 @@ export const WorldBundleSchema = z
      * either way: accepting it is a look change, so it lands as the next version's image.
      */
     masterLookCandidate: z.string().nullable().default(null),
+    /**
+     * An image staged for the next master-look generation to look at, world-relative, or null.
+     * On disk rather than in the renderer's memory for the same reason the candidate is: a
+     * reference that survives a reload is one the person can still see they attached.
+     */
+    masterLookReference: z.string().nullable().default(null),
     /** Closed-world edits awaiting reconciliation (SPEC-002 R-28). */
     externalEdits: z.array(ExternalEditSchema).default([]),
     /** Set when another program changed files while the world was open (SPEC-002 R-23). */

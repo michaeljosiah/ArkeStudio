@@ -311,19 +311,49 @@ describe("screen inventory", () => {
     assert.ok(html.includes('alt="Maren Kest portrait"'));
   });
 
-  it("renders the complete art-direction surface from its resolved record", () => {
+  it("renders the art-direction surface from its resolved record", () => {
     const html = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/art-direction`);
-    for (const copy of [
-      "WORLD ART DIRECTION",
-      "WHAT FOLLOWS THIS LOOK",
-      "NOT FOLLOWING IT",
-      "HISTORY",
-      "24 visual assets",
-      "The Chorister",
-      "Cold-water realism",
-    ]) {
+    for (const copy of ["WORLD ART DIRECTION", "HISTORY", "Cold-water realism"]) {
       assert.ok(html.includes(copy), `art direction names ${copy}`);
     }
+  });
+
+  /*
+   * The page was three inventories and a look. Two of the inventories counted work that this page
+   * changes nothing about, and the third was a whole second image with its own controls; between
+   * them they pushed the look — the reason to be here — into a third of the column.
+   */
+  it("no longer carries the reach, the overrides or the second image", () => {
+    const html = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/art-direction`);
+    for (const gone of [
+      "WHAT FOLLOWS THIS LOOK",
+      "NOT FOLLOWING IT",
+      "THE WORLD&#x27;S KEY ART",
+      "Generate key art from the logline",
+      "24 visual assets",
+      "The Chorister",
+    ]) {
+      assert.ok(!html.includes(gone), `art direction has stopped saying ${gone}`);
+    }
+  });
+
+  /*
+   * The verb next to its object: the picture being replaced is the large one on the left, and the
+   * two doors onto it are now on it rather than a third of the way down the other column.
+   */
+  it("offers Generate and Upload on the picture, and a dialog behind Generate", () => {
+    const html = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/art-direction`);
+    const at = html.indexOf("fy-artdirection__hover");
+    assert.ok(at > 0, "the hover controls are in the document rather than mounted on hover");
+    assert.ok(html.indexOf("fy-artdirection__master") < at, "and they are inside the picture");
+    assert.ok(html.includes('<dialog class="fy-gendialog"'), "Generate opens the standard dialog");
+    // The three decisions the standard dialog is for. The prompt starts as the look's own words.
+    assert.ok(html.includes("Generate the master look"));
+    assert.ok(html.includes("Add a reference image"));
+    assert.ok(html.includes('data-testid="dispatch-bar"'), "and the model is picked in the dialog");
+    const labelledBy = /<dialog[^>]*class="fy-gendialog"[^>]*aria-labelledby="([^"]+)"/.exec(html)?.[1];
+    assert.ok(labelledBy, "the dialog names its own heading");
+    assert.ok(html.includes(`id="${labelledBy}"`), "and that heading is in the document");
   });
 
   it("renders the approved two-image character workflow", () => {

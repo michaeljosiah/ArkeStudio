@@ -365,8 +365,115 @@ export function characterImageOutput(
   model: ManifestModel,
   workflow: CharacterImageWorkflow,
   tier?: SizeTier,
+  aspect?: string,
 ): ImageOutputSpec {
-  return imageOutput(model, workflow === "character-sheet" || workflow === "location-view", tier);
+  return imageOutputFor(model, {
+    landscape: isLandscapeWorkflow(workflow),
+    ...(tier !== undefined ? { tier } : {}),
+    ...(aspect !== undefined ? { aspect } : {}),
+  });
+}
+
+/**
+ * The shapes offered in a picker, in the order they are offered.
+ *
+ * Deliberately a short, opinionated list rather than every ratio arithmetic allows: this is a
+ * control somebody reads at a glance, and a model declaring a continuous range would otherwise
+ * produce an unbounded one.
+ */
+export const STANDARD_ASPECTS = ["1:1", "4:5", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"] as const;
+
+/** "16:9" as 1.777…, or null for anything that is not two positive numbers around a colon. */
+export function parseAspect(aspect: string): number | null {
+  const parts = /^\s*([0-9]+(?:\.[0-9]+)?)\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*$/.exec(aspect);
+  if (!parts) return null;
+  const width = Number.parseFloat(parts[1]!);
+  const height = Number.parseFloat(parts[2]!);
+  return width > 0 && height > 0 ? width / height : null;
+}
+
+/** Which way round the work wants to be, for the workflows whose shape is not the author's. */
+export function isLandscapeWorkflow(workflow: CharacterImageWorkflow): boolean {
+  return workflow === "character-sheet" || workflow === "location-view";
+}
+
+/**
+ * The shape a request takes when nobody chose one: the provider's own habit, by orientation.
+ *
+ * Extracted so there is one of these rather than two. It used to be inline in the output builder,
+ * and the picker took its default from the *curated* list's first entry instead — so the same
+ * model produced 3:2 everywhere except a screen with a shape control, where it produced 16:9,
+ * and nano-banana defaulted to a 21:9 cinemascope crop because 21:9 happened to be listed first.
+ */
+export function derivedAspect(model: ManifestModel, landscape: boolean): string {
+  return model.provider === "openai"
+    ? landscape
+      ? "3:2"
+      : "2:3"
+    : model.provider === "fal" && model.pricing.kind === "perImage"
+      ? landscape
+        ? "16:9"
+        : "9:16"
+      : model.provider === "higgsfield"
+        ? landscape
+          ? "16:9"
+          : "1:1"
+        : landscape
+          ? "3:2"
+          : "4:5";
+}
+
+/** The shapes a row advertises, as curated — before the default is folded in. */
+function curatedAspects(model: ManifestModel): readonly string[] {
+  if (model.unverified === true) return [];
+  const enumerated = model.limits.aspects;
+  if (enumerated !== undefined && enumerated.length > 0) return enumerated;
+  const range = model.aspectRange;
+  if (!range) return [];
+  return STANDARD_ASPECTS.filter((aspect) => {
+    const ratio = parseAspect(aspect);
+    return ratio !== null && ratio >= range.min && ratio <= range.max;
+  });
+}
+
+/**
+ * The shapes to offer for this model, in the order to offer them — and an empty list where it has
+ * no opinion, which is the signal to draw no control rather than a control over a guess.
+ *
+ * `limits.aspects` is a *curated offer list*, not a statement of what the route will accept: the
+ * fal catalogue's own comment says so, and nano-banana's entry deliberately leaves out ratios the
+ * route does have. So a derived default outside that list is not an invalid request — flux takes
+ * a 3:2 `image_size` perfectly well — it is simply a shape we had not thought to offer.
+ *
+ * Which is why the default is folded in rather than corrected away. Given an orientation, the
+ * shape that orientation would otherwise have produced comes **first**, so opening a dialog and
+ * changing nothing generates exactly what the surface generated before it had a picker. Without
+ * one, the curated list stands alone — there is no orientation to have a default for.
+ *
+ * Snapping the ladder into the curated list instead would have been worse than the inconsistency:
+ * flux's nearest offered shape to a 4:5 portrait is 1:1, so every character main photo would have
+ * become a square, and an identity anchor cropped to a square is a worse photograph than an
+ * unlisted ratio is a bookkeeping error.
+ */
+export function offeredAspects(
+  model: ManifestModel,
+  options: { landscape?: boolean } = {},
+): readonly string[] {
+  const curated = curatedAspects(model);
+  if (curated.length === 0 || options.landscape === undefined) return curated;
+  const fallback = derivedAspect(model, options.landscape);
+  return [fallback, ...curated.filter((aspect) => aspect !== fallback)];
+}
+
+/**
+ * Whether this model would take that shape.
+ *
+ * The union of both orientations' defaults and the curated list, because the output builder
+ * validates through here and must never reject a shape it would itself have produced.
+ */
+export function aspectOffered(model: ManifestModel, aspect: string): boolean {
+  if (curatedAspects(model).includes(aspect)) return true;
+  return aspect === derivedAspect(model, true) || aspect === derivedAspect(model, false);
 }
 
 /**
@@ -376,10 +483,29 @@ export function characterImageOutput(
  * else.
  */
 export function sceneImageOutput(model: ManifestModel, tier?: SizeTier): ImageOutputSpec {
-  return imageOutput(model, true, tier);
+  return imageOutputFor(model, { landscape: true, ...(tier !== undefined ? { tier } : {}) });
 }
 
-function imageOutput(model: ManifestModel, landscape: boolean, tier?: SizeTier): ImageOutputSpec {
+/**
+ * An output spec for any image request, with the shape either chosen or derived.
+ *
+ * Derived is what every caller had before there was a picker: the provider's own habit, portrait
+ * or landscape. A chosen aspect replaces that and is reshaped from the same base long edge, so
+ * changing the shape does not quietly change the size as well — the tier still decides that.
+ *
+ * A requested shape the model does not offer is ignored rather than obeyed. The manifest is the
+ * first line of defence and the picker never offers one; this is the backstop, and honouring an
+ * unreachable ratio here would send a request the provider refuses after the estimate was
+ * accepted.
+ */
+export function imageOutputFor(
+  model: ManifestModel,
+  options: { landscape?: boolean; tier?: SizeTier; aspect?: string } = {},
+): ImageOutputSpec {
+  const landscape = options.landscape ?? false;
+  const tier = options.tier;
+  const chosen =
+    options.aspect !== undefined && aspectOffered(model, options.aspect) ? options.aspect : undefined;
   const dimensions =
     model.provider === "openai"
       ? landscape
@@ -396,22 +522,10 @@ function imageOutput(model: ManifestModel, landscape: boolean, tier?: SizeTier):
       : landscape
         ? { width: 1536, height: 1024 }
         : { width: 1024, height: 1280 };
-  const aspect =
-    model.provider === "openai"
-      ? landscape
-        ? "3:2"
-        : "2:3"
-      : model.provider === "fal" && model.pricing.kind === "perImage"
-        ? landscape
-          ? "16:9"
-          : "9:16"
-        : model.provider === "higgsfield"
-          ? landscape
-            ? "16:9"
-            : "1:1"
-          : landscape
-            ? "3:2"
-            : "4:5";
+  const aspect = chosen ?? derivedAspect(model, landscape);
+  // Reshaped around the long edge the provider's own default already established, so a shape
+  // change is a shape change and nothing else. The tier below is still what decides the size.
+  const shaped = reshape(dimensions, chosen);
   const resolution =
     (tier !== undefined ? nativeResolution(model, tier) : undefined) ?? model.limits.resolutions?.[0];
   // The tier has to reach the dimensions too, not just the label. Several clients submit
@@ -419,8 +533,24 @@ function imageOutput(model: ManifestModel, landscape: boolean, tier?: SizeTier):
   // nano-banana — so a tier that only set the label left those requests at the old size while
   // the picker said 4K. Per-megapixel estimates read these dimensions as well, so the figure
   // would have been wrong in the same direction.
-  const scaled = tier !== undefined ? scaleToTier(dimensions, tier, resolution) : dimensions;
+  const scaled = tier !== undefined ? scaleToTier(shaped, tier, resolution) : shaped;
   return { ...snapToAcceptedSize(model.provider, scaled), aspect, ...(resolution ? { resolution } : {}) };
+}
+
+/** The same long edge, at a different ratio. Absent ratio means the dimensions already agree. */
+function reshape(
+  dimensions: { width: number; height: number },
+  aspect: string | undefined,
+): { width: number; height: number } {
+  const ratio = aspect === undefined ? null : parseAspect(aspect);
+  if (ratio === null) return dimensions;
+  // Even numbers, for the same reason scaleToTier rounds to them: several providers reject odd
+  // dimensions, and finding that out at submission costs a whole round trip.
+  const even = (value: number): number => Math.max(2, Math.round(value / 2) * 2);
+  const longEdge = Math.max(dimensions.width, dimensions.height);
+  return ratio >= 1
+    ? { width: even(longEdge), height: even(longEdge / ratio) }
+    : { width: even(longEdge * ratio), height: even(longEdge) };
 }
 
 /** Long edge per tier, the aspect kept. 1K is the size these defaults were already written at. */
@@ -490,19 +620,54 @@ function scaleToTier(
   return { width: even(dimensions.width * factor), height: even(dimensions.height * factor) };
 }
 
+/**
+ * What an image request will cost, priced off the spec it will actually carry.
+ *
+ * Orientation is explicit rather than inferred from a workflow, because a surface can borrow a
+ * workflow for its price band and still be making something the other way round — the master look
+ * is a landscape plate priced as ordinary image work — and the base long edge differs by
+ * orientation, so inferring it put the figure a whole tier away from the request on long-edge rows.
+ */
+export function estimateImageMicroUsd(
+  model: ManifestModel,
+  options: {
+    images?: number;
+    referenceImages?: number;
+    tier?: SizeTier;
+    // The shape as well as the size, because a per-megapixel row is billed by area: 16:9 and 1:1
+    // at one tier are different amounts of money on a long-edge row, and a figure that ignored
+    // the picker beside it would be wrong in whichever direction the author had just chosen.
+    aspect?: string;
+    landscape?: boolean;
+  } = {},
+): number {
+  const output = imageOutputFor(model, {
+    landscape: options.landscape ?? false,
+    ...(options.tier !== undefined ? { tier: options.tier } : {}),
+    ...(options.aspect !== undefined ? { aspect: options.aspect } : {}),
+  });
+  return estimateMicroUsd(model, {
+    images: options.images ?? 1,
+    referenceImages: options.referenceImages ?? 0,
+    megapixels: (output.width * output.height) / 1_000_000,
+    ...(output.resolution !== undefined ? { resolution: output.resolution } : {}),
+  });
+}
+
 export function estimateCharacterImageMicroUsd(
   model: ManifestModel,
   workflow: CharacterImageWorkflow,
   images = 1,
   referenceImages = 0,
   tier?: SizeTier,
+  aspect?: string,
 ): number {
-  const output = characterImageOutput(model, workflow, tier);
-  return estimateMicroUsd(model, {
+  return estimateImageMicroUsd(model, {
     images,
     referenceImages,
-    megapixels: (output.width * output.height) / 1_000_000,
-    resolution: output.resolution,
+    landscape: isLandscapeWorkflow(workflow),
+    ...(tier !== undefined ? { tier } : {}),
+    ...(aspect !== undefined ? { aspect } : {}),
   });
 }
 

@@ -544,6 +544,110 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 /* A picture that never arrived still needs a box, and without one the panel collapses to its head. */
 .fy-portrait-dialog__image .fy-portrait--fallback { width: 320px; height: 384px; }
 
+/*
+ * The standard generation dialog: say it, show it something, pick who makes it.
+ *
+ * Fixed width rather than shrink-wrapped, unlike the portrait dialog above — this one holds a
+ * form, and a form whose width follows its longest hint line is a form that moves while you read
+ * it. The panel scrolls inside a viewport budget so the model bar and the two buttons at the
+ * bottom cannot be cropped off a short window: they are the whole point of opening it.
+ */
+.fy-gendialog {
+  width: 560px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+.fy-gendialog::backdrop { background: color-mix(in srgb, var(--background) 72%, transparent); }
+.fy-gendialog__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 18px 22px 20px;
+}
+.fy-gendialog__head { display: flex; align-items: flex-start; gap: 11px; }
+.fy-gendialog__head > div { flex: 1; min-width: 0; }
+.fy-gendialog__head h2 { margin: 0; font: 650 17px var(--font-sans); letter-spacing: -0.01em; }
+.fy-gendialog__lede { margin: 4px 0 0; font: 400 12px/1.6 var(--font-sans); color: var(--muted-foreground); }
+.fy-gendialog__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--neutral-400);
+  cursor: pointer;
+}
+.fy-gendialog__close:hover { background: var(--accent); color: var(--foreground); }
+.fy-gendialog__close:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-gendialog__label {
+  margin-top: 8px;
+  font: 500 10px var(--font-mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--neutral-400);
+}
+.fy-gendialog__prompt { width: 100%; min-height: 116px; resize: vertical; }
+.fy-gendialog__hint { margin: 0; font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); }
+.fy-gendialog__reference { display: flex; flex-direction: column; gap: 8px; }
+/* A dashed slot rather than a button that says "browse": the empty state should look like the
+   place the picture will be, so what arrives lands where the eye already is. */
+.fy-gendialog__slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 132px;
+  height: 74px;
+  border: 1px dashed var(--neutral-300);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: 400 11px var(--font-sans);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-gendialog__slot:hover { border-color: var(--ring); color: var(--foreground); }
+.fy-gendialog__slot:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-gendialog__slot span { text-align: left; }
+.fy-gendialog__attached { display: flex; align-items: center; gap: 11px; }
+.fy-gendialog__thumb {
+  width: 132px;
+  height: 74px;
+  flex: none;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.fy-gendialog__thumb .fy-portrait { width: 100%; height: 100%; object-fit: cover; border-radius: 0; }
+.fy-gendialog__remove {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--muted-foreground);
+  font: 400 11.5px var(--font-sans);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.fy-gendialog__remove:hover { color: var(--foreground); }
+.fy-gendialog__why { margin: 0; font: 400 11px/1.6 var(--font-sans); color: var(--muted-foreground); }
+.fy-gendialog__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.fy-gendialog .fy-dispatchbar { margin-top: 8px; }
+
 .fy-ledgerhead {
   display: flex;
   align-items: baseline;
@@ -2640,8 +2744,41 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   font: 400 9px var(--font-mono);
 }
 .fy-artdirection__master-caption p { font: 400 12px var(--font-mono); color: color-mix(in srgb, var(--media-overlay-fg) 62%, transparent); margin-top: 6px; }
-/* The column that grows: reach, overrides and history all live below the fold on a short window,
-   and the screen is a fixed-height flex row, so without this they are simply unreachable. */
+/*
+ * The two doors onto the picture, on the picture.
+ *
+ * Always in the document and only ever faded, so the keyboard can reach them: mounting them on
+ * pointerenter would make them unreachable without a mouse, and `:focus-within` is what makes the
+ * tab stop show itself.
+ *
+ * Opacity alone, deliberately — `visibility: hidden` and `display: none` both take an element out
+ * of the focus order, so the rule meant to reveal a focused button could never fire, because the
+ * button could not be focused in the first place. Hiding it that way hid it from the only user
+ * who needed the reveal.
+ */
+.fy-artdirection__hover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: color-mix(in srgb, var(--neutral-950) 42%, transparent);
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+.fy-artdirection__master:hover .fy-artdirection__hover,
+.fy-artdirection__master:focus-within .fy-artdirection__hover {
+  opacity: 1;
+}
+.fy-artdirection__hover .ui-btn { min-width: 116px; height: 38px; justify-content: center; }
+/* The empty state has no picture to darken, and a dark scrim over a light card is a smear rather
+   than a scrim. It washes with its own surface instead, which still hides the copy underneath. */
+.fy-artdirection__master--empty .fy-artdirection__hover {
+  background: color-mix(in srgb, var(--muted) 88%, transparent);
+}
+/* The column that grows: the look, its history and any offer waiting on it live below the fold on
+   a short window, and the screen is a fixed-height flex row, so without this they are unreachable. */
 .fy-artdirection__detail { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; padding: 4px 0; }
 .fy-artdirection__eyebrow,
 .fy-artproposal__eyebrow { font: 500 10.5px var(--font-sans); letter-spacing: .15em; color: var(--muted-foreground); }
@@ -2663,10 +2800,6 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-artdirection__masterlook-row { display: flex; gap: 8px; margin-top: 10px; }
 .fy-artdirection__masterlook-row .ui-btn { height: 34px; }
 .fy-artdirection__masterlook-why { margin-top: 8px; font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); }
-.fy-artdirection__keyart { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 14px; }
-.fy-artdirection__keyart h2 { font: 500 10px var(--font-mono); letter-spacing: .14em; color: var(--neutral-400); }
-.fy-artdirection__keyart > p { margin-top: 7px; max-width: 460px; font: 400 11px/1.6 var(--font-sans); color: var(--muted-foreground); }
-.fy-artdirection__keyart .fy-keyart { margin-top: 10px; }
 .fy-artdirection__spacer { flex: 1; min-height: 6px; }
 .fy-artdirection__section { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
 .fy-artdirection__section h2 { font: 500 10px var(--font-mono); letter-spacing: .14em; color: var(--neutral-400); }
@@ -2984,6 +3117,11 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 /* Held off the model name by more than the row gap: the badge qualifies the whole pill, not the
    word beside it. */
 .fy-dispatchbar__pill strong { margin-left: 8px; }
+/* How many there are to choose from, and the chevron that says choosing is possible. Both sit
+   after the badges and before the edge, so the pill reads name → status → affordance. */
+.fy-dispatchbar__more { margin-left: 2px; font: 400 10px var(--font-mono); color: var(--neutral-400); }
+.fy-dispatchbar__chevron { display: inline-flex; align-items: center; color: var(--neutral-400); }
+.fy-dispatchbar__pill:hover .fy-dispatchbar__chevron { color: var(--foreground); }
 .fy-dispatchbar__pill em,
 .fy-dispatchbar__picker em {
   padding: 2px 6px; border-radius: 999px; border: 1px solid var(--warning);

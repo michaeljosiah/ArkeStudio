@@ -4,7 +4,13 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { ClientState, ManifestModel, ProviderStatus } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { choiceForModel, DispatchBar, resolveModel, usableModels } from "../src/components/dispatch-bar.js";
+import {
+  choiceForModel,
+  DispatchBar,
+  resolveModel,
+  resolveOutputChoice,
+  usableModels,
+} from "../src/components/dispatch-bar.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -231,5 +237,150 @@ describe("the production dispatch dialog, with no routing default saved", () => 
     ).replace(/<!-- -->/g, "");
     assert.ok(!html.includes("Nothing to dispatch with"), "a usable model is a usable model");
     assert.ok(html.includes("Dispatch per shot"), "and the cards are there to press");
+  });
+});
+
+/**
+ * The shape, where the model has said which shapes it takes.
+ *
+ * Aspect was decided for the user by provider and orientation and never offered — a 16:9 plate
+ * was unreachable from any screen. It is offered here on the same terms as size: from the model's
+ * own declaration, so the control can never promise a ratio the request would be refused for.
+ */
+describe("choosing the shape", () => {
+  const SHAPED: ManifestModel = { ...FAL_IMAGE, id: "shaped-row", limits: { ...FAL_IMAGE.limits, aspects: ["16:9", "1:1"] } };
+  const MUTE: ManifestModel = { ...FAL_IMAGE, id: "mute-row" };
+  const shapedState = (routed: string) => {
+    const base = stateWith({ routedImage: routed });
+    return {
+      ...base,
+      app: { ...base.app, manifest: { ...base.app.manifest!, models: [...base.app.manifest!.models, SHAPED, MUTE] } },
+    };
+  };
+
+  it("is not asked for unless the host wants it asked", () => {
+    __setStateForTest(shapedState(SHAPED.id));
+    assert.ok(!bar().includes("ASPECT"), "most surfaces have a shape the work decides");
+    assert.ok(bar({ aspect: true }).includes("ASPECT"));
+  });
+
+  it("offers exactly what the model declares, in its own order", () => {
+    __setStateForTest(shapedState(SHAPED.id));
+    const html = bar({ aspect: true });
+    const at = (value: string) => html.indexOf(`>${value}<`);
+    assert.ok(at("16:9") > 0 && at("1:1") > 0, "both of this row's shapes");
+    assert.ok(at("16:9") < at("1:1"), "in the order the manifest lists them");
+    assert.ok(at("4:3") < 0, "and nothing it never claimed");
+  });
+
+  it("draws no control at all for a model that never said", () => {
+    __setStateForTest(shapedState(MUTE.id));
+    // Absent, not empty: a row with no declared shapes has not been checked, and a picker over it
+    // would be inventing a capability rather than reporting one.
+    assert.ok(!bar({ aspect: true }).includes("ASPECT"));
+  });
+
+  it("drops a shape the model being switched to does not take", () => {
+    assert.deepEqual(choiceForModel(SHAPED, { aspect: "16:9" }), { modelId: SHAPED.id, aspect: "16:9" });
+    // 4:3 is neither in this row's curated list nor either of its derived defaults, so it goes.
+    assert.deepEqual(choiceForModel(SHAPED, { aspect: "4:3" }), { modelId: SHAPED.id });
+    assert.deepEqual(choiceForModel(MUTE, { aspect: "4:3" }), { modelId: MUTE.id });
+  });
+
+  it("sends what the bar is showing after such a drop", () => {
+    // The bug this exists to stop: the segment falls back to the new model's own default while a
+    // host reading its own state still sends the old one, so the request and the screen disagree.
+    assert.deepEqual(
+      resolveOutputChoice(SHAPED, { aspect: "4:3" }, { aspect: true, landscape: true }),
+      { tier: "1K", aspect: "16:9" },
+      "an unreachable shape falls back to this row's landscape default",
+    );
+    // A row that offers nothing sends nothing, whatever was carried in.
+    assert.deepEqual(resolveOutputChoice(MUTE, { aspect: "16:9" }, { aspect: true }), { tier: "1K" });
+  });
+
+  /*
+   * The default a picker opens on is the shape that surface already produced.
+   *
+   * These two rows share a curated list and differ only in orientation, which is exactly the
+   * case that was broken: the picker took the curated list's first entry regardless, so opening
+   * a dialog and changing nothing generated a different shape than pressing Generate had.
+   */
+  it("opens on the shape the surface would have used anyway", () => {
+    __setStateForTest(shapedState(SHAPED.id));
+    // fal + per-image derives 16:9 landscape and 9:16 portrait; the curated list leads with 16:9.
+    assert.equal(resolveOutputChoice(SHAPED, {}, { aspect: true, landscape: true }).aspect, "16:9");
+    assert.equal(
+      resolveOutputChoice(SHAPED, {}, { aspect: true, landscape: false }).aspect,
+      "9:16",
+      "a portrait surface opens on the portrait default, not the list's first entry",
+    );
+    // And the offered list leads with it, so the highlighted segment agrees.
+    const portraitHtml = bar({ aspect: true, landscape: false });
+    const at = (value: string) => portraitHtml.indexOf(`>${value}<`);
+    assert.ok(at("9:16") > 0 && at("9:16") < at("16:9"), "the default is offered first");
+  });
+});
+
+/**
+ * That the model is a choice at all.
+ *
+ * The pill has always opened a listbox and always looked like a badge — no chevron, no count —
+ * so a routed default read as a fixed property of the screen. The stylesheet had even left space
+ * for a chevron that was never drawn.
+ */
+describe("the model reads as a choice", () => {
+  it("shows the count and the chevron when there is more than one", () => {
+    __setStateForTest(stateWith({ providers: [provider("fal"), provider("openai")] }));
+    const html = bar();
+    assert.ok(html.includes("fy-dispatchbar__chevron"), "an affordance that says it opens");
+    assert.match(html, /fy-dispatchbar__more[^>]*>\d+ models/, "and how many there are");
+    assert.match(html, /aria-label="Model: [^"]* · \d+ available"/, "said to the screen reader too");
+  });
+
+  it("claims neither when there is only one model to pick", () => {
+    __setStateForTest(stateWith({}));
+    const html = bar();
+    assert.ok(!html.includes("fy-dispatchbar__chevron"), "an affordance opening a list of one is a lie");
+    assert.ok(!html.includes("fy-dispatchbar__more"));
+  });
+});
+
+/**
+ * The three controls, on the surface that asked for them.
+ *
+ * Asserted through the whole composition — screen, dialog, bar — rather than on the bar alone,
+ * because the bug this guards against is a host forgetting to turn a control on. The dialog is
+ * the one place a picture is asked for, so it is the one place all three have to appear.
+ */
+describe("the standard generation dialog offers all three decisions", () => {
+  const SHAPED: ManifestModel = {
+    ...FAL_IMAGE,
+    id: "shaped-row",
+    limits: { ...FAL_IMAGE.limits, aspects: ["16:9", "1:1"] },
+  };
+
+  it("asks for the model, the size and the shape", () => {
+    const base = stateWith({ routedImage: SHAPED.id });
+    __setStateForTest({
+      ...base,
+      app: { ...base.app, manifest: { ...base.app.manifest!, models: [...base.app.manifest!.models, SHAPED] } },
+    });
+    const world = FIXTURE_STATE.world!;
+    const html = renderToString(
+      <MemoryRouter initialEntries={[`/w/${world.meta.worldId}/art-direction`]}>
+        <App />
+      </MemoryRouter>,
+    ).replace(/<!-- -->/g, "");
+
+    const dialog = html.slice(html.indexOf('<dialog class="fy-gendialog"'));
+    assert.ok(dialog.length > 0, "the dialog is in the document");
+    // Sentence case in the markup; the mono eyebrow styling uppercases it.
+    assert.ok(dialog.includes(">Prompt</label>"), "the words");
+    assert.ok(dialog.includes("Add a reference image"), "something to look at");
+    assert.ok(dialog.includes("SIZE"), "how big");
+    assert.ok(dialog.includes("ASPECT"), "what shape");
+    assert.ok(dialog.includes(">16:9<") && dialog.includes(">1:1<"), "this row's own shapes");
+    assert.ok(dialog.includes("fy-dispatchbar__chevron"), "and the model reads as a choice");
   });
 });
