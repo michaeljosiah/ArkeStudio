@@ -59,10 +59,17 @@ export default async function verifyPackagedRuntimes(context) {
       );
     }
   }
-  // The shared build needs its libraries beside the executables; without them both binaries exist
-  // and neither runs, which is the one failure the presence check above cannot see.
-  if (!readdirSync(ffmpegDir).some((entry) => entry.toLowerCase().endsWith(".dll"))) {
-    throw new Error("resources/ffmpeg has the executables but none of the shared libraries they load");
+  /*
+   * The whole inventory, checksummed -- not one arbitrary library (Codex round 1).
+   *
+   * A shared build with any required DLL missing or corrupted leaves both executables present and
+   * neither able to start, and "some .dll exists" reports that as healthy. prepare-runtimes
+   * already writes the same checksum manifest the other runtimes are verified through, so this
+   * verifies it the same way rather than inventing a weaker check for the one runtime that ships
+   * its libraries loose.
+   */
+  if (verifyManifest(ffmpegDir).arch !== arch) {
+    throw new Error(`resources/ffmpeg was staged for a different architecture than ${arch}`);
   }
 
   const forbidden = new Set(["kokoro-82m", "whisper-base-en", "model_quantized.onnx", "ggml-base.en.bin"]);
