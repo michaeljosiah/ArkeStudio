@@ -121,6 +121,75 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     }
   });
 
+  it("keeps what it measured when a pass is interrupted partway", async () => {
+    // Batching removed the rescan storm and introduced the opposite fault: a world nobody keeps
+    // open for the full cumulative probe time would restart at the first file forever.
+    const { store } = await open();
+    try {
+      for (let i = 0; i < 12; i += 1) {
+        await fileArtifact(store, { sourcePath: await sourceFile(`track-${i}.mp3`, `track ${i}`) });
+      }
+      // Derived from the world rather than from a filename prefix: the fixture carries media of
+      // its own, and counting only what this test filed undercounts what the pass measured.
+      const before = new Set(
+        store
+          .getBundle()
+          .artifacts.filter((a) => (a.kind === "audio" || a.kind === "video") && a.mediaInfo === undefined)
+          .map((a) => a.file),
+      );
+      const abort = new AbortController();
+      let probes = 0;
+      const measured = await backfillMediaInfo(
+        store,
+        {
+          durationSec: async () => 3,
+          info: async () => {
+            probes += 1;
+            // Interrupted after the first batch has been flushed.
+            if (probes === 10) abort.abort();
+            return { durationSec: 3, hasAudio: true };
+          },
+        },
+        { signal: abort.signal },
+      );
+      assert.ok(measured > 0, "the completed measurements were kept, not discarded");
+      const stored = store
+        .getBundle()
+        .artifacts.filter((a) => before.has(a.file) && a.mediaInfo !== undefined).length;
+      assert.equal(stored, measured);
+      assert.ok(stored < before.size, "the pass really was interrupted before it finished");
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("never probes a path outside the artifacts directory", async () => {
+    // ArtifactSidecarSchema accepts any non-empty string, and this pass runs on open — so a
+    // sidecar naming ../../outside.mp3 would have opening a world read arbitrary local media.
+    const { dir, store } = await open();
+    try {
+      await fileArtifact(store, { sourcePath: await sourceFile("real.mp3", "a real one") });
+      const path = join(dir, "artifacts", "real.mp3.json");
+      const sidecar = JSON.parse(await readFile(path, "utf8"));
+      await writeFile(path, JSON.stringify({ ...sidecar, file: "../../outside.mp3" }, null, 2));
+      await store.rescan?.();
+      const probed: string[] = [];
+      await backfillMediaInfo(store, {
+        durationSec: async () => 1,
+        info: async (p: string) => {
+          probed.push(p);
+          return { durationSec: 1, hasAudio: true };
+        },
+      });
+      assert.ok(
+        !probed.some((p) => p.includes("outside.mp3")),
+        `probed outside the world: ${probed.join(", ")}`,
+      );
+    } finally {
+      await store.close();
+    }
+  });
+
   it("stops between files once its world is no longer the open one", async () => {
     const { store } = await open();
     try {

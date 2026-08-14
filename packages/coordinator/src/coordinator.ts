@@ -925,7 +925,11 @@ export class Coordinator {
    * in a way it is not at shutdown: archiving is an explicit action a user is watching, and the
    * cost is bounded by one probe rather than by the whole pass.
    */
-  private async settleBackfill(): Promise<void> {
+  private async settleBackfill(worldId: string): Promise<void> {
+    // Only the world being archived (Codex round 2). A pass measuring a different world holds no
+    // file in this directory, and cancelling it would throw away its progress and delay an
+    // archive it has nothing to do with.
+    if (this.backfillStore?.worldId !== worldId) return;
     this.backfillAbort?.abort();
     await this.backfillRunning?.catch(() => {});
     this.backfillRunning = null;
@@ -1353,9 +1357,7 @@ export class Coordinator {
         const TERMINAL_JOB_STATUS = new Set(["succeeded", "failed", "cancelled"]);
         const archive = this.opts.provider.archiveWorld?.bind(this.opts.provider);
         if (!archive) return;
-        // Before the directory is renamed: a probe still holding an artifact open makes that
-        // rename fail on Windows, and the provider has already cleared its open store by then.
-        await this.settleBackfill();
+
         const summary = this.readModel.getState().worlds.find((w) => w.worldId === msg.worldId);
         const refuse = (reason: string) =>
           this.emit({
@@ -1375,6 +1377,10 @@ export class Coordinator {
           );
           return;
         }
+        // After the refusals, immediately before the rename: an archive that is going to be
+        // refused should not cancel a pass or wait on a probe, and a probe still holding an
+        // artifact open makes the rename fail on Windows.
+        await this.settleBackfill(msg.worldId);
         try {
           const { folder } = await archive(msg.worldId);
           if (this.readModel.getState().world?.meta.worldId === msg.worldId) this.readModel.setWorld(null);

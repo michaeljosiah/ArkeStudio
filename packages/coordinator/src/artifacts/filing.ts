@@ -397,6 +397,9 @@ async function measureInto(
  * doing pointless work rather than about safety. A measurement lost to a shutdown or a world
  * switch is simply taken again on the next open.
  */
+/** Committed in bounded batches so an interrupted pass keeps what it already learned. */
+const BACKFILL_BATCH = 8;
+
 export async function backfillMediaInfo(
   store: WorldStore,
   probe: MediaProbe,
@@ -407,57 +410,80 @@ export async function backfillMediaInfo(
   if (!probe.info) return 0;
 
   /*
-   * Probe everything first, write once (Codex round 1).
+   * Probe outside the gate, write in batches (Codex rounds 1 and 2).
    *
-   * Measuring file by file cost two full world rescans each: the commit rescans the paths it
-   * touched, and `gateOp` rescans everything in its `finally`. A world with forty legacy tracks
-   * therefore ran forty whole-world scans under the serialisation gate, blocking ordinary edits
-   * repeatedly -- which is not what "in the background" is supposed to mean. Probing holds no
-   * gate at all, so the expensive part stays outside, and the writes land as one commit.
+   * Measuring file by file cost two full world rescans each -- the commit rescans the paths it
+   * touched and `gateOp` rescans everything in its `finally` -- so forty legacy tracks ran forty
+   * whole-world scans under the serialisation gate, blocking ordinary edits. Batching fixed that
+   * and introduced the opposite fault: a pass interrupted before the end threw away every
+   * measurement it had taken, and a world nobody keeps open for the full cumulative probe time
+   * would restart from the first file forever and never finish. Bounded batches keep both
+   * properties -- few rescans, and progress that survives being interrupted.
    */
-  const measured: Array<{ file: string; info: MediaInfo }> = [];
+  let measured = 0;
+  let batch: Array<{ file: string; info: MediaInfo }> = [];
+
+  const flush = async (): Promise<void> => {
+    if (batch.length === 0) return;
+    const pending = batch;
+    batch = [];
+    const written = await store
+      .gateOp(async () => {
+        // Rechecked inside the gate: the callback can have queued behind another operation and
+        // shutdown can abort while it waits. The store refuses a *closed* world, but it is not
+        // closed until late in stop(), so without this the whole batch would still be written
+        // and rescanned -- making shutdown wait on work deliberately left out of its drain.
+        if (abandoned()) return [];
+        const files: CommitInput["files"] = [];
+        const names: string[] = [];
+        for (const { file, info } of pending) {
+          const raw = await readSidecarRaw(store, file);
+          if (raw === null) continue;
+          let current: ArtifactSidecar;
+          try {
+            const parsed = ArtifactSidecarSchema.safeParse(JSON.parse(raw));
+            if (!parsed.success) continue;
+            current = parsed.data;
+          } catch {
+            continue;
+          }
+          if (current.mediaInfo !== undefined) continue;
+          files.push({
+            path: `artifacts/${file}.json`,
+            action: "replace",
+            content: JSON.stringify({ ...current, mediaInfo: info }, null, 2) + NEWLINE,
+            baseHash: sha256(raw),
+          });
+          names.push(file);
+        }
+        if (files.length === 0) return [];
+        await store.commitUnserialised({ kind: "artifact-file", source: "form", files });
+        return names;
+      })
+      .catch(() => [] as string[]);
+    measured += written.length;
+    for (const file of written) onMeasured?.(file);
+  };
+
   for (const artifact of store.getBundle().artifacts) {
     if (abandoned()) break;
     if (artifact.kind !== "audio" && artifact.kind !== "video") continue;
     if (artifact.mediaInfo !== undefined) continue;
+    /*
+     * The filename must be a filename (Codex round 2).
+     *
+     * `ArtifactSidecarSchema` accepts any non-empty string, so a hand-edited or imported sidecar
+     * naming `../../outside.mp3` resolves out of the world -- and this pass runs automatically on
+     * open, so merely opening such a world would read arbitrary local media and hold it open for
+     * the length of a probe. A sidecar that names something other than a file in `artifacts/` is
+     * the scan's problem to report, not this pass's to follow.
+     */
+    if (basename(artifact.file) !== artifact.file || artifact.file === "..") continue;
     const info = await measureMediaInfo(store, `artifacts/${artifact.file}`, probe);
-    if (info !== null) measured.push({ file: artifact.file, info });
+    if (info === null) continue;
+    batch.push({ file: artifact.file, info });
+    if (batch.length >= BACKFILL_BATCH) await flush();
   }
-  if (measured.length === 0 || abandoned()) return 0;
-
-  const written = await store
-    .gateOp(async () => {
-      const files: CommitInput["files"] = [];
-      const names: string[] = [];
-      for (const { file, info } of measured) {
-        const raw = await readSidecarRaw(store, file);
-        if (raw === null) continue;
-        let current: ArtifactSidecar;
-        try {
-          // Parsed, not cast: a sidecar edited to valid JSON of the wrong shape while the probe
-          // ran would otherwise be spread into a replacement and written back.
-          const parsed = ArtifactSidecarSchema.safeParse(JSON.parse(raw));
-          if (!parsed.success) continue;
-          current = parsed.data;
-        } catch {
-          continue;
-        }
-        // Somebody measured it first — filing, or an earlier pass. Never re-taken.
-        if (current.mediaInfo !== undefined) continue;
-        files.push({
-          path: `artifacts/${file}.json`,
-          action: "replace",
-          content: JSON.stringify({ ...current, mediaInfo: info }, null, 2) + NEWLINE,
-          baseHash: sha256(raw),
-        });
-        names.push(file);
-      }
-      if (files.length === 0) return [];
-      await store.commitUnserialised({ kind: "artifact-file", source: "form", files });
-      return names;
-    })
-    .catch(() => [] as string[]);
-
-  for (const file of written) onMeasured?.(file);
-  return written.length;
+  await flush();
+  return measured;
 }
