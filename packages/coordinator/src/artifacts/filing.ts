@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { copyFile, readdir, readFile, stat, statfs } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
+import { copyFile, readdir, readFile, realpath, stat, statfs } from "node:fs/promises";
+import { basename, extname, join, sep } from "node:path";
 import { ArtifactSidecarSchema, ulid, type ArtifactKind, type ArtifactSidecar, type MediaInfo } from "@arke-studio/contracts";
 import { measureMediaInfo, type MediaProbe } from "../media/probe.js";
 import type { CommitInput } from "../world/commit.js";
@@ -400,6 +400,23 @@ async function measureInto(
 /** Committed in bounded batches so an interrupted pass keeps what it already learned. */
 const BACKFILL_BATCH = 8;
 
+/**
+ * Whether a staged artifact really is a file inside `artifacts/`.
+ *
+ * The name is checked lexically first, but a symlink passes that and ffprobe follows it, so the
+ * resolved path is compared against the resolved directory. A world can be imported from
+ * anywhere and this pass runs on open, so anything it reads is something nobody asked it to read.
+ */
+async function insideArtifacts(store: WorldStore, file: string): Promise<boolean> {
+  const dir = join(store.dir, "artifacts");
+  try {
+    const [root, target] = await Promise.all([realpath(toExtendedLength(dir)), realpath(toExtendedLength(join(dir, file)))]);
+    return target === join(root, basename(target)) && target.startsWith(root + sep);
+  } catch {
+    return false;
+  }
+}
+
 export async function backfillMediaInfo(
   store: WorldStore,
   probe: MediaProbe,
@@ -421,6 +438,7 @@ export async function backfillMediaInfo(
    * properties -- few rescans, and progress that survives being interrupted.
    */
   let measured = 0;
+  let attempted = 0;
   let batch: Array<{ file: string; info: MediaInfo }> = [];
 
   const flush = async (): Promise<void> => {
@@ -479,10 +497,26 @@ export async function backfillMediaInfo(
      * the scan's problem to report, not this pass's to follow.
      */
     if (basename(artifact.file) !== artifact.file || artifact.file === "..") continue;
+    /*
+     * And the real path has to land inside artifacts/ too (Codex round 3).
+     *
+     * `basename` stops `../../outside.mp3`; it does nothing about `foo.mp3` being a symlink to
+     * somewhere else, which ffprobe follows. An imported world can carry one, and this pass runs
+     * on open, so the read would be unsolicited either way.
+     */
+    if (!(await insideArtifacts(store, artifact.file))) continue;
+    attempted += 1;
     const info = await measureMediaInfo(store, `artifacts/${artifact.file}`, probe);
-    if (info === null) continue;
-    batch.push({ file: artifact.file, info });
-    if (batch.length >= BACKFILL_BATCH) await flush();
+    if (info !== null) batch.push({ file: artifact.file, info });
+    /*
+     * Flushed on attempts, not successes (Codex round 3): one readable track followed by a run of
+     * unreadable ones left its measurement sitting in memory through twenty seconds of timeout
+     * each, which is the opposite of publishing as they land.
+     */
+    if (batch.length >= BACKFILL_BATCH || attempted >= BACKFILL_BATCH) {
+      attempted = 0;
+      await flush();
+    }
   }
   await flush();
   return measured;

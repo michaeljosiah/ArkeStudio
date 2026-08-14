@@ -167,14 +167,17 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     // ArtifactSidecarSchema accepts any non-empty string, and this pass runs on open — so a
     // sidecar naming ../../outside.mp3 would have opening a world read arbitrary local media.
     const { dir, store } = await open();
+    await fileArtifact(store, { sourcePath: await sourceFile("real.mp3", "a real one") });
+    const path = join(dir, "artifacts", "real.mp3.json");
+    const sidecar = JSON.parse(await readFile(path, "utf8"));
+    await writeFile(path, JSON.stringify({ ...sidecar, file: "../../outside.mp3" }, null, 2));
+    // Reopened rather than rescanned: rescan is the store's own business, and a test reaching
+    // past `private` is testing the class rather than the behaviour.
+    await store.close();
+    const reopened = await WorldStore.open(dir, { clock: CLOCK });
     try {
-      await fileArtifact(store, { sourcePath: await sourceFile("real.mp3", "a real one") });
-      const path = join(dir, "artifacts", "real.mp3.json");
-      const sidecar = JSON.parse(await readFile(path, "utf8"));
-      await writeFile(path, JSON.stringify({ ...sidecar, file: "../../outside.mp3" }, null, 2));
-      await store.rescan?.();
       const probed: string[] = [];
-      await backfillMediaInfo(store, {
+      await backfillMediaInfo(reopened, {
         durationSec: async () => 1,
         info: async (p: string) => {
           probed.push(p);
@@ -186,7 +189,7 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
         `probed outside the world: ${probed.join(", ")}`,
       );
     } finally {
-      await store.close();
+      await reopened.close();
     }
   });
 
