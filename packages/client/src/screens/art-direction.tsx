@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router";
 import type { ArtDirectionHistoryEntry, ResolvedArtDirection } from "@arke-studio/contracts";
 import { ArtStyleGrid } from "../components/art-style-picker.js";
 import { resolveModel } from "../components/dispatch-bar.js";
+import { WorldKeyArt } from "../components/key-art.js";
 import { seedFrom } from "../lib/art-styles.js";
 import { Button } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
@@ -290,12 +291,12 @@ export function ArtDirectionScreen() {
             </p>
           </div>
         </div>
-      ) : world.hasKeyArt ? (
+      ) : world.keyArt ? (
         /* The accepted key art stands in while no master look is set. The user made and
            accepted this image; a page about the world's visual language that refuses to show
            the world's one image reads as a bug, not a distinction. */
         <div className="fy-artdirection__master">
-          {directionImage(world.meta.slug, "world-art.png", `${world.meta.name} key art`, 0)}
+          {directionImage(world.meta.slug, world.keyArt, `${world.meta.name} key art`, 0)}
           <div className="fy-artdirection__master-caption">
             <div>
               <strong>World key art</strong>
@@ -355,6 +356,25 @@ export function ArtDirectionScreen() {
           version={direction.version}
           proposalOpen={proposed !== undefined}
         />
+        {/*
+          The world's other picture, and the one everything else shows.
+
+          Changing the master look here left the picker card, the hub hero and the settings scrim
+          exactly as they were, because those show the key art and this page had no way to touch
+          it. Both images now have a control on the page that talks about the world's images.
+        */}
+        <section className="fy-artdirection__keyart">
+          <h2>THE WORLD'S KEY ART</h2>
+          <p>
+            A picture of the world rather than of its treatment — this is the one on the worlds
+            list, the hub and the settings backdrop. It is not carried into generations.
+          </p>
+          <WorldKeyArt
+            worldId={world.meta.worldId}
+            slug={world.meta.slug}
+            hasLogline={Boolean(world.meta.logline)}
+          />
+        </section>
         <div className="fy-artdirection__spacer" />
         <Reach direction={direction} />
         <Overrides direction={direction} />

@@ -16,7 +16,7 @@ import { atomicWriteFile } from "./atomic.js";
 import { appendChanges } from "./change-writer.js";
 import { checkPathBudget, fromPortable, toExtendedLength, type PathBudget } from "./paths.js";
 import { installSampleWorld } from "./sample-world.js";
-import { readWorldMeta, scanWorld, WorldOpenError, SUPPORTED_SCHEMA_VERSION } from "./scan.js";
+import { findKeyArt, readWorldMeta, scanWorld, WorldOpenError, SUPPORTED_SCHEMA_VERSION } from "./scan.js";
 import { uniqueSlug } from "./slug.js";
 import { WorldStore } from "./store.js";
 
@@ -207,6 +207,9 @@ export class FsWorldProvider implements WorldProvider {
         slug: meta.slug,
         name: meta.name,
         ...(meta.logline !== undefined ? { logline: meta.logline } : {}),
+        // Read here, not assumed: the picker card used to name `world-art.png` itself, which
+        // showed a placeholder over every world whose key art was any other format.
+        keyArt: await findKeyArt(dir),
         counts: {
           characters: await countMd("characters"),
           locations: await countMd("locations"),
@@ -270,6 +273,8 @@ export class FsWorldProvider implements WorldProvider {
       slug,
       name: input.name,
       ...(input.logline ? { logline: input.logline } : {}),
+      // A world is born without key art. It arrives the first time one is accepted.
+      keyArt: null,
       counts: { characters: 0, locations: 0, factions: 0, canonEntries: 0, productions: 0 },
       updated: at,
     });
@@ -304,7 +309,15 @@ export class FsWorldProvider implements WorldProvider {
   async loadWorld(worldId: string): Promise<WorldBundle> {
     const dir = await this.findWorldDir(worldId);
     if (this.store) {
-      if (this.store.worldId === worldId) return this.store.getBundle();
+      if (this.store.worldId === worldId) {
+        // The registry row follows the open world, not just its opening. Every snapshot refresh
+        // arrives here, and skipping the refresh meant the picker described the world as it was
+        // when it was opened — so accepting key art changed the hub and left the card that
+        // sent you there showing the previous image until the world was closed.
+        const open = this.store.getBundle();
+        this.refreshRegistry(open);
+        return open;
+      }
       await this.closeStore();
     }
     this.store = await WorldStore.open(dir, {
@@ -334,6 +347,9 @@ export class FsWorldProvider implements WorldProvider {
       slug: bundle.meta.slug,
       name: bundle.meta.name,
       ...(bundle.meta.logline !== undefined ? { logline: bundle.meta.logline } : {}),
+      // Straight off the bundle the open world just produced, so accepting key art updates the
+      // card as soon as the world passes through — not on the next cold scan of the library.
+      keyArt: bundle.keyArt,
       counts: {
         // The world's own cast, matching the hub, the ledgers and their counts (SPEC-020 R-8).
         // The picker summarises the world, and a total that counted a production's guests would

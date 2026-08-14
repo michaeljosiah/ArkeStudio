@@ -539,7 +539,7 @@ export function GenerateCharacterSheetScreen() {
               <span>
                 <Portrait
                   worldSlug={world.meta.slug}
-                  path={world.artDirection.masterLook ?? "world-art.png"}
+                  path={world.artDirection.masterLook ?? world.keyArt ?? ""}
                   label="World look"
                   radius={8}
                 />
@@ -762,7 +762,7 @@ export function ReplaceMainPhotoScreen() {
               <div>
                 <Portrait
                   worldSlug={world.meta.slug}
-                  path="world-art.png"
+                  path={world.artDirection.masterLook ?? world.keyArt ?? ""}
                   label="Style reference"
                   radius={10}
                 />

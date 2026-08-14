@@ -69,7 +69,7 @@ describe("image dialog", () => {
 
   it("will not offer to enlarge a picture that has not arrived", () => {
     // Nothing has loaded in a server render, so no trigger may offer to enlarge anything yet.
-    const html = renderAt(`${W}/cast/maren-kest`);
+    const html = renderAt(`${W}/cast/maren-kest/kit`);
     const at = html.indexOf('aria-label="View larger main photo of Maren Kest"');
     assert.ok(at > 0, "the trigger is rendered");
     const tag = html.slice(html.lastIndexOf("<button", at), html.indexOf(">", at) + 1);
@@ -110,13 +110,25 @@ describe("image dialog", () => {
     assert.match(portrait, /node\.naturalWidth > 0/, "and a broken one is not mistaken for a loaded one");
   });
 
-  it("opens the character's main photo from the detail page", () => {
+  /*
+   * The detail page's main photo is a way in, not a thing to look at.
+   *
+   * It used to open a larger copy of itself — the one thing somebody looking at the picture
+   * already has. What the anchor is for is the set it anchors, so it goes there instead. The
+   * enlarge behaviour is unchanged everywhere it still makes sense, which the kit page below
+   * holds; this asserts the detail page no longer has it at all.
+   */
+  it("sends the character's main photo to the identity reference set, rather than enlarging it", () => {
     const html = renderAt(`${W}/cast/maren-kest`);
     assert.ok(
-      html.includes('aria-label="View larger main photo of Maren Kest"'),
-      "the main photo is the thing you most want to see properly, and it was the one that could not",
+      html.includes(`aria-label="Open Maren Kest&#x27;s identity reference set"`),
+      "the anchor leads to the set it anchors",
     );
-    assert.ok(html.includes('aria-haspopup="dialog"'), "and it says so before you press it");
+    assert.ok(
+      !html.includes('aria-label="View larger main photo of Maren Kest"'),
+      "and no longer offers a bigger copy of the picture already on screen",
+    );
+    assert.ok(!html.includes('aria-haspopup="dialog"'), "nothing on this page opens a dialog from the photo");
   });
 
   it("opens both panes of the reference page", () => {

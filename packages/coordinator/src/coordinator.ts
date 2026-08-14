@@ -105,9 +105,9 @@ import {
 } from "./references/generate.js";
 import { makeArtDirector, worldBrief } from "./references/art-director.js";
 import {
-  WORLD_IMAGE_CANDIDATE,
+  KEY_ART_EXTENSIONS,
   WORLD_IMAGE_DIR,
-  WORLD_IMAGE_FILE,
+  WORLD_IMAGE_STEM,
   worldImageRequest,
 } from "./references/world-image.js";
 import {
@@ -3656,29 +3656,92 @@ export class Coordinator {
         ]);
         return;
       }
+      case "upload-world-image": {
+        const store = this.opts.provider.openStore?.();
+        const pick = this.opts.pickFiles;
+        if (!store || store.worldId !== msg.worldId || !pick) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Key art upload is unavailable.");
+          return;
+        }
+        const chosen = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
+        const [source] = chosen;
+        // A closed dialog is not a failure. Nothing was queued and nothing is said.
+        if (!source) {
+          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+          return;
+        }
+        if (chosen.length > 1) {
+          this.rejectEnqueue(msg.requestId, msg.kind, ONE_IMAGE_ONLY);
+          return;
+        }
+        if (!this.stillOpen(store)) return;
+        const picked = await readPickedImage(source);
+        if (!this.stillOpen(store)) return;
+        if ("error" in picked) {
+          this.rejectEnqueue(msg.requestId, msg.kind, picked.error);
+          return;
+        }
+        const landed = await store
+          .gateOp(async () => {
+            // One candidate at a time, and the extension follows the bytes — so replacing a PNG
+            // with a JPEG must not leave the PNG behind for the scan to find first.
+            await rm(toExtendedLength(join(store.dir, WORLD_IMAGE_DIR)), { recursive: true, force: true });
+            await atomicWriteFile(
+              join(store.dir, WORLD_IMAGE_DIR, `candidate${picked.extension}`),
+              picked.data,
+            );
+          })
+          .then(
+            () => true,
+            () => false,
+          );
+        if (!landed) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That image could not be copied into the world.");
+          return;
+        }
+        this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "use-world-image": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        const from = join(store.dir, WORLD_IMAGE_DIR, WORLD_IMAGE_CANDIDATE);
-        const to = join(store.dir, WORLD_IMAGE_FILE);
-        // Through gateOp so the copy rides the world's suppression envelope — our own write
-        // must not come back at the user as an external edit (SPEC-011).
+        const candidate = store.getBundle().keyArtCandidate;
+        if (candidate === null) return;
+        /*
+         * The accepted file keeps the format its bytes carry.
+         *
+         * This used to copy a fixed `candidate.png` onto a fixed `world-art.png`, which was true
+         * while the only way to get one was to generate it. An uploaded JPEG written under a
+         * `.png` name would be served as `image/png` by a media route that reads the extension —
+         * and naming a file for a format it is not is the one thing every other import refuses.
+         */
+        const extension = extname(candidate).toLowerCase() || ".png";
         await store
           .gateOp(async () => {
-            await copyFile(toExtendedLength(from), toExtendedLength(to));
-            await rm(toExtendedLength(from), { force: true });
+            await copyFile(
+              toExtendedLength(join(store.dir, fromPortable(candidate))),
+              toExtendedLength(join(store.dir, `${WORLD_IMAGE_STEM}${extension}`)),
+            );
+            // The world has one key art, so a previous one in a different format goes with it.
+            // Two would leave the scan choosing between them by sort order.
+            for (const stale of KEY_ART_EXTENSIONS.filter((other) => other !== extension)) {
+              await rm(toExtendedLength(join(store.dir, `${WORLD_IMAGE_STEM}${stale}`)), { force: true });
+            }
+            await rm(toExtendedLength(join(store.dir, WORLD_IMAGE_DIR)), { recursive: true, force: true });
           })
           .catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
+        // The picker reads the registry, not the open world's bundle, so the card that sent you
+        // here goes on showing the old image until the list is asked for again.
+        await this.refreshWorldList();
         return;
       }
       case "discard-world-image": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         await store
-          .gateOp(async () =>
-            rm(toExtendedLength(join(store.dir, WORLD_IMAGE_DIR, WORLD_IMAGE_CANDIDATE)), { force: true }),
-          )
+          .gateOp(async () => rm(toExtendedLength(join(store.dir, WORLD_IMAGE_DIR)), { recursive: true, force: true }))
           .catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -5139,6 +5202,23 @@ export class Coordinator {
   private refreshIfStillOpen(store: WorldStore): void {
     if (!this.stillOpen(store)) return;
     this.readModel.setWorld(store.getBundle());
+    this.transport.broadcastSnapshot();
+  }
+
+  /**
+   * Re-read the library rows the picker renders from.
+   *
+   * Separate from the world snapshot because they are different surfaces reading different
+   * things: the open world's bundle, and the registry of every world. Only the actions that
+   * change what a *card* shows need this — it walks the worlds directory, so calling it on
+   * every snapshot refresh would put a directory scan behind every button in the app.
+   */
+  private async refreshWorldList(): Promise<void> {
+    try {
+      this.readModel.setWorlds(await this.opts.provider.listWorlds());
+    } catch {
+      /* the previous list stands */
+    }
     this.transport.broadcastSnapshot();
   }
 

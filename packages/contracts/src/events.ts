@@ -48,6 +48,7 @@ export const QueueCommandSchema = z.enum([
   "voice-preview",
   "read-sheet-section",
   "generate-world-image",
+  "upload-world-image",
   "generate-master-look",
   "upload-master-look",
   "establish-look",

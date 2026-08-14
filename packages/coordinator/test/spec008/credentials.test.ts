@@ -145,6 +145,7 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
           name: "The Undersong",
           logline: "A drowned god still sings beneath the harbour.",
           counts: { characters: 3, locations: 2, factions: 1, canonEntries: 6, productions: 1 },
+          keyArt: null,
           updated: "2026-07-30T18:22:00Z",
         },
       ],

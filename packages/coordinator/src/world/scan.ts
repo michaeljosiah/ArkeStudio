@@ -73,6 +73,32 @@ export interface ScanResult {
 /** What counts as an image when reading a candidate off the disk rather than out of a record. */
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 
+/** The accepted key art, whatever format it came in as. `world-art.png` remains the usual one. */
+const KEY_ART_NAMES = new Set([...IMAGE_EXTENSIONS].map((extension) => `world-art${extension}`));
+
+/**
+ * The world's accepted key art, or null. Exported because the picker's summaries are built
+ * without a full scan — the registry has to answer this question the same way the bundle does,
+ * or a card and the screen behind it disagree about which image the world has.
+ */
+export async function findKeyArt(dir: string): Promise<string | null> {
+  return readdir(toExtendedLength(dir))
+    .then((entries) => entries.filter((entry) => KEY_ART_NAMES.has(entry.toLowerCase())).sort()[0] ?? null)
+    .catch(() => null);
+}
+
+/**
+ * The one image waiting in a directory, as a portable path — or null for an absent directory,
+ * an empty one, or one holding nothing we would serve. Sorted so the answer is stable rather
+ * than whatever order the filesystem happened to hand back.
+ */
+async function firstImageIn(dir: string, relative: string, portable: string): Promise<string | null> {
+  const entry = await readdir(toExtendedLength(join(dir, relative)))
+    .then((entries) => entries.filter((name) => IMAGE_EXTENSIONS.has(extname(name).toLowerCase())).sort()[0])
+    .catch(() => undefined);
+  return entry === undefined ? null : `${portable}/${entry}`;
+}
+
 const SHEET_DIRS: ReadonlyArray<{ dir: string; type: SheetKind }> = [
   { dir: "characters", type: "character" },
   { dir: "locations", type: "location" },
@@ -493,25 +519,17 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     .filter((c): c is NonNullable<typeof c> => c !== null)
     .slice(-50);
 
-  // One stat, not a walk: either the candidate is there or it is not.
-  const keyArtCandidate = await stat(toExtendedLength(join(dir, "incoming", "world-image", "candidate.png")))
-    .then(() => "incoming/world-image/candidate.png")
-    .catch(() => null);
-  // Same rule for the accepted key art: the disk is the truth. The art-direction page needs to
-  // know it exists to stand it in while no master look is set.
-  const hasKeyArt = await stat(toExtendedLength(join(dir, "world-art.png")))
-    .then(() => true)
-    .catch(() => false);
   /*
-   * A master look waiting for a yes. Read by listing rather than by stat, because this one
-   * candidate arrives two ways: generated, where the dispatcher writes the name the job asked
-   * for, and uploaded, where the file is named for the format its bytes actually carry. A stat
-   * on `candidate.png` would find the first and silently lose the second.
+   * The two candidates and the accepted key art, read by listing rather than by stat.
+   *
+   * Each of these arrives two ways: generated, where the dispatcher writes the name the job
+   * asked for, and uploaded, where the file is named for the format its bytes actually carry.
+   * A stat on `candidate.png` finds the first and silently loses the second — and the accepted
+   * key art stopped being `world-art.png` for the same reason.
    */
-  const masterLookCandidate = await readdir(toExtendedLength(join(dir, "incoming", "master-look")))
-    .then((entries) => entries.filter((entry) => IMAGE_EXTENSIONS.has(extname(entry).toLowerCase())).sort()[0])
-    .then((entry) => (entry === undefined ? null : `incoming/master-look/${entry}`))
-    .catch(() => null);
+  const keyArtCandidate = await firstImageIn(dir, join("incoming", "world-image"), "incoming/world-image");
+  const masterLookCandidate = await firstImageIn(dir, join("incoming", "master-look"), "incoming/master-look");
+  const keyArt = await findKeyArt(dir);
 
   const resolved = resolveArtDirection(meta, artDirectionRecord);
   const overrides: ArtDirectionOverride[] = [];
@@ -612,7 +630,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       overrides,
     },
     keyArtCandidate,
-    hasKeyArt,
+    keyArt,
     masterLookCandidate,
     sheets,
     canon,

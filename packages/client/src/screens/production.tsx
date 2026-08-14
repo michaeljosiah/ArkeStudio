@@ -595,7 +595,7 @@ export function ProductionDashboardScreen() {
                     path={
                       nextGap.scene.board
                         ? `productions/${production.meta.id}/${nextGap.scene.board.image}`
-                        : `world-art.png`
+                        : (world.keyArt ?? "")
                     }
                     label={`${nextGap.shot.id.replace("sh_", "Shot ")}: frame`}
                     radius={0}

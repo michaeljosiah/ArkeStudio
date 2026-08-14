@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ManifestModel, WorldMeta } from "@arke-studio/contracts";
+import { readdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { ClientMessage, DomainEvent, ManifestModel, WorldMeta } from "@arke-studio/contracts";
 import { imageConstraintSuffix } from "@arke-studio/contracts";
 import { buildSessionConfig } from "@arke-studio/adapter-opencode";
 import type { HarnessEvent } from "@arke-studio/contracts";
+import { Coordinator } from "../../src/coordinator.js";
+import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeArtDirector, worldBrief } from "../../src/references/art-director.js";
+import { pngBytes } from "../queue/fake-provider.js";
 import { tempDir } from "../tmp.js";
+import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import {
   WORLD_IMAGE_CANDIDATE,
   WORLD_IMAGE_DIR,
@@ -111,6 +117,119 @@ describe("the world's key image", () => {
     assert.equal(request.landing.dir, WORLD_IMAGE_DIR);
     assert.equal(request.landing.name, WORLD_IMAGE_CANDIDATE);
     assert.ok(!request.landing.dir.includes("world-art"), "the world keeps the image it has until asked");
+  });
+});
+
+async function harness(picked: () => readonly string[]) {
+  const { root, worldDir } = await makeTempRoot();
+  const provider = new FsWorldProvider(root, { clock: () => "2026-08-14T12:00:00.000Z" });
+  await provider.loadWorld(WORLD_ID);
+  const events: DomainEvent[] = [];
+  const coordinator = new Coordinator({
+    provider,
+    adapter: null,
+    changeLogPath: join(root, "logs", "changes.jsonl"),
+    appVersion: "test",
+    observeEvent: (event) => events.push(event),
+    pickFiles: async () => picked(),
+  });
+  const send = (msg: ClientMessage) =>
+    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+  return { provider, worldDir, events, send };
+}
+
+async function fileOutsideTheWorld(name: string, bytes: Uint8Array | string = pngBytes()) {
+  const path = join(await tempDir("arke-keyart-"), name);
+  await writeFile(path, bytes);
+  return path;
+}
+
+/**
+ * Key art by hand, and the path that carries it (issue 291).
+ *
+ * Reported as "changing the art in the world art page did not impact the picture used in the
+ * list of worlds start page" — because every card, hero and scrim named the literal string
+ * `world-art.png`, and the art-direction page changes the *master look*, which is a different
+ * image. Key art could also only ever be generated. Both halves are fixed here: it can be
+ * uploaded, and what the world actually has is read off the disk and carried to the picker.
+ */
+describe("bringing key art in by hand", () => {
+  it("offers the picked file, then accepts it under the format its bytes carry", async () => {
+    const jpeg = Uint8Array.from([0xff, 0xd8, ...Array.from({ length: 32 }, () => 0x00), 0xff, 0xd9]);
+    const picked = await fileOutsideTheWorld("my-key-art.png", jpeg);
+    const { provider, worldDir, send } = await harness(() => [picked]);
+    try {
+      await send({ kind: "upload-world-image", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB62A" });
+      const offered = provider.openStore()!.getBundle();
+      assert.equal(offered.keyArtCandidate, "incoming/world-image/candidate.jpg");
+      assert.equal(offered.keyArt, "world-art.png", "an upload is an offer — the world keeps what it has");
+
+      await send({ kind: "use-world-image", worldId: WORLD_ID });
+      const after = provider.openStore()!.getBundle();
+      // Named for the format it is. A JPEG written as world-art.png would be served as
+      // image/png by a media route that reads the extension.
+      assert.equal(after.keyArt, "world-art.jpg");
+      assert.equal(after.keyArtCandidate, null);
+      // One key art, not two: the PNG it replaces goes, or the scan picks between them by sort.
+      const names = await readdir(worldDir);
+      assert.deepEqual(names.filter((name) => name.startsWith("world-art")), ["world-art.jpg"]);
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("carries the path to the picker, so a card shows what the world actually has", async () => {
+    const jpeg = Uint8Array.from([0xff, 0xd8, ...Array.from({ length: 32 }, () => 0x00), 0xff, 0xd9]);
+    const picked = await fileOutsideTheWorld("mine.png", jpeg);
+    const { provider, send } = await harness(() => [picked]);
+    try {
+      await send({ kind: "upload-world-image", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB62B" });
+      await send({ kind: "use-world-image", worldId: WORLD_ID });
+      // The registry row, which is all the picker has for a closed world. Read without closing
+      // the world: the card that sent you to the art page has to change while you are still on
+      // it, not once the world is put away.
+      const summary = (await provider.listWorlds()).find((world) => world.worldId === WORLD_ID);
+      assert.equal(summary?.keyArt, "world-art.jpg");
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("says nothing at all when the dialog is closed, and changes nothing", async () => {
+    const { provider, events, send } = await harness(() => []);
+    try {
+      await send({ kind: "upload-world-image", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB62C" });
+      const result = events.find((event) => event.type === "queue.enqueue-result");
+      assert.equal(result?.type === "queue.enqueue-result" ? result.disposition : null, "not-queued");
+      assert.equal(provider.openStore()!.getBundle().keyArtCandidate, null);
+      assert.equal(provider.openStore()!.getBundle().keyArt, "world-art.png");
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("says why when the file is not an image", async () => {
+    const picked = await fileOutsideTheWorld("notes.png", "this is not a picture");
+    const { provider, events, send } = await harness(() => [picked]);
+    try {
+      await send({ kind: "upload-world-image", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB62D" });
+      const result = events.find((event) => event.type === "queue.enqueue-result");
+      assert.equal(result?.type === "queue.enqueue-result" ? result.disposition : null, "rejected");
+      assert.equal(provider.openStore()!.getBundle().keyArtCandidate, null);
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("still reads a world whose key art is the plain world-art.png every earlier world has", async () => {
+    const { provider } = await harness(() => []);
+    try {
+      assert.equal(provider.openStore()!.getBundle().keyArt, "world-art.png");
+      const summary = (await provider.listWorlds()).find((world) => world.worldId === WORLD_ID);
+      assert.equal(summary?.keyArt, "world-art.png");
+    } finally {
+      await provider.close();
+    }
   });
 });
 

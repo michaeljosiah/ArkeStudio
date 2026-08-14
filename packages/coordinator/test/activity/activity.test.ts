@@ -262,6 +262,7 @@ describe("needs-you is derived, never appended to (R-3, D1, §3.2)", () => {
         name: "Otherworld",
         counts: { characters: 1, locations: 0, factions: 0, canonEntries: 0, productions: 1 },
         attention: { unreviewedTakes: 3, openProposals: 1, asOf: "2026-07-30T10:00:00Z" },
+        keyArt: null,
         updated: "2026-07-30T10:00:00Z",
       },
     ];
