@@ -91,6 +91,14 @@ export const WorldSummarySchema = z
       })
       .strict()
       .optional(),
+    /**
+     * The world's accepted key art, world-relative, or null when it has none.
+     *
+     * The picker renders closed worlds, so it has no bundle to ask — which is why every card
+     * used to point at the literal string `world-art.png` and show a placeholder for any world
+     * that had chosen something else. Carried here so the card can show what was actually set.
+     */
+    keyArt: z.string().nullable().default(null),
     updated: IsoDateTimeSchema,
   })
   .strict();
@@ -211,8 +219,12 @@ export const WorldBundleSchema = z
      * visit, over a file that had already been used or thrown away.
      */
     keyArtCandidate: z.string().nullable().default(null),
-    /** Whether accepted key art (world-art.png) exists — the disk is the truth here too. */
-    hasKeyArt: z.boolean().default(false),
+    /**
+     * The accepted key art, world-relative, or null. A path rather than a boolean because it
+     * is no longer always `world-art.png`: an uploaded image keeps the format its bytes carry,
+     * and a file named for a format it is not is the one thing every other import path refuses.
+     */
+    keyArt: z.string().nullable().default(null),
     /**
      * A master look waiting for a yes, world-relative. Generated or uploaded, the same offer
      * either way: accepting it is a look change, so it lands as the next version's image.

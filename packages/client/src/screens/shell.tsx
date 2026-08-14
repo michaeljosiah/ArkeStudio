@@ -543,7 +543,7 @@ export function WorldPickerScreen() {
                   onClick={() => navigate(`/w/${w.worldId}`)}
                 >
                   <div className="fy-worldcard__frame">
-                    <Portrait worldSlug={w.slug} path="world-art.png" label={`${w.name}: key art`} radius={10} />
+                    <Portrait worldSlug={w.slug} path={w.keyArt ?? ""} label={`${w.name}: key art`} radius={10} />
                   </div>
                   {/* Archiving is two clicks and no dialog: the second click is the consent,
                       and the words say what actually happens to the folder. */}
@@ -1140,7 +1140,7 @@ export function SettingsLayout() {
       <div className="fy-scrim">
         {firstWorld && (
           <div className="fy-scrim__art">
-            <Portrait worldSlug={firstWorld.slug} path="world-art.png" label="" radius={0} />
+            <Portrait worldSlug={firstWorld.slug} path={firstWorld.keyArt ?? ""} label="" radius={0} />
           </div>
         )}
         <div className="fy-scrim__wash" />

@@ -10,10 +10,18 @@ import { estimateMicroUsd, imageConstraintSuffix } from "@arke-studio/contracts"
  * would put the studio's taste in front of theirs.
  */
 
-/** Where a generated candidate waits for a yes. One at a time: generating again replaces it. */
+/** Where a candidate waits for a yes. One at a time: generating or uploading again replaces it. */
 export const WORLD_IMAGE_DIR = "incoming/world-image";
 export const WORLD_IMAGE_CANDIDATE = "candidate.png";
-export const WORLD_IMAGE_FILE = "world-art.png";
+/**
+ * The accepted key art, without its extension.
+ *
+ * `world-art.png` remains what a generated one is called, and what worlds made before uploads
+ * existed still hold. An uploaded image keeps the format its bytes carry instead, so the name
+ * is a stem and the bundle carries the path — nothing may assume the extension any more.
+ */
+export const WORLD_IMAGE_STEM = "world-art";
+export const KEY_ART_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"] as const;
 
 export function worldImagePrompt(meta: WorldMeta, direction?: ResolvedArtDirection): string {
   const parts = [

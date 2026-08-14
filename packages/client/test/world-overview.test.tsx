@@ -270,6 +270,7 @@ const WORLD_ROW: PickerWorld = {
   name: "Vessel",
   logline: "Alien Man is the only being who can move between two worlds that were never meant to overlap.",
   counts: { characters: 0, locations: 0, factions: 0, canonEntries: 0, productions: 0 },
+  keyArt: null,
   updated: FIXTURE_STATE.worlds[0]!.updated,
 };
 

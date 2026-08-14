@@ -82,7 +82,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       // offering one.
     })
     .strict(),
-  /** Keep the candidate that came back — it becomes world-art.png. */
+  /**
+   * Or bring your own key art. The counterpart to generating it: an author who already has the
+   * image — a frame, a painting, a photograph — should not have to ask a model for one.
+   */
+  z.object({ kind: z.literal("upload-world-image"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  /** Keep the candidate that came back — it becomes the world's key art. */
   z.object({ kind: z.literal("use-world-image"), worldId: UlidSchema }).strict(),
   /** Or do not: the candidate is deleted and the world keeps the image it had. */
   z.object({ kind: z.literal("discard-world-image"), worldId: UlidSchema }).strict(),

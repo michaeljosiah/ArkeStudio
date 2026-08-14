@@ -989,6 +989,11 @@ export function generateWorldImage(worldId: string, modelId?: string): void {
   });
 }
 
+/** Or bring your own key art: the host opens the picker, and the renderer never sees the bytes. */
+export function uploadWorldImage(worldId: string): void {
+  send({ kind: "upload-world-image", worldId, requestId: queueRequest("upload-world-image") });
+}
+
 export function useWorldImage(worldId: string): void {
   send({ kind: "use-world-image", worldId });
 }

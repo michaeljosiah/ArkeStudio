@@ -13,7 +13,8 @@ import { assertFts5, loadNodeSqlite, type Database, type DatabaseCtor } from "./
  */
 
 // v2: closed-world attention counts with their as-of stamp (SPEC-014 R-7, T-5/T-6).
-const SCHEMA_VERSION = 2;
+// v3: the world's key art path, so a picker card can show the image the world actually has.
+const SCHEMA_VERSION = 3;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS worlds(
   attention_unreviewed INTEGER,
   attention_proposals INTEGER,
   attention_as_of TEXT,
+  key_art TEXT,
   updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS jobs(
@@ -77,7 +79,17 @@ export class AppIndex {
         db.exec(DDL);
         const index = new AppIndex(db);
         if (index.getMeta("schema_version") !== String(SCHEMA_VERSION)) {
-          db.exec("DELETE FROM worlds; DELETE FROM jobs; DELETE FROM ledger;");
+          /*
+           * Dropped and rebuilt, not emptied.
+           *
+           * `CREATE TABLE IF NOT EXISTS` leaves an existing table exactly as it was, so a version
+           * that adds a column found the old shape still in place and every insert failed on a
+           * column that was not there. Emptying the rows hid that: the tables looked fine and
+           * stayed permanently empty. This is a cache rebuilt from the logs and the worlds
+           * present, so throwing the tables away costs nothing but the next scan.
+           */
+          db.exec("DROP TABLE IF EXISTS worlds; DROP TABLE IF EXISTS jobs; DROP TABLE IF EXISTS ledger;");
+          db.exec(DDL);
           index.setMeta("schema_version", String(SCHEMA_VERSION));
           index.setMeta("seeded", "0");
         }
@@ -125,13 +137,13 @@ export class AppIndex {
   upsertWorld(summary: WorldSummary): void {
     this.db
       .prepare(
-        `INSERT INTO worlds(world_id,slug,name,logline,characters,locations,factions,canon_entries,productions,attention_unreviewed,attention_proposals,attention_as_of,updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `INSERT INTO worlds(world_id,slug,name,logline,characters,locations,factions,canon_entries,productions,attention_unreviewed,attention_proposals,attention_as_of,key_art,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(world_id) DO UPDATE SET slug=excluded.slug,name=excluded.name,logline=excluded.logline,
            characters=excluded.characters,locations=excluded.locations,factions=excluded.factions,
            canon_entries=excluded.canon_entries,productions=excluded.productions,
            attention_unreviewed=excluded.attention_unreviewed,attention_proposals=excluded.attention_proposals,
-           attention_as_of=excluded.attention_as_of,updated_at=excluded.updated_at`,
+           attention_as_of=excluded.attention_as_of,key_art=excluded.key_art,updated_at=excluded.updated_at`,
       )
       .run(
         summary.worldId,
@@ -146,6 +158,7 @@ export class AppIndex {
         summary.attention?.unreviewedTakes ?? null,
         summary.attention?.openProposals ?? null,
         summary.attention?.asOf ?? null,
+        summary.keyArt,
         summary.updated,
       );
   }
@@ -169,6 +182,7 @@ export class AppIndex {
       attention_unreviewed: number | null;
       attention_proposals: number | null;
       attention_as_of: string | null;
+      key_art: string | null;
       updated_at: string;
     }>;
     const out: WorldSummary[] = [];
@@ -184,6 +198,7 @@ export class AppIndex {
         slug: row.slug,
         name: row.name,
         ...(row.logline !== null ? { logline: row.logline } : {}),
+        keyArt: row.key_art,
         counts: {
           characters: row.characters,
           locations: row.locations,

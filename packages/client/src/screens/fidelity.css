@@ -634,7 +634,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-designcard:hover { transform: rotate(0deg) translateY(-8px); box-shadow: var(--shadow-xl); }
 .fy-designcard__frame { width: 300px; height: 360px; }
-/* The main photo opens larger, the same way the featured portrait and the character sheet do. */
+/* The main photo opens the identity reference set it anchors — a link, so it takes the pointer
+   rather than the magnifier the enlarge triggers elsewhere still use. */
 .fy-designcard__portrait-button {
   width: 100%;
   height: 100%;
@@ -643,7 +644,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   border-radius: 8px;
   background: transparent;
   color: inherit;
-  cursor: zoom-in;
+  cursor: pointer;
   display: block;
 }
 .fy-designcard__portrait-button:disabled { cursor: default; }
@@ -2662,6 +2663,10 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-artdirection__masterlook-row { display: flex; gap: 8px; margin-top: 10px; }
 .fy-artdirection__masterlook-row .ui-btn { height: 34px; }
 .fy-artdirection__masterlook-why { margin-top: 8px; font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); }
+.fy-artdirection__keyart { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 14px; }
+.fy-artdirection__keyart h2 { font: 500 10px var(--font-mono); letter-spacing: .14em; color: var(--neutral-400); }
+.fy-artdirection__keyart > p { margin-top: 7px; max-width: 460px; font: 400 11px/1.6 var(--font-sans); color: var(--muted-foreground); }
+.fy-artdirection__keyart .fy-keyart { margin-top: 10px; }
 .fy-artdirection__spacer { flex: 1; min-height: 6px; }
 .fy-artdirection__section { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
 .fy-artdirection__section h2 { font: 500 10px var(--font-mono); letter-spacing: .14em; color: var(--neutral-400); }
