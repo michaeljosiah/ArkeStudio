@@ -52,8 +52,15 @@ export function spineExportRefusals(cut: DerivedSpineCut, preset: ExportPreset):
    * silently dropped. Both leave the timeline visually complete. A master is a claim that the
    * film is finished, and every problem the derivation names is a reason that claim is not yet
    * true -- so the check is for problems, and the seconds are only how it is described.
+   *
+   * Unanchored shots count too (Codex round 6). A shot with no anchor is recorded on the cut and
+   * nowhere else -- it adds no missing seconds and raises no problem, because from the song's
+   * point of view nothing is wrong: every second has picture. It is the *film* that is missing a
+   * shot somebody wrote and generated, and a master that quietly drops it is the worst of the
+   * three failures here, because nothing about the result looks incomplete.
    */
-  if (missingSec <= 0 && cut.problems.length === 0) return null;
+  const stranded = cut.unanchoredShotIds.length;
+  if (missingSec <= 0 && cut.problems.length === 0 && stranded === 0) return null;
 
   const kinds = [...new Set(cut.problems.map((p) => p.kind))].sort();
   const shots = cut.segments.filter((s) => s.kind === "slate").length;
@@ -63,11 +70,10 @@ export function spineExportRefusals(cut: DerivedSpineCut, preset: ExportPreset):
       : missingSec > 0
         ? `${cut.blackSec.toFixed(1)}s of the song has no picture`
         : "picture covers the song";
-  return {
-    reason: "incomplete",
-    detail: kinds.length > 0 ? `${holes}; unresolved: ${kinds.join(", ")}` : holes,
-    missingSec,
-  };
+  const parts = [holes];
+  if (stranded > 0) parts.push(`${stranded} shot${stranded === 1 ? "" : "s"} anchored nowhere in the song`);
+  if (kinds.length > 0) parts.push(`unresolved: ${kinds.join(", ")}`);
+  return { reason: "incomplete", detail: parts.join("; "), missingSec };
 }
 
 /**

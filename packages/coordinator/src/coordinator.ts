@@ -2921,9 +2921,13 @@ export class Coordinator {
          */
         const trackPath =
           trackFile !== undefined ? toExtendedLength(join(store.dir, "artifacts", fromPortable(trackFile))) : null;
+        // The id is allocated before the first thing that can fail. A probe that throws on the
+        // way to ffprobe used to escape the handler with no export event at all, so the user's
+        // click did nothing visible and only the transport backstop logged it (Codex round 6).
+        const attemptId = `ex_${ulid()}`;
         const probed =
           trackArtifact?.mediaInfo === undefined && trackPath !== null && this.opts.mediaProbe?.info
-            ? await this.opts.mediaProbe.info(trackPath)
+            ? await this.opts.mediaProbe.info(trackPath).catch(() => null)
             : null;
         /*
          * A spine export takes the whole measurement or none of it (Codex round 5).
@@ -2940,7 +2944,6 @@ export class Coordinator {
         // A refusal is an attempt with an outcome, so it gets an id of its own. Reporting every
         // one as "ex_none" let a second production's failure overwrite the first in the client's
         // export map, and the first screen then showed no failed attempt at all (Codex round 4).
-        const attemptId = `ex_${ulid()}`;
         if (spine && trackFile !== undefined && trackInfo === null) {
           emitProgress(
             attemptId,

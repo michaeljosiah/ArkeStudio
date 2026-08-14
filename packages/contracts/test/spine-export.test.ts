@@ -182,6 +182,16 @@ describe("spine export", () => {
     assert.match(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4")), /\[1:a\]anull\[aout\]/);
   });
 
+  it("refuses a master that would silently drop a shot anchored nowhere", () => {
+    // Every second of the song has picture, so nothing about the result looks incomplete — which
+    // is exactly why this is the worst of the three ways to be unfinished.
+    const cut = { ...cutOf([CLIP], 4), unanchoredShotIds: ["sh_2"] };
+    assert.equal(spineExportRefusals(cut, "review-cut"), null);
+    const refusal = spineExportRefusals(cut, "master");
+    assert.equal(refusal?.reason, "incomplete");
+    assert.match(refusal!.detail, /1 shot anchored nowhere/);
+  });
+
   it("lets a complete cut through to master", () => {
     assert.equal(spineExportRefusals(cutOf([CLIP], 4), "master"), null);
   });
