@@ -88,6 +88,15 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     }
   });
 
+  it("refuses a gate operation once the world has begun closing", async () => {
+    // The window every identity guard misses: the provider keeps returning this store until
+    // close() resolves, so "is this still the open store" is true while the lock is already gone.
+    // A closed world is not writable, and that is the store's own fact rather than each caller's.
+    const { store } = await open();
+    await store.close();
+    await assert.rejects(() => store.gateOp(async () => "written"), /closed/);
+  });
+
   it("refuses to rewrite a sidecar it cannot read as one", async () => {
     // Every writer here rebuilds a whole record from what it reads. A file hand-edited to
     // {"links":[]} was spread into a replacement and committed, erasing id, hash and origin —

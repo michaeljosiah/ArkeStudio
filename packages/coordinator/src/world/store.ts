@@ -110,6 +110,20 @@ export class WorldStore {
    */
   async gateOp<T>(fn: () => Promise<T>): Promise<T> {
     return this.serialise(async () => {
+      /*
+       * Refused once closing has begun (#283).
+       *
+       * `close()` sets this before it takes the serialisation lock, so work queued behind it
+       * arrives here after the world lock has been released. Every caller that guards on "is this
+       * still the open store" is checking the wrong thing during that window: the provider goes on
+       * returning this store until close resolves, so the identity check passes and the write
+       * lands on a world nothing holds the lock for -- next to a newly opened store on the same
+       * journal.
+       *
+       * Guarding it here rather than in each caller, because it is not a property of any of them.
+       * A closed world is not writable, and that is the store's own fact to enforce.
+       */
+      if (this.closed) throw new Error("world is closed");
       this.watcher?.suppress();
       try {
         return await fn();
