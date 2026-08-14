@@ -485,6 +485,8 @@ export class Coordinator {
    * stopped the last window from closing and left the process running invisibly.
    */
   private backfillAbort: AbortController | null = null;
+  /** The store whose backfill is running, so reopening the same world joins it rather than racing it. */
+  private backfillStore: WorldStore | null = null;
 
   constructor(private readonly opts: CoordinatorOptions) {
     this.secrets = opts.secretRegistry ?? new SecretRegistry();
@@ -876,11 +878,25 @@ export class Coordinator {
      */
     if (store && this.opts.mediaProbe && !this.stopping) {
       const probe = this.opts.mediaProbe;
-      // One pass at a time: opening another world abandons the previous world's, which is what
-      // its stillOpen check would conclude a moment later anyway.
-      this.backfillAbort?.abort();
-      const abort = new AbortController();
-      this.backfillAbort = abort;
+      /*
+       * One pass per store, and reopening the same world joins the one already running.
+       *
+       * Aborting and restarting on every open looked harmless because the signal "cancels" the
+       * pass -- but it cannot interrupt an ffprobe already in flight, so each reopen simply added
+       * a second twenty-second probe running alongside the first (Codex round 6). Only a switch
+       * to a different store abandons the previous pass.
+       */
+      if (this.backfillStore !== store) {
+        this.backfillAbort?.abort();
+        const abort = new AbortController();
+        this.backfillAbort = abort;
+        this.backfillStore = store;
+        this.startBackfill(store, probe, abort.signal);
+      }
+    }
+  }
+
+  private startBackfill(store: WorldStore, probe: MediaProbe, signal: AbortSignal): void {
       /*
        * Deliberately NOT tracked as background work (Codex round 5).
        *
@@ -895,16 +911,19 @@ export class Coordinator {
        * already refused once the signal is aborted or the world is no longer open, and a
        * measurement lost to a shutdown is simply taken again on the next open.
        */
-      void backfillMediaInfo(store, probe, {
-        signal: abort.signal,
-        stillOpen: () => this.stillOpen(store),
-        // Published as each one lands: a world with one readable track and three unreadable ones
-        // had its answer on disk immediately and on screen a minute later.
-        onMeasured: () => this.refreshIfStillOpen(store),
-      }).catch(() => {
+    void backfillMediaInfo(store, probe, {
+      signal,
+      stillOpen: () => this.stillOpen(store),
+      // Published as each one lands: a world with one readable track and three unreadable ones
+      // had its answer on disk immediately and on screen a minute later.
+      onMeasured: () => this.refreshIfStillOpen(store),
+    })
+      .catch(() => {
         // A world that cannot be measured is a world that works exactly as it did before.
+      })
+      .finally(() => {
+        if (this.backfillStore === store) this.backfillStore = null;
       });
-    }
   }
 
   /**
@@ -4732,7 +4751,10 @@ export class Coordinator {
       kind: outcome.artifact.kind,
       deduplicated: outcome.outcome === "deduplicated",
     });
-    await this.refreshWorldSnapshot(worldId);
+    // Against the store that was filed into, never by world id: refreshWorldSnapshot calls
+    // loadWorld, so filing that finished after the user switched worlds would have closed the
+    // world they just chose and reopened the one they left (Codex round 6).
+    this.refreshIfStillOpen(store);
   }
 
   /**

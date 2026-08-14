@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { copyFile, readdir, readFile, stat, statfs } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
-import { ulid, type ArtifactKind, type ArtifactSidecar } from "@arke-studio/contracts";
+import { ArtifactSidecarSchema, ulid, type ArtifactKind, type ArtifactSidecar } from "@arke-studio/contracts";
 import { measureMediaInfo, type MediaProbe } from "../media/probe.js";
 import { toExtendedLength } from "../world/paths.js";
 import { slugify } from "../world/slug.js";
@@ -272,6 +272,11 @@ export async function importFolder(
       return;
     }
     for (const entry of entries) {
+      // Not merely the measurement (Codex round 6): guarding only the probe left the walk copying
+      // and committing the *next* file through a store whose world lock had already been
+      // released. An import abandoned halfway is a partial import, which the report already
+      // describes; an import writing to a closed world is two stores on one journal.
+      if (abandoned?.() === true) return;
       const name = entry.name;
       const relPath = rel ? `${rel}/${name}` : name;
       if (name.startsWith(".") || EXCLUDED_NAMES.has(name.toLowerCase())) {
@@ -347,7 +352,13 @@ async function measureInto(
     const raw = await readSidecarRaw(store, file);
     if (raw === null) return false;
     try {
-      const current = JSON.parse(raw) as ArtifactSidecar;
+      // Parsed, not cast (Codex round 6). A sidecar edited to valid JSON but invalid shape while
+      // the probe ran would otherwise be spread into a replacement and written back -- `{}` would
+      // reduce the file to nothing but the measurement. The scanner reports malformed sidecars
+      // without rewriting them, and this pass has no better claim to overwrite one.
+      const parsed = ArtifactSidecarSchema.safeParse(JSON.parse(raw));
+      if (!parsed.success) return false;
+      const current = parsed.data;
       if (current.mediaInfo !== undefined) return false;
       await writeSidecar(store, { ...current, mediaInfo: info }, raw);
       return true;
