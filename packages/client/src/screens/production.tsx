@@ -1986,17 +1986,22 @@ export function AudioScreen() {
 type SpineView =
   | null
   | { state: "unmeasured" }
+  | { state: "silent" }
   | { state: "derived"; cut: ReturnType<typeof deriveSpineCut> };
 
 function spineViewFor(
-  world: { artifacts: readonly { id: string; mediaInfo?: { durationSec: number } }[] } | null | undefined,
+  world: { artifacts: readonly { id: string; mediaInfo?: { durationSec: number; hasAudio: boolean } }[] } | null | undefined,
   production: Parameters<typeof deriveSpineCut>[0] | null | undefined,
 ): SpineView {
   const spine = production?.spine;
   if (!production || !spine || !world) return null;
-  const durationSec = world.artifacts.find((a) => a.id === spine.trackArtifactId)?.mediaInfo?.durationSec;
-  if (durationSec === undefined) return { state: "unmeasured" };
-  return { state: "derived", cut: deriveSpineCut(production, spine, durationSec) };
+  const measured = world.artifacts.find((a) => a.id === spine.trackArtifactId)?.mediaInfo;
+  if (measured === undefined) return { state: "unmeasured" };
+  // A measured track with no audio stream refuses every preset in the coordinator, so offering the
+  // export here would offer one that is certain to fail (Codex round 2). Measured is not the same
+  // as usable, and the length being known says nothing about there being a song.
+  if (!measured.hasAudio) return { state: "silent" };
+  return { state: "derived", cut: deriveSpineCut(production, spine, measured.durationSec) };
 }
 
 export function ExportsScreen() {
@@ -2030,7 +2035,7 @@ export function ExportsScreen() {
    * prevented the one path that resolves the state it was complaining about -- a screen refusing
    * on the grounds that it lacks a number it was stopping anybody from fetching.
    */
-  const blocked = refusal !== null;
+  const blocked = refusal !== null || spine?.state === "silent";
   const presetCopy: Record<string, { label: string; sub: string }> = {
     "review-cut": { label: "Review cut", sub: `mp4 ${PRESETS["review-cut"].width}×${PRESETS["review-cut"].height} · timecode · fastest` },
     master: { label: "Master", sub: `${PRESETS.master.width}×${PRESETS.master.height} · clean` },
@@ -2096,6 +2101,13 @@ export function ExportsScreen() {
             </button>
           ))}
         </div>
+        {spine?.state === "silent" && (
+          <div className="fy-notecard">
+            <span className="fy-dot fy-dot--warn" />
+            The master track has no audio stream, so there is no song to cut against. Assign a track that carries audio
+            — nothing else about the production changes.
+          </div>
+        )}
         {spine?.state === "unmeasured" && (
           <div className="fy-notecard">
             <span className="fy-dot fy-dot--warn" />
@@ -2103,7 +2115,8 @@ export function ExportsScreen() {
             and renders against it — or says why it cannot be read. Nothing about the production changes either way.
           </div>
         )}
-        {spine?.state === "derived" && (refusal !== null || spine.cut.slateSec > 0 || spine.cut.blackSec > 0) && (
+        {spine?.state === "derived" &&
+          (refusal !== null || spine.cut.problems.length > 0 || spine.cut.slateSec > 0 || spine.cut.blackSec > 0) && (
           <div className="fy-notecard">
             <span className="fy-dot fy-dot--warn" />
             {/* Design 60c: review renders the holes, a finished cut refuses them. The reasons are named
@@ -2117,8 +2130,24 @@ export function ExportsScreen() {
               </>
             ) : (
               <>
-                {seconds(spine.cut.slateSec + spine.cut.blackSec)} of the song has no picture. It renders as labelled
-                black — an unfinished film still reviews.
+                {/* Slates carry labels; plain black does not, and the exporter draws text only on
+                    slates. Promising a label on both left unexplained black in the review (Codex
+                    round 2). Problems that cost no visible time are named here too, because
+                    review renders past them and only the master says so otherwise. */}
+                {spine.cut.slateSec > 0 && (
+                  <>{seconds(spine.cut.slateSec)} of the song is a labelled slate naming the shot that is missing. </>
+                )}
+                {spine.cut.blackSec > 0 && (
+                  <>{seconds(spine.cut.blackSec)} is plain black, anchored to no shot at all. </>
+                )}
+                {spine.cut.problems.length > 0 && (
+                  <>
+                    {spine.cut.problems.length} unresolved{" "}
+                    {spine.cut.problems.length === 1 ? "problem" : "problems"} the review renders past:{" "}
+                    {[...new Set(spine.cut.problems.map((p) => p.kind))].sort().join(", ")}.{" "}
+                  </>
+                )}
+                An unfinished film still reviews.
               </>
             )}
           </div>
