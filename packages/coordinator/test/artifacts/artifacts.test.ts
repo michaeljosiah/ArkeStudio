@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { computeNeedsYou, type ClientState } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { candidateHash, resolveCandidate, storeBatch, verifyCandidates } from "../../src/artifacts/extraction.js";
-import { ATTACHABLE_EXTENSIONS, fileArtifact, importFolder, kindForFile, pickable } from "../../src/artifacts/filing.js";
+import { ATTACHABLE_EXTENSIONS, backfillMediaInfo, fileArtifact, importFolder, kindForFile, pickable } from "../../src/artifacts/filing.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -83,6 +83,59 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     });
     assert.equal(outcome.outcome, "filed");
     assert.equal(store.getBundle().artifacts.find((a) => a.file === "second-song.mp3")?.mediaInfo, undefined);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("measures media filed before anything measured it, once", async () => {
+    // Every world that exists today was filed before filing learned to measure, and nothing would
+    // ever fill the field in on its own.
+    const { store } = await open();
+    try {
+      const song = await sourceFile("old-song.mp3", "filed before measuring existed");
+      await fileArtifact(store, { sourcePath: song });
+      assert.equal(store.getBundle().artifacts.find((a) => a.file === "old-song.mp3")?.mediaInfo, undefined);
+
+      // Derived, not hardcoded: the fixture world carries media of its own, and a count written
+      // in by hand here breaks the moment somebody adds a sound to it.
+      const unmeasured = store
+        .getBundle()
+        .artifacts.filter((a) => (a.kind === "audio" || a.kind === "video") && a.mediaInfo === undefined).length;
+      assert.ok(unmeasured >= 1);
+      let calls = 0;
+      const probe = {
+        durationSec: async () => 30,
+        info: async () => {
+          calls += 1;
+          return { durationSec: 30.25, hasAudio: true };
+        },
+      };
+      assert.equal(await backfillMediaInfo(store, probe), unmeasured);
+      assert.deepEqual(store.getBundle().artifacts.find((a) => a.file === "old-song.mp3")?.mediaInfo, {
+        durationSec: 30.25,
+        hasAudio: true,
+      });
+      // A measurement is added, never re-taken: the bytes cannot have changed, and a second
+      // opinion would only be a way for two runs to disagree.
+      assert.equal(await backfillMediaInfo(store, probe), 0);
+      assert.equal(calls, unmeasured, "nothing was measured twice");
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("leaves a world exactly as it was when nothing can measure it", async () => {
+    const { store } = await open();
+    try {
+      const song = await sourceFile("unreadable.mp3", "no probe will read this");
+      await fileArtifact(store, { sourcePath: song });
+      const measured = await backfillMediaInfo(store, {
+        durationSec: async () => null,
+        info: async () => { throw new Error("ffprobe is not here"); },
+      });
+      assert.equal(measured, 0);
+      assert.equal(store.getBundle().artifacts.find((a) => a.file === "unreadable.mp3")?.mediaInfo, undefined);
     } finally {
       await store.close();
     }

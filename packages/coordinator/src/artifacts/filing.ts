@@ -233,7 +233,14 @@ export interface ImportReport {
   needsConsent: Array<{ name: string; sizeBytes: number }>;
 }
 
-export async function importFolder(store: WorldStore, sourceDir: string): Promise<ImportReport> {
+export async function importFolder(
+  store: WorldStore,
+  sourceDir: string,
+  // Threaded through so a folder import measures what a single attach measures (Codex round 1).
+  // Filing learned to measure and this path did not, which would have left a whole import
+  // unmeasured for no reason a user could see or name.
+  mediaProbe?: MediaProbe,
+): Promise<ImportReport> {
   const report: ImportReport = { filed: [], deduplicated: [], excluded: [], needsConsent: [] };
   const walk = async (dir: string, rel: string): Promise<void> => {
     let entries;
@@ -256,6 +263,7 @@ export async function importFolder(store: WorldStore, sourceDir: string): Promis
         continue;
       }
       const outcome = await fileArtifact(store, {
+        ...(mediaProbe !== undefined ? { mediaProbe } : {}),
         sourcePath: join(dir, name),
         importedFrom: rel || ".",
       });
@@ -267,4 +275,51 @@ export async function importFolder(store: WorldStore, sourceDir: string): Promis
   };
   await walk(sourceDir, "");
   return report;
+}
+
+/**
+ * Measure media artifacts filed before anything measured them (#283).
+ *
+ * Every world that existed before filing learned to measure has audio and video with no
+ * `mediaInfo`, and nothing would ever fill it in: the field is written at filing time and those
+ * files were filed long ago. Left alone, those worlds keep paying a probe on every export click
+ * and their Cut screen can never show a spine timeline at all, because the client has no ffprobe
+ * to reach for.
+ *
+ * So it happens once, on open, in the background. Not during the scan: a world's load is measured
+ * against a cold-scan budget and spawning a probe per media artifact inside it would blow that for
+ * a number nobody has asked for yet.
+ *
+ * A measurement is added, never corrected. If a sidecar already carries one it is left exactly as
+ * it is -- the bytes cannot have changed, so a second opinion about them would only be a way for
+ * two runs of this to disagree.
+ */
+export async function backfillMediaInfo(
+  store: WorldStore,
+  probe: MediaProbe,
+  onMeasured?: (file: string) => void,
+): Promise<number> {
+  if (!probe.info) return 0;
+  let measured = 0;
+  for (const artifact of store.getBundle().artifacts) {
+    if (artifact.kind !== "audio" && artifact.kind !== "video") continue;
+    if (artifact.mediaInfo !== undefined) continue;
+    const raw = await readSidecarRaw(store, artifact.file);
+    // Gone, or rewritten since the bundle was read: either way this is not the moment to insist.
+    if (raw === null) continue;
+    const info = await probe
+      .info(toExtendedLength(join(store.dir, "artifacts", artifact.file)))
+      .catch(() => null);
+    if (info === null) continue;
+    try {
+      const sidecar = { ...(JSON.parse(raw) as ArtifactSidecar), mediaInfo: info };
+      await writeSidecar(store, sidecar, raw);
+      measured += 1;
+      onMeasured?.(artifact.file);
+    } catch {
+      // A sidecar that will not parse is a problem the scan already reports; measuring is not the
+      // pass that should be fixing it, and failing here would abandon every artifact after it.
+    }
+  }
+  return measured;
 }

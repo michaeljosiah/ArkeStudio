@@ -71,7 +71,7 @@ import {
   verifyCandidates,
   type RawCandidate,
 } from "./artifacts/extraction.js";
-import { ATTACHABLE_EXTENSIONS, fileArtifact, importFolder } from "./artifacts/filing.js";
+import { ATTACHABLE_EXTENSIONS, backfillMediaInfo, fileArtifact, importFolder } from "./artifacts/filing.js";
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
@@ -859,6 +859,25 @@ export class Coordinator {
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();
+    /*
+     * Worlds that predate filing-time measurement get measured once, here, after the snapshot
+     * (#283). Deliberately after: opening a world must not wait on a probe per media artifact,
+     * and nothing on screen at this moment is waiting for the number. A world opened repeatedly
+     * only pays this on the first open that finds something unmeasured, because the pass writes
+     * what it learns.
+     */
+    if (store && this.opts.mediaProbe) {
+      const probe = this.opts.mediaProbe;
+      this.trackBackground(
+        backfillMediaInfo(store, probe)
+          .then(async (measured) => {
+            if (measured > 0) await this.refreshWorldSnapshot(worldId);
+          })
+          .catch(() => {
+            // A world that cannot be measured is a world that works exactly as it did before.
+          }),
+      );
+    }
   }
 
   /**
@@ -3161,7 +3180,7 @@ export class Coordinator {
       case "import-folder": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        const report = await importFolder(store, msg.sourcePath).catch(() => null);
+        const report = await importFolder(store, msg.sourcePath, this.opts.mediaProbe).catch(() => null);
         if (report) {
           this.emit({ at: new Date().toISOString(), type: "import.report", worldId: msg.worldId, ...report });
           await this.refreshWorldSnapshot(msg.worldId);
