@@ -304,21 +304,42 @@ export async function backfillMediaInfo(
   for (const artifact of store.getBundle().artifacts) {
     if (artifact.kind !== "audio" && artifact.kind !== "video") continue;
     if (artifact.mediaInfo !== undefined) continue;
-    const raw = await readSidecarRaw(store, artifact.file);
-    // Gone, or rewritten since the bundle was read: either way this is not the moment to insist.
-    if (raw === null) continue;
+    /*
+     * Probe outside the envelope, commit inside it (Codex round 2).
+     *
+     * ffprobe can take seconds, and holding the world's serialisation gate across it would stall
+     * every edit the user makes meanwhile. The write is a different matter: writeSidecar goes
+     * through commitUnserialised, whose contract is that a caller has already taken the envelope.
+     * Committing outside it let a background measurement and a user's save read the same
+     * world.json and roll forward over each other -- a measurement nobody asked for silently
+     * winning against an edit somebody did.
+     *
+     * The sidecar is read again *inside* the gate, because the copy fetched before the probe is
+     * exactly as old as the probe took, and what it is compared against must be current.
+     */
     const info = await probe
       .info(toExtendedLength(join(store.dir, "artifacts", artifact.file)))
       .catch(() => null);
     if (info === null) continue;
-    try {
-      const sidecar = { ...(JSON.parse(raw) as ArtifactSidecar), mediaInfo: info };
-      await writeSidecar(store, sidecar, raw);
+    const wrote = await store.gateOp(async () => {
+      const raw = await readSidecarRaw(store, artifact.file);
+      // Gone, or rewritten while the probe ran: either way this is not the moment to insist.
+      if (raw === null) return false;
+      try {
+        const current = JSON.parse(raw) as ArtifactSidecar;
+        // Somebody measured it first — filing, or an earlier pass. Never re-taken.
+        if (current.mediaInfo !== undefined) return false;
+        await writeSidecar(store, { ...current, mediaInfo: info }, raw);
+        return true;
+      } catch {
+        // A sidecar that will not parse is a problem the scan already reports; measuring is not
+        // the pass that should fix it, and failing here would abandon every artifact after it.
+        return false;
+      }
+    });
+    if (wrote) {
       measured += 1;
       onMeasured?.(artifact.file);
-    } catch {
-      // A sidecar that will not parse is a problem the scan already reports; measuring is not the
-      // pass that should be fixing it, and failing here would abandon every artifact after it.
     }
   }
   return measured;

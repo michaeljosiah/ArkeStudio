@@ -870,8 +870,12 @@ export class Coordinator {
       const probe = this.opts.mediaProbe;
       this.trackBackground(
         backfillMediaInfo(store, probe)
-          .then(async (measured) => {
-            if (measured > 0) await this.refreshWorldSnapshot(worldId);
+          .then((measured) => {
+            // Against the store this pass actually measured, never by world id (Codex round 2).
+            // refreshWorldSnapshot calls loadWorld, so a probe still running when the user opens
+            // another world would have closed the world they just chose and reopened the old one
+            // — a background measurement changing which world somebody is looking at.
+            if (measured > 0) this.refreshIfStillOpen(store);
           })
           .catch(() => {
             // A world that cannot be measured is a world that works exactly as it did before.
