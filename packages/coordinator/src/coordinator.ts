@@ -71,7 +71,7 @@ import {
   verifyCandidates,
   type RawCandidate,
 } from "./artifacts/extraction.js";
-import { ATTACHABLE_EXTENSIONS, fileArtifact, importFolder } from "./artifacts/filing.js";
+import { ATTACHABLE_EXTENSIONS, backfillMediaInfo, fileArtifact, importFolder } from "./artifacts/filing.js";
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
@@ -477,6 +477,10 @@ export class Coordinator {
   private readonly exports = new Map<string, ExportHandle>();
   /** `worldId:productionId` whose export is being set up or is already running — one at a time. */
   private readonly exportsInFlight = new Set<string>();
+  /** Cancels the media backfill (issue 283) — optional migration work nothing should wait for. */
+  private backfillAbort: AbortController | null = null;
+  /** The store whose backfill is running, so reopening the same world joins it rather than racing it. */
+  private backfillStore: WorldStore | null = null;
 
   constructor(private readonly opts: CoordinatorOptions) {
     this.secrets = opts.secretRegistry ?? new SecretRegistry();
@@ -859,7 +863,67 @@ export class Coordinator {
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();
+    /*
+     * Worlds filed before measuring existed get measured once, here, after the snapshot (issue 283).
+     *
+     * Deliberately after: opening a world must not wait on a probe per media artifact, and nothing
+     * on screen at this moment is waiting for the number. A world opened repeatedly only pays this
+     * on the first open that finds something unmeasured, because the pass writes what it learns.
+     */
+    // `this.stillOpen(store)` as well as identity: two overlapping open-world messages can leave
+    // the first holding a store the second has already replaced, and an unconditional abort here
+    // would cancel the current world's pass and start one against a store that is already closed
+    // (Codex round 1).
+    if (store && this.opts.mediaProbe && !this.stopping && this.stillOpen(store) && this.backfillStore !== store) {
+      /*
+       * One pass per store, and reopening the same world joins the one already running.
+       *
+       * Aborting and restarting on every open would look free because the signal "cancels" the
+       * pass — but it cannot interrupt an ffprobe already in flight, so each reopen would simply
+       * add another twenty-second probe alongside the first.
+       */
+      this.backfillAbort?.abort();
+      const abort = new AbortController();
+      this.backfillAbort = abort;
+      this.backfillStore = store;
+      this.startBackfill(store, this.opts.mediaProbe, abort.signal);
+    }
   }
+
+  /**
+   * Run the measurement pass without anything waiting for it.
+   *
+   * Deliberately not tracked as background work: `trackBackground` puts a promise in the shutdown
+   * drain, and aborting cannot interrupt an ffprobe already in flight — `MediaProbe` has no way to
+   * carry a signal — so a slow probe would hold the drain past the desktop's fifteen-second
+   * deadline and the last window would not close. This is optional migration work. Its writes are
+   * refused once the signal aborts, once the world is no longer open, and by the store itself once
+   * that world begins closing; a measurement lost to a shutdown is taken again on the next open.
+   */
+  private startBackfill(store: WorldStore, probe: MediaProbe, signal: AbortSignal): void {
+    void backfillMediaInfo(store, probe, {
+      signal,
+      stillOpen: () => this.stillOpen(store),
+      onMeasured: () => this.refreshIfStillOpen(store),
+    })
+      .then((result) => {
+        /*
+         * The attempted marker is kept only when the pass really finished (Codex rounds 3 and 7).
+         *
+         * Keeping it always meant a world with permanently unreadable media stopped re-running
+         * every twenty-second failure on each reopen -- which is why it exists. But a pass that
+         * passed over sidecars awaiting reconciliation has not finished: nothing revisits them,
+         * and adopting the edit would otherwise leave that media unmeasured for the rest of the
+         * session. Deferred work releases the marker so the next open picks it up.
+         */
+        if (result?.deferred === true && this.backfillStore === store) this.backfillStore = null;
+      })
+      .catch(() => {
+        // A world that cannot be measured is a world that works exactly as it did before.
+      });
+  }
+
+
 
   /**
    * Put right what a crash left behind, before anything can be done to it (#70 §7.2, phase 1).
@@ -1283,6 +1347,7 @@ export class Coordinator {
         const TERMINAL_JOB_STATUS = new Set(["succeeded", "failed", "cancelled"]);
         const archive = this.opts.provider.archiveWorld?.bind(this.opts.provider);
         if (!archive) return;
+
         const summary = this.readModel.getState().worlds.find((w) => w.worldId === msg.worldId);
         const refuse = (reason: string) =>
           this.emit({
@@ -4953,6 +5018,9 @@ export class Coordinator {
       this.jobQueue?.dispose();
       for (const controller of this.reading.values()) controller.abort();
       for (const handle of this.exports.values()) handle.cancel();
+      // Nothing awaits the backfill, but it should stop trying: its next write would be refused
+      // by the store anyway once the world begins closing.
+      this.backfillAbort?.abort();
       // In-flight frames answer first, then the door shuts: no new work can arrive during the
       // drains below. Transport.stop() was written and never called, so a stopped coordinator
       // went on listening — invisible in the packaged app, where the process exits regardless,

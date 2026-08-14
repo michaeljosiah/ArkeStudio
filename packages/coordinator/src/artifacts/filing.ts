@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { copyFile, readdir, readFile, stat, statfs } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
-import { ArtifactSidecarSchema, ulid, type ArtifactKind, type ArtifactSidecar } from "@arke-studio/contracts";
+import { copyFile, readdir, readFile, realpath, stat, statfs } from "node:fs/promises";
+import { basename, extname, join, sep } from "node:path";
+import { ArtifactSidecarSchema, ulid, type ArtifactKind, type ArtifactSidecar, type MediaInfo } from "@arke-studio/contracts";
 import { measureMediaInfo, type MediaProbe } from "../media/probe.js";
+import type { CommitInput } from "../world/commit.js";
 import { toExtendedLength } from "../world/paths.js";
 import { slugify } from "../world/slug.js";
 import { sha256 } from "../world/text-files.js";
@@ -13,6 +14,8 @@ import type { WorldStore } from "../world/store.js";
  * sidecar per artifact (D6); original names kept, slugified (D7). Every sidecar write goes
  * through the world's commit primitive; the media copy rides the suppression envelope.
  */
+
+const NEWLINE = String.fromCharCode(10);
 
 const KIND_BY_EXT: Record<string, ArtifactKind> = {
   ".wav": "audio", ".mp3": "audio", ".flac": "audio", ".ogg": "audio", ".m4a": "audio",
@@ -374,4 +377,208 @@ async function measureInto(
     await writeSidecar(store, { ...parsed.data, mediaInfo: info }, raw);
     return true;
   }).catch(() => false);
+}
+
+/**
+ * Measure media artifacts filed before anything measured them (issue 283).
+ *
+ * Every world that existed before filing learned to measure has audio and video with no
+ * `mediaInfo`, and nothing would ever fill it in: the field is written at filing time and those
+ * files were filed long ago. Left alone, those worlds keep paying a probe on every export click,
+ * and their Exports screen can only say the track is unmeasured — the client has no ffprobe to
+ * reach for.
+ *
+ * It runs once, on open, in the background. Not during the scan: a world's load is measured
+ * against a cold-scan budget, and a probe per media artifact inside it would blow that for a
+ * number nobody has asked for yet.
+ *
+ * Nothing waits for this. `signal` and `stillOpen` stop it between files, and `WorldStore.gateOp`
+ * refuses a closing world regardless — the hard invariant lives there now, so these are about not
+ * doing pointless work rather than about safety. A measurement lost to a shutdown or a world
+ * switch is simply taken again on the next open.
+ */
+/** Committed in bounded batches so an interrupted pass keeps what it already learned. */
+const BACKFILL_BATCH = 8;
+
+/**
+ * Whether a staged artifact really is a file inside `artifacts/`.
+ *
+ * The name is checked lexically first, but a symlink passes that and ffprobe follows it, so the
+ * resolved path is compared against the resolved directory. A world can be imported from
+ * anywhere and this pass runs on open, so anything it reads is something nobody asked it to read.
+ */
+async function insideArtifacts(store: WorldStore, file: string): Promise<boolean> {
+  const dir = join(store.dir, "artifacts");
+  try {
+    const [root, target] = await Promise.all([realpath(toExtendedLength(dir)), realpath(toExtendedLength(join(dir, file)))]);
+    return target === join(root, basename(target)) && target.startsWith(root + sep);
+  } catch {
+    return false;
+  }
+}
+
+export async function backfillMediaInfo(
+  store: WorldStore,
+  probe: MediaProbe,
+  opts: { signal?: AbortSignal; stillOpen?: () => boolean; onMeasured?: (files: readonly string[]) => void } = {},
+): Promise<{ measured: number; deferred: boolean }> {
+  const { signal, stillOpen, onMeasured } = opts;
+  const abandoned = (): boolean => signal?.aborted === true || stillOpen?.() === false;
+  if (!probe.info) return { measured: 0, deferred: false };
+
+  /*
+   * Probe outside the gate, write in batches (Codex rounds 1 and 2).
+   *
+   * Measuring file by file cost two full world rescans each -- the commit rescans the paths it
+   * touched and `gateOp` rescans everything in its `finally` -- so forty legacy tracks ran forty
+   * whole-world scans under the serialisation gate, blocking ordinary edits. Batching fixed that
+   * and introduced the opposite fault: a pass interrupted before the end threw away every
+   * measurement it had taken, and a world nobody keeps open for the full cumulative probe time
+   * would restart from the first file forever and never finish. Bounded batches keep both
+   * properties -- few rescans, and progress that survives being interrupted.
+   */
+  /*
+   * Sidecars a person has been asked to reconcile are left alone (Codex rounds 4 and 5).
+   *
+   * A sidecar edited while the world was closed appears in `externalEdits` for explicit adoption.
+   * Rewriting it here -- normalising its bytes and recording an app-owned change -- would adopt
+   * part of somebody's edit on their behalf while the screen still shows it as pending, and their
+   * later Adopt would apply to a file this pass had already rewritten.
+   *
+   * Read fresh each time rather than captured once. A pass runs for as long as its probes take,
+   * and in that time an edit can appear (so a snapshot from before would rewrite it) or be
+   * adopted (so a snapshot from before would skip a file that is now perfectly measurable, and
+   * nothing restarts the pass for the rest of the session).
+   */
+  const isPending = (file: string): boolean =>
+    store.getBundle().externalEdits.some((edit) => edit.path === `artifacts/${file}.json`);
+  /**
+   * The bytes the sidecar describes, or nothing (Codex round 7).
+   *
+   * Size and modification time proved only that nothing changed *during* the probe. They said
+   * nothing about whether the file was already something other than what the sidecar records --
+   * media replaced while the world was closed is not tracked as an external edit, so it would
+   * have been measured and the measurement stored against a hash describing different bytes.
+   *
+   * Hashing answers both questions with one check and no window between them: if the media still
+   * hashes to what the sidecar says, it is the file the sidecar is about, and it was that file
+   * when this read it. The cost is one extra read of a file the probe is reading anyway, once,
+   * for a migration that happens once.
+   */
+  const matchesSidecar = async (file: string, expected: string): Promise<boolean> => {
+    try {
+      const bytes = await readFile(toExtendedLength(join(store.dir, "artifacts", file)));
+      return `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}` === expected;
+    } catch {
+      return false;
+    }
+  };
+
+  let measured = 0;
+  let attempted = 0;
+  let batch: Array<{ file: string; info: MediaInfo; hash: string }> = [];
+  /** Set when something was passed over for reconciliation, so the pass is not counted as done. */
+  let deferred = false;
+
+  const flush = async (): Promise<void> => {
+    if (batch.length === 0) return;
+    const pendingBatch = batch;
+    batch = [];
+    const written = await store
+      .gateOp(async () => {
+        // Rechecked inside the gate: the callback can have queued behind another operation and
+        // shutdown can abort while it waits. The store refuses a *closed* world, but it is not
+        // closed until late in stop(), so without this the whole batch would still be written
+        // and rescanned -- making shutdown wait on work deliberately left out of its drain.
+        if (abandoned()) return [];
+        const files: CommitInput["files"] = [];
+        const names: string[] = [];
+        for (const { file, info, hash } of pendingBatch) {
+          // The media has to be the bytes the sidecar describes, not merely a file with its name.
+          if (!(await matchesSidecar(file, hash))) continue;
+          // Asked again inside the gate: an edit can arrive while a slow probe runs, and
+          // committing over it here would make its bytes the rescan's new baseline -- quietly
+          // resolving a staleness the app was about to raise.
+          if (isPending(file)) continue;
+          const raw = await readSidecarRaw(store, file);
+          if (raw === null) continue;
+          let current: ArtifactSidecar;
+          try {
+            const parsed = ArtifactSidecarSchema.safeParse(JSON.parse(raw));
+            if (!parsed.success) continue;
+            current = parsed.data;
+          } catch {
+            continue;
+          }
+          if (current.mediaInfo !== undefined) continue;
+          files.push({
+            path: `artifacts/${file}.json`,
+            action: "replace",
+            content: JSON.stringify({ ...current, mediaInfo: info }, null, 2) + NEWLINE,
+            baseHash: sha256(raw),
+          });
+          names.push(file);
+        }
+        if (files.length === 0) return [];
+        await store.commitUnserialised({ kind: "artifact-file", source: "form", files });
+        return names;
+      })
+      .catch(() => [] as string[]);
+    measured += written.length;
+    // Once per committed batch, not once per file (Codex round 4). The coordinator's callback
+    // ignores the name and broadcasts a whole-world snapshot, so eight measurements in one commit
+    // meant eight identical snapshots and eight state folds for a single change on disk.
+    if (written.length > 0) onMeasured?.(written);
+  };
+
+  for (const artifact of store.getBundle().artifacts) {
+    if (abandoned()) break;
+    if (artifact.kind !== "audio" && artifact.kind !== "video") continue;
+    if (artifact.mediaInfo !== undefined) continue;
+    /*
+     * The filename must be a filename (Codex round 2).
+     *
+     * `ArtifactSidecarSchema` accepts any non-empty string, so a hand-edited or imported sidecar
+     * naming `../../outside.mp3` resolves out of the world -- and this pass runs automatically on
+     * open, so merely opening such a world would read arbitrary local media and hold it open for
+     * the length of a probe. A sidecar that names something other than a file in `artifacts/` is
+     * the scan's problem to report, not this pass's to follow.
+     */
+    if (basename(artifact.file) !== artifact.file || artifact.file === "..") continue;
+    /*
+     * And the real path has to land inside artifacts/ too (Codex round 3).
+     *
+     * `basename` stops `../../outside.mp3`; it does nothing about `foo.mp3` being a symlink to
+     * somewhere else, which ffprobe follows. An imported world can carry one, and this pass runs
+     * on open, so the read would be unsolicited either way.
+     */
+    if (isPending(artifact.file)) {
+      // Skipped, not finished with: nothing revisits it and nothing restarts the pass, so the
+      // caller is told this world still has work rather than being marked as attempted.
+      deferred = true;
+      continue;
+    }
+    if (!(await insideArtifacts(store, artifact.file))) continue;
+    // Rechecked after that await: on a slow or network-backed world the containment check is
+    // itself I/O, and starting a fresh twenty-second probe against a world that has since closed
+    // is the one thing this pass is trying not to do.
+    if (abandoned()) break;
+    // Last check before a twenty-second probe: the containment lookup above is filesystem I/O
+    // and the world can close inside it.
+    if (abandoned()) break;
+    attempted += 1;
+    const info = await measureMediaInfo(store, `artifacts/${artifact.file}`, probe);
+    if (info !== null) batch.push({ file: artifact.file, info, hash: artifact.hash });
+    /*
+     * Flushed on attempts, not successes (Codex round 3): one readable track followed by a run of
+     * unreadable ones left its measurement sitting in memory through twenty seconds of timeout
+     * each, which is the opposite of publishing as they land.
+     */
+    if (batch.length >= BACKFILL_BATCH || attempted >= BACKFILL_BATCH) {
+      attempted = 0;
+      await flush();
+    }
+  }
+  await flush();
+  return { measured, deferred };
 }
