@@ -375,3 +375,43 @@ async function measureInto(
     return true;
   }).catch(() => false);
 }
+
+/**
+ * Measure media artifacts filed before anything measured them (issue 283).
+ *
+ * Every world that existed before filing learned to measure has audio and video with no
+ * `mediaInfo`, and nothing would ever fill it in: the field is written at filing time and those
+ * files were filed long ago. Left alone, those worlds keep paying a probe on every export click,
+ * and their Exports screen can only say the track is unmeasured — the client has no ffprobe to
+ * reach for.
+ *
+ * It runs once, on open, in the background. Not during the scan: a world's load is measured
+ * against a cold-scan budget, and a probe per media artifact inside it would blow that for a
+ * number nobody has asked for yet.
+ *
+ * Nothing waits for this. `signal` and `stillOpen` stop it between files, and `WorldStore.gateOp`
+ * refuses a closing world regardless — the hard invariant lives there now, so these are about not
+ * doing pointless work rather than about safety. A measurement lost to a shutdown or a world
+ * switch is simply taken again on the next open.
+ */
+export async function backfillMediaInfo(
+  store: WorldStore,
+  probe: MediaProbe,
+  opts: { signal?: AbortSignal; stillOpen?: () => boolean; onMeasured?: (file: string) => void } = {},
+): Promise<number> {
+  const { signal, stillOpen, onMeasured } = opts;
+  const abandoned = (): boolean => signal?.aborted === true || stillOpen?.() === false;
+  let measured = 0;
+  for (const artifact of store.getBundle().artifacts) {
+    if (abandoned()) break;
+    if (artifact.kind !== "audio" && artifact.kind !== "video") continue;
+    if (artifact.mediaInfo !== undefined) continue;
+    if (await measureInto(store, artifact.file, probe, abandoned)) {
+      measured += 1;
+      // Published per measurement, not per pass: a world with one readable track and three
+      // unreadable ones had its answer on disk immediately and on screen a minute later.
+      onMeasured?.(artifact.file);
+    }
+  }
+  return measured;
+}

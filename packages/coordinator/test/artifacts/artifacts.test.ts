@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { computeNeedsYou, type ClientState } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { candidateHash, resolveCandidate, storeBatch, verifyCandidates } from "../../src/artifacts/extraction.js";
-import { addLinks, ATTACHABLE_EXTENSIONS, fileArtifact, importFolder, kindForFile, pickable } from "../../src/artifacts/filing.js";
+import { addLinks, ATTACHABLE_EXTENSIONS, backfillMediaInfo, fileArtifact, importFolder, kindForFile, pickable } from "../../src/artifacts/filing.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -83,6 +83,121 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     });
     assert.equal(outcome.outcome, "filed");
     assert.equal(store.getBundle().artifacts.find((a) => a.file === "second-song.mp3")?.mediaInfo, undefined);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("measures media filed before anything measured it, once", async () => {
+    const { store } = await open();
+    try {
+      const song = await sourceFile("old-song.mp3", "filed before measuring existed");
+      await fileArtifact(store, { sourcePath: song });
+      // Derived, not hardcoded: the fixture world carries media of its own, and a count written
+      // in by hand breaks the moment somebody adds a sound to it.
+      const unmeasured = store
+        .getBundle()
+        .artifacts.filter((a) => (a.kind === "audio" || a.kind === "video") && a.mediaInfo === undefined).length;
+      assert.ok(unmeasured >= 1);
+      let calls = 0;
+      const probe = {
+        durationSec: async () => 30,
+        info: async () => {
+          calls += 1;
+          return { durationSec: 30.25, hasAudio: true };
+        },
+      };
+      assert.equal(await backfillMediaInfo(store, probe), unmeasured);
+      assert.deepEqual(store.getBundle().artifacts.find((a) => a.file === "old-song.mp3")?.mediaInfo, {
+        durationSec: 30.25,
+        hasAudio: true,
+      });
+      // Added, never re-taken: the bytes cannot have changed, and a second opinion would only be
+      // a way for two runs to disagree.
+      assert.equal(await backfillMediaInfo(store, probe), 0);
+      assert.equal(calls, unmeasured, "nothing was measured twice");
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("stops between files once its world is no longer the open one", async () => {
+    const { store } = await open();
+    try {
+      let probes = 0;
+      const measured = await backfillMediaInfo(
+        store,
+        {
+          durationSec: async () => 9,
+          info: async () => {
+            probes += 1;
+            return { durationSec: 9, hasAudio: true };
+          },
+        },
+        { stillOpen: () => false },
+      );
+      assert.equal(measured, 0);
+      assert.equal(probes, 0, "not even probed once the world stopped being the open one");
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("stops when its signal aborts, and abandons a measurement taken mid-flight", async () => {
+    // The shutdown case: the signal cannot interrupt a probe already running, so what matters is
+    // that the result it returns with is never written.
+    const { store } = await open();
+    try {
+      const song = await sourceFile("aborted.mp3", "measured just too late");
+      await fileArtifact(store, { sourcePath: song });
+      const abort = new AbortController();
+      const measured = await backfillMediaInfo(
+        store,
+        {
+          durationSec: async () => 5,
+          info: async () => {
+            abort.abort();
+            return { durationSec: 5, hasAudio: true };
+          },
+        },
+        { signal: abort.signal },
+      );
+      assert.equal(measured, 0);
+      assert.equal(store.getBundle().artifacts.find((a) => a.file === "aborted.mp3")?.mediaInfo, undefined);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("cannot write to a world that closed while it was probing", async () => {
+    // The store refuses the commit itself, so this holds even with no guard in the pass.
+    const { store } = await open();
+    const song = await sourceFile("closing.mp3", "the world shut mid-probe");
+    await fileArtifact(store, { sourcePath: song });
+    const measured = await backfillMediaInfo(store, {
+      durationSec: async () => 7,
+      info: async () => {
+        await store.close();
+        return { durationSec: 7, hasAudio: true };
+      },
+    });
+    assert.equal(measured, 0);
+  });
+
+  it("publishes each measurement as it lands rather than after the whole pass", async () => {
+    const { store } = await open();
+    try {
+      for (const name of ["one.mp3", "two.mp3"]) {
+        await fileArtifact(store, { sourcePath: await sourceFile(name, name) });
+      }
+      const landed: string[] = [];
+      const measured = await backfillMediaInfo(
+        store,
+        { durationSec: async () => 4, info: async () => ({ durationSec: 4, hasAudio: true }) },
+        { onMeasured: (file) => landed.push(file) },
+      );
+      assert.equal(landed.length, measured);
+      assert.ok(landed.includes("one.mp3") && landed.includes("two.mp3"));
     } finally {
       await store.close();
     }
