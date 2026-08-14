@@ -68,7 +68,6 @@ async function readSidecarRaw(store: WorldStore, file: string): Promise<string |
 export async function addLinks(store: WorldStore, artifact: ArtifactSidecar, links: string[]): Promise<ArtifactSidecar> {
   const merged = [...new Set([...artifact.links, ...links])];
   if (merged.length === artifact.links.length) return artifact;
-  const next = { ...artifact, links: merged };
   // Merged onto the sidecar as it is *now*, inside the gate (Codex round 3). Building the
   // replacement from the copy fetched before, while using the latest raw only as a base hash,
   // meant the write succeeded and silently dropped anything added meanwhile -- a measurement the
@@ -208,24 +207,20 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
   await store.gateOp(async () => {
     const { mkdir } = await import("node:fs/promises");
     await mkdir(toExtendedLength(join(store.dir, "artifacts")), { recursive: true });
-    const copied = toExtendedLength(join(store.dir, "artifacts", file));
-    await copyFile(toExtendedLength(input.sourcePath), copied);
-    /*
-     * Measured from the copy rather than the source, so what is recorded describes the bytes the
-     * world actually holds. A probe that cannot read the file leaves the field absent, which every
-     * reader already treats as "not measured" rather than as a measurement of nothing -- filing a
-     * file must not fail because a media tool is missing or does not recognise it.
-     */
-    if (kind === "audio" || kind === "video") {
-      // Through measureMediaInfo rather than probe.info directly (Codex round 3): `info` is the
-      // optional half of the contract, and a host offering only durationSec was being treated as
-      // no probe at all -- leaving media permanently unmeasured next to a duration it could have
-      // had. That helper also validates, so a malformed answer cannot become a stored fact.
-      const measured = await measureMediaInfo(store, `artifacts/${file}`, input.mediaProbe ?? null);
-      if (measured !== null) sidecar.mediaInfo = measured;
-    }
+    await copyFile(toExtendedLength(input.sourcePath), toExtendedLength(join(store.dir, "artifacts", file)));
     await writeSidecar(store, sidecar, null);
   });
+  /*
+   * Measured after the gate is released, never inside it (Codex round 4).
+   *
+   * A probe can take twenty seconds on a file it cannot make sense of. Held inside the world's
+   * serialisation envelope that blocks every other edit and every world switch, and inside the
+   * message it blocks shutdown past the fifteen seconds the desktop allows before it reports that
+   * Arke could not close safely. The artifact is filed either way; the measurement catches up.
+   */
+  if (kind === "audio" || kind === "video") {
+    await measureInto(store, file, input.mediaProbe ?? null);
+  }
   return { outcome: "filed", artifact: sidecar };
 }
 
@@ -310,16 +305,71 @@ export async function importFolder(
  * it is -- the bytes cannot have changed, so a second opinion about them would only be a way for
  * two runs of this to disagree.
  */
+/**
+ * Measure one artifact and record it, if it is not already recorded.
+ *
+ * Probing happens outside the world's gate and the write inside it, because a probe is slow and a
+ * commit must be serialised. The re-read inside the gate is what makes "never re-taken" true
+ * against what is on disk rather than against a bundle read before the probe began.
+ *
+ * Only a *full* measurement is stored (Codex round 4). `measureMediaInfo` answers a
+ * duration-only probe with `hasAudio: false`, which is the right conservative reading for a
+ * decision made in the moment and the wrong thing to write down: stored, it is indistinguishable
+ * from a measured silence, the artifact is never revisited, and spine export refuses a real audio
+ * track on a machine that could have measured it properly. A narrow probe therefore records
+ * nothing and leaves the question open for a host that can answer it.
+ */
+async function measureInto(
+  store: WorldStore,
+  file: string,
+  probe: MediaProbe | null,
+  abandoned: () => boolean = () => false,
+): Promise<boolean> {
+  if (!probe?.info) return false;
+  const info = await measureMediaInfo(store, `artifacts/${file}`, probe);
+  if (info === null) return false;
+  // Re-checked after the probe: the world can have closed during the very call that made this
+  // slow, and gateOp does not refuse work on a closed store -- it would commit without the lock.
+  if (abandoned()) return false;
+  return await store.gateOp(async () => {
+    if (abandoned()) return false;
+    const raw = await readSidecarRaw(store, file);
+    if (raw === null) return false;
+    try {
+      const current = JSON.parse(raw) as ArtifactSidecar;
+      if (current.mediaInfo !== undefined) return false;
+      await writeSidecar(store, { ...current, mediaInfo: info }, raw);
+      return true;
+    } catch {
+      // A sidecar that will not parse is a problem the scan already reports; measuring is not the
+      // pass that should fix it, and failing here would abandon every artifact after it.
+      return false;
+    }
+  });
+}
+
+/**
+ * Measure media artifacts filed before anything measured them (#283).
+ *
+ * Every world that existed before filing learned to measure has audio and video with no
+ * `mediaInfo`, and nothing would ever fill it in. Left alone those worlds keep paying a probe on
+ * every export click, and their Cut screen can never show a spine timeline at all, the client
+ * having no ffprobe to reach for.
+ *
+ * So it happens once, on open, in the background. Not during the scan: a world's load is measured
+ * against a cold-scan budget and a probe per media artifact inside it would blow that for a
+ * number nobody has asked for yet.
+ */
 export async function backfillMediaInfo(
   store: WorldStore,
   probe: MediaProbe,
   /**
    * `signal` stops the pass; `stillOpen` says whether this store is still the app's open world.
    *
-   * Both exist because this runs for as long as ffprobe takes and the user is not waiting for it
-   * (Codex round 3). Without the signal, a slow probe held the shutdown drain past the desktop's
-   * fifteen-second budget and the last window would not close. Without `stillOpen`, switching
-   * worlds mid-probe left this committing to a store whose lock had already been released.
+   * Both exist because this runs for as long as ffprobe takes and the user is not waiting for it.
+   * Without the signal a slow probe held the shutdown drain past the desktop's fifteen-second
+   * budget and the last window would not close. Without `stillOpen`, switching worlds mid-probe
+   * left this committing to a store whose lock had already been released.
    */
   opts: { signal?: AbortSignal; stillOpen?: () => boolean; onMeasured?: (file: string) => void } = {},
 ): Promise<number> {
@@ -330,42 +380,7 @@ export async function backfillMediaInfo(
     if (abandoned()) break;
     if (artifact.kind !== "audio" && artifact.kind !== "video") continue;
     if (artifact.mediaInfo !== undefined) continue;
-    /*
-     * Probe outside the envelope, commit inside it (Codex round 2).
-     *
-     * ffprobe can take seconds, and holding the world's serialisation gate across it would stall
-     * every edit the user makes meanwhile. The write is a different matter: writeSidecar goes
-     * through commitUnserialised, whose contract is that a caller has already taken the envelope.
-     * Committing outside it let a background measurement and a user's save read the same
-     * world.json and roll forward over each other -- a measurement nobody asked for silently
-     * winning against an edit somebody did.
-     *
-     * The sidecar is read again *inside* the gate, because the copy fetched before the probe is
-     * exactly as old as the probe took, and what it is compared against must be current.
-     */
-    const info = await measureMediaInfo(store, `artifacts/${artifact.file}`, probe);
-    if (info === null) continue;
-    // Re-checked after the probe, not merely before it: the world can have been closed during it,
-    // and gateOp does not refuse work on a closed store -- it would commit without the lock.
-    if (abandoned()) break;
-    const wrote = await store.gateOp(async () => {
-      if (abandoned()) return false;
-      const raw = await readSidecarRaw(store, artifact.file);
-      // Gone, or rewritten while the probe ran: either way this is not the moment to insist.
-      if (raw === null) return false;
-      try {
-        const current = JSON.parse(raw) as ArtifactSidecar;
-        // Somebody measured it first — filing, or an earlier pass. Never re-taken.
-        if (current.mediaInfo !== undefined) return false;
-        await writeSidecar(store, { ...current, mediaInfo: info }, raw);
-        return true;
-      } catch {
-        // A sidecar that will not parse is a problem the scan already reports; measuring is not
-        // the pass that should fix it, and failing here would abandon every artifact after it.
-        return false;
-      }
-    });
-    if (wrote) {
+    if (await measureInto(store, artifact.file, probe, abandoned)) {
       measured += 1;
       onMeasured?.(artifact.file);
     }

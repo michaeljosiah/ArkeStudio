@@ -141,15 +141,16 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     }
   });
 
-  it("measures through a probe that only reports duration", async () => {
-    // `info` is the optional half of the MediaProbe contract; a host offering only durationSec
-    // was being treated as no probe at all.
+  it("records nothing from a probe that cannot say whether there is audio", async () => {
+    // measureMediaInfo answers a duration-only probe with hasAudio:false — the right conservative
+    // reading in the moment, and the wrong thing to write down. Stored, it is indistinguishable
+    // from a measured silence, the artifact is never revisited, and spine export would refuse a
+    // real audio track on a machine that could have measured it properly.
     const { store } = await open();
     try {
       const song = await sourceFile("duration-only.mp3", "measured the shallow way");
       await fileArtifact(store, { sourcePath: song, mediaProbe: { durationSec: async () => 41 } });
-      const filed = store.getBundle().artifacts.find((a) => a.file === "duration-only.mp3");
-      assert.equal(filed?.mediaInfo?.durationSec, 41);
+      assert.equal(store.getBundle().artifacts.find((a) => a.file === "duration-only.mp3")?.mediaInfo, undefined);
     } finally {
       await store.close();
     }
