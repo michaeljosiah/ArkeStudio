@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { copyFile, readdir, readFile, stat, statfs } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
-import { ArtifactSidecarSchema, ulid, type ArtifactKind, type ArtifactSidecar } from "@arke-studio/contracts";
+import { ArtifactSidecarSchema, ulid, type ArtifactKind, type ArtifactSidecar, type MediaInfo } from "@arke-studio/contracts";
 import { measureMediaInfo, type MediaProbe } from "../media/probe.js";
+import type { CommitInput } from "../world/commit.js";
 import { toExtendedLength } from "../world/paths.js";
 import { slugify } from "../world/slug.js";
 import { sha256 } from "../world/text-files.js";
@@ -13,6 +14,8 @@ import type { WorldStore } from "../world/store.js";
  * sidecar per artifact (D6); original names kept, slugified (D7). Every sidecar write goes
  * through the world's commit primitive; the media copy rides the suppression envelope.
  */
+
+const NEWLINE = String.fromCharCode(10);
 
 const KIND_BY_EXT: Record<string, ArtifactKind> = {
   ".wav": "audio", ".mp3": "audio", ".flac": "audio", ".ogg": "audio", ".m4a": "audio",
@@ -401,17 +404,60 @@ export async function backfillMediaInfo(
 ): Promise<number> {
   const { signal, stillOpen, onMeasured } = opts;
   const abandoned = (): boolean => signal?.aborted === true || stillOpen?.() === false;
-  let measured = 0;
+  if (!probe.info) return 0;
+
+  /*
+   * Probe everything first, write once (Codex round 1).
+   *
+   * Measuring file by file cost two full world rescans each: the commit rescans the paths it
+   * touched, and `gateOp` rescans everything in its `finally`. A world with forty legacy tracks
+   * therefore ran forty whole-world scans under the serialisation gate, blocking ordinary edits
+   * repeatedly -- which is not what "in the background" is supposed to mean. Probing holds no
+   * gate at all, so the expensive part stays outside, and the writes land as one commit.
+   */
+  const measured: Array<{ file: string; info: MediaInfo }> = [];
   for (const artifact of store.getBundle().artifacts) {
     if (abandoned()) break;
     if (artifact.kind !== "audio" && artifact.kind !== "video") continue;
     if (artifact.mediaInfo !== undefined) continue;
-    if (await measureInto(store, artifact.file, probe, abandoned)) {
-      measured += 1;
-      // Published per measurement, not per pass: a world with one readable track and three
-      // unreadable ones had its answer on disk immediately and on screen a minute later.
-      onMeasured?.(artifact.file);
-    }
+    const info = await measureMediaInfo(store, `artifacts/${artifact.file}`, probe);
+    if (info !== null) measured.push({ file: artifact.file, info });
   }
-  return measured;
+  if (measured.length === 0 || abandoned()) return 0;
+
+  const written = await store
+    .gateOp(async () => {
+      const files: CommitInput["files"] = [];
+      const names: string[] = [];
+      for (const { file, info } of measured) {
+        const raw = await readSidecarRaw(store, file);
+        if (raw === null) continue;
+        let current: ArtifactSidecar;
+        try {
+          // Parsed, not cast: a sidecar edited to valid JSON of the wrong shape while the probe
+          // ran would otherwise be spread into a replacement and written back.
+          const parsed = ArtifactSidecarSchema.safeParse(JSON.parse(raw));
+          if (!parsed.success) continue;
+          current = parsed.data;
+        } catch {
+          continue;
+        }
+        // Somebody measured it first — filing, or an earlier pass. Never re-taken.
+        if (current.mediaInfo !== undefined) continue;
+        files.push({
+          path: `artifacts/${file}.json`,
+          action: "replace",
+          content: JSON.stringify({ ...current, mediaInfo: info }, null, 2) + NEWLINE,
+          baseHash: sha256(raw),
+        });
+        names.push(file);
+      }
+      if (files.length === 0) return [];
+      await store.commitUnserialised({ kind: "artifact-file", source: "form", files });
+      return names;
+    })
+    .catch(() => [] as string[]);
+
+  for (const file of written) onMeasured?.(file);
+  return written.length;
 }

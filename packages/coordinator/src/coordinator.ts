@@ -481,6 +481,8 @@ export class Coordinator {
   private backfillAbort: AbortController | null = null;
   /** The store whose backfill is running, so reopening the same world joins it rather than racing it. */
   private backfillStore: WorldStore | null = null;
+  /** The pass in flight, so an archive can wait for the probe holding a file open. */
+  private backfillRunning: Promise<unknown> | null = null;
 
   constructor(private readonly opts: CoordinatorOptions) {
     this.secrets = opts.secretRegistry ?? new SecretRegistry();
@@ -870,7 +872,11 @@ export class Coordinator {
      * on screen at this moment is waiting for the number. A world opened repeatedly only pays this
      * on the first open that finds something unmeasured, because the pass writes what it learns.
      */
-    if (store && this.opts.mediaProbe && !this.stopping && this.backfillStore !== store) {
+    // `this.stillOpen(store)` as well as identity: two overlapping open-world messages can leave
+    // the first holding a store the second has already replaced, and an unconditional abort here
+    // would cancel the current world's pass and start one against a store that is already closed
+    // (Codex round 1).
+    if (store && this.opts.mediaProbe && !this.stopping && this.stillOpen(store) && this.backfillStore !== store) {
       /*
        * One pass per store, and reopening the same world joins the one already running.
        *
@@ -897,7 +903,7 @@ export class Coordinator {
    * that world begins closing; a measurement lost to a shutdown is taken again on the next open.
    */
   private startBackfill(store: WorldStore, probe: MediaProbe, signal: AbortSignal): void {
-    void backfillMediaInfo(store, probe, {
+    this.backfillRunning = backfillMediaInfo(store, probe, {
       signal,
       stillOpen: () => this.stillOpen(store),
       onMeasured: () => this.refreshIfStillOpen(store),
@@ -908,6 +914,21 @@ export class Coordinator {
       .finally(() => {
         if (this.backfillStore === store) this.backfillStore = null;
       });
+  }
+
+  /**
+   * Stop measuring and wait for the probe already in flight.
+   *
+   * Archiving renames the world directory, and on Windows an ffprobe still holding an artifact
+   * open makes that rename fail (Codex round 1). Aborting alone does not help -- `MediaProbe`
+   * carries no signal, so a probe in progress runs to its own timeout. Waiting is acceptable here
+   * in a way it is not at shutdown: archiving is an explicit action a user is watching, and the
+   * cost is bounded by one probe rather than by the whole pass.
+   */
+  private async settleBackfill(): Promise<void> {
+    this.backfillAbort?.abort();
+    await this.backfillRunning?.catch(() => {});
+    this.backfillRunning = null;
   }
 
   /**
@@ -1332,6 +1353,9 @@ export class Coordinator {
         const TERMINAL_JOB_STATUS = new Set(["succeeded", "failed", "cancelled"]);
         const archive = this.opts.provider.archiveWorld?.bind(this.opts.provider);
         if (!archive) return;
+        // Before the directory is renamed: a probe still holding an artifact open makes that
+        // rename fail on Windows, and the provider has already cleared its open store by then.
+        await this.settleBackfill();
         const summary = this.readModel.getState().worlds.find((w) => w.worldId === msg.worldId);
         const refuse = (reason: string) =>
           this.emit({
