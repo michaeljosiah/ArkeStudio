@@ -139,6 +139,25 @@ describe("spine export", () => {
     assert.deepEqual(args.slice(args.indexOf("-ss"), args.indexOf("-ss") + 4), ["-ss", "0", "-to", "1.02"]);
   });
 
+  it("places kept audio at the same quantised start as its picture", () => {
+    // A preceding 0.02s black collapses at 24fps, so the picture starts at 0; delaying the audio
+    // to the unrounded 0.02 would sit them half a frame apart for no reason anybody chose.
+    const plan = buildSpineExportPlan(
+      cutOf(
+        [
+          { kind: "black", startSec: 0, endSec: 0.02, label: "" },
+          { ...CLIP, startSec: 0.02, endSec: 4, hasAudio: true, clipAudio: { mode: "keep-diegetic" as const, gainDb: -9 } },
+        ],
+        4,
+      ),
+      "review-cut",
+      "a/m.mp3",
+    );
+    const clip = plan.items.find((i) => i.type === "clip")!;
+    assert.equal(clip.type === "clip" ? clip.audio?.atSec : -1, 0);
+    assert.match(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4")), /adelay=0:all=1/);
+  });
+
   it("renders a review cut with its holes and refuses a master with the same holes", () => {
     const holed = cutOf(
       [CLIP, { kind: "slate", startSec: 4, endSec: 10, label: "SHOT 2 - 6.0s", shotId: "sh_2" }],

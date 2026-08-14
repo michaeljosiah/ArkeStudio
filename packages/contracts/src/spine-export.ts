@@ -87,14 +87,15 @@ export function buildSpineExportPlan(cut: DerivedSpineCut, preset: ExportPreset,
   const grid = (sec: number): number => Math.round(sec * fps) / fps;
   const items: SpineExportItem[] = [];
   for (const segment of cut.segments) {
-    const durationSec = grid(segment.endSec) - grid(segment.startSec);
+    const startSec = grid(segment.startSec);
+    const durationSec = grid(segment.endSec) - startSec;
     if (durationSec <= 0) continue;
-    items.push(itemFor(segment, durationSec));
+    items.push(itemFor(segment, startSec, durationSec));
   }
   return { preset, trackPath, items, totalSec: grid(cut.trackDurationSec) };
 }
 
-function itemFor(segment: SpineCutSegment, durationSec: number): SpineExportItem {
+function itemFor(segment: SpineCutSegment, startSec: number, durationSec: number): SpineExportItem {
   if (segment.kind === "black") return { type: "black", durationSec };
   if (segment.kind === "slate") return { type: "slate", label: segment.label, durationSec };
   const media = segment.media!;
@@ -118,7 +119,10 @@ function itemFor(segment: SpineCutSegment, durationSec: number): SpineExportItem
      */
     audio:
       segment.clipAudio?.mode === "keep-diegetic" && segment.hasAudio === true
-        ? { gainDb: segment.clipAudio.gainDb, atSec: segment.startSec }
+        ? // The quantised start, the same one the picture was placed at: delaying the audio to
+          // the unrounded boundary while the picture sits on the grid puts them up to half a
+          // frame apart for no reason anybody chose (Codex round 4).
+          { gainDb: segment.clipAudio.gainDb, atSec: startSec }
         : null,
   };
 }

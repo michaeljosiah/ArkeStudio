@@ -20,6 +20,7 @@ import {
   buildSpineFfmpegArgs,
   deriveSpineCut,
   spineExportRefusals,
+  ulid,
   CutFileSchema,
   deriveCut,
   designatedCompilation,
@@ -474,7 +475,7 @@ export class Coordinator {
   private readonly voiceService: VoiceService | null;
   /** SPEC-013: exports in flight, cancellable by id (R-21). */
   private readonly exports = new Map<string, ExportHandle>();
-  /** Productions whose export is being set up or is already running — one at a time. */
+  /** `worldId:productionId` whose export is being set up or is already running — one at a time. */
   private readonly exportsInFlight = new Set<string>();
 
   constructor(private readonly opts: CoordinatorOptions) {
@@ -2858,8 +2859,12 @@ export class Coordinator {
          * cancel and every further click starts another probe, each of which goes on to launch
          * its own encode. The claim is taken before the first await and released on every exit.
          */
-        if (this.exportsInFlight.has(msg.productionId)) return;
-        this.exportsInFlight.add(msg.productionId);
+        // Keyed by world too: a production id is a slug inside its world, not a global name, so
+        // two worlds with the same directory slug would have shared one lock and the second
+        // world's export would have been dropped as a duplicate (Codex round 4).
+        const exportKey = `${msg.worldId}:${msg.productionId}`;
+        if (this.exportsInFlight.has(exportKey)) return;
+        this.exportsInFlight.add(exportKey);
         let started = false;
         try {
         const runner = this.opts.ffmpeg;
@@ -2900,28 +2905,39 @@ export class Coordinator {
          * exactly as it was for everything else, which is most productions.
          */
         const spine = production.spine;
-        const trackFile = spine
-          ? store.getBundle().artifacts.find((a) => a.id === spine.trackArtifactId)?.file
+        const trackArtifact = spine
+          ? store.getBundle().artifacts.find((a) => a.id === spine.trackArtifactId)
           : undefined;
-        // Extended-length like every other path this repository hands to a tool: a world nested
-        // past 260 characters on Windows would otherwise report its master as unreadable and
-        // refuse the export for where it lives (Codex round 2).
+        const trackFile = trackArtifact?.file;
+
+        /*
+         * The measurement recorded when the track was assigned, before asking ffprobe again.
+         *
+         * Artifacts are immutable and travel with the world, so their mediaInfo is as true on the
+         * machine that opens the folder as on the one that filed it. Requiring a probe anyway
+         * refused every spine export on a machine with ffmpeg but no ffprobe -- a world that
+         * already knows how long its song is, declining to export because it could not re-measure
+         * something that cannot have changed (Codex round 4).
+         */
         const trackPath =
           trackFile !== undefined ? toExtendedLength(join(store.dir, "artifacts", fromPortable(trackFile))) : null;
-        // The whole measurement rather than the duration alone: a master with no audio stream
-        // measures a perfectly good length and then fails the encode on a missing input, which is
-        // a refusal that belongs here in words rather than in ffmpeg's (Codex round 3).
-        const trackInfo =
-          trackPath !== null && this.opts.mediaProbe?.info
+        const probed =
+          trackArtifact?.mediaInfo === undefined && trackPath !== null && this.opts.mediaProbe?.info
             ? await this.opts.mediaProbe.info(trackPath)
             : null;
+        const trackInfo = trackArtifact?.mediaInfo ?? probed;
         const trackDurationSec =
           trackInfo?.durationSec ??
           (trackPath !== null && this.opts.mediaProbe && !this.opts.mediaProbe.info
             ? await this.opts.mediaProbe.durationSec(trackPath)
             : null);
+
+        // A refusal is an attempt with an outcome, so it gets an id of its own. Reporting every
+        // one as "ex_none" let a second production's failure overwrite the first in the client's
+        // export map, and the first screen then showed no failed attempt at all (Codex round 4).
+        const attemptId = `ex_${ulid()}`;
         if (spine && trackInfo !== null && !trackInfo.hasAudio) {
-          emitProgress("ex_none", "failed", 0, null, "the master track has no audio stream — assign a track that does");
+          emitProgress(attemptId, "failed", 0, null, "the master track has no audio stream — assign a track that does");
           return;
         }
 
@@ -2931,7 +2947,7 @@ export class Coordinator {
           const refusal = spineExportRefusals(spineCut, msg.preset);
           if (refusal) {
             // Said before the encode rather than after somebody has sent the file on.
-            emitProgress("ex_none", "failed", 0, null, `cut is not ready for ${msg.preset}: ${refusal.detail}`);
+            emitProgress(attemptId, "failed", 0, null, `cut is not ready for ${msg.preset}: ${refusal.detail}`);
             return;
           }
           const spinePlan = buildSpineExportPlan(spineCut, msg.preset, `artifacts/${trackFile}`);
@@ -2940,7 +2956,7 @@ export class Coordinator {
           if (spine && trackDurationSec === null) {
             // Falling through silently would export a spine production as though it had none.
             emitProgress(
-              "ex_none",
+              attemptId,
               "failed",
               0,
               null,
@@ -2969,13 +2985,13 @@ export class Coordinator {
           this.exports.delete(handle.id);
           // Released when the encode ends, not when this handler returns: the claim covers the
           // running export too, or a second click during it launches a duplicate.
-          this.exportsInFlight.delete(msg.productionId);
+          this.exportsInFlight.delete(exportKey);
           if (result.status === "done") emitProgress(handle.id, "done", 100, result.output, null);
           else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
           else emitProgress(handle.id, "failed", 0, null, result.error);
         }));
         } finally {
-          if (!started) this.exportsInFlight.delete(msg.productionId);
+          if (!started) this.exportsInFlight.delete(exportKey);
         }
         return;
       }
