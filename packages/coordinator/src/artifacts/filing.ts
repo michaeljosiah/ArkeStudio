@@ -438,21 +438,27 @@ export async function backfillMediaInfo(
    * properties -- few rescans, and progress that survives being interrupted.
    */
   /*
-   * Sidecars a person has been asked to reconcile are left alone (Codex round 4).
+   * Sidecars a person has been asked to reconcile are left alone (Codex rounds 4 and 5).
    *
    * A sidecar edited while the world was closed appears in `externalEdits` for explicit adoption.
    * Rewriting it here -- normalising its bytes and recording an app-owned change -- would adopt
    * part of somebody's edit on their behalf while the screen still shows it as pending, and their
    * later Adopt would apply to a file this pass had already rewritten.
+   *
+   * Read fresh each time rather than captured once. A pass runs for as long as its probes take,
+   * and in that time an edit can appear (so a snapshot from before would rewrite it) or be
+   * adopted (so a snapshot from before would skip a file that is now perfectly measurable, and
+   * nothing restarts the pass for the rest of the session).
    */
-  const pending = new Set(store.getBundle().externalEdits.map((edit) => edit.path));
+  const isPending = (file: string): boolean =>
+    store.getBundle().externalEdits.some((edit) => edit.path === `artifacts/${file}.json`);
   let measured = 0;
   let attempted = 0;
   let batch: Array<{ file: string; info: MediaInfo }> = [];
 
   const flush = async (): Promise<void> => {
     if (batch.length === 0) return;
-    const pending = batch;
+    const pendingBatch = batch;
     batch = [];
     const written = await store
       .gateOp(async () => {
@@ -463,7 +469,11 @@ export async function backfillMediaInfo(
         if (abandoned()) return [];
         const files: CommitInput["files"] = [];
         const names: string[] = [];
-        for (const { file, info } of pending) {
+        for (const { file, info } of pendingBatch) {
+          // Asked again inside the gate: an edit can arrive while a slow probe runs, and
+          // committing over it here would make its bytes the rescan's new baseline -- quietly
+          // resolving a staleness the app was about to raise.
+          if (isPending(file)) continue;
           const raw = await readSidecarRaw(store, file);
           if (raw === null) continue;
           let current: ArtifactSidecar;
@@ -516,7 +526,7 @@ export async function backfillMediaInfo(
      * somewhere else, which ffprobe follows. An imported world can carry one, and this pass runs
      * on open, so the read would be unsolicited either way.
      */
-    if (pending.has(`artifacts/${artifact.file}.json`)) continue;
+    if (isPending(artifact.file)) continue;
     if (!(await insideArtifacts(store, artifact.file))) continue;
     // Rechecked after that await: on a slow or network-backed world the containment check is
     // itself I/O, and starting a fresh twenty-second probe against a world that has since closed
