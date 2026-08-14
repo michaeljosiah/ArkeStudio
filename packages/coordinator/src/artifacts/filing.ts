@@ -122,6 +122,15 @@ export interface FileInput {
    * bytes are copied in.
    */
   mediaProbe?: MediaProbe;
+  /**
+   * Says this filing's world is no longer the one to commit to.
+   *
+   * The measurement happens after the gate is released and can outlive the world it belongs to:
+   * switching worlds mid-probe closes the store, and gateOp does not refuse work on a closed
+   * store -- it commits without the lock (Codex round 5). The backfill has carried this guard
+   * since round 3; filing needed the same one and was left with a predicate that never fired.
+   */
+  abandoned?: () => boolean;
   links?: string[];
   importedFrom?: string;
   /** The user has seen the size (R-6). Without it, large files come back needs-consent. */
@@ -219,7 +228,7 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
    * Arke could not close safely. The artifact is filed either way; the measurement catches up.
    */
   if (kind === "audio" || kind === "video") {
-    await measureInto(store, file, input.mediaProbe ?? null);
+    await measureInto(store, file, input.mediaProbe ?? null, input.abandoned);
   }
   return { outcome: "filed", artifact: sidecar };
 }
@@ -251,6 +260,7 @@ export async function importFolder(
   // Filing learned to measure and this path did not, which would have left a whole import
   // unmeasured for no reason a user could see or name.
   mediaProbe?: MediaProbe,
+  abandoned?: () => boolean,
 ): Promise<ImportReport> {
   const report: ImportReport = { filed: [], deduplicated: [], excluded: [], needsConsent: [] };
   const walk = async (dir: string, rel: string): Promise<void> => {
@@ -275,6 +285,7 @@ export async function importFolder(
       }
       const outcome = await fileArtifact(store, {
         ...(mediaProbe !== undefined ? { mediaProbe } : {}),
+        ...(abandoned !== undefined ? { abandoned } : {}),
         sourcePath: join(dir, name),
         importedFrom: rel || ".",
       });
@@ -382,6 +393,8 @@ export async function backfillMediaInfo(
     if (artifact.mediaInfo !== undefined) continue;
     if (await measureInto(store, artifact.file, probe, abandoned)) {
       measured += 1;
+      // Per measurement, not per pass (Codex round 5): a world with one readable track and three
+      // unreadable ones had its answer on disk immediately and on screen a minute later.
       onMeasured?.(artifact.file);
     }
   }

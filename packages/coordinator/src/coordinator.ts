@@ -881,22 +881,29 @@ export class Coordinator {
       this.backfillAbort?.abort();
       const abort = new AbortController();
       this.backfillAbort = abort;
-      this.trackBackground(
-        backfillMediaInfo(store, probe, {
-          signal: abort.signal,
-          stillOpen: () => this.stillOpen(store),
-        })
-          .then((measured) => {
-            // Against the store this pass actually measured, never by world id (Codex round 2).
-            // refreshWorldSnapshot calls loadWorld, so a probe still running when the user opens
-            // another world would have closed the world they just chose and reopened the old one
-            // — a background measurement changing which world somebody is looking at.
-            if (measured > 0) this.refreshIfStillOpen(store);
-          })
-          .catch(() => {
-            // A world that cannot be measured is a world that works exactly as it did before.
-          }),
-      );
+      /*
+       * Deliberately NOT tracked as background work (Codex round 5).
+       *
+       * trackBackground puts a promise in the shutdown drain, and aborting the signal does not
+       * interrupt an ffprobe already in flight -- the signal is only read between files and
+       * before the commit, because MediaProbe has no way to carry one. So a slow probe went on
+       * holding the drain past the desktop's fifteen-second deadline even with cancellation
+       * "wired up", and the last window still would not close.
+       *
+       * The right answer is not to make this cancellable enough to be worth waiting for. It is
+       * that nothing should ever wait for it: this is optional migration work, its commits are
+       * already refused once the signal is aborted or the world is no longer open, and a
+       * measurement lost to a shutdown is simply taken again on the next open.
+       */
+      void backfillMediaInfo(store, probe, {
+        signal: abort.signal,
+        stillOpen: () => this.stillOpen(store),
+        // Published as each one lands: a world with one readable track and three unreadable ones
+        // had its answer on disk immediately and on screen a minute later.
+        onMeasured: () => this.refreshIfStillOpen(store),
+      }).catch(() => {
+        // A world that cannot be measured is a world that works exactly as it did before.
+      });
     }
   }
 
@@ -3200,7 +3207,9 @@ export class Coordinator {
       case "import-folder": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        const report = await importFolder(store, msg.sourcePath, this.opts.mediaProbe).catch(() => null);
+        const report = await importFolder(store, msg.sourcePath, this.opts.mediaProbe, () => !this.stillOpen(store) || this.stopping).catch(
+          () => null,
+        );
         if (report) {
           this.emit({ at: new Date().toISOString(), type: "import.report", worldId: msg.worldId, ...report });
           await this.refreshWorldSnapshot(msg.worldId);
@@ -4695,6 +4704,8 @@ export class Coordinator {
       sourcePath,
       // Measured once, at the moment the bytes land, rather than by every reader afterwards (#283).
       ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
+      // The measurement outlives the gate, so it must not outlive the world it belongs to.
+      abandoned: () => !this.stillOpen(store) || this.stopping,
       ...opts,
     }).catch((err) => ({
       outcome: "refused" as const,

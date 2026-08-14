@@ -141,6 +141,35 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     }
   });
 
+  it("does not commit a measurement to a world that closed while it was probing", async () => {
+    // The case five rounds kept finding one guard at a time: the probe outlives the gate, and
+    // gateOp does not refuse work on a closed store — it commits without the world's lock.
+    // Written as a test rather than a sixth guard, so the next path to forget it fails here.
+    const { store } = await open();
+    try {
+      const song = await sourceFile("switched-away.mp3", "the world moved on mid-probe");
+      let closedDuringProbe = false;
+      await fileArtifact(store, {
+        sourcePath: song,
+        mediaProbe: {
+          durationSec: async () => 3,
+          info: async () => {
+            // The world switch happens *during* the probe, which is the whole point.
+            closedDuringProbe = true;
+            return { durationSec: 3, hasAudio: true };
+          },
+        },
+        abandoned: () => closedDuringProbe,
+      });
+      assert.ok(closedDuringProbe, "the probe ran");
+      const filed = store.getBundle().artifacts.find((a) => a.file === "switched-away.mp3");
+      assert.ok(filed, "the artifact is still filed — only the measurement is abandoned");
+      assert.equal(filed?.mediaInfo, undefined, "no measurement committed after the world moved on");
+    } finally {
+      await store.close();
+    }
+  });
+
   it("records nothing from a probe that cannot say whether there is audio", async () => {
     // measureMediaInfo answers a duration-only probe with hasAudio:false — the right conservative
     // reading in the moment, and the wrong thing to write down. Stored, it is indistinguishable
