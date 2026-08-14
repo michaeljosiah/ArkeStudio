@@ -2925,17 +2925,32 @@ export class Coordinator {
           trackArtifact?.mediaInfo === undefined && trackPath !== null && this.opts.mediaProbe?.info
             ? await this.opts.mediaProbe.info(trackPath)
             : null;
+        /*
+         * A spine export takes the whole measurement or none of it (Codex round 5).
+         *
+         * The duration-only fallback that used to sit here supplied a length while leaving audio
+         * presence unknown, which walked straight past the silent-master guard below and put the
+         * missing stream back in front of ffmpeg -- reintroducing, one round later, exactly the
+         * state the previous round had refused. A length is not a measurement when what the graph
+         * needs to know is whether there is a track to mix.
+         */
         const trackInfo = trackArtifact?.mediaInfo ?? probed;
-        const trackDurationSec =
-          trackInfo?.durationSec ??
-          (trackPath !== null && this.opts.mediaProbe && !this.opts.mediaProbe.info
-            ? await this.opts.mediaProbe.durationSec(trackPath)
-            : null);
+        const trackDurationSec = trackInfo?.durationSec ?? null;
 
         // A refusal is an attempt with an outcome, so it gets an id of its own. Reporting every
         // one as "ex_none" let a second production's failure overwrite the first in the client's
         // export map, and the first screen then showed no failed attempt at all (Codex round 4).
         const attemptId = `ex_${ulid()}`;
+        if (spine && trackFile !== undefined && trackInfo === null) {
+          emitProgress(
+            attemptId,
+            "failed",
+            0,
+            null,
+            "export needs the master track measured — no stored measurement and ffprobe could not make one (SPEC-016)",
+          );
+          return;
+        }
         if (spine && trackInfo !== null && !trackInfo.hasAudio) {
           emitProgress(attemptId, "failed", 0, null, "the master track has no audio stream — assign a track that does");
           return;
