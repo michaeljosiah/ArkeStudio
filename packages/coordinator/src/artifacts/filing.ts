@@ -305,35 +305,23 @@ export async function importFolder(
 }
 
 /**
- * Measure media artifacts filed before anything measured them (#283).
- *
- * Every world that existed before filing learned to measure has audio and video with no
- * `mediaInfo`, and nothing would ever fill it in: the field is written at filing time and those
- * files were filed long ago. Left alone, those worlds keep paying a probe on every export click
- * and their Cut screen can never show a spine timeline at all, because the client has no ffprobe
- * to reach for.
- *
- * So it happens once, on open, in the background. Not during the scan: a world's load is measured
- * against a cold-scan budget and spawning a probe per media artifact inside it would blow that for
- * a number nobody has asked for yet.
- *
- * A measurement is added, never corrected. If a sidecar already carries one it is left exactly as
- * it is -- the bytes cannot have changed, so a second opinion about them would only be a way for
- * two runs of this to disagree.
- */
-/**
  * Measure one artifact and record it, if it is not already recorded.
  *
- * Probing happens outside the world's gate and the write inside it, because a probe is slow and a
- * commit must be serialised. The re-read inside the gate is what makes "never re-taken" true
- * against what is on disk rather than against a bundle read before the probe began.
+ * Probing happens outside the world's gate and the write inside it. A probe can take twenty
+ * seconds on a file it cannot make sense of, and holding the serialisation envelope across that
+ * blocks every other edit, every world switch, and shutdown itself. The re-read inside the gate
+ * is what makes "recorded once" true against what is on disk rather than against a copy fetched
+ * before the probe began.
  *
- * Only a *full* measurement is stored (Codex round 4). `measureMediaInfo` answers a
- * duration-only probe with `hasAudio: false`, which is the right conservative reading for a
- * decision made in the moment and the wrong thing to write down: stored, it is indistinguishable
- * from a measured silence, the artifact is never revisited, and spine export refuses a real audio
- * track on a machine that could have measured it properly. A narrow probe therefore records
- * nothing and leaves the question open for a host that can answer it.
+ * `abandoned` is not optional in practice: the measurement outlives the gate, so it can outlive
+ * the world it belongs to. Switching worlds mid-probe closes the store, and gateOp does not
+ * refuse work on a closed one -- it commits without the world's lock, and reopening that world
+ * leaves two stores writing one journal.
+ *
+ * Only a full measurement is stored. `measureMediaInfo` answers a duration-only probe with
+ * `hasAudio: false`, which is the right conservative reading for a decision made in the moment
+ * and the wrong thing to write down: stored, it cannot be told from a measured silence, and spine
+ * export would refuse a real audio track on a machine that could have measured it properly.
  */
 async function measureInto(
   store: WorldStore,
@@ -344,70 +332,18 @@ async function measureInto(
   if (!probe?.info) return false;
   const info = await measureMediaInfo(store, `artifacts/${file}`, probe);
   if (info === null) return false;
-  // Re-checked after the probe: the world can have closed during the very call that made this
-  // slow, and gateOp does not refuse work on a closed store -- it would commit without the lock.
+  // Re-checked after the probe: the world can have closed during the very call that made this slow.
   if (abandoned()) return false;
   return await store.gateOp(async () => {
     if (abandoned()) return false;
     const raw = await readSidecarRaw(store, file);
     if (raw === null) return false;
-    try {
-      // Parsed, not cast (Codex round 6). A sidecar edited to valid JSON but invalid shape while
-      // the probe ran would otherwise be spread into a replacement and written back -- `{}` would
-      // reduce the file to nothing but the measurement. The scanner reports malformed sidecars
-      // without rewriting them, and this pass has no better claim to overwrite one.
-      const parsed = ArtifactSidecarSchema.safeParse(JSON.parse(raw));
-      if (!parsed.success) return false;
-      const current = parsed.data;
-      if (current.mediaInfo !== undefined) return false;
-      await writeSidecar(store, { ...current, mediaInfo: info }, raw);
-      return true;
-    } catch {
-      // A sidecar that will not parse is a problem the scan already reports; measuring is not the
-      // pass that should fix it, and failing here would abandon every artifact after it.
-      return false;
-    }
-  });
-}
-
-/**
- * Measure media artifacts filed before anything measured them (#283).
- *
- * Every world that existed before filing learned to measure has audio and video with no
- * `mediaInfo`, and nothing would ever fill it in. Left alone those worlds keep paying a probe on
- * every export click, and their Cut screen can never show a spine timeline at all, the client
- * having no ffprobe to reach for.
- *
- * So it happens once, on open, in the background. Not during the scan: a world's load is measured
- * against a cold-scan budget and a probe per media artifact inside it would blow that for a
- * number nobody has asked for yet.
- */
-export async function backfillMediaInfo(
-  store: WorldStore,
-  probe: MediaProbe,
-  /**
-   * `signal` stops the pass; `stillOpen` says whether this store is still the app's open world.
-   *
-   * Both exist because this runs for as long as ffprobe takes and the user is not waiting for it.
-   * Without the signal a slow probe held the shutdown drain past the desktop's fifteen-second
-   * budget and the last window would not close. Without `stillOpen`, switching worlds mid-probe
-   * left this committing to a store whose lock had already been released.
-   */
-  opts: { signal?: AbortSignal; stillOpen?: () => boolean; onMeasured?: (file: string) => void } = {},
-): Promise<number> {
-  const { signal, stillOpen, onMeasured } = opts;
-  const abandoned = (): boolean => signal?.aborted === true || stillOpen?.() === false;
-  let measured = 0;
-  for (const artifact of store.getBundle().artifacts) {
-    if (abandoned()) break;
-    if (artifact.kind !== "audio" && artifact.kind !== "video") continue;
-    if (artifact.mediaInfo !== undefined) continue;
-    if (await measureInto(store, artifact.file, probe, abandoned)) {
-      measured += 1;
-      // Per measurement, not per pass (Codex round 5): a world with one readable track and three
-      // unreadable ones had its answer on disk immediately and on screen a minute later.
-      onMeasured?.(artifact.file);
-    }
-  }
-  return measured;
+    // Parsed, not cast: a sidecar edited to valid JSON of the wrong shape while the probe ran
+    // would otherwise be spread into a replacement and written back. The scanner reports
+    // malformed sidecars without rewriting them, and this has no better claim to overwrite one.
+    const parsed = ArtifactSidecarSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success || parsed.data.mediaInfo !== undefined) return false;
+    await writeSidecar(store, { ...parsed.data, mediaInfo: info }, raw);
+    return true;
+  }).catch(() => false);
 }
