@@ -906,13 +906,21 @@ export class Coordinator {
       stillOpen: () => this.stillOpen(store),
       onMeasured: () => this.refreshIfStillOpen(store),
     })
+      .then((result) => {
+        /*
+         * The attempted marker is kept only when the pass really finished (Codex rounds 3 and 7).
+         *
+         * Keeping it always meant a world with permanently unreadable media stopped re-running
+         * every twenty-second failure on each reopen -- which is why it exists. But a pass that
+         * passed over sidecars awaiting reconciliation has not finished: nothing revisits them,
+         * and adopting the edit would otherwise leave that media unmeasured for the rest of the
+         * session. Deferred work releases the marker so the next open picks it up.
+         */
+        if (result?.deferred === true && this.backfillStore === store) this.backfillStore = null;
+      })
       .catch(() => {
         // A world that cannot be measured is a world that works exactly as it did before.
       });
-    // `backfillStore` is deliberately NOT cleared when the pass ends (Codex round 3). It marks
-    // "this store has been attempted", and a world with permanently unreadable media would
-    // otherwise re-run every twenty-second failure on each reopen. It is replaced when the open
-    // world is.
   }
 
 

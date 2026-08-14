@@ -421,10 +421,10 @@ export async function backfillMediaInfo(
   store: WorldStore,
   probe: MediaProbe,
   opts: { signal?: AbortSignal; stillOpen?: () => boolean; onMeasured?: (files: readonly string[]) => void } = {},
-): Promise<number> {
+): Promise<{ measured: number; deferred: boolean }> {
   const { signal, stillOpen, onMeasured } = opts;
   const abandoned = (): boolean => signal?.aborted === true || stillOpen?.() === false;
-  if (!probe.info) return 0;
+  if (!probe.info) return { measured: 0, deferred: false };
 
   /*
    * Probe outside the gate, write in batches (Codex rounds 1 and 2).
@@ -453,27 +453,32 @@ export async function backfillMediaInfo(
   const isPending = (file: string): boolean =>
     store.getBundle().externalEdits.some((edit) => edit.path === `artifacts/${file}.json`);
   /**
-   * Cheap evidence that the media is the same file the probe read (Codex round 6).
+   * The bytes the sidecar describes, or nothing (Codex round 7).
    *
-   * The sidecar's `baseHash` guards the sidecar; nothing guarded the media. Replaced during a
-   * twenty-second probe, the measurement would be written as a permanent fact about bytes the
-   * world no longer holds, and every later cut and export would trust that duration. Re-hashing
-   * would be honest and costs a full read of every media file in the world; size and modification
-   * time answer "is this still the same file" well enough for a measurement that any later scan
-   * would supersede anyway.
+   * Size and modification time proved only that nothing changed *during* the probe. They said
+   * nothing about whether the file was already something other than what the sidecar records --
+   * media replaced while the world was closed is not tracked as an external edit, so it would
+   * have been measured and the measurement stored against a hash describing different bytes.
+   *
+   * Hashing answers both questions with one check and no window between them: if the media still
+   * hashes to what the sidecar says, it is the file the sidecar is about, and it was that file
+   * when this read it. The cost is one extra read of a file the probe is reading anyway, once,
+   * for a migration that happens once.
    */
-  const stamp = async (file: string): Promise<string | null> => {
+  const matchesSidecar = async (file: string, expected: string): Promise<boolean> => {
     try {
-      const info = await stat(toExtendedLength(join(store.dir, "artifacts", file)));
-      return `${info.size}:${info.mtimeMs}`;
+      const bytes = await readFile(toExtendedLength(join(store.dir, "artifacts", file)));
+      return `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}` === expected;
     } catch {
-      return null;
+      return false;
     }
   };
 
   let measured = 0;
   let attempted = 0;
-  let batch: Array<{ file: string; info: MediaInfo; stamp: string | null }> = [];
+  let batch: Array<{ file: string; info: MediaInfo; hash: string }> = [];
+  /** Set when something was passed over for reconciliation, so the pass is not counted as done. */
+  let deferred = false;
 
   const flush = async (): Promise<void> => {
     if (batch.length === 0) return;
@@ -488,9 +493,9 @@ export async function backfillMediaInfo(
         if (abandoned()) return [];
         const files: CommitInput["files"] = [];
         const names: string[] = [];
-        for (const { file, info, stamp: before } of pendingBatch) {
-          // The media has to be the file that was measured, not merely a file with that name.
-          if (before === null || (await stamp(file)) !== before) continue;
+        for (const { file, info, hash } of pendingBatch) {
+          // The media has to be the bytes the sidecar describes, not merely a file with its name.
+          if (!(await matchesSidecar(file, hash))) continue;
           // Asked again inside the gate: an edit can arrive while a slow probe runs, and
           // committing over it here would make its bytes the rescan's new baseline -- quietly
           // resolving a staleness the app was about to raise.
@@ -547,16 +552,23 @@ export async function backfillMediaInfo(
      * somewhere else, which ffprobe follows. An imported world can carry one, and this pass runs
      * on open, so the read would be unsolicited either way.
      */
-    if (isPending(artifact.file)) continue;
+    if (isPending(artifact.file)) {
+      // Skipped, not finished with: nothing revisits it and nothing restarts the pass, so the
+      // caller is told this world still has work rather than being marked as attempted.
+      deferred = true;
+      continue;
+    }
     if (!(await insideArtifacts(store, artifact.file))) continue;
     // Rechecked after that await: on a slow or network-backed world the containment check is
     // itself I/O, and starting a fresh twenty-second probe against a world that has since closed
     // is the one thing this pass is trying not to do.
     if (abandoned()) break;
+    // Last check before a twenty-second probe: the containment lookup above is filesystem I/O
+    // and the world can close inside it.
+    if (abandoned()) break;
     attempted += 1;
-    const before = await stamp(artifact.file);
     const info = await measureMediaInfo(store, `artifacts/${artifact.file}`, probe);
-    if (info !== null) batch.push({ file: artifact.file, info, stamp: before });
+    if (info !== null) batch.push({ file: artifact.file, info, hash: artifact.hash });
     /*
      * Flushed on attempts, not successes (Codex round 3): one readable track followed by a run of
      * unreadable ones left its measurement sitting in memory through twenty seconds of timeout
@@ -568,5 +580,5 @@ export async function backfillMediaInfo(
     }
   }
   await flush();
-  return measured;
+  return { measured, deferred };
 }

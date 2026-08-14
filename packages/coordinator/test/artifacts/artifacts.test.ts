@@ -93,29 +93,22 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     try {
       const song = await sourceFile("old-song.mp3", "filed before measuring existed");
       await fileArtifact(store, { sourcePath: song });
-      // Derived, not hardcoded: the fixture world carries media of its own, and a count written
-      // in by hand breaks the moment somebody adds a sound to it.
-      const unmeasured = store
-        .getBundle()
-        .artifacts.filter((a) => (a.kind === "audio" || a.kind === "video") && a.mediaInfo === undefined).length;
-      assert.ok(unmeasured >= 1);
-      let calls = 0;
+      // Asserted about the artifact this test filed, not about a count of the world's. The
+      // fixture carries media whose recorded hash does not match its bytes, which the pass now
+      // refuses to measure — correctly, and it is not this test's subject.
       const probe = {
         durationSec: async () => 30,
-        info: async () => {
-          calls += 1;
-          return { durationSec: 30.25, hasAudio: true };
-        },
+        info: async () => ({ durationSec: 30.25, hasAudio: true }),
       };
-      assert.equal(await backfillMediaInfo(store, probe), unmeasured);
+      const first = (await backfillMediaInfo(store, probe)).measured;
+      assert.ok(first >= 1);
       assert.deepEqual(store.getBundle().artifacts.find((a) => a.file === "old-song.mp3")?.mediaInfo, {
         durationSec: 30.25,
         hasAudio: true,
       });
       // Added, never re-taken: the bytes cannot have changed, and a second opinion would only be
       // a way for two runs to disagree.
-      assert.equal(await backfillMediaInfo(store, probe), 0);
-      assert.equal(calls, unmeasured, "nothing was measured twice");
+      assert.equal((await backfillMediaInfo(store, probe)).measured, 0, "nothing was measured twice");
     } finally {
       await store.close();
     }
@@ -139,7 +132,7 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
       );
       const abort = new AbortController();
       let probes = 0;
-      const measured = await backfillMediaInfo(
+      const { measured } = await backfillMediaInfo(
         store,
         {
           durationSec: async () => 3,
@@ -169,7 +162,7 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     const { dir, store } = await open();
     try {
       await fileArtifact(store, { sourcePath: await sourceFile("swapped.mp3", "the original bytes") });
-      const measured = await backfillMediaInfo(store, {
+      const { measured } = await backfillMediaInfo(store, {
         durationSec: async () => 11,
         info: async () => {
           // Replaced while the probe is "running", which is exactly the window that matters.
@@ -220,7 +213,7 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     const { store } = await open();
     try {
       let probes = 0;
-      const measured = await backfillMediaInfo(
+      const { measured } = await backfillMediaInfo(
         store,
         {
           durationSec: async () => 9,
@@ -246,7 +239,7 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
       const song = await sourceFile("aborted.mp3", "measured just too late");
       await fileArtifact(store, { sourcePath: song });
       const abort = new AbortController();
-      const measured = await backfillMediaInfo(
+      const { measured } = await backfillMediaInfo(
         store,
         {
           durationSec: async () => 5,
@@ -269,7 +262,7 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     const { store } = await open();
     const song = await sourceFile("closing.mp3", "the world shut mid-probe");
     await fileArtifact(store, { sourcePath: song });
-    const measured = await backfillMediaInfo(store, {
+    const { measured } = await backfillMediaInfo(store, {
       durationSec: async () => 7,
       info: async () => {
         await store.close();
@@ -286,7 +279,7 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
         await fileArtifact(store, { sourcePath: await sourceFile(name, name) });
       }
       const batches: string[][] = [];
-      const measured = await backfillMediaInfo(
+      const { measured } = await backfillMediaInfo(
         store,
         { durationSec: async () => 4, info: async () => ({ durationSec: 4, hasAudio: true }) },
         { onMeasured: (files) => batches.push([...files]) },
