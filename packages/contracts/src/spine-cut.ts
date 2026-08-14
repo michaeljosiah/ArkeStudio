@@ -45,6 +45,8 @@ export interface SpineCutSegment {
   takeId?: string;
   /** World-relative source and the exact window taken from it, trim already applied. */
   media?: { path: string; inSec: number; outSec: number };
+  /** Whether the source carries an audio stream; undefined when it has never been measured. */
+  hasAudio?: boolean;
   clipAudio?: ClipAudioPolicy;
 }
 
@@ -81,6 +83,7 @@ interface Material {
   inSec: number;
   /** How much is usable from `inSec`, or undefined when the file has never been measured. */
   availableSec: number | undefined;
+  hasAudio: boolean | undefined;
   /**
    * A boundary the material may never be read past, whatever the anchor asks for.
    *
@@ -139,6 +142,7 @@ function materialFor(
         path: `productions/${productionId}/takes/${pass.id}/${pass.media}`,
         inSec: take.segment.inSec,
         availableSec: probed === undefined ? undefined : Math.max(0, Math.min(planned, probed - take.segment.inSec)),
+        hasAudio: production.takeMediaInfo[pass.id]?.mediaInfo.hasAudio,
         limitSec: planned,
       },
     };
@@ -157,6 +161,7 @@ function materialFor(
       path: `productions/${productionId}/takes/${take.id}/${take.media}`,
       inSec: 0,
       availableSec: production.takeMediaInfo[take.id]?.mediaInfo.durationSec,
+      hasAudio: production.takeMediaInfo[take.id]?.mediaInfo.hasAudio,
       limitSec: undefined,
     },
   };
@@ -330,6 +335,7 @@ export function deriveSpineCut(
       sceneNumber: shot.sceneNumber,
       takeId: take.id,
       media: { path: material.path, inSec, outSec: inSec + used },
+      ...(material.hasAudio === undefined ? {} : { hasAudio: material.hasAudio }),
       clipAudio: anchor.clipAudio,
     });
 

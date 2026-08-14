@@ -306,7 +306,7 @@ describe("exports (R-19..R-22, D10..D12, §3.2)", () => {
         await writeFile(args[args.length - 1]!, "rendered");
       },
     };
-    const done = runExport(worldDir, plan, "review.mp4", okRunner, () => {});
+    const done = runExport(worldDir, (stage) => buildFfmpegArgs(plan, worldDir, stage), "review.mp4", okRunner, () => {});
     const result = await done.done;
     assert.equal(result.status, "done");
     assert.ok(await stat(join(worldDir, "exports", "review.mp4")));
@@ -320,7 +320,7 @@ describe("exports (R-19..R-22, D10..D12, §3.2)", () => {
           signal.addEventListener("abort", () => reject(new Error("aborted")));
         }),
     };
-    const cancelled = runExport(worldDir, plan, "cancelled.mp4", slowRunner, () => {});
+    const cancelled = runExport(worldDir, (stage) => buildFfmpegArgs(plan, worldDir, stage), "cancelled.mp4", slowRunner, () => {});
     cancelled.cancel();
     const cancelledResult = await cancelled.done;
     release();

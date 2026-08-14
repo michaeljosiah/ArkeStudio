@@ -15,6 +15,12 @@ import {
   type HarnessAdapter,
   type HealthComponent,
   buildExportPlan,
+  buildFfmpegArgs,
+  buildSpineExportPlan,
+  buildSpineFfmpegArgs,
+  deriveSpineCut,
+  spineExportRefusals,
+  ulid,
   CutFileSchema,
   deriveCut,
   designatedCompilation,
@@ -469,6 +475,8 @@ export class Coordinator {
   private readonly voiceService: VoiceService | null;
   /** SPEC-013: exports in flight, cancellable by id (R-21). */
   private readonly exports = new Map<string, ExportHandle>();
+  /** `worldId:productionId` whose export is being set up or is already running — one at a time. */
+  private readonly exportsInFlight = new Set<string>();
 
   constructor(private readonly opts: CoordinatorOptions) {
     this.secrets = opts.secretRegistry ?? new SecretRegistry();
@@ -2843,6 +2851,22 @@ export class Coordinator {
         if (!store) return;
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production) return;
+        /*
+         * One export per production at a time (Codex round 3).
+         *
+         * Measuring the master happens before runExport hands back an id, and ffprobe waits up
+         * to twenty seconds on a file it cannot read. In that window the client has no export to
+         * cancel and every further click starts another probe, each of which goes on to launch
+         * its own encode. The claim is taken before the first await and released on every exit.
+         */
+        // Keyed by world too: a production id is a slug inside its world, not a global name, so
+        // two worlds with the same directory slug would have shared one lock and the second
+        // world's export would have been dropped as a duplicate (Codex round 4).
+        const exportKey = `${msg.worldId}:${msg.productionId}`;
+        if (this.exportsInFlight.has(exportKey)) return;
+        this.exportsInFlight.add(exportKey);
+        let started = false;
+        try {
         const runner = this.opts.ffmpeg;
         const emitProgress = (
           exportId: string,
@@ -2872,27 +2896,121 @@ export class Coordinator {
           );
           return;
         }
-        const cut = deriveCut(production);
-        const plan = buildExportPlan(cut, msg.preset);
+        /*
+         * A production cut to a track renders against the song, not against scene order (#253).
+         *
+         * The spine assembly existed and nothing called it, so exporting a spine production
+         * still produced the scene-order cut with no master under it -- a renderer that was
+         * unreachable from the product it was written for (Codex round 1). The old path stays
+         * exactly as it was for everything else, which is most productions.
+         */
+        const spine = production.spine;
+        const trackArtifact = spine
+          ? store.getBundle().artifacts.find((a) => a.id === spine.trackArtifactId)
+          : undefined;
+        const trackFile = trackArtifact?.file;
+
+        /*
+         * The measurement recorded when the track was assigned, before asking ffprobe again.
+         *
+         * Artifacts are immutable and travel with the world, so their mediaInfo is as true on the
+         * machine that opens the folder as on the one that filed it. Requiring a probe anyway
+         * refused every spine export on a machine with ffmpeg but no ffprobe -- a world that
+         * already knows how long its song is, declining to export because it could not re-measure
+         * something that cannot have changed (Codex round 4).
+         */
+        const trackPath =
+          trackFile !== undefined ? toExtendedLength(join(store.dir, "artifacts", fromPortable(trackFile))) : null;
+        // The id is allocated before the first thing that can fail. A probe that throws on the
+        // way to ffprobe used to escape the handler with no export event at all, so the user's
+        // click did nothing visible and only the transport backstop logged it (Codex round 6).
+        const attemptId = `ex_${ulid()}`;
+        const probed =
+          trackArtifact?.mediaInfo === undefined && trackPath !== null && this.opts.mediaProbe?.info
+            ? await this.opts.mediaProbe.info(trackPath).catch(() => null)
+            : null;
+        /*
+         * A spine export takes the whole measurement or none of it (Codex round 5).
+         *
+         * The duration-only fallback that used to sit here supplied a length while leaving audio
+         * presence unknown, which walked straight past the silent-master guard below and put the
+         * missing stream back in front of ffmpeg -- reintroducing, one round later, exactly the
+         * state the previous round had refused. A length is not a measurement when what the graph
+         * needs to know is whether there is a track to mix.
+         */
+        const trackInfo = trackArtifact?.mediaInfo ?? probed;
+        const trackDurationSec = trackInfo?.durationSec ?? null;
+
+        // A refusal is an attempt with an outcome, so it gets an id of its own. Reporting every
+        // one as "ex_none" let a second production's failure overwrite the first in the client's
+        // export map, and the first screen then showed no failed attempt at all (Codex round 4).
+        if (spine && trackFile !== undefined && trackInfo === null) {
+          emitProgress(
+            attemptId,
+            "failed",
+            0,
+            null,
+            "export needs the master track measured — no stored measurement and ffprobe could not make one (SPEC-016)",
+          );
+          return;
+        }
+        if (spine && trackInfo !== null && !trackInfo.hasAudio) {
+          emitProgress(attemptId, "failed", 0, null, "the master track has no audio stream — assign a track that does");
+          return;
+        }
+
+        let buildArgs: (stage: string) => string[];
+        if (spine && trackFile !== undefined && trackDurationSec !== null) {
+          const spineCut = deriveSpineCut(production, spine, trackDurationSec);
+          const refusal = spineExportRefusals(spineCut, msg.preset);
+          if (refusal) {
+            // Said before the encode rather than after somebody has sent the file on.
+            emitProgress(attemptId, "failed", 0, null, `cut is not ready for ${msg.preset}: ${refusal.detail}`);
+            return;
+          }
+          const spinePlan = buildSpineExportPlan(spineCut, msg.preset, `artifacts/${trackFile}`);
+          buildArgs = (stage) => buildSpineFfmpegArgs(spinePlan, store.dir, stage);
+        } else {
+          if (spine && trackDurationSec === null) {
+            // Falling through silently would export a spine production as though it had none.
+            emitProgress(
+              attemptId,
+              "failed",
+              0,
+              null,
+              "export needs the master track measured — ffprobe could not read it (SPEC-016)",
+            );
+            return;
+          }
+          const plan = buildExportPlan(deriveCut(production), msg.preset);
+          buildArgs = (stage) => buildFfmpegArgs(plan, store.dir, stage);
+        }
         const stamp = new Date()
           .toISOString()
           .replace(/[-:TZ.]/g, "")
           .slice(0, 14);
         const handle = runExport(
           store.dir,
-          plan,
+          buildArgs,
           `${msg.productionId}-${msg.preset}-${stamp}.mp4`,
           runner,
           (percent) => emitProgress(handle.id, "running", percent, null, null),
         );
         this.exports.set(handle.id, handle);
         emitProgress(handle.id, "running", 0, null, null);
+        started = true;
         this.trackBackground(handle.done.then((result) => {
           this.exports.delete(handle.id);
+          // Released when the encode ends, not when this handler returns: the claim covers the
+          // running export too, or a second click during it launches a duplicate.
+          this.exportsInFlight.delete(exportKey);
           if (result.status === "done") emitProgress(handle.id, "done", 100, result.output, null);
           else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
           else emitProgress(handle.id, "failed", 0, null, result.error);
         }));
+        } finally {
+          if (!started) this.exportsInFlight.delete(exportKey);
+        }
         return;
       }
       case "cancel-export": {

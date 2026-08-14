@@ -1,6 +1,6 @@
 import { cp, mkdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { buildFfmpegArgs, ulid, type ExportPlan } from "@arke-studio/contracts";
+import { ulid } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 
 /**
@@ -28,7 +28,14 @@ export interface ExportHandle {
  */
 export function runExport(
   worldDir: string,
-  plan: ExportPlan,
+  /**
+   * The encode, built against the staging path rather than the destination.
+   *
+   * Taking a builder instead of a plan is what lets a spine production render through its own
+   * assembly: the staging discipline here -- whole or not at all -- has nothing to do with which
+   * timeline produced the arguments, and there is no reason for it to know.
+   */
+  buildArgs: (stage: string) => string[],
   outName: string,
   runner: FfmpegRunner,
   onProgress: (percent: number) => void,
@@ -44,7 +51,7 @@ export function runExport(
       // A cancel that lands before the encoder starts must still cancel: an already-aborted
       // signal never invokes listeners added later, so the check happens here.
       if (controller.signal.aborted) throw new Error("cancelled before start");
-      await runner.run(buildFfmpegArgs(plan, worldDir, stage), onProgress, controller.signal);
+      await runner.run(buildArgs(stage), onProgress, controller.signal);
       if (controller.signal.aborted) throw new Error("cancelled");
       await rename(toExtendedLength(stage), toExtendedLength(output));
       return { status: "done" as const, output: `exports/${outName}` };
