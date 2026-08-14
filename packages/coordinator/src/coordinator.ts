@@ -4652,7 +4652,12 @@ export class Coordinator {
   ): Promise<void> {
     const store = this.opts.provider.openStore?.();
     if (!store) return;
-    const outcome = await fileArtifact(store, { sourcePath, ...opts }).catch((err) => ({
+    const outcome = await fileArtifact(store, {
+      sourcePath,
+      // Measured once, at the moment the bytes land, rather than by every reader afterwards (#283).
+      ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
+      ...opts,
+    }).catch((err) => ({
       outcome: "refused" as const,
       reason: err instanceof Error ? err.message : String(err),
     }));

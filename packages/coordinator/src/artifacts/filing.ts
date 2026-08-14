@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { copyFile, readdir, readFile, stat, statfs } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { ulid, type ArtifactKind, type ArtifactSidecar } from "@arke-studio/contracts";
+import type { MediaProbe } from "../media/probe.js";
 import { toExtendedLength } from "../world/paths.js";
 import { slugify } from "../world/slug.js";
 import { sha256 } from "../world/text-files.js";
@@ -99,6 +100,17 @@ export async function setOwner(
 
 export interface FileInput {
   sourcePath: string;
+  /**
+   * Measures audio and video as they are filed (#283).
+   *
+   * `ArtifactSidecarSchema` has carried `mediaInfo` since it was written and nothing ever wrote
+   * it, so every consumer fell through to probing the file again at the moment it was needed --
+   * export measuring the master on the export click, and the Cut screen unable to measure at all
+   * because it has no ffprobe to reach for. An artifact is immutable, so its length and whether
+   * it carries audio are true once and true forever; the honest time to record them is when the
+   * bytes are copied in.
+   */
+  mediaProbe?: MediaProbe;
   links?: string[];
   importedFrom?: string;
   /** The user has seen the size (R-6). Without it, large files come back needs-consent. */
@@ -165,9 +177,10 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
   let file = `${stem}${ext}`;
   for (let i = 2; taken.has(file); i++) file = `${stem}-${i}${ext}`;
 
+  const kind = kindForFile(original);
   const sidecar: ArtifactSidecar = {
     id: `ar_${ulid()}`,
-    kind: kindForFile(original),
+    kind,
     file,
     hash: hash as ArtifactSidecar["hash"],
     origin: { by: "user", ...(input.importedFrom !== undefined ? { importedFrom: input.importedFrom } : {}) },
@@ -183,7 +196,18 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
   await store.gateOp(async () => {
     const { mkdir } = await import("node:fs/promises");
     await mkdir(toExtendedLength(join(store.dir, "artifacts")), { recursive: true });
-    await copyFile(toExtendedLength(input.sourcePath), toExtendedLength(join(store.dir, "artifacts", file)));
+    const copied = toExtendedLength(join(store.dir, "artifacts", file));
+    await copyFile(toExtendedLength(input.sourcePath), copied);
+    /*
+     * Measured from the copy rather than the source, so what is recorded describes the bytes the
+     * world actually holds. A probe that cannot read the file leaves the field absent, which every
+     * reader already treats as "not measured" rather than as a measurement of nothing -- filing a
+     * file must not fail because a media tool is missing or does not recognise it.
+     */
+    if ((kind === "audio" || kind === "video") && input.mediaProbe?.info) {
+      const measured = await input.mediaProbe.info(copied).catch(() => null);
+      if (measured !== null) sidecar.mediaInfo = measured;
+    }
     await writeSidecar(store, sidecar, null);
   });
   return { outcome: "filed", artifact: sidecar };

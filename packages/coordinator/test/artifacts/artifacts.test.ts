@@ -39,6 +39,55 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     for (const kind of ["image", "document", "audio"]) assert.ok(kinds.has(kind as never), `${kind} can be attached`);
   });
 
+  it("records the measurement of audio and video as they are filed", async () => {
+    // The field existed and nothing wrote it, so every reader probed the file again later —
+    // export on the export click, and the Cut screen not at all, having no ffprobe to reach for.
+    const { store } = await open();
+    try {
+    const probed: string[] = [];
+    const mediaProbe = {
+      durationSec: async () => 12,
+      info: async (path: string) => {
+        probed.push(path);
+        return { durationSec: 12.5, hasAudio: true };
+      },
+    };
+    const song = await sourceFile("the-undersong.mp3", "not really an mp3");
+    assert.equal((await fileArtifact(store, { sourcePath: song, mediaProbe })).outcome, "filed");
+    const track = store.getBundle().artifacts.find((a) => a.file === "the-undersong.mp3");
+    assert.deepEqual(track?.mediaInfo, { durationSec: 12.5, hasAudio: true });
+    // Measured from the copy, so it describes the bytes the world holds rather than the source.
+    assert.ok(probed[0]?.includes("artifacts"), `measured ${probed[0]} rather than the world's copy`);
+
+    // A document is not media; probing it would be a tool call for nothing.
+    const notes = await sourceFile("notes.txt", "words");
+    await fileArtifact(store, { sourcePath: notes, mediaProbe });
+    assert.equal(probed.length, 1);
+    assert.equal(store.getBundle().artifacts.find((a) => a.file === "notes.txt")?.mediaInfo, undefined);
+    } finally {
+      // open() in this file does not close, and a live watcher holds the runner's event loop
+      // open long after the last assertion — two more leaked stores hung the whole sweep.
+      await store.close();
+    }
+  });
+
+  it("files media unmeasured rather than failing when nothing can read it", async () => {
+    // Absent already means "not measured" to every reader. Filing must not depend on a media
+    // tool being installed, and a probe that throws is not a reason to refuse somebody's file.
+    const { store } = await open();
+    try {
+    const song = await sourceFile("second-song.mp3", "also not an mp3");
+    const outcome = await fileArtifact(store, {
+      sourcePath: song,
+      mediaProbe: { durationSec: async () => null, info: async () => { throw new Error("ffprobe is not here"); } },
+    });
+    assert.equal(outcome.outcome, "filed");
+    assert.equal(store.getBundle().artifacts.find((a) => a.file === "second-song.mp3")?.mediaInfo, undefined);
+    } finally {
+      await store.close();
+    }
+  });
+
   it("copies in — the artifact survives its source being deleted", async () => {
     const { dir, store } = await open();
     const source = await sourceFile("tide-tables.txt", "the tides, tabulated");
