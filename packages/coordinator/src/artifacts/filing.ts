@@ -64,6 +64,32 @@ async function readSidecarRaw(store: WorldStore, file: string): Promise<string |
   }
 }
 
+/**
+ * The sidecar as it is on disk right now, or null if it is not one.
+ *
+ * Every writer here rebuilds a whole record from what it reads, so what it reads has to be a whole
+ * record. Casting instead of parsing meant a file hand-edited to `{"links":[]}` was spread into a
+ * replacement and committed, erasing id, hash and origin -- a rewrite triggered by somebody adding
+ * a link (Codex). The scan reports malformed sidecars without rewriting them; nothing here has a
+ * better claim, so a writer that cannot read one leaves it alone.
+ */
+async function currentSidecar(
+  store: WorldStore,
+  fallback: ArtifactSidecar,
+): Promise<{ sidecar: ArtifactSidecar; raw: string | null } | null> {
+  const raw = await readSidecarRaw(store, fallback.file);
+  // Absent is not malformed: the caller's copy is what a first write is compared against.
+  if (raw === null) return { sidecar: fallback, raw: null };
+  try {
+    const parsed = ArtifactSidecarSchema.safeParse(JSON.parse(raw));
+    // The raw bytes travel with it: the base hash has to be of what is actually on disk, not of a
+    // re-serialisation that may differ from it by a space.
+    return parsed.success ? { sidecar: parsed.data, raw } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Merge links into an existing artifact — dedupe keeps one copy, many uses (R-4, D9). */
 export async function addLinks(store: WorldStore, artifact: ArtifactSidecar, links: string[]): Promise<ArtifactSidecar> {
   const merged = [...new Set([...artifact.links, ...links])];
@@ -73,11 +99,13 @@ export async function addLinks(store: WorldStore, artifact: ArtifactSidecar, lin
   // meant the write succeeded and silently dropped anything added meanwhile -- a measurement the
   // backfill had just recorded, erased by somebody adding a link.
   return await store.gateOp(async () => {
-    const raw = await readSidecarRaw(store, artifact.file);
-    const current = raw === null ? artifact : (JSON.parse(raw) as ArtifactSidecar);
-    const merged2 = { ...current, links: [...new Set([...current.links, ...links])] };
-    await writeSidecar(store, merged2, raw);
-    return merged2;
+    const current = await currentSidecar(store, artifact);
+    // Malformed on disk: the scan already reports it, and adding a link is not worth rewriting a
+    // file whose id, hash and origin this would replace with whatever happened to parse.
+    if (current === null) return artifact;
+    const next = { ...current.sidecar, links: [...new Set([...current.sidecar.links, ...links])] };
+    await writeSidecar(store, next, current.raw);
+    return next;
   });
 }
 
@@ -99,12 +127,12 @@ export async function setOwner(
   if (current === production) return artifact;
   // Same merge-inside-the-gate rule as addLinks: ownership is one field, not a whole record.
   return await store.gateOp(async () => {
-    const raw = await readSidecarRaw(store, artifact.file);
-    const base = raw === null ? artifact : (JSON.parse(raw) as ArtifactSidecar);
-    const next = { ...base };
+    const base = await currentSidecar(store, artifact);
+    if (base === null) return artifact;
+    const next = { ...base.sidecar };
     if (production === null) delete next.production;
     else next.production = production as ArtifactSidecar["production"];
-    await writeSidecar(store, next, raw);
+    await writeSidecar(store, next, base.raw);
     return next;
   });
 }

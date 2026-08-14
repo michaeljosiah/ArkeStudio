@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { computeNeedsYou, type ClientState } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { candidateHash, resolveCandidate, storeBatch, verifyCandidates } from "../../src/artifacts/extraction.js";
-import { ATTACHABLE_EXTENSIONS, fileArtifact, importFolder, kindForFile, pickable } from "../../src/artifacts/filing.js";
+import { addLinks, ATTACHABLE_EXTENSIONS, fileArtifact, importFolder, kindForFile, pickable } from "../../src/artifacts/filing.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -83,6 +83,29 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     });
     assert.equal(outcome.outcome, "filed");
     assert.equal(store.getBundle().artifacts.find((a) => a.file === "second-song.mp3")?.mediaInfo, undefined);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("refuses to rewrite a sidecar it cannot read as one", async () => {
+    // Every writer here rebuilds a whole record from what it reads. A file hand-edited to
+    // {"links":[]} was spread into a replacement and committed, erasing id, hash and origin —
+    // a rewrite triggered by somebody adding a link.
+    const { dir, store } = await open();
+    try {
+      const doc = await sourceFile("fragile.txt", "a document with a sidecar somebody edited");
+      const filed = await fileArtifact(store, { sourcePath: doc, links: ["the-vigil"] });
+      assert.equal(filed.outcome, "filed");
+      const sidecarPath = join(dir, "artifacts", "fragile.txt.json");
+      await writeFile(sidecarPath, JSON.stringify({ links: [] }));
+
+      const artifact = filed.outcome === "filed" ? filed.artifact : null;
+      assert.ok(artifact);
+      const after = await addLinks(store, artifact, ["maren-kest"]);
+      // The caller gets its own copy back, and the malformed file is left for the scan to report.
+      assert.equal(after.id, artifact.id);
+      assert.deepEqual(JSON.parse(await readFile(sidecarPath, "utf8")), { links: [] });
     } finally {
       await store.close();
     }
