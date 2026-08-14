@@ -12,7 +12,7 @@ bundling; `scripts/verify-licenses.mjs` gates packaging on this file staying com
 | espeak-ng (phonemizer) | GPL-3.0 | **Never linked** — invoked strictly as a separate executable (R-10), the same arrangement Voxa makes. Exact GPL text and the complete pinned 1.52.0 source archive ship beside the executable. |
 | pcaudiolib (ARM64 espeak dependency) | GPL-3.0 | **Never linked to Arke** — loaded only by the separate ARM64 espeak-ng process. Exact GPL text and source package ship beside it. |
 | LLVM libc++ (ARM64 espeak dependency) | Apache-2.0 WITH LLVM-exception | Loaded only by the separate ARM64 espeak-ng process. Licence text retained beside the runtime. |
-| ffmpeg | LGPL-2.1 (LGPL build, no GPL components) | The LGPL build is chosen **deliberately** — no libx264/GPL flags. Invoked as a separate subprocess, never linked. Source offer: https://ffmpeg.org. |
+| ffmpeg | GPL-2.0-or-later (GPL build, includes libx264) | **Never linked to Arke** — invoked as a separate subprocess, the same arrangement espeak-ng makes. The GPL build is chosen deliberately: libx264 is GPL-only, and the export presets are expressed as x264 `-crf` values that an LGPL build accepts and silently ignores, encoding every preset identically. Exact GPL text and the corresponding source archive (FFmpeg at commit `9b6c8969e0`) ship beside the binaries. |
 | better-sqlite3 (native index binding) | MIT | Attribution here. Compiled per target architecture. |
 | SQLite | Public domain | None. |
 | Electron | MIT | Attribution here; Chromium/Node notices ship inside Electron's own LICENSES file, included in the installer. |

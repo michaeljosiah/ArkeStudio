@@ -33,10 +33,18 @@ const work = resolve(value("--work") ?? join(repoRoot, ".runtime-work", arch));
 const staged = join(desktopRoot, "build-resources");
 const voxaStage = join(staged, "voxa", arch);
 const espeakStage = join(staged, "espeak-ng", arch);
+/*
+ * ffmpeg stages flat rather than per-architecture, because main.ts looks for
+ * `resources/ffmpeg/ffmpeg.exe` and electron-builder copies this directory wholesale. One
+ * architecture is prepared per invocation, so the directory is cleared and rewritten each time.
+ */
+const ffmpegStage = join(staged, "ffmpeg");
 rmSync(work, { recursive: true, force: true });
+rmSync(ffmpegStage, { recursive: true, force: true });
 rmSync(voxaStage, { recursive: true, force: true });
 rmSync(espeakStage, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
+mkdirSync(ffmpegStage, { recursive: true });
 mkdirSync(voxaStage, { recursive: true });
 mkdirSync(espeakStage, { recursive: true });
 
@@ -290,4 +298,48 @@ writeManifest(espeakStage, "espeak-ng", {
   sourceRevision: arch === "x64" ? metadata.espeakNg.commit : "MSYS2 g0d451f8c + pinned dependency packages",
 });
 
-console.log(`[prepare-runtimes] staged verified ${arch} Voxa and espeak-ng runtimes`);
+/*
+ * ffmpeg and ffprobe (#279).
+ *
+ * Nothing staged these before, so `build-resources/ffmpeg` never existed, electron-builder logged
+ * "file source doesn't exist" and packaged happily, and every released installer had export
+ * silently unavailable -- the absence was stated in the UI rather than crashed on, which is why it
+ * went unnoticed through two releases.
+ *
+ * A GPL build, deliberately: libx264 is GPL-only and the export presets are written around -crf,
+ * which an LGPL build accepts and then ignores, producing output whose quality setting means
+ * nothing. It is invoked as a separate executable and never linked, the arrangement espeak-ng
+ * already makes here.
+ */
+const ffmpegSource = metadata.ffmpeg[arch];
+if (!ffmpegSource) throw new Error(`no pinned ffmpeg build for ${arch}`);
+const ffmpegArchive = join(work, `ffmpeg-${arch}.zip`);
+await download(ffmpegSource.url, ffmpegArchive, ffmpegSource.sha256, `ffmpeg ${arch}`);
+const ffmpegWork = join(work, "ffmpeg");
+rmSync(ffmpegWork, { recursive: true, force: true });
+extract(ffmpegArchive, ffmpegWork);
+const ffmpegRoot = join(ffmpegWork, readdirSync(ffmpegWork)[0]);
+const ffmpegBin = join(ffmpegRoot, "bin");
+for (const entry of readdirSync(ffmpegBin)) {
+  // ffplay is a media player, not part of what Arke invokes; shipping it is 30MB of surface for
+  // a feature that does not exist.
+  if (entry === "ffplay.exe") continue;
+  cpSync(join(ffmpegBin, entry), join(ffmpegStage, entry));
+}
+for (const binary of ["ffmpeg.exe", "ffprobe.exe"]) {
+  const staged = join(ffmpegStage, binary);
+  if (!existsSync(staged)) throw new Error(`ffmpeg staging is missing ${binary}`);
+  assertPeArchitecture(staged, arch);
+}
+cpSync(join(ffmpegRoot, "LICENSE.txt"), join(ffmpegStage, "LICENSE.ffmpeg.txt"));
+// A GPL binary ships with the source it was built from, the same arrangement espeak-ng makes
+// here. Pinned to the commit the build reports, so the offer matches what is installed.
+await download(
+  metadata.ffmpeg.sourceUrl,
+  join(ffmpegStage, `SOURCE-ffmpeg-${metadata.ffmpeg.commit}.tar.gz`),
+  metadata.ffmpeg.sourceSha256,
+  "ffmpeg source",
+);
+writeManifest(ffmpegStage, "ffmpeg", { version: metadata.ffmpeg.version, sourceRevision: metadata.ffmpeg.release });
+
+console.log(`[prepare-runtimes] staged verified ${arch} Voxa, espeak-ng and ffmpeg runtimes`);
