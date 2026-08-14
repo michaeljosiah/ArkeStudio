@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { copyFile, readdir, readFile, stat, statfs } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { ulid, type ArtifactKind, type ArtifactSidecar } from "@arke-studio/contracts";
-import type { MediaProbe } from "../media/probe.js";
+import { measureMediaInfo, type MediaProbe } from "../media/probe.js";
 import { toExtendedLength } from "../world/paths.js";
 import { slugify } from "../world/slug.js";
 import { sha256 } from "../world/text-files.js";
@@ -69,9 +69,17 @@ export async function addLinks(store: WorldStore, artifact: ArtifactSidecar, lin
   const merged = [...new Set([...artifact.links, ...links])];
   if (merged.length === artifact.links.length) return artifact;
   const next = { ...artifact, links: merged };
-  const raw = await readSidecarRaw(store, artifact.file);
-  await store.gateOp(async () => writeSidecar(store, next, raw));
-  return next;
+  // Merged onto the sidecar as it is *now*, inside the gate (Codex round 3). Building the
+  // replacement from the copy fetched before, while using the latest raw only as a base hash,
+  // meant the write succeeded and silently dropped anything added meanwhile -- a measurement the
+  // backfill had just recorded, erased by somebody adding a link.
+  return await store.gateOp(async () => {
+    const raw = await readSidecarRaw(store, artifact.file);
+    const current = raw === null ? artifact : (JSON.parse(raw) as ArtifactSidecar);
+    const merged2 = { ...current, links: [...new Set([...current.links, ...links])] };
+    await writeSidecar(store, merged2, raw);
+    return merged2;
+  });
 }
 
 /**
@@ -90,12 +98,16 @@ export async function setOwner(
   if (production === undefined) return artifact;
   const current = artifact.production ?? null;
   if (current === production) return artifact;
-  const next = { ...artifact };
-  if (production === null) delete next.production;
-  else next.production = production as ArtifactSidecar["production"];
-  const raw = await readSidecarRaw(store, artifact.file);
-  await store.gateOp(async () => writeSidecar(store, next, raw));
-  return next;
+  // Same merge-inside-the-gate rule as addLinks: ownership is one field, not a whole record.
+  return await store.gateOp(async () => {
+    const raw = await readSidecarRaw(store, artifact.file);
+    const base = raw === null ? artifact : (JSON.parse(raw) as ArtifactSidecar);
+    const next = { ...base };
+    if (production === null) delete next.production;
+    else next.production = production as ArtifactSidecar["production"];
+    await writeSidecar(store, next, raw);
+    return next;
+  });
 }
 
 export interface FileInput {
@@ -204,8 +216,12 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
      * reader already treats as "not measured" rather than as a measurement of nothing -- filing a
      * file must not fail because a media tool is missing or does not recognise it.
      */
-    if ((kind === "audio" || kind === "video") && input.mediaProbe?.info) {
-      const measured = await input.mediaProbe.info(copied).catch(() => null);
+    if (kind === "audio" || kind === "video") {
+      // Through measureMediaInfo rather than probe.info directly (Codex round 3): `info` is the
+      // optional half of the contract, and a host offering only durationSec was being treated as
+      // no probe at all -- leaving media permanently unmeasured next to a duration it could have
+      // had. That helper also validates, so a malformed answer cannot become a stored fact.
+      const measured = await measureMediaInfo(store, `artifacts/${file}`, input.mediaProbe ?? null);
       if (measured !== null) sidecar.mediaInfo = measured;
     }
     await writeSidecar(store, sidecar, null);
@@ -297,11 +313,21 @@ export async function importFolder(
 export async function backfillMediaInfo(
   store: WorldStore,
   probe: MediaProbe,
-  onMeasured?: (file: string) => void,
+  /**
+   * `signal` stops the pass; `stillOpen` says whether this store is still the app's open world.
+   *
+   * Both exist because this runs for as long as ffprobe takes and the user is not waiting for it
+   * (Codex round 3). Without the signal, a slow probe held the shutdown drain past the desktop's
+   * fifteen-second budget and the last window would not close. Without `stillOpen`, switching
+   * worlds mid-probe left this committing to a store whose lock had already been released.
+   */
+  opts: { signal?: AbortSignal; stillOpen?: () => boolean; onMeasured?: (file: string) => void } = {},
 ): Promise<number> {
-  if (!probe.info) return 0;
+  const { signal, stillOpen, onMeasured } = opts;
+  const abandoned = (): boolean => signal?.aborted === true || stillOpen?.() === false;
   let measured = 0;
   for (const artifact of store.getBundle().artifacts) {
+    if (abandoned()) break;
     if (artifact.kind !== "audio" && artifact.kind !== "video") continue;
     if (artifact.mediaInfo !== undefined) continue;
     /*
@@ -317,11 +343,13 @@ export async function backfillMediaInfo(
      * The sidecar is read again *inside* the gate, because the copy fetched before the probe is
      * exactly as old as the probe took, and what it is compared against must be current.
      */
-    const info = await probe
-      .info(toExtendedLength(join(store.dir, "artifacts", artifact.file)))
-      .catch(() => null);
+    const info = await measureMediaInfo(store, `artifacts/${artifact.file}`, probe);
     if (info === null) continue;
+    // Re-checked after the probe, not merely before it: the world can have been closed during it,
+    // and gateOp does not refuse work on a closed store -- it would commit without the lock.
+    if (abandoned()) break;
     const wrote = await store.gateOp(async () => {
+      if (abandoned()) return false;
       const raw = await readSidecarRaw(store, artifact.file);
       // Gone, or rewritten while the probe ran: either way this is not the moment to insist.
       if (raw === null) return false;

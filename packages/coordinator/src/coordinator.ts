@@ -477,6 +477,14 @@ export class Coordinator {
   private readonly exports = new Map<string, ExportHandle>();
   /** `worldId:productionId` whose export is being set up or is already running — one at a time. */
   private readonly exportsInFlight = new Set<string>();
+  /**
+   * Cancels the media backfill (#283).
+   *
+   * The pass is optional migration work nobody is waiting on, and each probe may take twenty
+   * seconds while the desktop gives shutdown fifteen. Left uncancelled, one slow legacy file
+   * stopped the last window from closing and left the process running invisibly.
+   */
+  private backfillAbort: AbortController | null = null;
 
   constructor(private readonly opts: CoordinatorOptions) {
     this.secrets = opts.secretRegistry ?? new SecretRegistry();
@@ -866,10 +874,18 @@ export class Coordinator {
      * only pays this on the first open that finds something unmeasured, because the pass writes
      * what it learns.
      */
-    if (store && this.opts.mediaProbe) {
+    if (store && this.opts.mediaProbe && !this.stopping) {
       const probe = this.opts.mediaProbe;
+      // One pass at a time: opening another world abandons the previous world's, which is what
+      // its stillOpen check would conclude a moment later anyway.
+      this.backfillAbort?.abort();
+      const abort = new AbortController();
+      this.backfillAbort = abort;
       this.trackBackground(
-        backfillMediaInfo(store, probe)
+        backfillMediaInfo(store, probe, {
+          signal: abort.signal,
+          stillOpen: () => this.stillOpen(store),
+        })
           .then((measured) => {
             // Against the store this pass actually measured, never by world id (Codex round 2).
             // refreshWorldSnapshot calls loadWorld, so a probe still running when the user opens
@@ -4969,6 +4985,8 @@ export class Coordinator {
       this.jobQueue?.dispose();
       for (const controller of this.reading.values()) controller.abort();
       for (const handle of this.exports.values()) handle.cancel();
+      // Before the drain below awaits backgroundWork, or the drain waits on it.
+      this.backfillAbort?.abort();
       // In-flight frames answer first, then the door shuts: no new work can arrive during the
       // drains below. Transport.stop() was written and never called, so a stopped coordinator
       // went on listening — invisible in the packaged app, where the process exits regardless,

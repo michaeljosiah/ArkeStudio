@@ -120,6 +120,36 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
       // opinion would only be a way for two runs to disagree.
       assert.equal(await backfillMediaInfo(store, probe), 0);
       assert.equal(calls, unmeasured, "nothing was measured twice");
+
+      // Abandoned when the world it was measuring is no longer the open one: gateOp does not
+      // refuse work on a closed store, so an unguarded pass commits without the world's lock.
+      const other = await open();
+      try {
+        let touched = 0;
+        const measuredAfterSwitch = await backfillMediaInfo(
+          other.store,
+          { durationSec: async () => 9, info: async () => { touched += 1; return { durationSec: 9, hasAudio: true }; } },
+          { stillOpen: () => false },
+        );
+        assert.equal(measuredAfterSwitch, 0);
+        assert.equal(touched, 0, "not even probed once the world stopped being the open one");
+      } finally {
+        await other.store.close();
+      }
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("measures through a probe that only reports duration", async () => {
+    // `info` is the optional half of the MediaProbe contract; a host offering only durationSec
+    // was being treated as no probe at all.
+    const { store } = await open();
+    try {
+      const song = await sourceFile("duration-only.mp3", "measured the shallow way");
+      await fileArtifact(store, { sourcePath: song, mediaProbe: { durationSec: async () => 41 } });
+      const filed = store.getBundle().artifacts.find((a) => a.file === "duration-only.mp3");
+      assert.equal(filed?.mediaInfo?.durationSec, 41);
     } finally {
       await store.close();
     }
