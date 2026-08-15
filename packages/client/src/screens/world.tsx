@@ -12,12 +12,12 @@ import {
   type CanonEntry,
   type PendingSheet,
   type Sheet,
+  type WorldBundle,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
 import { ChevronRight, Plus, Search } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
-import { WorldKeyArt } from "../components/key-art.js";
 import { Loading } from "../components/loading.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { characterPortraitPath, locationPortraitPath, Portrait, sheetPortraitPath } from "../components/portrait.js";
@@ -288,7 +288,11 @@ export function WorldOverviewScreen() {
         </div>
         <h1 className="fy-hero__title">{world.meta.name}</h1>
         {world.meta.logline && <p className="fy-hero__lede">{world.meta.logline}</p>}
-        <WorldKeyArt worldId={worldId!} slug={world.meta.slug} hasLogline={Boolean(world.meta.logline)} />
+        {/*
+          Nothing to operate (design 63a). The hero used to end in a key-art row — Generate from
+          the logline, Upload an image, a model picker and the keep-or-discard offer — which put
+          four controls over an image the hero does not even show, under the world's own title.
+        */}
       </div>
       <div className="fy-fan">
         {characters.map((sheet, i) => {
@@ -388,11 +392,273 @@ export function WorldOverviewScreen() {
         </div>
       </div>
       {/*
-       * Needs you, Open threads and Recent changes used to stack below the hub. Each of them now
-       * has a screen that shows it properly — proposals, canon, and activity — and the chrome
-       * carries a warning dot to the first two from anywhere, so restating them here only pushed
-       * the world's own entrances further down the page.
+       * Below the fold (design 63b). Needs you, Open threads and Recent changes used to stack
+       * here as panels, and turn 44 pulled them off precisely because screens' worth of content
+       * pushed the world's own entrances down the page. What is here now sits *after* the fan and
+       * the two doors and costs them nothing: what the world is made of, what it has been made
+       * into, and one line naming what is waiting.
        */}
+      <div className="fy-worldmore">
+        <div className="fy-worldmore__rule" />
+        <WorldGlance world={world} />
+        <WorldProductions worldId={worldId!} world={world} />
+        <NeedsYou worldId={worldId!} world={world} />
+      </div>
+    </div>
+  );
+}
+
+/** A heading pair used by both sections below the fold: the label, the sentence, and an aside. */
+function SectionHead({ eyebrow, title, aside }: { eyebrow: string; title: string; aside: ReactNode }) {
+  return (
+    <div className="fy-wsection__head">
+      <div>
+        <div className="fy-wsection__eyebrow">{eyebrow}</div>
+        <h2 className="fy-wsection__title">{title}</h2>
+      </div>
+      {aside}
+    </div>
+  );
+}
+
+/**
+ * What the world is made of (design 63b).
+ *
+ * Four figures, each with a second line naming what is outstanding about it rather than repeating
+ * the count in words. Every one of them is the world's own — `worldSheets` drops a production's
+ * guests, which would otherwise inflate a cast the world has never met (SPEC-020 R-8).
+ *
+ * Figures, not buttons: the tab row above already reaches all seven screens, and a second set of
+ * doors to the same places is the inventory this page has twice been cleared of.
+ */
+function WorldGlance({ world }: { world: WorldBundle }) {
+  const owned = worldSheets(world.sheets).filter((s) => s.retired !== true);
+  const characters = owned.filter((s) => s.type === "character");
+  const places = owned.filter((s) => s.type === "location");
+  const truths = world.canon.filter((c) => c.status === "settled" && c.retired !== true);
+  const threads = world.canon.filter((c) => c.status === "open").length;
+  const canonProposals = world.proposals.filter((p) =>
+    p.proposal.kind === "new-canon" || p.proposal.kind === "canon-edit" || p.proposal.kind === "canon-settle",
+  ).length;
+  const waitingCast = pendingWorldSheets(pendingSheets(world.proposals, "character")).length;
+  const sketchPlaces = places.filter((s) => s.status === "sketch").length;
+  // Accepted reference material: the identity anchors, the model sheets that ride along with a
+  // dispatch, and a location's accepted angles. Candidates and superseded views are not assets —
+  // nothing has said yes to them yet, or something has since said no.
+  const kits = world.referenceKits;
+  const anchored = kits.filter((kit) => mainPhotoFor(kit) !== null).length;
+  const assets = kits.reduce(
+    (n, kit) =>
+      n +
+      (mainPhotoFor(kit) !== null ? 1 : 0) +
+      (designatedCompilation(kit) !== null ? 1 : 0) +
+      (kit.locationViews ?? []).filter((v) => v.status === "active").length,
+    0,
+  );
+  const cells: Array<{ n: number; label: string; sub: string }> = [
+    {
+      n: truths.length,
+      label: `Canon truth${truths.length === 1 ? "" : "s"}`,
+      sub:
+        canonProposals > 0
+          ? `${canonProposals} proposed change${canonProposals === 1 ? "" : "s"}`
+          : threads > 0
+            ? `${threads} open thread${threads === 1 ? "" : "s"}`
+            : "nothing unsettled",
+    },
+    {
+      n: characters.length,
+      label: `Character${characters.length === 1 ? "" : "s"}`,
+      sub:
+        waitingCast > 0
+          ? `${waitingCast} waiting for approval`
+          : characters.length === 0
+            ? "no one lives here yet"
+            : `${characters.filter((s) => s.status === "locked").length} locked to canon`,
+    },
+    {
+      n: places.length,
+      label: "Places",
+      sub:
+        places.length === 0
+          ? "nowhere yet"
+          : sketchPlaces > 0
+            ? `${sketchPlaces} still a sketch`
+            : "all locked to canon",
+    },
+    {
+      n: assets,
+      label: "Accepted assets",
+      sub: assets === 0 ? "nothing accepted yet" : `${anchored} generation-ready`,
+    },
+  ];
+  return (
+    <section className="fy-wsection">
+      <SectionHead
+        eyebrow="The world at a glance"
+        title="Everything here becomes material."
+        aside={
+          <p className="fy-wsection__lede">
+            Build the foundations once, then carry them into stories, films and interactive
+            experiences.
+          </p>
+        }
+      />
+      <div className="fy-glance">
+        {cells.map((cell) => (
+          <div key={cell.label} className="fy-glance__cell">
+            <div className="fy-glance__n">{cell.n}</div>
+            <div className="fy-glance__label">{cell.label}</div>
+            <div className="fy-glance__sub">{cell.sub}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * What the world has been made into (design 63b).
+ *
+ * The same tiles the Productions tab draws at full size, in a row that fits under the glance.
+ * A percentage is shown only where there are shots to divide: a story production carries its
+ * scenes and chapters instead, because a completion figure over nothing countable is invented.
+ */
+function WorldProductions({ worldId, world }: { worldId: string; world: WorldBundle }) {
+  const navigate = useNavigate();
+  const productions = world.productions;
+  return (
+    <section className="fy-wsection">
+      <SectionHead
+        eyebrow="Productions"
+        title="One world, many forms."
+        aside={
+          <Button variant="secondary" onClick={() => navigate(`/w/${worldId}/productions/new`)}>
+            <Plus size={13} /> New production
+          </Button>
+        }
+      />
+      {productions.length === 0 ? (
+        <p className="fy-wsection__none">
+          Nothing has been made from this world yet. Same cast, same canon — any format: film,
+          stills, book.
+        </p>
+      ) : (
+        <div
+          className="fy-prodstrip"
+          // Never a hole where a card is missing: two productions are two halves, not two thirds
+          // of a row — the rule the location and faction grids already follow.
+          style={{
+            gridTemplateColumns: `repeat(${Math.min(Math.max(productions.length, 2), 3)}, minmax(0, 1fr))`,
+          }}
+        >
+          {productions.map((p) => {
+            const shots = p.scenes.flatMap((s) => s.shots);
+            const covered = shots.filter((s) => p.selections[s.id]?.acceptedTakeId).length;
+            const board = p.scenes.find((s) => s.board)?.board;
+            const take = p.takes.find((t) => t.media);
+            const art = board
+              ? `productions/${p.meta.id}/${board.image}`
+              : take
+                ? `productions/${p.meta.id}/takes/${take.id}/${take.media}`
+                : (world.keyArt ?? "");
+            return (
+              <button
+                key={p.meta.id}
+                type="button"
+                className="fy-prodtile"
+                onClick={() => navigate(`/w/${worldId}/p/${p.meta.id}`)}
+                aria-label={`${p.meta.title}, ${p.meta.format}. Open the workspace.`}
+              >
+                <div className="fy-prodtile__frame">
+                  <Portrait worldSlug={world.meta.slug} path={art} label={`${p.meta.title}: frame`} radius={7} />
+                </div>
+                <div className="fy-prodtile__eyebrow">{p.meta.format}</div>
+                <div className="fy-prodtile__name">{p.meta.title}</div>
+                <div className="fy-prodtile__foot">
+                  <span className="fy-prodtile__meta">
+                    {shots.length > 0
+                      ? `${shots.length} shot${shots.length === 1 ? "" : "s"} · ${covered} accepted`
+                      : `${p.scenes.length} scene${p.scenes.length === 1 ? "" : "s"} · ${p.meta.status}`}
+                  </span>
+                  {shots.length > 0 && (
+                    <span className="fy-prodtile__pct">{Math.round((covered / shots.length) * 100)}%</span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** Which decision a staged proposal is, in the words the person who has to make it would use. */
+const PROPOSAL_WHY: Record<string, string> = {
+  "new-sheet": "new sheet proposal",
+  "sheet-edit": "edit to a sheet",
+  "new-canon": "new canon entry",
+  "canon-edit": "edit to canon",
+  "canon-settle": "a thread to settle",
+  "chapter-draft": "drafted chapter",
+  "story-overview": "story overview",
+  "scene-draft": "drafted scene",
+  "scene-edit": "edit to a scene",
+  extraction: "extracted from an artifact",
+  restore: "a restore to confirm",
+  "art-direction": "change to the world look",
+  worldbuilding: "several changes, staged together",
+};
+
+/**
+ * One line naming what is waiting, or nothing at all (design 63b).
+ *
+ * At most two, because this is a convenience rather than the guarantee: the chrome's warning dot
+ * reaches proposals and activity from every screen in the app, so a third thing sitting off the
+ * end of this line is not lost. Never rendered at zero — a bar saying "0 things need you" is the
+ * kind of furniture that makes a page longer without making it say more.
+ */
+function NeedsYou({ worldId, world }: { worldId: string; world: WorldBundle }) {
+  const navigate = useNavigate();
+  const items = [
+    ...world.proposals.map((p) => ({
+      key: p.proposal.id,
+      name: p.proposal.summary,
+      why: PROPOSAL_WHY[p.proposal.kind] ?? p.proposal.kind.replace(/-/g, " "),
+      action: "Review",
+      go: () => navigate(`/w/${worldId}/proposals`),
+    })),
+    ...world.canon
+      .filter((c) => c.status === "open" && c.retired !== true)
+      .map((c) => ({
+        key: c.id,
+        name: c.title,
+        why: "an open thread",
+        action: "Resolve",
+        go: () => navigate(`/w/${worldId}/canon/${c.id}/thread`),
+      })),
+  ];
+  if (items.length === 0) return null;
+  return (
+    <div className="fy-needs">
+      <div className="fy-needs__count">
+        <span className="fy-dot fy-dot--warn" />
+        {items.length} thing{items.length === 1 ? "" : "s"} need{items.length === 1 ? "s" : ""} you
+      </div>
+      {/*
+        The subject clips; the kind and the verb never do. A proposal's summary is a whole
+        sentence — "Maren pays for scene four — her left ear is gone, and the sheet should say
+        so" — so leaving the kind after it in the same clipped run meant the one thing this line
+        exists to say, what sort of decision is waiting, was the first thing the ellipsis ate.
+      */}
+      {items.slice(0, 2).map((item) => (
+        <button key={item.key} type="button" className="fy-needs__item" onClick={item.go}>
+          <span className="fy-needs__what">{item.name}</span>
+          <span className="fy-needs__why">{item.why}</span>
+          <span className="fy-needs__go">{item.action} →</span>
+        </button>
+      ))}
     </div>
   );
 }

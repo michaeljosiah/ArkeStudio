@@ -222,7 +222,7 @@ describe("bringing a master look in by hand", () => {
 
       await send({ kind: "upload-master-look", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB61A" });
       const offered = provider.openStore()!.getBundle();
-      assert.equal(offered.masterLookCandidate, `${MASTER_LOOK_DIR}/candidate.png`);
+      assert.deepEqual(offered.masterLookCandidates, [`${MASTER_LOOK_DIR}/candidate.png`]);
       assert.equal(
         offered.artDirection.masterLook,
         before.masterLook,
@@ -259,7 +259,7 @@ describe("bringing a master look in by hand", () => {
     const { provider, send, record } = await harness(() => [picked]);
     try {
       await send({ kind: "upload-master-look", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB61B" });
-      assert.equal(provider.openStore()!.getBundle().masterLookCandidate, `${MASTER_LOOK_DIR}/candidate.jpg`);
+      assert.deepEqual(provider.openStore()!.getBundle().masterLookCandidates, [`${MASTER_LOOK_DIR}/candidate.jpg`]);
       await send({ kind: "use-master-look", worldId: WORLD_ID });
       assert.match((await record()).masterLook ?? "", /\.jpg$/);
     } finally {
@@ -275,7 +275,7 @@ describe("bringing a master look in by hand", () => {
       await send({ kind: "upload-master-look", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB61C" });
       const result = events.find((event) => event.type === "queue.enqueue-result");
       assert.equal(result?.type === "queue.enqueue-result" ? result.disposition : null, "rejected");
-      assert.equal(provider.openStore()!.getBundle().masterLookCandidate, null);
+      assert.deepEqual(provider.openStore()!.getBundle().masterLookCandidates, []);
       assert.equal(provider.openStore()!.getBundle().artDirection.version, before, "nothing moved");
     } finally {
       await provider.close();
@@ -290,7 +290,7 @@ describe("bringing a master look in by hand", () => {
       // Not a failure: nothing was queued, and a toast over a dialog somebody deliberately closed
       // is the app arguing with a decision.
       assert.equal(result?.type === "queue.enqueue-result" ? result.disposition : null, "not-queued");
-      assert.equal(provider.openStore()!.getBundle().masterLookCandidate, null);
+      assert.deepEqual(provider.openStore()!.getBundle().masterLookCandidates, []);
     } finally {
       await provider.close();
     }
@@ -354,7 +354,7 @@ describe("bringing a master look in by hand", () => {
 
       const after = provider.openStore()!.getBundle();
       assert.equal(after.artDirection.version, before, "the refusal changed nothing");
-      assert.equal(after.masterLookCandidate, `${MASTER_LOOK_DIR}/candidate.png`, "the offer is still on the screen");
+      assert.deepEqual(after.masterLookCandidates, [`${MASTER_LOOK_DIR}/candidate.png`], "the offer is still on the screen");
       assert.deepEqual(
         await readdir(join(worldDir, "art-direction")),
         ["art-direction.json"],
@@ -372,7 +372,7 @@ describe("bringing a master look in by hand", () => {
       const before = provider.openStore()!.getBundle().artDirection.version;
       await send({ kind: "upload-master-look", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB61G" });
       await send({ kind: "discard-master-look", worldId: WORLD_ID });
-      assert.equal(provider.openStore()!.getBundle().masterLookCandidate, null);
+      assert.deepEqual(provider.openStore()!.getBundle().masterLookCandidates, []);
       assert.equal(provider.openStore()!.getBundle().artDirection.version, before, "discarding is not a change");
     } finally {
       await provider.close();

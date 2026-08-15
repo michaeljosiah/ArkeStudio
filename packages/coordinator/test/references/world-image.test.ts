@@ -15,6 +15,7 @@ import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import {
   WORLD_IMAGE_CANDIDATE,
   WORLD_IMAGE_DIR,
+  keyArtPrompt,
   worldImagePrompt,
   worldImageRequest,
 } from "../../src/references/world-image.js";
@@ -92,12 +93,63 @@ describe("the world's key image", () => {
 
   it("keeps the constraints when the art director rewrites the prompt", () => {
     // Round 3's P2: the directed path replaces the composed prompt wholesale, so composing the
-    // suffix inside worldImageRequest bound only the fallback. This asserts the shape the
-    // coordinator builds for the directed branch.
+    // suffix inside worldImageRequest bound only the fallback.
     const constrained = { ...direction, failureModes: ["No lens flare on the harbour lamps."] };
-    const directed = `${constrained.description}. A drawn prompt from the art director.${imageConstraintSuffix(constrained)}`;
+    const directed = keyArtPrompt({
+      composed: String(worldImageRequest(meta(), model, constrained).params.prompt),
+      description: constrained.description,
+      suffix: imageConstraintSuffix(constrained),
+      directed: "A drawn prompt from the art director.",
+    });
     assert.match(directed, /No lens flare on the harbour lamps\.$/);
     assert.match(directed, /A drawn prompt from the art director\./, "the director's words survive");
+    assert.match(directed, /^Painterly, tidal, restrained\./, "a rewrite is a rewrite of the world's brief");
+  });
+});
+
+/**
+ * Whose words go, when more than one party has some (design 64).
+ *
+ * The author's outrank both, and the point of that is subtractive: an author who opened the box
+ * and changed it has said what the picture is, so the studio writes nothing on top. What no branch
+ * may do is drop the standing clause, which is not the author's to drop either.
+ */
+describe("the three sources of a key-art prompt", () => {
+  const constrained = { ...direction, failureModes: ["No lens flare on the harbour lamps."] };
+  const base = () => ({
+    composed: String(worldImageRequest(meta(), model, constrained).params.prompt),
+    description: constrained.description,
+    suffix: imageConstraintSuffix(constrained),
+  });
+
+  it("sends the author's words as written, with nothing of ours in front", () => {
+    const words = keyArtPrompt({ ...base(), authored: "A harbour at slack water, one lamp lit." });
+    assert.match(words, /^A harbour at slack water, one lamp lit\./, "nothing is prefixed to them");
+    assert.ok(!words.includes("Key art for"), "and the composition is not appended either");
+  });
+
+  it("lets the author outrank the art director rather than layering the two", () => {
+    const words = keyArtPrompt({
+      ...base(),
+      authored: "A harbour at slack water.",
+      directed: "A drawn prompt from the art director.",
+    });
+    assert.ok(!words.includes("art director"), "a rewrite on top of an author's words is our taste over theirs");
+  });
+
+  it("keeps the standing clause whoever wrote the rest", () => {
+    const suffix = /No lens flare on the harbour lamps\.$/;
+    assert.match(keyArtPrompt({ ...base(), authored: "A harbour." }), suffix);
+    assert.match(keyArtPrompt({ ...base(), directed: "A harbour." }), suffix);
+    assert.match(keyArtPrompt(base()), suffix, "and on the path where nobody wrote anything");
+  });
+
+  it("falls back to the composition, byte for byte, when nobody wrote anything", () => {
+    assert.equal(keyArtPrompt(base()), base().composed);
+    // An empty or absent director answer is the same as no answer; it must not produce a prompt
+    // that is just the description and a full stop.
+    assert.equal(keyArtPrompt({ ...base(), directed: null }), base().composed);
+    assert.equal(keyArtPrompt({ ...base(), directed: "" }), base().composed);
   });
 
   it("is an ordinary image job, so the queue can estimate, ledger and cancel it", () => {
@@ -110,6 +162,34 @@ describe("the world's key image", () => {
     assert.ok(request.estimatedMicroUsd > 0, "estimated before it runs, like everything that spends");
     assert.match(request.params.prompt, /Painterly, tidal, restrained/);
     assert.deepEqual(request.params.artDirection, { version: 3, source: "world", transport: "text" });
+  });
+
+  /**
+   * Four asked for, four landed (design 65).
+   *
+   * The failure this guards is exact and has happened before, on the character candidates: four
+   * jobs dispatched, four charges taken, and one file on disk because they all landed on the same
+   * name. A set of one keeps the historical name so nothing about an existing world moves.
+   */
+  it("names every candidate of a set separately, and keeps the old name for a set of one", () => {
+    const names = Array.from({ length: 4 }, (_, index) =>
+      worldImageRequest(meta(), model, direction, { index, count: 4 }).landing.name,
+    );
+    assert.equal(new Set(names).size, 4, "four charges must not collapse onto one file");
+    assert.deepEqual(names, ["candidate-1.png", "candidate-2.png", "candidate-3.png", "candidate-4.png"]);
+    assert.equal(
+      worldImageRequest(meta(), model, direction).landing.name,
+      WORLD_IMAGE_CANDIDATE,
+      "one is still candidate.png, so a world generated before the count reads back unchanged",
+    );
+  });
+
+  it("prices and targets each of a set exactly as it prices and targets one", () => {
+    const one = worldImageRequest(meta(), model, direction);
+    const third = worldImageRequest(meta(), model, direction, { index: 2, count: 4 });
+    assert.equal(third.estimatedMicroUsd, one.estimatedMicroUsd, "each image in the set costs the same");
+    assert.deepEqual(third.target, one.target);
+    assert.equal(third.params.prompt, one.params.prompt, "the same brief, sampled again — not reworded per slot");
   });
 
   it("lands where it can be looked at and said yes to, not straight over the world's image", () => {
@@ -161,7 +241,7 @@ describe("bringing key art in by hand", () => {
     try {
       await send({ kind: "upload-world-image", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB62A" });
       const offered = provider.openStore()!.getBundle();
-      assert.equal(offered.keyArtCandidate, "incoming/world-image/candidate.jpg");
+      assert.deepEqual(offered.keyArtCandidates, ["incoming/world-image/candidate.jpg"]);
       assert.equal(offered.keyArt, "world-art.png", "an upload is an offer — the world keeps what it has");
 
       await send({ kind: "use-world-image", worldId: WORLD_ID });
@@ -169,7 +249,7 @@ describe("bringing key art in by hand", () => {
       // Named for the format it is. A JPEG written as world-art.png would be served as
       // image/png by a media route that reads the extension.
       assert.equal(after.keyArt, "world-art.jpg");
-      assert.equal(after.keyArtCandidate, null);
+      assert.deepEqual(after.keyArtCandidates, []);
       // One key art, not two: the PNG it replaces goes, or the scan picks between them by sort.
       const names = await readdir(worldDir);
       assert.deepEqual(names.filter((name) => name.startsWith("world-art")), ["world-art.jpg"]);
@@ -201,7 +281,7 @@ describe("bringing key art in by hand", () => {
       await send({ kind: "upload-world-image", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB62C" });
       const result = events.find((event) => event.type === "queue.enqueue-result");
       assert.equal(result?.type === "queue.enqueue-result" ? result.disposition : null, "not-queued");
-      assert.equal(provider.openStore()!.getBundle().keyArtCandidate, null);
+      assert.deepEqual(provider.openStore()!.getBundle().keyArtCandidates, []);
       assert.equal(provider.openStore()!.getBundle().keyArt, "world-art.png");
     } finally {
       await provider.close();
@@ -215,7 +295,7 @@ describe("bringing key art in by hand", () => {
       await send({ kind: "upload-world-image", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB62D" });
       const result = events.find((event) => event.type === "queue.enqueue-result");
       assert.equal(result?.type === "queue.enqueue-result" ? result.disposition : null, "rejected");
-      assert.equal(provider.openStore()!.getBundle().keyArtCandidate, null);
+      assert.deepEqual(provider.openStore()!.getBundle().keyArtCandidates, []);
     } finally {
       await provider.close();
     }

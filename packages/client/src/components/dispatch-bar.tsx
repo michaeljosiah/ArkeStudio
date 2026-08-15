@@ -6,6 +6,7 @@ import {
   estimateImageMicroUsd,
   formatMicroUsd,
   isLandscapeWorkflow,
+  MAX_IMAGE_PREVIEWS,
   offeredAspects,
   PROVIDERS,
   tiersFor,
@@ -16,6 +17,13 @@ import {
 import { useStore } from "../lib/store.js";
 import { ChevronDown } from "./icons.js";
 import { Button } from "./ui.js";
+
+/**
+ * The counts the control offers, from the one number that caps them (design 65). Derived rather
+ * than written out, so raising the cap moves the frame's validation, the request fan-out and this
+ * row together — they are the same decision and they charge the same money.
+ */
+const PREVIEW_COUNTS = Array.from({ length: MAX_IMAGE_PREVIEWS }, (_, i) => i + 1);
 
 /**
  * The line that says what will run and what it costs, turned into the line that chooses
@@ -400,7 +408,7 @@ export function DispatchBar({
           <span className="fy-dispatchbar__seg">
             <span className="fy-dispatchbar__eyebrow">PREVIEWS</span>
             <span>
-              {[1, 2, 3, 4].map((value) => (
+              {PREVIEW_COUNTS.map((value) => (
                 <button
                   type="button"
                   key={value}
@@ -465,6 +473,22 @@ export function DispatchBar({
                 </button>
               ))}
             </span>
+          </span>
+        )}
+
+        {/*
+          The figure belongs to the controls, not to the buttons beside it (design 65).
+
+          It used to render only in the `full` variant, bundled with Cancel and the primary — so
+          the standard dialog, which draws its own actions and therefore asks for `controls`, has
+          never priced anything. That was survivable while a dialog meant one image. It stopped
+          being survivable the moment the count arrived: the count *is* money, four previews cost
+          four times one, and a control that multiplies the bill silently is the one thing this
+          bar exists to prevent.
+        */}
+        {!(variant === "full" && onCancel && primaryLabel && onPrimary) && (
+          <span className="fy-dispatchbar__group">
+            <span className="fy-dispatchbar__estimate">~{formatMicroUsd(estimate)}</span>
           </span>
         )}
 

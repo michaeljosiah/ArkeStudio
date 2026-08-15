@@ -4,6 +4,7 @@ import {
   compilationIsStale,
   designatedCompilation,
   mainPhotoFor,
+  MAX_IMAGE_PREVIEWS,
   type CharacterLook,
   type ManifestModel,
   type ReferenceKit,
@@ -12,7 +13,8 @@ import {
   type Sheet,
   type Take,
 } from "@arke-studio/contracts";
-import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
+import { resolveModel } from "../components/dispatch-bar.js";
+import { authoredPrompt, GenerationDialog } from "../components/generation-dialog.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Button, Callout, cx } from "../components/ui.js";
 import { Loading } from "../components/loading.js";
@@ -371,8 +373,16 @@ export function GenerateCharacterSheetScreen() {
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);
   const { state } = useStore();
-  const [override, setOverride] = useState(false);
-  const [style, setStyle] = useState("");
+  /*
+   * The look's own words, in the box, rather than an Override toggle over a hidden default.
+   *
+   * The screen used to show the world look as a thumbnail and a caption, with an "Override"
+   * button that revealed an empty textarea — so the words actually being sent were never on
+   * screen, and overriding meant writing a replacement for something you could not read. This is
+   * the same gesture key art and the master look already use (design 64): the box opens as what
+   * would be sent, and an edit *is* the override.
+   */
+  const [style, setStyle] = useState<string | null>(null);
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier }>({});
   const [requested, setRequested] = useState(false);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
@@ -424,190 +434,145 @@ export function GenerateCharacterSheetScreen() {
   const generatedPath = generatedTake
     ? `references/${sheetId}/takes/${generatedTake.id}/${generatedTake.media}`
     : null;
-  return (
-    <div className="fy-generation-scrim" data-screen="model-sheet-generate">
-      <div className="fy-sheet-dialog">
-        <header>
-          <div>
-            <h1>Generate character sheet</h1>
-            <p>{sheet.name} · one composite identity reference</p>
-          </div>
-          <button type="button" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}>
-            ×
-          </button>
-        </header>
-        {requested ? (
-          <div className="fy-sheet-dialog__result">
-            {dispatchError ? (
-              <div className="fy-sheet-dialog__result-message">
-                <strong>Couldn’t start generation</strong>
-                <p>{dispatchError}</p>
-                <Button variant="primary" onClick={() => setRequested(false)}>Back to generation settings</Button>
-              </div>
-            ) : generatedPath && generatedTake && generatedAccepted ? (
-              <>
-                {/* The human's own action: the composite the user asked for landed already
-                    designated, so there is nothing to approve — only somewhere to go. */}
-                <div className="fy-sheet-dialog__generated-image">
-                  <CharacterSheetPreview worldSlug={world.meta.slug} path={generatedPath} characterName={sheet.name} />
-                </div>
-                <div className="fy-sheet-dialog__result-actions">
-                  <div>
-                    <strong>Your character sheet is in</strong>
-                    <p>It is already part of {sheet.name}’s reference set. Regenerate from there any time.</p>
-                  </div>
-                  <Button variant="primary" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}>
-                    Back to the reference set
-                  </Button>
-                </div>
-              </>
-            ) : generatedPath && generatedTake ? (
-              /* A take that somehow arrived unreviewed — an older world, or the auto-accept's
-                 guards declined — keeps the explicit decision. */
-              <>
-                <div className="fy-sheet-dialog__generated-image">
-                  <CharacterSheetPreview worldSlug={world.meta.slug} path={generatedPath} characterName={sheet.name} />
-                </div>
-                <div className="fy-sheet-dialog__result-actions">
-                  <div>
-                    <strong>Your character sheet is ready</strong>
-                    <p>Open it for a larger view, then accept it into {sheet.name}’s reference set.</p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      rejectReferenceTake(world.meta.worldId, generatedTake.id, "identity");
-                      navigate(`/w/${worldId}/cast/${sheetId}/kit`);
-                    }}
-                  >
-                    Reject
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onClick={() => {
-                      acceptCharacterSheet(world.meta.worldId, sheetId, generatedTake.id);
-                      navigate(`/w/${worldId}/cast/${sheetId}/kit`);
-                    }}
-                  >
-                    Accept this sheet
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <div className="fy-sheet-dialog__result-message">
-                <Loading label={`Generating character sheet for ${sheet.name}`} size={56} />
-                <p>You can wait here or leave this page. We’ll notify you when it is ready.</p>
-                <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}>Leave page</Button>
-              </div>
-            )}
-          </div>
-        ) : <div className="fy-sheet-dialog__body">
-          <section className="fy-sheet-dialog__identity">
-            <div>
-              <Portrait
-                worldSlug={world.meta.slug}
-                path={photo ? `references/${sheetId}/${photo.file}` : ""}
-                label="Accepted main photo required"
-                radius={12}
-              />
-            </div>
-            <strong>Main photo</strong>
-            <span>identity source · accepted</span>
-          </section>
-          <section className="fy-sheet-dialog__spec">
-            <div className="fy-sheet-dialog__label">WHAT ARRIVES</div>
-            <div className="fy-sheet-dialog__layout">
-              <div className="fy-sheet-layout-sample">
-                <i />
-                <i />
-                <i />
-                <i />
-              </div>
-              <div>
-                <h2>Character sheet</h2>
-                <p>turnaround + expressions + details in one image</p>
-              </div>
-            </div>
-            <div className="fy-sheet-dialog__line" />
-            <div className="fy-sheet-dialog__stylehead">
-              <span>ART DIRECTION</span>
-              <button type="button" onClick={() => setOverride(!override)}>
-                Override
-              </button>
-            </div>
-            <div className="fy-sheet-dialog__worldlook">
-              <span>
-                <Portrait
-                  worldSlug={world.meta.slug}
-                  path={world.artDirection.masterLook ?? world.keyArt ?? ""}
-                  label="World look"
-                  radius={8}
-                />
-              </span>
-              <div>
-                <strong>World look · v{world.artDirection.version}</strong>
-                <p>inherited from this world</p>
-              </div>
-            </div>
-            {override && (
-              <textarea
-                value={style}
-                onChange={(event) => setStyle(event.target.value)}
-                placeholder="Override this generation only"
-              />
-            )}
-            <div className="fy-sheet-dialog__summary">
-              <span>Identity</span>
-              <strong>Main photo</strong>
-              <span>Style</span>
-              <strong>
-                {override && style ? "Generation override" : `World look v${world.artDirection.version}`}
-              </strong>
-            </div>
-            {referencesAsText && (
-              <p className="fy-reference-fallback">
-                {chosenModel?.displayName ?? "This model"} accepts no reference images. The main photo cannot be sent;
-                identity relies on the character traits carried in the prompt.
-              </p>
-            )}
-          </section>
-        </div>}
-        {!requested && <footer>
-          <span className="fy-sheetgen__purpose">completes {sheet.name}&apos;s reference set</span>
-          <DispatchBar
-            workflow="character-sheet"
-            referenceImages={1}
-            choice={choice}
-            onChoice={setChoice}
-            onCancel={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}
-            primaryLabel="Generate"
-            primaryDisabled={!photo || !carriesIdentity(chosenModel)}
-            onPrimary={(chosen) => {
-              // Seeded from ALL takes, reviewed included — a previously accepted composite must
-              // not read as this request's result.
-              earlierTakeIds.current = new Set(sheetTakes.map((take) => take.id));
-              const requestId = generateCharacterSheet(
-                world.meta.worldId,
-                sheetId,
-                override && style.trim() ? style.trim() : undefined,
-                sheet.name,
-                {
-                  modelId: chosen.model.id,
-                  ...(chosen.tier !== undefined ? { tier: chosen.tier } : {}),
-                },
-              );
-              if (requestId) {
-                pendingRequestId.current = requestId;
-                setDispatchError(null);
-                setRequested(true);
-              } else {
-                setDispatchError("The studio is disconnected. Reconnect and try again.");
-                setRequested(true);
-              }
-            }}
-          />
-        </footer>}
+  const back = () => navigate(`/w/${worldId}/cast/${sheetId}/kit`);
+  const inherited = world.artDirection.description;
+  const words = style ?? inherited;
+  /*
+   * What travels with a character sheet: the accepted main photo, and the look it inherits.
+   *
+   * Both are facts about this surface rather than choices — the sheet is conditioned on the main
+   * photo by definition — so they are shown rather than toggled. What can change is whether the
+   * chosen model will actually carry the photo, and that is stated here because it is the one
+   * silent downgrade that matters: identity by image, or identity by adjective.
+   */
+  const travelling = (
+    <>
+      <div className="fy-gendialog__label">What arrives</div>
+      <div className="fy-sheetspec">
+        <div className="fy-sheet-layout-sample">
+          <i />
+          <i />
+          <i />
+          <i />
+        </div>
+        <div>
+          <strong>Character sheet</strong>
+          <p>turnaround + expressions + details in one image</p>
+        </div>
       </div>
+      <div className="fy-gendialog__label">Identity source</div>
+      <div className="fy-gendialog__refs">
+        <div className={carriesIdentity(chosenModel) ? undefined : "is-dropped"}>
+          <Portrait
+            worldSlug={world.meta.slug}
+            path={photo ? `references/${sheetId}/${photo.file}` : ""}
+            label="Accepted main photo required"
+            radius={10}
+          />
+          <span>{carriesIdentity(chosenModel) ? "MAIN PHOTO" : "MAIN PHOTO · DROPPED"}</span>
+        </div>
+      </div>
+      {!photo && (
+        <p className="fy-gendialog__hint">
+          {sheet.name} has no accepted main photo yet. A character sheet is generated from one, so
+          that comes first.
+        </p>
+      )}
+      {referencesAsText && photo && (
+        <Callout tone="warning" title={`${chosenModel?.displayName ?? "This model"} accepts no reference images`}>
+          The main photo cannot be sent; identity relies on the character traits carried in the
+          prompt.
+        </Callout>
+      )}
+    </>
+  );
+
+  const preview = generatedPath
+    ? [{ key: generatedTake!.id, path: generatedPath, label: `${sheet.name}'s character sheet` }]
+    : [];
+
+  return (
+    <div data-screen="model-sheet-generate">
+      <GenerationDialog
+        open
+        onClose={back}
+        title="Generate character sheet"
+        lede={`${sheet.name} · one composite identity reference · World look · v${world.artDirection.version}`}
+        promptLabel="Art direction"
+        prompt={words}
+        onPrompt={setStyle}
+        onResetPrompt={() => setStyle(null)}
+        resetTitle="Back to the world look"
+        promptHint="Inherited from this world. Edit it and this one generation is made under your words instead — the look itself does not change."
+        worldSlug={world.meta.slug}
+        extra={travelling}
+        workflow="character-sheet"
+        referenceImages={1}
+        landscape
+        choice={choice}
+        onChoice={setChoice}
+        submitLabel="Generate"
+        submitDisabled={!photo || !carriesIdentity(chosenModel) || (requested && !generatedTake && !dispatchError)}
+        {...(dispatchError !== null ? { why: dispatchError } : {})}
+        onSubmit={() => {
+          // Seeded from ALL takes, reviewed included — a previously accepted composite must not
+          // read as this request's result.
+          earlierTakeIds.current = new Set(sheetTakes.map((take) => take.id));
+          acceptedJobId.current = null;
+          const override = authoredPrompt(words, inherited);
+          const requestId = generateCharacterSheet(
+            world.meta.worldId,
+            sheetId,
+            override?.trim() ? override.trim() : undefined,
+            sheet.name,
+            {
+              ...(chosenModel ? { modelId: chosenModel.id } : {}),
+              ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
+            },
+          );
+          if (requestId) {
+            pendingRequestId.current = requestId;
+            setDispatchError(null);
+            setRequested(true);
+          } else {
+            setDispatchError("The studio is disconnected. Reconnect and try again.");
+          }
+        }}
+        previews={preview}
+        generating={requested && generatedTake === null && dispatchError === null}
+        waitingHint={`Completes ${sheet.name}'s reference set. You can close this — it lands here and in Activity.`}
+        // One composite, so there is nothing to choose between: the take that came back is the
+        // selection. Making somebody click a single tile before they may answer it would be a
+        // step that exists only because the column can hold four.
+        selected={preview[0]?.key ?? null}
+        commit={
+          generatedTake === null
+            ? undefined
+            : generatedAccepted
+              ? {
+                  // The human's-own-action rule reviewed it as it landed, so there is nothing to
+                  // approve — only somewhere to go.
+                  label: "Back to the reference set",
+                  onCommit: back,
+                  note: `It is already part of ${sheet.name}'s reference set. Regenerate from here any time.`,
+                }
+              : {
+                  label: "Accept this sheet",
+                  onCommit: () => {
+                    acceptCharacterSheet(world.meta.worldId, sheetId, generatedTake.id);
+                    back();
+                  },
+                  note: `Accepting makes this ${sheet.name}'s designated character sheet.`,
+                  secondary: {
+                    label: "Reject",
+                    onAction: () => {
+                      rejectReferenceTake(world.meta.worldId, generatedTake.id, "identity");
+                      back();
+                    },
+                  },
+                }
+        }
+      />
     </div>
   );
 }
@@ -628,7 +593,7 @@ export function ReplaceMainPhotoScreen() {
   const [carryIdentity, setCarryIdentity] = useState(false);
   const [worldRef, setWorldRef] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
-  // The click itself flips the panel (the WorldKeyArt pattern): between the press and the
+  // The click itself flips the panel: between the press and the
   // first job event there is a round trip, and a panel that waits for it says "Ready when
   // you are" to somebody who just spent money. Cleared when the queue answers either way;
   // the timeout is the backstop for an enqueue that was refused without a job.
@@ -649,6 +614,32 @@ export function ReplaceMainPhotoScreen() {
       navigate(`/w/${worldId}/cast/${sheetId}/kit`);
     }
   }, [acceptance?.status, navigate, sheetId, worldId]);
+
+  /*
+   * Previews in flight, the same way the kit page watches sheet jobs. Without this the panel said
+   * "Ready when you are" while the money was already being spent — indistinguishable from having
+   * pressed nothing.
+   *
+   * Scoped to THIS world — sheet slugs recur across worlds — and a job held for reconciliation is
+   * not generating: nothing runs until the user answers in Activity.
+   *
+   * Computed above the guard, and so is the effect that reads it. Both used to sit below it, which
+   * meant this component ran 29 hooks on a render with no world open and 30 on the next one —
+   * React's "rendered more hooks than during the previous render", and a blank screen for anyone
+   * who arrived at this address before the world had finished opening. A reload on the route was
+   * enough to do it.
+   */
+  const generatingPreviews = (state?.app.jobs ?? []).filter(
+    (job) =>
+      job.worldId === world?.meta.worldId &&
+      job.target.kind === "main-photo-candidate" &&
+      job.target.id?.startsWith(`${sheetId}/`) &&
+      (!["succeeded", "failed", "cancelled", "needs-reconciliation"].includes(job.status) ||
+        job.finalization?.status === "pending"),
+  ).length;
+  useEffect(() => {
+    if (asking && generatingPreviews > 0) setAsking(false);
+  }, [asking, generatingPreviews]);
 
   if (!world || !sheet || !sheetId) return null;
   const current = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
@@ -673,23 +664,7 @@ export function ReplaceMainPhotoScreen() {
   }));
   const candidates = [...uploadedCandidates, ...generatedCandidates];
   const selectedCandidate = candidates.find((candidate) => candidate.key === selected) ?? null;
-  // Previews in flight, the same way the kit page watches sheet jobs. Without this the panel
-  // said "Ready when you are" while the money was already being spent — indistinguishable
-  // from having pressed nothing.
-  // Scoped to THIS world — sheet slugs recur across worlds — and a job held for
-  // reconciliation is not generating: nothing runs until the user answers in Activity.
-  const generatingPreviews = (state?.app.jobs ?? []).filter(
-    (job) =>
-      job.worldId === world.meta.worldId &&
-      job.target.kind === "main-photo-candidate" &&
-      job.target.id?.startsWith(`${sheetId}/`) &&
-      (!["succeeded", "failed", "cancelled", "needs-reconciliation"].includes(job.status) ||
-        job.finalization?.status === "pending"),
-  ).length;
   const generating = asking || generatingPreviews > 0;
-  useEffect(() => {
-    if (asking && generatingPreviews > 0) setAsking(false);
-  }, [asking, generatingPreviews]);
   // The chosen model decides what can travel, so it decides what this screen shows travelling.
   // A silent downgrade from image identity to text description is the failure the bar exists to
   // prevent, and it has to be visible where the references are, not only in the bar's own line.
@@ -697,164 +672,129 @@ export function ReplaceMainPhotoScreen() {
   const carriesReferences = model !== null && model.unverified !== true && model.accepts.referenceImages > 0;
   const canImport = canPickFiles();
   const refs = carryIdentity && photo && carriesReferences ? [`references/${sheetId}/${photo.file}`] : [];
-  return (
-    <div className="fy-mainphoto-scrim" data-screen="replace-main-photo">
-      <div className="fy-mainphoto-dialog">
-        <section className="fy-mainphoto-dialog__composer">
-          <div className="fy-mainphoto-dialog__title">
-            <div>
-              <h1>Replace main photo</h1>
-              <p>{sheet.name} · the accepted identity anchor</p>
-            </div>
-            <span>World look · v{world.artDirection.version}</span>
-          </div>
-          <label>Describe the portrait</label>
-          <div className="fy-mainphoto-dialog__prompt">
-            <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
-            <button
-              type="button"
-              title="Reset from character sheet"
-              onClick={() => setPrompt(mainPhotoPromptFor(sheet))}
-            >
-              Reset
-            </button>
-          </div>
-          <div className="fy-mainphoto-dialog__refbuttons">
-            {/* Two different things, so two buttons: one decides what travels with the
-                generation, the other brings in a finished image that needs no generation. */}
-            <Button
-              disabled={!photo}
-              title={
-                photo
-                  ? "Carry the accepted main photo into the generation, so the new one keeps the face"
-                  : "There is no accepted main photo to carry yet"
-              }
-              onClick={() => setCarryIdentity(!carryIdentity)}
-            >
-              Use current photo
-            </Button>
-            <Button onClick={() => setWorldRef(!worldRef)}>Choose from world</Button>
-            <Button
-              disabled={!canImport}
-              title={
-                canImport
-                  ? "Choose an image from this computer; it joins the previews to pick from"
-                  : UPLOAD_UNAVAILABLE
-              }
-              onClick={() => importMainPhotoCandidate(world.meta.worldId, sheetId)}
-            >
-              Upload your own
-            </Button>
-          </div>
-          <div className="fy-mainphoto-dialog__refs">
-            {carryIdentity && photo && (
-              <div className={carriesReferences ? undefined : "is-dropped"}>
-                <Portrait
-                  worldSlug={world.meta.slug}
-                  path={`references/${sheetId}/${photo.file}`}
-                  label="Identity reference"
-                  radius={10}
-                />
-                <span>{carriesReferences ? "IDENTITY" : "IDENTITY · DROPPED"}</span>
-              </div>
-            )}
-            {worldRef && (
-              <div>
-                <Portrait
-                  worldSlug={world.meta.slug}
-                  path={world.artDirection.masterLook ?? world.keyArt ?? ""}
-                  label="Style reference"
-                  radius={10}
-                />
-                <span>STYLE · TEXT FALLBACK</span>
-              </div>
-            )}
-          </div>
-          {carryIdentity && !carriesReferences && model && (
-            <Callout tone="warning" title={`${model.displayName} accepts no reference images`}>
-              {sheet.name}&apos;s main photo will not ride along. The generation sees the written
-              description and the world look as text, and nothing of the face.
-            </Callout>
-          )}
-          <DispatchBar
-            workflow="main-photo"
-            count={count}
-            onCount={setCount}
-            referenceImages={refs.length}
-            choice={choice}
-            onChoice={setChoice}
-            onCancel={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}
-            primaryLabel="Generate previews"
-            primaryDisabled={!prompt.trim()}
-            onPrimary={(chosen) => {
-              setAsking(true);
-              generateMainPhoto(world.meta.worldId, sheetId, prompt.trim(), count, refs, {
-                modelId: chosen.model.id,
-                ...(chosen.tier !== undefined ? { tier: chosen.tier } : {}),
-              });
-            }}
-          />
-        </section>
-        <section className="fy-mainphoto-dialog__results">
-          <header>
-            <span>PREVIEWS</span>
-            <strong>{generating ? "generating" : candidates.length ? "ready" : "waiting"}</strong>
-          </header>
-          {candidates.length === 0 && generating ? (
-            <div className="fy-mainphoto-dialog__empty">
-              <Loading
-                label={
-                  generatingPreviews > 0
-                    ? `Generating ${generatingPreviews} preview${generatingPreviews === 1 ? "" : "s"} of ${sheet.name}`
-                    : `Generating previews of ${sheet.name}`
-                }
-                size={44}
-              />
-              <span>You can leave this page. Previews land here and in Activity.</span>
-            </div>
-          ) : candidates.length === 0 ? (
-            <div className="fy-mainphoto-dialog__empty">
-              <strong>Ready when you are</strong>
-              <span>The selected world look carries as treatment, never subject.</span>
-            </div>
-          ) : (
-            <div className="fy-mainphoto-dialog__grid">
-              {candidates.slice(-4).map((candidate, index) => (
-                <button
-                  type="button"
-                  key={candidate.key}
-                  className={selected === candidate.key ? "is-selected" : ""}
-                  onClick={() => setSelected(candidate.key)}
-                >
-                  <Portrait
-                    worldSlug={world.meta.slug}
-                    path={candidate.path}
-                    label={`Candidate ${index + 1}`}
-                    radius={12}
-                  />
-                  <span>{selected === candidate.key ? "SELECTED" : `0${index + 1}`}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="fy-mainphoto-dialog__commit">
-            <span>
-              {acceptance?.status === "failed"
-                ? acceptance.reason
-                : "Replacing the main photo makes the current character sheet stale."}
-            </span>
-            <Button
-              variant="primary"
-              disabled={!selectedCandidate || acceptance?.status === null}
-              onClick={() => {
-                if (selectedCandidate) chooseAnchor(world.meta.worldId, sheetId, selectedCandidate.selection);
-              }}
-            >
-              {acceptance?.status === null ? "Using as main photo…" : "Use as main photo"}
-            </Button>
-          </div>
-        </section>
+  const back = () => navigate(`/w/${worldId}/cast/${sheetId}/kit`);
+  /*
+   * What travels, as this surface's own controls (design 65).
+   *
+   * These are the one thing the shared dialog does not own: a main photo can carry the accepted
+   * face and the world's look, and whether either actually rides depends on the model chosen in
+   * the bar below. They go in the dialog's `extra` slot rather than becoming a fourth arrangement
+   * of the three decisions — the words, the model, the size and the count stay exactly where they
+   * are on every other surface.
+   */
+  const travelling = (
+    <>
+      <div className="fy-gendialog__refbuttons">
+        {/* Two different things, so two buttons: one decides what travels with the generation,
+            the other brings in a finished image that needs no generation. */}
+        <Button
+          disabled={!photo}
+          title={
+            photo
+              ? "Carry the accepted main photo into the generation, so the new one keeps the face"
+              : "There is no accepted main photo to carry yet"
+          }
+          onClick={() => setCarryIdentity(!carryIdentity)}
+        >
+          Use current photo
+        </Button>
+        <Button onClick={() => setWorldRef(!worldRef)}>Choose from world</Button>
+        <Button
+          disabled={!canImport}
+          title={
+            canImport
+              ? "Choose an image from this computer; it joins the previews to pick from"
+              : UPLOAD_UNAVAILABLE
+          }
+          onClick={() => importMainPhotoCandidate(world.meta.worldId, sheetId)}
+        >
+          Upload your own
+        </Button>
       </div>
+      <div className="fy-gendialog__refs">
+        {carryIdentity && photo && (
+          <div className={carriesReferences ? undefined : "is-dropped"}>
+            <Portrait
+              worldSlug={world.meta.slug}
+              path={`references/${sheetId}/${photo.file}`}
+              label="Identity reference"
+              radius={10}
+            />
+            <span>{carriesReferences ? "IDENTITY" : "IDENTITY · DROPPED"}</span>
+          </div>
+        )}
+        {worldRef && (
+          <div>
+            <Portrait
+              worldSlug={world.meta.slug}
+              path={world.artDirection.masterLook ?? world.keyArt ?? ""}
+              label="Style reference"
+              radius={10}
+            />
+            <span>STYLE · TEXT FALLBACK</span>
+          </div>
+        )}
+      </div>
+      {carryIdentity && !carriesReferences && model && (
+        <Callout tone="warning" title={`${model.displayName} accepts no reference images`}>
+          {sheet.name}&apos;s main photo will not ride along. The generation sees the written
+          description and the world look as text, and nothing of the face.
+        </Callout>
+      )}
+    </>
+  );
+
+  return (
+    <div data-screen="replace-main-photo">
+      <GenerationDialog
+        open
+        onClose={back}
+        title="Replace main photo"
+        lede={`${sheet.name} · the accepted identity anchor · World look · v${world.artDirection.version}`}
+        promptLabel="Describe the portrait"
+        prompt={prompt}
+        onPrompt={setPrompt}
+        onResetPrompt={() => setPrompt(mainPhotoPromptFor(sheet))}
+        resetTitle="Reset from character sheet"
+        promptHint="Written from the character sheet. Whatever is here is what the model is asked for."
+        worldSlug={world.meta.slug}
+        extra={travelling}
+        workflow="main-photo"
+        referenceImages={refs.length}
+        count={count}
+        onCount={setCount}
+        choice={choice}
+        onChoice={setChoice}
+        submitLabel="Generate previews"
+        submitDisabled={generating}
+        onSubmit={() => {
+          setAsking(true);
+          generateMainPhoto(world.meta.worldId, sheetId, prompt.trim(), count, refs, {
+            ...(model ? { modelId: model.id } : {}),
+            ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
+          });
+        }}
+        previews={candidates.slice(-MAX_IMAGE_PREVIEWS).map((candidate, index) => ({
+          key: candidate.key,
+          path: candidate.path,
+          label: `Candidate ${index + 1}`,
+        }))}
+        generating={generating}
+        waitingHint="The selected world look carries as treatment, never subject."
+        selected={selected}
+        onSelect={setSelected}
+        commit={{
+          label: acceptance?.status === null ? "Using as main photo…" : "Use as main photo",
+          disabled: acceptance?.status === null,
+          onCommit: () => {
+            if (selectedCandidate) chooseAnchor(world.meta.worldId, sheetId, selectedCandidate.selection);
+          },
+          note:
+            acceptance?.status === "failed"
+              ? acceptance.reason
+              : "Replacing the main photo makes the current character sheet stale.",
+        }}
+      />
     </div>
   );
 }
@@ -938,14 +878,15 @@ export function CharacterLooksScreen() {
   const [kind, setKind] = useState<"costume" | "pose-expression" | "condition-age">("costume");
   const [mode, setMode] = useState<"stay-close" | "push-it">("stay-close");
   const [prompt, setPrompt] = useState("");
-  const navigate = useNavigate();
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier }>({});
   // Four was hard-coded at the call site while the frame already carried a count — the estimate
   // said four and there was no way to ask for fewer.
   const [count, setCount] = useState(4);
   const [selected, setSelected] = useState<string | null>(null);
   const [showOlder, setShowOlder] = useState(false);
+  const [exploring, setExploring] = useState(false);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const exploreRef = useRef<HTMLButtonElement>(null);
   if (!world || !sheet || !sheetId) return null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = kit ? mainPhotoFor(kit) : null;
@@ -963,75 +904,108 @@ export function CharacterLooksScreen() {
     <div data-screen="character-looks">
       <CharacterHeader active="looks" />
       <main className="fy-looks-grid">
+        {/*
+          The ask is a dialog now (design 66); the gallery is the page.
+
+          The composer used to hold a permanent column beside the results, which made a page whose
+          subject is everything this character has spend half its width on the form for adding one
+          more. The dialog carries no preview column of its own — `previews` undefined is "this
+          offer is answered elsewhere", and elsewhere is the gallery right here, where a look is
+          accepted, promoted to main photo, or attached to a production.
+        */}
         <section className="fy-looks-composer">
           <div>
             <h2>Explore more looks</h2>
             <p>Optional visual exploration, outside the identity package.</p>
           </div>
-          <label>TYPE</label>
-          <div className="fy-look-options">
-            {[
-              ["costume", "Costume"],
-              ["pose-expression", "Pose / expression"],
-              ["condition-age", "Condition / age"],
-            ].map(([id, label]) => (
-              <button
-                type="button"
-                className={kind === id ? "is-active" : ""}
-                key={id}
-                onClick={() => setKind(id as typeof kind)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <label>DIRECTION</label>
-          <div className="fy-look-modes">
-            <button
-              type="button"
-              className={mode === "stay-close" ? "is-active" : ""}
-              onClick={() => setMode("stay-close")}
-            >
-              Stay close
-            </button>
-            <button
-              type="button"
-              className={mode === "push-it" ? "is-active" : ""}
-              onClick={() => setMode("push-it")}
-            >
-              Push it
-            </button>
-          </div>
-          <label>Describe the look</label>
-          <textarea
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder={
-              kind === "costume"
-                ? "A formal occasion, work clothes, festival dress…"
-                : kind === "pose-expression"
-                  ? "Mid-laugh, guard up, lost in thought…"
-                  : "Years later, soaked through, after the fight…"
-            }
-          />
-          <DispatchBar
-            workflow="character-look"
-            count={count}
-            onCount={setCount}
-            referenceImages={1}
-            choice={choice}
-            onChoice={setChoice}
-            onCancel={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}
-            primaryLabel="Explore"
-            primaryDisabled={!prompt.trim() || !photo || !carriesIdentity(chosenModel)}
-            onPrimary={(chosen) =>
-              generateCharacterLooks(world.meta.worldId, sheetId, kind, mode, prompt.trim(), chosen.count ?? count, {
-                modelId: chosen.model.id,
-                ...(chosen.tier !== undefined ? { tier: chosen.tier } : {}),
-              })
-            }
-          />
+          <Button ref={exploreRef} variant="primary" onClick={() => setExploring(true)}>
+            Explore more looks
+          </Button>
+          <p className="fy-looks-composer__note">
+            {photo
+              ? "Anchored to the accepted main photo, so an exploration is still this character."
+              : `${sheet.name} has no accepted main photo yet — a look is explored from one.`}
+          </p>
         </section>
+        <GenerationDialog
+          open={exploring}
+          onClose={() => setExploring(false)}
+          returnFocus={exploreRef}
+          title="Explore more looks"
+          lede={`${sheet.name} · optional visual exploration, outside the identity package`}
+          promptLabel="Describe the look"
+          prompt={prompt}
+          onPrompt={setPrompt}
+          promptPlaceholder={
+            kind === "costume"
+              ? "A formal occasion, work clothes, festival dress…"
+              : kind === "pose-expression"
+                ? "Mid-laugh, guard up, lost in thought…"
+                : "Years later, soaked through, after the fight…"
+          }
+          promptHint="The main photo rides along, so what comes back is still this character wearing your words."
+          worldSlug={world.meta.slug}
+          extra={
+            <>
+              <div className="fy-gendialog__label">Type</div>
+              <div className="fy-look-options">
+                {[
+                  ["costume", "Costume"],
+                  ["pose-expression", "Pose / expression"],
+                  ["condition-age", "Condition / age"],
+                ].map(([id, label]) => (
+                  <button
+                    type="button"
+                    className={kind === id ? "is-active" : ""}
+                    key={id}
+                    onClick={() => setKind(id as typeof kind)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="fy-gendialog__label">Direction</div>
+              <div className="fy-look-modes">
+                <button
+                  type="button"
+                  className={mode === "stay-close" ? "is-active" : ""}
+                  onClick={() => setMode("stay-close")}
+                >
+                  Stay close
+                </button>
+                <button
+                  type="button"
+                  className={mode === "push-it" ? "is-active" : ""}
+                  onClick={() => setMode("push-it")}
+                >
+                  Push it
+                </button>
+              </div>
+            </>
+          }
+          workflow="character-look"
+          referenceImages={1}
+          count={count}
+          onCount={setCount}
+          choice={choice}
+          onChoice={setChoice}
+          submitLabel="Explore"
+          submitDisabled={!photo || !carriesIdentity(chosenModel)}
+          {...(!photo
+            ? { why: `${sheet.name} has no accepted main photo yet — a look is explored from one.` }
+            : !carriesIdentity(chosenModel)
+              ? {
+                  why: `${chosenModel?.displayName ?? "This model"} accepts no reference images, so the main photo cannot anchor the exploration.`,
+                }
+              : {})}
+          onSubmit={() => {
+            generateCharacterLooks(world.meta.worldId, sheetId, kind, mode, prompt.trim(), count, {
+              ...(chosenModel ? { modelId: chosenModel.id } : {}),
+              ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
+            });
+            setExploring(false);
+          }}
+        />
         <section className="fy-looks-results">
           {images.length === 0 ? (
             <div className="fy-mainphoto-dialog__empty">

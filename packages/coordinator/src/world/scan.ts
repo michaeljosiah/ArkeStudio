@@ -93,10 +93,21 @@ export async function findKeyArt(dir: string): Promise<string | null> {
  * than whatever order the filesystem happened to hand back.
  */
 async function firstImageIn(dir: string, relative: string, portable: string): Promise<string | null> {
-  const entry = await readdir(toExtendedLength(join(dir, relative)))
-    .then((entries) => entries.filter((name) => IMAGE_EXTENSIONS.has(extname(name).toLowerCase())).sort()[0])
-    .catch(() => undefined);
-  return entry === undefined ? null : `${portable}/${entry}`;
+  return (await imagesIn(dir, relative, portable))[0] ?? null;
+}
+
+/**
+ * Every image in a landing directory, by name (design 65).
+ *
+ * Sorted by filename rather than by mtime, so the set is stable across scans and reads back in
+ * the order the jobs were numbered — `candidate-1` before `candidate-2`, whichever finished
+ * first. A directory that does not exist is an empty set, not an error: nothing is waiting.
+ */
+async function imagesIn(dir: string, relative: string, portable: string): Promise<string[]> {
+  const entries = await readdir(toExtendedLength(join(dir, relative)))
+    .then((names) => names.filter((name) => IMAGE_EXTENSIONS.has(extname(name).toLowerCase())).sort())
+    .catch(() => [] as string[]);
+  return entries.map((name) => `${portable}/${name}`);
 }
 
 const SHEET_DIRS: ReadonlyArray<{ dir: string; type: SheetKind }> = [
@@ -527,8 +538,8 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
    * A stat on `candidate.png` finds the first and silently loses the second — and the accepted
    * key art stopped being `world-art.png` for the same reason.
    */
-  const keyArtCandidate = await firstImageIn(dir, join("incoming", "world-image"), "incoming/world-image");
-  const masterLookCandidate = await firstImageIn(dir, join("incoming", "master-look"), "incoming/master-look");
+  const keyArtCandidates = await imagesIn(dir, join("incoming", "world-image"), "incoming/world-image");
+  const masterLookCandidates = await imagesIn(dir, join("incoming", "master-look"), "incoming/master-look");
   const masterLookReference = await firstImageIn(
     dir,
     join("incoming", "master-look-ref"),
@@ -634,9 +645,9 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       },
       overrides,
     },
-    keyArtCandidate,
+    keyArtCandidates,
     keyArt,
-    masterLookCandidate,
+    masterLookCandidates,
     masterLookReference,
     sheets,
     canon,

@@ -89,6 +89,105 @@ describe("the world hub cast fan (R-18, R-19)", () => {
   });
 });
 
+/** The hub, rendered against a world the case has adjusted. */
+function renderHub(world: Partial<typeof WORLD> = {}): string {
+  __setStateForTest({ ...FIXTURE_STATE, world: { ...WORLD, ...world } });
+  try {
+    return renderToString(
+      <MemoryRouter initialEntries={[`/w/${WORLD_ID}`]}>
+        <App />
+      </MemoryRouter>,
+    ).replace(/<!-- -->/g, "");
+  } finally {
+    __setStateForTest(FIXTURE_STATE);
+  }
+}
+
+/**
+ * The hero carries nothing to operate (design 63a).
+ *
+ * The key-art row lived here — Generate from the logline, Upload an image, a model picker and the
+ * keep-or-discard offer — over an image this screen does not even show. Asserted as an absence
+ * because that is exactly what regressed twice: a control returns to the hero the moment somebody
+ * needs somewhere to put one.
+ */
+describe("the world hub hero (design 63a)", () => {
+  it("offers no way to make or bring an image", () => {
+    const html = renderHub();
+    assert.doesNotMatch(html, /fy-keyart/, "the key-art row is gone, not merely hidden");
+    assert.doesNotMatch(html, /Generate key art/);
+    assert.doesNotMatch(html, /Upload an image/);
+  });
+
+  it("holds no control of any kind between the logline and the fan", () => {
+    const html = renderHub();
+    const hero = /<div class="fy-hero">([\s\S]*?)<\/div>\s*<div class="fy-fan">/.exec(html);
+    assert.ok(hero, "the hero still precedes the fan");
+    assert.doesNotMatch(hero[1]!, /<button/, "a hub is a way in, not a workbench");
+  });
+});
+
+/**
+ * What the world is made of, and what is waiting (design 63b).
+ *
+ * The figures are the world's own — a production's guests are counted nowhere here (SPEC-020 R-8)
+ * — and every one of them carries a second line, including on a world with nothing in it. A blank
+ * line is what makes the four cells different heights, which is the whole reason it is pinned.
+ */
+describe("the world at a glance (design 63b)", () => {
+  it("draws four figures, each with a line saying what is outstanding", () => {
+    const html = renderHub();
+    const cells = html.match(/fy-glance__cell/g) ?? [];
+    assert.equal(cells.length, 4);
+    const subs = [...html.matchAll(/class="fy-glance__sub">([^<]*)</g)].map((m) => m[1]);
+    assert.equal(subs.length, 4);
+    for (const sub of subs) assert.notEqual(sub, "", "an empty line would shorten its cell");
+  });
+
+  it("says something in every cell of a world with nothing in it", () => {
+    const html = renderHub({ sheets: [], canon: [], proposals: [], referenceKits: [], productions: [] });
+    const subs = [...html.matchAll(/class="fy-glance__sub">([^<]*)</g)].map((m) => m[1]);
+    assert.equal(subs.length, 4);
+    for (const sub of subs) assert.notEqual(sub, "", "zero is a state to state, not a gap");
+    assert.match(html, /Nothing has been made from this world yet/, "and the productions row says so too");
+  });
+
+  it("counts the world's own cast, never a production's guests (SPEC-020 R-8)", () => {
+    const guest: Sheet = { ...BASE, id: "kettle-boy", name: "Kettle Boy", production: "saltlight" };
+    const own = renderHub();
+    const withGuest = renderHub({ sheets: [...WORLD.sheets, guest] });
+    const figure = (html: string): string =>
+      /class="fy-glance__n">(\d+)<\/div><div class="fy-glance__label">Character/.exec(html)?.[1] ?? "";
+    assert.notEqual(figure(own), "", "the characters figure is findable");
+    assert.equal(figure(withGuest), figure(own), "a guest changes nothing on the world's own count");
+  });
+});
+
+describe("what needs a person (design 63b)", () => {
+  it("names at most two, whatever is waiting", () => {
+    const html = renderHub();
+    assert.ok(WORLD.proposals.length + WORLD.canon.filter((c) => c.status === "open").length > 0);
+    assert.ok((html.match(/fy-needs__item/g) ?? []).length <= 2);
+  });
+
+  it("keeps the kind of decision and its verb out of the clipped run", () => {
+    // A proposal's summary is a whole sentence; with the kind after it in one clipped span, the
+    // one thing this line exists to say was the first thing the ellipsis ate.
+    const html = renderHub();
+    assert.match(html, /class="fy-needs__why"/);
+    assert.match(html, /class="fy-needs__go"/);
+    assert.match(declarationsFor(".fy-needs__why"), /flex:\s*none/);
+    assert.match(declarationsFor(".fy-needs__go"), /flex:\s*none/);
+    assert.match(declarationsFor(".fy-needs__what"), /text-overflow:\s*ellipsis/, "only the subject gives ground");
+  });
+
+  it("is absent rather than empty when nothing is waiting", () => {
+    const settled = WORLD.canon.map((c) => (c.status === "open" ? { ...c, status: "settled" as const } : c));
+    const html = renderHub({ proposals: [], canon: settled });
+    assert.doesNotMatch(html, /fy-needs__count/, '"0 things need you" is furniture, not information');
+  });
+});
+
 /** The declarations in effect for a selector, across every rule that names it. */
 function declarationsFor(selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -118,6 +217,42 @@ describe("the card holds one height whatever it is given", () => {
   it("keeps the frame a fixed size, the other half of the constant height", () => {
     assert.match(declarationsFor(".fy-polaroid__frame"), /height:\s*180px/);
   });
+});
+
+/**
+ * The bands below the fold (design 63b).
+ *
+ * Same discipline as the fan and the ledger cards: pin every band and clip every line, so three
+ * productions with a one-word title, a logline and no shots at all still sit level — and four
+ * glance cells hold one height whatever the world has in it.
+ */
+describe("the sections below the fold hold their heights", () => {
+  it("pins the glance's outstanding line", () => {
+    const decls = declarationsFor(".fy-glance__sub");
+    assert.match(decls, /height:\s*15px/, "a fixed height, so a settled cell is not shorter");
+    assert.match(decls, /white-space:\s*nowrap/);
+    assert.match(decls, /text-overflow:\s*ellipsis/);
+  });
+
+  for (const [selector, height] of [
+    [".fy-prodtile__frame", 128],
+    [".fy-prodtile__eyebrow", 13],
+    [".fy-prodtile__name", 19],
+    [".fy-prodtile__foot", 15],
+  ] as const) {
+    it(`pins ${selector} at ${height}px`, () => {
+      assert.match(declarationsFor(selector), new RegExp(`height:\\s*${height}px`));
+    });
+  }
+
+  for (const selector of [".fy-prodtile__name", ".fy-prodtile__meta"]) {
+    it(`clips ${selector} to one line`, () => {
+      const decls = declarationsFor(selector);
+      assert.match(decls, /white-space:\s*nowrap/);
+      assert.match(decls, /overflow:\s*hidden/);
+      assert.match(decls, /text-overflow:\s*ellipsis/);
+    });
+  }
 });
 
 /**

@@ -6,6 +6,7 @@ import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
 import { BackgroundNotificationPreferenceSchema, ThemePreferenceSchema } from "./settings.js";
+import { MAX_IMAGE_PREVIEWS } from "./planning.js";
 import { CHARACTER_ROLE_MAX } from "./world.js";
 import { WorldChatContextSchema } from "./world-chat.js";
 
@@ -77,6 +78,21 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       /** Override the routed model for this generation only. */
       modelId: z.string().min(1).optional(),
+      /**
+       * The words, when the author wrote them (design 64).
+       *
+       * Absent is the long-standing path: the harness writes the prompt from the world's brief,
+       * falling back to the plain assembly. Present outranks both — an author who has opened the
+       * box and edited it has said what the picture is, and an art-director rewrite on top of
+       * that would be the studio's taste in front of theirs. The standing constraint suffix is
+       * still appended either way; it is not the author's to drop.
+       */
+      prompt: z.string().min(1).optional(),
+      /**
+       * How many to make, 1–4 (design 65). Absent is one, so every caller written before the
+       * count still asks for exactly what it used to.
+       */
+      count: z.number().int().min(1).max(MAX_IMAGE_PREVIEWS).optional(),
       // No size here: a world image carries no output spec at all today, so the provider's own
       // default is what runs. Offering a control that changed nothing would be worse than not
       // offering one.
@@ -87,9 +103,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * image — a frame, a painting, a photograph — should not have to ask a model for one.
    */
   z.object({ kind: z.literal("upload-world-image"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
-  /** Keep the candidate that came back — it becomes the world's key art. */
-  z.object({ kind: z.literal("use-world-image"), worldId: UlidSchema }).strict(),
-  /** Or do not: the candidate is deleted and the world keeps the image it had. */
+  /**
+   * Keep one of the candidates that came back — it becomes the world's key art.
+   *
+   * `file` names which, world-relative, now that a generation may land four (design 65). Absent
+   * means the only one there is, which is what every caller meant while there could only be one.
+   */
+  z.object({ kind: z.literal("use-world-image"), worldId: UlidSchema, file: z.string().min(1).optional() }).strict(),
+  /** Or do not: every candidate is deleted and the world keeps the image it had. */
   z.object({ kind: z.literal("discard-world-image"), worldId: UlidSchema }).strict(),
   /**
    * SPEC-017: the world look as a picture. The record has carried a `masterLook` since the look
@@ -117,6 +138,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * shape it does not take is dropped rather than sent.
        */
       aspect: z.string().min(1).max(16).optional(),
+      /**
+       * How many to make, 1–4 (design 65). Absent is one. Every one of them is priced and
+       * charged, which is why the dialog states the figure for the set rather than for one.
+       */
+      count: z.number().int().min(1).max(MAX_IMAGE_PREVIEWS).optional(),
     })
     .strict(),
   /**
@@ -141,8 +167,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * version's master look, with the same history, ripples and change record any other look
    * change produces.
    */
-  z.object({ kind: z.literal("use-master-look"), worldId: UlidSchema }).strict(),
-  /** Or do not: the candidate is deleted and the look keeps the image it had, or none. */
+  z
+    .object({
+      kind: z.literal("use-master-look"),
+      worldId: UlidSchema,
+      /** Which candidate, world-relative, now that a generation may land four (design 65). */
+      file: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** Or do not: every candidate is deleted and the look keeps the image it had, or none. */
   z.object({ kind: z.literal("discard-master-look"), worldId: UlidSchema }).strict(),
   z.object({ kind: z.literal("archive-world"), worldId: UlidSchema }).strict(),
   /**
@@ -798,7 +831,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().trim().min(1).max(80),
       /** Optional extra direction for this angle. */
       prompt: z.string().trim().max(2000).optional(),
-      count: z.number().int().min(1).max(4),
+      count: z.number().int().min(1).max(MAX_IMAGE_PREVIEWS),
       /** Replace the establishing view rather than adding an angle beside it. */
       establishing: z.boolean().optional(),
     })
@@ -859,7 +892,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       sheetId: SlugSchema,
       prompt: z.string().trim().min(1).max(2000),
-      count: z.number().int().min(1).max(4),
+      count: z.number().int().min(1).max(MAX_IMAGE_PREVIEWS),
       identityReferences: z.array(z.string().min(1)).max(4),
     })
     .strict(),
@@ -899,7 +932,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       lookKind: z.enum(["costume", "pose-expression", "condition-age"]),
       mode: z.enum(["stay-close", "push-it"]),
       prompt: z.string().trim().min(1).max(2000),
-      count: z.number().int().min(1).max(4),
+      count: z.number().int().min(1).max(MAX_IMAGE_PREVIEWS),
     })
     .strict(),
   z
