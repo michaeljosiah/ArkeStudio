@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { BenchModeSchema, BenchParamsSchema } from "./bench.js";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema } from "./ids.js";
+import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
@@ -1334,5 +1335,164 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("generate-diagnostics") }).strict(),
   /** SPEC-016 R-17: open the data location in the file manager. */
   z.object({ kind: z.literal("open-data-folder") }).strict(),
+
+  // ---- the bench (issue 305) ----------------------------------------------
+  /**
+   * Open a session: by id from a durable URL, or with none — which resumes the world's most
+   * recently updated session and creates one only when the world has none. The answer is the
+   * snapshot's `bench` workspace; nothing is queued and nothing is spent.
+   */
+  z
+    .object({ kind: z.literal("bench-open"), worldId: UlidSchema, sessionId: SessionIdSchema.optional() })
+    .strict(),
+  /** Clear-the-bench: a NEW session. The old one keeps running; nothing is cancelled by this. */
+  z.object({ kind: z.literal("bench-new-session"), worldId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("bench-close"), worldId: UlidSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("bench-set-title"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      title: z.string().max(200).nullable(),
+    })
+    .strict(),
+  /** The composer, whole. Debounced by the client; each landing replaces the previous state. */
+  z
+    .object({
+      kind: z.literal("bench-compose"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      mode: BenchModeSchema,
+      provider: z.string(),
+      model: z.string(),
+      params: BenchParamsSchema,
+      brief: z.string().max(100_000),
+    })
+    .strict(),
+  /**
+   * Attach one already-filed source. Token allocation is the coordinator's: re-adding a source
+   * the registry knows restores its old token; a new source takes the next number of its kind.
+   * `replace` names the active token that gives way when the set is at the model's ceiling.
+   */
+  z
+    .object({
+      kind: z.literal("bench-add-reference"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      source: z.discriminatedUnion("source", [
+        z.object({ source: z.literal("artifact"), artifactId: z.string().min(1) }).strict(),
+        z.object({ source: z.literal("take"), takeId: TakeIdSchema }).strict(),
+      ]),
+      replace: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("bench-remove-reference"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      token: z.string().min(1),
+    })
+    .strict(),
+  /**
+   * Host file dialog → file into the world on arrival → attach each as a reference. The filing
+   * outcome returns as `artifact.filed-batch` under this requestId; cancelling the picker later
+   * does not unfile what landed (issue 305 §4).
+   */
+  z
+    .object({
+      kind: z.literal("bench-upload-references"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      allowLarge: z.boolean().optional(),
+    })
+    .strict(),
+  /** Dispatch the composer as written. Count N reserves N takes and enqueues N jobs. */
+  z
+    .object({
+      kind: z.literal("bench-dispatch"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+    })
+    .strict(),
+  /** A new numbered take from an old take's immutable snapshot. Always exactly one. */
+  z
+    .object({
+      kind: z.literal("bench-rerun"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      takeId: TakeIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("bench-keep"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      takeId: TakeIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("bench-discard"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      takeId: TakeIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("bench-clear-view"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      takeId: TakeIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("bench-select-take"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      takeId: TakeIdSchema,
+    })
+    .strict(),
+  /**
+   * Stage an already-filed artifact on a standard generation surface's reference slot
+   * (issue 305 §4): the staged path becomes the artifact's own file, no copy is made, and
+   * clearing the slot later removes a pointer rather than the artifact.
+   */
+  z
+    .object({
+      kind: z.literal("stage-artifact-reference"),
+      worldId: UlidSchema,
+      key: StagedReferenceKeySchema,
+      artifactId: z.string().min(1),
+    })
+    .strict(),
+  /**
+   * The GenerationDialog picker's upload lane: host dialog → file into the world → answer with
+   * `artifact.filed-batch`. Unlike bench-upload-references this attaches nothing anywhere;
+   * what to do with the ids is the caller's.
+   */
+  z
+    .object({
+      kind: z.literal("attach-files-correlated"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      links: z.array(z.string()).optional(),
+      allowLarge: z.boolean().optional(),
+    })
+    .strict(),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;

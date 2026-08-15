@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { BenchParamsSchema, BenchReferenceTokenSchema } from "./bench.js";
 import { MediaInfoSchema } from "./media.js";
-import { ArtifactIdSchema, IsoDateTimeSchema, Sha256Schema, SlugSchema } from "./ids.js";
+import { ArtifactIdSchema, IsoDateTimeSchema, SessionIdSchema, Sha256Schema, SlugSchema, TakeIdSchema } from "./ids.js";
 
 /**
  * Artifacts (master spec §13): recordings, documents, boards, stems and images filed against
@@ -43,6 +44,30 @@ export const ExtractionCandidateSchema = z
   })
   .strict();
 export type ExtractionCandidate = z.infer<typeof ExtractionCandidateSchema>;
+
+/**
+ * How a generated artifact came to exist (issue 305 §7): the exact request, so "why and how the
+ * bytes were made" is part of the artifact's identity. Two generated occurrences with the same
+ * bytes but different provenance stay two artifacts, and a generated take never collapses into
+ * an earlier user upload — which is why generated filing bypasses content-hash dedup.
+ */
+export const ArtifactGenerationSchema = z
+  .object({
+    sessionId: SessionIdSchema,
+    takeId: TakeIdSchema,
+    takeNumber: z.number().int().min(1),
+    brief: z.string(),
+    /** Token and source snapshot, with content hashes — what actually rode along. */
+    references: z.array(BenchReferenceTokenSchema),
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    params: BenchParamsSchema,
+    requestedSeed: z.number().int().optional(),
+    /** From the matching ledger entry; null when the ledger had no actual figure. */
+    costMicroUsd: z.number().int().min(0).nullable(),
+  })
+  .strict();
+export type ArtifactGeneration = z.infer<typeof ArtifactGenerationSchema>;
 
 export const ArtifactSidecarSchema = z
   .object({
@@ -90,7 +115,19 @@ export const ArtifactSidecarSchema = z
       })
       .strict()
       .optional(),
+    /** Present exactly on artifacts a bench take filed. `made here` derives from this + origin. */
+    generation: ArtifactGenerationSchema.optional(),
     created: IsoDateTimeSchema,
   })
   .strict();
 export type ArtifactSidecar = z.infer<typeof ArtifactSidecarSchema>;
+
+/**
+ * Pickers exclude superseded artifacts — derived from `supersedes`, never a flag on the old one
+ * (SPEC-015 R-5, D10). Here rather than in the coordinator because the reference picker renders
+ * in the client, and importing coordinator code into React is the wrong direction (issue 305 §4).
+ */
+export function pickableArtifacts(artifacts: readonly ArtifactSidecar[]): ArtifactSidecar[] {
+  const superseded = new Set(artifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
+  return artifacts.filter((a) => !superseded.has(a.id));
+}

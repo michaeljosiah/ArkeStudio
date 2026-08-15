@@ -59,6 +59,9 @@ export const QueueCommandSchema = z.enum([
   "generate-character-looks",
   "generate-missing-tiles",
   "regenerate-tile",
+  "bench-dispatch",
+  "bench-rerun",
+  "bench-upload-references",
 ]);
 export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 
@@ -332,6 +335,22 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       outcome: z.enum(["needs-consent", "refused"]),
       reason: z.string(),
       sizeBytes: z.number().nullable(),
+    })
+    .strict(),
+
+  /**
+   * A correlated filing request's answer (issue 305 §4): the ids of what landed, in the order
+   * it was picked. A file that was refused or needs consent holds its position as null — the
+   * refusal itself arrives as artifact.notice — so the caller can still line ids up with what
+   * it asked for. Cancelling the host dialog answers with an empty list, not silence.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("artifact.filed-batch"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      artifactIds: z.array(z.string().min(1).nullable()),
     })
     .strict(),
 

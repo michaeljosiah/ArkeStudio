@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { ManifestModel } from "./manifest.js";
 import type { SheetKind } from "./world.js";
 
@@ -9,7 +10,8 @@ import type { SheetKind } from "./world.js";
  */
 
 /** What a carried asset is (SPEC-019 R-41). Each kind is budgeted against its own limits. */
-export type ReferenceKind = "image" | "video" | "audio";
+export const ReferenceKindSchema = z.enum(["image", "video", "audio"]);
+export type ReferenceKind = z.infer<typeof ReferenceKindSchema>;
 
 export interface BudgetCandidate {
   /** Defaults to "image": every existing candidate is one, and every caller wrote it that way. */
@@ -179,4 +181,134 @@ export function payloadVerdict(rawBytes: number, ceilingBytes: number): PayloadV
         )}MB the provider accepts — drop some, or use smaller reference images`
       : null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Multimedia admission (issue 305 §5.2) — the bench's references, one at a time
+// ---------------------------------------------------------------------------
+
+/**
+ * One reference the bench wants to carry. Images are budgeted by count against
+ * `accepts.referenceImages`; sound and motion are budgeted by aggregate seconds against
+ * `limits.maxReferenceAudioSec` / `maxReferenceVideoSec`, because that is the unit the
+ * manifest can actually prove (#306, #309).
+ */
+export interface MultimediaReference {
+  kind: ReferenceKind;
+  /**
+   * Measured seconds, for audio and video. `null` means measurement was attempted and failed;
+   * `undefined` means nobody has measured yet. Both refuse — a duration nobody knows must never
+   * be assumed to be zero, because zero is what makes it fit.
+   */
+  durationSec?: number | null;
+}
+
+export interface MultimediaCapacity {
+  imageCeiling: number;
+  imagesUsed: number;
+  /** 0 means the model states no verified support for the kind, which refuses, not "unlimited". */
+  audioCeilingSec: number;
+  audioUsedSec: number;
+  videoCeilingSec: number;
+  videoUsedSec: number;
+}
+
+export function multimediaCapacity(carried: readonly MultimediaReference[], model: ManifestModel): MultimediaCapacity {
+  let images = 0;
+  let audio = 0;
+  let video = 0;
+  for (const item of carried) {
+    if (item.kind === "image") images += 1;
+    else if (item.kind === "audio") audio += typeof item.durationSec === "number" ? item.durationSec : 0;
+    else video += typeof item.durationSec === "number" ? item.durationSec : 0;
+  }
+  return {
+    imageCeiling: model.unverified === true ? 0 : model.accepts.referenceImages,
+    imagesUsed: images,
+    audioCeilingSec: model.unverified === true ? 0 : (model.limits.maxReferenceAudioSec ?? 0),
+    audioUsedSec: audio,
+    videoCeilingSec: model.unverified === true ? 0 : (model.limits.maxReferenceVideoSec ?? 0),
+    videoUsedSec: video,
+  };
+}
+
+export type MultimediaRefusal =
+  | { ok: true }
+  | {
+      ok: false;
+      /** Which dimension refused, so the surface knows whether replacing helps. */
+      binding: "images" | "audio-seconds" | "video-seconds" | "unsupported-kind" | "unknown-duration";
+      /** The verbatim tile copy where the spec fixes it; a sentence to build from otherwise. */
+      reason: string;
+    };
+
+/**
+ * May this ONE reference join what is already carried? The bench asks at the tile, and the
+ * coordinator asks the same function again for the whole set immediately before enqueue —
+ * renderer state is not an authority. Nothing here truncates: over a ceiling the answer is a
+ * refusal that names the dimension, and for images the surface offers replacement instead.
+ */
+export function admitReference(
+  item: MultimediaReference,
+  carried: readonly MultimediaReference[],
+  model: ManifestModel,
+): MultimediaRefusal {
+  const capacity = multimediaCapacity(carried, model);
+  if (item.kind === "image") {
+    if (capacity.imageCeiling === 0) {
+      return { ok: false, binding: "unsupported-kind", reason: `${model.displayName} accepts no reference images` };
+    }
+    if (capacity.imagesUsed >= capacity.imageCeiling) {
+      return {
+        ok: false,
+        binding: "images",
+        reason: `${capacity.imageCeiling} of ${capacity.imageCeiling} images.`,
+      };
+    }
+    return { ok: true };
+  }
+  const ceiling = item.kind === "audio" ? capacity.audioCeilingSec : capacity.videoCeilingSec;
+  if (ceiling <= 0) {
+    return {
+      ok: false,
+      binding: "unsupported-kind",
+      reason: item.kind === "audio" ? "this model takes no audio" : "this model takes no video",
+    };
+  }
+  if (typeof item.durationSec !== "number") {
+    return { ok: false, binding: "unknown-duration", reason: "duration could not be read" };
+  }
+  const used = item.kind === "audio" ? capacity.audioUsedSec : capacity.videoUsedSec;
+  if (used + item.durationSec > ceiling) {
+    return {
+      ok: false,
+      binding: item.kind === "audio" ? "audio-seconds" : "video-seconds",
+      reason: `${formatSeconds(item.durationSec)} — over the ${formatSeconds(ceiling - used)} left`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * The whole set at once, for the gate before enqueue. Order matters the way attaching did:
+ * each item is admitted against everything before it, so the first offender is named rather
+ * than the set being judged in some other order than the one the user built it in.
+ */
+export function validateReferences(
+  items: readonly MultimediaReference[],
+  model: ManifestModel,
+): { ok: true } | { ok: false; index: number; refusal: Exclude<MultimediaRefusal, { ok: true }> } {
+  for (let index = 0; index < items.length; index++) {
+    const refusal = admitReference(items[index]!, items.slice(0, index), model);
+    if (!refusal.ok) return { ok: false, index, refusal };
+  }
+  return { ok: true };
+}
+
+/** "0:12", "1:00" — the clock words the capacity chip speaks (design 69). */
+export function formatSeconds(seconds: number): string {
+  const whole = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(whole / 60);
+  const rest = whole % 60;
+  return `${minutes}:${String(rest).padStart(2, "0")}`;
 }

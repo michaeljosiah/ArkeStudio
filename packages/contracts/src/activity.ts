@@ -388,6 +388,13 @@ export function jobOrigin(job: Job): JobOrigin | null {
   if (job.target.kind === "world-image") {
     return { path: `/w/${job.worldId}`, label: "World", where: "the world's own screen" };
   }
+  // A bench take's target id is "<sessionId>/<takeId>", so the origin is the exact session —
+  // the durable route is how a particular session is reopened at all (issue 305 §1).
+  if (job.target.kind === "bench-take") {
+    const sessionId = job.target.id?.split("/")[0] ?? "";
+    if (sessionId.length === 0) return null;
+    return { path: `/w/${job.worldId}/artifacts/bench/${sessionId}`, label: "Bench", where: "its bench session" };
+  }
   // Shots, scene passes, storyboards and lines are the production's. A line is the exception
   // among them: it has its own dialog, and the shot dispatch dialog carries no dialogue or
   // delivery controls, so sending a failed line there would be the same dead end again.
