@@ -818,8 +818,17 @@ function composerReason(state: ReturnType<typeof useStore>["state"]): string | u
  * transcript but in nothing the transcript produced — read back later as though it had been
  * considered. Send-back is how a closed conversation is reopened, and it is on the proposal.
  */
+/**
+ * Why the composer cannot send — and after Accept all, it can.
+ *
+ * A closed conversation used to refuse with "send one back to carry on", which is advice nobody
+ * could take: Accept all writes what it carried, so a wrap-up that succeeded leaves no proposal
+ * to send back and the thread was finished whether or not the person was. Saying something
+ * reopens it, which is what carrying on has always meant.
+ *
+ * Archived still refuses. That one was filed on purpose and is restored on purpose.
+ */
 function closedReason(status: string | undefined): string | undefined {
-  if (status === "closed") return "This conversation was turned into proposals. Send one back to carry on.";
   if (status === "archived") return "This conversation is archived. Restore it to carry on.";
   return undefined;
 }

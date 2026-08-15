@@ -209,6 +209,72 @@ describe("world chat fold", () => {
     assert.equal(summarise(folded.view).reopened, true);
   });
 
+  /*
+   * Accept all closes the conversation, and closed used to be the end of it: the composer went
+   * dead offering "send one back to carry on", which cannot be done when the wrap-up wrote
+   * everything and left no proposal to send. Saying the next thing is what reopens it.
+   */
+  it("reopens when the author carries on talking after Accept all", async () => {
+    const s = await store();
+    await s.append(turn("drafted"), { at: AT });
+    await s.append(
+      { type: "wrapup.completed", requestId: "r1", proposalIds: [], notCarried: [], mediaIdeaIds: [] },
+      { at: AT },
+    );
+    const closedNow = foldConversation(CV, AT, (await s.read()).events).view;
+    assert.equal(closedNow.status, "closed", "Accept all still finishes the batch");
+
+    const turnId = newId("turn");
+    await s.append(
+      {
+        type: "turn.started",
+        message: { id: newId("msg"), turnId, role: "user", text: "one more thing", attachmentIds: [], createdAt: AT },
+        run: {
+          id: newId("run"),
+          turnId,
+          basedOnConversationSeq: 0,
+          status: "running",
+          adapter: "opencode",
+          harnessCleanup: "not-required",
+          contextDigest: `sha256:${"a".repeat(64)}`,
+          startedAt: AT,
+        },
+      } as never,
+      { at: AT },
+    );
+
+    const after = foldConversation(CV, AT, (await s.read()).events).view;
+    assert.equal(after.status, "open", "the thread carries on rather than being abandoned");
+  });
+
+  /* Archiving is a filing decision, undone by restoring and not by talking over it. */
+  it("does not un-archive a conversation just because something was said", async () => {
+    const s = await store();
+    await s.append(turn("drafted"), { at: AT });
+    await s.append({ type: "conversation.archived" } as never, { at: AT });
+
+    const turnId = newId("turn");
+    await s.append(
+      {
+        type: "turn.started",
+        message: { id: newId("msg"), turnId, role: "user", text: "hello", attachmentIds: [], createdAt: AT },
+        run: {
+          id: newId("run"),
+          turnId,
+          basedOnConversationSeq: 0,
+          status: "running",
+          adapter: "opencode",
+          harnessCleanup: "not-required",
+          contextDigest: `sha256:${"a".repeat(64)}`,
+          startedAt: AT,
+        },
+      } as never,
+      { at: AT },
+    );
+
+    assert.equal(foldConversation(CV, AT, (await s.read()).events).view.status, "archived");
+  });
+
   it("counts only live propositions on the summary row", async () => {
     const s = await store();
     const live = newId("cand");

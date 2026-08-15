@@ -124,6 +124,20 @@ export function foldConversation(
         proposalIds.delete(e.proposalId);
         break;
       case "turn.started":
+        /*
+         * Saying something in a conversation is what makes it open (#70 §6.5).
+         *
+         * Accept all closes: every point it carried was written, and "closed · everything decided"
+         * is a true and useful thing for the list to say. What it must not mean is that the thread
+         * is over. It used to: the composer went dead and offered "send one back to carry on" —
+         * advice that cannot be taken, because a wrap-up that wrote everything leaves no proposal
+         * to send back. Somebody four documents deep in a conversation had to abandon it and
+         * re-attach everything to a new one.
+         *
+         * Closed only. Archiving is a filing decision the person made on purpose, and it is
+         * undone by restoring rather than by talking over it.
+         */
+        if (status === "closed") status = "open";
         addMessage(e.message, envelope.seq);
         runs.set(e.run.id, e.run);
         break;
