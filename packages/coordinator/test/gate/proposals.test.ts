@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ART_DIRECTION_PATH, ArtDirectionRecordSchema } from "@arke-studio/contracts";
-import { ProposalManager } from "../../src/gate/proposals.js";
+import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { projectReview } from "../../src/gate/review.js";
 import { WorldStore } from "../../src/world/store.js";
 import { readChanges } from "../../src/world/change-writer.js";
@@ -766,6 +766,57 @@ describe("ripples: preview and authority (R-8..R-10)", () => {
       confirmRipples: blocked.status === "needs-reconfirm" ? blocked.signature : "",
     });
     assert.equal(outcome.status, "accepted", "echoing the authoritative signature lands it");
+    await store.close();
+  });
+
+  /*
+   * The same drift, met by a press that has already decided (#299 follow-up).
+   *
+   * Accept all stages its proposals together and accepts them one after another, so each accept
+   * moves the next one's ripples. Three canon rules about one subject wrote the first and refused
+   * the other two — a dead end whose only exit was pressing Save again, which worked. `acceptDecided`
+   * is that second press, made where the reason for it is known.
+   */
+  it("lands a press that has already decided, where a bare accept asks again (R-10)", async () => {
+    const { dir, store, gate } = await openGate();
+    const a = await gate.stage({
+      kind: "sheet-edit",
+      summary: "appearance",
+      source: "a",
+      targets: [{ path: MAREN }],
+    });
+    await gate.updateFile(a.id, MAREN, await editedMaren(dir, ["Salt-crusted", "Salt-white"]));
+
+    const kitPath = join(dir, "references", "maren-kest", "kit.json");
+    const kit = JSON.parse(await readFile(kitPath, "utf8")) as {
+      tiles: Array<{ angle: string; status: string; sheetVersion?: number }>;
+    };
+    kit.tiles = kit.tiles.filter((t) => t.angle !== "body-full");
+    await writeFile(kitPath, JSON.stringify(kit, null, 2), "utf8");
+    await store.reload();
+
+
+    const outcome = await acceptDecided(gate, a.id);
+    assert.equal(outcome.status, "accepted", "the press writes rather than asking a question nobody posed");
+    await store.close();
+  });
+
+  it("still refuses a press whose target moved underneath it (R-5)", async () => {
+    const { dir, store, gate } = await openGate();
+    const a = await gate.stage({
+      kind: "sheet-edit",
+      summary: "appearance",
+      source: "a",
+      targets: [{ path: MAREN }],
+    });
+    await gate.updateFile(a.id, MAREN, await editedMaren(dir, ["Salt-crusted", "Salt-white"]));
+
+    // Somebody else writes the same file. Confirming ripples must not confirm past this.
+    await writeFile(join(dir, MAREN), await editedMaren(dir, ["Maren", "Maren (edited elsewhere)"]), "utf8");
+    await store.reload();
+
+    const outcome = await acceptDecided(gate, a.id);
+    assert.equal(outcome.status, "stale", "the staleness guard is not what this press waives");
     await store.close();
   });
 });

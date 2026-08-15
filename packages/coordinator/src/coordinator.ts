@@ -165,7 +165,7 @@ import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
-import { explainAcceptRefusal } from "./gate/proposals.js";
+import { acceptDecided, explainAcceptRefusal } from "./gate/proposals.js";
 import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
@@ -1771,7 +1771,7 @@ export class Coordinator {
               });
               continue;
             }
-            const outcome = await gate.accept(proposalId, {});
+            const outcome = await acceptDecided(gate, proposalId);
             const at = new Date().toISOString();
             if (outcome.status === "accepted" && staged) {
               // The conversation's own account of what became of its propositions (§6.5).
@@ -1881,15 +1881,17 @@ export class Coordinator {
              */
             writeThrough: async (proposalId) => {
               const staged = await gate.readManifest(proposalId).catch(() => null);
-              if (staged?.openChoices?.length) return true;
-              const outcome = await gate.accept(proposalId, {});
+              if (staged?.openChoices?.length) return null;
+              const outcome = await acceptDecided(gate, proposalId);
               const at = new Date().toISOString();
-              if (outcome.status !== "accepted") return false;
+              // The gate's own words, carried out to the rail. Discarding them left the person
+              // with a count and no cause, and left this path undiagnosable from a log.
+              if (outcome.status !== "accepted") return explainAcceptRefusal(outcome);
               if (staged) {
                 await recordResolution(store, staged, "accepted", () => at);
                 this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId, outcome: "accepted" });
               }
-              return true;
+              return null;
             },
           });
         } catch (err) {

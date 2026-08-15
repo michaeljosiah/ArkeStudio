@@ -362,8 +362,12 @@ describe("per-agent settings", () => {
     // The role cap belongs here for the same reason: the gate refuses an over-long one either
     // way, so an agent that had been talked out of the rule would just fail at accept.
     assert.ok(
-      edited.prompt.includes(`role frontmatter is at most ${CHARACTER_ROLE_MAX} characters`),
+      edited.prompt.includes(`at most ${CHARACTER_ROLE_MAX} characters`),
       "the role bound survives an edited brief",
+    );
+    assert.ok(
+      edited.prompt.includes("Every character sheet carries a role"),
+      "and so does the instruction to set one at all — a character drafted without a role is listed without a line",
     );
     // And the tool denials are not addressable from settings at all.
     assert.equal(edited.tools["bash"], false);
