@@ -685,8 +685,6 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     changes,
     problems,
     externalEdits: [],
-    stale: false,
-    stalePaths: [],
   };
   return { meta, bundle, problems, manifest, mediaManifest };
 }

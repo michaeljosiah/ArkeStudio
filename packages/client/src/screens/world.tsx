@@ -48,7 +48,6 @@ import {
   duplicateSheet,
   openThread as openThreadMsg,
   reconcileExternalEdit,
-  reloadWorld,
   promoteGuest,
   renameSheet,
   replyToPermission,
@@ -171,7 +170,7 @@ function WorldConditionBanners() {
   if (!world || world.meta.worldId !== worldId) return null;
   const permissionEntries = Object.entries(permissions);
   const hasConditions =
-    world.stale || world.externalEdits.length > 0 || world.problems.length > 0 || permissionEntries.length > 0;
+    world.externalEdits.length > 0 || world.problems.length > 0 || permissionEntries.length > 0;
   if (!hasConditions) return null;
   return (
     <div style={{ display: "grid", gap: "var(--space-3)", padding: "var(--space-4) var(--gutter) 0" }}>
@@ -190,24 +189,6 @@ function WorldConditionBanners() {
           </div>
         </Callout>
       ))}
-      {world.stale && (
-        <Callout tone="warning" title="This world changed outside Arke Studio">
-          Another program wrote to the world folder while it was open. Reload to pick the changes
-          up — nothing is merged silently.
-          {world.stalePaths.length > 0 && (
-            /* Named, not merely counted. "Something changed" is a warning nobody can check;
-               the paths are what let the person decide whether they meant it. */
-            <div className="mono" style={{ fontSize: "var(--text-xs)", marginTop: "var(--space-2)" }}>
-              {world.stalePaths.join(" · ")}
-            </div>
-          )}
-          <div style={{ marginTop: "var(--space-2)" }}>
-            <Button variant="primary" onClick={() => reloadWorld(world.meta.worldId)}>
-              Reload world
-            </Button>
-          </div>
-        </Callout>
-      )}
       {world.externalEdits.length > 0 && (
         <Callout tone="warning" title={`${world.externalEdits.length} file(s) changed while the world was closed`}>
           Adopting an edit snapshots the prior version, bumps the entity version and records the

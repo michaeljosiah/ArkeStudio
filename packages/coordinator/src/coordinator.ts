@@ -743,11 +743,6 @@ export class Coordinator {
     if (this.started) throw new Error("coordinator already started");
     this.started = true;
 
-    // Out-of-band writes to the open world mark it stale for every client (SPEC-002 R-23).
-    this.opts.provider.onWorldStale?.((worldId, paths) => {
-      this.emit({ at: new Date().toISOString(), type: "world.stale", worldId, paths });
-    });
-
     // The bible, hand-edited while the app was open (SPEC-022 R-BIBLE-6). No event and no banner:
     // the world simply redraws with what they typed. Without this the store holds the new text
     // and the screen holds the old, which is the most confusing of the three possible states.
@@ -1429,18 +1424,6 @@ export class Coordinator {
           this.emit({ at: new Date().toISOString(), type: "sample-world.installed", worldId, slug, name });
         } catch (err) {
           refuse(err instanceof Error ? err.message : String(err));
-        }
-        this.transport.broadcastSnapshot();
-        return;
-      }
-      case "reload-world": {
-        const reload = this.opts.provider.reloadWorld?.bind(this.opts.provider);
-        if (!reload) return;
-        try {
-          this.readModel.setWorld(await reload(msg.worldId));
-          this.readModel.setWorlds(await this.opts.provider.listWorlds());
-        } catch {
-          /* the next snapshot carries the honest state */
         }
         this.transport.broadcastSnapshot();
         return;

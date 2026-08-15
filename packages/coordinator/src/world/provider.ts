@@ -45,7 +45,6 @@ export class FsWorldProvider implements WorldProvider {
   private store: WorldStore | null = null;
   private closing = false;
   private readonly scopedOperations = new Set<Promise<unknown>>();
-  private onStaleCb: ((worldId: string, paths: string[]) => void) | null = null;
   private onAdoptedCb: ((worldId: string) => void) | null = null;
   private appIndex: AppIndex | null = null;
   private appIndexReady = false;
@@ -106,10 +105,6 @@ export class FsWorldProvider implements WorldProvider {
   /** The accept gate over the open world (SPEC-004). */
   gate(): ProposalManager | null {
     return this.store ? new ProposalManager(this.store) : null;
-  }
-
-  onWorldStale(cb: (worldId: string, paths: string[]) => void): void {
-    this.onStaleCb = cb;
   }
 
   /** The open world quietly refreshed itself — no accusation, just newer bytes (SPEC-022). */
@@ -330,7 +325,6 @@ export class FsWorldProvider implements WorldProvider {
       clock: this.clock,
       ...(this.sqlite ? { sqlite: this.sqlite } : {}),
       events: {
-        onStale: (paths) => this.onStaleCb?.(worldId, paths),
         onAdopted: () => this.onAdoptedCb?.(worldId),
       },
     });
@@ -492,11 +486,6 @@ export class FsWorldProvider implements WorldProvider {
       return null;
     }
     return { path: toExtendedLength(abs), contentType };
-  }
-
-  async reloadWorld(worldId: string): Promise<WorldBundle> {
-    if (!this.store || this.store.worldId !== worldId) return this.loadWorld(worldId);
-    return this.store.reload();
   }
 
   async reconcileExternalEdit(worldId: string, path: string): Promise<WorldBundle> {

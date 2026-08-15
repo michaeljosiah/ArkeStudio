@@ -458,8 +458,6 @@ const state: ClientState = {
     masterLookCandidates: [],
     stagedReferences: {},
     externalEdits: [],
-    stale: false,
-    stalePaths: [],
   },
   // No conversation open by default: the workspace is loaded by id when one is chosen.
   worldChat: null,
