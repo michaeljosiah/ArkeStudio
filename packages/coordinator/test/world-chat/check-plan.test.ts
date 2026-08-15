@@ -253,3 +253,65 @@ describe("what the checks found", () => {
     assert.equal(checks.basedOnArtDirectionLook, undefined, "nothing else is bound to the world's look");
   });
 });
+
+/**
+ * A relationship is the classification that needs to know what else touches the entity, and the
+ * only one whose required categories include `related-read` (#70 §5.7).
+ *
+ * It was unwritable for as long as it existed: the coordinator's plan runner called the search
+ * and target tools and never `related`, so the category could not complete, the state stayed
+ * `partial`, and readiness refuses `partial` — every relationship a conversation described
+ * reached the rail and answered "there is not enough behind it to write it down".
+ */
+describe("a relationship needs what else touches the entity", () => {
+  const relationship = () =>
+    draft({
+      classification: "relationship.change",
+      title: "Ottoline is linked to Colm",
+      target: { kind: "sheet", sheetKind: "character", sheetId: "sister-ottoline-pike" },
+      draft: {
+        proseEdits: [
+          { sheet: { kind: "sheet", sheetId: "sister-ottoline-pike" }, sectionHeading: "Essence", body: "Bound." },
+        ],
+      },
+    } as unknown as Partial<ModelCandidateDraft>);
+
+  it("requires a related read, which only one tool satisfies", () => {
+    assert.ok(planFor(relationship()).required.includes("related-read"));
+  });
+
+  it("stays partial on the target read alone — the state readiness refuses", () => {
+    const checks = deriveChecks({
+      draft: relationship(),
+      plan: planFor(relationship()),
+      receipts: [receipt({ tool: "get-sheet" })],
+      canonRevision: 42,
+    });
+    assert.equal(checks.state, "partial");
+  });
+
+  it("completes once the related read is among the receipts", () => {
+    const checks = deriveChecks({
+      draft: relationship(),
+      plan: planFor(relationship()),
+      receipts: [receipt({ tool: "get-sheet" }), receipt({ tool: "related" })],
+      canonRevision: 42,
+    });
+    assert.equal(checks.state, "complete");
+  });
+
+  /*
+   * A check that could not run is not a check nobody asked for. The plan runner used to swallow a
+   * failed call and drop its receipt, which left the category merely missing — and missing is
+   * `partial`, which blocks. Carried through, it is `unavailable`, which deliberately does not.
+   */
+  it("reads as unavailable, not partial, when the related read could not run", () => {
+    const checks = deriveChecks({
+      draft: relationship(),
+      plan: planFor(relationship()),
+      receipts: [receipt({ tool: "get-sheet" }), receipt({ tool: "related", status: "unavailable" })],
+      canonRevision: 42,
+    });
+    assert.equal(checks.state, "unavailable", "a broken index is shown, not turned into a refusal");
+  });
+});

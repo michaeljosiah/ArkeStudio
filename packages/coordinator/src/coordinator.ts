@@ -5294,17 +5294,39 @@ export class Coordinator {
       runCheckPlan: async ({ draft, leaseToken }) => {
         const plan = planFor(draft);
         const produced: WorldChatCheckReceipt[] = [];
+        /*
+         * A call that failed is a check that could not run, not a check nobody asked for.
+         *
+         * Swallowing the error dropped its receipt, so the category stayed merely *missing* — and
+         * missing reads as `partial`, which readiness refuses. The receipt the error carries makes
+         * it `unavailable` instead, which deliberately does not block: a broken index is shown to
+         * the person and left to their judgement rather than turned into a broken app (§9.4).
+         */
+        const run = async (tool: string, args: Record<string, unknown>) => {
+          try {
+            produced.push((await retrieval.call(leaseToken, tool, args)).receipt);
+          } catch (err) {
+            const receipt = (err as { receipt?: WorldChatCheckReceipt }).receipt;
+            if (receipt) produced.push(receipt);
+          }
+        };
+
         for (const [category, query] of Object.entries(plan.queries)) {
-          const tool = category === "sheet-search" ? "search_sheets" : "search_canon";
-          const outcome = await retrieval.call(leaseToken, tool, { query }).catch(() => null);
-          if (outcome) produced.push(outcome.receipt);
+          await run(category === "sheet-search" ? "search_sheets" : "search_canon", { query });
         }
         for (const target of plan.targets) {
           if (target.kind === "world") continue;
-          const tool = target.kind === "canon" ? "get_entry" : "get_sheet";
           const id = target.kind === "canon" ? target.entryId : target.sheetId;
-          const outcome = await retrieval.call(leaseToken, tool, { id }).catch(() => null);
-          if (outcome) produced.push(outcome.receipt);
+          await run(target.kind === "canon" ? "get_entry" : "get_sheet", { id });
+          /*
+           * What else touches this entity, when the plan says the answer depends on it.
+           *
+           * `related-read` is required by `relationship.change` and satisfied by exactly one tool,
+           * which nothing here ever called — so every relationship a conversation described stayed
+           * `partial` for ever and could not be written. The classification existed, was proposed,
+           * reached the rail, and refused with "there is not enough behind it to write it down".
+           */
+          if (plan.required.includes("related-read")) await run("related", { id });
         }
         // This runner's own world, for the same reason worldContext reads from it: the provider's
         // selection follows whatever the person opened while the turn was still running.
