@@ -61,6 +61,32 @@ export interface TileRequest {
   estimatedMicroUsd: number;
 }
 
+/**
+ * The references a generation sends: what it must carry, then what the author staged (design 67).
+ *
+ * Order is the rule. Identity comes first and is never displaced — a main photo generated without
+ * the face it exists to preserve is not the picture anybody asked for — so a staged reference
+ * rides only in the room left after it. The dialog says which one was dropped; nothing is left to
+ * be discovered in the result.
+ */
+function withStaged(
+  carried: readonly string[],
+  carriedRole: "identity" | "environment",
+  staged: string | undefined,
+  model: ManifestModel,
+): { references: string[]; referenceRoles: Array<{ file: string; role: string }> } {
+  const references = [...carried];
+  // Its own role, because it is neither of the two the surfaces already send: a staged image is
+  // there for how it looks, not for who or where it is, and a provider that reads roles should
+  // not be told this face is the identity to preserve.
+  const fits = staged !== undefined && carried.length < referenceBudgetFor(model);
+  if (fits) references.push(staged);
+  return {
+    references,
+    referenceRoles: references.map((file) => ({ file, role: fits && file === staged ? "style" : carriedRole })),
+  };
+}
+
 /** One tile dispatch: prompt from the sheet, references from the locked set (R-6, D1). */
 export function tileRequest(
   world: WorldMeta,
@@ -195,6 +221,8 @@ export function mainPhotoRequests(
     identityReferences: string[];
     generationKey: string;
     tier?: SizeTier;
+    /** An image the author attached for this generation only (design 67). */
+    staged?: string;
   },
 ): CharacterGenerationRequest[] {
   const budget = referenceBudgetFor(model);
@@ -202,7 +230,12 @@ export function mainPhotoRequests(
     throw new Error(`${model.displayName} cannot receive identity reference images`);
   }
   const style = kit?.styleOverride ?? direction.description;
-  const identityReferences = input.identityReferences.slice(0, budget);
+  const { references: identityReferences, referenceRoles } = withStaged(
+    input.identityReferences.slice(0, budget),
+    "identity",
+    input.staged,
+    model,
+  );
   const tier = tierFor(model, input.tier);
   const estimatedMicroUsd = pricedCharacterImage(model, "main-photo", identityReferences.length, tier);
   // N previews are N jobs, not one job asking for N images, and that is the choice rather than
@@ -221,7 +254,7 @@ export function mainPhotoRequests(
       params: {
         prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}. Head-and-shoulders identity portrait, face and physical identity clear, restrained neutral expression, no text or montage.${imageConstraintSuffix(direction)}`,
         references: identityReferences,
-        referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
+        referenceRoles,
         output: characterImageOutput(model, "main-photo", tier),
         artDirection: {
           version: direction.version,
@@ -248,6 +281,8 @@ export function characterSheetRequest(
   generationKey: string,
   styleOverride?: string,
   requestedTier?: SizeTier,
+  /** An image the author attached for this generation only (design 67). */
+  staged?: string,
 ): CharacterGenerationRequest {
   if (referenceBudgetFor(model) === 0) {
     throw new Error(`${model.displayName} cannot receive the accepted main photo`);
@@ -255,7 +290,12 @@ export function characterSheetRequest(
   const photo = kit.mainPhoto?.file ?? kit.anchor;
   if (!photo) throw new Error("character sheet generation needs an accepted main photo");
   const style = styleOverride ?? kit.styleOverride ?? direction.description;
-  const identityReferences = referenceBudgetFor(model) > 0 ? [`references/${sheet.id}/${photo}`] : [];
+  const { references: identityReferences, referenceRoles } = withStaged(
+    [`references/${sheet.id}/${photo}`],
+    "identity",
+    staged,
+    model,
+  );
   const tier = tierFor(model, requestedTier);
   const estimatedMicroUsd = pricedCharacterImage(model, "character-sheet", identityReferences.length, tier);
   return {
@@ -270,7 +310,7 @@ export function characterSheetRequest(
         characterName: sheet.name,
         prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. One composite character sheet on a clean neutral field: front, three-quarter, profile and back turnaround; expression studies; costume and prop details; clear relative proportions. Preserve the supplied identity exactly.${imageConstraintSuffix(direction)}`,
         references: identityReferences,
-        referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
+        referenceRoles,
         output: characterImageOutput(model, "character-sheet", tier),
         artDirection: {
           version: direction.version,
@@ -302,6 +342,8 @@ export function characterLookRequests(
     count: number;
     tier?: SizeTier;
     generationKey: string;
+    /** An image the author attached for this generation only (design 67). */
+    staged?: string;
   },
 ): CharacterGenerationRequest[] {
   if (referenceBudgetFor(model) === 0) {
@@ -310,7 +352,12 @@ export function characterLookRequests(
   const photo = kit.mainPhoto?.file ?? kit.anchor;
   if (!photo) throw new Error("looks need an accepted main photo");
   const style = kit.styleOverride ?? direction.description;
-  const identityReferences = referenceBudgetFor(model) > 0 ? [`references/${sheet.id}/${photo}`] : [];
+  const { references: identityReferences, referenceRoles } = withStaged(
+    [`references/${sheet.id}/${photo}`],
+    "identity",
+    input.staged,
+    model,
+  );
   const tier = tierFor(model, input.tier);
   const estimatedMicroUsd = pricedCharacterImage(model, "character-look", identityReferences.length, tier);
   return Array.from({ length: input.count }, (_, index) => ({
@@ -324,7 +371,7 @@ export function characterLookRequests(
       params: {
         prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}. ${input.mode === "stay-close" ? "Stay close to the accepted identity and proportions." : "Push the styling while preserving the accepted identity."} Optional ${input.kind.replace("-", " ")} exploration; do not redefine identity.${imageConstraintSuffix(direction)}`,
         references: identityReferences,
-        referenceRoles: identityReferences.map((file) => ({ file, role: "identity" })),
+        referenceRoles,
         output: characterImageOutput(model, "character-look", tier),
         lookKind: input.kind,
         lookPrompt: input.prompt,
@@ -467,6 +514,8 @@ export function locationViewRequests(
     anchorFile?: string;
     generationKey: string;
     tier?: SizeTier;
+    /** An image the author attached for this generation only (design 67). */
+    staged?: string;
   },
 ): CharacterGenerationRequest[] {
   if (sheet.type !== "location") {
@@ -484,8 +533,12 @@ export function locationViewRequests(
   // handing that path to the dispatcher unchanged asked it for a file that does not exist from
   // the world root — so every anchored angle failed with "an image reference is missing" while
   // the unanchored establishing view, which carries no reference at all, worked fine.
-  const references =
-    input.anchorFile !== undefined ? [`references/${sheet.id}/${input.anchorFile}`] : [];
+  const { references, referenceRoles } = withStaged(
+    input.anchorFile !== undefined ? [`references/${sheet.id}/${input.anchorFile}`] : [],
+    "environment",
+    input.staged,
+    model,
+  );
   const tier = tierFor(model, input.tier);
   const estimatedMicroUsd = pricedCharacterImage(model, "location-view", references.length, tier);
 
@@ -508,7 +561,7 @@ export function locationViewRequests(
       params: {
         prompt: `${style}. ${sheet.name} — ${locationDescription(sheet)}.${angle} ${input.name}: an establishing photograph of this place with no people in frame, architecture and spatial layout legible, no text or montage.${anchored}${imageConstraintSuffix(direction)}`,
         references,
-        referenceRoles: references.map((file) => ({ file, role: "environment" as const })),
+        referenceRoles,
         output: characterImageOutput(model, "location-view", tier),
         artDirection: {
           version: direction.version,

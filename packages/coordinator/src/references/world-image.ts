@@ -77,17 +77,29 @@ export function worldImageRequest(
   direction?: ResolvedArtDirection,
   /** Which of the set this is, and how many there are. One, unless the author asked for more. */
   slot: { index: number; count: number } = { index: 0, count: 1 },
+  /** An image the author staged for this generation, or none (design 67). */
+  references: readonly string[] = [],
 ) {
-  const estimatedMicroUsd = estimateMicroUsd(model, { images: 1, megapixels: 1, referenceImages: 0 });
+  // The figure moves with what actually rides: a staged reference is billed like any other, and
+  // an estimate that ignored it would under-quote the one generation the author changed.
+  const estimatedMicroUsd = estimateMicroUsd(model, {
+    images: 1,
+    megapixels: 1,
+    referenceImages: references.length,
+  });
   return {
     worldId: meta.worldId,
     target: { kind: "world-image", id: meta.worldId },
     capability: "image" as const,
     provider: model.provider,
     model: model.id,
-    // No references: a world has no reference kit. Sending an empty list would be a field the
-    // provider has to know to ignore, and OpenAI does not — it answers unknown fields with 400.
+    // Only when there is one: a world has no reference kit, so this field is absent unless the
+    // author staged an image. An empty list would be a field the provider has to know to ignore,
+    // and OpenAI does not — it answers unknown fields with 400.
     params: {
+      ...(references.length > 0
+        ? { references: [...references], referenceRoles: references.map((file) => ({ file, role: "style" })) }
+        : {}),
       prompt: `${worldImagePrompt(meta, direction)}${imageConstraintSuffix(direction)}`,
       ...(direction
         ? {

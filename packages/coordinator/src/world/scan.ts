@@ -110,6 +110,25 @@ async function imagesIn(dir: string, relative: string, portable: string): Promis
   return entries.map((name) => `${portable}/${name}`);
 }
 
+/**
+ * Every image staged for a generation to look at, by surface key (design 67).
+ *
+ * One image per key, and the key is the directory name. A world holding the pre-67 master-look
+ * reference is read into the `master-look` key rather than losing it — nothing writes to that
+ * path any more, so this fades on its own once the staged image is used or cleared.
+ */
+async function readStagedReferences(dir: string): Promise<Record<string, string>> {
+  const staged: Record<string, string> = {};
+  const legacy = await firstImageIn(dir, join("incoming", "master-look-ref"), "incoming/master-look-ref");
+  if (legacy !== null) staged["master-look"] = legacy;
+  const root = join("incoming", "staged-refs");
+  for (const key of await listDir(join(dir, root))) {
+    const image = await firstImageIn(dir, join(root, key), `incoming/staged-refs/${key}`);
+    if (image !== null) staged[key] = image;
+  }
+  return staged;
+}
+
 const SHEET_DIRS: ReadonlyArray<{ dir: string; type: SheetKind }> = [
   { dir: "characters", type: "character" },
   { dir: "locations", type: "location" },
@@ -540,11 +559,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
    */
   const keyArtCandidates = await imagesIn(dir, join("incoming", "world-image"), "incoming/world-image");
   const masterLookCandidates = await imagesIn(dir, join("incoming", "master-look"), "incoming/master-look");
-  const masterLookReference = await firstImageIn(
-    dir,
-    join("incoming", "master-look-ref"),
-    "incoming/master-look-ref",
-  );
+  const stagedReferences = await readStagedReferences(dir);
   const keyArt = await findKeyArt(dir);
 
   const resolved = resolveArtDirection(meta, artDirectionRecord);
@@ -648,7 +663,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     keyArtCandidates,
     keyArt,
     masterLookCandidates,
-    masterLookReference,
+    stagedReferences,
     sheets,
     canon,
     referenceKits,

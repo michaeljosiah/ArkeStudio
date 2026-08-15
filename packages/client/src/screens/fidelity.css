@@ -2995,9 +2995,29 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   gap: 48px;
   animation: fy-fade-up 0.7s var(--ease-out) 0.08s both;
 }
+/*
+ * The two pictures, stacked: the master look takes what is left, key art a fixed band beneath it.
+ * Sized so both clear the fold on a short window — the page exists to answer "what does this
+ * world look like", and answering half of it above the fold was answering it badly.
+ */
+.fy-artdirection__pictures {
+  /*
+   * The pictures take the room the window has, rather than a fixed 680 with the surplus stranded
+   * in the other column as an empty spacer. The reading column keeps a measure — prose does not
+   * improve past about 60 characters — so everything a wider window offers goes to the thing this
+   * page is for, which is looking at the world.
+   */
+  flex: 1 1 auto;
+  min-width: 420px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
 .fy-artdirection__master {
-  width: 680px;
-  flex: none;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 180px;
   position: relative;
   border-radius: 18px;
   overflow: hidden;
@@ -3071,12 +3091,24 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
  * not its first. The doors are on this picture and act on this picture, which is the whole point
  * of the block: for two turns key art was shown under controls that made a master look.
  */
+.fy-artdirection__keyartband {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  min-height: 0;
+}
+.fy-artdirection__keyartsay { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fy-artdirection__keyartsay > h2 {
+  font: 500 10px var(--font-mono);
+  letter-spacing: 0.14em;
+  color: var(--neutral-400);
+}
 .fy-artdirection__keyart {
   position: relative;
-  width: 100%;
-  max-width: 420px;
+  flex: none;
+  height: 168px;
   aspect-ratio: 16 / 9;
-  margin-top: 12px;
   border-radius: 12px;
   overflow: hidden;
   box-shadow: var(--shadow-md);
@@ -3094,22 +3126,29 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   justify-content: center;
 }
 .fy-artdirection__keyart-note {
-  margin-top: 10px;
+  margin-top: 8px;
   font: 400 11px/1.6 var(--font-sans);
   color: var(--muted-foreground);
-  max-width: 420px;
 }
 /* The column that grows: the look, its history and any offer waiting on it live below the fold on
    a short window, and the screen is a fixed-height flex row, so without this they are unreachable. */
-.fy-artdirection__detail { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; padding: 4px 0; }
+.fy-artdirection__detail {
+  flex: 0 0 460px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
 .fy-artdirection__eyebrow,
 .fy-artproposal__eyebrow { font: 500 10.5px var(--font-sans); letter-spacing: .15em; color: var(--muted-foreground); }
 .fy-artdirection__detail > h1 { margin: 12px 0 0; font: 650 42px/1.04 var(--font-sans); letter-spacing: -.03em; }
-.fy-artdirection__description { margin-top: 16px; font: 400 14px/1.7 var(--font-sans); color: var(--muted-foreground); max-width: 460px; }
+.fy-artdirection__description { margin-top: 16px; font: 400 14px/1.7 var(--font-sans); color: var(--muted-foreground); }
 .fy-artdirection__badges { display: flex; gap: 8px; margin-top: 22px; }
 .fy-artdirection__badges span { padding: 5px 11px; border-radius: 999px; background: var(--secondary); font: 400 10.5px var(--font-mono); }
 .fy-artdirection__badges span + span { border: 1px solid var(--border); background: var(--background); color: var(--muted-foreground); }
-.fy-artdirection__carries { font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); margin-top: 10px; max-width: 460px; }
+.fy-artdirection__carries { font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); margin-top: 10px; }
 .fy-artdirection__safety,
 .fy-artdirection__derived { font: 400 11px/1.6 var(--font-sans); color: var(--muted-foreground); margin-top: 14px; border-left: 2px solid var(--border); padding-left: 12px; }
 .fy-artdirection__derived { border-color: var(--warning); color: var(--neutral-600); }

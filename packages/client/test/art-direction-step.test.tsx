@@ -217,9 +217,11 @@ describe("key art on the art-direction page (design 64)", () => {
       keyArt: "world-art.png",
       artDirection: { ...WORLD.artDirection, masterLook: undefined },
     });
+    // The key-art band sits between the master frame and the detail column now (both pictures
+    // above the fold), so the master frame ends where that band begins.
     const from = html.indexOf('class="fy-artdirection__master');
-    const to = html.indexOf('class="fy-artdirection__detail');
-    assert.ok(from > 0 && to > from, "the master frame renders, and the detail column after it");
+    const to = html.indexOf('class="fy-artdirection__keyartband');
+    assert.ok(from > 0 && to > from, "the master frame renders, and the key-art band after it");
     const hero = html.slice(from, to);
     assert.ok(!hero.includes("world-art.png"), "the master frame does not borrow the key art");
     assert.match(hero, /NO MASTER LOOK/, "an unset picture says it is unset");
@@ -229,7 +231,7 @@ describe("key art on the art-direction page (design 64)", () => {
 
   it("says which of the two it is, and that this one is never sent to a model", () => {
     const html = renderArtDirection({ keyArt: "world-art.png" });
-    assert.match(html, /nothing sends it to a model/, "the distinction that governs everything else");
+    assert.match(html, /Nothing sends it to a model/i, "the distinction that governs everything else");
   });
 
   it("states the empty case rather than hiding the block", () => {

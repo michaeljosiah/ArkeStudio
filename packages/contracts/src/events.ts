@@ -51,7 +51,7 @@ export const QueueCommandSchema = z.enum([
   "upload-world-image",
   "generate-master-look",
   "upload-master-look",
-  "pick-master-look-reference",
+  "pick-staged-reference",
   "establish-look",
   "generate-main-photo",
   "generate-character-sheet",
