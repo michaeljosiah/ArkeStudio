@@ -3770,3 +3770,67 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 /* The looks composer is a door now, not a form (design 66). */
 .fy-looks-composer__note { font: 400 11px/1.6 var(--font-sans); color: var(--muted-foreground); margin-top: 10px; }
+
+/* The bible (SPEC-022): one document, an outline beside it, and the versions behind it. */
+.fy-biblegrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 268px;
+  gap: 24px;
+  padding: 22px 34px 44px;
+  align-items: start;
+  animation: fy-fade-up 0.7s var(--ease-out) 0.12s both;
+}
+.fy-biblegrid__main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.fy-biblegrid__side { display: flex; flex-direction: column; gap: 14px; }
+/*
+ * Deliberately plain, and deliberately tall. This is the one screen in the product that is a
+ * blank page, and the writing is the interface — chrome around it would be the app having an
+ * opinion about a document whose whole point is that it has none.
+ */
+.fy-bible__editor {
+  width: 100%;
+  min-height: 62vh;
+  resize: vertical;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--background);
+  color: var(--foreground);
+  font: 400 14.5px/1.75 var(--font-sans);
+  tab-size: 2;
+}
+.fy-bible__editor:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
+.fy-bible__foot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.fy-bible__panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.fy-bible__panel--quiet { background: var(--muted); }
+.fy-bible__paneltitle { font: 500 11px var(--font-sans); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); margin: 0; }
+.fy-bible__empty { font: 400 12px/1.6 var(--font-sans); color: var(--muted-foreground); margin: 0; }
+.fy-bible__empty code { font: 400 11px var(--font-mono); }
+.fy-bible__toc { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; line-height: 1.5; }
+.fy-bible__versions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.fy-bible__versions li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+@media (max-width: 1100px) {
+  .fy-biblegrid { grid-template-columns: 1fr; padding: 18px 24px 36px; }
+}
+
+/* A landed bible edit in the conversation — already done, unlike everything else in the rail. */
+.fy-biblecard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted-foreground);
+  border-radius: 8px;
+  padding: 9px 12px;
+  background: var(--muted);
+}
+.fy-biblecard__text { font: 400 12px/1.5 var(--font-sans); color: var(--foreground); margin: 0; flex: 1; min-width: 0; }
+.fy-biblecard__what { font-weight: 500; }

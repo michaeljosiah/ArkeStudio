@@ -29,6 +29,24 @@ export const BOUNDS = {
   attachments: 32_000,
 } as const;
 
+/**
+ * The bible is deliberately absent from BOUNDS: it is never trimmed (SPEC-022).
+ *
+ * That is a departure from the rule above, and a considered one. The section is the author's own
+ * document, loaded whole because a bible the Studio has only half of is worse than useless — it
+ * would answer confidently out of the half it holds, and the author, who can see the whole thing
+ * on their own screen, has no way to know which half that was.
+ *
+ * What the rule above is actually defending survives intact. Its worry is *unbounded history*:
+ * conversation context that grows the longer somebody talks, so that the same question costs
+ * more at teatime than it did at breakfast. The bible does not do that. It is the same size on
+ * turn one and turn fifty, and it changes only when somebody edits it deliberately.
+ *
+ * What replaces the bound is visibility: `bibleSize` feeds a meter on the Bible screen, and the
+ * agent is told not to append to it unprompted. A document that is loaded every turn and also
+ * written every turn is the one way this could grow without anybody choosing it.
+ */
+
 /** How many complete turns of history a run sees before summarisation takes over (§8.5). */
 export const RECENT_TURN_COUNT = 8;
 
@@ -70,6 +88,8 @@ export interface ContextInput {
   messages: readonly WorldChatMessage[];
   tombstones: readonly CandidateTombstone[];
   worldContext?: string;
+  /** The author's bible, whole and untrimmed (SPEC-022). Empty when they have not started one. */
+  bible?: string;
   /** Linked to this turn. Empty for a turn that handed nothing over. */
   attachments?: readonly ContextAttachment[];
   currentUserMessage: string;
@@ -91,6 +111,8 @@ export interface AssembledContext {
   registry: string;
   recentTurns: string;
   worldContext: string;
+  /** The bible with its framing line, or "" when there is none. Never trimmed. */
+  bible: string;
   /** What was handed over this turn, named and — where readable — quoted. */
   attachments: string;
   /** Structural keys and digests only — enough to not re-propose, not enough to reconstruct. */
@@ -232,6 +254,31 @@ function renderAttachments(
 }
 
 /**
+ * The author's bible, whole, with the one paragraph that says what it is (SPEC-022).
+ *
+ * The framing is not decoration. A long, confident, first-person document about a world, dropped
+ * into a prompt unlabelled, reads exactly like settled fact — and the Studio would then answer
+ * out of it, cite it, and defend it, which is the failure SPEC-006's whole grounding pipeline
+ * exists to prevent, reintroduced through a side door.
+ *
+ * The last line is the one that earns its place in practice. A bible and its canon *will* drift:
+ * the author writes a thought in March, canon decides otherwise in June, and nobody goes back to
+ * the March paragraph. A Studio that notices and says so is doing the drift detection the master
+ * spec defers (§6.4). A Studio that silently picks one is worse than useless, because whichever
+ * it picks it will sound equally sure.
+ */
+function renderBible(text: string): string {
+  if (text.trim() === "") return "";
+  return [
+    "This is the author's own bible: their thinking about this world, in their words. It is context, not Canon.",
+    "Nothing in it is settled unless a CANON entry says so, and no candidate may cite it as evidence.",
+    "Where it and Canon disagree, Canon is what the world has decided — say so rather than choosing between them.",
+    "",
+    text.trim(),
+  ].join("\n");
+}
+
+/**
  * Tombstones travel as keys and digests, never as their original text (§8.5).
  *
  * The model needs to know not to re-propose something. It does not need to be reminded what the
@@ -259,6 +306,8 @@ export function assembleContext(input: ContextInput): AssembledContext {
     BOUNDS.recentTurns,
   );
   const worldContext = take("worldContext", input.worldContext ?? "", BOUNDS.worldContext);
+  // Not passed through `take`. See the note beside BOUNDS: this one is never cut.
+  const bible = renderBible(input.bible ?? "");
   const tombstones = renderTombstones(input.tombstones);
   /**
    * Cut per document and from the *end* of each, unlike every other section.
@@ -279,6 +328,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
     registry,
     recentTurns,
     worldContext,
+    bible,
     attachments,
     tombstones,
     // Never trimmed. See the note at the top of this file.
@@ -290,6 +340,10 @@ export function assembleContext(input: ContextInput): AssembledContext {
       registry,
       recentTurns,
       worldContext,
+      // In the digest because the bible is editable from inside the conversation as well as from
+      // outside it. Two turns that read different bibles are different turns, and a run record
+      // claiming they shared a context would misdate every edit made between them.
+      bible,
       // In the digest because two turns differing only by what was handed over are different
       // turns, and the run record should not claim they had the same context.
       attachments,

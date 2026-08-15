@@ -28,6 +28,13 @@ export interface WorldProvider {
   installSampleWorld?(sourceDir: string): Promise<{ worldId: string; slug: string; name: string }>;
   reconcileExternalEdit?(worldId: string, path: string): Promise<WorldBundle>;
   onWorldStale?(cb: (worldId: string, paths: string[]) => void): void;
+  /**
+   * The open world took newer bytes for an ungated file and needs no decision (SPEC-022).
+   *
+   * Separate from `onWorldStale` because it means the opposite thing to a client: nothing is
+   * wrong, nobody has to reconcile, and the only correct response is to redraw.
+   */
+  onWorldAdopted?(cb: (worldId: string) => void): void;
   /** The accept gate over the open world (SPEC-004). Null until a world is open. */
   gate?(): ProposalManager | null;
   /** The open store itself (SPEC-005: the world-query tool reads through it). */

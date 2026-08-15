@@ -135,6 +135,22 @@ const state: ClientState = {
       created: "2026-05-02T09:14:00Z",
       updated: AT,
     },
+    bible: {
+      version: 4,
+      updated: "2026-07-20",
+      present: true,
+      text: [
+        "This is a world about being owed something by the sea, and about the arithmetic people do to keep living beside it.",
+        "",
+        "## The tides",
+        "",
+        "The tide is the world's clock and its accountant. Nothing in the harbour is owed on a day; it is owed on a tide. Maren counts in tides without noticing she is doing it, and I would like that to stay under the surface rather than being explained.",
+        "",
+        "## What I have not decided",
+        "",
+        "Whether the Undersong is one voice or many. It matters for the last act and not before it, so I am leaving it open.",
+      ].join("\n"),
+    },
     artDirection: {
       version: 3,
       description:

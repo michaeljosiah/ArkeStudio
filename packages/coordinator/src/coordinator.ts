@@ -90,6 +90,7 @@ import {
   type SidecarLike,
 } from "./voice/service.js";
 import { atomicWriteFile } from "./world/atomic.js";
+import { applyTurnBibleEdits, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import { imageFormatOf } from "./queue/verify.js";
 import { readContainedImageReferences } from "./world/reference-files.js";
@@ -744,6 +745,13 @@ export class Coordinator {
     // Out-of-band writes to the open world mark it stale for every client (SPEC-002 R-23).
     this.opts.provider.onWorldStale?.((worldId, paths) => {
       this.emit({ at: new Date().toISOString(), type: "world.stale", worldId, paths });
+    });
+
+    // The bible, hand-edited while the app was open (SPEC-022 R-BIBLE-6). No event and no banner:
+    // the world simply redraws with what they typed. Without this the store holds the new text
+    // and the screen holds the old, which is the most confusing of the three possible states.
+    this.opts.provider.onWorldAdopted?.((worldId) => {
+      void this.refreshWorldSnapshot(worldId);
     });
 
     await this.seed();
@@ -2693,6 +2701,25 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         await saveChapter(store, msg.productionId, msg.chapterFile, msg.body).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "save-bible": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        // Swallowed like every other direct-authoring save: a rejected save leaves the editor's
+        // text where it is, and the refreshed snapshot below is what tells it the version moved.
+        await saveBible(store, msg.text, {
+          source: "editor",
+          ...(msg.baseVersion !== undefined ? { baseVersion: msg.baseVersion } : {}),
+        }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "restore-bible": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await restoreBible(store, msg.version, "editor").catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -5172,6 +5199,21 @@ export class Coordinator {
         const look = store.getBundle().artDirection;
         return { version: look.version, description: look.description };
       },
+      /*
+       * Straight off the disk, and from this runner's own world for the same reason as above.
+       *
+       * Not from the bundle: `bible.md` is the one authored file the app expects to be edited
+       * outside it, and the Studio's own edits land mid-conversation. The bundle is refreshed by
+       * a rescan, and a turn assembled between an edit and that rescan would show the model a
+       * bible one version behind the one it is about to be checked against — which fails the
+       * write it was meant to enable.
+       */
+      bible: async () => {
+        const current = await readBible(store.dir);
+        return { version: current.version, text: current.text };
+      },
+      applyBibleEdits: ({ edits, baseVersion }) =>
+        applyTurnBibleEdits(store, edits, { source: "world-chat", baseVersion }),
       prepare: async ({ conversationId, runId, attachmentIds }) => {
         const lease = leases.mint({
           worldId: store.worldId,

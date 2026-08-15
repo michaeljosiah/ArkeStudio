@@ -110,6 +110,9 @@ export function WorldLayout() {
     ["", "Overview"],
     ["art-direction", "Art direction"],
     ["cast", "Cast"],
+    // Before Canon, because that is the order the two are written in: what the author thinks the
+    // world is, and then what the world has actually settled.
+    ["bible", "Bible"],
     ["canon", "Canon"],
     ["chat", "World Chat"],
     ["artifacts", "Artifacts"],

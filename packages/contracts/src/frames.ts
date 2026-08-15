@@ -1112,6 +1112,30 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       body: z.string(),
     })
     .strict(),
+  /**
+   * SPEC-022: the author's bible saves in place, like chapter prose — no proposal, no approval.
+   *
+   * Unlike chapter prose it *does* cut a version on every save, and that is the point: the
+   * version and its `.history/` snapshot are what stand in for the accept step, for the author
+   * here and for the Studio's own edits. `baseVersion` is what the editor had loaded, so a save
+   * written against a bible that has since moved is refused rather than merged.
+   */
+  z
+    .object({
+      kind: z.literal("save-bible"),
+      worldId: UlidSchema,
+      text: z.string(),
+      baseVersion: z.number().int().min(1).optional(),
+    })
+    .strict(),
+  /** SPEC-022: undo. v<n> comes back as a new version; nothing between it and now is lost. */
+  z
+    .object({
+      kind: z.literal("restore-bible"),
+      worldId: UlidSchema,
+      version: z.number().int().min(1),
+    })
+    .strict(),
   /** SPEC-012 R-5: agent drafts arrive as proposals and cut a version on acceptance. */
   z
     .object({
