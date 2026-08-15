@@ -56,7 +56,7 @@ export function queueToastCopy(result: QueueEnqueueResult): QueueToastCopy {
   if (
     result.command === "upload-master-look" ||
     result.command === "upload-world-image" ||
-    result.command === "pick-master-look-reference"
+    result.command === "pick-staged-reference"
   ) {
     return {
       kind: "error",

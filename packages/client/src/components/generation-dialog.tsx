@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { CharacterImageWorkflow, SizeTier } from "@arke-studio/contracts";
 import { Button, Textarea } from "./ui.js";
 import { DispatchBar } from "./dispatch-bar.js";
@@ -211,6 +211,28 @@ export function GenerationDialog({
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const promptId = useId();
+  /*
+   * The press itself, said back immediately.
+   *
+   * Between the click and the first job event there is a round trip — the request is sent, the
+   * coordinator resolves a model, prices it and enqueues — and for all of it the button sat
+   * unchanged. Somebody who has just spent money on four images and seen nothing happen presses
+   * it again, which is the one outcome worth engineering against. Cleared when the host says
+   * something is running, and on a timeout as the backstop for a request refused without a job.
+   */
+  const [pressed, setPressed] = useState(false);
+  useEffect(() => {
+    if (generating) setPressed(false);
+  }, [generating]);
+  useEffect(() => {
+    if (!pressed) return;
+    const timer = setTimeout(() => setPressed(false), 20_000);
+    return () => clearTimeout(timer);
+  }, [pressed]);
+  // A dialog reopened after an answer must not still be mid-press from the last one.
+  useEffect(() => {
+    if (!open) setPressed(false);
+  }, [open]);
 
   /*
    * showModal() is imperative, and the parent's `open` is the truth.
@@ -334,10 +356,20 @@ export function GenerationDialog({
           </Button>
           <Button
             variant="primary"
-            disabled={submitDisabled || (!promptOptional && prompt.trim().length === 0)}
-            onClick={onSubmit}
+            disabled={pressed || generating || submitDisabled || (!promptOptional && prompt.trim().length === 0)}
+            onClick={() => {
+              setPressed(true);
+              onSubmit();
+            }}
           >
-            {submitLabel}
+            {/*
+              Two windows, one label. `pressed` covers the round trip before any job exists;
+              `generating` covers the run once the host can see it. Saying nothing during the
+              first was the complaint — the button sat unchanged while the money was already
+              being spent — and reverting to "Generate" the moment the job appeared would have
+              swapped one silence for another.
+            */}
+            {pressed || generating ? "Generating…" : submitLabel}
           </Button>
         </div>
         </div>

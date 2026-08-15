@@ -6,7 +6,7 @@ import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
 import { BackgroundNotificationPreferenceSchema, ThemePreferenceSchema } from "./settings.js";
-import { MAX_IMAGE_PREVIEWS } from "./planning.js";
+import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
 import { CHARACTER_ROLE_MAX } from "./world.js";
 import { WorldChatContextSchema } from "./world-chat.js";
 
@@ -23,6 +23,9 @@ export const FrameSchema = z.discriminatedUnion("kind", [
 export type Frame = z.infer<typeof FrameSchema>;
 
 /** What a client may send up. Commands arrive with their owning specs. */
+/** A staged-reference key, as strictly as the coordinator needs it to be — it becomes a folder. */
+const StagedReferenceKeySchema = z.string().min(1).max(120).regex(STAGED_REFERENCE_KEY);
+
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional() }).strict(),
   z.object({ kind: z.literal("open-world"), worldId: UlidSchema }).strict(),
@@ -146,17 +149,26 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
-   * Stage an image for the next master-look generation to look at. The host opens the picker and
-   * copies what comes back into the world, so no path and no bytes cross into the renderer — it
-   * learns only that a reference is now staged, from the snapshot.
+   * Stage an image for a generation to look at (design 67). The host opens the picker and copies
+   * what comes back into the world, so no path and no bytes cross into the renderer — it learns
+   * only that a reference is now staged, from the snapshot.
    *
-   * One at a time, like the candidate: picking again replaces it.
+   * One per key, like the candidate: picking again replaces it. The key names the surface, and is
+   * validated here because it becomes a directory: a fixed vocabulary plus an optional sheet slug,
+   * never anything typed.
    */
   z
-    .object({ kind: z.literal("pick-master-look-reference"), worldId: UlidSchema, requestId: UlidSchema })
+    .object({
+      kind: z.literal("pick-staged-reference"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      key: StagedReferenceKeySchema,
+    })
     .strict(),
-  /** Unstage it. The next generation goes back to being made from words alone. */
-  z.object({ kind: z.literal("clear-master-look-reference"), worldId: UlidSchema }).strict(),
+  /** Unstage it. That generation goes back to being made from words alone. */
+  z
+    .object({ kind: z.literal("clear-staged-reference"), worldId: UlidSchema, key: StagedReferenceKeySchema })
+    .strict(),
   /**
    * Or bring your own. Opens the host's file picker: the renderer never handles the bytes, and
    * the format is decided by reading them rather than by trusting the name.

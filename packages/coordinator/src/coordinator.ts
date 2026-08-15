@@ -7,6 +7,7 @@ import {
   JobSchema,
   REFERENCE_FINALIZATION_TARGETS,
   imageConstraintSuffix,
+  stagedReferenceKey,
   LedgerEntrySchema,
   type ClientMessage,
   type Capability,
@@ -114,9 +115,10 @@ import {
 import {
   MASTER_LOOK_DIR,
   MASTER_LOOK_DIR_ACCEPTED,
-  MASTER_LOOK_REFERENCE_DIR,
   masterLookFile,
   masterLookRequest,
+  stagedFor,
+  stagedReferenceDir,
 } from "./references/master-look.js";
 import {
   acceptCharacterLook,
@@ -3649,8 +3651,12 @@ export class Coordinator {
         // sharing one landing name would be four charges and one file — the defect the character
         // candidates were numbered to fix, and there is no reason for this path to relearn it.
         const count = ("count" in msg ? msg.count : undefined) ?? 1;
+        // A world has no reference kit, so a staged image is the only reference key art can ever
+        // carry — and it goes in only when there is one, because an empty references field is one
+        // more thing a provider has to know to ignore, and OpenAI answers unknown fields with 400.
+        const stagedKeyArt = stagedFor(bundle, stagedReferenceKey("world-image"), model);
         const requests = Array.from({ length: count }, (_, index) =>
-          worldImageRequest(bundle.meta, model, bundle.artDirection, { index, count }),
+          worldImageRequest(bundle.meta, model, bundle.artDirection, { index, count }, stagedKeyArt),
         );
         // The suffix survives every branch (#244, round 3): composing constraints upstream in
         // worldImageRequest bound only the fallback, so the directed path — the normal one —
@@ -3752,6 +3758,7 @@ export class Coordinator {
             await rm(toExtendedLength(join(store.dir, WORLD_IMAGE_DIR)), { recursive: true, force: true });
           })
           .catch(() => {});
+        await this.dropStagedReference(store, stagedReferenceKey("world-image"));
         await this.refreshWorldSnapshot(msg.worldId);
         // The picker reads the registry, not the open world's bundle, so the card that sent you
         // here goes on showing the old image until the list is asked for again.
@@ -3764,6 +3771,7 @@ export class Coordinator {
         await store
           .gateOp(async () => rm(toExtendedLength(join(store.dir, WORLD_IMAGE_DIR)), { recursive: true, force: true }))
           .catch(() => {});
+        await this.dropStagedReference(store, stagedReferenceKey("world-image"));
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -3795,10 +3803,7 @@ export class Coordinator {
         // The staged reference rides along only where the model can take one. Sending it to a
         // model that declares no reference slots would not be refused by the provider — it would
         // be quietly dropped, and the estimate would have charged for it.
-        const references =
-          bundle.masterLookReference !== null && model.accepts.referenceImages > 0
-            ? [bundle.masterLookReference]
-            : [];
+        const references = stagedFor(bundle, stagedReferenceKey("master-look"), model);
         // One job per preview, each under its own landing name (design 65).
         const wanted = msg.count ?? 1;
         await this.enqueueBatch(
@@ -3816,7 +3821,7 @@ export class Coordinator {
         );
         return;
       }
-      case "pick-master-look-reference": {
+      case "pick-staged-reference": {
         const store = this.opts.provider.openStore?.();
         const pick = this.opts.pickFiles;
         if (!store || store.worldId !== msg.worldId || !pick) {
@@ -3846,12 +3851,12 @@ export class Coordinator {
             // One reference at a time, and the extension follows the bytes — the same rule the
             // candidate follows, for the same reason: a stale PNG beside a new JPEG is what the
             // scan would find first.
-            await rm(toExtendedLength(join(store.dir, MASTER_LOOK_REFERENCE_DIR)), {
+            await rm(toExtendedLength(join(store.dir, stagedReferenceDir(msg.key))), {
               recursive: true,
               force: true,
             });
             await atomicWriteFile(
-              join(store.dir, MASTER_LOOK_REFERENCE_DIR, `reference${picked.extension}`),
+              join(store.dir, stagedReferenceDir(msg.key), `reference${picked.extension}`),
               picked.data,
             );
           })
@@ -3868,10 +3873,10 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
-      case "clear-master-look-reference": {
+      case "clear-staged-reference": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        await this.dropMasterLookReference(store);
+        await this.dropStagedReference(store, msg.key);
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -3991,7 +3996,7 @@ export class Coordinator {
             })
             .catch(() => {});
         }
-        if (accepted) await this.dropMasterLookReference(store);
+        if (accepted) await this.dropStagedReference(store, stagedReferenceKey("master-look"));
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -4003,7 +4008,7 @@ export class Coordinator {
             rm(toExtendedLength(join(store.dir, MASTER_LOOK_DIR)), { recursive: true, force: true }),
           )
           .catch(() => {});
-        await this.dropMasterLookReference(store);
+        await this.dropStagedReference(store, stagedReferenceKey("master-look"));
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -4120,6 +4125,10 @@ export class Coordinator {
             source = "generated";
             const recovered = await recordReferenceTake(store, job).catch(() => null);
             if (!recovered) {
+              // Accepting settles the ask this reference was staged for (design 67). A rejection does
+              // not: the usual answer to one is to run it again, and running it again with the
+              // picture you had just chosen is the point of having staged it.
+              await this.dropStagedReference(store, stagedReferenceKey("main-photo", msg.sheetId));
               await this.refreshWorldSnapshot(msg.worldId);
               report("failed", true, mainPhotoFailureReason("take-recording"), "take-recording");
               return;
@@ -4386,7 +4395,9 @@ export class Coordinator {
         }
         let requests;
         try {
+          const stagedMainPhoto = bundle.stagedReferences[stagedReferenceKey("main-photo", msg.sheetId)];
           requests = mainPhotoRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
+            ...(stagedMainPhoto !== undefined ? { staged: stagedMainPhoto } : {}),
             prompt: msg.prompt,
             count: msg.count,
             identityReferences: msg.identityReferences,
@@ -4437,7 +4448,9 @@ export class Coordinator {
         }
         let requests;
         try {
+          const stagedView = bundle.stagedReferences[stagedReferenceKey("location-view", msg.sheetId)];
           requests = locationViewRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
+            ...(stagedView !== undefined ? { staged: stagedView } : {}),
             name: msg.name,
             ...(msg.prompt !== undefined ? { prompt: msg.prompt } : {}),
             count: msg.count,
@@ -4549,6 +4562,10 @@ export class Coordinator {
           ...(msg.replaceExistingName !== undefined ? { replaceExistingName: msg.replaceExistingName } : {}),
           review: referenceReviewDecision(store.now(), take, "accept"),
         }).catch(() => {});
+        // Accepting settles the ask this reference was staged for (design 67). A rejection does
+        // not: the usual answer to one is to run it again, and running it again with the
+        // picture you had just chosen is the point of having staged it.
+        await this.dropStagedReference(store, stagedReferenceKey("location-view", msg.sheetId));
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -4581,6 +4598,7 @@ export class Coordinator {
             Date.now().toString(36),
             msg.styleOverride,
             msg.tier,
+            bundle.stagedReferences[stagedReferenceKey("character-sheet", msg.sheetId)],
           );
         } catch (error) {
           this.rejectEnqueue(
@@ -4634,6 +4652,10 @@ export class Coordinator {
           artDirectionVersion: take.provenance.artDirectionVersion ?? store.getBundle().artDirection.version,
           review,
         }).catch(() => {});
+        // Accepting settles the ask this reference was staged for (design 67). A rejection does
+        // not: the usual answer to one is to run it again, and running it again with the
+        // picture you had just chosen is the point of having staged it.
+        await this.dropStagedReference(store, stagedReferenceKey("character-sheet", msg.sheetId));
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -4657,7 +4679,9 @@ export class Coordinator {
         }
         let requests;
         try {
+          const stagedLook = bundle.stagedReferences[stagedReferenceKey("look", msg.sheetId)];
           requests = characterLookRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
+            ...(stagedLook !== undefined ? { staged: stagedLook } : {}),
             kind: msg.lookKind,
             mode: msg.mode,
             prompt: msg.prompt,
@@ -4724,6 +4748,10 @@ export class Coordinator {
           artDirectionVersion: take.provenance.artDirectionVersion ?? store.getBundle().artDirection.version,
           review,
         }).catch(() => {});
+        // Accepting settles the ask this reference was staged for (design 67). A rejection does
+        // not: the usual answer to one is to run it again, and running it again with the
+        // picture you had just chosen is the point of having staged it.
+        await this.dropStagedReference(store, stagedReferenceKey("look", msg.sheetId));
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -5299,17 +5327,17 @@ export class Coordinator {
   }
 
   /**
-   * Throw away the image staged for the next master look.
+   * Throw away the image staged for one surface.
    *
    * Called when the offer it helped make is settled either way, as well as on an explicit
    * removal: a reference kept past the picture it produced would silently join the *next*
    * generation, which nobody asked it to, and the dialog would open with an attachment the
    * person does not remember making.
    */
-  private async dropMasterLookReference(store: WorldStore): Promise<void> {
+  private async dropStagedReference(store: WorldStore, key: string): Promise<void> {
     await store
       .gateOp(async () =>
-        rm(toExtendedLength(join(store.dir, MASTER_LOOK_REFERENCE_DIR)), { recursive: true, force: true }),
+        rm(toExtendedLength(join(store.dir, stagedReferenceDir(key))), { recursive: true, force: true }),
       )
       .catch(() => {});
   }

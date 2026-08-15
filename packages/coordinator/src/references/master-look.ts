@@ -21,7 +21,42 @@ export const MASTER_LOOK_DIR = "incoming/master-look";
 export const MASTER_LOOK_CANDIDATE = "candidate.png";
 
 /** Where an image staged for the next generation waits. Also one at a time, for the same reason. */
-export const MASTER_LOOK_REFERENCE_DIR = "incoming/master-look-ref";
+/**
+ * Where the master look's staged reference used to live, on its own.
+ *
+ * Kept only so a world that has one staged right now does not lose it across the upgrade: the
+ * scan reads this path into the `master-look` key, and nothing writes here any more.
+ */
+export const LEGACY_MASTER_LOOK_REFERENCE_DIR = "incoming/master-look-ref";
+
+/** Where any surface's staged reference lives now (design 67). One directory, one image. */
+export function stagedReferenceDir(key: string): string {
+  return `incoming/staged-refs/${key}`;
+}
+
+/**
+ * The staged reference for one surface, if this model can carry another image (design 67).
+ *
+ * `already` is what the surface is sending regardless — a character's identity anchor, a
+ * location's establishing view. Those win: a main photo generated without the face it exists to
+ * preserve is not the picture anybody asked for, whereas a staged reference that does not fit is
+ * a preference that could not be honoured. The dialog says which was dropped rather than leaving
+ * the difference to be discovered in the result.
+ *
+ * Sending it to a model that declares no reference slots would not be refused by the provider —
+ * it would be quietly dropped, and the estimate would have charged for it.
+ */
+export function stagedFor(
+  bundle: { stagedReferences: Record<string, string> },
+  key: string,
+  model: { accepts: { referenceImages: number }; unverified?: boolean },
+  already: readonly string[] = [],
+): string[] {
+  const staged = bundle.stagedReferences[key];
+  if (staged === undefined) return [...already];
+  const budget = model.unverified === true ? 0 : model.accepts.referenceImages;
+  return already.length < budget ? [...already, staged] : [...already];
+}
 
 /** Accepted master looks live beside the record that names them, one per look version. */
 export const MASTER_LOOK_DIR_ACCEPTED = "art-direction";

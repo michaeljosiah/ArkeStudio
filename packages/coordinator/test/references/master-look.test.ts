@@ -9,7 +9,7 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import {
   MASTER_LOOK_CANDIDATE,
   MASTER_LOOK_DIR,
-  MASTER_LOOK_REFERENCE_DIR,
+  stagedReferenceDir,
   masterLookFile,
   masterLookPrompt,
   masterLookRequest,
@@ -166,9 +166,9 @@ describe("asking the look to illustrate itself", () => {
 
   it("carries a staged reference and prices it, or carries none at all", () => {
     const withRef = masterLookRequest(meta(), model, direction, {
-      references: ["incoming/master-look-ref/reference.png"],
+      references: ["incoming/staged-refs/master-look/reference.png"],
     });
-    assert.deepEqual(withRef.params.references, ["incoming/master-look-ref/reference.png"]);
+    assert.deepEqual(withRef.params.references, ["incoming/staged-refs/master-look/reference.png"]);
     const without = masterLookRequest(meta(), model, direction);
     assert.ok(!("references" in without.params), "an absent reference is absent, not an empty array");
 
@@ -180,7 +180,7 @@ describe("asking the look to illustrate itself", () => {
       pricing: { kind: "perImage", microUsdPerImage: 40000, microUsdPerReferenceImage: 5000 },
     };
     assert.ok(
-      masterLookRequest(meta(), perImage, direction, { references: ["incoming/master-look-ref/reference.png"] })
+      masterLookRequest(meta(), perImage, direction, { references: ["incoming/staged-refs/master-look/reference.png"] })
         .estimatedMicroUsd > masterLookRequest(meta(), perImage, direction).estimatedMicroUsd,
     );
   });
@@ -393,13 +393,14 @@ describe("staging a reference for the next master look", () => {
     const { provider, send } = await harness(() => [picked]);
     try {
       await send({
-        kind: "pick-master-look-reference",
+        kind: "pick-staged-reference",
+        key: "master-look",
         worldId: WORLD_ID,
         requestId: "01J8F3K2QW9VZX4N7M0RTYB62A",
       });
       assert.equal(
-        provider.openStore()!.getBundle().masterLookReference,
-        `${MASTER_LOOK_REFERENCE_DIR}/reference.png`,
+        provider.openStore()!.getBundle().stagedReferences["master-look"],
+        `${stagedReferenceDir("master-look")}/reference.png`,
       );
     } finally {
       await provider.close();
@@ -413,17 +414,19 @@ describe("staging a reference for the next master look", () => {
     const { provider, worldDir, send } = await harness(() => [next]);
     try {
       await send({
-        kind: "pick-master-look-reference",
+        kind: "pick-staged-reference",
+        key: "master-look",
         worldId: WORLD_ID,
         requestId: "01J8F3K2QW9VZX4N7M0RTYB62B",
       });
       next = second;
       await send({
-        kind: "pick-master-look-reference",
+        kind: "pick-staged-reference",
+        key: "master-look",
         worldId: WORLD_ID,
         requestId: "01J8F3K2QW9VZX4N7M0RTYB62C",
       });
-      assert.deepEqual(await readdir(join(worldDir, "incoming", "master-look-ref")), ["reference.png"]);
+      assert.deepEqual(await readdir(join(worldDir, "incoming", "staged-refs", "master-look")), ["reference.png"]);
     } finally {
       await provider.close();
     }
@@ -434,12 +437,13 @@ describe("staging a reference for the next master look", () => {
     const { provider, send } = await harness(() => [picked]);
     try {
       await send({
-        kind: "pick-master-look-reference",
+        kind: "pick-staged-reference",
+        key: "master-look",
         worldId: WORLD_ID,
         requestId: "01J8F3K2QW9VZX4N7M0RTYB62D",
       });
-      await send({ kind: "clear-master-look-reference", worldId: WORLD_ID });
-      assert.equal(provider.openStore()!.getBundle().masterLookReference, null);
+      await send({ kind: "clear-staged-reference", worldId: WORLD_ID, key: "master-look" });
+      assert.equal(provider.openStore()!.getBundle().stagedReferences["master-look"], undefined);
     } finally {
       await provider.close();
     }
@@ -455,15 +459,16 @@ describe("staging a reference for the next master look", () => {
     const { provider, send } = await harness(() => [picked]);
     try {
       await send({
-        kind: "pick-master-look-reference",
+        kind: "pick-staged-reference",
+        key: "master-look",
         worldId: WORLD_ID,
         requestId: "01J8F3K2QW9VZX4N7M0RTYB62E",
       });
       await send({ kind: "upload-master-look", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB62F" });
-      assert.ok(provider.openStore()!.getBundle().masterLookReference !== null, "still staged while it waits");
+      assert.ok(provider.openStore()!.getBundle().stagedReferences["master-look"] !== undefined, "still staged while it waits");
 
       await send({ kind: "discard-master-look", worldId: WORLD_ID });
-      assert.equal(provider.openStore()!.getBundle().masterLookReference, null);
+      assert.equal(provider.openStore()!.getBundle().stagedReferences["master-look"], undefined);
     } finally {
       await provider.close();
     }

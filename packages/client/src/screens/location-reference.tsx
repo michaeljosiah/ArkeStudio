@@ -4,6 +4,7 @@ import {
   MAX_ACTIVE_LOCATION_VIEWS,
   designatedCompilation,
   normalizeViewName,
+  stagedReferenceKey,
   orderedLocationViews,
   panelMapPhrase,
   type LocationView,
@@ -20,7 +21,9 @@ import {
   acceptLocationView,
   clearLocationViewUpload,
   generateLocationView,
+  clearStagedReference,
   importLocationViewCandidate,
+  pickStagedReference,
   rejectReferenceTake,
   useLocationViewUpload,
 } from "../lib/store.js";
@@ -343,6 +346,10 @@ export function LocationReferenceScreen() {
             promptOptional
             promptHint="Optional. The place, its look and the angle's name are sent whether or not you write here."
             worldSlug={world.meta.slug}
+            reference={world.stagedReferences[stagedReferenceKey("location-view", sheetId)] ?? null}
+            referenceHint="Optional. A photograph or a plate of the place to work from. The establishing view goes first, so this rides only where the model has room for a second image."
+            onAttachReference={() => pickStagedReference(worldId, stagedReferenceKey("location-view", sheetId))}
+            onClearReference={() => clearStagedReference(worldId, stagedReferenceKey("location-view", sheetId))}
             extra={
               <label className="fy-locref__namefield">
                 <span>What is this angle called?</span>

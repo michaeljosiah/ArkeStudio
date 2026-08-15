@@ -237,11 +237,18 @@ export const WorldBundleSchema = z
      */
     masterLookCandidates: z.array(z.string()).default([]),
     /**
-     * An image staged for the next master-look generation to look at, world-relative, or null.
-     * On disk rather than in the renderer's memory for the same reason the candidate is: a
-     * reference that survives a reload is one the person can still see they attached.
+     * Images staged for a generation to look at, by surface key, world-relative (design 67).
+     *
+     * One per key, replaced by picking again. On disk rather than in the renderer's memory for
+     * the same reason a candidate is: a reference that survives a reload is one the person can
+     * still see they attached — and the bytes never cross into the client either way.
+     *
+     * This was a single `masterLookReference`, because the master look was the only surface with
+     * anywhere to put one. That absence had been read as a reason the other five dialogs could
+     * not offer a reference at all, which had it backwards: the dialog asks for a picture to look
+     * at, so every surface it serves needs somewhere to keep one.
      */
-    masterLookReference: z.string().nullable().default(null),
+    stagedReferences: z.record(z.string(), z.string()).default({}),
     /** Closed-world edits awaiting reconciliation (SPEC-002 R-28). */
     externalEdits: z.array(ExternalEditSchema).default([]),
     /** Set when another program changed files while the world was open (SPEC-002 R-23). */

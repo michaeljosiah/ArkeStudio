@@ -6,7 +6,7 @@ import type {
   SizeTier,
   WorldBundle,
 } from "@arke-studio/contracts";
-import { worldImagePrompt } from "@arke-studio/contracts";
+import { stagedReferenceKey, worldImagePrompt } from "@arke-studio/contracts";
 import { ArtStyleGrid } from "../components/art-style-picker.js";
 import { resolveModel, resolveOutputChoice, usableModels } from "../components/dispatch-bar.js";
 import { authoredPrompt, GenerationDialog } from "../components/generation-dialog.js";
@@ -16,13 +16,13 @@ import { Portrait } from "../components/portrait.js";
 import { shortDate } from "../lib/format.js";
 import {
   acceptProposal,
-  clearMasterLookReference,
+  clearStagedReference,
   discardMasterLook,
   discardProposal,
   discardWorldImage,
   generateMasterLook,
   generateWorldImage,
-  pickMasterLookReference,
+  pickStagedReference,
   setArtDirection,
   uploadMasterLook,
   uploadWorldImage,
@@ -300,8 +300,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
 
   return (
     <>
-      <section className="fy-artdirection__section">
-        <h2>WORLD KEY ART</h2>
+      <section className="fy-artdirection__keyartband">
         <div
           className={
             world.keyArt ? "fy-artdirection__keyart" : "fy-artdirection__keyart fy-artdirection__keyart--empty"
@@ -314,11 +313,13 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
           )}
           {doors}
         </div>
-        <p className="fy-artdirection__keyart-note">
-          A picture <i>of</i> the world. The worlds list, the world's own hero and a production
-          with no frame of its own all show it — and nothing sends it to a model, which is why it
-          may carry the faces a master look may not.
-        </p>
+        <div className="fy-artdirection__keyartsay">
+          <h2>WORLD KEY ART</h2>
+          <p className="fy-artdirection__keyart-note">
+            A picture <i>of</i> the world — the worlds list, the world's own hero, a production
+            with no frame of its own. Nothing sends it to a model, which is why it may carry the
+            faces a master look may not.
+          </p>
         {/*
           The set is answered in the dialog's own preview column now (design 65) — this line only
           says one is waiting, and reopens the dialog to deal with it. Two places to answer the
@@ -339,6 +340,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
             </p>
           )
         )}
+        </div>
       </section>
       {/* Outside the section on purpose: it is a modal, not section content, and nesting it there
           put its own <h2> under the section's eyebrow styling. */}
@@ -352,8 +354,10 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         onPrompt={setDraft}
         promptHint="Opens as the words this would send on its own — the look, the logline, the tone. Edit them and yours are sent as written, with the standing clause added after, and the studio writes nothing of its own on top."
         worldSlug={world.meta.slug}
-        // No reference row: there is nowhere in the world to stage one for key art, and a slot
-        // that opened a picker whose result had no home would be worse than none.
+        reference={world.stagedReferences[stagedReferenceKey("world-image")] ?? null}
+        referenceHint="Optional. A photograph, a painting, a frame — whatever the world should look like. It is the only reference key art can carry, since a world has no reference kit of its own."
+        onAttachReference={() => pickStagedReference(worldId, stagedReferenceKey("world-image"))}
+        onClearReference={() => clearStagedReference(worldId, stagedReferenceKey("world-image"))}
         workflow="main-photo"
         // The request carries no output spec at all, so the provider's own size is what runs.
         size={false}
@@ -462,16 +466,26 @@ export function ArtDirectionScreen() {
 
   return (
     <div className="fy-artdirection" data-screen="world-art-direction">
-      <MasterLookHero
-        world={world}
-        direction={direction}
-        running={running}
-        generateRef={generateRef}
-        onGenerate={() => {
-          setDraft(null);
-          setDialogOpen(true);
-        }}
-      />
+      {/*
+        Both pictures, both above the fold.
+        Key art used to live two thirds of the way down the other column, which meant the page
+        about the world's pictures showed one of them and made you scroll for the other. They
+        stack now: the master look takes the room that is left, and key art a fixed band beneath
+        it, so the answer to "what does this world look like" is one screen.
+      */}
+      <div className="fy-artdirection__pictures">
+        <MasterLookHero
+          world={world}
+          direction={direction}
+          running={running}
+          generateRef={generateRef}
+          onGenerate={() => {
+            setDraft(null);
+            setDialogOpen(true);
+          }}
+        />
+        <WorldKeyArtPanel world={world} />
+      </div>
       <GenerationDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
@@ -482,10 +496,10 @@ export function ArtDirectionScreen() {
         onPrompt={setDraft}
         promptHint="Starts as the look's own words. Whatever is here is sent as written — with the standing clause forbidding people, faces, text and montage added after it, because this image rides along with other characters' portraits."
         worldSlug={world.meta.slug}
-        reference={world.masterLookReference}
+        reference={world.stagedReferences[stagedReferenceKey("master-look")] ?? null}
         referenceHint="Optional. A palette, a frame or a lighting study for the model to look at while it works."
-        onAttachReference={() => pickMasterLookReference(world.meta.worldId)}
-        onClearReference={() => clearMasterLookReference(world.meta.worldId)}
+        onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("master-look"))}
+        onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("master-look"))}
         // "main-photo" is borrowed for its price band only — a master look is not a portrait, and
         // the coordinator builds this request landscape, so the orientation is stated rather than
         // inferred from the workflow. Without it the dialog would default to a portrait shape and
@@ -606,9 +620,6 @@ export function ArtDirectionScreen() {
           )
         )}
         <div className="fy-artdirection__spacer" />
-        {/* The world's other picture, below the look's own business and above its history — the
-            page carries both pictures or it is not the page about the world's pictures. */}
-        <WorldKeyArtPanel world={world} />
         <History worldSlug={world.meta.slug} history={direction.history} />
       </div>
     </div>

@@ -656,6 +656,39 @@ export function standingConstraints(
 }
 
 /**
+ * Which surface a staged reference belongs to (design 67).
+ *
+ * Keyed rather than one field per surface, because the six of them want the same thing and a
+ * seventh will too. The key becomes a directory name under `incoming/staged-refs/`, so it is
+ * built from a fixed vocabulary and a slug rather than from anything a user typed.
+ */
+export type StagedReferenceSurface =
+  | "world-image"
+  | "master-look"
+  | "main-photo"
+  | "character-sheet"
+  | "look"
+  | "location-view";
+
+/**
+ * The key a surface stages under. `--` rather than `:` because this is a folder on Windows too,
+ * where a colon in a name is not a name at all — it is a drive letter or an alternate stream.
+ */
+export function stagedReferenceKey(surface: StagedReferenceSurface, sheetId?: string): string {
+  return sheetId === undefined ? surface : `${surface}--${sheetId}`;
+}
+
+/**
+ * A key as it is allowed to arrive over the wire.
+ *
+ * Anchored and character-classed rather than free text, because the coordinator turns it into a
+ * path: `..`, a separator or a drive letter here would be a directory traversal wearing the name
+ * of a feature. The surfaces are enumerated and the slug half is the same shape as every other
+ * sheet id.
+ */
+export const STAGED_REFERENCE_KEY = /^(world-image|master-look|main-photo|character-sheet|look|location-view)(--[a-z0-9]+(?:-[a-z0-9]+)*)?$/;
+
+/**
  * How many previews one image generation may ask for (design 65).
  *
  * Four is what fits the dialog's preview column as a 2×2 at a size you can actually judge, and it

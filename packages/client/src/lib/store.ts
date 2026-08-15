@@ -1043,20 +1043,21 @@ export function uploadMasterLook(worldId: string): void {
 }
 
 /**
- * Stage an image for the next master-look generation to look at. Same picker, same one-way
- * street: the renderer asks, and learns from the snapshot that a reference is now attached.
+ * Stage an image for a generation to look at (design 67). Same picker, same one-way street: the
+ * renderer asks, and learns from the snapshot that a reference is now attached.
  */
-export function pickMasterLookReference(worldId: string): void {
+export function pickStagedReference(worldId: string, key: string): void {
   send({
-    kind: "pick-master-look-reference",
+    kind: "pick-staged-reference",
     worldId,
-    requestId: queueRequest("pick-master-look-reference"),
+    key,
+    requestId: queueRequest("pick-staged-reference"),
   });
 }
 
-/** Take it away again — the next generation is made from words alone. */
-export function clearMasterLookReference(worldId: string): void {
-  send({ kind: "clear-master-look-reference", worldId });
+/** Take it away again — that generation is made from words alone. */
+export function clearStagedReference(worldId: string, key: string): void {
+  send({ kind: "clear-staged-reference", worldId, key });
 }
 
 /** Accepting is a look change: the image lands as the next version's master look. */
