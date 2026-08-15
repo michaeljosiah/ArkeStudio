@@ -3,6 +3,7 @@ import {
   type CandidateId,
   type ConversationId,
   type Proposal,
+  type ProposalId,
   type ProposalOpenChoice,
   type WorldBundle,
   type WorldChangeCandidate,
@@ -407,6 +408,45 @@ async function buildAndStage(input: {
   return { built, proposals, openChoices, threadProposalIds };
 }
 
+/**
+ * Take back a proposal that was staged but never written, and put its propositions back on the rail.
+ *
+ * Staging marks every carried proposition `proposed`, which takes it off the rail. That is right
+ * for one that landed and wrong for one that did not: without this the point is gone from the
+ * conversation — nothing left to correct it from — while a proposal nobody can accept stands on
+ * the approvals screen offering the same change a second time.
+ *
+ * Recorded before the discard, in that order and for the reason send-back gives: if the discard
+ * then fails, the propositions are live in an open conversation and the proposal is still standing
+ * where a person can see it and decide it. The other order would leave propositions belonging to a
+ * proposal nobody could find.
+ *
+ * `sent-back` rather than `discarded`, because that is what this is — nobody refused the change, it
+ * could not be written and has come back to be talked about. It is also the only outcome the fold
+ * both returns the propositions to live for *and* stops counting the proposal as one this
+ * conversation is waiting on: `candidate.status-changed` alone left the id in the set that blocks
+ * deletion, naming a proposal that had just been removed.
+ */
+export async function returnToRail(
+  log: WorldChatStore,
+  gate: ProposalManager,
+  proposal: Proposal,
+  now: () => string,
+): Promise<void> {
+  await log.append(
+    {
+      type: "proposal.resolved",
+      proposalId: proposal.id as ProposalId,
+      outcome: "sent-back",
+      candidateIds: (proposal.worldChatOrigins ?? []).map((origin) => origin.candidateId as CandidateId),
+    },
+    { at: now() },
+  );
+  await gate.discard(proposal.id).catch(() => {
+    /* a proposal that will not go is still better restored on the rail than lost from both */
+  });
+}
+
 export async function wrapUp(input: WrapUpInput): Promise<WrapUpResult> {
   // Built through the shared helper rather than spelled out here, so this store reaches the same
   // per-directory writer as every other one on this conversation (see `writerFor`).
@@ -588,24 +628,7 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
        * proposal goes with them, because leaving it waiting would offer the same change twice,
        * once here and once on the approvals screen.
        */
-      for (const proposal of left) {
-        await input.gate.discard(proposal.id).catch(() => {
-          /* a proposal that will not go is still better restored on the rail than lost from both */
-        });
-        for (const origin of proposal.worldChatOrigins ?? []) {
-          const candidate = carried.find((c) => c.id === origin.candidateId);
-          if (!candidate) continue;
-          await log.append(
-            {
-              type: "candidate.status-changed",
-              candidateId: candidate.id,
-              revision: candidate.revision,
-              status: "live",
-            },
-            { at: input.now() },
-          );
-        }
-      }
+      for (const proposal of left) await returnToRail(log, input.gate, proposal, input.now);
 
       await log.append(
         { type: "wrapup.failed", requestId: input.requestId, safeDetail: "some changes could not be written" },

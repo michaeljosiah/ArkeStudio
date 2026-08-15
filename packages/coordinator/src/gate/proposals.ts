@@ -102,6 +102,46 @@ export type AcceptOutcome =
   | { status: "draft-unresolved"; records: string[] }
   | { status: "invalid"; problems: Array<{ path: string; message: string }> };
 
+/**
+ * Why an accept did not write, said to somebody who pressed a button expecting it to.
+ *
+ * The statuses are the gate's own vocabulary and no use on their own: `the gate answered "invalid"`
+ * tells a person nothing they can act on, least of all that a character's role is a hundred
+ * characters over its limit. Every branch that carries detail spends it — `invalid` names the first
+ * problem, because it is the one case where the gate knows exactly what is wrong and has already
+ * worded it for a person.
+ *
+ * Each reads as the tail of "this could not be written because …".
+ */
+export function explainAcceptRefusal(outcome: AcceptOutcome): string {
+  switch (outcome.status) {
+    case "invalid": {
+      const first = outcome.problems[0];
+      if (!first) return "one of its fields is outside what may be written";
+      const others = outcome.problems.length - 1;
+      return `${first.path}: ${first.message}${others > 0 ? `, and ${others} more like it` : ""}`;
+    }
+    case "stale":
+      return `the world moved underneath it — ${outcome.stalePaths.join(", ")} changed while this was being written`;
+    case "no-op":
+      return "nothing in it differs from what the world already says";
+    case "needs-reconfirm":
+      return "what it would affect elsewhere changed while it was being written, so it has to be looked at again";
+    case "pending-review":
+      return "it was rebased onto newer work and has to be read before it can be written";
+    case "unresolved-conflicts":
+      return `${outcome.count} of its fields conflict with a change made since, and only a person can choose between them`;
+    case "target-retired":
+      return `${outcome.paths.join(", ")} has been retired, so it can no longer be changed`;
+    case "draft-unresolved":
+      return "an edit to it could not be resolved, and writing past that would write something nobody reviewed";
+    case "accepted":
+      // Unreachable through every caller, and not worth a throw: a wrong word beats a crash on a
+      // path that only runs once something has already gone unexpectedly.
+      return "it was written after all";
+  }
+}
+
 export interface StageInput {
   kind: Proposal["kind"];
   summary: string;

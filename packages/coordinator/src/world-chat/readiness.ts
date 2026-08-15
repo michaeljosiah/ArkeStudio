@@ -1,4 +1,4 @@
-import type { WorldBundle, WorldChangeCandidate } from "@arke-studio/contracts";
+import { CHARACTER_ROLE_MAX, type WorldBundle, type WorldChangeCandidate } from "@arke-studio/contracts";
 import { lookHasMoved } from "./look.js";
 
 /**
@@ -20,7 +20,8 @@ export type NotCarriedReason =
   | "target-missing"
   | "invalid"
   | "look-moved"
-  | "look-already-proposed";
+  | "look-already-proposed"
+  | "role-too-long";
 
 export interface NotCarried {
   candidateId: string;
@@ -62,6 +63,31 @@ function targetExists(candidate: WorldChangeCandidate, bundle: WorldBundle): boo
   }
   const sheet = bundle.sheets.find((s) => s.id === target.sheetId);
   return sheet !== undefined && sheet.retired !== true;
+}
+
+/**
+ * Whether this proposition would write a character role longer than a role may be.
+ *
+ * Both ways of writing one. A create takes the kind from its own draft; an edit takes it from the
+ * sheet it names, because its draft carries only what is changing. Only a string counts: absent
+ * leaves the role alone and null clears it, and neither can be too long.
+ *
+ * Characters only, and trimmed before measuring, because that is exactly how the gate judges it
+ * (`checkAuthoredBounds`). A role on a location is written and never measured, and holding one
+ * back here would refuse what the gate would have accepted.
+ */
+function roleTooLong(candidate: WorldChangeCandidate): boolean {
+  const record = candidate as unknown as Record<string, unknown>;
+  const draft = record["draft"] as { type?: string; role?: unknown } | undefined;
+  if (typeof draft?.role !== "string") return false;
+  const kind =
+    candidate.classification === "sheet.create"
+      ? draft.type
+      : candidate.classification === "sheet.edit"
+        ? (record["target"] as { sheetKind?: string } | undefined)?.sheetKind
+        : undefined;
+  if (kind !== "character") return false;
+  return draft.role.trim().length > CHARACTER_ROLE_MAX;
 }
 
 /** Intent has to be verified, not asserted: a proposition with no evidence is a claim about a claim. */
@@ -145,6 +171,26 @@ export function evaluateReadiness(
       continue;
     }
     /*
+     * A role that is a sentence, held back here rather than refused at the gate.
+     *
+     * `CHARACTER_ROLE_MAX` is an authoring bound, and nothing between a model's answer and the
+     * accept gate used to measure it: the read schema is deliberately permissive, the wire schema
+     * allows a paragraph, and materialise copies the draft's role into the frontmatter untouched.
+     * So a character with a sentence for a role was built, staged, and only then refused by
+     * `checkAuthoredBounds` — the last possible step, and the one place where saying no costs the
+     * most. Saving such a point left a proposal nobody could accept standing on the approvals
+     * screen with the proposition already off the rail.
+     *
+     * Named here instead, where a proposition that cannot carry is named rather than dropped. The
+     * point stays in the conversation, so asking for a shorter role is the whole repair — and its
+     * siblings are unaffected, which refusing in materialise could not manage: that path is all
+     * or nothing, so one long label would have held back everything said beside it.
+     */
+    if (roleTooLong(candidate)) {
+      fail("role-too-long");
+      continue;
+    }
+    /*
      * One look change waiting at a time.
      *
      * There is a single world look, and the screen that reviews a proposed one finds it by kind
@@ -189,5 +235,7 @@ export function explainNotCarried(reason: NotCarriedReason): string {
       return "what it would change is no longer in the world";
     case "invalid":
       return "there is not enough behind it to write it down";
+    case "role-too-long":
+      return `it gives a role of more than ${CHARACTER_ROLE_MAX} characters, and a role is a label rather than a sentence`;
   }
 }

@@ -192,6 +192,10 @@ Rules that are not yours to break:
 - You never create ids, paths, Canon ids or sheet slugs. The application assigns them. The ids
   you may use are the ones this session shows you: message ids from the conversation, candidate
   and group ids from the registry, receipt ids from tool responses.
+- A character's role is at most ${CHARACTER_ROLE_MAX} characters — a label, not a sentence.
+  "Tide-caller", "Salvage diver", "Keeper of the drowned verse". Everything that does not fit
+  belongs in the Essence section instead. A longer one cannot be written, so the proposition is
+  held back and the person has to ask you again for the same character.
 - Nothing you say writes to the world. The conversation becomes proposals later and a person
   accepts them, so never tell them a change has been made.`,
     postscript: worldChatResultShapeGuide(),

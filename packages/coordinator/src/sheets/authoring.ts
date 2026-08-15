@@ -5,6 +5,7 @@ import {
   sheetDir,
   worldSheets,
   type Proposal,
+  type Sheet,
   type SheetKind,
   type VoiceAssignment,
 } from "@arke-studio/contracts";
@@ -43,6 +44,84 @@ async function takenSlugs(store: WorldStore, type: SheetKind): Promise<string[]>
   return slugs;
 }
 
+/** The prose of a sheet, sections ordered per the schema and the empty optional ones dropped (D2). */
+function sheetBody(type: SheetKind, sections: Record<string, string>): string {
+  return SHEET_SHAPES[type].sections
+    .map((section) => {
+      const text = (sections[section.heading] ?? "").trim();
+      if (text === "" && !section.required) return null;
+      return `## ${section.heading}\n${text === "" ? "—" : text}`;
+    })
+    .filter((s): s is string => s !== null)
+    .join("\n\n");
+}
+
+/**
+ * The same sheet with part of it changed, and every other part carried through (SPEC-007 §2.3.2).
+ *
+ * `buildSheetContent` writes a sheet from nothing, so whatever it is not given it omits. That is
+ * right for a create and quietly destructive for an edit, which is what World Chat's sheet edits
+ * used to go through: the file was rebuilt from the name, the status and the sections alone, so
+ * the role, the billing, the region, the assigned voice and the duplication origin were dropped,
+ * `canonRules` and `links` were reset to empty, `created` was restamped as today, and the
+ * `production` that makes a sheet a guest went with them — an edit to one paragraph erased a
+ * character's canon references and promoted somebody else's guest into the world.
+ *
+ * Written against the parsed `Sheet` rather than the file's text because `SheetSchema` is strict:
+ * a sheet on disk carries these keys and no others, so restating them is faithful rather than
+ * best-effort. What a conversation may not reach is taken from the sheet and never from the
+ * caller — the version, the status, the retirement and the ownership each have their own flow.
+ */
+export function editSheetContent(input: {
+  sheet: Sheet;
+  /** Absent leaves the name as it is. */
+  name?: string;
+  /** The sections after the edit, already merged over the live ones. */
+  sections: Record<string, string>;
+  /**
+   * Frontmatter a conversation may change. Absent leaves the field alone; null clears it — the
+   * distinction the draft schema's nullable fields exist to carry, and one an edit has to keep:
+   * "say nothing about the role" and "he has no role any more" are different instructions.
+   */
+  role?: string | null;
+  billing?: string | null;
+  region?: string | null;
+  date: string;
+}): string {
+  const { sheet } = input;
+  const settle = (next: string | null | undefined, current: string | undefined) =>
+    next === undefined ? current : next === null ? undefined : next;
+  const role = settle(input.role, sheet.role);
+  const billing = settle(input.billing, sheet.billing);
+  const region = settle(input.region, sheet.region);
+
+  const doc = MarkdownFile.create(
+    {
+      id: sheet.id,
+      type: sheet.type,
+      name: input.name ?? sheet.name,
+      ...(role !== undefined ? { role } : {}),
+      ...(billing !== undefined ? { billing } : {}),
+      ...(region !== undefined ? { region } : {}),
+      // The live version, not 1: the committer stamps the real one either way, and restating what
+      // the sheet actually says keeps the staged file readable as the thing it is a version of.
+      version: sheet.version,
+      status: sheet.status,
+      ...(sheet.retired !== undefined ? { retired: sheet.retired } : {}),
+      ...(sheet.production !== undefined ? { production: sheet.production } : {}),
+      canonRules: [...sheet.canonRules],
+      links: [...sheet.links],
+      ...(sheet.origin ? { origin: sheet.origin } : {}),
+      ...(sheet.voice ? { voice: sheet.voice } : {}),
+      // Created once, and not by an edit. Only `updated` moves.
+      created: sheet.created,
+      updated: input.date,
+    },
+    sheetBody(sheet.type, input.sections),
+  );
+  return doc.serialize();
+}
+
 /** Build a sheet file from its shape, sections ordered per the schema (D2). */
 export function buildSheetContent(input: {
   id: string;
@@ -56,15 +135,7 @@ export function buildSheetContent(input: {
   production?: string;
   date: string;
 }): string {
-  const shape = SHEET_SHAPES[input.type];
-  const body = shape.sections
-    .map((section) => {
-      const text = (input.sections[section.heading] ?? "").trim();
-      if (text === "" && !section.required) return null;
-      return `## ${section.heading}\n${text === "" ? "—" : text}`;
-    })
-    .filter((s): s is string => s !== null)
-    .join("\n\n");
+  const body = sheetBody(input.type, input.sections);
   const doc = MarkdownFile.create(
     {
       id: input.id,

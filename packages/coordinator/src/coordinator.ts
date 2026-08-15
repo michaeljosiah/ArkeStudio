@@ -165,7 +165,8 @@ import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
-import { rejectPoint, savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
+import { explainAcceptRefusal } from "./gate/proposals.js";
+import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
 import { titleFrom } from "./world-chat/title.js";
@@ -1778,17 +1779,31 @@ export class Coordinator {
               this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId, outcome: "accepted" });
             } else if (outcome.status !== "accepted") {
               /*
-               * Staged but not accepted: it is a proposal waiting on the approvals screen, which
-               * is a state a person can finish. Said out loud rather than left to be discovered —
-               * the rail promised to write this, and it did not.
+               * Not written, so not left proposed either — the same taking-back Accept all does.
+               *
+               * This used to leave the proposal standing, on the reasoning that a waiting proposal
+               * is a state a person can finish. What that missed is that staging had already
+               * marked the proposition `proposed`: the point left the rail, the conversation had
+               * nothing left to correct it from, and the change surfaced on the Cast and approvals
+               * screens as a draft that could not be accepted — while the rail said only that the
+               * gate had answered a word. Back on the rail it can be talked about, which for every
+               * refusal the gate raises is the repair.
                */
+              if (staged) {
+                await returnToRail(
+                  new WorldChatStore(conversationDir(store.dir, msg.conversationId)),
+                  gate,
+                  staged,
+                  () => new Date().toISOString(),
+                );
+              }
               this.emit({
                 at,
                 type: "world-chat.wrap-up-refused",
                 conversationId: msg.conversationId,
                 requestId: msg.requestId,
                 reason: "unknown",
-                detail: `This is waiting on the proposals screen instead — the gate answered "${outcome.status}".`,
+                detail: `This could not be written, so it is back above: ${explainAcceptRefusal(outcome)}.`,
               });
             }
           }
