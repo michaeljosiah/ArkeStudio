@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   MAX_ACTIVE_LOCATION_VIEWS,
@@ -11,7 +11,7 @@ import {
   type SizeTier,
   type Take,
 } from "@arke-studio/contracts";
-import { DispatchBar } from "../components/dispatch-bar.js";
+import { GenerationDialog } from "../components/generation-dialog.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { Portrait } from "../components/portrait.js";
 import { Button, Callout, cx } from "../components/ui.js";
@@ -82,6 +82,7 @@ export function LocationReferenceScreen() {
   const [angleName, setAngleName] = useState("");
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier }>({});
   const [count, setCount] = useState(2);
+  const addRef = useRef<HTMLButtonElement>(null);
   // A landed upload says itself — the candidate appears below. What it must not do is linger,
   // or the next press of Upload would find the slot already occupied and go quietly dead.
   useEffect(() => {
@@ -304,23 +305,45 @@ export function LocationReferenceScreen() {
             </Callout>
           )}
 
-          {!adding ? (
-            <div className="fy-locref__add">
-              <Button disabled={full} onClick={() => setAdding(true)}>
-                {establishing ? "Generate" : "Add a view"}
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={!canUpload || uploading || full}
-                title={canUpload ? "Use an image from this computer — nothing is generated" : UPLOAD_UNAVAILABLE}
-                onClick={() => importLocationViewCandidate(worldId, sheetId)}
-              >
-                {uploading ? "Uploading…" : "Upload"}
-              </Button>
-              {!establishing && <span className="fy-locref__note">anchored to the establishing view</span>}
-            </div>
-          ) : (
-            <div className="fy-locref__form">
+          {/* The form is the standard dialog now (design 66) — the page keeps the candidates and
+              the naming that accepts them, so the offer is still answered in one place. */}
+          <div className="fy-locref__add">
+            <Button ref={addRef} disabled={full} onClick={() => setAdding(true)}>
+              {establishing ? "Generate" : "Add a view"}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={!canUpload || uploading || full}
+              title={canUpload ? "Use an image from this computer — nothing is generated" : UPLOAD_UNAVAILABLE}
+              onClick={() => importLocationViewCandidate(worldId, sheetId)}
+            >
+              {uploading ? "Uploading…" : "Upload"}
+            </Button>
+            {!establishing && <span className="fy-locref__note">anchored to the establishing view</span>}
+          </div>
+          <GenerationDialog
+            open={adding}
+            onClose={() => {
+              setAdding(false);
+              setReplacingEstablishing(false);
+            }}
+            returnFocus={addRef}
+            title={establishing || replacingEstablishing ? "Generate the establishing view" : "Add a view"}
+            lede={
+              establishing || replacingEstablishing
+                ? `${sheet.name} · the view every later angle is generated against`
+                : `${sheet.name} · anchored to the establishing view, so it stays the same room`
+            }
+            promptLabel="Where is the camera?"
+            prompt={angle}
+            onPrompt={setAngle}
+            promptPlaceholder="from the seaward stair looking back"
+            // Optional, and genuinely so: the brief is composed from the sheet, its look and this
+            // angle's name. This box only adds a camera position to it.
+            promptOptional
+            promptHint="Optional. The place, its look and the angle's name are sent whether or not you write here."
+            worldSlug={world.meta.slug}
+            extra={
               <label className="fy-locref__namefield">
                 <span>What is this angle called?</span>
                 <input
@@ -331,49 +354,36 @@ export function LocationReferenceScreen() {
                   onChange={(event) => setAngleName(event.target.value)}
                 />
               </label>
-              <label className="fy-locref__namefield">
-                <span>Where is the camera? (optional)</span>
-                <input
-                  type="text"
-                  value={angle}
-                  maxLength={2000}
-                  placeholder="from the seaward stair looking back"
-                  onChange={(event) => setAngle(event.target.value)}
-                />
-              </label>
-              <DispatchBar
-                workflow="location-view"
-                count={count}
-                onCount={setCount}
-                referenceImages={establishing || replacingEstablishing ? 0 : 1}
-                choice={choice}
-                onChoice={setChoice}
-                onCancel={() => {
-                  setAdding(false);
-                  setReplacingEstablishing(false);
-                }}
-                primaryLabel="Generate"
-                primaryDisabled={angleName.trim() === ""}
-                onPrimary={(chosen) => {
-                  generateLocationView(
-                    worldId,
-                    sheetId,
-                    {
-                      name: angleName.trim(),
-                      ...(angle.trim() ? { prompt: angle.trim() } : {}),
-                      count: chosen.count ?? count,
-                      ...(establishing || replacingEstablishing ? { establishing: true } : {}),
-                    },
-                    { modelId: chosen.model.id, ...(chosen.tier ? { tier: chosen.tier } : {}) },
-                  );
-                  setAdding(false);
-                  setReplacingEstablishing(false);
-                  setAngle("");
-                  setAngleName("");
-                }}
-              />
-            </div>
-          )}
+            }
+            workflow="location-view"
+            referenceImages={establishing || replacingEstablishing ? 0 : 1}
+            count={count}
+            onCount={setCount}
+            choice={choice}
+            onChoice={setChoice}
+            submitLabel="Generate"
+            submitDisabled={angleName.trim() === ""}
+            {...(angleName.trim() === ""
+              ? { why: "An angle needs a name — it is what the view is called once you accept it." }
+              : {})}
+            onSubmit={() => {
+              generateLocationView(
+                worldId,
+                sheetId,
+                {
+                  name: angleName.trim(),
+                  ...(angle.trim() ? { prompt: angle.trim() } : {}),
+                  count,
+                  ...(establishing || replacingEstablishing ? { establishing: true } : {}),
+                },
+                { ...(choice.modelId ? { modelId: choice.modelId } : {}), ...(choice.tier ? { tier: choice.tier } : {}) },
+              );
+              setAdding(false);
+              setReplacingEstablishing(false);
+              setAngle("");
+              setAngleName("");
+            }}
+          />
 
           {upload?.status === "failed" && (
             <p className="fy-locref__note fy-locref__note--warn">{upload.reason ?? "The view was not added."}</p>

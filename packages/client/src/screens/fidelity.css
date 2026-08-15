@@ -441,6 +441,159 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-cta__title { font: 600 15px var(--font-sans); }
 .fy-cta__sub { font: 400 12px/1.45 var(--font-sans); color: var(--muted-foreground); margin-top: 3px; }
 
+/* ---- the world overview, below the fold (design 63b) ----------------------- */
+
+/*
+ * One column, the width of the two doors above it, so the page has a single left edge from the
+ * hero down. Everything here sits after the fan and the two doors and costs them no vertical
+ * space — which is the whole difference between this and the panels turn 44 pulled off the hub.
+ */
+.fy-worldmore {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 24px 64px;
+  animation: fy-fade-up 0.8s var(--ease-out) 0.5s both;
+}
+.fy-worldmore__rule { border-top: 1px solid var(--border); }
+.fy-wsection { margin-top: 48px; }
+.fy-wsection__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 40px;
+}
+.fy-wsection__eyebrow {
+  font: 500 10.5px var(--font-sans);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.fy-wsection__title { margin: 10px 0 0; font: 650 30px/1.15 var(--font-sans); letter-spacing: -0.028em; }
+.fy-wsection__lede {
+  flex: 0 1 360px;
+  margin: 0;
+  font: 400 13px/1.55 var(--font-sans);
+  color: var(--muted-foreground);
+}
+.fy-wsection__none { margin: 22px 0 0; font: 400 13px/1.6 var(--font-sans); color: var(--muted-foreground); }
+
+/* Four figures over one box, divided by hairlines rather than separated into four cards. */
+.fy-glance {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  overflow: hidden;
+}
+.fy-glance__cell { padding: 18px 20px 20px; border-left: 1px solid var(--border); min-width: 0; }
+.fy-glance__cell:first-child { border-left: 0; }
+.fy-glance__n { font: 650 30px/1 var(--font-sans); letter-spacing: -0.03em; }
+.fy-glance__label { margin-top: 10px; font: 500 13px/17px var(--font-sans); }
+/*
+ * The outstanding line, and it is never empty: a settled count says so in words rather than
+ * leaving a gap, so the four cells hold one height whatever the world has in it.
+ */
+.fy-glance__sub {
+  margin-top: 4px;
+  font: 400 11.5px/15px var(--font-sans);
+  color: var(--muted-foreground);
+  height: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Production tiles. Every band is pinned and both text lines are clipped, so a one-word title
+ * with no shots sits level with a long one — the rule the cast fan and the ledger cards follow.
+ */
+.fy-prodstrip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 22px; }
+.fy-prodtile {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  padding: 5px 5px 12px;
+  cursor: pointer;
+  transition: transform 0.3s var(--ease-out), box-shadow 0.3s var(--ease-out);
+}
+.fy-prodtile:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
+.fy-prodtile__frame { height: 128px; }
+.fy-prodtile__eyebrow {
+  margin: 12px 7px 0;
+  font: 500 10px/13px var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  height: 13px;
+  overflow: hidden;
+}
+.fy-prodtile__name {
+  margin: 6px 7px 0;
+  font: 600 15px/19px var(--font-sans);
+  height: 19px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fy-prodtile__foot {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 8px 7px 0;
+  font: 400 11.5px/15px var(--font-sans);
+  color: var(--muted-foreground);
+  height: 15px;
+}
+.fy-prodtile__meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-prodtile__pct { margin-left: auto; flex: none; font: 400 11px var(--font-mono); }
+
+/* What is waiting — one line, at most two things, and absent at zero. */
+.fy-needs {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 44px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.fy-needs__count { display: flex; align-items: center; gap: 8px; font: 500 12.5px var(--font-sans); flex: none; }
+.fy-needs__item {
+  flex: 1 1 260px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 9px 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: var(--transition-control);
+}
+.fy-needs__item:hover { background: var(--accent); }
+/*
+ * The subject is the only part that gives ground. Everything after it — what kind of decision it
+ * is, and the verb that settles it — is flex:none, because those two are what the line is for.
+ */
+.fy-needs__what {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 12px var(--font-sans);
+  color: var(--foreground);
+}
+.fy-needs__why { flex: none; font: 400 11.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-needs__go { flex: none; font: 400 11.5px var(--font-sans); color: var(--muted-foreground); }
+
 /* ---- featured card + ledger ----------------------------------------------- */
 
 .fy-content--cast {
@@ -600,7 +753,23 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   text-transform: uppercase;
   color: var(--neutral-400);
 }
+.fy-gendialog__promptbox { position: relative; display: flex; }
 .fy-gendialog__prompt { width: 100%; min-height: 116px; resize: vertical; }
+.fy-gendialog__reset {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted-foreground);
+  font: 400 10.5px var(--font-sans);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-gendialog__reset:hover { color: var(--foreground); border-color: var(--ring); }
+.fy-gendialog__reset:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .fy-gendialog__hint { margin: 0; font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); }
 .fy-gendialog__reference { display: flex; flex-direction: column; gap: 8px; }
 /* A dashed slot rather than a button that says "browse": the empty state should look like the
@@ -647,6 +816,140 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-gendialog__why { margin: 0; font: 400 11px/1.6 var(--font-sans); color: var(--muted-foreground); }
 .fy-gendialog__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .fy-gendialog .fy-dispatchbar { margin-top: 8px; }
+
+
+/* What arrives, where the surface produces a fixed composite rather than a free picture. */
+.fy-gendialog__sheetspec,
+.fy-sheetspec {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--background);
+}
+.fy-sheetspec strong { display: block; font: 600 12.5px var(--font-sans); }
+.fy-sheetspec p { margin: 3px 0 0; font: 400 11px var(--font-sans); color: var(--muted-foreground); }
+
+/* What travels with a generation, on the surfaces that have a choice about it (design 65). */
+.fy-gendialog__refbuttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.fy-gendialog__refs { display: flex; gap: 10px; }
+.fy-gendialog__refs > div { position: relative; width: 72px; height: 72px; }
+.fy-gendialog__refs > div.is-dropped { opacity: 0.45; }
+.fy-gendialog__refs .fy-portrait,
+.fy-gendialog__refs .fy-portrait--fallback { width: 100%; height: 100%; object-fit: cover; }
+.fy-gendialog__refs > div > span {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--neutral-950) 62%, transparent);
+  color: var(--media-overlay-fg);
+  font: 500 8px var(--font-mono);
+  letter-spacing: 0.08em;
+}
+/* ---- the dialog's preview column (design 65) ------------------------------ */
+
+/*
+ * Two columns once there is something to show: what you are asking for on the left, what came
+ * back on the right, side by side so a re-run is a change to the words with the last set still in
+ * sight. A surface with nothing to show stays the single 560px column it has always been.
+ */
+.fy-gendialog--wide { width: 980px; }
+.fy-gendialog__columns { display: flex; gap: 22px; min-height: 0; }
+.fy-gendialog__compose { display: flex; flex-direction: column; gap: 8px; flex: 1 1 0; min-width: 0; }
+.fy-gendialog--wide .fy-gendialog__compose { flex: 0 0 420px; }
+.fy-gendialog__previews {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 22px;
+  border-left: 1px solid var(--border);
+}
+.fy-gendialog__previews-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font: 500 10px var(--font-mono);
+  letter-spacing: 0.14em;
+  color: var(--neutral-400);
+}
+.fy-gendialog__previews-head strong { font: 500 10px var(--font-mono); color: var(--muted-foreground); }
+.fy-gendialog__previews-empty {
+  flex: 1;
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-card);
+  text-align: center;
+  padding: 20px;
+}
+.fy-gendialog__previews-empty strong { font: 600 14px var(--font-sans); }
+.fy-gendialog__previews-empty span {
+  font: 400 11.5px/1.6 var(--font-sans);
+  color: var(--muted-foreground);
+  max-width: 260px;
+}
+/*
+ * Always 2×2, whether one preview came back or four. A grid that reflowed to one big tile for a
+ * single result and four small ones for a set would change the size of the thing being judged
+ * according to how many there were of it.
+ */
+.fy-gendialog__previews-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+.fy-gendialog__previews-grid button {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--muted);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-gendialog__previews-grid button:hover { border-color: var(--ring); }
+.fy-gendialog__previews-grid button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-gendialog__previews-grid button.is-selected { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.fy-gendialog__previews-grid .fy-portrait,
+.fy-gendialog__previews-grid .fy-portrait--fallback { width: 100%; height: 100%; object-fit: cover; border-radius: 0; }
+.fy-gendialog__previews-grid button > span {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--neutral-950) 62%, transparent);
+  color: var(--media-overlay-fg);
+  font: 500 9px var(--font-mono);
+  letter-spacing: 0.1em;
+}
+.fy-gendialog__commit {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.fy-gendialog__commit span {
+  flex: 1;
+  min-width: 0;
+  font: 400 11px/1.5 var(--font-sans);
+  color: var(--muted-foreground);
+}
 
 .fy-ledgerhead {
   display: flex;
@@ -2313,7 +2616,6 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   cursor: default;
 }
 .fy-worldcard__confirmacts { display: flex; gap: 8px; justify-content: center; }
-/* The key-art offer under the world's hero: one row, never a dialog over the world. */
 /* The finished setup screen: a door, and the version that opened it. */
 .fy-launch__done {
   display: flex;
@@ -2323,24 +2625,6 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   padding: 8px 0 2px;
 }
 .fy-launch__version { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
-.fy-keyart {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-top: 14px;
-  flex-wrap: wrap;
-}
-.fy-keyart__note { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
-.fy-keyart__shot { width: 132px; height: 74px; overflow: hidden; border-radius: 8px; flex: none; }
-.fy-keyart__ask {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font: 400 12.5px/1.5 var(--font-sans);
-  color: var(--muted-foreground);
-  text-align: left;
-}
 .fy-set__aboutname { font: 650 26px var(--font-sans); letter-spacing: -0.02em; }
 .fy-set__aboutmeta { font: 400 11px var(--font-mono); color: var(--neutral-400); }
 .fy-set__aboutline { font: 400 12.5px var(--font-sans); color: var(--muted-foreground); margin-top: 5px; }
@@ -2768,14 +3052,52 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   transition: opacity var(--dur-base) var(--ease-out);
 }
 .fy-artdirection__master:hover .fy-artdirection__hover,
-.fy-artdirection__master:focus-within .fy-artdirection__hover {
+.fy-artdirection__master:focus-within .fy-artdirection__hover,
+.fy-artdirection__keyart:hover .fy-artdirection__hover,
+.fy-artdirection__keyart:focus-within .fy-artdirection__hover {
   opacity: 1;
 }
 .fy-artdirection__hover .ui-btn { min-width: 116px; height: 38px; justify-content: center; }
 /* The empty state has no picture to darken, and a dark scrim over a light card is a smear rather
    than a scrim. It washes with its own surface instead, which still hides the copy underneath. */
-.fy-artdirection__master--empty .fy-artdirection__hover {
+.fy-artdirection__master--empty .fy-artdirection__hover,
+.fy-artdirection__keyart--empty .fy-artdirection__hover {
   background: color-mix(in srgb, var(--muted) 88%, transparent);
+}
+
+/*
+ * The world's other picture (design 64). Same frame and the same two doors as the master look, a
+ * size down and in the column rather than beside it — because it is the page's second subject,
+ * not its first. The doors are on this picture and act on this picture, which is the whole point
+ * of the block: for two turns key art was shown under controls that made a master look.
+ */
+.fy-artdirection__keyart {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  aspect-ratio: 16 / 9;
+  margin-top: 12px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+  background: var(--neutral-900);
+}
+.fy-artdirection__keyart > .fy-portrait,
+.fy-artdirection__keyart > .fy-portrait--fallback { border-radius: 0; object-fit: cover; }
+.fy-artdirection__keyart--empty {
+  background: var(--muted);
+  border: 1px dashed var(--neutral-300);
+  box-shadow: none;
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fy-artdirection__keyart-note {
+  margin-top: 10px;
+  font: 400 11px/1.6 var(--font-sans);
+  color: var(--muted-foreground);
+  max-width: 420px;
 }
 /* The column that grows: the look, its history and any offer waiting on it live below the fold on
    a short window, and the screen is a fixed-height flex row, so without this they are unreachable. */
@@ -2793,16 +3115,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-artdirection__derived { border-color: var(--warning); color: var(--neutral-600); }
 .fy-artdirection__action { margin-top: 28px; }
 .fy-artdirection__action .ui-btn { width: 180px; height: 40px; justify-content: center; }
-.fy-artdirection__masterlook { margin-top: 18px; }
-.fy-artdirection__masterlook-shot { width: 220px; height: 124px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); margin-bottom: 10px; }
-.fy-artdirection__masterlook-shot .fy-portrait { border-radius: 0; object-fit: cover; }
-.fy-artdirection__masterlook > p { font: 400 11px/1.6 var(--font-sans); color: var(--muted-foreground); max-width: 460px; }
-.fy-artdirection__masterlook-row { display: flex; gap: 8px; margin-top: 10px; }
-.fy-artdirection__masterlook-row .ui-btn { height: 34px; }
-.fy-artdirection__masterlook-why { margin-top: 8px; font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); }
+/* The one-line notice that previews are waiting; the set itself is answered in the dialog. */
+.fy-artdirection__offer-why { margin-top: 8px; font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); }
 .fy-artdirection__spacer { flex: 1; min-height: 6px; }
 .fy-artdirection__section { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
-.fy-artdirection__section h2 { font: 500 10px var(--font-mono); letter-spacing: .14em; color: var(--neutral-400); }
+/*
+ * A direct child, not a descendant. As a descendant this caught the generation dialog's own <h2>
+ * when a section happened to host one, and set the dialog's title in 10px grey mono — the eyebrow
+ * style — while the identical dialog opened from the hero was 17px sans.
+ */
+.fy-artdirection__section > h2 { font: 500 10px var(--font-mono); letter-spacing: .14em; color: var(--neutral-400); }
 .fy-artdirection__fact { display: flex; align-items: baseline; gap: 10px; margin-top: 6px; font: 400 12.5px var(--font-sans); }
 .fy-artdirection__fact span:first-child { min-width: 0; }
 .fy-artdirection__fact span:last-child { margin-left: auto; color: var(--neutral-400); font: 400 10.5px var(--font-mono); text-align: right; }
@@ -2911,117 +3233,36 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
    width. It no longer needs to: the dialog takes whatever aspect the image has. */
 
 /* Generate character sheet (31b) */
-.fy-generation-scrim { width: 100%; min-height: 850px; height: 100%; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--neutral-200) 72%, var(--background)); overflow: auto; padding: 40px; }
-.fy-sheet-dialog { width: 1080px; height: 650px; flex: none; border-radius: 20px; background: var(--background); box-shadow: var(--shadow-xl); overflow: hidden; display: flex; flex-direction: column; }
-.fy-sheet-dialog > header { height: 72px; flex: none; padding: 0 26px; border-bottom: 1px solid var(--border); display: flex; align-items: center; }
-.fy-sheet-dialog > header h1 { font: 650 20px var(--font-sans); letter-spacing: -.02em; }
-.fy-sheet-dialog > header p { font: 400 10px var(--font-mono); color: var(--neutral-400); margin-top: 3px; }
-.fy-sheet-dialog > header button { margin-left: auto; border: 0; background: transparent; font-size: 22px; color: var(--neutral-400); cursor: pointer; }
-.fy-sheet-dialog__body { flex: 1; min-height: 0; display: flex; }
-.fy-sheet-dialog__result { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--muted); }
-.fy-sheet-dialog__result-message { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 48px; }
-.fy-sheet-dialog__result-message .fy-loading { padding: 0; }
-.fy-sheet-dialog__result-message > strong { font: 650 20px var(--font-sans); }
-.fy-sheet-dialog__result-message > p { max-width: 450px; margin: 14px 0 22px; font: 400 12px/1.6 var(--font-mono); color: var(--neutral-400); }
-.fy-sheet-dialog__generated-image { flex: 1; min-height: 0; margin: 22px 22px 0; overflow: hidden; border-radius: 12px; background: var(--neutral-950); }
-.fy-sheet-dialog__generated-image .fy-portrait { object-fit: contain; }
-.fy-sheet-dialog__result-actions { min-height: 90px; display: flex; align-items: center; gap: 10px; padding: 16px 22px; }
-.fy-sheet-dialog__result-actions > div { min-width: 0; margin-right: auto; }
-.fy-sheet-dialog__result-actions strong { font: 600 14px var(--font-sans); }
-.fy-sheet-dialog__result-actions p { margin-top: 3px; font: 400 10px var(--font-mono); color: var(--neutral-400); }
-.fy-sheet-dialog__identity { width: 440px; flex: none; padding: 26px 30px 24px; background: var(--muted); border-right: 1px solid var(--border); }
-.fy-sheet-dialog__identity > div { height: 420px; overflow: hidden; border-radius: 12px; }
-.fy-sheet-dialog__identity strong { display: block; font: 600 14px var(--font-sans); margin-top: 12px; }
-.fy-sheet-dialog__identity > span { font: 400 9.5px var(--font-mono); color: var(--success); }
-.fy-sheet-dialog__spec { flex: 1; padding: 26px 30px 24px; }
-.fy-sheet-dialog__label { font: 500 10px var(--font-mono); letter-spacing: .14em; color: var(--neutral-400); }
-.fy-sheet-dialog__layout { display: flex; gap: 18px; align-items: center; margin-top: 12px; }
-.fy-sheet-dialog__layout h2 { font: 600 17px var(--font-sans); }
-.fy-sheet-dialog__layout p { font: 400 11px var(--font-mono); color: var(--neutral-400); margin-top: 4px; }
 .fy-sheet-layout-sample { width: 154px; height: 96px; flex: none; padding: 9px; border: 1px solid var(--border); border-radius: 10px; background: var(--muted); display: grid; grid-template-columns: repeat(2,1fr); gap: 5px; }
 /* Panels in a miniature of the sheet layout, on the --muted box above — same reasoning as
    .fy-doclines span: a recessed backing needs the .dark pair, not --border. */
 .fy-sheet-layout-sample i { background: var(--neutral-200); border-radius: 4px; }
 .dark .fy-sheet-layout-sample i { background: var(--neutral-700); }
-.fy-sheet-dialog__line { border-top: 1px solid var(--border); margin: 24px 0 20px; }
-.fy-sheet-dialog__stylehead { display: flex; align-items: center; font: 500 10px var(--font-mono); letter-spacing: .14em; color: var(--neutral-400); }
-.fy-sheet-dialog__stylehead button { margin-left: auto; border: 0; background: transparent; color: var(--foreground); font: 500 11px var(--font-sans); cursor: pointer; }
-.fy-sheet-dialog__worldlook { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
-.fy-sheet-dialog__worldlook > span { width: 92px; height: 62px; flex: none; overflow: hidden; }
-.fy-sheet-dialog__worldlook strong { font: 600 14px var(--font-sans); }
-.fy-sheet-dialog__worldlook p { font: 400 10px var(--font-mono); color: var(--neutral-400); margin-top: 3px; }
-.fy-sheet-dialog__spec textarea { width: 100%; height: 82px; margin-top: 14px; resize: none; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--background); font: 400 12px/1.5 var(--font-sans); }
-.fy-sheet-dialog__summary { margin-top: 24px; padding: 14px; border-radius: 10px; background: var(--muted); display: grid; grid-template-columns: 80px 1fr; gap: 8px 16px; }
-.fy-sheet-dialog__summary span { font: 400 10px var(--font-mono); color: var(--neutral-400); }
-.fy-sheet-dialog__summary strong { font: 500 11.5px var(--font-sans); }
 .fy-reference-fallback { margin-top: 12px; padding: 10px 12px; border-left: 2px solid var(--warning); background: var(--warning-bg); font: 400 10px/1.5 var(--font-mono); color: var(--neutral-600); }
 .fy-worldlook-line { margin-top: 14px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; display: flex; align-items: center; background: var(--muted); }
 .fy-worldlook-line span { font: 500 11px var(--font-sans); }
 .fy-worldlook-line small { margin-left: auto; font: 400 9px var(--font-mono); color: var(--neutral-400); }
-.fy-sheet-dialog > footer { height: 72px; flex: none; border-top: 1px solid var(--border); padding: 0 26px; display: flex; align-items: center; gap: 12px; }
-.fy-sheet-dialog > footer > span { font: 400 10px var(--font-mono); color: var(--neutral-400); }
-.fy-sheet-dialog > footer > span:nth-child(2) { color: var(--success); }
-.fy-sheet-dialog > footer .ui-btn:first-of-type { margin-left: auto; }
 
-/* Replace main photo (4c) */
-.fy-mainphoto-scrim { width: 100%; min-height: 850px; height: 100%; display: flex; align-items: center; justify-content: center; background: var(--neutral-900); padding: 40px; overflow: auto; }
-.fy-mainphoto-dialog { width: 1180px; height: 700px; flex: none; border-radius: 20px; box-shadow: var(--shadow-xl); overflow: hidden; background: var(--background); display: grid; grid-template-columns: 470px 1fr; }
-.fy-mainphoto-dialog__composer,
-.fy-mainphoto-dialog__results { padding: 28px 30px 26px; min-width: 0; display: flex; flex-direction: column; }
-.fy-mainphoto-dialog__composer { border-right: 1px solid var(--border); }
-.fy-mainphoto-dialog__title { display: flex; align-items: flex-start; }
-.fy-mainphoto-dialog__title h1 { font: 650 22px var(--font-sans); letter-spacing: -.02em; }
-.fy-mainphoto-dialog__title p { font: 400 10px var(--font-mono); color: var(--neutral-400); margin-top: 3px; }
-.fy-mainphoto-dialog__title > span { margin-left: auto; font: 500 9px var(--font-mono); padding: 5px 8px; border-radius: 999px; background: var(--secondary); }
-.fy-mainphoto-dialog__composer > label { font: 600 11.5px var(--font-sans); margin-top: 25px; }
-.fy-mainphoto-dialog__prompt { position: relative; margin-top: 7px; }
-.fy-mainphoto-dialog__prompt textarea { width: 100%; height: 112px; resize: none; border: 1px solid var(--border); border-radius: 11px; padding: 13px 42px 13px 14px; background: var(--background); font: 400 12.5px/1.6 var(--font-sans); }
-.fy-mainphoto-dialog__prompt button { position: absolute; right: 9px; bottom: 9px; width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); }
 /* Wraps, because the reference controls are a set that grows: three of them already overflow
    the composer at its fixed width, and a nowrap row spills into the padding rather than saying so. */
-.fy-mainphoto-dialog__refbuttons { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
-.fy-mainphoto-dialog__refs { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; margin-top: 10px; min-height: 106px; }
-.fy-mainphoto-dialog__refs > div { height: 106px; position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; }
-.fy-mainphoto-dialog__refs span { position: absolute; left: 7px; bottom: 7px; padding: 3px 7px; border-radius: 999px; background: color-mix(in srgb, var(--background) 92%, transparent); font: 500 8.5px var(--font-mono); }
-.fy-mainphoto-dialog__count { display: flex; align-items: center; gap: 7px; margin-top: auto; }
-.fy-mainphoto-dialog__count > span { font: 500 11px var(--font-sans); margin-right: 4px; }
-.fy-mainphoto-dialog__count button { width: 31px; height: 31px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); cursor: pointer; }
-.fy-mainphoto-dialog__count button.is-active { background: var(--foreground); color: var(--background); }
-.fy-mainphoto-dialog__generate { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--border); margin-top: 16px; padding-top: 16px; }
-.fy-mainphoto-dialog__generate > span { font: 400 10px var(--font-mono); color: var(--neutral-400); }
-.fy-mainphoto-dialog__generate .ui-btn:first-of-type { margin-left: auto; }
-.fy-mainphoto-dialog__results > header { display: flex; align-items: baseline; }
-.fy-mainphoto-dialog__results > header > span { font: 500 10px var(--font-mono); letter-spacing: .14em; color: var(--neutral-400); }
-.fy-mainphoto-dialog__results > header > strong { margin-left: auto; font: 400 10px var(--font-mono); color: var(--success); }
 .fy-mainphoto-dialog__empty { flex: 1; margin-top: 18px; border: 1px dashed var(--neutral-300); border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--neutral-400); }
 .fy-mainphoto-dialog__empty strong { font: 600 15px var(--font-sans); color: var(--foreground); }
 .fy-mainphoto-dialog__empty span { font: 400 10px var(--font-mono); margin-top: 6px; text-align: center; }
-.fy-mainphoto-dialog__grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2,1fr); grid-template-rows: repeat(2,245px); gap: 12px; margin-top: 18px; }
 /* --muted, not --neutral-100: this plate is what shows before a preview paints, and the ramp does
    not invert, so in dark it was a white rectangle sitting on the dialog until the image arrived. */
-.fy-mainphoto-dialog__grid button { position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--muted); padding: 0; cursor: pointer; }
-.fy-mainphoto-dialog__grid button.is-selected { border: 3px solid var(--foreground); }
-.fy-mainphoto-dialog__grid button > span { position: absolute; top: 9px; right: 9px; padding: 4px 7px; border-radius: 999px; background: var(--background); font: 500 8px var(--font-mono); }
-.fy-mainphoto-dialog__commit { display: flex; align-items: center; gap: 14px; margin-top: 18px; }
-.fy-mainphoto-dialog__commit span { font: 400 10px/1.5 var(--font-mono); color: var(--neutral-400); }
-.fy-mainphoto-dialog__commit .ui-btn { margin-left: auto; }
 
 /* More looks (4b) */
-.fy-looks-grid { padding: 20px 90px 34px; display: grid; grid-template-columns: 390px 1fr; gap: 28px; min-height: 600px; }
+.fy-looks-grid { padding: 20px 90px 34px; display: grid; grid-template-columns: 300px 1fr; gap: 28px; min-height: 600px; }
 .fy-looks-composer { border: 1px solid var(--border); border-radius: 15px; padding: 20px; background: var(--muted); display: flex; flex-direction: column; }
 .fy-looks-composer h2 { font: 650 20px var(--font-sans); }
 .fy-looks-composer > div:first-child p { font: 400 11px/1.5 var(--font-sans); color: var(--neutral-400); margin-top: 4px; }
-.fy-looks-composer > label { font: 500 9px var(--font-mono); letter-spacing: .12em; color: var(--neutral-400); margin-top: 20px; }
+/* Shared with the dialog’s `extra` slot: these two rows moved into it with the composer. */
 .fy-look-options,
 .fy-look-modes { display: flex; gap: 6px; margin-top: 7px; }
 .fy-look-options button,
 .fy-look-modes button { flex: 1; min-height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); font: 500 10.5px var(--font-sans); cursor: pointer; }
 .fy-look-options button.is-active,
 .fy-look-modes button.is-active { border-color: var(--foreground); box-shadow: var(--shadow-xs); }
-.fy-looks-composer textarea { height: 104px; resize: none; margin-top: 7px; border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--background); font: 400 12px/1.55 var(--font-sans); }
-.fy-looks-composer__foot { display: flex; align-items: center; margin-top: 14px; }
-.fy-looks-composer__foot span { font: 400 10px var(--font-mono); color: var(--neutral-400); }
-.fy-looks-composer__foot .ui-btn { margin-left: auto; }
 .fy-looks-note { margin-top: auto; padding-top: 18px; font: 400 10px/1.55 var(--font-mono); color: var(--neutral-400); }
 .fy-looks-results { min-width: 0; display: flex; flex-direction: column; }
 /* Auto rows carry the tiles past the design's two sample rows: the gallery may hold every
@@ -3047,8 +3288,6 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   .fy-reference-grid,
   .fy-looks-grid { padding-inline: 22px; grid-template-columns: 1fr; height: auto; }
   .fy-reference-card { min-height: 520px; }
-  .fy-mainphoto-scrim,
-  .fy-generation-scrim { justify-content: flex-start; }
 }
 .fy-voicerow__icon {
   width: 34px;
@@ -3166,10 +3405,6 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
  * a picture as well, so it dims too — but the dashed edge is what says "not sent" rather than
  * "not loaded yet", which a dim alone reads as.
  */
-.fy-mainphoto-dialog__refs .is-dropped { opacity: .45; }
-.fy-mainphoto-dialog__refs .is-dropped { border-style: dashed; border-color: var(--neutral-300); }
-.fy-mainphoto-dialog__refs .is-dropped span { text-decoration: line-through; color: var(--neutral-300); }
-.fy-sheetgen__purpose { display: block; font: 400 10px var(--font-mono); color: var(--neutral-400); }
 
 /* ---- proposals (turn 41b): the list beside the one you are deciding on ---- */
 
@@ -3479,7 +3714,6 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-locref__namefield input { font: inherit; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); }
 .fy-locref__namefield input:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
 .fy-locref__add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.fy-locref__form { display: flex; flex-direction: column; gap: 10px; }
 .fy-locref__note { font-size: 11.5px; color: var(--muted-foreground); margin: 0; }
 .fy-locref__note--warn { color: var(--destructive); }
 .fy-locref__sheetimage { width: 100%; padding: 0; border: 0; background: var(--neutral-950); border-radius: 8px; overflow: hidden; cursor: zoom-in; display: block; }
@@ -3494,3 +3728,6 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-location-tabs { margin-bottom: 14px; }
 .fy-locref__establishing { display: flex; gap: 7px; align-items: center; font-size: 12px; color: var(--muted-foreground); }
+
+/* The looks composer is a door now, not a form (design 66). */
+.fy-looks-composer__note { font: 400 11px/1.6 var(--font-sans); color: var(--muted-foreground); margin-top: 10px; }

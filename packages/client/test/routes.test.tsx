@@ -346,12 +346,12 @@ describe("screen inventory", () => {
     const at = html.indexOf("fy-artdirection__hover");
     assert.ok(at > 0, "the hover controls are in the document rather than mounted on hover");
     assert.ok(html.indexOf("fy-artdirection__master") < at, "and they are inside the picture");
-    assert.ok(html.includes('<dialog class="fy-gendialog"'), "Generate opens the standard dialog");
+    assert.ok(html.includes('<dialog class="fy-gendialog'), "Generate opens the standard dialog");
     // The three decisions the standard dialog is for. The prompt starts as the look's own words.
     assert.ok(html.includes("Generate the master look"));
     assert.ok(html.includes("Add a reference image"));
     assert.ok(html.includes('data-testid="dispatch-bar"'), "and the model is picked in the dialog");
-    const labelledBy = /<dialog[^>]*class="fy-gendialog"[^>]*aria-labelledby="([^"]+)"/.exec(html)?.[1];
+    const labelledBy = /<dialog[^>]*class="fy-gendialog[^"]*"[^>]*aria-labelledby="([^"]+)"/.exec(html)?.[1];
     assert.ok(labelledBy, "the dialog names its own heading");
     assert.ok(html.includes(`id="${labelledBy}"`), "and that heading is in the document");
   });

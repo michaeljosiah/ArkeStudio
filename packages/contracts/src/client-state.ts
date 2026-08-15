@@ -214,11 +214,16 @@ export const WorldBundleSchema = z
     /** Files that failed to parse; the valid entities are still usable (SPEC-002 R-2). */
     problems: z.array(WorldProblemSchema).default([]),
     /**
-     * A generated key image waiting for a yes, world-relative. Read from the disk, because the
-     * disk is the truth: deriving it from the job record made the offer come back on every
-     * visit, over a file that had already been used or thrown away.
+     * Key images waiting for a yes, world-relative, by name (design 65).
+     *
+     * A list rather than one, because a generation now asks for up to four and the whole point
+     * of asking for four is choosing between them. Read from the disk, because the disk is the
+     * truth: deriving it from the job record made the offer come back on every visit, over a
+     * file that had already been used or thrown away. A world whose candidate predates the
+     * count carries its single `candidate.png` here as a one-element list — the shape changed,
+     * nothing on disk did.
      */
-    keyArtCandidate: z.string().nullable().default(null),
+    keyArtCandidates: z.array(z.string()).default([]),
     /**
      * The accepted key art, world-relative, or null. A path rather than a boolean because it
      * is no longer always `world-art.png`: an uploaded image keeps the format its bytes carry,
@@ -226,10 +231,11 @@ export const WorldBundleSchema = z
      */
     keyArt: z.string().nullable().default(null),
     /**
-     * A master look waiting for a yes, world-relative. Generated or uploaded, the same offer
-     * either way: accepting it is a look change, so it lands as the next version's image.
+     * Master looks waiting for a yes, world-relative, by name. Generated or uploaded, the same
+     * offer either way: accepting one is a look change, so it lands as the next version's image.
+     * A list for the same reason key art's is (design 65) — an upload contributes one.
      */
-    masterLookCandidate: z.string().nullable().default(null),
+    masterLookCandidates: z.array(z.string()).default([]),
     /**
      * An image staged for the next master-look generation to look at, world-relative, or null.
      * On disk rather than in the renderer's memory for the same reason the candidate is: a

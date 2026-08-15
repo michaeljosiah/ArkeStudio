@@ -108,6 +108,7 @@ import {
   KEY_ART_EXTENSIONS,
   WORLD_IMAGE_DIR,
   WORLD_IMAGE_STEM,
+  keyArtPrompt,
   worldImageRequest,
 } from "./references/world-image.js";
 import {
@@ -3619,8 +3620,13 @@ export class Coordinator {
         // Ask the harness to write the prompt, and carry on without it if it cannot. A writing
         // model turns "a drowned god still sings" into light, material and lens; the plain
         // assembly is a weaker prompt, but it is a prompt, and a picture still gets made.
+        //
+        // Unless the author wrote it themselves (design 64), in which case neither runs: the box
+        // on the art-direction page opens as the words this would otherwise compose, so an edit
+        // to it is a decision about this picture, and rewriting it would discard that decision.
+        const authored = "prompt" in msg ? msg.prompt?.trim() : undefined;
         let prompt: string | null = null;
-        if (this.opts.adapter?.readiness().ready && this.buildConfig) {
+        if (authored === undefined && this.opts.adapter?.readiness().ready && this.buildConfig) {
           const director = makeArtDirector(
             this.opts.adapter,
             this.buildConfig,
@@ -3639,22 +3645,31 @@ export class Coordinator {
             ...(prompt ? { prompt } : {}),
           });
         }
-        const request = worldImageRequest(bundle.meta, model, bundle.artDirection);
-        await this.enqueueBatch(msg.requestId, msg.kind, [
-          prompt
-            ? {
-                ...request,
-                params: {
-                  ...request.params,
-                  // The suffix survives the art-director's rewrite (#244, round 3). This branch
-                  // replaces the composed prompt wholesale, so composing constraints upstream in
-                  // worldImageRequest bound only the fallback path — the directed path, which is
-                  // the normal one, quietly dropped them.
-                  prompt: `${bundle.artDirection.description}. ${prompt}${imageConstraintSuffix(bundle.artDirection)}`,
-                },
-              }
-            : request,
-        ]);
+        // One job per preview asked for, each landing under its own name (design 65). Four jobs
+        // sharing one landing name would be four charges and one file — the defect the character
+        // candidates were numbered to fix, and there is no reason for this path to relearn it.
+        const count = ("count" in msg ? msg.count : undefined) ?? 1;
+        const requests = Array.from({ length: count }, (_, index) =>
+          worldImageRequest(bundle.meta, model, bundle.artDirection, { index, count }),
+        );
+        // The suffix survives every branch (#244, round 3): composing constraints upstream in
+        // worldImageRequest bound only the fallback, so the directed path — the normal one —
+        // quietly dropped them until the precedence moved into one place.
+        const words = keyArtPrompt({
+          composed: String(requests[0]!.params["prompt"]),
+          description: bundle.artDirection.description,
+          suffix: imageConstraintSuffix(bundle.artDirection),
+          ...(authored !== undefined ? { authored } : {}),
+          directed: prompt,
+        });
+        // Every candidate is asked for from the same words. They differ because the model is
+        // sampled afresh, not because we quietly reword the brief per slot — the author wrote
+        // one description of one picture and asked to see it several times.
+        await this.enqueueBatch(
+          msg.requestId,
+          msg.kind,
+          requests.map((request) => ({ ...request, params: { ...request.params, prompt: words } })),
+        );
         return;
       }
       case "upload-world-image": {
@@ -3707,8 +3722,13 @@ export class Coordinator {
       case "use-world-image": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        const candidate = store.getBundle().keyArtCandidate;
-        if (candidate === null) return;
+        // Which one, of however many are waiting (design 65). A named file must be one of them:
+        // the message arrives from the renderer, and copying an arbitrary world-relative path
+        // onto the world's key art on request is not a thing this handler should be able to do.
+        const waiting = store.getBundle().keyArtCandidates;
+        const named = "file" in msg ? msg.file : undefined;
+        const candidate = named === undefined ? waiting[0] : waiting.find((path) => path === named);
+        if (candidate === undefined) return;
         /*
          * The accepted file keeps the format its bytes carry.
          *
@@ -3779,14 +3799,21 @@ export class Coordinator {
           bundle.masterLookReference !== null && model.accepts.referenceImages > 0
             ? [bundle.masterLookReference]
             : [];
-        await this.enqueueBatch(msg.requestId, msg.kind, [
-          masterLookRequest(bundle.meta, model, bundle.artDirection, {
-            ...(msg.prompt !== undefined ? { prompt: msg.prompt } : {}),
-            ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
-            ...(msg.aspect !== undefined ? { aspect: msg.aspect } : {}),
-            references,
-          }),
-        ]);
+        // One job per preview, each under its own landing name (design 65).
+        const wanted = msg.count ?? 1;
+        await this.enqueueBatch(
+          msg.requestId,
+          msg.kind,
+          Array.from({ length: wanted }, (_, index) =>
+            masterLookRequest(bundle.meta, model, bundle.artDirection, {
+              ...(msg.prompt !== undefined ? { prompt: msg.prompt } : {}),
+              ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
+              ...(msg.aspect !== undefined ? { aspect: msg.aspect } : {}),
+              references,
+              slot: { index, count: wanted },
+            }),
+          ),
+        );
         return;
       }
       case "pick-master-look-reference": {
@@ -3904,8 +3931,13 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         const gate = this.opts.provider.gate?.();
         if (!store || !gate) return;
-        const candidate = store.getBundle().masterLookCandidate;
-        if (candidate === null) return;
+        // Which of the waiting candidates (design 65), and it must be one of them: this handler
+        // copies the named path into the world, so it may not take a path from the renderer on
+        // trust.
+        const offered = store.getBundle().masterLookCandidates;
+        const chosen = "file" in msg ? msg.file : undefined;
+        const candidate = chosen === undefined ? offered[0] : offered.find((path) => path === chosen);
+        if (candidate === undefined) return;
         /*
          * Accepting a master look is a look change, taken through the gate like any other.
          *

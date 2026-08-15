@@ -59,9 +59,12 @@ export function masterLookRequest(
     tier?: SizeTier | undefined;
     /** The chosen shape. One the model does not offer is dropped, not sent. */
     aspect?: string | undefined;
+    /** Which of the set this is, and how many there are (design 65). One, unless asked otherwise. */
+    slot?: { index: number; count: number } | undefined;
   } = {},
 ) {
   const references = options.references ?? [];
+  const slot = options.slot ?? { index: 0, count: 1 };
   /*
    * A real output spec, where this job used to send none at all.
    *
@@ -95,6 +98,14 @@ export function masterLookRequest(
       referenceImages: references.length,
       ...(output.resolution !== undefined ? { resolution: output.resolution } : {}),
     }),
-    landing: { dir: MASTER_LOOK_DIR, name: MASTER_LOOK_CANDIDATE },
+    landing: { dir: MASTER_LOOK_DIR, name: masterLookCandidateName(slot.index, slot.count) },
   };
+}
+
+/**
+ * Where the nth candidate of a set lands (design 65). A set of one keeps the historical
+ * `candidate.png`, so a world that generated one before the count reads back unchanged.
+ */
+export function masterLookCandidateName(index: number, count: number): string {
+  return count === 1 ? MASTER_LOOK_CANDIDATE : `candidate-${index + 1}.png`;
 }

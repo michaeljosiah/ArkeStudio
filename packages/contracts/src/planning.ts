@@ -656,6 +656,44 @@ export function standingConstraints(
 }
 
 /**
+ * How many previews one image generation may ask for (design 65).
+ *
+ * Four is what fits the dialog's preview column as a 2×2 at a size you can actually judge, and it
+ * was already the cap main photo, looks and location views each spelled as a bare `4`. Named once
+ * so the frame that validates it, the control that offers it and the request builder that fans it
+ * out cannot drift — every one of them charges per image, so the number is money, not layout.
+ */
+export const MAX_IMAGE_PREVIEWS = 4;
+
+/**
+ * The world's key image, from what the world already says about itself.
+ *
+ * There is no clever prompt here on purpose: the logline is the author's sentence and it goes in
+ * as written. Adding adjectives of our own would put the studio's taste in front of theirs.
+ *
+ * It lives in contracts rather than beside the coordinator's other request builders because both
+ * ends now need it (design 64): the coordinator composes it when nothing else writes one, and the
+ * art-direction page opens its prompt box with it, so what the author edits is exactly what the
+ * app would otherwise have sent.
+ */
+export function worldImagePrompt(
+  meta: { name: string; logline?: string; tone?: string; genre?: string },
+  direction?: { description?: string },
+): string {
+  const parts = [
+    `Key art for "${meta.name}"`,
+    direction?.description,
+    meta.logline?.trim(),
+    meta.tone?.trim() ? `Tone: ${meta.tone.trim()}.` : undefined,
+    meta.genre?.trim() ? `Genre: ${meta.genre.trim()}.` : undefined,
+    // No people: a world image that leads with a face competes with the character sheets,
+    // and the sheets are where a face is decided.
+    "A single evocative establishing image of the place and its atmosphere. No text, no logos, no character portraits.",
+  ];
+  return parts.filter((p): p is string => typeof p === "string" && p.length > 0).join(" ");
+}
+
+/**
  * The standing-constraint suffix a reference or board prompt carries, or "" (#244, round 2).
  *
  * Scene dispatch reaches the failure modes through planScene; nothing else did, so key art,

@@ -979,13 +979,19 @@ export function genesisAttachFiles(genesisId: string): void {
 /**
  * The world's key image, from its own name, logline and tone. An ordinary image job: estimated
  * before it runs, in the ledger, cancellable from Activity like anything else that spends.
+ *
+ * A prompt is sent only when the author changed one (design 64). Sending the box's contents
+ * unconditionally would look identical from here and mean something different at the other end:
+ * the coordinator reads a present prompt as "the author has decided", and would then skip the
+ * art-director rewrite for every generation whose box was merely opened and closed.
  */
-export function generateWorldImage(worldId: string, modelId?: string): void {
+export function generateWorldImage(worldId: string, opts: { modelId?: string; prompt?: string } = {}): void {
   send({
     kind: "generate-world-image",
     worldId,
     requestId: queueRequest("generate-world-image"),
-    ...(modelId !== undefined ? { modelId } : {}),
+    ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
+    ...(opts.prompt !== undefined ? { prompt: opts.prompt } : {}),
   });
 }
 
@@ -994,8 +1000,9 @@ export function uploadWorldImage(worldId: string): void {
   send({ kind: "upload-world-image", worldId, requestId: queueRequest("upload-world-image") });
 }
 
-export function useWorldImage(worldId: string): void {
-  send({ kind: "use-world-image", worldId });
+/** Keep one of the candidates. `file` names which, world-relative — absent means the only one. */
+export function useWorldImage(worldId: string, file?: string): void {
+  send({ kind: "use-world-image", worldId, ...(file !== undefined ? { file } : {}) });
 }
 
 export function discardWorldImage(worldId: string): void {
@@ -1014,6 +1021,8 @@ export function generateMasterLook(
     prompt?: string | undefined;
     tier?: SizeTier | undefined;
     aspect?: string | undefined;
+    /** How many previews to make, 1-4. Absent is one. */
+    count?: number | undefined;
   } = {},
 ): void {
   send({
@@ -1024,6 +1033,7 @@ export function generateMasterLook(
     ...(options.prompt !== undefined ? { prompt: options.prompt } : {}),
     ...(options.tier !== undefined ? { tier: options.tier } : {}),
     ...(options.aspect !== undefined ? { aspect: options.aspect } : {}),
+    ...(options.count !== undefined ? { count: options.count } : {}),
   });
 }
 
@@ -1050,8 +1060,8 @@ export function clearMasterLookReference(worldId: string): void {
 }
 
 /** Accepting is a look change: the image lands as the next version's master look. */
-export function useMasterLook(worldId: string): void {
-  send({ kind: "use-master-look", worldId });
+export function useMasterLook(worldId: string, file?: string): void {
+  send({ kind: "use-master-look", worldId, ...(file !== undefined ? { file } : {}) });
 }
 
 export function discardMasterLook(worldId: string): void {

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { ClientState, ManifestModel, ProviderStatus } from "@arke-studio/contracts";
+import { MAX_IMAGE_PREVIEWS } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import {
   choiceForModel,
@@ -373,8 +374,11 @@ describe("the standard generation dialog offers all three decisions", () => {
       </MemoryRouter>,
     ).replace(/<!-- -->/g, "");
 
-    const dialog = html.slice(html.indexOf('<dialog class="fy-gendialog"'));
-    assert.ok(dialog.length > 0, "the dialog is in the document");
+    // The class prefix, not the whole attribute: a dialog showing previews carries a modifier
+    // beside it, and this assertion is about which dialog it is, not how wide it is drawn.
+    const at = html.indexOf('<dialog class="fy-gendialog');
+    assert.ok(at > 0, "the dialog is in the document");
+    const dialog = html.slice(at);
     // Sentence case in the markup; the mono eyebrow styling uppercases it.
     assert.ok(dialog.includes(">Prompt</label>"), "the words");
     assert.ok(dialog.includes("Add a reference image"), "something to look at");
@@ -382,5 +386,69 @@ describe("the standard generation dialog offers all three decisions", () => {
     assert.ok(dialog.includes("ASPECT"), "what shape");
     assert.ok(dialog.includes(">16:9<") && dialog.includes(">1:1<"), "this row's own shapes");
     assert.ok(dialog.includes("fy-dispatchbar__chevron"), "and the model reads as a choice");
+  });
+});
+
+/**
+ * The preview count, and the column it fills (design 65).
+ *
+ * The count is money: every preview is a separate job, separately priced and separately charged.
+ * So it is asserted through the whole composition — screen, dialog, bar — the same way the other
+ * three controls are, because the failure mode is a host forgetting to turn it on.
+ */
+describe("the dialog asks how many, and shows what came back", () => {
+  const withModels = () => {
+    const base = stateWith({ routedImage: FAL_IMAGE.id });
+    __setStateForTest(base);
+    return FIXTURE_STATE.world!;
+  };
+
+  const dialogHtml = (world: (typeof FIXTURE_STATE)["world"]): string => {
+    const html = renderToString(
+      <MemoryRouter initialEntries={[`/w/${world!.meta.worldId}/art-direction`]}>
+        <App />
+      </MemoryRouter>,
+    ).replace(/<!-- -->/g, "");
+    const at = html.indexOf('<dialog class="fy-gendialog');
+    assert.ok(at > 0, "the dialog is in the document");
+    return html.slice(at);
+  };
+
+  it("offers every count up to the cap, and no more", () => {
+    const dialog = dialogHtml(withModels());
+    assert.ok(dialog.includes("PREVIEWS"), "the control names what it is counting");
+    for (let value = 1; value <= MAX_IMAGE_PREVIEWS; value += 1) {
+      assert.ok(dialog.includes(`>${value}</button>`), `${value} is offered`);
+    }
+    assert.ok(!dialog.includes(`>${MAX_IMAGE_PREVIEWS + 1}</button>`), "and nothing past the cap");
+  });
+
+  it("draws the preview column beside the composer, not under it", () => {
+    const dialog = dialogHtml(withModels());
+    assert.ok(dialog.includes("fy-gendialog--wide"), "the dialog widens to hold both columns");
+    const compose = dialog.indexOf("fy-gendialog__compose");
+    const previews = dialog.indexOf("fy-gendialog__previews");
+    assert.ok(compose > 0 && previews > compose, "what you ask for, then what came back");
+  });
+
+  it("says nothing has come back rather than pretending it is ready", () => {
+    // The fixture world has no candidates waiting, and nothing running.
+    const dialog = dialogHtml(withModels());
+    assert.ok(dialog.includes("Nothing yet"));
+    assert.ok(dialog.includes(">waiting<"), "and the header agrees with the body");
+  });
+
+  it("shows a candidate on the disk as a preview, and offers to keep it", () => {
+    const base = stateWith({ routedImage: FAL_IMAGE.id });
+    const world = FIXTURE_STATE.world!;
+    __setStateForTest({
+      ...base,
+      world: { ...world, masterLookCandidates: ["incoming/master-look/candidate-1.png"] },
+    });
+    const dialog = dialogHtml({ ...world, masterLookCandidates: ["incoming/master-look/candidate-1.png"] });
+    assert.ok(dialog.includes("fy-gendialog__previews-grid"), "the set is a grid, not an empty state");
+    assert.ok(dialog.includes("Master look preview 1"));
+    assert.ok(dialog.includes(">ready<"), "the header says so");
+    assert.ok(dialog.includes("Use this · v"), "and there is a way to keep one");
   });
 });
