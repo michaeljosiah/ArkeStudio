@@ -50,6 +50,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
       "endFrame": false
     },
     "limits": {
+      "maxPromptChars": 50000,
       "resolutions": [
         "1K",
         "2K",
@@ -88,6 +89,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
       "endFrame": false
     },
     "limits": {
+      "maxPromptChars": 50000,
       "resolutions": [
         "1K",
         "2K",
@@ -126,6 +128,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
       "endFrame": false
     },
     "limits": {
+      "maxPromptChars": 32000,
       "aspects": [
         "16:9",
         "3:2",
@@ -287,6 +290,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
       "endFrame": false
     },
     "limits": {
+      "maxPromptChars": 20000,
       "maxDurationSec": 8,
       "durations": {
         "4": "4s",
@@ -318,6 +322,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
       "endFrame": false
     },
     "limits": {
+      "maxPromptChars": 20000,
       "maxDurationSec": 8,
       "durations": {
         "4": "4s",
@@ -348,6 +353,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
       "endFrame": false
     },
     "limits": {
+      "maxPromptChars": 2500,
       "maxDurationSec": 15,
       "durations": {
         "3": "3",
@@ -386,6 +392,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
       "endFrame": false
     },
     "limits": {
+      "maxPromptChars": 2500,
       "maxDurationSec": 15,
       "durations": {
         "3": "3",

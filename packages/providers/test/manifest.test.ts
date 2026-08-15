@@ -585,3 +585,45 @@ describe("local runtime gating (R-22, D11, D12)", () => {
     assert.match(kokoro!.reason!, /Needs 4 GB memory\. This machine has 2 GB\./);
   });
 });
+
+/**
+ * Prompt caps (design 68). Every number here is transcribed from the provider's own route
+ * schema, so the test's job is to catch a regeneration or a hand-edit that quietly changes one —
+ * and, just as much, to keep the ABSENCES deliberate. A row with no cap makes the composer show
+ * no counter; if somebody later fills one in from a blog post or a guess, this fails and asks
+ * them to cite it instead.
+ */
+describe("how long a prompt each model takes", () => {
+  const PUBLISHED: Record<string, number> = {
+    "nano-banana-2": 50000,
+    "nano-banana-pro": 50000,
+    "gpt-image-2-fal": 32000,
+    "gpt-image-2": 32000,
+    "veo-3.1": 20000,
+    "veo-3.1-fast": 20000,
+    "kling-3-pro": 2500,
+    "kling-3-standard": 2500,
+  };
+
+  for (const [id, chars] of Object.entries(PUBLISHED)) {
+    it(`${id} states ${chars} characters, as its provider publishes`, () => {
+      assert.equal(model(id).limits.maxPromptChars, chars);
+    });
+  }
+
+  // fal's schema for these declares no maxLength. "The provider does not say" is not "unlimited",
+  // and it is not an invitation to pick a number: the counter simply does not appear.
+  for (const id of ["flux-2-pro", "seedance-2.0", "seedance-2.0-fast", "text2image_soul_v2"]) {
+    it(`${id} states no cap, because none is published`, () => {
+      assert.equal(model(id).limits.maxPromptChars, undefined);
+    });
+  }
+
+  it("no row invents one: every cap present is a positive integer", () => {
+    for (const m of SHIPPED_MANIFEST.models) {
+      const cap = m.limits.maxPromptChars;
+      if (cap === undefined) continue;
+      assert.ok(Number.isInteger(cap) && cap > 0, `${m.id} cap is a positive integer`);
+    }
+  });
+});
