@@ -129,6 +129,18 @@ export const ModelLimitsSchema = z
     maxReferenceVideoSec: z.number().min(0).optional(),
     /** Aggregate seconds of audio reference this model accepts across all clips (R-40, R-41). */
     maxReferenceAudioSec: z.number().min(0).optional(),
+    /**
+     * Characters of prompt this model accepts, where the provider publishes one (design 68).
+     *
+     * Characters, not tokens: the composer counts what somebody typed as they type it, and a
+     * token count cannot be computed on this side of the wire for a model whose tokenizer we do
+     * not ship. A row **without** one states no cap, and the composer shows **no counter** there
+     * rather than an invented ceiling — a counter is a promise about a refusal, and one measured
+     * against a house number would refuse briefs the model would have taken. Where it is stated,
+     * over the cap refuses *before* dispatch: nothing is truncated on the way out, because a brief
+     * silently cut at the end loses the shot list rather than the adjectives.
+     */
+    maxPromptChars: z.number().int().min(1).optional(),
   })
   .strict();
 export type ModelLimits = z.infer<typeof ModelLimitsSchema>;
