@@ -9,7 +9,7 @@ import {
 } from "@arke-studio/contracts";
 import { ZodError } from "zod";
 import { entryContent } from "../canon/authoring.js";
-import { buildSheetContent } from "../sheets/authoring.js";
+import { buildSheetContent, editSheetContent } from "../sheets/authoring.js";
 import { uniqueSlug } from "../world/slug.js";
 import { MarkdownFile } from "../world/text-files.js";
 
@@ -229,12 +229,21 @@ export function materialiseCandidate(
       for (const section of (draft["sections"] as Array<{ heading: string; body: string }>) ?? []) {
         sections[section.heading] = section.body;
       }
-      const content = buildSheetContent({
-        id: sheet.id,
-        type: sheet.type,
-        name: String(draft["name"] ?? sheet.name),
-        status: sheet.status,
+      /*
+       * An edit changes what it names and carries everything else (SPEC-007 §2.3.2).
+       *
+       * `canonRules` and `links` are carried rather than taken from the draft: a draft's links are
+       * refs, including refs to entities this same wrap-up is still planning slugs for, and
+       * resolving those is a piece of work this does not do yet. Carrying them is the honest half
+       * — the sheet keeps the references it had, and a conversation simply cannot change them.
+       */
+      const content = editSheetContent({
+        sheet,
+        ...(draft["name"] !== undefined ? { name: String(draft["name"]) } : {}),
         sections,
+        ...(draft["role"] !== undefined ? { role: draft["role"] as string | null } : {}),
+        ...(draft["billing"] !== undefined ? { billing: draft["billing"] as string | null } : {}),
+        ...(draft["region"] !== undefined ? { region: draft["region"] as string | null } : {}),
         date,
       });
       assertSheetParses(candidate.id, content, sheet.type);
@@ -259,14 +268,8 @@ export function materialiseCandidate(
         const sections: Record<string, string> = {};
         for (const section of sheet.sections) sections[section.heading] = section.body;
         sections[edit.sectionHeading] = edit.body;
-        const content = buildSheetContent({
-          id: sheet.id,
-          type: sheet.type,
-          name: sheet.name,
-          status: sheet.status,
-          sections,
-          date,
-        });
+        // One section changes; the rest of the sheet is not this proposition's business.
+        const content = editSheetContent({ sheet, sections, date });
         assertSheetParses(candidate.id, content, sheet.type);
         targets.push({ path: `${folderFor(sheet.type)}/${sheet.id}.md`, content });
         fields.push(edit.sectionHeading);

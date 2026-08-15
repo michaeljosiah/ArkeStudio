@@ -648,6 +648,7 @@ export const WorldChatNotCarriedSchema = z
       "invalid",
       "look-moved",
       "look-already-proposed",
+      "role-too-long",
     ]),
   })
   .strict();

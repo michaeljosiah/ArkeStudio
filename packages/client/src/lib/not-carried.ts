@@ -1,4 +1,4 @@
-import type { WorldChatNotCarried } from "@arke-studio/contracts";
+import { CHARACTER_ROLE_MAX, type WorldChatNotCarried } from "@arke-studio/contracts";
 
 /**
  * Why a proposition did not become a proposal, in the user's own terms (R-13, R-27d).
@@ -26,5 +26,9 @@ export function explainNotCarried(reason: WorldChatNotCarried["reason"]): string
       return "The world look changed after this was written — writing it now would undo that change";
     case "look-already-proposed":
       return "A change to the world look is already waiting on a decision";
+    case "role-too-long":
+      // Named as something to ask for rather than something that went wrong: the fix is one
+      // sentence in the conversation, and the point is still there to be corrected.
+      return `Its role is longer than ${CHARACTER_ROLE_MAX} characters — ask for a short label and the rest can go in Essence`;
   }
 }

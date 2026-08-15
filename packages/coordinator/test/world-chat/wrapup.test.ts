@@ -17,7 +17,7 @@ import { recoverWrapUps } from "../../src/world-chat/wrapup-recovery.js";
 import { evaluateReadiness } from "../../src/world-chat/readiness.js";
 import { recordResolution } from "../../src/world-chat/resolution.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import { rejectPoint, savePoint, wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
+import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
 import { WorldStore } from "../../src/world/store.js";
 import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -860,6 +860,99 @@ describe("readiness on its own", () => {
   });
 
   /*
+   * A role that is a sentence.
+   *
+   * `CHARACTER_ROLE_MAX` used to be enforced only by the accept gate, which is the last step there
+   * is: the point was materialised, staged, marked `proposed` — off the rail, with nothing left to
+   * correct it from — and only then refused, leaving a proposal on the Cast and approvals screens
+   * that nobody could ever accept. Held back here it stays in the conversation, which is where a
+   * shorter role can be asked for.
+   */
+  function newCharacter(role: string) {
+    return candidate({
+      classification: "sheet.create",
+      title: "Corvin joins the cast",
+      draft: {
+        type: "character",
+        name: "Corvin Sabato",
+        role,
+        canonRules: [],
+        links: [],
+        sections: [{ heading: "Essence", body: "An ancient Watcher." }],
+      },
+    } as Partial<WorldChangeCandidate>);
+  }
+
+  it("holds back a new character whose role is longer than a role may be", () => {
+    const long = "Founder and High Regent of the Blackfeather Covenant; Severed political leader";
+    const { carried, notCarried } = evaluateReadiness([newCharacter(long)], bundle);
+    assert.deepEqual(carried, [], "nothing is staged, so nothing can be left standing");
+    assert.equal(notCarried[0]!.reason, "role-too-long");
+  });
+
+  it("carries one whose role is a label", () => {
+    const { carried, notCarried } = evaluateReadiness([newCharacter("Blackfeather founder")], bundle);
+    assert.equal(carried.length, 1);
+    assert.deepEqual(notCarried, []);
+  });
+
+  /*
+   * The bound belongs to characters, exactly as the gate applies it. `checkAuthoredBounds` measures
+   * `characters/` and nothing else, so refusing a long role on a location here would hold back what
+   * the gate would have written without complaint.
+   */
+  it("leaves a location's role alone, because the gate never measures one", () => {
+    const long = "A drowned harbour that keeps its bells above the waterline year round";
+    const place = candidate({
+      classification: "sheet.create",
+      title: "The harbour joins the world",
+      draft: {
+        type: "location",
+        name: "Slackwater",
+        role: long,
+        canonRules: [],
+        links: [],
+        sections: [{ heading: "Essence", body: "Bells above the water." }],
+      },
+    } as Partial<WorldChangeCandidate>);
+    assert.equal(evaluateReadiness([place], bundle).carried.length, 1);
+  });
+
+  /*
+   * The edit path too, now that an edit can actually set a role. It could not before — materialise
+   * dropped the field — so the bound only had to cover creates; a fix in one place without the
+   * other would have reopened exactly this bug through the other door.
+   */
+  it("holds back an edit that would set a role longer than a role may be", () => {
+    const edit = candidate({
+      classification: "sheet.edit",
+      title: "Corvin's role is spelled out",
+      target: { kind: "sheet", sheetKind: "character", sheetId: "corvin-sabato" },
+      draft: { role: "Founder and High Regent of the Blackfeather Covenant, and much else besides" },
+    } as Partial<WorldChangeCandidate>);
+    const world = { canon: [], sheets: [{ id: "corvin-sabato" }], proposals: [] } as never;
+    assert.equal(evaluateReadiness([edit], world).notCarried[0]?.reason, "role-too-long");
+  });
+
+  it("lets an edit that clears the role through, because null is not a long string", () => {
+    const edit = candidate({
+      classification: "sheet.edit",
+      title: "Corvin loses his title",
+      target: { kind: "sheet", sheetKind: "character", sheetId: "corvin-sabato" },
+      draft: { role: null },
+    } as Partial<WorldChangeCandidate>);
+    const world = { canon: [], sheets: [{ id: "corvin-sabato" }], proposals: [] } as never;
+    assert.equal(evaluateReadiness([edit], world).carried.length, 1);
+  });
+
+  it("holds back only the long one, leaving what was said beside it to carry", () => {
+    const long = "Founder and High Regent of the Blackfeather Covenant; Severed political leader";
+    const { carried, notCarried } = evaluateReadiness([newCharacter(long), candidate()], bundle);
+    assert.equal(carried.length, 1, "the sibling is unaffected — this is not all-or-nothing");
+    assert.equal(notCarried.length, 1);
+  });
+
+  /*
    * A look drafted against a look that has since changed.
    *
    * This classification carries the whole description, so writing it now would replace whatever
@@ -1485,6 +1578,53 @@ describe("a save the conversation can see", () => {
       view.deletionBlock,
       "unresolved-proposals",
       "and the proposal keeps the conversation alive, because send-back has nowhere else to go",
+    );
+  });
+
+  /*
+   * What a save does when the gate will not write what it staged.
+   *
+   * It used to do nothing at all: the proposal stayed, and the proposition stayed `proposed`. So a
+   * character the gate refused — over a role a hundred characters past its limit — left the rail
+   * for good and reappeared on the Cast screen as a draft that could never be accepted, with the
+   * conversation offering no way back to it. Taken back instead, exactly as Accept all does.
+   */
+  it("takes back a proposal the gate would not write, and puts the point back on the rail", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const point = candidate();
+    await withCandidates(w.log, [point]);
+
+    const result = await savePoint({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "save-refused",
+      candidateId: point.id,
+      expectedCandidateRevision: point.revision,
+      now: NOW,
+    });
+    const proposalId = result.proposalIds[0]!;
+    const staged = await w.gate.readManifest(proposalId);
+
+    await returnToRail(w.log, w.gate, staged, NOW);
+
+    assert.equal(
+      (await w.ours()).some((p) => p.id === proposalId),
+      false,
+      "the proposal is gone, so the same change is not offered twice",
+    );
+    const view = foldConversation((await w.log.readMeta())!.id, AT, (await w.log.read()).events).view;
+    assert.equal(
+      view.candidates.find((c) => c.id === point.id)?.status,
+      "live",
+      "and the point is back on the rail, where it can be corrected",
+    );
+    assert.deepEqual(view.proposalIds, [], "nothing is still counted as waiting");
+    assert.equal(
+      view.deletionBlock,
+      null,
+      "so the conversation is not held open for ever by a proposal that no longer exists",
     );
   });
 });
