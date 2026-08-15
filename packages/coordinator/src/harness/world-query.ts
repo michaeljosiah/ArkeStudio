@@ -167,10 +167,32 @@ export class WorldQueryServer {
   private server: Server | null = null;
   private port = 0;
 
+  /**
+   * Which run's reads each live lease belongs to (#70 §8.2).
+   *
+   * The surface was a constructor argument and nothing ever passed one, so `this.leased` was
+   * always undefined and every `/mcp/<token>` request answered 404 — World Chat's retrieval was
+   * built, configured, pointed at from every session, and unreachable. It is registered per token
+   * instead of once for the server because a lease belongs to one run of one conversation, and
+   * each conversation's runner holds its own registry: a single surface would answer with the
+   * wrong conversation's leases the moment two were open.
+   */
+  private readonly leasedByToken = new Map<string, LeasedSurface>();
+
   constructor(
     private readonly getStore: () => WorldStore | null,
     private readonly leased?: LeasedSurface,
   ) {}
+
+  /** Serve this run's leased reads until it releases (§8.2). */
+  attachLease(token: string, surface: LeasedSurface): void {
+    this.leasedByToken.set(token, surface);
+  }
+
+  /** The run is over; its token stops resolving here as well as in the registry that minted it. */
+  detachLease(token: string): void {
+    this.leasedByToken.delete(token);
+  }
 
   url(): string | null {
     return this.server ? `http://127.0.0.1:${this.port}/mcp` : null;
@@ -204,9 +226,12 @@ export class WorldQueryServer {
 
         const path = (req.url ?? "/mcp").split("?")[0] ?? "/mcp";
         let token: string | null = null;
+        let surface: LeasedSurface | undefined;
         if (path.startsWith("/mcp/")) {
           const match = LEASE_PATH.exec(path);
-          if (!match || !this.leased) {
+          // The run's own surface first; the constructor's is the fallback tests are built on.
+          surface = match ? (this.leasedByToken.get(match[1]!) ?? this.leased) : undefined;
+          if (!match || !surface) {
             res.writeHead(404).end();
             return;
           }
@@ -249,7 +274,7 @@ export class WorldQueryServer {
               });
 
             if (token !== null) {
-              const leased = this.leased!;
+              const leased = surface!;
               void leased.retrieval
                 .call(token, name, args)
                 .then(({ result, receipt }) => {

@@ -86,6 +86,9 @@ export function editSheetContent(input: {
   role?: string | null;
   billing?: string | null;
   region?: string | null;
+  /** References after the edit. Absent carries the sheet's own, which is what an edit that says nothing about them means. */
+  canonRules?: readonly string[];
+  links?: readonly string[];
   date: string;
 }): string {
   const { sheet } = input;
@@ -109,8 +112,8 @@ export function editSheetContent(input: {
       status: sheet.status,
       ...(sheet.retired !== undefined ? { retired: sheet.retired } : {}),
       ...(sheet.production !== undefined ? { production: sheet.production } : {}),
-      canonRules: [...sheet.canonRules],
-      links: [...sheet.links],
+      canonRules: [...(input.canonRules ?? sheet.canonRules)],
+      links: [...(input.links ?? sheet.links)],
       ...(sheet.origin ? { origin: sheet.origin } : {}),
       ...(sheet.voice ? { voice: sheet.voice } : {}),
       // Created once, and not by an edit. Only `updated` moves.
@@ -129,6 +132,9 @@ export function buildSheetContent(input: {
   name: string;
   status: "sketch" | "locked";
   sections: Record<string, string>;
+  /** Canon this sheet is governed by, and sibling sheets it links to. Empty when not given. */
+  canonRules?: readonly string[];
+  links?: readonly string[];
   extra?: Record<string, unknown>;
   origin?: { sheet: string; version: number };
   /** Set to file this as a guest of that production (SPEC-020 R-1); absent means the world's. */
@@ -147,8 +153,8 @@ export function buildSheetContent(input: {
       // Ownership sits with status: both say what this sheet currently *is*, and promotion
       // reads as a state change in the diff rather than a field appearing from nowhere.
       ...(input.production !== undefined ? { production: input.production } : {}),
-      canonRules: [],
-      links: [],
+      canonRules: [...(input.canonRules ?? [])],
+      links: [...(input.links ?? [])],
       ...(input.origin ? { origin: input.origin } : {}),
       created: input.date,
       updated: input.date,

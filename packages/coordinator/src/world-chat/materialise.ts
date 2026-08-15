@@ -6,6 +6,7 @@ import {
   type Sheet,
   type WorldBundle,
   type WorldChangeCandidate,
+  type WorldChatLinkRef,
 } from "@arke-studio/contracts";
 import { ZodError } from "zod";
 import { entryContent } from "../canon/authoring.js";
@@ -41,6 +42,15 @@ export interface Identities {
   canonIds: string[];
   /** Slugs chosen for new sheets, keyed by the candidate that creates them. */
   slugBy: Map<string, string>;
+  /**
+   * Canon ids chosen for new entries, keyed by the candidate that creates them.
+   *
+   * The same shape as `slugBy`, and for the same reason. These used to be handed out positionally
+   * as materialise walked the set, which meant nothing could name an entry before it was reached —
+   * so a sheet asking to be governed by a rule written in the same breath had no id to point at.
+   * Planned together, the graph between propositions can be resolved before any file exists.
+   */
+  canonIdBy: Map<string, string>;
 }
 
 export interface MaterialisedTarget {
@@ -69,6 +79,7 @@ export function planIdentities(
 ): Identities {
   const canonIds = [...reservedCanonIds];
   const slugBy = new Map<string, string>();
+  const canonIdBy = new Map<string, string>();
   const taken = bundle.sheets.map((s) => s.id);
 
   for (const candidate of carried) {
@@ -80,7 +91,20 @@ export function planIdentities(
     slugBy.set(candidate.id, slug);
     taken.push(slug);
   }
-  return { canonIds, slugBy };
+  /*
+   * Reserved ids handed to the entries that will carry them, in the order `canonIdsNeeded` counted.
+   *
+   * The two must walk the same set the same way or an entry is written under an id nothing
+   * reserved — so both filter on exactly this pair of classifications, and this is the only place
+   * the order is decided.
+   */
+  let next = 0;
+  for (const candidate of carried) {
+    if (candidate.classification !== "canon.create" && candidate.classification !== "canon.thread") continue;
+    const id = canonIds[next++];
+    if (id) canonIdBy.set(candidate.id, id);
+  }
+  return { canonIds, slugBy, canonIdBy };
 }
 
 /** How many Canon ids this wrap-up must reserve before it can write anything. */
@@ -122,14 +146,92 @@ function detailOf(err: unknown): string {
   return err instanceof Error ? err.message.slice(0, 300) : "unreadable";
 }
 
+/**
+ * The references a draft asks for, as the two frontmatter fields a sheet has to hold them (§2.3.2).
+ *
+ * These used to be dropped: every sheet a conversation wrote came out with `canonRules: []` and
+ * `links: []`, so "he is bound by the maintenance-hand rule" was heard, answered, and then not
+ * written down anywhere. Resolved here instead, against the world and against the propositions
+ * this same wrap-up is about to create.
+ *
+ * A reference that resolves to nothing throws rather than being quietly left out, following the
+ * two `require*` calls above it: a sheet naming a rule that does not exist is a broken edge in the
+ * citation graph, and writing one is worse than saying the sentence could not be written.
+ */
+function resolveReferences(
+  candidate: WorldChangeCandidate,
+  draft: Record<string, unknown>,
+  identities: Identities,
+  bundle: WorldBundle,
+  /** The sheet being written, so it cannot end up linking to itself. */
+  selfId: string | undefined,
+): { canonRules: string[]; links: string[] } {
+  const canonRules = new Set<string>();
+  const links = new Set<string>();
+
+  for (const id of (draft["canonRules"] as string[] | undefined) ?? []) {
+    requireEntry(bundle, id, candidate.id);
+    canonRules.add(id);
+  }
+
+  for (const ref of (draft["links"] as WorldChatLinkRef[] | undefined) ?? []) {
+    if (ref.kind === "canon") {
+      /*
+       * A sheet has exactly one field for canon and this is it.
+       *
+       * `links` holds sheet slugs alone, so a canon reference arriving as a link has nowhere else
+       * to go — and the link union admits one, so it is a shape the model is invited to produce.
+       * Folded rather than dropped, and deduplicated against `canonRules` by the set.
+       */
+      requireEntry(bundle, ref.entryId, candidate.id);
+      canonRules.add(ref.entryId);
+      continue;
+    }
+    if (ref.kind === "sheet") {
+      requireSheet(bundle, ref.sheetId, candidate.id);
+      links.add(ref.sheetId);
+      continue;
+    }
+    /*
+     * Another proposition in this same wrap-up.
+     *
+     * Its slug — or its canon id — was chosen before any file was written, which is exactly what
+     * planning identities together is for: two new entities may refer to each other, and the graph
+     * can only be resolved once every name in it exists.
+     */
+    const slug = identities.slugBy.get(ref.ref.candidateId);
+    if (slug) {
+      links.add(slug);
+      continue;
+    }
+    const canonId = identities.canonIdBy.get(ref.ref.candidateId);
+    if (canonId) {
+      canonRules.add(canonId);
+      continue;
+    }
+    throw new MaterialiseError(
+      candidate.id,
+      "it refers to something that is not being created alongside it",
+    );
+  }
+
+  links.delete(selfId ?? "");
+  return { canonRules: [...canonRules], links: [...links] };
+}
+
 export function materialiseCandidate(
   candidate: WorldChangeCandidate,
   identities: Identities,
   bundle: WorldBundle,
   /** The whole instant, not the day: the world-look record stamps a full timestamp. */
   at: string,
-  nextCanonId: () => string,
 ): Materialised {
+  /** The id planned for this entry, so nothing depends on the order materialise is walked in. */
+  const nextCanonId = (): string => {
+    const id = identities.canonIdBy.get(candidate.id);
+    if (!id) throw new MaterialiseError(candidate.id, "no canon id was reserved for this entry");
+    return id;
+  };
   const draft = candidate.draft as Record<string, unknown>;
   const date = at.slice(0, 10);
 
@@ -201,6 +303,7 @@ export function materialiseCandidate(
       for (const section of (draft["sections"] as Array<{ heading: string; body: string }>) ?? []) {
         sections[section.heading] = section.body;
       }
+      const refs = resolveReferences(candidate, draft, identities, bundle, slug);
       const content = buildSheetContent({
         id: slug,
         type: draft["type"] as Sheet["type"],
@@ -210,6 +313,8 @@ export function materialiseCandidate(
         status: "sketch",
         sections,
         date,
+        canonRules: refs.canonRules,
+        links: refs.links,
         ...(draft["role"] !== undefined ? { extra: { role: draft["role"] } } : {}),
       });
       assertSheetParses(candidate.id, content, draft["type"] as Sheet["type"]);
@@ -237,8 +342,11 @@ export function materialiseCandidate(
        * resolving those is a piece of work this does not do yet. Carrying them is the honest half
        * — the sheet keeps the references it had, and a conversation simply cannot change them.
        */
+      const names = draft["canonRules"] !== undefined || draft["links"] !== undefined;
+      const refs = names ? resolveReferences(candidate, draft, identities, bundle, sheet.id) : null;
       const content = editSheetContent({
         sheet,
+        ...(refs ? { canonRules: refs.canonRules, links: refs.links } : {}),
         ...(draft["name"] !== undefined ? { name: String(draft["name"]) } : {}),
         sections,
         ...(draft["role"] !== undefined ? { role: draft["role"] as string | null } : {}),

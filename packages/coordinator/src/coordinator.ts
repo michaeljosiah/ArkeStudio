@@ -5186,6 +5186,8 @@ export class Coordinator {
     const leases = new QueryLeaseRegistry(() => this.opts.provider.openStore?.()?.worldId ?? null);
     const attachments = new WorldChatAttachmentStore(store.dir);
     const receipts = new Map<string, WorldChatCheckReceipt[]>();
+    /** Which token each run is reading under, so releasing it stops resolving at the server too. */
+    const tokenByRun = new Map<string, string>();
     const retrieval = new WorldChatRetrieval({
       leases,
       getBundle: () => this.opts.provider.openStore?.()?.getBundle() ?? null,
@@ -5238,6 +5240,34 @@ export class Coordinator {
           runId,
           allowedAttachmentIds: attachmentIds,
         });
+        /*
+         * Started, not merely asked for.
+         *
+         * `leasedUrl` answers null until the server is up, and this was the only authoring flow
+         * that never started it — so whether World Chat could look anything up depended on
+         * whether some other flow had happened to start it first. Open a world and go straight to
+         * a conversation and the agent had no arke-world tools at all: it could not find the sheet
+         * behind a name, so it could not target an edit at one, and it said so rather than
+         * guessing an id. Every other caller starts the server before taking a URL from it.
+         */
+        await this.worldQuery.start().catch(() => {
+          /* a turn without retrieval is worse than one with it, and better than no turn at all */
+        });
+        /*
+         * The run's reads, reachable (#70 §8.2).
+         *
+         * Registering the lease with the server is what makes the URL below answer anything: it
+         * routes `/mcp/<token>` to this conversation's retrieval and records every receipt against
+         * the run that earned it. Without it the address was live and every request 404'd.
+         */
+        this.worldQuery.attachLease(lease.token, {
+          retrieval,
+          onReceipt: (receipt) => {
+            const seen = receipts.get(receipt.runId) ?? [];
+            receipts.set(receipt.runId, [...seen, receipt]);
+          },
+        });
+        tokenByRun.set(runId, lease.token);
         const url = this.worldQuery.leasedUrl(lease.token) ?? undefined;
         // Without a configured app root — a dev or test coordinator — the OS temp directory
         // still satisfies what §8.2 actually requires: somewhere outside the world.
@@ -5250,6 +5280,11 @@ export class Coordinator {
         return { cwd, leaseToken: lease.token };
       },
       release: async ({ conversationId, runId }) => {
+        const token = tokenByRun.get(runId);
+        if (token) {
+          this.worldQuery.detachLease(token);
+          tokenByRun.delete(runId);
+        }
         leases.revokeRun(runId);
         retrieval.forgetRun(runId);
         receipts.delete(runId);
