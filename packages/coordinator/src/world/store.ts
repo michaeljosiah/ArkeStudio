@@ -28,39 +28,18 @@ interface ScanState {
 
 export interface WorldStoreEvents {
   /**
-   * Another program touched world files while open (R-23), with the portable paths that
-   * differed. The paths are the whole point: a report that only says "something changed"
-   * cannot be checked against, argued with, or debugged after the fact.
-   */
-  onStale?: (paths: string[]) => void;
-  /**
    * The store refreshed its own scan without anybody being at fault (SPEC-022).
    *
-   * Distinct from `onStale`, and it has to be. Staleness is an accusation — something outside
-   * the app wrote to a gated file and a human has to decide what to do. This is the opposite:
-   * an ungated file the product invites into a text editor changed, and the right response is to
-   * take the new bytes and say nothing. Without this event nobody downstream learns, so the
-   * screen goes on showing what the author replaced minutes ago and cannot tell why.
+   * The only thing the watcher does now. There used to be an `onStale` beside it — an accusation
+   * that something outside the app had written to a gated file, raised as a banner with a Reload
+   * button. It could not tell Arke's own writes from anybody else's often enough to be worth
+   * keeping: the harness writing a drafted sheet, or a commit whose rescan landed a beat late,
+   * both read as "another program wrote to the world folder", and the person was asked to
+   * reload over their own work. Detection of edits made while the world was CLOSED is untouched
+   * and is where that guarantee actually lives (R-28) — nothing is merged silently there either.
    */
   onAdopted?: () => void;
 }
-
-/**
- * How long a verified difference has to survive before it is reported.
- *
- * A difference seen once is not yet a difference: the comparison is against `this.scan`, which
- * the app's own commit refreshes only *after* its bytes land, so a scan that happens to run
- * between those two moments sees the app's own write as somebody else's. That window is real —
- * it produced repeated "this world changed outside Arke Studio" reports against the app's own
- * art-direction commits — and it closes on its own the instant the commit's rescan completes.
- *
- * So the second look happens *outside* the serialisation lock. Holding it would starve the very
- * rescan that resolves the difference, and the confirmation would agree with the mistake.
- */
-const CONFIRM_MS = 500;
-
-/** Enough to name the culprit without turning an event into a directory listing. */
-const MAX_REPORTED_PATHS = 20;
 
 export class WorldStore {
   private constructor(
@@ -73,9 +52,6 @@ export class WorldStore {
     private readonly clockFn: () => string,
   ) {}
 
-  private stale = false;
-  /** What differed when staleness was reported — carried to the banner, not just to a boolean. */
-  private stalePaths: string[] = [];
   private watcher: WorldWatcher | null = null;
   private mutex: Promise<unknown> = Promise.resolve();
   private index: WorldIndex | null = null;
@@ -194,8 +170,6 @@ export class WorldStore {
     return {
       ...this.scan.bundle,
       externalEdits: this.externalEdits,
-      stale: this.stale,
-      stalePaths: [...this.stalePaths],
     };
   }
 
@@ -330,12 +304,10 @@ export class WorldStore {
     });
   }
 
-  /** Reload after an external change: rescan, clear staleness (R-23). */
+  /** Rescan from disk and re-save the scan state. */
   async reload(): Promise<WorldBundle> {
     await this.serialise(async () => {
       await this.rescan();
-      this.stale = false;
-      this.stalePaths = [];
       await this.saveScanState();
     });
     return this.getBundle();
@@ -402,58 +374,22 @@ export class WorldStore {
     await atomicWriteFile(join(this.dir, fromPortable(SCAN_STATE_PATH)), JSON.stringify(state, null, 2));
   }
 
-  private startWatcher(): void {
-    this.watcher = new WorldWatcher(this.dir, () => this.verifyExternalChange());
-    this.watcher.start();
-  }
-
-  private verifyExternalChange(): void {
-    if (this.stale || this.closed) return;
-    if (this.verifying) {
-      this.verifyAgain = true;
-      return;
-    }
-    this.verifying = true;
-    void this.runVerification().finally(() => {
-      const rerun = this.verifyAgain;
-      this.verifying = false;
-      if (rerun) this.verifyExternalChange();
-    });
-  }
-
   /**
-   * Two looks, and only the second one may accuse.
+   * The watcher's only remaining job: notice the bible moved and take the new bytes (SPEC-022).
    *
-   * The comparison runs under the serialisation lock so it never reads a world mid-commit; the
-   * wait between the two runs *without* it, so anything queued behind us — in practice the
-   * rescan belonging to the write that provoked this — gets to finish and update `this.scan`.
-   * A difference that was our own write in flight is gone by the second look. A difference that
-   * was somebody else's is still there, and still reported, one debounce later than before.
+   * `bible.md` is the one authored file the product invites the user to open in a text editor, so
+   * a hand-edit to it is the feature working. Everything else the watcher used to do — compare
+   * byte manifests, wait, compare again, and declare the world stale — is gone with the banner it
+   * fed.
    */
-  private async runVerification(): Promise<void> {
-    do {
-      this.verifyAgain = false;
-      await this.serialise(() => this.adoptBibleIfMoved());
-      const seen = await this.serialise(() => this.differingPaths());
-      if (this.closed || this.stale) return;
-      if (seen.length === 0) continue;
-
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, CONFIRM_MS).unref?.();
+  private startWatcher(): void {
+    this.watcher = new WorldWatcher(this.dir, () => {
+      if (this.closed) return;
+      void this.serialise(() => this.adoptBibleIfMoved()).catch(() => {
+        /* a bible that could not be re-read is re-read on the next event, or at open */
       });
-      if (this.closed || this.stale) return;
-
-      const confirmed = await this.serialise(() => this.differingPaths());
-      if (this.closed || this.stale) return;
-      if (confirmed.length > 0) {
-        this.stale = true;
-        this.stalePaths = confirmed.slice(0, MAX_REPORTED_PATHS);
-        this.events.onStale?.([...this.stalePaths]);
-        return;
-      }
-      // Our own write, caught between landing and being rescanned. Nothing happened, and the
-      // next event is verified from scratch rather than held against this one.
-    } while (this.verifyAgain);
+    });
+    this.watcher.start();
   }
 
   /**
@@ -476,35 +412,6 @@ export class WorldStore {
     await this.rescan().catch(() => {});
     this.events.onAdopted?.();
   }
-
-  /** Portable paths where the world on disk no longer matches the scan this store is serving. */
-  private async differingPaths(): Promise<string[]> {
-    let current: ScanResult;
-    try {
-      current = await scanWorld(this.dir);
-    } catch {
-      // A malformed or missing world.json is itself a verified byte-level change, and the only
-      // path that can be named for it is the one that would not read.
-      return ["world.json"];
-    }
-    // Both manifests: text for adoption, media for staleness (#253, Codex round 3).
-    return [
-      ...manifestDifference(this.scan.manifest, current.manifest),
-      ...manifestDifference(this.scan.mediaManifest, current.mediaManifest),
-    ].sort();
-  }
-}
-
-/** Every path added, removed or rewritten between two manifests. */
-function manifestDifference(before: Record<string, string>, after: Record<string, string>): string[] {
-  const paths = new Set<string>();
-  for (const [path, hash] of Object.entries(after)) {
-    if (before[path] !== hash) paths.add(path);
-  }
-  for (const path of Object.keys(before)) {
-    if (!(path in after)) paths.add(path);
-  }
-  return [...paths];
 }
 
 /**

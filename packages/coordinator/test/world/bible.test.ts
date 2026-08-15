@@ -305,15 +305,12 @@ describe("the world bible (SPEC-022)", () => {
       }
     });
 
-    it("adopts them silently instead of reporting the world as changed outside Arke", async () => {
-      // `bible.md` is the one authored file the product invites into a text editor, so R-23's
-      // staleness and R-28's reconciliation both have to stay out of its way.
+    it("adopts a hand-edit made while the world is open", async () => {
+      // `bible.md` is the one authored file the product invites into a text editor, and taking
+      // its new bytes is the only thing the watcher still does. R-28's reconciliation stays out
+      // of its way for the same reason.
       const dir = await makeTempWorld();
-      let staleReports = 0;
-      const store = await WorldStore.open(dir, {
-        clock: CLOCK,
-        events: { onStale: () => staleReports++ },
-      });
+      const store = await WorldStore.open(dir, { clock: CLOCK });
       try {
         await saveBible(store, OPENING, { source: "editor" });
         // The watcher stays suppressed for a beat after the app's own write, so that events for
@@ -331,8 +328,6 @@ describe("the world bible (SPEC-022)", () => {
           () => /VS Code/.test(store.getBundle().bible.text),
           "the hand-edited bible to be adopted",
         );
-        assert.equal(staleReports, 0, "a hand-edit to the bible is the feature working");
-        assert.equal(store.getBundle().stale, false);
       } finally {
         await store.close();
       }

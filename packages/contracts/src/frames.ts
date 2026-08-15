@@ -196,8 +196,6 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * twice is not an error — the second copy is a world of its own, slugged accordingly.
    */
   z.object({ kind: z.literal("install-sample-world") }).strict(),
-  /** SPEC-002: reload after an external change made the open world stale (R-23). */
-  z.object({ kind: z.literal("reload-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: adopt one closed-world edit — snapshot, bump, log (R-28). */
   z
     .object({ kind: z.literal("reconcile-external-edit"), worldId: UlidSchema, path: z.string().min(1) })

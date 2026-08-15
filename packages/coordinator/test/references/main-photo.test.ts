@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Job } from "@arke-studio/contracts";
 import {
@@ -14,7 +14,6 @@ import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 
 const CLOCK = () => "2026-08-04T08:00:00.000Z";
-const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 async function candidateWorld() {
   const dir = await makeTempWorld();
@@ -157,40 +156,6 @@ describe("main-photo acceptance boundary", () => {
     assert.match((await readKit(store, sheet.id))!.kit.mainPhoto!.file, /^takes\//);
     await access(join(dir, relative));
     assert.equal(store.getBundle().referenceReviews.at(-1)?.decision, "accept");
-    await store.close();
-  });
-
-  it("keeps delayed cleanup inside the app-owned watcher boundary", async () => {
-    const dir = await makeTempWorld();
-    let staleEvents = 0;
-    const store = await WorldStore.open(dir, {
-      clock: CLOCK,
-      events: { onStale: () => staleEvents++ },
-    });
-    const relative = "references/maren-kest/candidates/upload-delayed.png";
-    await store.gateOp(async () => {
-      await mkdir(join(dir, "references", "maren-kest", "candidates"), { recursive: true });
-      await writeFile(join(dir, relative), "candidate-bytes");
-    });
-    await delay(700);
-    const sheet = store.getBundle().sheets.find((candidate) => candidate.id === "maren-kest")!;
-    const result = await acceptMainPhoto(
-      store,
-      sheet,
-      store.getBundle(),
-      { source: "candidate", file: "upload-delayed.png" },
-      null,
-      {
-        removeCandidate: async (path) => {
-          await delay(700);
-          await rm(path);
-        },
-      },
-    );
-    assert.equal(result.status, "accepted");
-    await delay(700);
-    assert.equal(staleEvents, 0);
-    assert.equal(store.getBundle().stale, false);
     await store.close();
   });
 

@@ -658,17 +658,6 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   /** Estimate-versus-actual divergence crossed the drift threshold (SPEC-008 R-13, §2.11). */
   z.object({ ...base, type: z.literal("manifest.drift"), reports: z.array(ManifestDriftSchema) }).strict(),
 
-  /** Another program changed world files while open — reload required, never merged (SPEC-002 R-23). */
-  z
-    .object({
-      ...base,
-      type: z.literal("world.stale"),
-      worldId: UlidSchema,
-      /** The world-relative paths that differed, so the log can be read after the fact. */
-      paths: z.array(z.string().min(1)).default([]),
-    })
-    .strict(),
-
   /** Agent progress in product language: canon checks, drafting steps (SPEC-005 R-15). */
   z
     .object({

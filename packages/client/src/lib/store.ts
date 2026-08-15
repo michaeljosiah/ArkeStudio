@@ -359,9 +359,6 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
         ...state,
         world: { ...state.world, meta: { ...state.world.meta, canonRevision: event.revision } },
       };
-    case "world.stale":
-      if (!state.world || state.world.meta.worldId !== event.worldId) return state;
-      return { ...state, world: { ...state.world, stale: true, stalePaths: event.paths } };
     case "take.recorded":
     case "review.recorded":
     case "selection.changed": {
@@ -1090,10 +1087,6 @@ export function installSampleWorld(): void {
  */
 export function useSampleWorld(): ClientState["app"]["sampleWorld"] | null {
   return useStore().state?.app.sampleWorld ?? null;
-}
-
-export function reloadWorld(worldId: string): void {
-  send({ kind: "reload-world", worldId });
 }
 
 export function reconcileExternalEdit(worldId: string, path: string): void {

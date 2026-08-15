@@ -262,14 +262,6 @@ export const WorldBundleSchema = z
     stagedReferences: z.record(z.string(), z.string()).default({}),
     /** Closed-world edits awaiting reconciliation (SPEC-002 R-28). */
     externalEdits: z.array(ExternalEditSchema).default([]),
-    /** Set when another program changed files while the world was open (SPEC-002 R-23). */
-    stale: z.boolean().default(false),
-    /**
-     * Which world-relative paths differed when that was decided. A warning that cannot say what
-     * changed is a warning nobody can check — and when the report is wrong, as it was while the
-     * app could still mistake its own commit for somebody else's, this is the only evidence.
-     */
-    stalePaths: z.array(z.string().min(1)).default([]),
   })
   .strict();
 export type WorldBundle = z.infer<typeof WorldBundleSchema>;
