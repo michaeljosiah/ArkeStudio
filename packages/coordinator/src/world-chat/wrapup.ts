@@ -107,8 +107,13 @@ export interface WrapUpInput {
    * on that would have written half its contents while saying it was done.
    *
    * Absent, wrap-up stages and closes as it always did.
+   *
+   * Returns null when the proposal landed, or a sentence saying why it did not. A boolean was not
+   * enough: the gate's reason was computed, thrown away, and the person told only that "1 of these
+   * could not be written" — a fact with nothing to act on, and one that made the failure
+   * undiagnosable from the outside as well.
    */
-  writeThrough?: (proposalId: string) => Promise<boolean>;
+  writeThrough?: (proposalId: string) => Promise<string | null>;
   now: () => string;
 }
 
@@ -613,10 +618,10 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
    * and the refusal says which did not.
    */
   if (input.writeThrough) {
-    const left: Proposal[] = [];
+    const left: Array<{ proposal: Proposal; why: string }> = [];
     for (const proposal of proposals) {
-      const landed = await input.writeThrough(proposal.id);
-      if (!landed) left.push(proposal);
+      const why = await input.writeThrough(proposal.id);
+      if (why !== null) left.push({ proposal, why });
     }
     if (left.length > 0) {
       /*
@@ -628,17 +633,29 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
        * proposal goes with them, because leaving it waiting would offer the same change twice,
        * once here and once on the approvals screen.
        */
-      for (const proposal of left) await returnToRail(log, input.gate, proposal, input.now);
+      for (const one of left) await returnToRail(log, input.gate, one.proposal, input.now);
 
+      /*
+       * The reasons, said once each and in the order they happened.
+       *
+       * Deduplicated because a batch usually fails the same way twice — five points refused for
+       * one cause read as five causes, and the person starts looking for five things to fix.
+       */
+      const why = [...new Set(left.map((one) => one.why))].join("; ");
       await log.append(
-        { type: "wrapup.failed", requestId: input.requestId, safeDetail: "some changes could not be written" },
+        {
+          type: "wrapup.failed",
+          requestId: input.requestId,
+          // The event schema bounds this, and the gate's wording is the part worth keeping.
+          safeDetail: `some changes could not be written: ${why}`.slice(0, 500),
+        },
         { at: input.now() },
       );
       throw new WrapUpError(
         "materialise",
         left.length === proposals.length
-          ? "None of these could be written, so they are all still here. The conversation is still open."
-          : `${left.length} of these could not be written and are back on the rail. The rest were written, and the conversation is still open.`,
+          ? `None of these could be written, so they are all still here: ${why}. The conversation is still open.`
+          : `${left.length} of these could not be written and are back on the rail: ${why}. The rest were written, and the conversation is still open.`,
       );
     }
   }

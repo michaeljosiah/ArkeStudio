@@ -1434,9 +1434,12 @@ describe("the windows either side of a decision", () => {
           expectedConversationSeq: seq,
           now: NOW,
           // Nothing lands, as a stale or unconfirmed accept would answer.
-          writeThrough: async () => false,
+          writeThrough: async () => "the world moved underneath it",
         }),
-      (err: unknown) => err instanceof WrapUpError,
+      (err: unknown) =>
+        err instanceof WrapUpError &&
+        // The gate's reason reaches the person, rather than a count they cannot act on.
+        err.message.includes("the world moved underneath it"),
     );
 
     const { events } = await w.log.read();

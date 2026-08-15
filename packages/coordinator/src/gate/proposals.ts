@@ -103,6 +103,39 @@ export type AcceptOutcome =
   | { status: "invalid"; problems: Array<{ path: string; message: string }> };
 
 /**
+ * Accept on behalf of a press that has already decided (SPEC-004 R-9, R-10).
+ *
+ * The ripple reconfirmation exists for the approvals screen: somebody shown "this affects three
+ * things" must not have eleven written under them, so a set that has moved since the preview was
+ * computed sends the decision back to be looked at again.
+ *
+ * A conversation shows no such preview. Save and Accept all are one press over points the person
+ * has read as sentences, not as ripple counts — so there is nothing for them to re-read, and the
+ * refusal is not a question but a dead end: pressing Save again is the only move it leaves, and
+ * it works, which is the proof that nothing was being asked.
+ *
+ * And it moved for a reason worth naming: the proposals in one press are staged together and then
+ * accepted one after another, so each accept changes what the next one's ripples look like. Three
+ * canon rules about one subject wrote the first and refused the other two, every time — the
+ * consequences of the press catching up with the rest of the press.
+ *
+ * What still refuses is everything that guards the world rather than the reader. The staleness
+ * check on each target's recorded base is untouched, so a file edited underneath this press is
+ * still refused; so are a retired target, an unresolved conflict, and an over-long role.
+ */
+export async function acceptDecided(gate: ProposalManager, proposalId: string): Promise<AcceptOutcome> {
+  const first = await gate.accept(proposalId, {});
+  if (first.status !== "needs-reconfirm") return first;
+  /*
+   * Once, and only once.
+   *
+   * A second refusal is no longer this press's own consequences arriving — something else changed
+   * the world between these two calls, and that is exactly the case the reconfirmation is for.
+   */
+  return gate.accept(proposalId, { confirmRipples: first.signature });
+}
+
+/**
  * Why an accept did not write, said to somebody who pressed a button expecting it to.
  *
  * The statuses are the gate's own vocabulary and no use on their own: `the gate answered "invalid"`

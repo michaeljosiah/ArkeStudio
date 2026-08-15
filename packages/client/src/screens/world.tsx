@@ -869,9 +869,21 @@ function SheetGrid({ kind, screenId, newPath, detailPath, title, hint }: {
   const sketches = sheets.filter((s) => s.status === "sketch").length;
   const featured = sheets[0] ?? null;
   const slug = world?.meta.slug;
-  const roleOf = (sheet: Sheet): string =>
-    [sheet.role, sheet.billing].filter(Boolean).join(" · ") ||
-    (sheet.sections[0]?.body.split(/[.!?]/)[0] ?? "").slice(0, 60);
+  /**
+   * The line under a name in the cast list: the role when there is one, the sheet's opening
+   * clause when there is not.
+   *
+   * Cut on a word, never through one. `slice(0, 60)` alone produced "…records in the warm ba",
+   * which reads as a broken field rather than a summary — and it sits in the column where every
+   * other row shows a clean label, so the one character drafted without a role looked like the
+   * one character whose sheet had gone wrong.
+   */
+  const roleOf = (sheet: Sheet): string => {
+    const identity = [sheet.role, sheet.billing].filter(Boolean).join(" · ");
+    if (identity) return identity;
+    const opening = (sheet.sections[0]?.body.split(/[.!?]/)[0] ?? "").trim();
+    return opening.length <= 60 ? opening : `${opening.slice(0, 60).replace(/\s+\S*$/, "")}…`;
+  };
   const featureCopy = (sheet: Sheet): string => {
     const identity = [sheet.role, sheet.billing].filter(Boolean).join(" · ");
     let essence = sheet.sections.find((section) => section.heading.toLowerCase() === "essence")?.body.trim() ?? "";
