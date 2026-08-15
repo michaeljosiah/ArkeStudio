@@ -72,6 +72,51 @@ function baseInput() {
   };
 }
 
+describe("the author's bible in context (SPEC-022)", () => {
+  const BIBLE = "## The tides\n\nThe tide is the clock.";
+
+  it("carries the whole thing, however long, unlike every other section", () => {
+    // The one section with no bound. A bible the Studio has only half of is worse than none: it
+    // would answer confidently out of the half it holds, and the author — who can see the whole
+    // document on their own screen — would have no way to know which half that was.
+    const long = `## The tides\n\n${"The tide is the world's clock. ".repeat(4_000)}`;
+    const context = assembleContext({ ...baseInput(), bible: long });
+    assert.ok(context.bible.includes(long.trim()), "the bible is not cut");
+    assert.ok(context.bible.length > BOUNDS.worldContext, "well past what any bound would allow");
+    assert.deepEqual(context.trimmed, [], "nothing trimmed, so nothing reported as trimmed");
+  });
+
+  it("says what it is before it says what it holds", () => {
+    // Unlabelled, a long confident first-person document about a world reads as settled fact —
+    // and the Studio would then answer out of it and cite it, which is the exact failure the
+    // grounding pipeline exists to prevent, arriving through a side door.
+    const context = assembleContext({ ...baseInput(), bible: BIBLE });
+    assert.match(context.bible, /context, not Canon/i);
+    assert.match(context.bible, /no candidate may cite it as evidence/i);
+    assert.match(context.bible, /Canon is what the world has decided/i);
+    assert.ok(
+      context.bible.trimEnd().endsWith("The tide is the clock."),
+      "the framing leads and the document follows it",
+    );
+  });
+
+  it("renders nothing at all when there is no bible", () => {
+    // A world that has not started one must not be given a paragraph about the thing it lacks.
+    assert.equal(assembleContext({ ...baseInput(), bible: "" }).bible, "");
+    assert.equal(assembleContext({ ...baseInput(), bible: "   \n  " }).bible, "");
+    assert.equal(assembleContext(baseInput()).bible, "");
+  });
+
+  it("makes two turns that read different bibles different turns", () => {
+    // The bible is editable from inside the conversation as well as from outside it, so a digest
+    // that ignored it would let a run record claim a context the turn never had.
+    const before = assembleContext({ ...baseInput(), bible: BIBLE });
+    const after = assembleContext({ ...baseInput(), bible: `${BIBLE} And its accountant.` });
+    assert.notEqual(before.digest, after.digest);
+    assert.equal(before.digest, assembleContext({ ...baseInput(), bible: BIBLE }).digest);
+  });
+});
+
 describe("context assembly", () => {
   it("never truncates what the user just typed", () => {
     const long = "salt ".repeat(20_000);

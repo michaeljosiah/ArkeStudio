@@ -46,6 +46,7 @@ export class FsWorldProvider implements WorldProvider {
   private closing = false;
   private readonly scopedOperations = new Set<Promise<unknown>>();
   private onStaleCb: ((worldId: string, paths: string[]) => void) | null = null;
+  private onAdoptedCb: ((worldId: string) => void) | null = null;
   private appIndex: AppIndex | null = null;
   private appIndexReady = false;
   readonly pathBudget: PathBudget;
@@ -109,6 +110,11 @@ export class FsWorldProvider implements WorldProvider {
 
   onWorldStale(cb: (worldId: string, paths: string[]) => void): void {
     this.onStaleCb = cb;
+  }
+
+  /** The open world quietly refreshed itself — no accusation, just newer bytes (SPEC-022). */
+  onWorldAdopted(cb: (worldId: string) => void): void {
+    this.onAdoptedCb = cb;
   }
 
   /**
@@ -323,7 +329,10 @@ export class FsWorldProvider implements WorldProvider {
     this.store = await WorldStore.open(dir, {
       clock: this.clock,
       ...(this.sqlite ? { sqlite: this.sqlite } : {}),
-      events: { onStale: (paths) => this.onStaleCb?.(worldId, paths) },
+      events: {
+        onStale: (paths) => this.onStaleCb?.(worldId, paths),
+        onAdopted: () => this.onAdoptedCb?.(worldId),
+      },
     });
     const bundle = this.store.getBundle();
     this.refreshRegistry(bundle);

@@ -11,6 +11,7 @@ import {
   attachHostFiles,
   attachHostText,
   cancelWorldChat,
+  restoreBible,
   deleteWorldChat,
   hostCanAttach,
   retryWorldChatTurn,
@@ -515,6 +516,32 @@ export function WorldChatConversationScreen() {
                         <div className="fy-chat__receipts">{`✓ ${m.receipts.join(" · ")}`}</div>
                       )}
                     </div>
+                    {/*
+                      Outside the bubble, because it is not something the Studio said — it is
+                      something it did, to a file, already. The rail beside this transcript holds
+                      what is waiting for a yes; this is the opposite kind of thing, and it needs
+                      to look like it (SPEC-022).
+                    */}
+                    {m.bibleEdit && (
+                      <div className="fy-biblecard">
+                        <p className="fy-biblecard__text">
+                          <span className="fy-biblecard__what">
+                            Edited your bible · {m.bibleEdit.headings.join(", ")}
+                          </span>{" "}
+                          <span className="fy-mono">
+                            v{m.bibleEdit.fromVersion} → v{m.bibleEdit.toVersion}
+                          </span>
+                        </p>
+                        <Button
+                          variant="ghost"
+                          onClick={() => {
+                            if (worldId) restoreBible(worldId, m.bibleEdit!.fromVersion);
+                          }}
+                        >
+                          Undo
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ))}
                 {/*

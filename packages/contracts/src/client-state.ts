@@ -6,6 +6,7 @@ import { CutFileSchema } from "./cut.js";
 import { WorldChatSummarySchema, WorldChatWorkspaceSchema } from "./world-chat.js";
 import { ArtifactSidecarSchema } from "./artifact.js";
 import { ArtDirectionRecordSchema, ResolvedArtDirectionSchema } from "./art-direction.js";
+import { EMPTY_BIBLE, WorldBibleSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
 import { HealthStatusSchema } from "./events.js";
 import { IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
@@ -194,6 +195,16 @@ export const WorldBundleSchema = z
   .object({
     meta: WorldMetaSchema,
     artDirection: ResolvedArtDirectionSchema,
+    /**
+     * The author's bible, whole (SPEC-022). Always present as a record; `present: false` when the
+     * world has no `bible.md` yet, which is every world created before it existed. Carried on the
+     * bundle rather than fetched, because the screen that edits it and the turn that loads it both
+     * want the same text and a world is already sent whole (SPEC-001 D4).
+     *
+     * Defaulted, not required: this schema is a read path, and a bundle from a build that predates
+     * the bible must still parse rather than taking a whole world down with it.
+     */
+    bible: WorldBibleSchema.default(EMPTY_BIBLE),
     sheets: z.array(SheetSchema),
     canon: z.array(CanonEntrySchema),
     referenceKits: z.array(ReferenceKitSchema),

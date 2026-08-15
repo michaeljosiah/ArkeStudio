@@ -83,6 +83,7 @@ world files use forward slashes internally.
 | **World** | The unit of authorship. A folder holding sheets, canon, artifacts and productions. |
 | **Sheet** | A versioned entity record — character, location or faction. |
 | **Canon** | The world's settled rules, lore, timeline, factions and tone, as numbered entries. |
+| **Bible** | The author's own prose about the world — thinking, not record. Ungated, versioned, cited by nothing. |
 | **Canon revision** | A single monotonic counter for the whole world's canon. |
 | **Proposal** | A staged, not-yet-accepted change to any world entity. |
 | **Ripple** | The computed consequences of accepting a proposal. |
@@ -228,6 +229,7 @@ directories and temporary files.
   worlds\
     the-undersong\
       world.json                  name, logline, tone, genre, canonRevision, timestamps
+      bible.md                    the author's own prose about the world (§4.5) — ungated, versioned
       canon\
         CANON-002.md
         CANON-043.md
@@ -656,7 +658,7 @@ cites. Four classes, with different rules:
 | Class | Members | Rule |
 |---|---|---|
 | **Gated** | canon entries, sheets, scenes, story overviews, production metadata, artifact links, agent-drafted chapters | Proposal → ripple → accept. Versioned, snapshotted, logged. |
-| **Direct authored** | chapter prose after acceptance (§8.3) | Written by the author, autosaved. Versioned at save-points, snapshotted, logged. No proposal. |
+| **Direct authored** | chapter prose after acceptance (§8.3), the world bible (§4.5) | Written by the author — or, for the bible, by World Chat. Versioned at every save, snapshotted, logged. No proposal. |
 | **Operational** | `changes.jsonl`, the job queue, the ledger, review decisions, lock files, the index, shot selections | Written by the system as work happens. Append-only where applicable. Never versioned, never gated — these *are* the record of gating, and gating them would be circular. |
 | **Generated media** | takes and their binaries, compiled boards, extracted frames | Written on arrival by the job queue or a local compile. Immutable and content-addressed. Not gated for *existing*; gated for **admission** — what a shot cites and what enters the cut. |
 
@@ -937,6 +939,41 @@ settles the entry.
 
 - **R-CANON-5** Accepting a thread SHALL settle the entry, close the thread, and increment the
   canon revision once.
+
+## 4.5 The world bible
+
+Canon holds what the world has **decided**. The bible holds what the author **thinks** — intent,
+mood, direction, the half-formed — as one Markdown document, `bible.md`, at the world root.
+
+The two are not two copies of one thing, and the ownership rule (§4.1) is not weakened by the
+bible's existence, because the bible owns nothing. Nothing cites it, nothing generates from it,
+and the grounded Q&A pipeline never answers out of it: an answer drawn from a musing would look
+exactly like an answer drawn from canon, which is the failure §4.3 exists to prevent.
+
+It is **direct authored** (§3.1): no proposal, no accept. Two writers share it — the author, in
+the editor or in any text editor, and World Chat, which describes edits in its turn result for
+the coordinator to apply. The version is what makes that safe. Every save cuts one, snapshots to
+`.history/bible/`, and writes a `changes.jsonl` line; a write against a version that has moved is
+refused rather than merged. An unwanted edit is one restore away, and for a document that cites
+nothing that is a better trade than an approval step on thinking out loud.
+
+The whole document is loaded into every World Chat turn, untrimmed. This is the one context
+section with no bound (§8.5's discipline is about *unbounded history*, and the bible is the same
+size on turn fifty as on turn one), so what protects the author is visibility rather than a cut:
+the Bible screen shows its size and per-turn cost, and the agent is instructed not to append to it
+unprompted.
+
+- **R-BIBLE-1** The bible SHALL be one Markdown document at the world root, and a world without
+  one SHALL open normally rather than reporting a problem.
+- **R-BIBLE-2** Every save SHALL cut a version, write a `.history/` snapshot and append a change
+  line, whether the author or World Chat wrote it.
+- **R-BIBLE-3** A write against a version that has since moved SHALL be refused, never merged.
+- **R-BIBLE-4** Bible edits from a turn SHALL be all-or-nothing with that turn: a failed edit
+  rejects the whole turn, and no reply describing an edit SHALL persist without it.
+- **R-BIBLE-5** The bible SHALL be given to the model whole and never truncated, labelled as
+  context rather than canon, and SHALL NOT be citable as candidate evidence.
+- **R-BIBLE-6** Hand-edits to the bible while a world is open SHALL be adopted, not reported as
+  external modification (§2.7) or queued for reconciliation (R-28).
 
 ---
 

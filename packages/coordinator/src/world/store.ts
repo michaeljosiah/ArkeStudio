@@ -4,6 +4,7 @@ import type { ExternalEdit, WorldBundle } from "@arke-studio/contracts";
 import { WorldIndex } from "../index-db/world-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import { atomicWriteFile } from "./atomic.js";
+import { readBible } from "./bible.js";
 import { appendChanges } from "./change-writer.js";
 import { CommitPlanError, Committer, classify, type CommitHooks, type CommitInput, type CommitResult } from "./commit.js";
 import { WorldLock } from "./lock.js";
@@ -32,6 +33,16 @@ export interface WorldStoreEvents {
    * cannot be checked against, argued with, or debugged after the fact.
    */
   onStale?: (paths: string[]) => void;
+  /**
+   * The store refreshed its own scan without anybody being at fault (SPEC-022).
+   *
+   * Distinct from `onStale`, and it has to be. Staleness is an accusation — something outside
+   * the app wrote to a gated file and a human has to decide what to do. This is the opposite:
+   * an ungated file the product invites into a text editor changed, and the right response is to
+   * take the new bytes and say nothing. Without this event nobody downstream learns, so the
+   * screen goes on showing what the author replaced minutes ago and cannot tell why.
+   */
+  onAdopted?: () => void;
 }
 
 /**
@@ -237,7 +248,10 @@ export class WorldStore {
     let historyPath: string;
     if (kind.track === "sheet") historyPath = `.history/${kind.collection}/${kind.id}/v${version}.md`;
     else if (kind.track === "canon") historyPath = `.history/canon/${kind.id}/v${version}.md`;
-    else throw new CommitPlanError(`restore is defined for sheets and canon, not ${kind.track}`);
+    // The bible is ungated, so restore is not a convenience here — it is the undo that stands in
+    // for the accept step every other authored file gets (SPEC-022).
+    else if (kind.track === "bible") historyPath = `.history/bible/v${version}.md`;
+    else throw new CommitPlanError(`restore is defined for sheets, canon and the bible, not ${kind.track}`);
 
     const snapshot = await this.readEntity(historyPath);
     if (snapshot === null) throw new CommitPlanError(`no history snapshot at ${historyPath}`);
@@ -419,6 +433,7 @@ export class WorldStore {
   private async runVerification(): Promise<void> {
     do {
       this.verifyAgain = false;
+      await this.serialise(() => this.adoptBibleIfMoved());
       const seen = await this.serialise(() => this.differingPaths());
       if (this.closed || this.stale) return;
       if (seen.length === 0) continue;
@@ -439,6 +454,27 @@ export class WorldStore {
       // Our own write, caught between landing and being rescanned. Nothing happened, and the
       // next event is verified from scratch rather than held against this one.
     } while (this.verifyAgain);
+  }
+
+  /**
+   * Hot-reload the bible instead of accusing anybody of editing it (SPEC-022).
+   *
+   * `bible.md` is the one authored file the product invites the user to open in a text editor, so
+   * a hand-edit to it is the feature working, not an anomaly. It is absent from the manifests for
+   * that reason — R-23's staleness and R-28's reconciliation both exist to protect *gated* files,
+   * and applying either here would answer an edit the app asked for with "this world changed
+   * outside Arke Studio", or with a reconciliation prompt for prose nobody needs to approve.
+   *
+   * Adopting it is a plain rescan, which is also what makes the next turn read what they typed.
+   */
+  private async adoptBibleIfMoved(): Promise<void> {
+    if (this.closed) return;
+    const current = await readBible(this.dir).catch(() => null);
+    if (current === null) return;
+    const held = this.scan.bundle.bible;
+    if (current.text === held.text && current.present === held.present) return;
+    await this.rescan().catch(() => {});
+    this.events.onAdopted?.();
   }
 
   /** Portable paths where the world on disk no longer matches the scan this store is serving. */

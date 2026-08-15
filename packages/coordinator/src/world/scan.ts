@@ -38,6 +38,7 @@ import {
   type WorldProblem,
 } from "@arke-studio/contracts";
 import { MarkdownFile, sha256 } from "./text-files.js";
+import { readBible } from "./bible.js";
 import { projectReview } from "../gate/review.js";
 import { toExtendedLength, toPortable } from "./paths.js";
 import { readChanges } from "./change-writer.js";
@@ -236,6 +237,11 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
   };
 
   manifest["world.json"] = sha256(await read(join(dir, "world.json")));
+
+  // Deliberately outside `tryParse`, so it never joins `manifest`. The manifest is the
+  // reconciliation surface for gated files (R-28); the bible is ungated and invites hand-edits,
+  // which the store adopts silently rather than reporting (see `adoptBibleIfMoved`).
+  const bible = await readBible(dir);
 
   let artDirectionRecord: ArtDirectionRecord | null = null;
   const artDirectionPath = ART_DIRECTION_PATH;
@@ -634,6 +640,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
 
   const bundle: WorldBundle = {
     meta,
+    bible,
     artDirection: {
       ...resolved,
       reach: {

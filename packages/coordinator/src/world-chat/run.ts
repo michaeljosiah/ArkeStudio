@@ -1,5 +1,7 @@
 import {
   newId,
+  type BibleEdit,
+  type BibleEditRecord,
   type CandidateChecks,
   type ConversationId,
   type HarnessAdapter,
@@ -15,6 +17,7 @@ import {
   type WorldChatRun,
 } from "@arke-studio/contracts";
 import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
+import { BibleEditError, BibleStaleError } from "../world/bible.js";
 import { assembleContext, type ContextAttachment } from "./context.js";
 import type { CurrentLook } from "./look.js";
 import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
@@ -109,6 +112,27 @@ export interface RunDeps {
    * existed and is stale against neither.
    */
   artDirectionLook?: () => CurrentLook;
+  /**
+   * The author's bible as it stands right now (SPEC-022).
+   *
+   * Read from disk per turn rather than taken off the cached bundle, for two reasons that both
+   * bite: the author may have edited `bible.md` in a text editor since this conversation opened,
+   * and the Studio itself may have edited it in an earlier turn of this very conversation. A
+   * cached copy would show the model a bible that is one edit behind its own last edit, and the
+   * version it returns is what the next write is checked against.
+   */
+  bible?: () => Promise<{ version: number; text: string }>;
+  /**
+   * Apply this turn's bible edits, or throw.
+   *
+   * `baseVersion` is the version the prompt was built from, so a bible that moved between the
+   * prompt and the answer is refused rather than overwritten — the same guard the commit
+   * primitive applies to every other authored file (SPEC-002 R-27).
+   */
+  applyBibleEdits?: (input: {
+    edits: readonly BibleEdit[];
+    baseVersion: number;
+  }) => Promise<BibleEditRecord | null>;
   /** What the conversation was opened about, worded for the model (#70 phase 6). */
   describeEntry?: (context: NonNullable<WorldChatLoaded["entryContext"]>) => string;
   /**
@@ -338,6 +362,14 @@ export class WorldChatRunner {
      * job is to catch a whole-description draft written against a look that has since moved.
      */
     const artDirectionLook = this.deps.artDirectionLook?.();
+    /*
+     * The bible the model is about to be shown, pinned now — same reasoning as the look above.
+     *
+     * The version travels with the text because it is what any edit this turn returns will be
+     * checked against. Reading the text now and the version later would let an edit made in a
+     * text editor between the two be silently overwritten by an answer that never saw it.
+     */
+    const bible = (await this.deps.bible?.()) ?? { version: 1, text: "" };
     const assembled = assembleContext({
       ...(view.entryContext && this.deps.describeEntry
         ? { entryContext: this.deps.describeEntry(view.entryContext) }
@@ -351,6 +383,7 @@ export class WorldChatRunner {
       messages: view.messages.filter((m) => m.id !== currentMessage.id),
       tombstones: tombstonesFrom(events),
       ...(this.deps.worldContext ? { worldContext: this.deps.worldContext(view) } : {}),
+      bible: bible.text,
       attachments: contextAttachments(view, attachmentIds, handed.text),
       currentUserMessage: text,
       currentUserMessageId: currentMessage.id,
@@ -411,6 +444,7 @@ export class WorldChatRunner {
         at,
         linked,
         artDirectionLook,
+        bible.version,
       );
       if (!outcome.ok) {
         // The one corrective turn (§8.4). It names the faults and asks for the whole result
@@ -442,6 +476,7 @@ export class WorldChatRunner {
           at,
           linked,
           artDirectionLook,
+          bible.version,
         );
       }
 
@@ -534,6 +569,8 @@ export class WorldChatRunner {
     allowed: readonly ChatAttachmentId[],
     /** The look the prompt was assembled against — see RunDeps.artDirectionLook. */
     artDirectionLook: CurrentLook | undefined,
+    /** The bible version the prompt was assembled against — see RunDeps.bible. */
+    bibleBaseVersion: number,
   ): Promise<{ ok: true; reply: string } | { ok: false; problems: readonly TurnProblem[] }> {
     const { events } = await store.read();
     const meta = await store.readMeta();
@@ -590,6 +627,44 @@ export class WorldChatRunner {
       checks: checksByDraft.get(candidate as unknown as ModelCandidateDraft) ?? candidate.checks,
     }));
 
+    /*
+     * The bible is written before the turn is recorded, and a failure here rejects the turn
+     * whole (SPEC-022, §8.3's all-or-nothing rule).
+     *
+     * Both orderings lose something and this one loses less. Recording the turn first would let
+     * a reply saying "I've added that to your bible" persist beside a bible that never changed —
+     * the same confident account of work that does not exist that this file's opening comment
+     * refuses for propositions. Writing first risks the opposite: a crash in the window between
+     * the commit and the append leaves the edit on disk with no conversation record of it. That
+     * one is recoverable and visible — the text is in the bible, the version is in
+     * `changes.jsonl`, and the history snapshot is there to restore from — where a reply about
+     * an edit that never happened is neither.
+     */
+    let bibleEdit: BibleEditRecord | null = null;
+    if (outcome.turn.bibleEdits.length > 0) {
+      if (!this.deps.applyBibleEdits) {
+        return {
+          ok: false,
+          problems: [
+            {
+              code: "bible-unavailable",
+              safeMessage: "The bible cannot be edited in this conversation. Answer without editing it.",
+            },
+          ],
+        };
+      }
+      try {
+        bibleEdit = await this.deps.applyBibleEdits({
+          edits: outcome.turn.bibleEdits,
+          baseVersion: bibleBaseVersion,
+        });
+      } catch (err) {
+        // Named precisely, because the corrective turn can act on it: a heading that does not
+        // resolve is fixable by the model, and a bible that moved underneath it is not.
+        return { ok: false, problems: [{ code: "bible-edit", safeMessage: bibleProblem(err) }] };
+      }
+    }
+
     await store.append(
       {
         type: "turn.completed",
@@ -606,6 +681,7 @@ export class WorldChatRunner {
         candidates: revalidated,
         groups: outcome.turn.groups,
         tombstones: outcome.turn.tombstones,
+        ...(bibleEdit ? { bibleEdit } : {}),
       },
       { at },
     );
@@ -704,6 +780,24 @@ function safeDetail(err: unknown): string {
   return "the studio could not complete this turn";
 }
 
+/**
+ * Why a bible edit failed, in words the one corrective turn can use (§8.4).
+ *
+ * `BibleEditError` is the model's to fix — it named a heading the document does not have, and
+ * the retry can use `set-section` instead. `BibleStaleError` is not: the author edited the file
+ * while the model was writing, and the only honest thing to do is answer without touching it.
+ * Neither message carries world content, per TurnProblem's contract.
+ */
+function bibleProblem(err: unknown): string {
+  if (err instanceof BibleEditError) {
+    return `The bible has no section headed "${err.heading.slice(0, 120)}". Use set-section to add one, or name a heading that is there.`;
+  }
+  if (err instanceof BibleStaleError) {
+    return "The bible changed while you were answering, so it was left alone. Answer without editing it this turn.";
+  }
+  return "The bible could not be edited. Answer without editing it this turn.";
+}
+
 /** The context sections, in the order the agent brief expects them. */
 function renderPrompt(assembled: ReturnType<typeof assembleContext>): string {
   const sections: string[] = [];
@@ -717,6 +811,9 @@ ${assembled.entryContext}`);
       `## Withdrawn — do not propose these again\n${assembled.tombstones}`,
     );
   }
+  // Before the world's own record, because it is the frame that record sits inside: what the
+  // author thinks this world is, in their words, ahead of what the world has so far decided.
+  if (assembled.bible) sections.push(`## The author's bible\n${assembled.bible}`);
   if (assembled.worldContext) sections.push(`## From the world\n${assembled.worldContext}`);
   if (assembled.recentTurns) sections.push(`## Recent turns\n${assembled.recentTurns}`);
   // Last before what they just said, because that is usually the sentence about it — "can you

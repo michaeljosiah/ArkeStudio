@@ -262,6 +262,7 @@ export function projectWorkspace(
       role: m.role,
       text: m.text,
       receipts: (receiptsByMessage.get(m.id) ?? []).map(wordReceipt),
+      ...(loaded.bibleEdits[m.id] ? { bibleEdit: loaded.bibleEdits[m.id]! } : {}),
       createdAt: m.createdAt,
     })),
     hasMore: loaded.hasMore,

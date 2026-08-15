@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
+  BIBLE_PATH,
   deriveArtDirectionDescription,
   newId,
   WorldMetaSchema,
@@ -120,9 +121,11 @@ type Classified =
   | { track: "story"; production: string }
   | { track: "production-meta"; production: string }
   | { track: "art-direction" }
+  | { track: "bible" }
   | { track: "unversioned" };
 
 export function classify(path: string): Classified {
+  if (path === BIBLE_PATH) return { track: "bible" };
   let m = /^canon\/(CANON-\d+)\.md$/.exec(path);
   if (m) return { track: "canon", id: m[1]! };
   m = /^(characters|locations|factions)\/([a-z0-9][a-z0-9-]*)\.md$/.exec(path);
@@ -218,11 +221,17 @@ export class Committer {
       let toVersion: number | undefined;
       let fieldsChanged: string[] | undefined;
 
-      if (kind.track === "sheet" || kind.track === "chapter") {
+      if (kind.track === "sheet" || kind.track === "chapter" || kind.track === "bible") {
+        // The bible rides the sheet track: Markdown, a monotonic version in frontmatter, a full
+        // snapshot per version. It is ungated (§3.1, direct authored), so the version and the
+        // snapshot are the *only* things standing between an agent edit and lost work — which is
+        // why it never passes `preserveVersion`, unlike chapter prose. Every save is restorable.
         const dirPath =
           kind.track === "sheet"
             ? `.history/${kind.collection}/${kind.id}`
-            : `.history/productions/${kind.production}/chapters/${kind.file}`;
+            : kind.track === "bible"
+              ? ".history/bible"
+              : `.history/productions/${kind.production}/chapters/${kind.file}`;
         const baseDoc = live !== null ? MarkdownFile.parse(live) : null;
         fromVersion = baseDoc ? ((baseDoc.data["version"] as number) ?? 1) : null;
         if (f.action !== "delete") {

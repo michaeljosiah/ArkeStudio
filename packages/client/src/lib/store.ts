@@ -1821,6 +1821,22 @@ export function stageSceneEdit(
   send({ kind: "stage-scene-edit", worldId, productionId, sceneFile, summary, scene });
 }
 
+/**
+ * Save the bible (SPEC-022). No proposal, no accept — it saves where it stands.
+ *
+ * `baseVersion` is the version the editor loaded. Passing it is what makes an ungated file safe
+ * to share between three writers: this screen, the Studio mid-conversation, and a text editor
+ * outside the app. A save written against a version that has since moved is refused, not merged.
+ */
+export function saveBible(worldId: string, text: string, baseVersion?: number): void {
+  send({ kind: "save-bible", worldId, text, ...(baseVersion !== undefined ? { baseVersion } : {}) });
+}
+
+/** Undo, at whatever depth: v<n> returns as a new version and the ones after it stay in history. */
+export function restoreBible(worldId: string, version: number): void {
+  send({ kind: "restore-bible", worldId, version });
+}
+
 export function createChapter(worldId: string, productionId: string, title: string, order: number): void {
   send({ kind: "create-chapter", worldId, productionId, title, order });
 }

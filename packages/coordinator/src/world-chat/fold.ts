@@ -1,4 +1,5 @@
 import type {
+  BibleEditRecord,
   CandidateGroup,
   CandidateTombstone,
   ConversationId,
@@ -61,6 +62,8 @@ export function foldConversation(
   let saveInFlight = false;
 
   const messages: WorldChatMessage[] = [];
+  /** Landed bible edits, by the studio message that reported them (SPEC-022). */
+  const bibleEdits = new Map<string, BibleEditRecord>();
   /** The log sequence each message arrived at, so paging can use a real cursor. */
   const messageSeq = new Map<string, number>();
   const messageIds = new Set<string>();
@@ -138,6 +141,8 @@ export function foldConversation(
       case "turn.completed":
         addMessage(e.message, envelope.seq);
         runs.set(e.run.id, e.run);
+        // Keyed by the reply that made it, so the card renders beside the sentence describing it.
+        if (e.bibleEdit) bibleEdits.set(e.message.id, e.bibleEdit);
         for (const c of e.candidates) applyCandidate(c, envelope.seq);
         for (const g of e.groups) groups.set(g.id, g);
         for (const t of e.tombstones) {
@@ -291,6 +296,14 @@ export function foldConversation(
     seq,
     ...(reopened ? { reopened: true } : {}),
     messages: shown,
+    // Only for the messages still in the window: a card whose message has paged out of the
+    // transcript has nothing to render beside, and the bible's own history is the durable record.
+    bibleEdits: Object.fromEntries(
+      shown.flatMap((m) => {
+        const edit = bibleEdits.get(m.id);
+        return edit ? [[m.id, edit] as const] : [];
+      }),
+    ),
     hasMore: shown.length < windowed.length,
     candidates: [...candidates.values()],
     groups: [...groups.values()],

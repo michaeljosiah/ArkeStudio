@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   newId,
   WorldChatTurnResultSchema,
+  type BibleEdit,
   type CandidateChecks,
   type CandidateEvidence,
   type CandidateGroup,
@@ -68,6 +69,14 @@ export interface AcceptedTurn {
   candidates: WorldChangeCandidate[];
   groups: CandidateGroup[];
   tombstones: CandidateTombstone[];
+  /**
+   * Bible edits this turn described, still unapplied (SPEC-022).
+   *
+   * Validation stops at the shape. Whether a heading resolves is a fact about the file, and this
+   * module deliberately touches no world state — the runner applies them, and a failure there
+   * rejects the turn exactly as a failure here would.
+   */
+  bibleEdits: readonly BibleEdit[];
 }
 
 export type ValidationOutcome =
@@ -372,7 +381,9 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
   }
 
   const groups = buildGroups(result, input, idByTemporary, candidates);
-  return { ok: true, turn: { reply: result.reply, candidates, groups, tombstones } };
+  // Carried through untouched: the schema has already bounded them, and whether they *apply* is
+  // a question about the file on disk, which only the caller holding the store can answer.
+  return { ok: true, turn: { reply: result.reply, candidates, groups, tombstones, bibleEdits: result.bibleEdits } };
 }
 
 function resolvableMember(

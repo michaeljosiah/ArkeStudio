@@ -15,6 +15,7 @@ import {
   SlugSchema,
   TurnIdSchema,
 } from "./ids.js";
+import { BIBLE_EDIT_BOUNDS, BibleEditRecordSchema, BibleEditSchema, type BibleEdit } from "./bible.js";
 
 /**
  * World Chat (#70): a conversation about a world, and the propositions it produced.
@@ -708,6 +709,15 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
       candidates: z.array(WorldChangeCandidateSchema),
       groups: z.array(CandidateGroupSchema),
       tombstones: z.array(CandidateTombstoneSchema),
+      /**
+       * The bible edit this turn landed, if it made one (SPEC-022).
+       *
+       * Recorded with the reply for the same reason the propositions are: the reply says "I've
+       * written that down", and a crash that kept the sentence but lost the record of which
+       * version it produced would leave the conversation describing an edit nobody could find
+       * or undo. The file itself is already committed by then — this is the pointer to it.
+       */
+      bibleEdit: BibleEditRecordSchema.optional(),
     })
     .strict(),
   z
@@ -921,6 +931,15 @@ export const WorldChatLoadedSchema = z
      * "this did not work".
      */
     lastFailedRun: WorldChatRunSchema.nullable().default(null),
+    /**
+     * Bible edits this conversation made, by the studio message that made them (SPEC-022).
+     *
+     * A map rather than a field on the message, because the message is the durable record of
+     * what was *said* and this is a record of what was *done* to a file outside the conversation.
+     * Folding them together would put a pointer to world state inside the transcript, and the
+     * transcript is the one thing here that never holds any.
+     */
+    bibleEdits: z.record(MessageIdSchema, BibleEditRecordSchema).default({}),
     summary: z.string().max(8000).optional(),
     proposalIds: z.array(ProposalIdSchema),
     /** What its wrap-up could not carry; empty until one has happened. */
@@ -1081,6 +1100,17 @@ export const WorldChatTurnResultSchema = z
     reply: z.string().max(TURN_RESULT_BOUNDS.reply),
     candidateOperations: z.array(ModelCandidateOperationSchema).max(TURN_RESULT_BOUNDS.candidateOperations),
     groupOperations: z.array(ModelGroupOperationSchema).max(TURN_RESULT_BOUNDS.groupOperations),
+    /**
+     * Edits to the author's bible, applied by the coordinator when the turn lands (SPEC-022).
+     *
+     * Here rather than on the retrieval tool surface, which is read-only by contract (#70 §9.2)
+     * and confines the harness to its scratch directory (§18.3). Both stay true: the model
+     * describes the edit, the coordinator performs it, and the one path that writes the file is
+     * also the path that versions and snapshots it.
+     *
+     * Defaulted rather than required, so a turn that touches nothing may omit it entirely.
+     */
+    bibleEdits: z.array(BibleEditSchema).max(BIBLE_EDIT_BOUNDS.edits).default([]),
   })
   .strict();
 export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
@@ -1136,6 +1166,15 @@ export const WorldChatTranscriptMessageSchema = z
     text: z.string(),
     /** Persisted receipts, already worded for a person: "read Maren Kest v4". */
     receipts: z.array(z.string().max(200)),
+    /**
+     * The bible edit this reply made, if it made one (SPEC-022).
+     *
+     * Beside the message rather than in the understanding rail, and that placement is the point.
+     * The rail holds propositions, which are waiting for a yes; this already happened. Putting
+     * them together would make "I changed your bible" and "I propose changing Canon" read as the
+     * same kind of offer, and only one of them is an offer at all.
+     */
+    bibleEdit: BibleEditRecordSchema.optional(),
     createdAt: IsoDateTimeSchema,
   })
   .strict();
@@ -1422,7 +1461,22 @@ const exampleTurnResult = {
     { op: "create", temporaryId: "t2", candidate: exampleDrafts["canon.thread"] },
   ],
   groupOperations: [],
+  bibleEdits: [],
 } satisfies WorldChatTurnResult;
+
+const exampleBibleEdits = {
+  "set-section": {
+    op: "set-section",
+    heading: "The tides",
+    text: "The tide is the world's clock and its accountant. Nothing in the harbour is owed on a day; it is owed on a tide.",
+  },
+  "append-to-section": {
+    op: "append-to-section",
+    heading: "The tides",
+    text: "Maren counts in tides without noticing she is doing it.",
+  },
+  "remove-section": { op: "remove-section", heading: "Old notes on the bells" },
+} satisfies Record<string, BibleEdit>;
 
 const exampleGroupOperation = {
   op: "create",
@@ -1443,6 +1497,7 @@ export const WORLD_CHAT_SHAPE_EXAMPLES = {
   operations: exampleOperations,
   groupOperation: exampleGroupOperation,
   turnResult: exampleTurnResult,
+  bibleEdits: exampleBibleEdits,
 } as const;
 
 /** One classification's payload line: what sits beside the common fields, shown as real JSON. */
@@ -1556,9 +1611,9 @@ export function worldChatResultShapeGuide(): string {
 
 Return one JSON object and nothing else — no prose around it, no markdown fences:
 
-{"reply": "...", "candidateOperations": [...], "groupOperations": [...]}
+{"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...]}
 
-reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}; both are [] when there is nothing to record.
+reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}; all are [] when there is nothing to record.
 
 A complete result:
 ${JSON.stringify(exampleTurnResult, null, 1)}
@@ -1628,6 +1683,23 @@ ${JSON.stringify(exampleWorldEvidence)}
 Supporting evidence — an attachment you were handed:
 ${JSON.stringify(exampleAttachmentEvidence)}
 - attachmentId and contentHash are printed with the document under "What they handed you". Copy both exactly; do not guess either.
+
+### Bible edits
+
+The bible is the author's own document about their world — their thinking, in their words. It is shown to you in full under "The author's bible". It is NOT canon: nothing in it is settled, nothing generates from it, and a candidate may never cite it as evidence.
+
+You may edit it, and edits land immediately — there is no accept step. Every edit cuts a version and can be undone, which is why it needs no permission; it is not a licence to tidy. Edit it when they ask you to, or when writing something down is plainly the point of what they just said. Never append to it as a routine end to a turn: it is loaded whole on every turn, so a document you add to reflexively is one that grows until it costs them.
+
+op is one of set-section | append-to-section | remove-section | replace-document.
+
+- set-section replaces that section's body, or adds the section at the end when the heading is new: ${JSON.stringify(exampleBibleEdits["set-section"])}
+- append-to-section adds to the end of a section that already exists: ${JSON.stringify(exampleBibleEdits["append-to-section"])}
+- remove-section takes one out: ${JSON.stringify(exampleBibleEdits["remove-section"])}
+- replace-document rewrites the whole thing: {"op": "replace-document", "text": "..."}
+
+heading matches the \`## \` headings shown to you, ignoring case and surrounding space. append-to-section and remove-section are refused when the heading is not there, and a refusal rejects the whole turn — so use set-section when you are adding something new. Prefer a section-scoped edit to replace-document: restating a long document to change one line loses the parts you were not thinking about.
+
+Where the bible and Canon disagree, Canon is what the world has decided. Say so rather than choosing — and never quietly edit the bible to agree with Canon unless they ask you to.
 
 ### Group operations
 
