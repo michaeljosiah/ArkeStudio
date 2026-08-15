@@ -177,10 +177,9 @@ async function buildAndStage(input: {
   // Everything is built and validated before a single proposal directory exists, so a malformed
   // candidate fails without leaving one behind (§11.2).
   const built = [];
-  let nextCanon = 0;
   try {
     for (const candidate of carried) {
-      built.push(materialiseCandidate(candidate, identities, bundle, at, () => identities.canonIds[nextCanon++]!));
+      built.push(materialiseCandidate(candidate, identities, bundle, at));
     }
   } catch (err) {
     // Nothing was staged yet — this fails before the first gate call — so there is nothing that

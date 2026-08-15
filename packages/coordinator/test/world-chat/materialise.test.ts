@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Sheet, WorldBundle, WorldChangeCandidate } from "@arke-studio/contracts";
-import { materialiseCandidate, type Identities } from "../../src/world-chat/materialise.js";
+import { materialiseCandidate, MaterialiseError, type Identities } from "../../src/world-chat/materialise.js";
 import { MarkdownFile } from "../../src/world/text-files.js";
 
 /**
@@ -16,11 +16,7 @@ import { MarkdownFile } from "../../src/world/text-files.js";
  */
 
 const AT = "2026-08-15T10:00:00Z";
-const IDENTITIES: Identities = { canonIds: [], slugBy: new Map() };
-const NO_CANON = () => {
-  throw new Error("no canon id should be needed here");
-};
-
+const IDENTITIES: Identities = { canonIds: [], slugBy: new Map(), canonIdBy: new Map() };
 /** A character wearing every optional field a sheet may carry, so a drop cannot hide. */
 function fullSheet(over: Partial<Sheet> = {}): Sheet {
   return {
@@ -61,7 +57,7 @@ function editOf(draft: Record<string, unknown>, sheet: Sheet): WorldChangeCandid
 
 /** The frontmatter of the single file this proposition would write. */
 function frontmatterOf(candidate: WorldChangeCandidate, sheet: Sheet): Record<string, unknown> {
-  const built = materialiseCandidate(candidate, IDENTITIES, bundleWith(sheet), AT, NO_CANON);
+  const built = materialiseCandidate(candidate, IDENTITIES, bundleWith(sheet), AT);
   assert.equal(built.targets.length, 1);
   return MarkdownFile.parse(built.targets[0]!.content).data;
 }
@@ -71,7 +67,7 @@ describe("a sheet edit changes what it names and nothing else", () => {
   const touchOneSection = editOf({ sections: [{ heading: "Essence", body: "Rewritten." }] }, sheet);
 
   it("writes the section it was given", () => {
-    const built = materialiseCandidate(touchOneSection, IDENTITIES, bundleWith(sheet), AT, NO_CANON);
+    const built = materialiseCandidate(touchOneSection, IDENTITIES, bundleWith(sheet), AT);
     const doc = MarkdownFile.parse(built.targets[0]!.content);
     assert.match(doc.body, /Rewritten\./);
     assert.match(doc.body, /Tall, lean, controlled\./, "and leaves the sections it was not given");
@@ -171,5 +167,106 @@ describe("a relationship change touches one section of one sheet", () => {
     assert.deepEqual(data["canonRules"], ["CANON-004", "CANON-011"]);
     assert.equal(data["role"], "Blackfeather founder");
     assert.equal(data["production"], "the-long-fall");
+  });
+});
+
+/**
+ * What a sheet is bound by (§2.3.2).
+ *
+ * Every sheet a conversation wrote used to come out with `canonRules: []` and `links: []`,
+ * whatever had been said: the draft carried the references and materialise dropped them, so "he is
+ * bound by the maintenance-hand rule" was heard, answered, and written down nowhere.
+ */
+describe("references a conversation asks for", () => {
+  const RULE = "CANON-004";
+  const OTHER = "maren-kest";
+
+  function worldWith(sheet?: Sheet): WorldBundle {
+    return {
+      sheets: [...(sheet ? [sheet] : []), { id: OTHER, type: "character", name: "Maren" }],
+      canon: [{ id: RULE, title: "The maintenance hand", body: "Only deacons read it." }],
+    } as unknown as WorldBundle;
+  }
+
+  function creating(draft: Record<string, unknown>, id = "cand_new"): WorldChangeCandidate {
+    return {
+      id,
+      classification: "sheet.create",
+      draft: { type: "character", name: "Colm Venn", canonRules: [], links: [], sections: [], ...draft },
+    } as unknown as WorldChangeCandidate;
+  }
+
+  const plan = (over: Partial<Identities> = {}): Identities => ({
+    canonIds: [],
+    slugBy: new Map([["cand_new", "colm-venn"]]),
+    canonIdBy: new Map(),
+    ...over,
+  });
+
+  const fm = (c: WorldChangeCandidate, ids: Identities, b: WorldBundle) =>
+    MarkdownFile.parse(materialiseCandidate(c, ids, b, AT).targets[0]!.content).data;
+
+  it("writes the canon rules the draft names", () => {
+    assert.deepEqual(fm(creating({ canonRules: [RULE] }), plan(), worldWith())["canonRules"], [RULE]);
+  });
+
+  it("writes a link to a sheet that exists", () => {
+    const data = fm(creating({ links: [{ kind: "sheet", sheetId: OTHER }] }), plan(), worldWith());
+    assert.deepEqual(data["links"], [OTHER]);
+  });
+
+  /*
+   * A sheet holds canon in one field, and `links` is not it — that field takes slugs. The link
+   * union admits a canon ref, so it is a shape the model is invited to produce and it has to land
+   * somewhere rather than vanish.
+   */
+  it("folds a canon reference arriving as a link into canonRules", () => {
+    const data = fm(creating({ links: [{ kind: "canon", entryId: RULE }] }), plan(), worldWith());
+    assert.deepEqual(data["canonRules"], [RULE]);
+    assert.deepEqual(data["links"], []);
+  });
+
+  it("resolves a link to a sheet being created in the same breath", () => {
+    const ids = plan({ slugBy: new Map([["cand_new", "colm-venn"], ["cand_sister", "ottoline-pike"]]) });
+    const c = creating({ links: [{ kind: "pending-entity", ref: { candidateId: "cand_sister", revision: 1 } }] });
+    assert.deepEqual(fm(c, ids, worldWith())["links"], ["ottoline-pike"]);
+  });
+
+  /*
+   * The reason canon ids are planned per candidate rather than handed out as materialise walks the
+   * set: a character bound by a rule written in the same turn has to be able to name it.
+   */
+  it("resolves a rule being created in the same breath", () => {
+    const ids = plan({ canonIdBy: new Map([["cand_rule", "CANON-050"]]) });
+    const c = creating({ links: [{ kind: "pending-entity", ref: { candidateId: "cand_rule", revision: 1 } }] });
+    assert.deepEqual(fm(c, ids, worldWith())["canonRules"], ["CANON-050"]);
+  });
+
+  it("refuses a rule the world does not have, rather than writing a dangling reference", () => {
+    assert.throws(
+      () => materialiseCandidate(creating({ canonRules: ["CANON-999"] }), plan(), worldWith(), AT),
+      (err: unknown) => err instanceof MaterialiseError && err.detail.includes("CANON-999"),
+    );
+  });
+
+  it("never links a sheet to itself", () => {
+    const ids = plan();
+    const c = creating({ links: [{ kind: "pending-entity", ref: { candidateId: "cand_new", revision: 1 } }] });
+    assert.deepEqual(fm(c, ids, worldWith())["links"], []);
+  });
+
+  it("carries a sheet's references through an edit that says nothing about them", () => {
+    const sheet = fullSheet({ canonRules: [RULE], links: [OTHER] });
+    const edit = editOf({ sections: [{ heading: "Essence", body: "Changed." }] }, sheet);
+    const data = frontmatterOf(edit, sheet);
+    assert.deepEqual(data["canonRules"], [RULE]);
+    assert.deepEqual(data["links"], [OTHER]);
+  });
+
+  it("replaces them when an edit does name them", () => {
+    const sheet = fullSheet({ canonRules: [], links: [] });
+    const edit = editOf({ canonRules: [RULE] }, sheet);
+    const data = materialiseCandidate(edit, plan(), worldWith(sheet), AT);
+    assert.deepEqual(MarkdownFile.parse(data.targets[0]!.content).data["canonRules"], [RULE]);
   });
 });
