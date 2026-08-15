@@ -13,6 +13,16 @@
  * would put wrong promises in front of a dispatch. The script merges the two and refuses to
  * emit a model whose price it could not read: an unpriced model cannot be estimated, and
  * estimating before spending is the whole point of the manifest.
+ *
+ * `maxPromptChars` is the exception that proves it: the catalogue API is silent, but each route
+ * publishes its own JSON schema — no key needed — and where the provider enforces a length it is
+ * declared there:
+ *
+ *   https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=<route>   →  input.prompt.maxLength
+ *
+ * So the caps below are transcribed from that, not chosen. A route whose schema declares none is
+ * left without one deliberately: the composer then shows no counter, which is the honest reading
+ * of "the provider does not say" — and is not the same as an unlimited prompt.
  */
 
 const API = "https://fal.ai/api/models";
@@ -50,6 +60,7 @@ const CURATED = {
     // resolutions[0] is what every job gets until the resolution picker exists, so 0.5K first
     // would silently halve every image, and nothing in the studio dispatches a 8:1 frame.
     limits: {
+      maxPromptChars: 50000,
       resolutions: ["1K", "2K", "4K"],
       tiers: { "1K": "1K", "2K": "2K", "4K": "4K" },
       aspects: ["21:9", "16:9", "3:2", "4:3", "1:1", "4:5", "3:4", "2:3", "9:16"],
@@ -61,6 +72,7 @@ const CURATED = {
     editRoute: "fal-ai/nano-banana-pro/edit",
     accepts: { referenceImages: 3, startFrame: false, endFrame: false },
     limits: {
+      maxPromptChars: 50000,
       resolutions: ["1K", "2K", "4K"],
       tiers: { "1K": "1K", "2K": "2K", "4K": "4K" },
       aspects: ["21:9", "16:9", "3:2", "4:3", "1:1", "4:5", "3:4", "2:3", "9:16"],
@@ -81,7 +93,8 @@ const CURATED = {
     // The base route takes a free width/height rather than a tier enum, so there are no native
     // words to map 1K/2K/4K onto. Left without tiers on purpose: offering a size the request
     // cannot carry would be a control that changes nothing.
-    limits: { aspects: ["16:9", "3:2", "1:1", "2:3", "9:16"] },
+    limits: {
+      maxPromptChars: 32000, aspects: ["16:9", "3:2", "1:1", "2:3", "9:16"] },
     /**
      * fal bills this in tokens, and the token count is not knowable before dispatch. These are
      * the counts the estimate assumes, set above the largest published per-image figure we could
@@ -163,6 +176,7 @@ const CURATED = {
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     // Veo counts in "4s"/"6s"/"8s" and takes nothing between them.
     limits: {
+      maxPromptChars: 20000,
       maxDurationSec: 8,
       durations: { "4": "4s", "6": "6s", "8": "8s" },
       resolutions: ["720p", "1080p"],
@@ -174,6 +188,7 @@ const CURATED = {
     capability: "video",
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     limits: {
+      maxPromptChars: 20000,
       maxDurationSec: 8,
       durations: { "4": "4s", "6": "6s", "8": "8s" },
       resolutions: ["720p"],
@@ -186,13 +201,15 @@ const CURATED = {
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     // No resolutions at all: the kling v3 text-to-video schema has no resolution field, so a
     // size listed here was offered in the picker and sent as a word the route does not know.
-    limits: { maxDurationSec: 15, durations: { "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" }, aspects: ["16:9", "9:16", "1:1"] },
+    limits: {
+      maxPromptChars: 2500, maxDurationSec: 15, durations: { "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" }, aspects: ["16:9", "9:16", "1:1"] },
   },
   "fal-ai/kling-video/v3/standard/text-to-video": {
     id: "kling-3-standard",
     capability: "video",
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-    limits: { maxDurationSec: 15, durations: { "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" }, aspects: ["16:9", "9:16"] },
+    limits: {
+      maxPromptChars: 2500, maxDurationSec: 15, durations: { "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" }, aspects: ["16:9", "9:16"] },
   },
 };
 

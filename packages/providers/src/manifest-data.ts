@@ -56,6 +56,11 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       displayName: "GPT Image 2",
       accepts: { referenceImages: 16, referenceRoles: false, startFrame: false, endFrame: false },
       limits: {
+        // 32000 is what OpenAI documents for the GPT image models on the images endpoint (the
+        // older DALL·E rows are 1000 and 4000), and what fal's schema for the same model behind
+        // its own gateway declares — two sources, one of them the provider's. Transcribed, not
+        // chosen: a cap invented here would refuse briefs the model would have taken.
+        maxPromptChars: 32000,
         // One tier, because the route has one size per shape: `size` is an enum — 1024x1024,
         // 1536x1024, 1024x1536 — and nothing else is accepted. The row used to claim 2048 as
         // well, which put a 2K button in the picker that scaled portrait to 1366x2048 and was
