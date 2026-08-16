@@ -102,6 +102,13 @@ export const ModelLimitsSchema = z
      * length we can ask for, so the provider's default runs and the estimate must say so.
      */
     durations: z.record(z.string().regex(/^[0-9]+$/), z.string().min(1)).optional(),
+    /**
+     * How the route spells that length on the wire. Every route shipped before this took a
+     * string ("5", "8s"); the minimax, ltx and wan families declare `duration` as an integer
+     * or a number enum, and a quoted "6" is not a member of [6, 8, 10]. Absent means string,
+     * which is what every earlier row meant implicitly.
+     */
+    durationWire: z.enum(["string", "number"]).optional(),
     resolutions: z.array(z.string()).optional(),
     /**
      * Normalised tier → the provider's own word for it. The tier is what a user chooses; the
@@ -207,6 +214,12 @@ export const TaskModeSpecSchema = z
      * never read, and a dispatch must refuse rather than probe a paid route with a guess.
      */
     maxFrames: z.number().int().min(1).optional(),
+    /**
+     * What this route calls the array of frames. Seedance says `image_urls`; the minimax and
+     * wan reference routes say `reference_image_urls`. Data rather than a constant for the
+     * same reason sentinels are: two routes of one family already disagree.
+     */
+    framesField: z.string().min(1).optional(),
   })
   .strict();
 export type TaskModeSpec = z.infer<typeof TaskModeSpecSchema>;

@@ -9,6 +9,7 @@ import {
   imageOutputFor,
   keyframeAddable,
   keyframePlan,
+  modeSpec,
   mappedReferenceKinds,
   newId,
   pricedDuration,
@@ -408,7 +409,7 @@ export function planBenchDispatch(
           .map((token) => session.tokenRegistry.find((e) => e.token === token))
           .filter((e): e is BenchReferenceToken => e !== undefined)
       : []; // an image request never claimed frames — the lane rides along, ignored, not refused
-  let frame: { mode: TaskMode; route: string | null; paths: string[] } | null = null;
+  let frame: { mode: TaskMode; route: string | null; framesField: string | undefined; paths: string[] } | null = null;
   if (keyframes.length > 0) {
     if (composer.mode !== "video") return { ok: false, reason: "Keyframes ride video, not image." };
     if (references.length > 0) {
@@ -425,7 +426,12 @@ export function planBenchDispatch(
       if (resolved.kind !== "image") return { ok: false, reason: `${entry.token}: only an image can ride as a keyframe` };
       paths.push(resolved.path);
     }
-    frame = { mode: plan.mode, route: routeFor(model, plan.mode), paths };
+    frame = {
+      mode: plan.mode,
+      route: routeFor(model, plan.mode),
+      framesField: modeSpec(model, plan.mode)?.framesField,
+      paths,
+    };
   }
 
   const snapshotBase: Omit<BenchRequestSnapshot, "params"> = {
@@ -508,6 +514,7 @@ export function planBenchDispatch(
                 }),
                 taskMode: frame.mode,
                 ...(frame.route !== null ? { route: frame.route } : {}),
+                ...(frame.framesField !== undefined ? { framesField: frame.framesField } : {}),
                 references: frame.paths,
               }
             : {

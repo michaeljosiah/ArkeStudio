@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { FAL_MODELS } from "../src/fal-catalogue.generated.js";
 import {
   characterImageEstimateIsUsable,
   characterImageOutput,
@@ -625,5 +626,93 @@ describe("how long a prompt each model takes", () => {
       if (cap === undefined) continue;
       assert.ok(Number.isInteger(cap) && cap > 0, `${m.id} cap is a positive integer`);
     }
+  });
+});
+
+describe("the new video families carry the routes' own numbers (fal catalogue sync)", () => {
+  const byId = (id: string) => {
+    const model = FAL_MODELS.find((m) => m.id === id);
+    assert.ok(model, `${id} is in the shipped catalogue`);
+    return model!;
+  };
+
+  /**
+   * Every figure below is the route's published one. They are asserted rather than trusted
+   * because the sync script reads them out of prose, and prose that reads correctly forwards
+   * can also read one-off backwards: an earlier pass paired every minimax resolution with the
+   * NEXT price and priced 480P at 768P's rate.
+   */
+  it("prices each resolution at its own published rate", () => {
+    const h3 = byId("minimax-h3");
+    assert.equal(h3.pricing.kind, "perSecond");
+    if (h3.pricing.kind === "perSecond") {
+      assert.deepEqual(h3.pricing.byResolution, {
+        "480P": 50000,
+        "768P": 80000,
+        "2K": 130000,
+        "4K": 160000,
+      });
+      // The base is the route's OWN default (2K), not the cheapest tier: a job that picks no
+      // resolution is charged at the default, and basing it on 480P understates it 2.6x.
+      assert.equal(h3.pricing.microUsdPerSecond, 130000);
+    }
+    const wan = byId("wan-2.7");
+    if (wan.pricing.kind === "perSecond") {
+      assert.equal(wan.pricing.byResolution?.["720p"], 100000);
+      assert.equal(wan.pricing.byResolution?.["1080p"], 150000);
+      assert.equal(wan.pricing.microUsdPerSecond, 150000);
+    }
+  });
+
+  it("keys every rate to the word the picker sends, across the price list's own spellings", () => {
+    // The ltx fast route is billed for "4K" and dispatched with "2160p". A rate keyed on the
+    // prose word is a lookup that misses in silence, falling back to the base rate.
+    const fast = byId("ltx-2.5-fast");
+    if (fast.pricing.kind === "perSecond") {
+      assert.equal(fast.pricing.byResolution?.["2160p"], 300000);
+      assert.equal(fast.pricing.byResolution?.["4k"], undefined);
+    }
+    for (const id of ["minimax-h3", "ltx-2.5-pro", "ltx-2.5-fast", "wan-2.7"]) {
+      const model = byId(id);
+      if (model.pricing.kind !== "perSecond") continue;
+      for (const key of Object.keys(model.pricing.byResolution ?? {})) {
+        assert.ok(
+          (model.limits.resolutions ?? []).includes(key),
+          `${id}: the rate for "${key}" names a resolution the row offers`,
+        );
+      }
+    }
+  });
+
+  it("declares the wire type of a length, because these routes count in numbers", () => {
+    // seedance and kling take duration as a string out of a list; minimax, ltx and wan declare
+    // an integer or a number enum, and "6" is not a member of [6, 8, 10].
+    for (const id of ["minimax-h3", "ltx-2.5-pro", "ltx-2.5-fast", "wan-2.7"]) {
+      assert.equal(byId(id).limits.durationWire, "number", `${id} sends a numeric duration`);
+    }
+    assert.equal(byId("seedance-2.0").limits.durationWire, undefined, "seedance keeps its strings");
+  });
+
+  it("names the frames field where the family disagrees with seedance", () => {
+    // minimax and wan call the array `reference_image_urls`; seedance calls it `image_urls`.
+    assert.equal(byId("minimax-h3").modes?.["keyframe-sequence"]?.framesField, "reference_image_urls");
+    assert.equal(byId("wan-2.7").modes?.["keyframe-sequence"]?.framesField, "reference_image_urls");
+    assert.equal(byId("seedance-2.0").modes?.["keyframe-sequence"]?.framesField, undefined);
+    // ltx ships no reference route at all, so it offers no sequence to mis-name.
+    assert.equal(byId("ltx-2.5-pro").modes?.["keyframe-sequence"], undefined);
+  });
+
+  it("only claims a frame ceiling the route published", () => {
+    // minimax's reference route declares maxItems 9; wan's declares none, so a sequence past
+    // two refuses rather than probing a paid route with a guess.
+    assert.equal(byId("minimax-h3").modes?.["keyframe-sequence"]?.maxFrames, 9);
+    assert.equal(byId("wan-2.7").modes?.["keyframe-sequence"]?.maxFrames, undefined);
+  });
+
+  it("offers a prompt counter only where the route publishes a cap", () => {
+    assert.equal(byId("minimax-h3").limits.maxPromptChars, 50000);
+    assert.equal(byId("ltx-2.5-pro").limits.maxPromptChars, 5000);
+    // wan 2.7 declares no maxLength: "the provider does not say" is not "unlimited".
+    assert.equal(byId("wan-2.7").limits.maxPromptChars, undefined);
   });
 });

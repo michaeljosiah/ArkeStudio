@@ -42,8 +42,13 @@ const DURATIONS = new Map(
   ]),
 );
 
+/** Model id → whether this route's `duration` is a number. Absent means the string it always was. */
+const DURATION_IS_NUMBER = new Set(
+  FAL_MODELS.filter((model) => model.limits.durationWire === "number").map((model) => model.id),
+);
+
 /** The duration field as this route wants it, or nothing when the row declares no lengths. */
-function durationParam(model: string, params: Record<string, unknown>): Record<string, string> {
+function durationParam(model: string, params: Record<string, unknown>): Record<string, string | number> {
   const seconds = params["durationSec"];
   if (typeof seconds !== "number") return {};
   const declared = DURATIONS.get(model);
@@ -60,7 +65,9 @@ function durationParam(model: string, params: Record<string, unknown>): Record<s
       `fal: ${model} cannot be asked for ${seconds}s — it offers ${Object.keys(declared).join(", ")}s`,
     );
   }
-  return { duration: wire };
+  // The route's own type: a number enum rejects the quoted form, and coercion is not a
+  // promise any of these schemas makes.
+  return { duration: DURATION_IS_NUMBER.has(model) ? Number(wire) : wire };
 }
 
 /** fal takes file inputs as URLs; a data URI is a URL that needs nobody's storage. */
@@ -185,7 +192,10 @@ export class FalClient implements ProviderClient {
       };
     } else if (taskMode === "keyframe-sequence") {
       if (imageUrls.length === 0) throw new Error("fal: keyframe-sequence needs at least one frame image");
-      imagePayload = { image_urls: imageUrls };
+      // Seedance's reference route says `image_urls`; minimax's and wan's say
+      // `reference_image_urls`. The planner sends the route's own word for it.
+      const field = typeof request.params["framesField"] === "string" ? (request.params["framesField"] as string) : "image_urls";
+      imagePayload = { [field]: imageUrls };
     }
     const internal = new Set([
       "references",
@@ -198,6 +208,7 @@ export class FalClient implements ProviderClient {
       // Ours, not fal's: the mode already chose the endpoint and the image field names.
       "taskMode",
       "route",
+      "framesField",
       // Ours, not fal's: the length goes as `duration`, in this route's own vocabulary.
       "durationSec",
     ]);

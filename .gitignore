@@ -10,7 +10,9 @@ dist/
 release/
 # electron-builder's configured output is `release/`, but a packaging run pointed anywhere else
 # lands beside it — `release-local/` is a local build, several hundred MB of win-unpacked.
-release-local/
+# Globbed rather than named: `release-fresh/` was created to route around a wedged
+# `win-unpacked` and was very nearly committed, all 280MB of it.
+release-*/
 apps/desktop/build-resources/
 .runtime-work/
 *.tsbuildinfo
