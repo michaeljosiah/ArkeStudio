@@ -34,10 +34,17 @@ export const FALLBACK_BUDGET_CHARS = 120_000;
 /**
  * Characters per token, for turning a model's token window into a character budget.
  *
- * Deliberately pessimistic. English prose runs nearer four, and assuming three leaves the
- * arithmetic wrong in the safe direction on prose that tokenises badly — names, ids, JSON.
+ * Four is what English prose actually runs at, so the budget is now the window rather than a
+ * cautious fraction of it. Nothing else is holding anything back either: `WINDOW_SHARE` is 1,
+ * and the provider's `input` limit already excludes the reply.
+ *
+ * What that spends is the margin that used to absorb two things — prose that tokenises worse
+ * than prose (ids, hashes, JSON), and whatever a turn reads through its tools after the prompt
+ * is sent. Both come out of the same window. In practice a conversation is nowhere near it: the
+ * reducer only ever engages when the total would not fit, and until it does this number changes
+ * nothing at all.
  */
-const CHARS_PER_TOKEN = 3;
+const CHARS_PER_TOKEN = 4;
 
 /**
  * How much of the input window this prompt may fill: all of it.
