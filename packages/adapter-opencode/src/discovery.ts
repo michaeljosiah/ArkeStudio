@@ -139,26 +139,78 @@ export const OPENCODE2_MIN_BUILD = 17_444;
 /** Whether a discovered v2 version satisfies the pinned-contract gate. */
 export function meetsV2Gate(version: string | null, minBuild: number = OPENCODE2_MIN_BUILD): boolean {
   if (version === null) return false;
-  const next = /next-(\d+)/.exec(version);
-  if (next) return Number(next[1]) >= minBuild;
-  // A stable release (2.x and beyond) postdates every next-build.
+  // A stable release (2.x and beyond) postdates every next-build — and its own prereleases
+  // ("2.0.0-next-3") restart the build counter, so the major check must run FIRST or the
+  // next-branch below rejects a current binary as older than the beta pin.
   const major = /^(\d+)\./.exec(version);
-  return major !== null && Number(major[1]) >= 2;
+  if (major && Number(major[1]) >= 2) return true;
+  const next = /next-(\d+)/.exec(version);
+  return next !== null && Number(next[1]) >= minBuild;
+}
+
+interface GatedDiscovery {
+  found: DiscoveredOpenCode | null;
+  /** The best candidate that answered but failed the gate — the honest reason (SPEC-005 R-1). */
+  rejected: DiscoveredOpenCode | null;
+}
+
+/**
+ * The gate applies per candidate, INSIDE the ladder: a stale configured path must fall
+ * through to a current binary on PATH, not null the whole discovery — "configured wins when
+ * it responds" was never meant to mean "a stale configured entry hides every other install".
+ */
+async function discoverGated(
+  command: string,
+  opts: DiscoveryOptions,
+  accept: (version: string | null) => boolean,
+): Promise<GatedDiscovery> {
+  const run = opts.runCommand ?? runCommand;
+  let rejected: DiscoveredOpenCode | null = null;
+  const consider = (candidate: DiscoveredOpenCode): DiscoveredOpenCode | null => {
+    if (accept(candidate.version)) return candidate;
+    rejected ??= candidate;
+    return null;
+  };
+  if (opts.configuredPath && existsSync(opts.configuredPath)) {
+    const version = await versionOf(opts.configuredPath, run);
+    if (version !== null) {
+      const hit = consider({ command: opts.configuredPath, source: "configured", version });
+      if (hit) return { found: hit, rejected: null };
+    }
+  }
+  const fromPath = await resolveOnPath(command, run);
+  if (fromPath) {
+    const hit = consider({ command: fromPath, source: "path", version: await versionOf(fromPath, run) });
+    if (hit) return { found: hit, rejected: null };
+  }
+  if (opts.bundledPath && existsSync(opts.bundledPath)) {
+    const hit = consider({
+      command: opts.bundledPath,
+      source: "bundled",
+      version: await versionOf(opts.bundledPath, run),
+    });
+    if (hit) return { found: hit, rejected: null };
+  }
+  return { found: null, rejected };
 }
 
 /** Resolve the opencode2 to use — the gate is part of discovery, not a runtime probe. */
 export async function discoverOpenCode2(
   opts: DiscoveryOptions & { minBuild?: number } = {},
 ): Promise<DiscoveredOpenCode | null> {
-  const found = await discoverCommand("opencode2", opts);
-  if (found === null) return null;
-  if (!meetsV2Gate(found.version, opts.minBuild)) return null;
+  const { found } = await discoverGated("opencode2", opts, (v) => meetsV2Gate(v, opts.minBuild));
   return found;
 }
 
 export interface DiscoveredHarness {
   generation: "v2" | "v1";
   discovery: DiscoveredOpenCode;
+  /**
+   * A v2 binary that answered but failed the build gate, when that is why v2 was not chosen.
+   * Settings states it plainly ("found 0.0.0-next-17400, need ≥17444") instead of claiming
+   * nothing is installed (SPEC-005 R-1).
+   */
+  rejectedV2?: DiscoveredOpenCode;
 }
 
 /**
@@ -170,15 +222,15 @@ export async function discoverPreferredHarness(opts: {
   v1?: DiscoveryOptions;
   v2?: DiscoveryOptions & { minBuild?: number };
 } = {}): Promise<DiscoveredHarness | null> {
-  if (!opts.preferV1) {
-    const v2 = await discoverOpenCode2(opts.v2 ?? {});
-    if (v2) return { generation: "v2", discovery: v2 };
-  }
+  const gate = (v: string | null) => meetsV2Gate(v, opts.v2?.minBuild);
+  const v2 = await discoverGated("opencode2", opts.v2 ?? {}, gate);
+  const withReason = (result: DiscoveredHarness): DiscoveredHarness => ({
+    ...result,
+    ...(v2.rejected ? { rejectedV2: v2.rejected } : {}),
+  });
+  if (!opts.preferV1 && v2.found) return { generation: "v2", discovery: v2.found };
   const v1 = await discoverOpenCode(opts.v1 ?? {});
-  if (v1) return { generation: "v1", discovery: v1 };
-  if (opts.preferV1) {
-    const v2 = await discoverOpenCode2(opts.v2 ?? {});
-    if (v2) return { generation: "v2", discovery: v2 };
-  }
+  if (v1) return withReason({ generation: "v1", discovery: v1 });
+  if (opts.preferV1 && v2.found) return { generation: "v2", discovery: v2.found };
   return null;
 }

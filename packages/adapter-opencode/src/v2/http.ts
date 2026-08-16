@@ -36,10 +36,19 @@ export function wireDirectory(directory: string): string {
   return directory.replaceAll("\\", "/");
 }
 
-/** Compare a response's echoed directory against the one requested, separator-insensitively. */
-export function sameDirectory(a: string | undefined, b: string): boolean {
+/**
+ * Compare a response's echoed directory against the one requested, separator-insensitively.
+ * Case folds only where the filesystem does: on Linux, /worlds/Alpha and /worlds/alpha are
+ * different directories, and folding both would pass the wrong-location guard on exactly the
+ * silent misdirection it exists to catch.
+ */
+export function sameDirectory(a: string | undefined, b: string, platform: string = process.platform): boolean {
   if (a === undefined) return false;
-  const norm = (s: string) => s.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
+  const fold = platform === "win32" || platform === "darwin";
+  const norm = (s: string) => {
+    const slashed = s.replaceAll("\\", "/").replace(/\/+$/, "");
+    return fold ? slashed.toLowerCase() : slashed;
+  };
   return norm(a) === norm(b);
 }
 

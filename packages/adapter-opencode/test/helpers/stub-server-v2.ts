@@ -34,6 +34,8 @@ export class StubOpenCodeV2 {
   readonly messagesBySession = new Map<string, unknown[]>();
   /** Extra latency on the first health answer — the server-global warm-up switch. */
   coldHealthMs = 0;
+  /** Answer the next GET .../message with a 503 — the completion-fetch blip switch. */
+  failNextMessageFetch = false;
   private healthAnswered = false;
   /** The location echoed on session create; null echoes the requested one honestly. */
   echoLocation: string | null = null;
@@ -166,6 +168,11 @@ export class StubOpenCodeV2 {
 
         m = /^\/api\/session\/([^/]+)\/message$/.exec(url.pathname);
         if (m && req.method === "GET") {
+          if (this.failNextMessageFetch) {
+            this.failNextMessageFetch = false;
+            res.writeHead(503).end();
+            return;
+          }
           const rows = this.messagesBySession.get(m[1]!) ?? [];
           res
             .writeHead(200, { "Content-Type": "application/json" })

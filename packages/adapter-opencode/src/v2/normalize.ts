@@ -97,6 +97,12 @@ const IGNORED_V2_TYPES = new Set([
   "session.skill.activated",
   "session.revert.cleared",
   "session.revert.committed",
+  "session.deleted",
+  "session.forked",
+  // Never observed on the pinned build (the §12 spike watched full turns; only
+  // execution.succeeded closed them), and mapping it to a completion doubles the message
+  // fetch. POST .../wait is the API-level idle backstop; the stream needs one signal.
+  "session.idle",
 ]);
 
 interface RawV2Event {
@@ -142,14 +148,6 @@ export function normalizeOpenCodeV2(raw: unknown, state: NormalizeV2State): Norm
     case "session.execution.succeeded": {
       const sessionId = str(d["sessionID"]);
       if (!sessionId) return { kind: "dead-letter", reason: "session.execution.succeeded without sessionID" };
-      return { kind: "turn-succeeded", sessionId };
-    }
-
-    case "session.idle": {
-      // The backstop the wait endpoint mirrors; execution.succeeded is the primary signal and
-      // the adapter's reported-message dedup makes hearing both harmless.
-      const sessionId = str(d["sessionID"]);
-      if (!sessionId) return { kind: "ignore" };
       return { kind: "turn-succeeded", sessionId };
     }
 
@@ -202,12 +200,16 @@ export function normalizeOpenCodeV2(raw: unknown, state: NormalizeV2State): Norm
     case "session.tool.called": {
       const sessionId = str(d["sessionID"]);
       if (!sessionId) return { kind: "dead-letter", reason: "session.tool.called without sessionID" };
-      const call = str(d["id"]) ?? `${sessionId}:tool`;
-      if (state.toolsSeen.has(call)) return { kind: "ignore" };
-      state.toolsSeen.add(call);
+      const call = str(d["id"]);
+      // Dedup only what is identifiable: collapsing id-less calls onto one session-wide key
+      // would silently drop every such call after the first.
+      if (call !== undefined) {
+        if (state.toolsSeen.has(call)) return { kind: "ignore" };
+        state.toolsSeen.add(call);
+      }
       // The call frame carries input but not the tool's name (measured); the name arrived on
       // session.tool.input.started and was remembered by call id.
-      const tool = state.toolNameByCall.get(call) ?? "a tool";
+      const tool = (call !== undefined ? state.toolNameByCall.get(call) : undefined) ?? "a tool";
       return {
         kind: "events",
         events: [
@@ -223,8 +225,12 @@ export function normalizeOpenCodeV2(raw: unknown, state: NormalizeV2State): Norm
 
     case "permission.asked": {
       const id = str(d["id"]);
-      const sessionId = str(d["sessionID"]) ?? "";
       if (!id) return { kind: "dead-letter", reason: "permission.asked without id" };
+      // v2 has no global reply route — a session-less ask is unanswerable, and surfacing it
+      // with a blank sessionId only moves the failure to respondToPermission, which would
+      // report "stale" without ever posting. Dead-letter it where it can be seen (R-14).
+      const sessionId = str(d["sessionID"]);
+      if (!sessionId) return { kind: "dead-letter", reason: "permission.asked without sessionID" };
       const action = str(d["action"]) ?? "an action";
       const resources = Array.isArray(d["resources"])
         ? (d["resources"] as unknown[]).filter((r): r is string => typeof r === "string")
@@ -260,10 +266,6 @@ export function normalizeOpenCodeV2(raw: unknown, state: NormalizeV2State): Norm
         ],
       };
     }
-
-    case "session.deleted":
-    case "session.forked":
-      return { kind: "ignore" };
 
     default:
       if (IGNORED_V2_TYPES.has(e.type)) return { kind: "ignore" };

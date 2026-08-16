@@ -76,9 +76,11 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   private readonly normalizeState: NormalizeV2State = createNormalizeV2State();
   /** Bounded record of dropped frames — contained, never silently lost (R-14). */
   readonly deadLetters: Array<{ reason: string; at: number }> = [];
+  /**
+   * Permission id → session id, for the session-scoped reply route. Doubles as the
+   * already-surfaced record the resync checks — one structure, one invariant.
+   */
   private readonly permissionSessions = new Map<string, string>();
-  /** Permission asks already surfaced, so a resync repeats nothing. */
-  private readonly permissionsSeen = new Set<string>();
   private disposed = false;
 
   // Fan-out: each streamEvents() consumer gets its own queue — the authoring service and the
@@ -127,6 +129,9 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
           this.caps = new Set<HarnessCapability>(["events", "models", "permissions"]);
           this.ready = { ready: true };
           this.trace("init.ready", { version: this.serverVersion, warmupMs: Date.now() - started });
+          // Prime the window so the first turn budgets from the real model, not the fallback
+          // floor — the same reason v1's init ended with primeInputTokenLimit (§8.5).
+          void this.listModels().catch(() => null);
           return;
         }
         lastError = "health answered but not healthy";
@@ -153,18 +158,20 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 
   /**
    * The window comes from the model catalog: entries carry limit { context, input?, output },
-   * and `input ?? context` is the same fallback the v1 backing used. The session's own model
-   * is implementation work (it arrives on session.model.selected); the scaffold budgets from
-   * the default model's window, which is the model an unpinned session answers with.
+   * and `input ?? context` is the same fallback the v1 backing used. Cached once learned —
+   * the default model cannot change without the server restarting, and a catalog fetch per
+   * turn is exactly the per-message cost v1's design comment forbids. The session's own model
+   * is implementation work (it arrives on session.model.selected); until then this budgets
+   * from the default model's window, which is the model an unpinned session answers with.
    */
   async inputTokenLimit(_sessionId: string): Promise<number | null> {
+    if (this.lastKnownWindow !== null) return this.lastKnownWindow;
     try {
-      const fallback = this.lastKnownWindow;
       await this.listModels();
-      return this.lastKnownWindow ?? fallback;
     } catch {
-      return this.lastKnownWindow;
+      /* the fallback budget covers this */
     }
+    return this.lastKnownWindow;
   }
 
   // ---- sessions ------------------------------------------------------------
@@ -208,6 +215,9 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
    * another session; measured). The caller's correlation id stays on this side of the wire.
    */
   async dispatchAsync(input: SendMessageInput): Promise<SendReceipt> {
+    // The turn's completion arrives only on the stream — make sure someone is listening even
+    // if the host never called streamEvents(), or sendMessage waits on silence forever.
+    void this.pump();
     const correlationId = input.correlationId ?? `corr_${Date.now().toString(36)}`;
     const text = input.parts.map((p) => p.text).join("\n");
     void (async () => {
@@ -268,12 +278,31 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   /**
    * Fetch the newest completed assistant message and report it, unless it was already
    * reported. Called when the stream says the turn succeeded (the event carries no text —
-   * measured) and again on every reconnect, for every tracked session.
+   * measured) and again on every reconnect, for every tracked session. The two paths differ
+   * where it matters:
+   *
+   * - `turn-ended`: the stream said this turn is over, so something MUST be reported or a
+   *   sendMessage awaits forever. A failed or empty fetch falls back to the text accumulated
+   *   from the deltas — late or duplicated news beats never.
+   * - `resync`: nothing is known to have finished. Only a new, non-empty assistant message is
+   *   reported; an empty completion here would declare a still-running turn over (the v1
+   *   resync carried the same guard).
    *
    * The v2 message list is cursor-paginated `{ data, cursor }`, newest first, with agent and
    * model switches recorded as messages — only `type: "assistant"` rows carry a turn's text.
+   * The fetch is bounded so a hung GET can never wedge the caller.
    */
-  private async reportCompletedTurn(sessionId: string): Promise<void> {
+  private async reportCompletedTurn(sessionId: string, mode: "turn-ended" | "resync"): Promise<void> {
+    const finishWithAccumulated = (why: string): void => {
+      const last = this.normalizeState.textBySession.get(sessionId);
+      this.normalizeState.textBySession.delete(sessionId);
+      this.trace("turn.completed-from-deltas", { sessionId, why, chars: last?.text.length ?? 0 });
+      this.push({
+        type: "message.completed",
+        sessionId,
+        ...(last ? { correlationId: last.messageId, text: last.text } : { text: "" }),
+      });
+    };
     try {
       const messages = await this.http.reqData<
         Array<{
@@ -282,24 +311,32 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
           time?: { completed?: number };
           content?: Array<{ type?: string; text?: string }>;
         }>
-      >("GET", `/api/session/${sessionId}/message`);
-      if (!Array.isArray(messages)) return;
-      const done = messages.find((m) => m.type === "assistant" && typeof m.time?.completed === "number");
+      >("GET", `/api/session/${sessionId}/message`, undefined, { signal: AbortSignal.timeout(10_000) });
+      const done = Array.isArray(messages)
+        ? messages.find((m) => m.type === "assistant" && typeof m.time?.completed === "number")
+        : undefined;
       const id = done?.id;
       if (id === undefined || this.reportedMessage.get(sessionId) === id) {
         this.trace("turn.nothing-new", { sessionId });
+        if (mode === "turn-ended" && id === undefined) finishWithAccumulated("no completed assistant message");
         return;
       }
-      this.reportedMessage.set(sessionId, id);
       const text = (done?.content ?? [])
         .filter((part) => part.type === "text")
         .map((part) => part.text ?? "")
         .join("");
+      if (mode === "resync" && text.trim().length === 0) {
+        // An all-tool message, or shape drift: not worth ending a possibly-live turn over.
+        this.trace("turn.resync-empty", { sessionId, messageId: id });
+        return;
+      }
+      this.reportedMessage.set(sessionId, id);
       this.normalizeState.textBySession.delete(sessionId);
       this.trace("turn.completed", { sessionId, messageId: id, chars: text.length });
       this.push({ type: "message.completed", sessionId, correlationId: id, text });
     } catch (err) {
-      this.trace("turn.fetch-failed", { sessionId, error: String(err) });
+      this.trace("turn.fetch-failed", { sessionId, mode, error: String(err) });
+      if (mode === "turn-ended") finishWithAccumulated("completion fetch failed");
     }
   }
 
@@ -313,10 +350,9 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       try {
         const pending = await this.http.reqData<
           Array<{ id?: string; action?: string; resources?: unknown[] }>
-        >("GET", `/api/session/${sessionId}/permission`);
+        >("GET", `/api/session/${sessionId}/permission`, undefined, { signal: AbortSignal.timeout(10_000) });
         for (const request of pending ?? []) {
-          if (!request.id || this.permissionsSeen.has(request.id)) continue;
-          this.permissionsSeen.add(request.id);
+          if (!request.id || this.permissionSessions.has(request.id)) continue;
           const resources = (request.resources ?? []).filter((r): r is string => typeof r === "string");
           this.trace("resync.permission", { sessionId, permissionId: request.id });
           this.push({
@@ -413,7 +449,6 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     const parsed = HarnessEventSchema.parse(event);
     if (parsed.type === "permission.requested") {
       this.permissionSessions.set(parsed.permissionId, parsed.sessionId);
-      this.permissionsSeen.add(parsed.permissionId);
     }
     for (const listener of Array.from(this.turnListeners)) listener(parsed);
     for (const sub of this.subscribers) {
@@ -457,12 +492,17 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
           heard();
           // No replay on the wire: ask REST what happened while we were not listening —
           // completed turns and pending permission asks both (issue 327 §6).
-          for (const sessionId of this.sessions.keys()) await this.reportCompletedTurn(sessionId);
+          for (const sessionId of this.sessions.keys()) await this.reportCompletedTurn(sessionId, "resync");
           await this.resyncPendingPermissions();
           for await (const raw of parseSse(stream.body, attempt.signal, heard)) {
             const outcome = normalizeOpenCodeV2(raw, this.normalizeState);
             if (outcome.kind === "turn-succeeded") {
-              if (this.sessions.has(outcome.sessionId)) await this.reportCompletedTurn(outcome.sessionId);
+              // Detached, deliberately: awaiting this fetch inside the read loop would let one
+              // hung GET starve event delivery for every session and every subscriber. The
+              // fetch is itself time-bounded, and dedup makes late arrival harmless.
+              if (this.sessions.has(outcome.sessionId)) {
+                void this.reportCompletedTurn(outcome.sessionId, "turn-ended");
+              }
               continue;
             }
             if (outcome.kind === "events") {

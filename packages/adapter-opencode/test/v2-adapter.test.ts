@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { HarnessEvent } from "@arke-studio/contracts";
 import { OpenCodeV2Adapter } from "../src/v2/opencode-v2-adapter.js";
 import { createNormalizeV2State, normalizeOpenCodeV2 } from "../src/v2/normalize.js";
 import { buildSessionConfigV2 } from "../src/v2/config.js";
 import { sameDirectory } from "../src/v2/http.js";
-import { meetsV2Gate, discoverPreferredHarness } from "../src/discovery.js";
+import { meetsV2Gate, discoverOpenCode2, discoverPreferredHarness } from "../src/discovery.js";
 import { StubOpenCodeV2, STUB_V2_PASSWORD } from "./helpers/stub-server-v2.js";
 
 /** Wait until `predicate` has seen enough events, or fail loudly with what arrived. */
@@ -247,14 +250,13 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
       assert.equal(completed?.type === "message.completed" && completed.text, "It printed arke-spike.");
       const deltas = events.filter((e) => e.type === "message.delta");
       assert.ok(deltas.length >= 1, "deltas stream before the completion");
-      // A second success signal for the same turn repeats nothing (dedup by message id):
-      // session.idle mirrors execution.succeeded, and hearing both must be harmless.
+      // A repeated success signal for the same turn reports nothing new (dedup by message id).
       const late: HarnessEvent[] = [];
       const lateAbort = new AbortController();
       const drain = (async () => {
         for await (const event of adapter.streamEvents(lateAbort.signal)) late.push(event);
       })();
-      stub.emit({ id: "evt_idle", type: "session.idle", data: { sessionID: ref.sessionId } });
+      stub.emit({ id: "evt_again", type: "session.execution.succeeded", data: { sessionID: ref.sessionId } });
       await new Promise((r) => setTimeout(r, 250));
       lateAbort.abort();
       await drain;
@@ -292,6 +294,28 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
       assert.deepEqual(reply?.body, { reply: "once" });
       assert.match(reply?.path ?? "", new RegExp(`^/api/session/${ref.sessionId}/`), "the reply is session-scoped");
     } finally {
+      await adapter.dispose();
+    }
+  });
+
+  it("falls back to accumulated deltas when the completion fetch fails — a blip must not hang the turn", async () => {
+    const adapter = makeAdapter();
+    try {
+      await adapter.init();
+      const ref = await adapter.createSession({ purpose: "authoring", agent: "scene-writer" });
+      const eventsPromise = collect(adapter, (events) => events.some((e) => e.type === "message.completed"));
+      await until(() => stub.streamCount > 0);
+      stub.failNextMessageFetch = true;
+      stub.emitTurn(ref.sessionId, "Salvaged from the stream.");
+      const events = await eventsPromise;
+      const completed = events.find((e) => e.type === "message.completed");
+      assert.equal(
+        completed?.type === "message.completed" && completed.text,
+        "Salvaged from the stream.",
+        "the deltas the stream already delivered are the fallback payload",
+      );
+    } finally {
+      stub.failNextMessageFetch = false;
       await adapter.dispose();
     }
   });
@@ -381,6 +405,9 @@ describe("v2 discovery and the build gate (issue 327 §3)", () => {
     assert.equal(meetsV2Gate("0.0.0-next-17444"), true);
     assert.equal(meetsV2Gate("0.0.0-next-17443"), false);
     assert.equal(meetsV2Gate("2.0.0"), true);
+    // A 2.x prerelease restarts the build counter; the major check must win over the
+    // next-branch or a current binary reads as older than the beta pin.
+    assert.equal(meetsV2Gate("2.0.0-next-3"), true);
     assert.equal(meetsV2Gate("1.18.10"), false);
     assert.equal(meetsV2Gate(null), false);
   });
@@ -416,13 +443,57 @@ describe("v2 discovery and the build gate (issue 327 §3)", () => {
     const tooOld = await discoverPreferredHarness({ v1: { runCommand: machine(gated) }, v2: { runCommand: machine(gated) } });
     assert.equal(tooOld, null, "a binary older than the pin is treated as absent");
   });
+
+  it("lets a stale configured path fall through to a current binary on PATH", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "arke-oc2-disc-"));
+    const configured = join(dir, "opencode2-old.exe");
+    writeFileSync(configured, "stub");
+    try {
+      const run = async (command: string, args: string[]) => {
+        if (command === "where" || command === "which") {
+          return args[0] === "opencode2"
+            ? { status: 0, stdout: "C:\\bin\\opencode2.exe\n" }
+            : { status: 1, stdout: "" };
+        }
+        if (command === configured) return { status: 0, stdout: "opencode2 v0.0.0-next-9000" };
+        return { status: 0, stdout: "opencode2 v0.0.0-next-17444" };
+      };
+      const found = await discoverOpenCode2({ configuredPath: configured, runCommand: run });
+      assert.equal(found?.source, "path", "the stale configured entry does not hide the current install");
+      assert.equal(found?.version, "0.0.0-next-17444");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("carries the too-old v2 as the honest reason when discovery falls back to v1", async () => {
+    const run = async (command: string, args: string[]) => {
+      if (command === "where" || command === "which") {
+        return { status: 0, stdout: `C:\\bin\\${args[0]}.exe\n` };
+      }
+      return command.includes("opencode2")
+        ? { status: 0, stdout: "opencode2 v0.0.0-next-9000" }
+        : { status: 0, stdout: "opencode v1.18.18" };
+    };
+    const result = await discoverPreferredHarness({ v1: { runCommand: run }, v2: { runCommand: run } });
+    assert.equal(result?.generation, "v1");
+    assert.equal(
+      result?.rejectedV2?.version,
+      "0.0.0-next-9000",
+      "Settings can say 'found but too old' instead of 'not installed' (SPEC-005 R-1)",
+    );
+  });
 });
 
 describe("v2 http location discipline (issue 327 §5)", () => {
-  it("compares directories separator- and case-insensitively", () => {
-    assert.equal(sameDirectory("C:\\worlds\\p1", "C:/worlds/p1"), true);
-    assert.equal(sameDirectory("C:/Worlds/P1/", "C:\\worlds\\p1"), true);
-    assert.equal(sameDirectory("C:/elsewhere", "C:/worlds/p1"), false);
-    assert.equal(sameDirectory(undefined, "C:/worlds/p1"), false);
+  it("compares directories separator-insensitively, folding case only where the filesystem does", () => {
+    assert.equal(sameDirectory("C:\\worlds\\p1", "C:/worlds/p1", "win32"), true);
+    assert.equal(sameDirectory("C:/Worlds/P1/", "C:\\worlds\\p1", "win32"), true);
+    assert.equal(sameDirectory("C:/elsewhere", "C:/worlds/p1", "win32"), false);
+    assert.equal(sameDirectory(undefined, "C:/worlds/p1", "win32"), false);
+    // On Linux those are two different directories, and folding them equal would pass the
+    // wrong-location guard on exactly the misdirection it exists to catch.
+    assert.equal(sameDirectory("/home/u/Worlds/Alpha", "/home/u/worlds/alpha", "linux"), false);
+    assert.equal(sameDirectory("/home/u/worlds/alpha/", "/home/u/worlds/alpha", "linux"), true);
   });
 });
