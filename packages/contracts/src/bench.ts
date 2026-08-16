@@ -3,6 +3,7 @@ import {
   ArtifactIdSchema,
   IsoDateTimeSchema,
   JobIdSchema,
+  RecipeIdSchema,
   SessionIdSchema,
   Sha256Schema,
   TakeIdSchema,
@@ -650,4 +651,54 @@ export function keyframeCapacity(model: ManifestModel): number {
   const pairCeiling = supportsMode(model, "first-and-last-frame") ? 2 : 0;
   const singleCeiling = supportsMode(model, "first-frame") ? 1 : 0;
   return Math.max(sequenceCeiling, pairCeiling, singleCeiling);
+}
+
+// ---------------------------------------------------------------------------
+// Recipes (issue 305 §3): a saved dispatch setup — model, controls, and an
+// optional brief scaffold — app-level, because what makes a good setup is the
+// model's, not any one world's.
+// ---------------------------------------------------------------------------
+
+export const BenchRecipeSchema = z
+  .object({
+    id: RecipeIdSchema,
+    /** The name the menu shows. Saving under an existing name replaces that recipe. */
+    name: z.string().min(1).max(80),
+    mode: BenchModeSchema,
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    params: BenchParamsSchema,
+    /** A brief to start from. Absent means the recipe sets controls and leaves the words alone. */
+    brief: z.string().max(100_000).optional(),
+    createdAt: IsoDateTimeSchema,
+  })
+  .strict()
+  .superRefine((recipe, ctx) => {
+    if (recipe.params.kind !== recipe.mode) {
+      ctx.addIssue({ code: "custom", message: `recipe params are for "${recipe.params.kind}" but the mode is "${recipe.mode}"` });
+    }
+  });
+export type BenchRecipe = z.infer<typeof BenchRecipeSchema>;
+
+export type RecipeFault = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Whether a recipe can be applied under this manifest — stated, never repaired. A recipe whose
+ * model left the manifest or is switched off shows its reason in the menu rather than vanishing:
+ * hiding saved work reads as losing it (the routing-faults posture, SPEC-008 §2.7).
+ */
+export function recipeFault(
+  recipe: BenchRecipe,
+  manifest: { models: readonly ManifestModel[] } | null,
+  disabled: readonly string[],
+): RecipeFault {
+  const model = manifest?.models.find((m) => m.id === recipe.model && m.provider === recipe.provider);
+  if (!model) return { ok: false, reason: `"${recipe.model}" is no longer in the manifest` };
+  if (model.capability !== recipe.mode) {
+    return { ok: false, reason: `${model.displayName} is a ${model.capability} model, not ${recipe.mode}` };
+  }
+  if (disabled.includes(recipe.model)) {
+    return { ok: false, reason: `${model.displayName} is switched off in Providers` };
+  }
+  return { ok: true };
 }

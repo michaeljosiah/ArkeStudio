@@ -4196,3 +4196,33 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   text-underline-offset: 2px; transition: var(--transition-control);
 }
 .fy-liftfacts:hover { color: var(--foreground); }
+
+/* Recipes (issue 305 §3): the ghost trigger left of the model select, menu opening upward. */
+.fy-bench__recipes {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px; padding: 7px 6px; border-radius: 8px;
+  font: 400 12px var(--font-sans); color: var(--muted-foreground); transition: var(--transition-control);
+}
+.fy-bench__recipes:hover { color: var(--foreground); }
+.fy-bench__recipes svg { color: var(--neutral-400); }
+.fy-bench__recipemenu {
+  position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 40; min-width: 250px;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  border: 1px solid var(--border); border-radius: 11px; background: var(--card); box-shadow: var(--shadow-lg);
+}
+.fy-bench__recipenone { padding: 6px 8px; font: 400 11.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-bench__reciperow { display: flex; align-items: center; gap: 2px; }
+.fy-bench__reciperow .fy-bench__sessionrow { flex: 1; min-width: 0; }
+.fy-bench__reciperow .fy-bench__sessionrow:disabled { cursor: not-allowed; }
+.fy-bench__reciperow .fy-bench__sessionrow:disabled .fy-bench__sessionname { color: var(--muted-foreground); }
+/* Delete appears when asked after — hover or focus — never at rest. */
+.fy-bench__recipedelete {
+  appearance: none; width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--neutral-400); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0; transition: var(--transition-control); flex: none;
+}
+.fy-bench__reciperow:hover .fy-bench__recipedelete,
+.fy-bench__reciperow:focus-within .fy-bench__recipedelete { opacity: 1; }
+.fy-bench__recipedelete:hover { background: var(--accent); color: var(--foreground); }
+/* The name is the row's point; a long model name yields rather than crushing it. */
+.fy-bench__reciperow .fy-bench__sessionmeta { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; }

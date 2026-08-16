@@ -1049,6 +1049,7 @@ export class Coordinator {
         ? { routing: { defaults: settings.routing, faults: routingFaults(settings, manifest) } }
         : {}),
       ...(settings ? { models: settings.models } : {}),
+      ...(settings ? { recipes: settings.recipes } : {}),
       ...(settings ? { spend: evaluateSpend(entries, settings.spend, new Date()) } : {}),
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
@@ -3447,6 +3448,35 @@ export class Coordinator {
         if (!bench) return;
         await bench.store.append({ type: "take-cleared", takeId: msg.takeId }, { at: this.nowIso(), requestId: msg.requestId });
         await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "bench-recipe-save": {
+        if (!this.appSettings || !this.opts.manifest) return;
+        const outcome = await this.appSettings.saveRecipe(
+          {
+            name: msg.name,
+            mode: msg.mode,
+            provider: msg.provider,
+            model: msg.model,
+            params: msg.params,
+            ...(msg.brief !== undefined ? { brief: msg.brief } : {}),
+          },
+          this.opts.manifest,
+          this.nowIso(),
+        );
+        // The composer can only offer models the manifest carries, so landing here means a
+        // racing manifest change — recorded, not silent.
+        if (!outcome.ok) {
+          void this.appLog?.append({ kind: "bench.recipe-refused", reason: outcome.reason });
+          return;
+        }
+        this.emit({ at: this.nowIso(), type: "recipes.changed", recipes: outcome.settings.recipes });
+        return;
+      }
+      case "bench-recipe-delete": {
+        if (!this.appSettings) return;
+        const settings = await this.appSettings.deleteRecipe(msg.recipeId);
+        this.emit({ at: this.nowIso(), type: "recipes.changed", recipes: settings.recipes });
         return;
       }
       case "bench-select-take": {

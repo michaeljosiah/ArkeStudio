@@ -276,3 +276,11 @@ describe("the Keyframe tab (issue 305 §3)", () => {
     assert.match(without, /Plain Video takes no keyframes\./);
   });
 });
+
+describe("recipes (issue 305 §3)", () => {
+  it("the dispatch row carries the Recipes trigger", () => {
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, stateWithBench());
+    assert.match(html, /data-testid="bench-recipes"/);
+    assert.match(html, /Recipes/);
+  });
+});

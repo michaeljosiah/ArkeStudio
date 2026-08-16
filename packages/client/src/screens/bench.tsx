@@ -9,6 +9,7 @@ import {
   keyframeCapacity,
   keyframePlan,
   pricedDuration,
+  recipeFault,
   tiersFor,
   type BenchParams,
   type BenchSession,
@@ -25,6 +26,8 @@ import {
   sendBenchKeep,
   sendBenchNewSession,
   sendBenchOpen,
+  sendBenchRecipeDelete,
+  sendBenchRecipeSave,
   sendBenchRemoveReference,
   sendBenchRerun,
   sendBenchSelectTake,
@@ -190,6 +193,8 @@ function BenchWorkspace({
 
   // ---- the breadcrumb's session switcher + the brief's expanded editor ----
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [recipesOpen, setRecipesOpen] = useState(false);
+  const recipes = state?.app.recipes ?? [];
   const [briefExpanded, setBriefExpanded] = useState(false);
   const briefUnder = useRef<HTMLDivElement>(null);
   const tokens = useMemo(() => new Set(session.tokenRegistry.map((e) => e.token)), [session.tokenRegistry]);
@@ -665,6 +670,88 @@ function BenchWorkspace({
 
           {/* dispatch row */}
           <div className="fy-bench__dispatch">
+            {/* Recipes (issue 305 §3): saved setups, applied into the draft — the ghost
+                trigger the master puts left of the model select (68b). */}
+            <span style={{ position: "relative", display: "inline-flex" }}>
+              <button
+                type="button"
+                className="fy-bench__recipes"
+                aria-expanded={recipesOpen}
+                data-testid="bench-recipes"
+                onClick={() => setRecipesOpen((v) => !v)}
+              >
+                Recipes
+                <ChevronDown size={11} />
+              </button>
+              {recipesOpen && (
+                <>
+                  <div className="fy-bench__scrim" onClick={() => setRecipesOpen(false)} />
+                  <div className="fy-bench__recipemenu" role="menu" aria-label="Recipes">
+                    {recipes.length === 0 && <span className="fy-bench__recipenone">No recipes yet.</span>}
+                    {recipes.map((recipe) => {
+                      const fault = recipeFault(recipe, manifest, state?.app.models.disabled ?? []);
+                      return (
+                        <div key={recipe.id} className="fy-bench__reciperow">
+                          <button
+                            type="button"
+                            className="fy-bench__sessionrow"
+                            disabled={!fault.ok}
+                            title={fault.ok ? undefined : fault.reason}
+                            onClick={() => {
+                              if (!fault.ok) return;
+                              setRecipesOpen(false);
+                              compose({
+                                mode: recipe.mode,
+                                provider: recipe.provider,
+                                model: recipe.model,
+                                params: recipe.params,
+                                brief: recipe.brief ?? draft.brief,
+                              });
+                            }}
+                          >
+                            <span className="fy-bench__sessionname">{recipe.name}</span>
+                            <span className="fy-bench__sessionmeta">
+                              {fault.ok ? modelName(recipe.provider, recipe.model) : fault.reason}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            className="fy-bench__recipedelete"
+                            aria-label={`Delete the recipe ${recipe.name}`}
+                            onClick={() => sendBenchRecipeDelete(recipe.id)}
+                          >
+                            <X size={11} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {/* Saving needs a model the manifest can honor — absent otherwise (§3). */}
+                    {model !== null && (
+                      <input
+                        aria-label="Save the current setup as a recipe"
+                        className="fy-bench__rename"
+                        placeholder="Save current setup as…"
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter") return;
+                          const name = (e.target as HTMLInputElement).value.trim();
+                          if (name.length === 0) return;
+                          sendBenchRecipeSave({
+                            name,
+                            mode: draft.mode,
+                            provider: model.provider,
+                            model: model.id,
+                            params: draft.params,
+                            ...(draft.brief.trim().length > 0 ? { brief: draft.brief } : {}),
+                          });
+                          (e.target as HTMLInputElement).value = "";
+                          setRecipesOpen(false);
+                        }}
+                      />
+                    )}
+                  </div>
+                </>
+              )}
+            </span>
             <span className="fy-bench__modelwrap">
               <select
                 aria-label="Model"

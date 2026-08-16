@@ -10,6 +10,7 @@ import {
   type ModelManifest,
   type SessionId,
 } from "@arke-studio/contracts";
+import { AppSettingsFile } from "../../src/app-settings.js";
 import { WorldStore } from "../../src/world/store.js";
 import { fileGeneratedArtifact } from "../../src/artifacts/filing.js";
 import { BenchStore, sessionDir, sessionMediaDir } from "../../src/bench/store.js";
@@ -569,5 +570,77 @@ describe("the Keyframe lane (issue 305 §3)", () => {
     });
     assert.ok(!plan.ok);
     assert.match((plan as { reason: string }).reason, /References and keyframes cannot ride one request yet/);
+  });
+});
+
+describe("recipes (issue 305 §3)", () => {
+  const settingsPath = async () => join(await makeTempWorld(), "settings.json");
+  const RECIPE_INPUT = {
+    name: "Tide studies",
+    mode: "image" as const,
+    provider: "fal" as const,
+    model: "test-image",
+    params: { kind: "image" as const, count: 2 },
+    brief: "a rusted tide-clock face",
+  };
+
+  it("saves validated against the manifest, persists, and the same name replaces", async () => {
+    const path = await settingsPath();
+    const file = new AppSettingsFile(path);
+    const saved = await file.saveRecipe(RECIPE_INPUT, MANIFEST, CLOCK());
+    assert.ok(saved.ok);
+    if (saved.ok) {
+      assert.equal(saved.recipe.name, "Tide studies");
+      assert.match(saved.recipe.id, /^rcp_/);
+    }
+
+    // A fresh reader sees the same recipe: settings.json is the record, not the cache.
+    const reread = await new AppSettingsFile(path).load();
+    assert.equal(reread.recipes.length, 1);
+    assert.equal(reread.recipes[0]!.params.kind === "image" && reread.recipes[0]!.params.count, 2);
+
+    // Saving under the same name replaces — one gesture, one spelling, same identity.
+    const replaced = await file.saveRecipe({ ...RECIPE_INPUT, params: { kind: "image", count: 4 } }, MANIFEST, CLOCK());
+    assert.ok(replaced.ok);
+    const after = await new AppSettingsFile(path).load();
+    assert.equal(after.recipes.length, 1);
+    if (saved.ok && replaced.ok) assert.equal(replaced.recipe.id, saved.recipe.id);
+    assert.equal(after.recipes[0]!.params.kind === "image" && after.recipes[0]!.params.count, 4);
+  });
+
+  it("a model the manifest does not carry, or of the wrong capability, refuses with words", async () => {
+    const file = new AppSettingsFile(await settingsPath());
+    const unknown = await file.saveRecipe({ ...RECIPE_INPUT, model: "gone" }, MANIFEST, CLOCK());
+    assert.ok(!unknown.ok && /not in the model manifest/.test(unknown.reason));
+    const wrongMode = await file.saveRecipe(
+      { ...RECIPE_INPUT, mode: "video", params: { kind: "video" } },
+      MANIFEST,
+      CLOCK(),
+    );
+    assert.ok(!wrongMode.ok && /is a image model, not video/.test(wrongMode.reason));
+  });
+
+  it("delete removes the one recipe and leaves the rest", async () => {
+    const path = await settingsPath();
+    const file = new AppSettingsFile(path);
+    const a = await file.saveRecipe(RECIPE_INPUT, MANIFEST, CLOCK());
+    const b = await file.saveRecipe({ ...RECIPE_INPUT, name: "Night harbour" }, MANIFEST, CLOCK());
+    assert.ok(a.ok && b.ok);
+    if (a.ok) await file.deleteRecipe(a.recipe.id);
+    const after = await new AppSettingsFile(path).load();
+    assert.deepEqual(after.recipes.map((r) => r.name), ["Night harbour"]);
+  });
+
+  it("one unreadable recipe drops alone rather than taking the settings file down", async () => {
+    const path = await settingsPath();
+    const file = new AppSettingsFile(path);
+    await file.saveRecipe(RECIPE_INPUT, MANIFEST, CLOCK());
+    const raw = JSON.parse(await readFile(path, "utf8")) as { recipes: unknown[]; models: unknown };
+    raw.recipes.push({ this: "is not a recipe" });
+    (raw as { models: { disabled: string[] } }).models = { disabled: ["something-off"] };
+    await writeFile(path, JSON.stringify(raw));
+    const reread = await new AppSettingsFile(path).load();
+    assert.equal(reread.recipes.length, 1, "the good recipe survives");
+    assert.deepEqual(reread.models.disabled, ["something-off"], "the rest of settings survives too");
   });
 });

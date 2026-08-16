@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   admitReference,
+  BenchRecipeSchema,
   BenchRequestSnapshotSchema,
   BenchSessionSchema,
   benchSessionSummary,
@@ -14,6 +15,7 @@ import {
   keyframePlan,
   multimediaCapacity,
   parseBenchToken,
+  recipeFault,
   validateReferences,
   type BenchEventEnvelope,
   type BenchReferenceToken,
@@ -382,5 +384,35 @@ describe("the Keyframe lane (issue 305 §3)", () => {
     assert.equal(keyframeCapacity(PLAIN_MODEL), 0);
     assert.deepEqual(frameTaskModes(FRAME_MODEL), ["first-frame", "first-and-last-frame"]);
     assert.deepEqual(frameTaskModes(PLAIN_MODEL), []);
+  });
+});
+
+describe("recipes (issue 305 §3)", () => {
+  it("a recipe's controls must match its mode, and a fault is stated rather than repaired", () => {
+    const bad = BenchRecipeSchema.safeParse({
+      id: "rcp_01J8F3K2QW9VZX4N7M0RTYB6HD",
+      name: "Tide studies",
+      mode: "video",
+      provider: "fal",
+      model: "m",
+      params: { kind: "image", count: 1 },
+      createdAt: "2026-08-16T10:00:00.000Z",
+    });
+    assert.equal(bad.success, false);
+
+    const recipe = BenchRecipeSchema.parse({
+      id: "rcp_01J8F3K2QW9VZX4N7M0RTYB6HD",
+      name: "Tide studies",
+      mode: "image",
+      provider: "fal",
+      model: "test-image",
+      params: { kind: "image", count: 2 },
+      createdAt: "2026-08-16T10:00:00.000Z",
+    });
+    assert.deepEqual(recipeFault(recipe, { models: [MODEL] }, []), { ok: true });
+    const gone = recipeFault({ ...recipe, model: "left" }, { models: [MODEL] }, []);
+    assert.ok(!gone.ok && /no longer in the manifest/.test(gone.reason));
+    const off = recipeFault(recipe, { models: [MODEL] }, ["test-image"]);
+    assert.ok(!off.ok && /switched off in Providers/.test(off.reason));
   });
 });

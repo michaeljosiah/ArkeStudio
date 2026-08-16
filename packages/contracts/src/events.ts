@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ArtifactKindSchema } from "./artifact.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
+import { BenchRecipeSchema } from "./bench.js";
 import { ChangeRecordSchema } from "./change.js";
 import {
   IsoDateTimeSchema,
@@ -656,6 +657,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       faults: z.array(RoutingFaultSchema),
     })
     .strict(),
+  /** Saved bench setups changed (issue 305 §3): the whole list rides, it is small. */
+  z.object({ ...base, type: z.literal("recipes.changed"), recipes: z.array(BenchRecipeSchema) }).strict(),
   /** Rolling spend re-evaluated on a ledger append or a settings change (SPEC-008 R-19, D10). */
   z.object({ ...base, type: z.literal("spend.status"), spend: SpendStatusSchema }).strict(),
   z

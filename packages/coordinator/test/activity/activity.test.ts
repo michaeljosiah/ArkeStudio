@@ -56,6 +56,7 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
       manifest: null,
       routing: { defaults: {}, faults: [] },
       models: { disabled: [] },
+        recipes: [],
       spend: null,
       backgroundNotifications: "issues-only",
       appearance: { theme: "system" },

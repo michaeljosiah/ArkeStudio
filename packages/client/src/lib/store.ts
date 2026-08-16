@@ -3,6 +3,7 @@ import {
   FrameSchema,
   type AskCandidate,
   type AskResult,
+  type BenchParams,
   type Capability,
   type ClientMessage,
   type ClientState,
@@ -324,6 +325,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, providers: event.providers } };
     case "routing.changed":
       return { ...state, app: { ...state.app, routing: { defaults: event.routing, faults: event.faults } } };
+    case "recipes.changed":
+      return { ...state, app: { ...state.app, recipes: event.recipes } };
     case "models.changed":
       // Faults travel with availability because they are the same act: switching a model off can
       // strand the default that points at it, and the two arriving separately would show a
@@ -2466,6 +2469,30 @@ export function sendBenchAddReference(
     picks: picks.map((p) => ({ source: p.pick, ...(p.replace !== undefined ? { replace: p.replace } : {}) })),
     ...(lane !== undefined ? { lane } : {}),
   } as ClientMessage);
+}
+
+export function sendBenchRecipeSave(input: {
+  name: string;
+  mode: "image" | "video";
+  provider: string;
+  model: string;
+  params: BenchParams;
+  brief?: string;
+}): void {
+  send({
+    kind: "bench-recipe-save",
+    requestId: ulid(),
+    name: input.name,
+    mode: input.mode,
+    provider: input.provider,
+    model: input.model,
+    params: input.params,
+    ...(input.brief !== undefined ? { brief: input.brief } : {}),
+  } as ClientMessage);
+}
+
+export function sendBenchRecipeDelete(recipeId: string): void {
+  send({ kind: "bench-recipe-delete", requestId: ulid(), recipeId } as ClientMessage);
 }
 
 export function sendBenchRemoveReference(
