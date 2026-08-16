@@ -41,6 +41,7 @@ export class ReadModel {
         drift: [],
         agents: [],
         harnessModels: [],
+        harnessInfo: null,
         queues: [],
         setup: null,
         update: IDLE_UPDATE_STATE,
@@ -70,6 +71,7 @@ export class ReadModel {
         | "appearance"
         | "runtime"
         | "drift"
+        | "harnessInfo"
       >
     >,
   ): void {

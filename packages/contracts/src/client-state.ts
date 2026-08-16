@@ -331,6 +331,23 @@ export const ClientStateSchema = z
               .strict(),
           )
           .default([]),
+        /**
+         * Which OpenCode generation is wired, from launch-time discovery (issue 327 §9):
+         * name, source, version, and — when a v2 binary was found but failed the build
+         * gate — the rejected version, so Settings can say "found but too old" instead of
+         * "not installed" (SPEC-005 R-1). Null until a host supplies it.
+         */
+        harnessInfo: z
+          .object({
+            generation: z.enum(["v2", "v1"]),
+            source: z.enum(["configured", "path", "bundled"]),
+            version: z.string().nullable(),
+            beta: z.boolean(),
+            rejectedV2Version: z.string().nullable().optional(),
+          })
+          .strict()
+          .nullable()
+          .default(null),
         spend: SpendStatusSchema.nullable().default(null),
         backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
         appearance: AppearanceSettingsSchema.default({ theme: "system" }),

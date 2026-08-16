@@ -133,6 +133,7 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
         drift: [],
         agents: [],
         harnessModels: [],
+      harnessInfo: null,
         queues: [],
         setup: null,
         update: { status: "idle", targetVersion: null, progressPercent: null, flow: null, detail: null },

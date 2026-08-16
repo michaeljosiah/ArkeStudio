@@ -7,6 +7,7 @@ import type { HarnessEvent } from "@arke-studio/contracts";
 import { OpenCodeV2Adapter } from "../src/v2/opencode-v2-adapter.js";
 import { createNormalizeV2State, normalizeOpenCodeV2 } from "../src/v2/normalize.js";
 import { buildSessionConfigV2 } from "../src/v2/config.js";
+import { credentialEnvPatch } from "../src/config.js";
 import { sameDirectory } from "../src/v2/http.js";
 import { meetsV2Gate, discoverOpenCode2, discoverPreferredHarness } from "../src/discovery.js";
 import { StubOpenCodeV2, STUB_V2_PASSWORD } from "./helpers/stub-server-v2.js";
@@ -402,6 +403,23 @@ describe("v2 session config (issue 327 §7)", () => {
       type: "remote",
       url: "http://127.0.0.1:7777/mcp",
       codemode: false,
+    });
+  });
+
+  it("patches credentials with deletion markers — absence must be expressible", () => {
+    assert.deepEqual(credentialEnvPatch({ anthropic: "sk-a", openai: "sk-o" }), {
+      ANTHROPIC_API_KEY: "sk-a",
+      OPENAI_API_KEY: "sk-o",
+    });
+    // Every managed variable is named even when its key is gone: an omission preserves a
+    // revoked key through the next spawn; an explicit undefined deletes it.
+    assert.deepEqual(credentialEnvPatch({ anthropic: "sk-a" }), {
+      ANTHROPIC_API_KEY: "sk-a",
+      OPENAI_API_KEY: undefined,
+    });
+    assert.deepEqual(credentialEnvPatch({}), {
+      ANTHROPIC_API_KEY: undefined,
+      OPENAI_API_KEY: undefined,
     });
   });
 

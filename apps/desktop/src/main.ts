@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, safeStorage, shell } from "electron";
 import electronUpdater from "electron-updater";
 import {
+  assembleHarness,
   ChildLedger,
   ChildSupervisor,
   Coordinator,
@@ -22,15 +23,7 @@ import {
   type Cipher,
   type DatabaseCtor,
 } from "@arke-studio/coordinator";
-import {
-  agentForPurpose,
-  skillFor,
-  buildSessionConfig,
-  ROSTER,
-  credentialEnv,
-  discoverOpenCode,
-  OpenCodeAdapter,
-} from "@arke-studio/adapter-opencode";
+import { agentForPurpose, skillFor, ROSTER } from "@arke-studio/adapter-opencode";
 import {
   createProviderClients,
   discoverHiggsfield,
@@ -400,36 +393,29 @@ async function initialize(): Promise<{ port: number }> {
     console.log(`[arke] reaped ${swept.reaped.length} orphaned child process(es): ${named}`);
   }
 
-  // OpenCode discovery (SPEC-005 R-1): configured path → PATH → bundled, reported with its
-  // version. Absent → authoring degrades with the reason stated (R-4).
-  const discovered = await discoverOpenCode({
-    ...(process.env["ARKE_OPENCODE_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE_CMD"] } : {}),
-    ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode", "opencode.exe") } : {}),
-  });
-  const opencodeSupervisor = new ChildSupervisor(
-    {
-      id: "opencode",
-      command: discovered?.command ?? null,
-      args: ["serve", "--port", "{port}", "--hostname", "127.0.0.1"],
-      env: credentialEnv({}), // SPEC-008 supplies real keys from safeStorage
-      healthPath: "/api/health",
-      readyTimeoutMs: 30_000,
+  // Harness assembly (SPEC-005 R-1, issue 327 §3–§4): both generations resolved, v2
+  // preferred, v1 the escape hatch (ARKE_OPENCODE_GENERATION=v1 until the Settings toggle
+  // lands). One seam builds the whole launch — discovery, password protocol, redirected
+  // profile, adapter, config writer — so dev and desktop cannot drift. Absent → authoring
+  // degrades with the reason stated (R-4). The trace file answers "what did the app hear,
+  // and when" whenever a chat sticks, without a debugger.
+  const wiring = await assembleHarness({
+    appRoot,
+    deps: { ledger: childLedger },
+    preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
+    v1: {
+      ...(process.env["ARKE_OPENCODE_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE_CMD"] } : {}),
+      ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode", "opencode.exe") } : {}),
     },
-    { ledger: childLedger },
-  );
-  const adapter = discovered
-    ? new OpenCodeAdapter({
-        baseUrl: () => `http://127.0.0.1:${opencodeSupervisor.port ?? 0}`,
-        // The adapter's own account of itself — connects, stalls, resyncs, dispatches. When a
-        // chat sticks, this file answers "what did the app hear, and when" without a debugger.
-        onTrace: harnessTrace(appRoot),
-      })
-    : null;
-  if (discovered) {
-    console.log(`[arke] OpenCode: ${discovered.source} (${discovered.version ?? "unknown version"})`);
-  } else {
-    console.log("[arke] OpenCode: not found — authoring disabled");
-  }
+    v2: {
+      ...(process.env["ARKE_OPENCODE2_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE2_CMD"] } : {}),
+      ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode2", "opencode2.exe") } : {}),
+    },
+    onTrace: harnessTrace(appRoot),
+  });
+  const opencodeSupervisor = wiring.supervisor;
+  const adapter = wiring.adapter;
+  for (const line of wiring.logLines) console.log(`[arke] ${line}`);
 
   // Credentials encrypt against the OS user's key (SPEC-008 R-5); safeStorage is the cipher,
   // the coordinator's store is the store.
@@ -685,7 +671,11 @@ async function initialize(): Promise<{ port: number }> {
     // this build honestly has none; the dev coordinator points at the repo fixture instead, and
     // that is where the feature is exercised from source.
     sampleWorldPath: app.isPackaged ? join(process.resourcesPath, "sample-world") : null,
-    authoring: { buildConfig: buildSessionConfig, agentForPurpose, roster: ROSTER, skillFor },
+    authoring: { buildConfig: wiring.buildConfig, agentForPurpose, roster: ROSTER, skillFor },
+    ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
+    // Stored LLM keys reach the harness as spawn environment (SPEC-005 D5) — under v2's
+    // redirected profile this is the only credential path there is (issue 327 §2).
+    relaunchHarness: wiring.relaunchHarness,
     cipher,
     secretRegistry: providerSecrets,
     providerCalls,

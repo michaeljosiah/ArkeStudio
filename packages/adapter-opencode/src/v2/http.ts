@@ -52,6 +52,15 @@ export function sameDirectory(a: string | undefined, b: string, platform: string
   return norm(a) === norm(b);
 }
 
+/**
+ * The v2 auth scheme in one place: Basic, username `opencode`, the launch-line password.
+ * The supervisor's health probe and this client must always agree — encoded twice, a pin
+ * bump that changes the scheme fixes one copy and leaves the other silently 401ing.
+ */
+export function v2BasicAuth(password: string): string {
+  return "Basic " + Buffer.from(`opencode:${password}`).toString("base64");
+}
+
 export class OpenCodeV2Http {
   constructor(private readonly opts: OpenCodeV2HttpOptions) {}
 
@@ -60,7 +69,7 @@ export class OpenCodeV2Http {
     if (password === null) {
       throw new OpenCodeError("AUTH", "(any)", 0, "no server password yet — the launch line has not been parsed");
     }
-    return "Basic " + Buffer.from(`opencode:${password}`).toString("base64");
+    return v2BasicAuth(password);
   }
 
   url(path: string, location?: string): string {

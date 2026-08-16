@@ -65,6 +65,7 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
       drift: [],
       agents: [],
       harnessModels: [],
+      harnessInfo: null,
       queues: [],
       setup: null,
       update: { status: "idle", targetVersion: null, progressPercent: null, flow: null, detail: null },

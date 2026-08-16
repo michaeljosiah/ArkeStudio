@@ -162,6 +162,7 @@ import {
   mainPhotoLogRecord,
   type MainPhotoAcceptanceStage,
 } from "./references/main-photo.js";
+import { LLM_ENV_PROVIDERS } from "@arke-studio/adapter-opencode";
 import { SecretRegistry } from "./redact.js";
 import { detectDrift, evaluateSpend } from "./spend/analytics.js";
 import { LedgerFile } from "./spend/ledger.js";
@@ -353,6 +354,24 @@ export interface CoordinatorOptions {
    * other. Separate names keep dev out of the desktop's way entirely.
    */
   credentialsFileName?: string;
+  /**
+   * Which OpenCode generation the host wired, from launch-time discovery — surfaced whole
+   * into app state so Settings can name it (issue 327 §9, SPEC-005 R-1).
+   */
+  harnessInfo?: {
+    generation: "v2" | "v1";
+    source: "configured" | "path" | "bundled";
+    version: string | null;
+    beta: boolean;
+    rejectedV2Version?: string | null;
+  };
+  /**
+   * Deliver stored provider keys to the harness child's spawn environment (SPEC-005 D5).
+   * Called with the current keys at start, before the child first spawns, and again when an
+   * LLM credential changes. Under v2's redirected profile this is the ONLY credential path —
+   * the shared store v1 silently leaned on is closed by design (issue 327 §2).
+   */
+  relaunchHarness?: (credentials: Record<string, string | undefined>) => Promise<void>;
   /** Shared with provider-call capture so known credentials are scrubbed from owner-visible payloads. */
   secretRegistry?: SecretRegistry;
   providerCalls?: ProviderCallStore;
@@ -711,6 +730,44 @@ export class Coordinator {
     }
   }
 
+  /**
+   * Serialized: two credential changes in quick succession must not run overlapping
+   * restart chains — the interleave spawned a second child and reported a spurious terminal
+   * "failed" over the one coming up healthy. Tracked in backgroundWork so stop() waits it
+   * out — an untracked refresh racing shutdown respawned the harness after its supervisor
+   * had already stopped.
+   */
+  private harnessEnvWork: Promise<void> = Promise.resolve();
+
+  /**
+   * Stored LLM keys → the harness spawn environment, via the host's closure. Failure is
+   * contained: an unreadable key or a relaunch error leaves readiness to say what the
+   * harness can actually do, and the other children unaffected.
+   */
+  private refreshHarnessEnv(): Promise<void> {
+    const run = async (): Promise<void> => {
+      if (!this.opts.relaunchHarness || !this.credentials) return;
+      const credentials: Record<string, string | undefined> = {};
+      for (const provider of LLM_ENV_PROVIDERS) {
+        try {
+          credentials[provider] = (await this.credentials.get(provider)) ?? undefined;
+        } catch {
+          /* one unreadable key must not cost the other its delivery */
+        }
+      }
+      try {
+        await this.opts.relaunchHarness(credentials);
+      } catch {
+        /* best-effort by design; the harness's own readiness states the consequence */
+      }
+    };
+    const next = this.harnessEnvWork.then(run, run);
+    this.harnessEnvWork = next.catch(() => {});
+    this.backgroundWork.add(this.harnessEnvWork);
+    void this.harnessEnvWork.finally(() => this.backgroundWork.delete(this.harnessEnvWork));
+    return next;
+  }
+
   /** Attach a supervised child and mirror its lifecycle into component health (R-6). */
   superviseAs(component: Exclude<HealthComponent, "coordinator">, supervisor: ChildSupervisor): void {
     this.supervisors.set(component, supervisor);
@@ -845,6 +902,9 @@ export class Coordinator {
       timer.unref?.();
     }
 
+    // Stored keys reach the harness child as spawn environment before its first spawn
+    // (SPEC-005 D5) — under v2's redirected profile there is no other credential path.
+    await this.refreshHarnessEnv();
     for (const supervisor of this.supervisors.values()) {
       void supervisor.start();
     }
@@ -1056,6 +1116,7 @@ export class Coordinator {
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
       ...(manifest ? { drift: detectDrift(entries, manifest) } : {}),
+      ...(this.opts.harnessInfo ? { harnessInfo: this.opts.harnessInfo } : {}),
     });
   }
 
@@ -2446,6 +2507,11 @@ export class Coordinator {
         try {
           await this.credentials.set(msg.provider, msg.key);
           this.providerService.setConfigured(msg.provider, true);
+          // An LLM key change re-delivers the spawn environment, which restarts the harness
+          // — the honest cost of rotation (SPEC-005 D5). Media/voice keys leave it alone.
+          if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
+            void this.refreshHarnessEnv();
+          }
           this.emit({
             at: new Date().toISOString(),
             type: "provider.status",
@@ -2464,6 +2530,9 @@ export class Coordinator {
         if (!this.credentials) return;
         await this.credentials.clear(msg.provider).catch(() => {});
         this.providerService.setConfigured(msg.provider, false);
+        if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
+          void this.refreshHarnessEnv();
+        }
         this.emit({
           at: new Date().toISOString(),
           type: "provider.status",
