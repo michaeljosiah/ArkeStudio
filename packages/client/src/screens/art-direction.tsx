@@ -10,6 +10,7 @@ import { stagedReferenceKey, worldImagePrompt } from "@arke-studio/contracts";
 import { ArtStyleGrid } from "../components/art-style-picker.js";
 import { resolveModel, resolveOutputChoice, usableModels } from "../components/dispatch-bar.js";
 import { authoredPrompt, GenerationDialog } from "../components/generation-dialog.js";
+import { ReferencePickerBody, worldPickerSources } from "../components/reference-picker.js";
 import { seedFrom } from "../lib/art-styles.js";
 import { Button } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
@@ -23,6 +24,7 @@ import {
   generateMasterLook,
   generateWorldImage,
   pickStagedReference,
+  sendStageArtifactReference,
   setArtDirection,
   uploadMasterLook,
   uploadWorldImage,
@@ -427,6 +429,8 @@ export function ArtDirectionScreen() {
   const [dismissed, setDismissed] = useState<readonly string[]>([]);
   const [count, setCount] = useState(1);
   const [picked, setPicked] = useState<string | null>(null);
+  // The reference picker takes over the dialog's own panel — never a dialog over it (issue 305).
+  const [pickingReference, setPickingReference] = useState(false);
   const generateRef = useRef<HTMLButtonElement>(null);
   if (!world || world.meta.worldId !== worldId) return null;
   const direction = world.artDirection;
@@ -497,9 +501,48 @@ export function ArtDirectionScreen() {
         promptHint="Starts as the look's own words. Whatever is here is sent as written — with the standing clause forbidding people, faces, text and montage added after it, because this image rides along with other characters' portraits."
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("master-look")] ?? null}
-        referenceHint="Optional. A palette, a frame or a lighting study for the model to look at while it works."
+        referenceHint={
+          <>
+            Optional. A palette, a frame or a lighting study for the model to look at while it works.{" "}
+            <button
+              type="button"
+              className="fy-gendialog__reset"
+              style={{ position: "static" }}
+              onClick={() => setPickingReference(true)}
+            >
+              Choose from artifacts
+            </button>
+          </>
+        }
         onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("master-look"))}
         onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("master-look"))}
+        {...(pickingReference
+          ? {
+              panel: (
+                <ReferencePickerBody
+                  mode="slot"
+                  worldSlug={world.meta.slug}
+                  model={model}
+                  carried={[]}
+                  world={worldPickerSources(world.artifacts, null)}
+                  session={[]}
+                  onChoose={(pick) => {
+                    if (pick.source === "artifact") {
+                      sendStageArtifactReference(world.meta.worldId, stagedReferenceKey("master-look"), pick.artifactId);
+                    }
+                    setPickingReference(false);
+                  }}
+                  onUpload={() => {
+                    // The host OS picker files into the world and stages in one step, as before.
+                    pickStagedReference(world.meta.worldId, stagedReferenceKey("master-look"));
+                    setPickingReference(false);
+                  }}
+                  onClose={() => setPickingReference(false)}
+                />
+              ),
+              onPanelClose: () => setPickingReference(false),
+            }
+          : {})}
         // "main-photo" is borrowed for its price band only — a master look is not a portrait, and
         // the coordinator builds this request landscape, so the orientation is stated rather than
         // inferred from the workflow. Without it the dialog would default to a portrait shape and

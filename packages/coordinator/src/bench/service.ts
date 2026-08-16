@@ -9,7 +9,6 @@ import {
   imageOutputFor,
   mappedReferenceKinds,
   newId,
-  parseBenchToken,
   pricedDuration,
   validateReferences,
   type ArtifactSidecar,

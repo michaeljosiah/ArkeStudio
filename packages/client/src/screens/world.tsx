@@ -3266,6 +3266,7 @@ export function NewCanonScreen() {
 export function ArtifactsScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
+  const navigate = useNavigate();
   // The world's own shelf (SPEC-020 R-13): artifacts a production owns are shown there, and
   // counting them here would make "12 files" a number no filter on this screen can reach.
   const artifacts = (world?.artifacts ?? []).filter((a) => a.production === undefined);
@@ -3273,16 +3274,23 @@ export function ArtifactsScreen() {
   const notices = useArtifactNotices();
   const [importPath, setImportPath] = useState("");
   const [kindFilter, setKindFilter] = useState<string | null>(null);
+  // "Made here" combines with the kind filter rather than replacing it (issue 305 §2).
+  const [madeHereOnly, setMadeHereOnly] = useState(false);
+  const madeHere = (a: (typeof artifacts)[number]) => a.origin.by === "system" && a.origin.producedBy === "bench";
   // Superseded artifacts drop out of the listing the way they drop out of pickers (R-5).
   const superseded = new Set(artifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
-  const visible = artifacts.filter((a) => !superseded.has(a.id) && (kindFilter === null || a.kind === kindFilter));
+  const visible = artifacts.filter(
+    (a) => !superseded.has(a.id) && (kindFilter === null || a.kind === kindFilter) && (!madeHereOnly || madeHere(a)),
+  );
   const kinds = [...new Set(artifacts.map((a) => a.kind))];
+  const madeHereCount = artifacts.filter((a) => !superseded.has(a.id) && madeHere(a)).length;
   const batches = artifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
   return (
     <div data-screen="artifacts">
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {visible.length} file{visible.length === 1 ? "" : "s"}
+          {madeHereCount > 0 ? ` · ${madeHereCount} made here` : ""}
           {superseded.size > 0 ? ` · ${superseded.size} superseded — history keeps them` : ""}
         </div>
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
@@ -3291,6 +3299,13 @@ export function ArtifactsScreen() {
         <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 500 }}>
           Recordings, documents and references: filed against the world, attachable to any generation.
         </p>
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
+          {/* The only entrance to the bench (issue 305 §2): a production's Generate has shots
+              to answer to, so it never grows one. */}
+          <Button data-testid="artifacts-generate" onClick={() => void navigate(`/w/${worldId}/artifacts/bench`)}>
+            Generate
+          </Button>
+        </div>
         <div className="fy-filterrow">
           <button type="button" className={cx("fy-filterchip", kindFilter === null && "fy-filterchip--active")} onClick={() => setKindFilter(null)}>
             All {artifacts.filter((a) => !superseded.has(a.id)).length}
@@ -3300,6 +3315,15 @@ export function ArtifactsScreen() {
               {k.charAt(0).toUpperCase() + k.slice(1)} {artifacts.filter((a) => a.kind === k && !superseded.has(a.id)).length}
             </button>
           ))}
+          {madeHereCount > 0 && (
+            <button
+              type="button"
+              className={cx("fy-filterchip", madeHereOnly && "fy-filterchip--active")}
+              onClick={() => setMadeHereOnly((v) => !v)}
+            >
+              {`Made here ${madeHereCount}`}
+            </button>
+          )}
         </div>
         <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 16 }}>
           <Input

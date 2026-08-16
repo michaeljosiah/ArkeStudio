@@ -59,6 +59,11 @@ async function freshBench(dir: string) {
   return opened;
 }
 
+async function refolded(opened: { store: BenchStore }) {
+  const session = await opened.store.fold();
+  return session === null ? null : { store: opened.store, session };
+}
+
 describe("the bench store (issue 305 §6)", () => {
   it("appends land durably and a repeated requestId writes nothing", async () => {
     const dir = await makeTempWorld();
@@ -143,7 +148,7 @@ describe("reference allocation (issue 305 §4)", () => {
     assert.deepEqual(added, { outcome: "added", token: "Image 1" });
 
     // Active twice is refused as already-active, not double-tokened.
-    const again = await addBenchReference((await reopen(opened))!, bundle, IMAGE_MODEL, {
+    const again = await addBenchReference((await refolded(opened))!, bundle, IMAGE_MODEL, {
       source: { source: "artifact", artifactId },
       requestId: "r2",
       at: CLOCK(),
@@ -152,7 +157,7 @@ describe("reference allocation (issue 305 §4)", () => {
 
     // Remove, then re-add: the old name comes back; nothing is renumbered.
     await opened.store.append({ type: "reference-removed", token: "Image 1" }, { at: CLOCK() });
-    const restored = await addBenchReference((await reopen(opened))!, bundle, IMAGE_MODEL, {
+    const restored = await addBenchReference((await refolded(opened))!, bundle, IMAGE_MODEL, {
       source: { source: "artifact", artifactId },
       requestId: "r3",
       at: CLOCK(),
@@ -189,10 +194,6 @@ describe("reference allocation (issue 305 §4)", () => {
     assert.deepEqual(outcome, { outcome: "refused", reason: "duration could not be read" });
   });
 
-  async function reopen(opened: Awaited<ReturnType<typeof freshBench>>) {
-    const session = await opened.store.fold();
-    return session === null ? null : { store: opened.store, session };
-  }
 });
 
 describe("dispatch planning (issue 305 §9)", () => {
@@ -316,13 +317,13 @@ describe("recovery (issue 305 §6)", () => {
       },
       { at: CLOCK() },
     );
-    const touched = await recoverBenchSession((await reopened(opened))!, [], CLOCK);
+    const touched = await recoverBenchSession((await refolded(opened))!, [], CLOCK);
     assert.equal(touched, true);
     const session = await opened.store.fold();
     assert.equal(session?.takes[0]?.status, "failed");
     assert.match(session?.takes[0]?.error ?? "", /nothing was spent/);
     // Idempotent: running it again changes nothing.
-    assert.equal(await recoverBenchSession((await reopened(opened))!, [], CLOCK), false);
+    assert.equal(await recoverBenchSession((await refolded(opened))!, [], CLOCK), false);
   });
 
   it("window two: a job the log never heard finished catches the log up", async () => {
@@ -338,7 +339,7 @@ describe("recovery (issue 305 §6)", () => {
       { at: CLOCK() },
     );
     const jobId = newId("jb");
-    const touched = await recoverBenchSession((await reopened(opened))!, [
+    const touched = await recoverBenchSession((await refolded(opened))!, [
       { jobId, targetId: `${session0.id}/${takeId}`, status: "failed", error: "provider said no" },
     ], CLOCK);
     assert.equal(touched, true);
@@ -348,10 +349,6 @@ describe("recovery (issue 305 §6)", () => {
     assert.equal(session?.takes[0]?.error, "provider said no");
   });
 
-  async function reopened(opened: { store: BenchStore }) {
-    const session = await opened.store.fold();
-    return session === null ? null : { store: opened.store, session };
-  }
 });
 
 describe("keeping (issue 305 §7)", () => {

@@ -17,6 +17,7 @@ import {
   WorldPickerScreen,
 } from "./screens/shell.js";
 import { ArtDirectionProposalScreen, ArtDirectionScreen } from "./screens/art-direction.js";
+import { BenchScreen } from "./screens/bench.js";
 import { BibleScreen } from "./screens/bible.js";
 import { ProposalsScreen } from "./screens/proposals.js";
 import { WorldChatConversationScreen, WorldChatScreen } from "./screens/world-chat.js";
@@ -157,6 +158,8 @@ export function App() {
           <Route path="chat" element={<WorldChatScreen />} />
           <Route path="chat/:conversationId" element={<WorldChatConversationScreen />} />
           <Route path="artifacts" element={<ArtifactsScreen />} />
+          <Route path="artifacts/bench" element={<BenchScreen />} />
+          <Route path="artifacts/bench/:sessionId" element={<BenchScreen />} />
           <Route path="productions" element={<ProductionsScreen />} />
           <Route path="productions/new" element={<NewProductionScreen />} />
         </Route>

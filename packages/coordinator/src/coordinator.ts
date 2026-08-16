@@ -43,7 +43,6 @@ import {
   type RuntimeProbes,
   type VoiceCandidate,
   type ArtifactGeneration,
-  type BenchSession,
   type SessionId,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir } from "./bench/store.js";
