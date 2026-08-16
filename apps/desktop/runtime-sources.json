@@ -50,6 +50,18 @@
       }
     ]
   },
+  "opencode2": {
+    "_note": "The v2 harness (issue 327 §9, SPEC-016). The pin IS the contract: every wire shape in the adapter was measured against this exact build, and the discovery gate treats anything older as absent — so the bundle and the adapter move together, never independently. MIT (anomalyco/opencode); invoked as a separate supervised process, never linked.",
+    "version": "0.0.0-next-17444",
+    "license": {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/d4f10fa9bed3c19d3e28fb90f20dc208226eeee7/LICENSE",
+      "sha256": "625F0F619133F89BBBB2ABE37369613DFA1885EBA1E50D02170DEB62BB42CB6B"
+    },
+    "x64": {
+      "url": "https://registry.npmjs.org/@opencode-ai/cli-windows-x64/-/cli-windows-x64-0.0.0-next-17444.tgz",
+      "sha256": "FB0CD2C4E5CD3F384E52290EDA0259BB0159E4AD86DAC09B55FFD4D1D2F83828"
+    }
+  },
   "ffmpeg": {
     "_note": "GPL shared build: libx264 is GPL-only, and the export presets are written around -crf, which an LGPL build silently ignores. Invoked as a separate executable, never linked -- the same arrangement espeak-ng and Voxa make.",
     "release": "autobuild-2026-08-13-17-03",

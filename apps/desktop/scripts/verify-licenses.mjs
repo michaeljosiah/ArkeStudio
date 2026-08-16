@@ -13,6 +13,7 @@ const buildResources = resolve(here, "../build-resources");
 // build-resources subdirectory → the notice row that must exist for it.
 const REQUIRED_ROW = {
   opencode: "OpenCode",
+  opencode2: "OpenCode 2",
   voxa: "Voxa",
   ffmpeg: "ffmpeg",
   "espeak-ng": "espeak-ng",
@@ -49,6 +50,26 @@ if (existsSync(buildResources)) {
 if (process.argv.includes("--require-runtimes")) for (const arch of ["x64"]) {
   const voxa = join(buildResources, "voxa", arch);
   const espeak = join(buildResources, "espeak-ng", arch);
+  /*
+   * The bundled v2 harness is REQUIRED (issue 327 §9). The v1 entry in the yml was specced
+   * but never staged, so every installer quietly shipped without a harness and PATH installs
+   * covered the gap invisibly — the same silent-absence failure ffmpeg lived through (#279).
+   * The harness is what authoring stands on; its absence is a packaging failure, not a state.
+   */
+  const opencode2 = join(buildResources, "opencode2");
+  if (!existsSync(join(opencode2, "opencode2.exe"))) {
+    failures.push("opencode2 runtime is required but opencode2.exe is absent — run prepare:opencode2");
+  } else {
+    try {
+      verifyManifest(opencode2);
+      assertPeArchitecture(join(opencode2, "opencode2.exe"), arch);
+    } catch (error) {
+      failures.push(`opencode2 ${arch}: ${String(error)}`);
+    }
+    if (!existsSync(join(opencode2, "LICENSE.opencode2.txt"))) {
+      failures.push("opencode2 is staged but its licence text is absent");
+    }
+  }
   for (const [component, root, executable] of [
     ["Voxa", voxa, "voxa.exe"],
     ["espeak-ng", espeak, "espeak-ng.exe"],

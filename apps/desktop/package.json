@@ -14,9 +14,10 @@
     "prepare:runtimes:x64": "node scripts/prepare-runtimes.mjs --arch x64",
     "prepare:runtimes:arm64": "node scripts/prepare-runtimes.mjs --arch arm64",
     "prepare:runtimes": "npm run prepare:runtimes:x64",
+    "prepare:opencode2": "node scripts/prepare-opencode2.mjs --arch x64",
     "smoke:voxa:x64": "node scripts/smoke-voxa.mjs --root build-resources/voxa/x64",
-    "package": "npm run prepare:runtimes && npm run verify:licenses -- --require-runtimes && npm run build && node scripts/package-windows.mjs --publish never",
-    "release": "npm run prepare:runtimes && npm run verify:licenses -- --require-runtimes && npm run build && node scripts/package-windows.mjs --publish never",
+    "package": "npm run prepare:runtimes && npm run prepare:opencode2 && npm run verify:licenses -- --require-runtimes && npm run build && node scripts/package-windows.mjs --publish never",
+    "release": "npm run prepare:runtimes && npm run prepare:opencode2 && npm run verify:licenses -- --require-runtimes && npm run build && node scripts/package-windows.mjs --publish never",
     "verify:licenses": "node scripts/verify-licenses.mjs"
   },
   "dependencies": {
