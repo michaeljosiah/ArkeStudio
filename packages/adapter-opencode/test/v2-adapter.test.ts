@@ -40,6 +40,18 @@ async function until(check: () => boolean, timeoutMs = 5_000): Promise<void> {
   }
 }
 
+/**
+ * Wait until the pump's connect-time resync has run (its permission GET is the last leg).
+ * The stub pre-populates REST state before streaming frames, so on a slow runner the resync
+ * can legitimately recover a scripted turn via REST before the SSE frames are read — correct
+ * adapter behavior, but a test scripting "deltas then completion" must start after it.
+ */
+async function untilResynced(stub: StubOpenCodeV2, mark: number): Promise<void> {
+  await until(() =>
+    stub.requests.slice(mark).some((r) => r.method === "GET" && r.path.endsWith("/permission")),
+  );
+}
+
 describe("v2 normalisation (issue 327 §6)", () => {
   it("accumulates text deltas into full-text message.delta events", () => {
     const state = createNormalizeV2State();
@@ -239,11 +251,13 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     try {
       await adapter.init();
       const ref = await adapter.createSession({ purpose: "authoring", agent: "scene-writer" });
+      const mark = stub.requests.length;
       const eventsPromise = collect(
         adapter,
         (events) => events.some((e) => e.type === "message.completed"),
       );
       await until(() => stub.streamCount > 0);
+      await untilResynced(stub, mark);
       stub.emitTurn(ref.sessionId, "It printed arke-spike.");
       const events = await eventsPromise;
       const completed = events.find((e) => e.type === "message.completed");
@@ -275,11 +289,13 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     try {
       await adapter.init();
       const ref = await adapter.createSession({ purpose: "authoring", agent: "scene-writer" });
+      const mark = stub.requests.length;
       const eventsPromise = collect(
         adapter,
         (events) => events.some((e) => e.type === "permission.requested"),
       );
       await until(() => stub.streamCount > 0);
+      await untilResynced(stub, mark);
       stub.emitHeldToolCall(ref.sessionId, "per_stub_1", "echo arke-spike");
       const events = await eventsPromise;
       const ask = events.find((e) => e.type === "permission.requested");
@@ -303,8 +319,10 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     try {
       await adapter.init();
       const ref = await adapter.createSession({ purpose: "authoring", agent: "scene-writer" });
+      const mark = stub.requests.length;
       const eventsPromise = collect(adapter, (events) => events.some((e) => e.type === "message.completed"));
       await until(() => stub.streamCount > 0);
+      await untilResynced(stub, mark);
       stub.failNextMessageFetch = true;
       stub.emitTurn(ref.sessionId, "Salvaged from the stream.");
       const events = await eventsPromise;
