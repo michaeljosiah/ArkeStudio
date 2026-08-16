@@ -5859,6 +5859,9 @@ export class Coordinator {
         return { receipts: produced, canonRevision: store.getBundle().meta.canonRevision };
       },
       describeEntry: (context) => describeEntryContext(context, store.getBundle()),
+      onTurnFailed: ({ conversationId, runId, cause }) => {
+        void this.appLog?.append({ level: "warn", event: "world-chat.turn-failed", conversationId, runId, cause });
+      },
       onProgress: (conversationId, label) => {
         this.emit({
           at: new Date().toISOString(),
