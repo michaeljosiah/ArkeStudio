@@ -213,22 +213,45 @@ export class ChildSupervisor extends EventEmitter {
   }
 
   /**
-   * Merge new environment for the child. Before the first start this only stores it — the
-   * coming spawn picks it up; a running child restarts, because environment reaches a
-   * process exactly once, at spawn. Credential rotation is the caller (SPEC-005 D5), and a
-   * restarted harness is the honest cost of a changed key.
+   * Apply an environment PATCH for the child: a string sets the variable, an explicit
+   * `undefined` deletes it — a merge that cannot delete turns a revoked credential into one
+   * that quietly survives every later spawn. Before the first start this only stores the
+   * result; a running child restarts, because environment reaches a process exactly once,
+   * at spawn — and only when something actually changed, so re-saving an identical key (or
+   * clearing one that was never set) does not cost an in-flight turn its harness.
    */
-  async updateEnv(env: Record<string, string>): Promise<void> {
-    this.spec.env = { ...this.spec.env, ...env };
-    if (this.child !== null) await this.restart();
+  async updateEnv(patch: Record<string, string | undefined>): Promise<void> {
+    const next: Record<string, string> = { ...this.spec.env };
+    for (const [name, value] of Object.entries(patch)) {
+      if (value === undefined) delete next[name];
+      else next[name] = value;
+    }
+    const before = this.spec.env ?? {};
+    const changed =
+      Object.keys(next).length !== Object.keys(before).length ||
+      Object.entries(next).some(([k, v]) => before[k] !== v);
+    this.spec.env = next;
+    if (changed && this.child !== null) await this.restart();
   }
+
+  /**
+   * Bumped by every spawn attempt and every stop. A continuation resumed from an await
+   * (port allocation, the health probe) acts only if its epoch is still current — the
+   * `stopping` flag alone cannot carry this, because an interleaved restart resets it, and
+   * the superseded continuation then force-killed a recycled pid and reported a terminal
+   * "failed" over a child that was coming up healthy (found in review of issue 327's
+   * wiring slice).
+   */
+  private launchEpoch = 0;
 
   private async spawnOnce(): Promise<void> {
     const command = this.spec.command;
     if (command === null) return;
+    const epoch = ++this.launchEpoch;
     this.setStatus("starting");
     this.healthFailure = undefined;
     const port = await allocateLoopbackPort();
+    if (epoch !== this.launchEpoch || this.stopping) return;
     this._port = port;
     const args = (this.spec.args ?? []).map((a) => a.replaceAll("{port}", String(port)));
 
@@ -280,7 +303,10 @@ export class ChildSupervisor extends EventEmitter {
     });
 
     const healthy = await this.probeUntilHealthy(child);
-    if (this.stopping) return;
+    // A superseded attempt owns nothing: the child it probed was already stopped and
+    // replaced, and both its verdicts — healthy or failed — describe a process that is no
+    // longer this supervisor's child.
+    if (epoch !== this.launchEpoch || this.stopping || this.child !== child) return;
     if (healthy) {
       this.setStatus("healthy");
       void this.adoptDescendants(child);
@@ -411,6 +437,9 @@ export class ChildSupervisor extends EventEmitter {
           /* a broken line handler must never take the supervisor down */
         }
       }
+      // A child that streams without newlines (spinners, progress frames) must not grow this
+      // buffer forever; the launch line is short and early, so a capped tail loses nothing.
+      if (buffer.length > 65_536) buffer = buffer.slice(-1_024);
     });
   }
 
@@ -421,10 +450,18 @@ export class ChildSupervisor extends EventEmitter {
   private async probeUntilHealthy(child: ChildProcess): Promise<boolean> {
     const deadline = Date.now() + this.spec.readyTimeoutMs;
     while (Date.now() < deadline && !this.stopping && this.child === child) {
+      let headers: Record<string, string> | undefined;
+      try {
+        headers = this.spec.healthHeaders?.();
+      } catch (err) {
+        // A broken resolver cannot heal by retrying; report IT, not a misleading timeout.
+        this.healthFailure = `${this.id} health-header resolver failed: ${err instanceof Error ? err.message : String(err)}`;
+        return false;
+      }
       try {
         const res = await fetch(this.healthUrl(), {
           signal: AbortSignal.timeout(1_000),
-          ...(this.spec.healthHeaders ? { headers: this.spec.healthHeaders() } : {}),
+          ...(headers ? { headers } : {}),
         });
         if (res.ok) {
           if (!this.spec.validateHealth) return true;
@@ -467,6 +504,7 @@ export class ChildSupervisor extends EventEmitter {
   /** Graceful stop: signal, wait, then force-kill the process tree. Never leaves an orphan. */
   async stop(): Promise<void> {
     this.stopping = true;
+    this.launchEpoch += 1; // any in-flight spawn continuation is now superseded
     const child = this.child;
     this.child = null;
     if (child && child.exitCode === null && child.signalCode === null) {

@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tempDir } from "./tmp.js";
 import {
+  assembleHarness,
   HarnessPasswordHolder,
   harnessProfileDir,
   passwordFromLine,
@@ -111,5 +113,85 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
     } finally {
       await sup.stop();
     }
+  });
+
+  it("updateEnv honours deletion markers and skips restarts when nothing changed", async () => {
+    const sup = new ChildSupervisor({
+      id: "opencode",
+      command: process.execPath,
+      args: [CHILD],
+      env: { MODE: "healthy", ANTHROPIC_API_KEY: "sk-revoke-me" },
+      healthPath: "/api/health",
+      readyTimeoutMs: 10_000,
+    });
+    const events: SupervisorStatusEvent[] = [];
+    sup.on("status", (e: SupervisorStatusEvent) => events.push(e));
+    try {
+      await sup.start();
+      await waitForStatus(sup, "healthy");
+      const firstPid = sup.pid;
+
+      // An identical patch must not cost an in-flight turn its harness.
+      const restartsBefore = events.filter((e) => e.status === "starting").length;
+      await sup.updateEnv({ ANTHROPIC_API_KEY: "sk-revoke-me" });
+      assert.equal(sup.pid, firstPid, "re-saving the same key does not restart");
+      assert.equal(
+        events.filter((e) => e.status === "starting").length,
+        restartsBefore,
+        "no restart cycle ran for a no-op patch",
+      );
+
+      // A cleared credential is a DELETION the merge must honour — the revoked key
+      // surviving the next spawn is a revocation that did not happen (issue 327 review).
+      await sup.updateEnv({ ANTHROPIC_API_KEY: undefined });
+      await waitForStatus(sup, "healthy");
+      assert.notEqual(sup.pid, firstPid, "removal restarts to shed the key");
+      const port = sup.port;
+      const res = await fetch(`http://127.0.0.1:${port}/api/health`);
+      const body = (await res.json()) as { env?: Record<string, string | undefined> };
+      assert.equal(body.env?.["ANTHROPIC_API_KEY"], undefined, "the revoked key is gone from the child env");
+    } finally {
+      await sup.stop();
+    }
+  });
+
+  it("assembles the absent case honestly: null adapter, unconfigured supervisor, stated reason", async () => {
+    const nothing = async () => ({ status: 1, stdout: "" });
+    const wiring = await assembleHarness({
+      appRoot: await tempDir("v2-launch-"),
+      v1: { runCommand: nothing },
+      v2: { runCommand: nothing },
+    });
+    assert.equal(wiring.harness, null);
+    assert.equal(wiring.adapter, null);
+    assert.equal(wiring.harnessInfo, undefined);
+    assert.deepEqual(wiring.logLines, ["OpenCode: not found — authoring disabled"]);
+    await wiring.supervisor.start();
+    assert.equal(wiring.supervisor.status, "unconfigured");
+  });
+
+  it("names the legacy knob's fate instead of routing around it silently", async () => {
+    const machine = (answers: Record<string, string>) => async (command: string, args: string[]) => {
+      if (command === "where" || command === "which") {
+        const target = args[0]!;
+        return answers[target] !== undefined
+          ? { status: 0, stdout: `C:\\bin\\${target}.exe\n` }
+          : { status: 1, stdout: "" };
+      }
+      const name = command.replace(/^C:\\bin\\/, "").replace(/\.exe$/, "");
+      return answers[name] !== undefined ? { status: 0, stdout: answers[name]! } : { status: 1, stdout: "" };
+    };
+    // A configured v1 path exists, but v2 on PATH wins: the pass-over is stated (R-4).
+    const both = { opencode: "opencode v1.18.18", opencode2: "opencode2 v0.0.0-next-17444" };
+    const wiring = await assembleHarness({
+      appRoot: await tempDir("v2-launch-"),
+      v1: { configuredPath: process.execPath, runCommand: machine(both) },
+      v2: { runCommand: machine(both) },
+    });
+    assert.equal(wiring.isV2, true);
+    assert.ok(
+      wiring.logLines.some((l) => l.includes("configured OpenCode path passed over")),
+      `the pass-over is stated: ${wiring.logLines.join(" | ")}`,
+    );
   });
 });

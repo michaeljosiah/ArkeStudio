@@ -162,6 +162,7 @@ import {
   mainPhotoLogRecord,
   type MainPhotoAcceptanceStage,
 } from "./references/main-photo.js";
+import { LLM_ENV_PROVIDERS } from "@arke-studio/adapter-opencode";
 import { SecretRegistry } from "./redact.js";
 import { detectDrift, evaluateSpend } from "./spend/analytics.js";
 import { LedgerFile } from "./spend/ledger.js";
@@ -730,25 +731,41 @@ export class Coordinator {
   }
 
   /**
+   * Serialized: two credential changes in quick succession must not run overlapping
+   * restart chains — the interleave spawned a second child and reported a spurious terminal
+   * "failed" over the one coming up healthy. Tracked in backgroundWork so stop() waits it
+   * out — an untracked refresh racing shutdown respawned the harness after its supervisor
+   * had already stopped.
+   */
+  private harnessEnvWork: Promise<void> = Promise.resolve();
+
+  /**
    * Stored LLM keys → the harness spawn environment, via the host's closure. Failure is
    * contained: an unreadable key or a relaunch error leaves readiness to say what the
    * harness can actually do, and the other children unaffected.
    */
-  private async refreshHarnessEnv(): Promise<void> {
-    if (!this.opts.relaunchHarness || !this.credentials) return;
-    const credentials: Record<string, string | undefined> = {};
-    for (const provider of ["anthropic", "openai"] as const) {
-      try {
-        credentials[provider] = (await this.credentials.get(provider)) ?? undefined;
-      } catch {
-        /* one unreadable key must not cost the other its delivery */
+  private refreshHarnessEnv(): Promise<void> {
+    const run = async (): Promise<void> => {
+      if (!this.opts.relaunchHarness || !this.credentials) return;
+      const credentials: Record<string, string | undefined> = {};
+      for (const provider of LLM_ENV_PROVIDERS) {
+        try {
+          credentials[provider] = (await this.credentials.get(provider)) ?? undefined;
+        } catch {
+          /* one unreadable key must not cost the other its delivery */
+        }
       }
-    }
-    try {
-      await this.opts.relaunchHarness(credentials);
-    } catch {
-      /* best-effort by design; the harness's own readiness states the consequence */
-    }
+      try {
+        await this.opts.relaunchHarness(credentials);
+      } catch {
+        /* best-effort by design; the harness's own readiness states the consequence */
+      }
+    };
+    const next = this.harnessEnvWork.then(run, run);
+    this.harnessEnvWork = next.catch(() => {});
+    this.backgroundWork.add(this.harnessEnvWork);
+    void this.harnessEnvWork.finally(() => this.backgroundWork.delete(this.harnessEnvWork));
+    return next;
   }
 
   /** Attach a supervised child and mirror its lifecycle into component health (R-6). */
@@ -2492,7 +2509,7 @@ export class Coordinator {
           this.providerService.setConfigured(msg.provider, true);
           // An LLM key change re-delivers the spawn environment, which restarts the harness
           // — the honest cost of rotation (SPEC-005 D5). Media/voice keys leave it alone.
-          if (msg.provider === "anthropic" || msg.provider === "openai") {
+          if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
             void this.refreshHarnessEnv();
           }
           this.emit({
@@ -2513,7 +2530,7 @@ export class Coordinator {
         if (!this.credentials) return;
         await this.credentials.clear(msg.provider).catch(() => {});
         this.providerService.setConfigured(msg.provider, false);
-        if (msg.provider === "anthropic" || msg.provider === "openai") {
+        if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
           void this.refreshHarnessEnv();
         }
         this.emit({

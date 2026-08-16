@@ -28,12 +28,17 @@ const server = http.createServer((req, res) => {
     res.end("not ready");
   } else {
     // The body carries this process's pid so shim tests can find the grandchild doing the
-    // real work behind a .cmd wrapper.
+    // real work behind a .cmd wrapper — and the LLM env vars, so updateEnv's deletion
+    // semantics are provable against a real child rather than assumed.
     res.writeHead(200);
     res.end(JSON.stringify({
       ok: true,
       pid: process.pid,
       protocolVersion: process.env.PROTOCOL_VERSION ? Number(process.env.PROTOCOL_VERSION) : undefined,
+      env: {
+        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+        OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+      },
     }));
   }
 });

@@ -1,17 +1,7 @@
 import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  agentForPurpose,
-  skillFor,
-  buildSessionConfig,
-  buildSessionConfigV2,
-  credentialEnv,
-  discoverPreferredHarness,
-  OpenCodeAdapter,
-  OpenCodeV2Adapter,
-  ROSTER,
-} from "@arke-studio/adapter-opencode";
+import { agentForPurpose, skillFor, ROSTER } from "@arke-studio/adapter-opencode";
 import { createProviderClients, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { KOKORO_PRESETS, localCandidates } from "@arke-studio/voice";
 import { ChildLedger } from "./child-ledger.js";
@@ -19,11 +9,11 @@ import { Coordinator } from "./coordinator.js";
 import { devCipher } from "./credentials/dev-cipher.js";
 import { ProviderCallStore } from "./providers/call-store.js";
 import { SecretRegistry } from "./redact.js";
-import { ChildSupervisor, registerExitBackstop } from "./supervisor.js";
+import { registerExitBackstop } from "./supervisor.js";
 import { nodeSetupDeps } from "./setup/node-deps.js";
 import { FsWorldProvider } from "./world/provider.js";
 import { harnessTrace } from "./harness/trace.js";
-import { HarnessPasswordHolder, harnessProfileDir, v2ProfileEnv } from "./harness/v2-launch.js";
+import { assembleHarness } from "./harness/v2-launch.js";
 
 /**
  * Dev entry: run the coordinator standalone over a real on-disk app root (SPEC-002) so the
@@ -77,53 +67,18 @@ if (swept.reaped.length > 0) {
 }
 
 // Real authoring in dev when either OpenCode generation is installed; honest degradation
-// when neither is. v2 preferred, v1 the escape hatch (issue 327 §3, §9).
-const harness = await discoverPreferredHarness({
+// when neither is. One seam builds the whole launch (issue 327 §3–§4) — v2 preferred, v1
+// the escape hatch — so dev and desktop cannot drift.
+const wiring = await assembleHarness({
+  appRoot: devRoot,
+  deps: { ledger },
   preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
+  onTrace: harnessTrace(devRoot),
 });
-const isV2 = harness?.generation === "v2";
-const harnessPassword = new HarnessPasswordHolder();
-const profileDir = harnessProfileDir(devRoot);
-if (isV2) await mkdir(profileDir, { recursive: true });
-const opencodeSupervisor = new ChildSupervisor(
-  {
-    id: "opencode",
-    command: harness?.discovery.command ?? null,
-    args: ["serve", "--port", "{port}", "--hostname", "127.0.0.1"],
-    ...(isV2 ? { env: v2ProfileEnv(profileDir) } : {}),
-    healthPath: "/api/health",
-    readyTimeoutMs: 30_000,
-    ...(isV2
-      ? { healthHeaders: harnessPassword.healthHeaders, onStdoutLine: harnessPassword.onStdoutLine }
-      : {}),
-  },
-  { ledger },
-);
+const opencodeSupervisor = wiring.supervisor;
+const adapter = wiring.adapter;
 registerExitBackstop(opencodeSupervisor);
-const adapter = harness
-  ? isV2
-    ? new OpenCodeV2Adapter({
-        baseUrl: () => `http://127.0.0.1:${opencodeSupervisor.port ?? 0}`,
-        password: harnessPassword.current,
-        onTrace: harnessTrace(devRoot),
-      })
-    : new OpenCodeAdapter({
-        baseUrl: () => `http://127.0.0.1:${opencodeSupervisor.port ?? 0}`,
-        // The adapter's own account of itself — connects, stalls, resyncs, dispatches. When a
-        // chat sticks, this file answers "what did the app hear, and when" without a debugger.
-        onTrace: harnessTrace(devRoot),
-      })
-  : null;
-console.log(
-  harness
-    ? `[arke-studio] OpenCode ${harness.generation}: ${harness.discovery.source} (${harness.discovery.version ?? "unknown version"})${isV2 ? " [beta]" : ""}`
-    : "[arke-studio] OpenCode: not found — authoring disabled",
-);
-if (harness?.rejectedV2) {
-  console.log(
-    `[arke-studio] OpenCode v2 found but too old: ${harness.rejectedV2.version ?? "unknown version"} — running v1`,
-  );
-}
+for (const line of wiring.logLines) console.log(`[arke-studio] ${line}`);
 
 // Generation works in dev (issue #227). Three things were missing, and any one of them alone
 // left the stack unable to produce a single image: a cipher, so a key can be stored at all; the
@@ -168,19 +123,9 @@ const coordinator = new Coordinator({
   // Settings · Sample world is a working surface here and not a dead one (SPEC-016 R-6).
   sampleWorldPath: join(fixturesRoot, "worlds", "the-undersong"),
   setup: nodeSetupDeps(),
-  authoring: { buildConfig: isV2 ? buildSessionConfigV2 : buildSessionConfig, agentForPurpose, roster: ROSTER, skillFor },
-  ...(harness
-    ? {
-        harnessInfo: {
-          generation: harness.generation,
-          source: harness.discovery.source,
-          version: harness.discovery.version,
-          beta: isV2,
-          ...(harness.rejectedV2 ? { rejectedV2Version: harness.rejectedV2.version } : {}),
-        },
-      }
-    : {}),
-  relaunchHarness: (credentials) => opencodeSupervisor.updateEnv(credentialEnv(credentials)),
+  authoring: { buildConfig: wiring.buildConfig, agentForPurpose, roster: ROSTER, skillFor },
+  ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
+  relaunchHarness: wiring.relaunchHarness,
   // The dev coordinator carries the app's own preset speakers so the voice picker has a
   // catalogue to show without a sidecar or a provider key. No cloud sources: unkeyed
   // providers contribute nothing anyway, and dev should never reach for one.

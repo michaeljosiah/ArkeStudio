@@ -223,13 +223,19 @@ export async function discoverPreferredHarness(opts: {
   v2?: DiscoveryOptions & { minBuild?: number };
 } = {}): Promise<DiscoveredHarness | null> {
   const gate = (v: string | null) => meetsV2Gate(v, opts.v2?.minBuild);
-  const v2 = await discoverGated("opencode2", opts.v2 ?? {}, gate);
+  // Both lanes probe concurrently: each is a PATH walk plus a --version spawn (~300ms
+  // typical, seconds on a loaded machine), the probes are independent, and this runs on the
+  // visible boot path — serial probing charged every v1-only machine a failed v2 probe
+  // before its own discovery even began.
+  const [v2, v1] = await Promise.all([
+    discoverGated("opencode2", opts.v2 ?? {}, gate),
+    discoverOpenCode(opts.v1 ?? {}),
+  ]);
   const withReason = (result: DiscoveredHarness): DiscoveredHarness => ({
     ...result,
     ...(v2.rejected ? { rejectedV2: v2.rejected } : {}),
   });
   if (!opts.preferV1 && v2.found) return { generation: "v2", discovery: v2.found };
-  const v1 = await discoverOpenCode(opts.v1 ?? {});
   if (v1) return withReason({ generation: "v1", discovery: v1 });
   if (opts.preferV1 && v2.found) return { generation: "v2", discovery: v2.found };
   return null;
