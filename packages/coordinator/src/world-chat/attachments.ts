@@ -30,7 +30,17 @@ import { conversationDir, WorldChatStore } from "./store.js";
 /** Matches the filing path's ceiling, so an attachment cannot be a way around it. */
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 
-/** One `get_attachment_text` call. Bounded results, like every other tool (§19). */
+/**
+ * What one `get_attachment_text` call returns when it does not say (§19).
+ *
+ * A default, not a ceiling. It used to be both, and the ceiling was the quiet half: the same
+ * method loads the text that goes into the prompt, so a document was cut to eight thousand
+ * characters before any budget had an opinion about it. Whatever the prompt then said about
+ * carrying attachments whole, whole meant the first eight thousand characters.
+ *
+ * What a call may actually return is governed where it should be — by the run's own text budget,
+ * which the caller passes down.
+ */
 export const MAX_TEXT_READ_CHARS = 8_000;
 
 /**
@@ -68,7 +78,12 @@ export function mergeAttachmentRanges(ranges: readonly AttachmentRange[]): strin
   return merged.map((r) => r.text);
 }
 
-/** Everything one run may read out of attachments, across all calls (§19). */
+/**
+ * The floor for what one run may read out of attachments, across all calls (§19).
+ *
+ * A floor rather than the figure: like every other budget here it is taken from the window of the
+ * model that answers, and this is what applies when none can be named.
+ */
 export const MAX_TEXT_PER_RUN_CHARS = 32_000;
 
 export const MAX_LINKED_ATTACHMENTS_PER_TURN = 20;
@@ -303,6 +318,16 @@ export class WorldChatAttachmentStore {
    * and reports the total length so a caller can tell a window from a whole document — a model
    * told only "here is the text" would cite a truncated file as though it had read all of it.
    */
+  /**
+   * The whole document, for the path that puts it in the prompt.
+   *
+   * What survives is the prompt budget's decision, made against the model's window with
+   * everything else in view — not this method's, made per document before anything is known.
+   */
+  async readWholeText(attachment: WorldChatAttachment): Promise<string> {
+    return (await this.readText(attachment, { limit: Number.POSITIVE_INFINITY })).text;
+  }
+
   async readText(
     attachment: WorldChatAttachment,
     range: { offset?: number; limit?: number } = {},
@@ -316,7 +341,9 @@ export class WorldChatAttachmentStore {
     const bytes = await this.readBytes(attachment);
     const whole = new TextDecoder("utf-8").decode(bytes);
     const offset = Math.max(0, Math.trunc(range.offset ?? 0));
-    const limit = Math.min(Math.max(1, Math.trunc(range.limit ?? MAX_TEXT_READ_CHARS)), MAX_TEXT_READ_CHARS);
+    // No upper clamp: the caller's limit is the caller's business, and the run's text budget is
+    // what actually bounds it. Clamping here bounded the prompt as well, which was never the point.
+    const limit = Math.max(1, Math.trunc(range.limit ?? MAX_TEXT_READ_CHARS));
     const text = whole.slice(offset, offset + limit);
     return {
       text,

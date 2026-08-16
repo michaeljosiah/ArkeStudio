@@ -213,11 +213,27 @@ describe("reading an attachment as text", () => {
     assert.equal(second.truncated, false, "the window reaches the end");
   });
 
-  it("will not exceed the per-call bound however large a range is asked for", async () => {
+  /*
+   * The per-call figure is a default, not a ceiling.
+   *
+   * It was both, and the ceiling was the quiet half: the same method loads the text that goes
+   * into the prompt, so every document was cut to eight thousand characters before any budget had
+   * an opinion. What a call may return is governed by the run's text budget, which the caller
+   * passes down — not by a clamp that could not tell the tool path from the prompt path.
+   */
+  it("honours a larger range when the caller asks for one", async () => {
     const { store, conversationId } = await setup();
     const attachment = await store.ingestText(conversationId, "b".repeat(100_000));
     const read = await store.readText(attachment, { limit: 100_000 });
-    assert.equal(read.text.length, MAX_TEXT_READ_CHARS);
+    assert.equal(read.text.length, 100_000);
+    assert.equal(read.truncated, false);
+  });
+
+  it("reads a whole document for the path that puts it in the prompt", async () => {
+    const { store, conversationId } = await setup();
+    const whole = "c".repeat(MAX_TEXT_READ_CHARS * 7 + 13);
+    const attachment = await store.ingestText(conversationId, whole);
+    assert.equal(await store.readWholeText(attachment), whole);
   });
 
   it("refuses a file it cannot read instead of returning gibberish", async () => {
