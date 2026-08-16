@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { applyBibleEdits, splitBible, type BibleEdit } from "@arke-studio/contracts";
+import {
+  applyBibleEdits,
+  BIBLE_EDIT_BOUNDS,
+  splitBible,
+  WorldChatTurnResultSchema,
+  type BibleEdit,
+} from "@arke-studio/contracts";
 import {
   applyTurnBibleEdits,
   BibleStaleError,
@@ -332,5 +338,56 @@ describe("the world bible (SPEC-022)", () => {
         await store.close();
       }
     });
+  });
+});
+
+/**
+ * Building a bible out of a document somebody handed over (§8.5).
+ *
+ * The bounds were written for a conversation nudging a bible it already had — six sections a turn,
+ * twenty thousand characters each. The other thing people do is attach a series bible and ask for
+ * theirs to be built from it, and that could not be answered at all: a result outside these bounds
+ * is rejected whole, so the turn came back "that did not go through" with the reply lost too.
+ */
+describe("a bible built from a handed-over document", () => {
+  it("accepts a turn that writes a whole bible's worth of sections", () => {
+    const edits: BibleEdit[] = Array.from({ length: 40 }, (_, i) => ({
+      op: "set-section",
+      heading: `Chapter ${i + 1}`,
+      text: `Body of chapter ${i + 1}.`,
+    }));
+    const result = WorldChatTurnResultSchema.safeParse({
+      reply: "Built it from the document you attached.",
+      candidateOperations: [],
+      groupOperations: [],
+      bibleEdits: edits,
+    });
+    assert.equal(result.success, true, "forty sections is a bible, not an abuse");
+  });
+
+  it("accepts a section as long as a chapter of one", () => {
+    const result = WorldChatTurnResultSchema.safeParse({
+      reply: "Written.",
+      candidateOperations: [],
+      groupOperations: [],
+      bibleEdits: [{ op: "set-section", heading: "The Rift", text: "x".repeat(150_000) }],
+    });
+    assert.equal(result.success, true, "a section of a series bible can be a chapter");
+  });
+
+  /* Still bounded: the shape of an edit is what keeps a diff to what was asked for. */
+  it("still refuses a turn that is not an edit but a flood", () => {
+    const edits: BibleEdit[] = Array.from({ length: BIBLE_EDIT_BOUNDS.edits + 1 }, (_, i) => ({
+      op: "set-section",
+      heading: `H${i}`,
+      text: "body",
+    }));
+    const result = WorldChatTurnResultSchema.safeParse({
+      reply: "…",
+      candidateOperations: [],
+      groupOperations: [],
+      bibleEdits: edits,
+    });
+    assert.equal(result.success, false);
   });
 });

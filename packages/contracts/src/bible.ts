@@ -103,10 +103,27 @@ export function joinBible(outline: BibleOutline): string {
  * `replace-document` remains, for a bible with no headings at all and for a genuine rewrite.
  */
 export const BIBLE_EDIT_BOUNDS = {
-  /** Per turn. A turn that wants to rewrite more of the bible than this wants a rewrite. */
-  edits: 6,
+  /**
+   * Sections one turn may touch.
+   *
+   * Six was written for a conversation nudging a bible it already had, and it is the wrong number
+   * for the other thing people do: hand over a document and ask for the bible to be built from it.
+   * A bible worth the name has more sections than six, so that request could not be answered at
+   * all — and because a result outside these bounds is rejected whole, the turn came back "that
+   * did not go through" with the reply lost too.
+   *
+   * Still bounded, because the shape of the edit still matters: section-scoped edits keep the diff
+   * to what was asked for, and `replace-document` remains for a genuine whole rewrite.
+   */
+  edits: 100,
   heading: 120,
-  text: 20_000,
+  /**
+   * Characters in one section.
+   *
+   * A section of a series bible can be a chapter. Twenty thousand was under a third of one
+   * document a person handed over expecting it to become their bible.
+   */
+  text: 200_000,
 } as const;
 
 const HeadingSchema = z.string().trim().min(1).max(BIBLE_EDIT_BOUNDS.heading);
