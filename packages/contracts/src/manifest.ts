@@ -754,7 +754,7 @@ export function durationOptions(model: ManifestModel): number[] {
  * clip would spend real money on footage that cannot cover what was asked for.
  */
 export type DurationChoice =
-  | { kind: "asked"; seconds: number; wire: string }
+  | { kind: "asked"; seconds: number; wire: string | number }
   | { kind: "provider-default" }
   | { kind: "over-cap"; longest: number };
 
@@ -764,7 +764,11 @@ export function dispatchDuration(model: ManifestModel, requestedSec: number): Du
   const longest = options[options.length - 1]!;
   if (requestedSec > longest) return { kind: "over-cap", longest };
   const chosen = options.find((seconds) => seconds >= requestedSec)!;
-  return { kind: "asked", seconds: chosen, wire: model.limits.durations![String(chosen)]! };
+  const wire = model.limits.durations![String(chosen)]!;
+  // In the route's own type. The lengths are stored as strings because they are keys, but a
+  // route declaring `duration` as a number enum rejects the quoted form — and it rejects it
+  // AFTER accepting the submission, so the job is queued, billed and then 422s on its result.
+  return { kind: "asked", seconds: chosen, wire: model.limits.durationWire === "number" ? Number(wire) : wire };
 }
 
 /** The seconds a dispatch will run for, for pricing — the request itself when we cannot ask. */
