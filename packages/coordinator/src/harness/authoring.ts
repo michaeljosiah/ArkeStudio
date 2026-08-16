@@ -5,6 +5,7 @@ import { fromPortable } from "../world/paths.js";
 import type { ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "../world/store.js";
 import type { GrantStore } from "./grants.js";
+import { sessionTokenBudget } from "./token-budget.js";
 
 /**
  * Authoring sessions over proposals (SPEC-005 §2.4): one session, one proposal; cancellable,
@@ -33,7 +34,14 @@ interface ActiveRun {
 }
 
 const DEFAULT_WALL_CLOCK_MS = 5 * 60_000;
-const DEFAULT_TOKEN_BUDGET = 200_000;
+/**
+ * The floor for one proposal's drafting conversation, when no model window can be named.
+ *
+ * A session lives per proposal and every instruction spends into the same total, so this is a
+ * conversation's budget rather than a run's. What replaced the flat figure is beside
+ * `sessionTokenBudget`.
+ */
+const FALLBACK_TOKEN_BUDGET = 200_000;
 
 export class AuthoringService {
   private readonly runs = new Map<string, ActiveRun>();
@@ -145,7 +153,9 @@ export class AuthoringService {
     status("running");
 
     const wallClock = this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS;
-    const tokenBudget = this.opts.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
+    const tokenBudget =
+      this.opts.tokenBudget ??
+      sessionTokenBudget(this.adapter.knownInputTokenLimit?.(), FALLBACK_TOKEN_BUDGET);
     const abort = new AbortController();
     let ending: { state: "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed"; detail?: string } | null =
       null;
