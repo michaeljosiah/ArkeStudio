@@ -9,25 +9,70 @@ import { contentHash } from "./observations.js";
 /**
  * What a run is allowed to see (#70 §8.5).
  *
- * Every section has a stated bound, and the bounds are enforced here rather than trusted to
- * happen. The rule underneath them is the one worth keeping: the model never inherits unbounded
- * history invisibly. A conversation that has been going for two hours must cost the same as one
- * that started five minutes ago, or the app quietly becomes slower, more expensive and less
- * predictable the longer somebody uses it — and nobody would be able to point at when it changed.
+ * One budget, taken from the context window of the model that is actually going to answer, and
+ * spent only when there is not enough room for everything. Nothing is cut while it fits.
  *
- * The current user message is the single exception, and it is never truncated. Cutting what
- * somebody just typed, mid-sentence, to fit a budget would be the app losing part of what they
- * said without telling them. Oversized input becomes a private attachment instead (§19).
+ * It used to be a fixed character bound per section — 8k of summary, 32k of world, 32k of
+ * attachments shared between them — which came to about 30k tokens against models holding
+ * 372,000 and more. A document somebody attached for this turn was cut to a third of a third of
+ * what the model could comfortably read, and the reply was written out of the fraction that
+ * survived. The person could see the whole document on their own screen and had no way to know
+ * which part the Studio had been given.
+ *
+ * When the limit is not known the floor below applies, which is what the fixed bounds added up
+ * to: the same behaviour as before rather than a guess that might overflow a small model.
  */
 
-export const BOUNDS = {
-  summary: 8_000,
-  registry: 16_000,
-  recentTurns: 32_000,
-  worldContext: 32_000,
-  /** Matches MAX_TEXT_PER_RUN_CHARS: what one run may read out of attachments in total (§19). */
-  attachments: 32_000,
-} as const;
+/**
+ * The budget when nobody could say what model is answering — the old bounds, added up.
+ *
+ * A floor rather than a guess: an unknown model may be a small one, and overflowing it fails the
+ * turn outright, which is worse than the trimming this replaces.
+ */
+export const FALLBACK_BUDGET_CHARS = 120_000;
+
+/**
+ * Characters per token, for turning a model's token window into a character budget.
+ *
+ * Deliberately pessimistic. English prose runs nearer four, and assuming three leaves the
+ * arithmetic wrong in the safe direction on prose that tokenises badly — names, ids, JSON.
+ */
+const CHARS_PER_TOKEN = 3;
+
+/**
+ * How much of the input window this prompt may fill.
+ *
+ * The rest is the model's to work in: the reply, and whatever tool results a turn reads on its
+ * way to one. Half is not a measured figure; it is room to be wrong in without failing a turn.
+ */
+const WINDOW_SHARE = 0.5;
+
+/** A character budget from a model's input-token limit, or the floor when there is none. */
+export function budgetFor(inputTokenLimit: number | undefined): number {
+  if (!inputTokenLimit || inputTokenLimit <= 0) return FALLBACK_BUDGET_CHARS;
+  return Math.max(FALLBACK_BUDGET_CHARS, Math.floor(inputTokenLimit * WINDOW_SHARE * CHARS_PER_TOKEN));
+}
+
+/**
+ * What gets cut first when there genuinely is not room, and what is never cut.
+ *
+ * Ordered by what a turn can most afford to lose. Recent turns go first because the summary
+ * already carries what they were about; attachments go last of the trimmable sections because
+ * they are what the person handed over for *this* turn, which is the same reason the current
+ * message is not on this list at all. The bible is absent for the reason stated beside it.
+ */
+const SACRIFICE_ORDER = ["recentTurns", "worldContext", "summary", "registry", "attachments"] as const;
+
+/**
+ * When a conversation is long enough to be worth summarising.
+ *
+ * Unrelated to the prompt budget, and it always was: this is about a conversation having enough
+ * history to be worth condensing, not about running out of room to send it.
+ */
+const SUMMARISE_AFTER_CHARS = 32_000;
+
+/** A summary is a summary. Longer than this and it is a second copy of the conversation. */
+const MAX_SUMMARY_CHARS = 8_000;
 
 /**
  * The bible is deliberately absent from BOUNDS: it is never trimmed (SPEC-022).
@@ -90,6 +135,12 @@ export interface ContextInput {
   worldContext?: string;
   /** The author's bible, whole and untrimmed (SPEC-022). Empty when they have not started one. */
   bible?: string;
+  /**
+   * What this prompt may spend, in characters, from the answering model's own window.
+   *
+   * Absent means nobody could say which model is answering, and the floor applies.
+   */
+  budgetChars?: number;
   /** Linked to this turn. Empty for a turn that handed nothing over. */
   attachments?: readonly ContextAttachment[];
   currentUserMessage: string;
@@ -227,30 +278,45 @@ const CUT_NOTE = "[Cut off here. Read further with get_attachment_text rather th
  * document the model was told least about is also the only one it cannot go and read. Every
  * attachment now keeps its identity and a share of the text.
  */
-function renderAttachments(
-  attachments: readonly ContextAttachment[],
-  budget: number,
-): { text: string; trimmed: boolean } {
-  if (attachments.length === 0) return { text: "", trimmed: false };
-  const share = Math.floor(budget / attachments.length);
-  let trimmed = false;
-  const blocks = attachments.map((a) => {
-    // The identity line is what makes a quotation of this document citable at all; it is
-    // printed for unreadable files too, so an image can still be referred to by id.
-    const head = `### ${a.fileName} (${a.kind})\nattachmentId: ${a.id}\ncontentHash: ${a.contentHash}`;
-    if (!a.readable || a.text === undefined) {
-      return `${head}\nAttached, and cannot be read as text here. Say so plainly if it is relevant; do not guess at what it contains.`;
-    }
-    // Less the newline after the heading, the blank line before the note, and the blank line
-    // that joins this block to the next — a share that ignored them would overrun the bound.
-    const room = Math.max(0, share - head.length - CUT_NOTE.length - 5);
-    if (a.text.length <= room) return `${head}\n${a.text}`;
-    trimmed = true;
-    // The beginning, as before: a document was handed over whole and starts at its start, so
-    // keeping the tail would give the model the last page of something it never saw page one of.
-    return `${head}\n${a.text.slice(0, room)}\n\n${CUT_NOTE}`;
-  });
-  return { text: blocks.join("\n\n"), trimmed };
+function renderAttachments(attachments: readonly ContextAttachment[], room?: number): string {
+  /*
+   * Whole, all of them.
+   *
+   * These used to share a fixed budget and be cut to `budget / count`, so attaching a second
+   * document halved the first — three documents left a 57,000-character bible showing about a
+   * fifth of itself, and the reply was written out of that fifth. An attachment is what somebody
+   * handed over for this turn, which is the same thing the current message is, so it is treated
+   * the same way: given whole, and shortened only if the whole prompt will not fit.
+   */
+  /*
+   * A share each, and only when `room` says there is not enough for all of them.
+   *
+   * Spending a shortfall down the concatenation instead would take it all out of the last
+   * documents — losing their headings, and with them the ids `get_attachment_text` needs to go
+   * and read the rest. The one the model is told least about would be the one it cannot look up.
+   */
+  const share = room === undefined ? undefined : Math.floor(room / Math.max(1, attachments.length));
+  return attachments
+    .map((a) => {
+      // The identity line is what makes a quotation of this document citable at all; it is
+      // printed for unreadable files too, so an image can still be referred to by id.
+      const head = [
+        `### ${a.fileName} (${a.kind})`,
+        `attachmentId: ${a.id}`,
+        `contentHash: ${a.contentHash}`,
+      ].join("\n");
+      if (!a.readable || a.text === undefined) {
+        return `${head}\nAttached, and cannot be read as text here. Say so plainly if it is relevant; do not guess at what it contains.`;
+      }
+      if (share === undefined || a.text.length <= share - head.length - CUT_NOTE.length - 5) {
+        return `${head}\n${a.text}`;
+      }
+      // The beginning: a document was handed over whole and starts at its start, so keeping the
+      // tail would give the model the last page of something it never saw page one of.
+      const keep = Math.max(0, share - head.length - CUT_NOTE.length - 5);
+      return `${head}\n${a.text.slice(0, keep)}\n\n${CUT_NOTE}`;
+    })
+    .join("\n\n");
 }
 
 /**
@@ -290,63 +356,75 @@ function renderTombstones(tombstones: readonly CandidateTombstone[]): string {
 }
 
 export function assembleContext(input: ContextInput): AssembledContext {
+  const budget = input.budgetChars ?? FALLBACK_BUDGET_CHARS;
   const trimmed: string[] = [];
 
-  const take = (name: string, text: string, bound: number): string => {
-    const result = trimToBound(text, bound);
-    if (result.trimmed) trimmed.push(name);
-    return result.text;
+  /*
+   * Everything, whole, before anything is measured.
+   *
+   * The order of these two steps is the change: sections used to be cut to their own bound as
+   * they were built, so a document was shortened whether or not there was room for it. Nothing is
+   * cut here until the total is known to be too big.
+   */
+  const sections: Record<(typeof SACRIFICE_ORDER)[number], string> = {
+    recentTurns: renderTurns(input.messages.slice(-RECENT_TURN_COUNT * 2)),
+    worldContext: input.worldContext ?? "",
+    summary: input.summary ?? "",
+    registry: renderRegistry(input.candidates, input.groups ?? []),
+    attachments: renderAttachments(input.attachments ?? []),
   };
-
-  const summary = take("summary", input.summary ?? "", BOUNDS.summary);
-  const registry = take("registry", renderRegistry(input.candidates, input.groups ?? []), BOUNDS.registry);
-  const recentTurns = take(
-    "recentTurns",
-    renderTurns(input.messages.slice(-RECENT_TURN_COUNT * 2)),
-    BOUNDS.recentTurns,
-  );
-  const worldContext = take("worldContext", input.worldContext ?? "", BOUNDS.worldContext);
-  // Not passed through `take`. See the note beside BOUNDS: this one is never cut.
+  // Never cut, and so never part of what is spent: see the notes beside each of them.
   const bible = renderBible(input.bible ?? "");
   const tombstones = renderTombstones(input.tombstones);
-  /**
-   * Cut per document and from the *end* of each, unlike every other section.
+  const fixed =
+    bible.length + tombstones.length + input.currentUserMessage.length + (input.entryContext ?? "").length;
+
+  const spent = () => Object.values(sections).reduce((n, text) => n + text.length, 0);
+  /*
+   * Cut only as far as it takes, and in the order stated above.
    *
-   * The others keep their most recent lines because a conversation's recent material is what is
-   * still being talked about. A document is the other way round: it was handed over whole and
-   * starts at its beginning, so keeping the tail would hand the model the last page of something
-   * it was never given the first page of.
+   * Each section gives up what the total is over by, not all of it: a prompt 200 characters too
+   * long loses 200 characters of the oldest turns rather than every turn it had.
    */
-  const rendered = renderAttachments(input.attachments ?? [], BOUNDS.attachments);
-  if (rendered.trimmed) trimmed.push("attachments");
-  const attachments = rendered.text;
+  for (const name of SACRIFICE_ORDER) {
+    const over = fixed + spent() - budget;
+    if (over <= 0) break;
+    const text = sections[name];
+    if (text.length === 0) continue;
+    const keep = Math.max(0, text.length - over);
+    sections[name] =
+      name === "attachments"
+        ? renderAttachments(input.attachments ?? [], keep)
+        : trimToBound(text, keep).text;
+    trimmed.push(name);
+  }
 
   return {
     // Never trimmed: it is one short line, and it is the frame for everything else.
     entryContext: input.entryContext ?? "",
-    summary,
-    registry,
-    recentTurns,
-    worldContext,
+    summary: sections.summary,
+    registry: sections.registry,
+    recentTurns: sections.recentTurns,
+    worldContext: sections.worldContext,
     bible,
-    attachments,
+    attachments: sections.attachments,
     tombstones,
     // Never trimmed. See the note at the top of this file.
     currentUserMessage: input.currentUserMessage,
     currentUserMessageId: input.currentUserMessageId,
     digest: contentHash({
       entryContext: input.entryContext ?? "",
-      summary,
-      registry,
-      recentTurns,
-      worldContext,
+      summary: sections.summary,
+      registry: sections.registry,
+      recentTurns: sections.recentTurns,
+      worldContext: sections.worldContext,
       // In the digest because the bible is editable from inside the conversation as well as from
       // outside it. Two turns that read different bibles are different turns, and a run record
       // claiming they shared a context would misdate every edit made between them.
       bible,
       // In the digest because two turns differing only by what was handed over are different
       // turns, and the run record should not claim they had the same context.
-      attachments,
+      attachments: sections.attachments,
       tombstones,
       current: input.currentUserMessage,
       currentId: input.currentUserMessageId,
@@ -362,7 +440,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
  * matters because eight short turns and eight long ones are not the same amount of history.
  */
 export function shouldSummarise(input: { turnCount: number; recentTurnsLength: number }): boolean {
-  return input.turnCount >= RECENT_TURN_COUNT || input.recentTurnsLength >= BOUNDS.recentTurns;
+  return input.turnCount >= RECENT_TURN_COUNT || input.recentTurnsLength >= SUMMARISE_AFTER_CHARS;
 }
 
 /**
@@ -380,7 +458,7 @@ export interface SummaryInput {
 }
 
 export function boundSummary(input: SummaryInput): SummaryInput {
-  return { ...input, text: input.text.slice(0, BOUNDS.summary) };
+  return { ...input, text: input.text.slice(0, MAX_SUMMARY_CHARS) };
 }
 
 /**

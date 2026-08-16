@@ -183,6 +183,14 @@ export interface HarnessAdapter {
 
   // ---- core ----
   createSession(input: CreateSessionInput): Promise<SessionRef>;
+  /**
+   * The input-token window of the model this harness answers with, when it can name one (§8.5).
+   *
+   * Optional because an adapter may not know, and a caller that cannot find out budgets from a
+   * floor instead. Studio does not choose the model — the session config carries no `model` key —
+   * so this is the only place the real limit can come from.
+   */
+  knownInputTokenLimit?(): number | null;
   /** Synchronous send: resolves when the turn completes. */
   sendMessage(input: SendMessageInput): Promise<SendReceipt>;
   /** Fire-and-watch: must not block while the turn runs. */

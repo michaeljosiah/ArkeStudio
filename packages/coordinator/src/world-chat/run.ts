@@ -18,7 +18,7 @@ import {
 } from "@arke-studio/contracts";
 import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
 import { BibleEditError, BibleStaleError } from "../world/bible.js";
-import { assembleContext, type ContextAttachment } from "./context.js";
+import { assembleContext, budgetFor, type ContextAttachment } from "./context.js";
 import type { CurrentLook } from "./look.js";
 import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
 import { deriveChecks, planFor } from "./check-plan.js";
@@ -370,7 +370,15 @@ export class WorldChatRunner {
      * text editor between the two be silently overwritten by an answer that never saw it.
      */
     const bible = (await this.deps.bible?.()) ?? { version: 1, text: "" };
+    /*
+     * What this prompt may spend, from the window of the model that will answer it.
+     *
+     * Asked of the adapter rather than assumed: Studio does not choose the model, so the only
+     * honest budget is the one the harness can name. Absent — a fresh install with no session to
+     * learn from — `budgetFor` returns the floor.
+     */
     const assembled = assembleContext({
+      budgetChars: budgetFor(adapter.knownInputTokenLimit?.() ?? undefined),
       ...(view.entryContext && this.deps.describeEntry
         ? { entryContext: this.deps.describeEntry(view.entryContext) }
         : {}),
