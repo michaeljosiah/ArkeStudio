@@ -28,6 +28,7 @@ function value(name) {
 
 const arch = value("--arch") ?? "x64";
 if (!SUPPORTED_ARCHES.has(arch)) throw new Error("--arch must be x64 or arm64");
+if (process.platform !== "win32") throw new Error("Windows runtime preparation must run on Windows");
 const source = metadata.opencode2?.[arch];
 if (!source) throw new Error(`no pinned opencode2 build for ${arch}`);
 
@@ -65,11 +66,15 @@ cpSync(binary, join(stage, "opencode2.exe"));
 assertPeArchitecture(join(stage, "opencode2.exe"), arch);
 
 // The staged binary must BE the pin, and must run on this machine — asked, not assumed.
-// (Cross-arch staging cannot execute the binary; the PE check above carries that case.)
-if (arch === process.arch || (arch === "x64" && process.arch === "x64")) {
+// This probe's one job is catching an incoherent pin (sha bumped, version field stale), so
+// the match is boundary-anchored: a stale version that happens to prefix the new build's
+// must not pass. Executable when the arches match, and on ARM64 hosts too — Windows on ARM
+// runs x64 under emulation, which is the packaged story (see package-windows.mjs).
+if (arch === process.arch || process.arch === "arm64") {
   const probe = spawnSync(join(stage, "opencode2.exe"), ["--version"], { encoding: "utf8", shell: false, timeout: 30_000 });
   const reported = (probe.stdout ?? "").trim();
-  if (probe.status !== 0 || !reported.includes(metadata.opencode2.version)) {
+  const pinned = new RegExp(`(^|[\\s v])${metadata.opencode2.version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|\\s)`);
+  if (probe.status !== 0 || !pinned.test(reported)) {
     throw new Error(
       `staged opencode2 did not answer with the pinned version: expected ${metadata.opencode2.version}, got "${reported || probe.stderr || "no output"}"`,
     );
