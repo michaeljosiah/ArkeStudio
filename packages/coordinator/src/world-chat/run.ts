@@ -151,6 +151,15 @@ export interface RunDeps {
    * hands a tool summary outwards.
    */
   onProgress?: (conversationId: ConversationId, label: string) => void;
+  /**
+   * A turn that failed, in the operator's terms rather than the person's (§8.4).
+   *
+   * `safeDetail` collapses every error that is not a timeout into one sentence, which is right
+   * for the screen and left the failure undiagnosable from anywhere: a comprehensive bible write
+   * landed on disk and reported "that did not go through", with no record anywhere of what threw.
+   * The safe sentence still goes to the person; this is the same event with the cause attached.
+   */
+  onTurnFailed?: (input: { conversationId: ConversationId; runId: RunId; cause: string }) => void;
   now: () => string;
   timeoutMs?: number;
 }
@@ -497,6 +506,13 @@ export class WorldChatRunner {
       }
 
       if (!outcome.ok) {
+        // The problems are already worded for a person and are the whole reason this failed;
+        // reporting only that it did is what made the same class of failure unreadable before.
+        this.deps.onTurnFailed?.({
+          conversationId,
+          runId,
+          cause: `answer rejected: ${outcome.problems.map((p) => p.code).join(", ")}`,
+        });
         await this.finish(store, run, "failed", "the studio's answer could not be used");
         return { status: "failed", reason: "the answer could not be used", problems: outcome.problems };
       }
@@ -505,6 +521,15 @@ export class WorldChatRunner {
       const cancelled = controller.signal.aborted;
       const timedOut = err instanceof Error && err.message === "timeout";
       const status = cancelled ? "interrupted" : timedOut ? "timeout" : "failed";
+      if (status === "failed") {
+        // The raw error, once, where an operator can read it. It never leaves this process and it
+        // never reaches the screen — `safeDetail` still decides what the person is told.
+        this.deps.onTurnFailed?.({
+          conversationId,
+          runId,
+          cause: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+        });
+      }
       await this.finish(store, run, status, safeDetail(err));
       if (cancelled) return { status: "cancelled" };
       if (timedOut) return { status: "timeout" };
