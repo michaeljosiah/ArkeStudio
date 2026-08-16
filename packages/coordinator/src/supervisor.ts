@@ -54,6 +54,19 @@ export interface SupervisedSpec {
   /** Path probed at http://127.0.0.1:<port>; 2xx → healthy. Default "/health". */
   healthPath?: string;
   /**
+   * Headers for the health probe, resolved per attempt. An OpenCode v2 child authenticates
+   * its whole API — health included — with a password it prints at launch, so the probe must
+   * be able to carry credentials that did not exist when the spec was written (issue 327 §4).
+   * Until the resolver can supply them, the probe runs bare and the 401s read as "not yet".
+   */
+  healthHeaders?: () => Record<string, string>;
+  /**
+   * One call per complete stdout line. The v2 launch protocol arrives this way (`server
+   * password <secret>`); the line is handed over verbatim and never logged here — what is in
+   * it is the caller's secret to keep (issue 327 §4).
+   */
+  onStdoutLine?: (line: string) => void;
+  /**
    * Optional protocol validation after a 2xx response.
    *
    * `false` means not ready yet — keep probing. `{ ok: false, reason }` means the contract is
@@ -112,8 +125,10 @@ export interface SupervisorDeps {
 
 export class ChildSupervisor extends EventEmitter {
   readonly id: string;
-  private readonly spec: Required<Omit<SupervisedSpec, "command" | "args" | "env" | "validateHealth">> &
-    Pick<SupervisedSpec, "command" | "args" | "env" | "validateHealth">;
+  private readonly spec: Required<
+    Omit<SupervisedSpec, "command" | "args" | "env" | "validateHealth" | "healthHeaders" | "onStdoutLine">
+  > &
+    Pick<SupervisedSpec, "command" | "args" | "env" | "validateHealth" | "healthHeaders" | "onStdoutLine">;
   private readonly deps: SupervisorDeps;
   private child: ChildProcess | null = null;
   private _port: number | null = null;
@@ -197,6 +212,17 @@ export class ChildSupervisor extends EventEmitter {
     await this.start();
   }
 
+  /**
+   * Merge new environment for the child. Before the first start this only stores it — the
+   * coming spawn picks it up; a running child restarts, because environment reaches a
+   * process exactly once, at spawn. Credential rotation is the caller (SPEC-005 D5), and a
+   * restarted harness is the honest cost of a changed key.
+   */
+  async updateEnv(env: Record<string, string>): Promise<void> {
+    this.spec.env = { ...this.spec.env, ...env };
+    if (this.child !== null) await this.restart();
+  }
+
   private async spawnOnce(): Promise<void> {
     const command = this.spec.command;
     if (command === null) return;
@@ -223,6 +249,11 @@ export class ChildSupervisor extends EventEmitter {
       return;
     }
     this.child = child;
+
+    // Both pipes are drained whether or not anyone listens: an unread pipe eventually fills
+    // and blocks the child's writes. Stdout lines additionally reach the spec's handler —
+    // the v2 launch protocol travels there — and are never logged or stored here.
+    this.drain(child);
 
     const spawnError = new Promise<string | null>((resolve) => {
       child.once("error", (err: NodeJS.ErrnoException) => resolve(err.code ?? "spawn error"));
@@ -360,6 +391,29 @@ export class ChildSupervisor extends EventEmitter {
     }
   }
 
+  private drain(child: ChildProcess): void {
+    child.stderr?.on("data", () => {});
+    const handler = this.spec.onStdoutLine;
+    if (!handler) {
+      child.stdout?.on("data", () => {});
+      return;
+    }
+    let buffer = "";
+    child.stdout?.on("data", (chunk: Buffer) => {
+      buffer += chunk.toString("utf8");
+      let newline: number;
+      while ((newline = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newline).replace(/\r$/, "");
+        buffer = buffer.slice(newline + 1);
+        try {
+          handler(line);
+        } catch {
+          /* a broken line handler must never take the supervisor down */
+        }
+      }
+    });
+  }
+
   private healthUrl(): string {
     return `http://127.0.0.1:${this._port}${this.spec.healthPath}`;
   }
@@ -368,7 +422,10 @@ export class ChildSupervisor extends EventEmitter {
     const deadline = Date.now() + this.spec.readyTimeoutMs;
     while (Date.now() < deadline && !this.stopping && this.child === child) {
       try {
-        const res = await fetch(this.healthUrl(), { signal: AbortSignal.timeout(1_000) });
+        const res = await fetch(this.healthUrl(), {
+          signal: AbortSignal.timeout(1_000),
+          ...(this.spec.healthHeaders ? { headers: this.spec.healthHeaders() } : {}),
+        });
         if (res.ok) {
           if (!this.spec.validateHealth) return true;
           const validation = await this.spec.validateHealth(res);

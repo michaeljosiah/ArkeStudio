@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { appendFileSync, existsSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, safeStorage, shell } from "electron";
@@ -12,6 +13,9 @@ import {
   AppSettingsFile,
   defaultAppRoot,
   FsWorldProvider,
+  HarnessPasswordHolder,
+  harnessProfileDir,
+  v2ProfileEnv,
   ProviderCallStore,
   SecretRegistry,
   nodeSetupDeps,
@@ -26,10 +30,12 @@ import {
   agentForPurpose,
   skillFor,
   buildSessionConfig,
+  buildSessionConfigV2,
   ROSTER,
   credentialEnv,
-  discoverOpenCode,
+  discoverPreferredHarness,
   OpenCodeAdapter,
+  OpenCodeV2Adapter,
 } from "@arke-studio/adapter-opencode";
 import {
   createProviderClients,
@@ -400,33 +406,64 @@ async function initialize(): Promise<{ port: number }> {
     console.log(`[arke] reaped ${swept.reaped.length} orphaned child process(es): ${named}`);
   }
 
-  // OpenCode discovery (SPEC-005 R-1): configured path → PATH → bundled, reported with its
-  // version. Absent → authoring degrades with the reason stated (R-4).
-  const discovered = await discoverOpenCode({
-    ...(process.env["ARKE_OPENCODE_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE_CMD"] } : {}),
-    ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode", "opencode.exe") } : {}),
+  // Harness discovery (SPEC-005 R-1, issue 327 §3): both generations resolved, v2 preferred,
+  // v1 the escape hatch (ARKE_OPENCODE_GENERATION=v1 until the Settings toggle lands).
+  // Absent → authoring degrades with the reason stated (R-4).
+  const harness = await discoverPreferredHarness({
+    preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
+    v1: {
+      ...(process.env["ARKE_OPENCODE_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE_CMD"] } : {}),
+      ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode", "opencode.exe") } : {}),
+    },
+    v2: {
+      ...(process.env["ARKE_OPENCODE2_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE2_CMD"] } : {}),
+      ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode2", "opencode2.exe") } : {}),
+    },
   });
+  const isV2 = harness?.generation === "v2";
+  // The v2 launch protocol (issue 327 §4): password parsed from stdout, held here and nowhere
+  // else; profile redirected so the user's own OpenCode logins cannot shadow Arke's keys (§2).
+  const harnessPassword = new HarnessPasswordHolder();
+  const profileDir = harnessProfileDir(appRoot);
+  if (isV2) await mkdir(profileDir, { recursive: true });
   const opencodeSupervisor = new ChildSupervisor(
     {
       id: "opencode",
-      command: discovered?.command ?? null,
+      command: harness?.discovery.command ?? null,
       args: ["serve", "--port", "{port}", "--hostname", "127.0.0.1"],
-      env: credentialEnv({}), // SPEC-008 supplies real keys from safeStorage
+      // Real keys arrive via relaunchHarness before the first spawn (SPEC-005 D5).
+      env: { ...credentialEnv({}), ...(isV2 ? v2ProfileEnv(profileDir) : {}) },
       healthPath: "/api/health",
       readyTimeoutMs: 30_000,
+      ...(isV2
+        ? { healthHeaders: harnessPassword.healthHeaders, onStdoutLine: harnessPassword.onStdoutLine }
+        : {}),
     },
     { ledger: childLedger },
   );
-  const adapter = discovered
-    ? new OpenCodeAdapter({
-        baseUrl: () => `http://127.0.0.1:${opencodeSupervisor.port ?? 0}`,
-        // The adapter's own account of itself — connects, stalls, resyncs, dispatches. When a
-        // chat sticks, this file answers "what did the app hear, and when" without a debugger.
-        onTrace: harnessTrace(appRoot),
-      })
+  const adapter = harness
+    ? isV2
+      ? new OpenCodeV2Adapter({
+          baseUrl: () => `http://127.0.0.1:${opencodeSupervisor.port ?? 0}`,
+          password: harnessPassword.current,
+          onTrace: harnessTrace(appRoot),
+        })
+      : new OpenCodeAdapter({
+          baseUrl: () => `http://127.0.0.1:${opencodeSupervisor.port ?? 0}`,
+          // The adapter's own account of itself — connects, stalls, resyncs, dispatches. When a
+          // chat sticks, this file answers "what did the app hear, and when" without a debugger.
+          onTrace: harnessTrace(appRoot),
+        })
     : null;
-  if (discovered) {
-    console.log(`[arke] OpenCode: ${discovered.source} (${discovered.version ?? "unknown version"})`);
+  if (harness) {
+    console.log(
+      `[arke] OpenCode ${harness.generation}: ${harness.discovery.source} (${harness.discovery.version ?? "unknown version"})${isV2 ? " [beta]" : ""}`,
+    );
+    if (harness.rejectedV2) {
+      console.log(
+        `[arke] OpenCode v2 found but too old: ${harness.rejectedV2.version ?? "unknown version"} — running v1`,
+      );
+    }
   } else {
     console.log("[arke] OpenCode: not found — authoring disabled");
   }
@@ -685,7 +722,21 @@ async function initialize(): Promise<{ port: number }> {
     // this build honestly has none; the dev coordinator points at the repo fixture instead, and
     // that is where the feature is exercised from source.
     sampleWorldPath: app.isPackaged ? join(process.resourcesPath, "sample-world") : null,
-    authoring: { buildConfig: buildSessionConfig, agentForPurpose, roster: ROSTER, skillFor },
+    authoring: { buildConfig: isV2 ? buildSessionConfigV2 : buildSessionConfig, agentForPurpose, roster: ROSTER, skillFor },
+    ...(harness
+      ? {
+          harnessInfo: {
+            generation: harness.generation,
+            source: harness.discovery.source,
+            version: harness.discovery.version,
+            beta: isV2,
+            ...(harness.rejectedV2 ? { rejectedV2Version: harness.rejectedV2.version } : {}),
+          },
+        }
+      : {}),
+    // Stored LLM keys reach the harness as spawn environment (SPEC-005 D5) — under v2's
+    // redirected profile this is the only credential path there is (issue 327 §2).
+    relaunchHarness: (credentials) => opencodeSupervisor.updateEnv(credentialEnv(credentials)),
     cipher,
     secretRegistry: providerSecrets,
     providerCalls,

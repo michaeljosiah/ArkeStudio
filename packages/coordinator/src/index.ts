@@ -3,6 +3,7 @@ export { AppSettingsFile, routingFaults } from "./app-settings.js";
 export { ChangeLog, WriteQueue, type LogRecord } from "./change-log.js";
 export { Coordinator, type CoordinatorOptions } from "./coordinator.js";
 export { CredentialStore, type Cipher } from "./credentials/store.js";
+export { HarnessPasswordHolder, harnessProfileDir, passwordFromLine, v2ProfileEnv } from "./harness/v2-launch.js";
 export { buildDiagnosticsBundle } from "./diagnostics.js";
 export { ProviderService, type KeyValidator } from "./providers/service.js";
 export { ProviderCallStore } from "./providers/call-store.js";
