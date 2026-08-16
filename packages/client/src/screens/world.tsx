@@ -121,7 +121,10 @@ export function WorldLayout() {
   if (
     location.pathname.endsWith("/art-direction/propose") ||
     location.pathname.endsWith("/main-photo") ||
-    location.pathname.endsWith("/model-sheet")
+    location.pathname.endsWith("/model-sheet") ||
+    // The bench is a fixed workspace with its own breadcrumb chrome (design 68b) — the pill
+    // nav and hero scroll of the world pages would sit on top of its three columns.
+    location.pathname.includes("/artifacts/bench")
   ) {
     return (
       <div className="fy-app">
@@ -3286,7 +3289,7 @@ export function ArtifactsScreen() {
   const madeHereCount = artifacts.filter((a) => !superseded.has(a.id) && madeHere(a)).length;
   const batches = artifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
   return (
-    <div data-screen="artifacts">
+    <div data-screen="artifacts" style={{ position: "relative" }}>
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {visible.length} file{visible.length === 1 ? "" : "s"}
@@ -3299,9 +3302,10 @@ export function ArtifactsScreen() {
         <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 500 }}>
           Recordings, documents and references: filed against the world, attachable to any generation.
         </p>
-        <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
-          {/* The only entrance to the bench (issue 305 §2): a production's Generate has shots
-              to answer to, so it never grows one. */}
+        {/* The only entrance to the bench (issue 305 §2), placed as the master places it
+            (design 68a): top-right of the hero, out of its flow. A production's Generate has
+            shots to answer to, so it never grows one. */}
+        <div className="fy-artifacts-door">
           <Button data-testid="artifacts-generate" onClick={() => void navigate(`/w/${worldId}/artifacts/bench`)}>
             Generate
           </Button>
