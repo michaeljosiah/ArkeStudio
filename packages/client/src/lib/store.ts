@@ -2455,6 +2455,7 @@ export function sendBenchAddReference(
     pick: { source: "artifact"; artifactId: string } | { source: "take"; takeId: string };
     replace?: string;
   }>,
+  lane?: "reference" | "keyframe",
 ): void {
   if (picks.length === 0) return;
   send({
@@ -2463,11 +2464,24 @@ export function sendBenchAddReference(
     sessionId,
     requestId: ulid(),
     picks: picks.map((p) => ({ source: p.pick, ...(p.replace !== undefined ? { replace: p.replace } : {}) })),
+    ...(lane !== undefined ? { lane } : {}),
   } as ClientMessage);
 }
 
-export function sendBenchRemoveReference(worldId: string, sessionId: string, token: string): void {
-  send({ kind: "bench-remove-reference", worldId, sessionId, requestId: ulid(), token } as ClientMessage);
+export function sendBenchRemoveReference(
+  worldId: string,
+  sessionId: string,
+  token: string,
+  lane?: "reference" | "keyframe",
+): void {
+  send({
+    kind: "bench-remove-reference",
+    worldId,
+    sessionId,
+    requestId: ulid(),
+    token,
+    ...(lane !== undefined ? { lane } : {}),
+  } as ClientMessage);
 }
 
 /** Returns the requestId the artifact.filed-batch answer will carry. */

@@ -147,9 +147,14 @@ export class FalClient implements ProviderClient {
     const durable = request.params["references"];
     const withReferences = Array.isArray(durable) && durable.length > 0;
     const prepared = request.imageReferences ?? [];
-    // Route first: a model with no `/edit` sibling cannot take references at all, and saying so
-    // is more use than complaining about the bytes for a request that could never have gone.
-    const endpoint = this.endpointFor(request.model, withReferences);
+    // A task mode is a ROUTE on this provider (SPEC-019 T-1): a dispatch that planned one sends
+    // its endpoint in `route`, resolved from the manifest's own mode spec via routeFor. Route
+    // first either way: a model with no `/edit` sibling cannot take references at all, and
+    // saying so is more use than complaining about the bytes for a request that could never
+    // have gone.
+    const routeOverride = typeof request.params["route"] === "string" ? (request.params["route"] as string) : null;
+    const endpoint = routeOverride ?? this.endpointFor(request.model, withReferences);
+    const taskMode = typeof request.params["taskMode"] === "string" ? (request.params["taskMode"] as string) : null;
     // The durable list is what the job promised; the prepared list is what actually resolved to
     // bytes. A mismatch means a reference went missing between planning and dispatch, and
     // submitting the remainder would quietly generate against a smaller set than was priced.
@@ -163,6 +168,25 @@ export class FalClient implements ProviderClient {
       );
     }
     const imageUrls = withReferences ? prepared.map(dataUri) : [];
+    // The frame task modes name their images differently per route, read from the routes' own
+    // schemas: image-to-video takes `image_url` (start, required) and `end_image_url`;
+    // reference-to-video takes `image_urls`. The counts are structural — a first-and-last
+    // dispatch that arrives with one image was mis-planned, and refusing beats animating the
+    // wrong thing.
+    let imagePayload: Record<string, unknown> = imageUrls.length > 0 ? { image_urls: imageUrls } : {};
+    if (taskMode === "first-frame" || taskMode === "first-and-last-frame") {
+      const wanted = taskMode === "first-frame" ? 1 : 2;
+      if (imageUrls.length !== wanted) {
+        throw new Error(`fal: ${taskMode} needs ${wanted} frame image${wanted === 1 ? "" : "s"}, got ${imageUrls.length}`);
+      }
+      imagePayload = {
+        image_url: imageUrls[0],
+        ...(taskMode === "first-and-last-frame" ? { end_image_url: imageUrls[1] } : {}),
+      };
+    } else if (taskMode === "keyframe-sequence") {
+      if (imageUrls.length === 0) throw new Error("fal: keyframe-sequence needs at least one frame image");
+      imagePayload = { image_urls: imageUrls };
+    }
     const internal = new Set([
       "references",
       "referenceRoles",
@@ -171,9 +195,11 @@ export class FalClient implements ProviderClient {
       "lookKind",
       "lookPrompt",
       "shotPlan",
+      // Ours, not fal's: the mode already chose the endpoint and the image field names.
+      "taskMode",
+      "route",
       // Ours, not fal's: the length goes as `duration`, in this route's own vocabulary.
       "durationSec",
-      // Ours, not fal's: the length goes as `duration`, in this route's own vocabulary.
     ]);
     const { output, ...params } = Object.fromEntries(
       Object.entries(request.params).filter(([key]) => !internal.has(key)),
@@ -197,7 +223,7 @@ export class FalClient implements ProviderClient {
         ...params,
         ...durationParam(request.model, request.params),
         ...imageOutput,
-        ...(imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
+        ...imagePayload,
       }),
     });
     const requestId = (body as { request_id?: string } | null)?.request_id;

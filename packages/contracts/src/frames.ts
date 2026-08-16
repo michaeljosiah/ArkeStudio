@@ -1398,6 +1398,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         )
         .min(1)
         .max(24),
+      /** Which lane the picks land in. Absent is the reference lane (issue 305 §3). */
+      lane: z.enum(["reference", "keyframe"]).optional(),
     })
     .strict(),
   z
@@ -1407,6 +1409,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sessionId: SessionIdSchema,
       requestId: UlidSchema,
       token: z.string().min(1),
+      /** Which lane loses the token. Absent is the reference lane (issue 305 §3). */
+      lane: z.enum(["reference", "keyframe"]).optional(),
     })
     .strict(),
   /**

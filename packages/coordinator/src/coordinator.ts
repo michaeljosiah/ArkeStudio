@@ -3257,6 +3257,7 @@ export class Coordinator {
           const outcome = await addBenchReference(bench, store.getBundle(), model, {
             source: pick.source,
             replace: pick.replace,
+            lane: msg.lane,
             requestId: `${msg.requestId}/${index}`,
             at: this.nowIso(),
           });
@@ -3272,8 +3273,16 @@ export class Coordinator {
       case "bench-remove-reference": {
         const bench = await this.benchFor(msg.worldId, msg.sessionId);
         if (!bench) return;
-        if (bench.session.composer.activeTokens.includes(msg.token)) {
-          await bench.store.append({ type: "reference-removed", token: msg.token }, { at: this.nowIso(), requestId: msg.requestId });
+        const lane = msg.lane ?? "reference";
+        const held =
+          lane === "keyframe"
+            ? bench.session.composer.keyframeTokens.includes(msg.token)
+            : bench.session.composer.activeTokens.includes(msg.token);
+        if (held) {
+          await bench.store.append(
+            { type: "reference-removed", token: msg.token, ...(lane === "keyframe" ? { lane } : {}) },
+            { at: this.nowIso(), requestId: msg.requestId },
+          );
         }
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;
@@ -3392,6 +3401,7 @@ export class Coordinator {
           takeNumber: take.n,
           brief: take.request.brief,
           references: take.request.references,
+          keyframes: take.request.keyframes,
           provider: take.request.provider,
           model: take.request.model,
           params: take.request.params,

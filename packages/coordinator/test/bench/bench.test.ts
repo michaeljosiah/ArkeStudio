@@ -276,6 +276,7 @@ describe("dispatch planning (issue 305 §9)", () => {
         mode: "image",
         brief: "the ORIGINAL brief",
         references: [],
+          keyframes: [],
         provider: "fal",
         model: "test-image",
         params: { kind: "image", count: 1 },
@@ -313,7 +314,7 @@ describe("recovery (issue 305 §6)", () => {
     await opened.store.append(
       {
         type: "takes-reserved",
-        takes: [{ id: takeId as never, n: 1, requestId: "r1", request: { mode: "image", brief: "x", references: [], provider: "fal", model: "test-image", params: { kind: "image", count: 1 } }, createdAt: CLOCK() }],
+        takes: [{ id: takeId as never, n: 1, requestId: "r1", request: { mode: "image", brief: "x", references: [], keyframes: [], provider: "fal", model: "test-image", params: { kind: "image", count: 1 } }, createdAt: CLOCK() }],
       },
       { at: CLOCK() },
     );
@@ -334,7 +335,7 @@ describe("recovery (issue 305 §6)", () => {
     await opened.store.append(
       {
         type: "takes-reserved",
-        takes: [{ id: takeId as never, n: 1, requestId: "r1", request: { mode: "image", brief: "x", references: [], provider: "fal", model: "test-image", params: { kind: "image", count: 1 } }, createdAt: CLOCK() }],
+        takes: [{ id: takeId as never, n: 1, requestId: "r1", request: { mode: "image", brief: "x", references: [], keyframes: [], provider: "fal", model: "test-image", params: { kind: "image", count: 1 } }, createdAt: CLOCK() }],
       },
       { at: CLOCK() },
     );
@@ -369,6 +370,7 @@ describe("keeping (issue 305 §7)", () => {
       takeNumber: 1,
       brief: "a rusted tide-clock face on wet slate",
       references: [],
+          keyframes: [],
       provider: "fal",
       model: "test-image",
       params: { kind: "image" as const, count: 1 },
@@ -389,5 +391,183 @@ describe("keeping (issue 305 §7)", () => {
     assert.equal(files.filter((f) => f !== "upload.png").length >= 1, true);
     const bytes = await readFile(join(dir, "artifacts", first.file), "utf8");
     assert.equal(bytes, "the same bytes");
+  });
+});
+
+describe("the Keyframe lane (issue 305 §3)", () => {
+  const VIDEO_MODEL: ManifestModel = {
+    id: "test-video",
+    provider: "fal",
+    capability: "video",
+    displayName: "Test Video",
+    accepts: { referenceImages: 2, startFrame: false, endFrame: false },
+    limits: { maxDurationSec: 10, resolutions: ["720p"], aspects: ["16:9"] },
+    pricing: { kind: "perSecond", microUsdPerSecond: 100000 },
+    modes: {
+      generate: { locked: [] },
+      "first-frame": { route: "test/image-to-video", locked: ["aspect"] },
+      "first-and-last-frame": { route: "test/image-to-video", locked: ["aspect"] },
+    },
+  };
+  const VIDEO_MANIFEST: ModelManifest = { manifestVersion: 1, generated: "2026-08-16", models: [IMAGE_MODEL, VIDEO_MODEL] };
+
+  async function fileImage(dir: string, name: string, id: string, hash: string) {
+    await mkdir(join(dir, "artifacts"), { recursive: true });
+    await writeFile(join(dir, "artifacts", name), `bytes of ${name}`);
+    await writeFile(
+      join(dir, "artifacts", `${name}.json`),
+      JSON.stringify({ id, kind: "image", file: name, hash, origin: { by: "user" }, links: [], created: CLOCK() }),
+    );
+  }
+
+  async function withImage(name = "frame.png") {
+    const { dir, store } = await open();
+    await fileImage(dir, name, `ar_${"01JKKKKKKKKKKKKKKKKKKKKKKK".slice(0, 26)}`, "sha256:deadbeefdeadbeef");
+    await store.reload();
+    const mine = store.getBundle().artifacts.find((a) => a.file === name);
+    if (!mine) throw new Error("the filed sidecar did not scan");
+    return { dir, store, artifactId: mine.id };
+  }
+
+  it("a keyframe pick lands in its own lane, never among the riding references", async () => {
+    const { dir, store, artifactId } = await withImage();
+    const opened = await freshBench(dir);
+    const added = await addBenchReference(opened, store.getBundle(), VIDEO_MODEL, {
+      source: { source: "artifact", artifactId },
+      lane: "keyframe",
+      requestId: "r1",
+      at: CLOCK(),
+    });
+    assert.deepEqual(added, { outcome: "added", token: "Image 1" });
+    const session = (await opened.store.fold())!;
+    assert.deepEqual(session.composer.keyframeTokens, ["Image 1"]);
+    assert.deepEqual(session.composer.activeTokens, []);
+  });
+
+  it("only a picture rides as a keyframe, in those words", async () => {
+    const { dir, store } = await open();
+    await mkdir(join(dir, "artifacts"), { recursive: true });
+    await writeFile(join(dir, "artifacts", "bells.wav"), "wav bytes");
+    await writeFile(
+      join(dir, "artifacts", "bells.wav.json"),
+      JSON.stringify({
+        id: `ar_${"01JRRRRRRRRRRRRRRRRRRRRRRR".slice(0, 26)}`,
+        kind: "audio",
+        file: "bells.wav",
+        hash: "sha256:deadbeefdeadbeef",
+        origin: { by: "user" },
+        links: [],
+        created: CLOCK(),
+      }),
+    );
+    await store.reload();
+    const artifactId = store.getBundle().artifacts.find((a) => a.file === "bells.wav")!.id;
+    const opened = await freshBench(dir);
+    const outcome = await addBenchReference(opened, store.getBundle(), VIDEO_MODEL, {
+      source: { source: "artifact", artifactId },
+      lane: "keyframe",
+      requestId: "r1",
+      at: CLOCK(),
+    });
+    assert.deepEqual(outcome, { outcome: "refused", reason: "only an image can ride as a keyframe" });
+  });
+
+  it("the lane's ceiling is the frame modes' own: a third frame refuses with the missing route", async () => {
+    const { dir, store } = await withImage("one.png");
+    await fileImage(dir, "two.png", `ar_${"01JNNNNNNNNNNNNNNNNNNNNNNN".slice(0, 26)}`, "sha256:beefbeefbeefbeef");
+    await fileImage(dir, "three.png", `ar_${"01JPPPPPPPPPPPPPPPPPPPPPPP".slice(0, 26)}`, "sha256:feedfeedfeedfeed");
+    await store.reload();
+    const bundle = store.getBundle();
+    const ids = ["one.png", "two.png", "three.png"].map((f) => bundle.artifacts.find((a) => a.file === f)!.id);
+    const opened = await freshBench(dir);
+    for (const [i, id] of ids.slice(0, 2).entries()) {
+      const ok = await addBenchReference((await refolded(opened))!, bundle, VIDEO_MODEL, {
+        source: { source: "artifact", artifactId: id },
+        lane: "keyframe",
+        requestId: `r${i}`,
+        at: CLOCK(),
+      });
+      assert.equal(ok.outcome, "added");
+    }
+    const third = await addBenchReference((await refolded(opened))!, bundle, VIDEO_MODEL, {
+      source: { source: "artifact", artifactId: ids[2]! },
+      lane: "keyframe",
+      requestId: "r3",
+      at: CLOCK(),
+    });
+    assert.equal(third.outcome, "refused");
+    assert.match((third as { reason: string }).reason, /keyframe sequence route/);
+  });
+
+  it("dispatch honors the mode's route, drops the locked aspect, and snapshots the frames", async () => {
+    const { dir, store, artifactId } = await withImage();
+    const opened = await freshBench(dir);
+    await addBenchReference(opened, store.getBundle(), VIDEO_MODEL, {
+      source: { source: "artifact", artifactId },
+      lane: "keyframe",
+      requestId: "r1",
+      at: CLOCK(),
+    });
+    await opened.store.append(
+      {
+        type: "composer-set",
+        mode: "video",
+        provider: "fal",
+        model: "test-video",
+        params: { kind: "video", aspect: "16:9", resolution: "720p", durationSec: 5 },
+        brief: "the tide going still",
+      },
+      { at: CLOCK() },
+    );
+    const session = (await opened.store.fold())!;
+    const plan = planBenchDispatch(session, store.getBundle(), VIDEO_MANIFEST, {
+      worldId: store.worldId,
+      requestId: "r2",
+      at: CLOCK(),
+    });
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (plan.ok) {
+      const params = plan.inputs[0]!.params;
+      assert.equal(params["taskMode"], "first-frame");
+      assert.equal(params["route"], "test/image-to-video");
+      assert.deepEqual(params["references"], ["artifacts/frame.png"]);
+      // The mode locks aspect and declares no sentinel: the chosen value must not go (R-33).
+      assert.ok(!("aspect" in params), "locked aspect must not be sent");
+      assert.equal(params["resolution"], "720p");
+      assert.equal(plan.reserved[0]!.request.keyframes.length, 1);
+      assert.equal(plan.reserved[0]!.request.keyframes[0]!.token, "Image 1");
+    }
+  });
+
+  it("references and keyframes refuse to ride one request together", async () => {
+    const { dir, store } = await withImage("one.png");
+    await fileImage(dir, "two.png", `ar_${"01JQQQQQQQQQQQQQQQQQQQQQQQ".slice(0, 26)}`, "sha256:beefbeefbeefbeef");
+    await store.reload();
+    const bundle = store.getBundle();
+    const firstId = bundle.artifacts.find((a) => a.file === "one.png")!.id;
+    const secondId = bundle.artifacts.find((a) => a.file === "two.png")!.id;
+    const opened = await freshBench(dir);
+    await addBenchReference(opened, bundle, VIDEO_MODEL, {
+      source: { source: "artifact", artifactId: firstId },
+      requestId: "r1",
+      at: CLOCK(),
+    });
+    await addBenchReference((await refolded(opened))!, bundle, VIDEO_MODEL, {
+      source: { source: "artifact", artifactId: secondId },
+      lane: "keyframe",
+      requestId: "r2",
+      at: CLOCK(),
+    });
+    await opened.store.append(
+      { type: "composer-set", mode: "video", provider: "fal", model: "test-video", params: { kind: "video" }, brief: "x" },
+      { at: CLOCK() },
+    );
+    const plan = planBenchDispatch((await opened.store.fold())!, bundle, VIDEO_MANIFEST, {
+      worldId: store.worldId,
+      requestId: "r3",
+      at: CLOCK(),
+    });
+    assert.ok(!plan.ok);
+    assert.match((plan as { reason: string }).reason, /References and keyframes cannot ride one request yet/);
   });
 });

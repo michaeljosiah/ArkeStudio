@@ -40,6 +40,7 @@ function benchSession(): BenchSession {
       params: { kind: "image", count: 2 },
       brief: "A rusted tide-clock face, citing Image 1.",
       activeTokens: ["Image 1"],
+      keyframeTokens: [],
     },
     tokenRegistry: [
       {
@@ -61,6 +62,7 @@ function benchSession(): BenchSession {
           mode: "image",
           brief: "A rusted tide-clock face, citing Image 1.",
           references: [],
+          keyframes: [],
           provider: "fal",
           model: "test-image",
           params: { kind: "image", count: 1 },
@@ -215,5 +217,62 @@ describe("the reference picker's refusals (issue 305 §9)", () => {
       />,
     );
     assert.match(html, /1 of 2 images/);
+  });
+});
+
+describe("the Keyframe tab (issue 305 §3)", () => {
+  const FRAME_VIDEO: ManifestModel = {
+    id: "test-frame-video",
+    provider: "fal",
+    capability: "video",
+    displayName: "Frame Video",
+    accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
+    limits: { maxDurationSec: 10 },
+    pricing: { kind: "perSecond", microUsdPerSecond: 100000 },
+    modes: {
+      generate: { locked: [] },
+      "first-frame": { route: "t/image-to-video", locked: ["aspect"] },
+      "first-and-last-frame": { route: "t/image-to-video", locked: ["aspect"] },
+    },
+  };
+  const PLAIN_VIDEO: ManifestModel = {
+    ...FRAME_VIDEO,
+    id: "test-plain-video",
+    displayName: "Plain Video",
+    modes: { generate: { locked: [] } },
+  };
+
+  function videoState(model: ManifestModel): ClientState {
+    const base = stateWithBench();
+    const session = base.bench!.session;
+    return {
+      ...base,
+      app: { ...base.app, manifest: { ...base.app.manifest!, models: [...base.app.manifest!.models, model] } },
+      bench: {
+        worldId: FIXTURE_WORLD_ID,
+        session: {
+          ...session,
+          composer: {
+            ...session.composer,
+            mode: "video",
+            provider: model.provider,
+            model: model.id,
+            params: { kind: "video" },
+          },
+        },
+      },
+    };
+  }
+
+  it("the tab exists exactly where the model verifies a frame task mode", () => {
+    const withTabs = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, videoState(FRAME_VIDEO));
+    assert.match(withTabs, /Keyframe/);
+    assert.doesNotMatch(withTabs, /takes no keyframes/);
+  });
+
+  it("a model with no frame mode shows no tab, and the composer says so in a line", () => {
+    const without = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, videoState(PLAIN_VIDEO));
+    assert.doesNotMatch(without, /Keyframe/);
+    assert.match(without, /Plain Video takes no keyframes\./);
   });
 });

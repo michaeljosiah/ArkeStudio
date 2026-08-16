@@ -8,7 +8,7 @@ import {
   TakeIdSchema,
 } from "./ids.js";
 import { JobStatusSchema } from "./job.js";
-import { SizeTierSchema } from "./manifest.js";
+import { SizeTierSchema, modeSpec, modeUnavailableReason, supportsMode, type ManifestModel, type TaskMode } from "./manifest.js";
 import { MediaInfoSchema } from "./media.js";
 import { ReferenceKindSchema, type ReferenceKind } from "./reference-budget.js";
 import { TakeCostSchema } from "./take.js";
@@ -126,6 +126,11 @@ export const BenchRequestSnapshotSchema = z
     provider: z.string().min(1),
     model: z.string().min(1),
     params: BenchParamsSchema,
+    /**
+     * The keyframes that rode, in order, with their content hashes — the same self-contained
+     * shape references take, so re-run resolves the exact frames without the live lane.
+     */
+    keyframes: z.array(BenchReferenceTokenSchema).default([]),
     /** Recorded only when one was asked for; providers do not universally return one. */
     requestedSeed: z.number().int().optional(),
   })
@@ -133,6 +138,9 @@ export const BenchRequestSnapshotSchema = z
   .superRefine((request, ctx) => {
     if (request.params.kind !== request.mode) {
       ctx.addIssue({ code: "custom", message: `params are for "${request.params.kind}" but the mode is "${request.mode}"` });
+    }
+    if (request.keyframes.length > 0 && request.mode !== "video") {
+      ctx.addIssue({ code: "custom", message: "keyframes ride video, not image" });
     }
   });
 export type BenchRequestSnapshot = z.infer<typeof BenchRequestSnapshotSchema>;
@@ -199,6 +207,15 @@ export const BenchComposerSchema = z
     brief: z.string(),
     /** Tokens currently riding, in attach order. Every one resolves in the registry. */
     activeTokens: z.array(z.string().regex(BENCH_TOKEN)),
+    /**
+     * The Keyframe lane (issue 305 §3): image tokens the shot must pass through, in order —
+     * one is the first frame, two are first and last, more are a keyframe sequence. A lane
+     * beside activeTokens rather than a params field, deliberately: params are pushed whole
+     * from a client draft, and a lane the coordinator allocates into must not be clobberable
+     * by a debounced composer-set that never knew the token. Defaulted so every log written
+     * before the lane existed still folds.
+     */
+    keyframeTokens: z.array(z.string().regex(BENCH_TOKEN)).default([]),
   })
   .strict();
 export type BenchComposer = z.infer<typeof BenchComposerSchema>;
@@ -269,6 +286,16 @@ export const BenchSessionSchema = z
       if (active.has(token)) ctx.addIssue({ code: "custom", message: `token "${token}" is active twice` });
       active.add(token);
       if (!tokens.has(token)) ctx.addIssue({ code: "custom", message: `active token "${token}" is not in the registry` });
+    }
+    const frames = new Set<string>();
+    for (const token of session.composer.keyframeTokens) {
+      if (frames.has(token)) ctx.addIssue({ code: "custom", message: `token "${token}" rides the keyframe lane twice` });
+      frames.add(token);
+      if (!tokens.has(token)) ctx.addIssue({ code: "custom", message: `keyframe token "${token}" is not in the registry` });
+      const entry = session.tokenRegistry.find((e) => e.token === token);
+      if (entry !== undefined && entry.kind !== "image") {
+        ctx.addIssue({ code: "custom", message: `keyframe token "${token}" is ${entry.kind} — only an image can ride as a keyframe` });
+      }
     }
     if (session.composer.params.kind !== session.composer.mode) {
       ctx.addIssue({ code: "custom", message: "composer params do not match the composer mode" });
@@ -341,10 +368,29 @@ export const BenchEventSchema = z.discriminatedUnion("type", [
       brief: z.string(),
     })
     .strict(),
-  z.object({ type: z.literal("reference-added"), entry: BenchReferenceTokenSchema }).strict(),
+  /** `lane` absent means the reference lane — every event written before the Keyframe lane. */
+  z
+    .object({
+      type: z.literal("reference-added"),
+      entry: BenchReferenceTokenSchema,
+      lane: z.enum(["reference", "keyframe"]).optional(),
+    })
+    .strict(),
   /** Re-adding a source whose token already exists in the registry: the old name comes back. */
-  z.object({ type: z.literal("reference-restored"), token: z.string().regex(BENCH_TOKEN) }).strict(),
-  z.object({ type: z.literal("reference-removed"), token: z.string().regex(BENCH_TOKEN) }).strict(),
+  z
+    .object({
+      type: z.literal("reference-restored"),
+      token: z.string().regex(BENCH_TOKEN),
+      lane: z.enum(["reference", "keyframe"]).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("reference-removed"),
+      token: z.string().regex(BENCH_TOKEN),
+      lane: z.enum(["reference", "keyframe"]).optional(),
+    })
+    .strict(),
   /** The at-capacity path: one out, one in, atomically, so the set is never over the ceiling. */
   z
     .object({
@@ -402,6 +448,7 @@ const EMPTY_COMPOSER: BenchComposer = {
   params: { kind: "image", count: 1 },
   brief: "",
   activeTokens: [],
+  keyframeTokens: [],
 };
 
 export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly BenchEventEnvelope[]): BenchSession {
@@ -409,7 +456,7 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
     schemaVersion: 1,
     id: meta.id,
     title: null,
-    composer: { ...EMPTY_COMPOSER, params: { ...EMPTY_COMPOSER.params } as BenchParams, activeTokens: [] },
+    composer: { ...EMPTY_COMPOSER, params: { ...EMPTY_COMPOSER.params } as BenchParams, activeTokens: [], keyframeTokens: [] },
     tokenRegistry: [],
     nextToken: {},
     nextTake: 1,
@@ -426,8 +473,10 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
       if (parsed.n >= next) session.nextToken[parsed.kind] = parsed.n + 1;
     }
   };
-  const activate = (token: string): void => {
-    if (!session.composer.activeTokens.includes(token)) session.composer.activeTokens.push(token);
+  // Each lane activates into its own list; the registry underneath them is one.
+  const activate = (token: string, lane: "reference" | "keyframe" = "reference"): void => {
+    const list = lane === "keyframe" ? session.composer.keyframeTokens : session.composer.activeTokens;
+    if (!list.includes(token)) list.push(token);
   };
   for (const { at, event } of envelopes) {
     session.updatedAt = at;
@@ -443,17 +492,22 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
           params: event.params,
           brief: event.brief,
           activeTokens: session.composer.activeTokens,
+          keyframeTokens: session.composer.keyframeTokens,
         };
         break;
       case "reference-added":
         claimToken(event.entry);
-        activate(event.entry.token);
+        activate(event.entry.token, event.lane ?? "reference");
         break;
       case "reference-restored":
-        activate(event.token);
+        activate(event.token, event.lane ?? "reference");
         break;
       case "reference-removed":
-        session.composer.activeTokens = session.composer.activeTokens.filter((t) => t !== event.token);
+        if ((event.lane ?? "reference") === "keyframe") {
+          session.composer.keyframeTokens = session.composer.keyframeTokens.filter((t) => t !== event.token);
+        } else {
+          session.composer.activeTokens = session.composer.activeTokens.filter((t) => t !== event.token);
+        }
         break;
       case "reference-replaced":
         session.composer.activeTokens = session.composer.activeTokens.filter((t) => t !== event.removed);
@@ -545,4 +599,55 @@ export function benchSessionSummary(session: BenchSession): BenchSessionSummary 
     runningCount: running,
     failedCount: failed,
   };
+}
+
+// ---------------------------------------------------------------------------
+// The Keyframe lane's plan — shared by the composer that offers the tab and
+// the dispatch gate that enqueues, so a lane the screen admitted is a lane
+// the coordinator would have admitted (issue 305 §3).
+// ---------------------------------------------------------------------------
+
+export const FRAME_TASK_MODES = ["first-frame", "first-and-last-frame", "keyframe-sequence"] as const satisfies readonly TaskMode[];
+
+/** The frame modes this model actually declares. Empty means no Keyframe tab exists. */
+export function frameTaskModes(model: ManifestModel): TaskMode[] {
+  return FRAME_TASK_MODES.filter((mode) => supportsMode(model, mode));
+}
+
+export type KeyframePlan = { ok: true; mode: TaskMode } | { ok: false; reason: string };
+
+/**
+ * Which task mode a keyframe count dispatches as: one frame is the first frame, two are first
+ * and last, more are a sequence. The mapping is strict — riding two frames on a sequence route
+ * would change what they mean — and every refusal is worded, because availability "derived from
+ * verified task modes" (issue 305 §3) has to say which verification is missing. A sequence
+ * whose route declares no `maxFrames` refuses past two: probing a paid route for its ceiling
+ * is not verification.
+ */
+export function keyframePlan(model: ManifestModel, count: number): KeyframePlan {
+  if (count <= 0) return { ok: false, reason: "no keyframes ride this request" };
+  const mode: TaskMode = count === 1 ? "first-frame" : count === 2 ? "first-and-last-frame" : "keyframe-sequence";
+  if (!supportsMode(model, mode)) {
+    return { ok: false, reason: modeUnavailableReason(model, mode) ?? `${model.displayName} has no ${mode} route` };
+  }
+  if (mode === "keyframe-sequence") {
+    const ceiling = modeSpec(model, mode)?.maxFrames;
+    if (ceiling === undefined) {
+      return { ok: false, reason: `${model.displayName}'s keyframe sequence declares no ceiling, so ${count} frames cannot be admitted` };
+    }
+    if (count > ceiling) {
+      return { ok: false, reason: `${model.displayName} takes at most ${ceiling} keyframes` };
+    }
+  }
+  return { ok: true, mode };
+}
+
+/** The most frames one more pick may bring the lane to, for the tile that offers the pick. */
+export function keyframeCapacity(model: ManifestModel): number {
+  const sequenceCeiling = supportsMode(model, "keyframe-sequence")
+    ? (modeSpec(model, "keyframe-sequence")?.maxFrames ?? 2)
+    : 0;
+  const pairCeiling = supportsMode(model, "first-and-last-frame") ? 2 : 0;
+  const singleCeiling = supportsMode(model, "first-frame") ? 1 : 0;
+  return Math.max(sequenceCeiling, pairCeiling, singleCeiling);
 }

@@ -2,17 +2,22 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   admitReference,
+  BenchRequestSnapshotSchema,
   BenchSessionSchema,
   benchSessionSummary,
   benchSourceKey,
   benchTokenFor,
   foldBenchSession,
   formatSeconds,
+  frameTaskModes,
+  keyframeCapacity,
+  keyframePlan,
   multimediaCapacity,
   parseBenchToken,
   validateReferences,
   type BenchEventEnvelope,
   type BenchReferenceToken,
+  type BenchSession,
   type BenchSessionMeta,
   type ManifestModel,
 } from "../src/index.js";
@@ -53,6 +58,7 @@ const SNAPSHOT = {
   mode: "image" as const,
   brief: "a rusted tide-clock face",
   references: [],
+          keyframes: [],
   provider: "fal",
   model: "test-image",
   params: { kind: "image" as const, count: 1 },
@@ -255,5 +261,126 @@ describe("the summary", () => {
     assert.equal(summary.takeCount, 2);
     assert.equal(summary.failedCount, 1);
     assert.equal(summary.runningCount, 1); // the sibling still allocating counts as running
+  });
+});
+
+describe("the Keyframe lane (issue 305 §3)", () => {
+  const FRAME_MODEL: ManifestModel = {
+    id: "frame-video",
+    provider: "fal",
+    capability: "video",
+    displayName: "Frame Video",
+    accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
+    limits: { maxDurationSec: 10 },
+    pricing: { kind: "perSecond", microUsdPerSecond: 100000 },
+    modes: {
+      generate: { locked: [] },
+      "first-frame": { route: "t/image-to-video", locked: ["aspect"] },
+      "first-and-last-frame": { route: "t/image-to-video", locked: ["aspect"] },
+    },
+  };
+  const PLAIN_MODEL: ManifestModel = { ...FRAME_MODEL, id: "plain-video", displayName: "Plain Video" };
+  delete (PLAIN_MODEL as { modes?: unknown }).modes;
+
+  const entry = (n: number) => ({
+    token: `Image ${n}`,
+    kind: "image" as const,
+    source: { source: "artifact" as const, artifactId: `ar_01J8F3K2QW9VZX4N7M0RTYB6H${n}`, hash: "sha256:deadbeef" },
+  });
+
+  it("frame events fold into their own lane, and composer-set cannot clobber it", () => {
+    const meta = { schemaVersion: 1 as const, id: "sess_01J8F3K2QW9VZX4N7M0RTYB6HD" as BenchSession["id"], createdAt: "2026-08-16T10:00:00.000Z" };
+    const at = "2026-08-16T10:01:00.000Z";
+    const session = foldBenchSession(meta, [
+      { seq: 1, at, event: { type: "reference-added", entry: entry(1), lane: "keyframe" } },
+      { seq: 2, at, event: { type: "composer-set", mode: "video", provider: "fal", model: "frame-video", params: { kind: "video" }, brief: "a tide" } },
+      { seq: 3, at, event: { type: "reference-added", entry: entry(2), lane: "keyframe" } },
+      { seq: 4, at, event: { type: "reference-removed", token: "Image 1", lane: "keyframe" } },
+    ]);
+    assert.deepEqual(session.composer.keyframeTokens, ["Image 2"]);
+    assert.deepEqual(session.composer.activeTokens, []);
+    // Removed from the lane, never from the registry — the name survives for a restore.
+    assert.equal(session.tokenRegistry.length, 2);
+    const parsed = BenchSessionSchema.parse(session);
+    assert.deepEqual(parsed.composer.keyframeTokens, ["Image 2"]);
+  });
+
+  it("a lane-less event is the reference lane — every log written before the lane existed", () => {
+    const meta = { schemaVersion: 1 as const, id: "sess_01J8F3K2QW9VZX4N7M0RTYB6HD" as BenchSession["id"], createdAt: "2026-08-16T10:00:00.000Z" };
+    const session = foldBenchSession(meta, [
+      { seq: 1, at: "2026-08-16T10:01:00.000Z", event: { type: "reference-added", entry: entry(1) } },
+    ]);
+    assert.deepEqual(session.composer.activeTokens, ["Image 1"]);
+    assert.deepEqual(session.composer.keyframeTokens, []);
+  });
+
+  it("the session refuses a keyframe token the registry does not know, or that is not a picture", () => {
+    const meta = { schemaVersion: 1 as const, id: "sess_01J8F3K2QW9VZX4N7M0RTYB6HD" as BenchSession["id"], createdAt: "2026-08-16T10:00:00.000Z" };
+    const base = foldBenchSession(meta, []);
+    assert.throws(
+      () => BenchSessionSchema.parse({ ...base, composer: { ...base.composer, keyframeTokens: ["Image 9"] } }),
+      /keyframe token .{0,2}Image 9.{0,2} is not in the registry/,
+    );
+    const audio = {
+      token: "Audio 1",
+      kind: "audio" as const,
+      source: { source: "artifact" as const, artifactId: "ar_01J8F3K2QW9VZX4N7M0RTYB6HA", hash: "sha256:deadbeef" },
+    };
+    assert.throws(
+      () =>
+        BenchSessionSchema.parse({
+          ...base,
+          tokenRegistry: [audio],
+          nextToken: { audio: 2 },
+          composer: { ...base.composer, keyframeTokens: ["Audio 1"] },
+        }),
+      /only an image can ride as a keyframe/,
+    );
+  });
+
+  it("keyframes ride video, not image — the snapshot itself says so", () => {
+    assert.throws(
+      () =>
+        BenchRequestSnapshotSchema.parse({
+          mode: "image",
+          brief: "x",
+          references: [],
+          keyframes: [entry(1)],
+          provider: "fal",
+          model: "m",
+          params: { kind: "image", count: 1 },
+        }),
+      /keyframes ride video, not image/,
+    );
+  });
+
+  it("the plan maps count to mode strictly, with worded refusals from the manifest", () => {
+    assert.deepEqual(keyframePlan(FRAME_MODEL, 1), { ok: true, mode: "first-frame" });
+    assert.deepEqual(keyframePlan(FRAME_MODEL, 2), { ok: true, mode: "first-and-last-frame" });
+    const three = keyframePlan(FRAME_MODEL, 3);
+    assert.ok(!three.ok && /keyframe sequence route/.test(three.reason));
+    const none = keyframePlan(PLAIN_MODEL, 1);
+    assert.ok(!none.ok && /has no first frame route/.test(none.reason));
+  });
+
+  it("a sequence with no declared ceiling refuses; a declared one admits up to it", () => {
+    const sequenced: ManifestModel = {
+      ...FRAME_MODEL,
+      modes: { ...FRAME_MODEL.modes, "keyframe-sequence": { route: "t/reference-to-video", locked: [], maxFrames: 4 } },
+    };
+    assert.deepEqual(keyframePlan(sequenced, 3), { ok: true, mode: "keyframe-sequence" });
+    const over = keyframePlan(sequenced, 5);
+    assert.ok(!over.ok && /at most 4 keyframes/.test(over.reason));
+    const undeclared: ManifestModel = {
+      ...FRAME_MODEL,
+      modes: { ...FRAME_MODEL.modes, "keyframe-sequence": { route: "t/reference-to-video", locked: [] } },
+    };
+    const refused = keyframePlan(undeclared, 3);
+    assert.ok(!refused.ok && /declares no ceiling/.test(refused.reason));
+    assert.equal(keyframeCapacity(sequenced), 4);
+    assert.equal(keyframeCapacity(FRAME_MODEL), 2);
+    assert.equal(keyframeCapacity(PLAIN_MODEL), 0);
+    assert.deepEqual(frameTaskModes(FRAME_MODEL), ["first-frame", "first-and-last-frame"]);
+    assert.deepEqual(frameTaskModes(PLAIN_MODEL), []);
   });
 });

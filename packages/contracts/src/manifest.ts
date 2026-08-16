@@ -200,6 +200,13 @@ export const TaskModeSpecSchema = z
      * a figure that can come in under is honest where one that can come in over is not.
      */
     durationToleranceSec: z.number().min(0).optional(),
+    /**
+     * The route's own ceiling on frame images, curated from its schema the way durations are.
+     * Meaningful on keyframe-sequence, whose count is otherwise unbounded; first-frame and
+     * first-and-last-frame carry their counts in their names. Absent means the ceiling was
+     * never read, and a dispatch must refuse rather than probe a paid route with a guess.
+     */
+    maxFrames: z.number().int().min(1).optional(),
   })
   .strict();
 export type TaskModeSpec = z.infer<typeof TaskModeSpecSchema>;

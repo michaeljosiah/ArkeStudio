@@ -3912,6 +3912,23 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-bench__clear:hover { background: var(--accent); color: var(--foreground); }
 
+/* The lane tabs (design 68b): a full-width track; the active lane is the white cell. */
+.fy-bench__lanes { display: flex; gap: 3px; background: var(--muted); border-radius: 9px; padding: 3px; margin-top: 11px; flex: none; }
+.fy-bench__lanes button {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  flex: 1; text-align: center; padding: 6px 0; border-radius: 7px;
+  font: 400 12px var(--font-sans); color: var(--muted-foreground); transition: var(--transition-control);
+}
+.fy-bench__lanes button:hover { color: var(--foreground); }
+.fy-bench__lanes button[aria-selected="true"] { background: var(--background); box-shadow: var(--shadow-xs); color: var(--foreground); font-weight: 500; }
+/* "A model that takes no keyframes shows no Keyframe tab, and the composer says so in a line." */
+.fy-bench__nolane { margin: 10px 2px 0; font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
+.fy-bench__slotchip {
+  position: absolute; left: 6px; top: 5px; font: 500 8.5px var(--font-mono); letter-spacing: 0.08em;
+  color: var(--media-overlay-fg); text-shadow: 0 0 4px color-mix(in srgb, var(--media-overlay-bg) 70%, transparent);
+  text-transform: uppercase;
+}
+
 .fy-bench__refgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; flex: none; }
 .fy-bench__reftile { position: relative; height: 66px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .fy-bench__reftile--add {
