@@ -15,7 +15,8 @@ import {
 } from "@arke-studio/contracts";
 import {
   assembleContext,
-  BOUNDS,
+  FALLBACK_BUDGET_CHARS,
+  budgetFor,
   currentLookContext,
   shouldSummarise,
   type ContextAttachment,
@@ -82,7 +83,7 @@ describe("the author's bible in context (SPEC-022)", () => {
     const long = `## The tides\n\n${"The tide is the world's clock. ".repeat(4_000)}`;
     const context = assembleContext({ ...baseInput(), bible: long });
     assert.ok(context.bible.includes(long.trim()), "the bible is not cut");
-    assert.ok(context.bible.length > BOUNDS.worldContext, "well past what any bound would allow");
+    assert.ok(context.bible.length > 32_000, "well past what any section bound ever allowed");
     assert.deepEqual(context.trimmed, [], "nothing trimmed, so nothing reported as trimmed");
   });
 
@@ -125,17 +126,42 @@ describe("context assembly", () => {
     assert.equal(context.currentUserMessage.length, long.length);
   });
 
-  it("holds every other section to its stated bound", () => {
+  it("holds the whole prompt to the budget, rather than each section to a bound", () => {
+    const budgetChars = 20_000;
     const context = assembleContext({
       ...baseInput(),
-      summary: "s".repeat(BOUNDS.summary * 2),
-      worldContext: "w".repeat(BOUNDS.worldContext * 2),
+      budgetChars,
+      summary: "s".repeat(40_000),
+      worldContext: "w".repeat(40_000),
       messages: Array.from({ length: 40 }, (_, i) => message("user", `${i} `.repeat(2_000))),
     });
 
-    assert.ok(context.summary.length <= BOUNDS.summary);
-    assert.ok(context.worldContext.length <= BOUNDS.worldContext);
-    assert.ok(context.recentTurns.length <= BOUNDS.recentTurns);
+    const total =
+      context.summary.length +
+      context.worldContext.length +
+      context.recentTurns.length +
+      context.registry.length +
+      context.attachments.length;
+    assert.ok(total <= budgetChars, `spent ${total} of ${budgetChars}`);
+  });
+
+  /* The point of the change: what fits is sent whole, however big any one section is. */
+  it("cuts nothing at all when it all fits", () => {
+    const context = assembleContext({
+      ...baseInput(),
+      budgetChars: budgetFor(372_000),
+      summary: "s".repeat(60_000),
+      worldContext: "w".repeat(60_000),
+      attachments: [attachment({ fileName: "bible.md", text: "b".repeat(120_000) })],
+    });
+    assert.deepEqual(context.trimmed, []);
+    assert.equal(context.summary.length, 60_000);
+    assert.ok(context.attachments.includes("b".repeat(120_000)), "the document arrives whole");
+  });
+
+  it("takes its budget from the answering model's window, and falls back when unknown", () => {
+    assert.equal(budgetFor(undefined), FALLBACK_BUDGET_CHARS);
+    assert.ok(budgetFor(372_000) > FALLBACK_BUDGET_CHARS * 4, "a big window is actually used");
   });
 
   /**
@@ -190,12 +216,13 @@ describe("context assembly", () => {
    * the first page of.
    */
   it("keeps the beginning of a document it has to cut, not the end", () => {
-    const body = `START-OF-DOCUMENT ${"x ".repeat(BOUNDS.attachments)} END-OF-DOCUMENT`;
+    const body = `START-OF-DOCUMENT ${"x ".repeat(32_000)} END-OF-DOCUMENT`;
     const context = assembleContext({
       ...baseInput(),
+      budgetChars: 20_000,
       attachments: [attachment({ fileName: "long.md", text: body })],
     });
-    assert.ok(context.attachments.length <= BOUNDS.attachments + 200, "bounded");
+    assert.ok(context.attachments.length <= 20_000, "bounded by the budget");
     assert.match(context.attachments, /START-OF-DOCUMENT/);
     assert.doesNotMatch(context.attachments, /END-OF-DOCUMENT/);
     assert.ok(context.trimmed.includes("attachments"), "and it says it cut, rather than cutting quietly");
@@ -209,11 +236,11 @@ describe("context assembly", () => {
    */
   it("keeps every attachment's identity when several long documents are handed over", () => {
     const many = Array.from({ length: 5 }, (_, i) =>
-      attachment({ fileName: `doc-${i}.txt`, text: "x".repeat(BOUNDS.attachments) }),
+      attachment({ fileName: `doc-${i}.txt`, text: "x".repeat(32_000) }),
     );
-    const context = assembleContext({ ...baseInput(), attachments: many });
+    const context = assembleContext({ ...baseInput(), budgetChars: 20_000, attachments: many });
 
-    assert.ok(context.attachments.length <= BOUNDS.attachments, "still inside the bound");
+    assert.ok(context.attachments.length <= 20_000, "still inside the budget");
     for (const doc of many) {
       assert.ok(context.attachments.includes(doc.fileName), `${doc.fileName} is named`);
       assert.ok(context.attachments.includes(doc.id), `${doc.fileName} keeps the id the tool needs`);
@@ -232,8 +259,12 @@ describe("context assembly", () => {
   });
 
   it("says which sections it had to trim, rather than trimming quietly", () => {
-    const context = assembleContext({ ...baseInput(), summary: "s".repeat(BOUNDS.summary + 1) });
-    assert.deepEqual(context.trimmed, ["summary"]);
+    const context = assembleContext({
+      ...baseInput(),
+      budgetChars: 5_000,
+      summary: "s".repeat(20_000),
+    });
+    assert.ok(context.trimmed.length > 0, "it names what it cut");
   });
 
   it("keeps the most recent history when it has to choose", () => {
@@ -338,7 +369,7 @@ describe("context assembly", () => {
 
   it("summarises on turn count or on length, whichever comes first", () => {
     assert.equal(shouldSummarise({ turnCount: 8, recentTurnsLength: 10 }), true);
-    assert.equal(shouldSummarise({ turnCount: 2, recentTurnsLength: BOUNDS.recentTurns }), true);
+    assert.equal(shouldSummarise({ turnCount: 2, recentTurnsLength: 32_000 }), true);
     assert.equal(shouldSummarise({ turnCount: 2, recentTurnsLength: 10 }), false);
   });
 });

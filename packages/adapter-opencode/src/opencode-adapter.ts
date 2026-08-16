@@ -100,6 +100,69 @@ export class OpenCodeAdapter implements HarnessAdapter {
     this.caps = result.capabilities;
     this.ready = result.readiness;
     this.serverVersion = result.serverVersion ?? null;
+    // So the first turn after a launch budgets from the real window rather than the fallback.
+    void this.primeInputTokenLimit();
+  }
+
+  /**
+   * The input-token window of the model that will actually answer, or null (§8.5).
+   *
+   * Studio does not choose the model — the session config carries no `model` key, so OpenCode
+   * answers with whatever it is configured with. That is the right default and it left the
+   * prompt budget guessing: fixed character bounds sized for nothing in particular, against
+   * models whose windows differ by a factor of four. Asked rather than assumed.
+   *
+   * Cached because it cannot change without OpenCode restarting, and a lookup per turn would put
+   * two HTTP calls in front of every message for a number that does not move.
+   */
+  private windowByModel = new Map<string, number | null>();
+
+  /** The last window learned, for callers that need it before a session exists. */
+  knownInputTokenLimit(): number | null {
+    return this.lastKnownWindow;
+  }
+
+  private lastKnownWindow: number | null = null;
+
+  /** Learn the window from whatever session OpenCode most recently answered on. */
+  async primeInputTokenLimit(): Promise<void> {
+    try {
+      const sessions = await this.http.req<Array<{ id?: string }>>("GET", "/session");
+      const newest = sessions?.[0]?.id;
+      if (newest) await this.inputTokenLimit(newest);
+    } catch {
+      /* the fallback budget covers this; it is not worth failing readiness over */
+    }
+  }
+
+  async inputTokenLimit(sessionId: string): Promise<number | null> {
+    try {
+      const session = await this.http.req<{ model?: { id?: string; providerID?: string } }>(
+        "GET",
+        `/session/${sessionId}`,
+      );
+      const modelId = session.model?.id;
+      const providerId = session.model?.providerID;
+      if (!modelId || !providerId) return null;
+      const key = `${providerId}/${modelId}`;
+      const cached = this.windowByModel.get(key);
+      if (cached !== undefined) return cached;
+
+      const config = await this.http.req<{
+        providers?: Array<{ id?: string; models?: Record<string, { limit?: { input?: number; context?: number } }> }>;
+      }>("GET", "/config/providers");
+      const provider = (config.providers ?? []).find((p) => p.id === providerId);
+      const limit = provider?.models?.[modelId]?.limit;
+      // `input` when the provider states one, else the whole context: a model that publishes only
+      // a context size still tells us more than the fallback does.
+      const window = limit?.input ?? limit?.context ?? null;
+      this.windowByModel.set(key, window);
+      if (window) this.lastKnownWindow = window;
+      return window;
+    } catch {
+      // A window nobody could name is the fallback's job, not a reason to fail the turn.
+      return null;
+    }
   }
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
@@ -122,6 +185,9 @@ export class OpenCodeAdapter implements HarnessAdapter {
       sessionId = res.id ?? "";
     }
     if (!sessionId) throw new Error("OpenCode did not return a session id");
+    // Not awaited: the next turn's budget is the one that benefits, and a turn should not wait
+    // two HTTP calls for a number it already has a working answer for.
+    void this.inputTokenLimit(sessionId).catch(() => null);
     this.sessions.set(sessionId, {
       purpose: input.purpose,
       ...(input.cwd ? { cwd: input.cwd } : {}),
