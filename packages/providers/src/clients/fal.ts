@@ -42,6 +42,14 @@ const DURATIONS = new Map(
   ]),
 );
 
+/** Model id → what its reference route calls the image array. Absent means `image_urls`. */
+const REFERENCES_FIELD = new Map(
+  FAL_MODELS.filter((model) => model.limits.referencesField !== undefined).map((model) => [
+    model.id,
+    model.limits.referencesField!,
+  ]),
+);
+
 /** Model id → whether this route's `duration` is a number. Absent means the string it always was. */
 const DURATION_IS_NUMBER = new Set(
   FAL_MODELS.filter((model) => model.limits.durationWire === "number").map((model) => model.id),
@@ -180,7 +188,8 @@ export class FalClient implements ProviderClient {
     // reference-to-video takes `image_urls`. The counts are structural — a first-and-last
     // dispatch that arrives with one image was mis-planned, and refusing beats animating the
     // wrong thing.
-    let imagePayload: Record<string, unknown> = imageUrls.length > 0 ? { image_urls: imageUrls } : {};
+    const referencesField = REFERENCES_FIELD.get(request.model) ?? "image_urls";
+    let imagePayload: Record<string, unknown> = imageUrls.length > 0 ? { [referencesField]: imageUrls } : {};
     if (taskMode === "first-frame" || taskMode === "first-and-last-frame") {
       const wanted = taskMode === "first-frame" ? 1 : 2;
       if (imageUrls.length !== wanted) {
@@ -209,6 +218,8 @@ export class FalClient implements ProviderClient {
       "taskMode",
       "route",
       "framesField",
+      // Ours, not fal's: the routes that offer the choice spell it `generate_audio`.
+      "sound",
       // Ours, not fal's: the length goes as `duration`, in this route's own vocabulary.
       "durationSec",
     ]);
@@ -232,6 +243,7 @@ export class FalClient implements ProviderClient {
       headers: this.headers(key),
       body: JSON.stringify({
         ...params,
+        ...(typeof request.params["sound"] === "boolean" ? { generate_audio: request.params["sound"] } : {}),
         ...durationParam(request.model, request.params),
         ...imageOutput,
         ...imagePayload,

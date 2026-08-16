@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   deriveCapabilityAvailability,
@@ -56,6 +56,8 @@ import {
   Message,
   Plus,
   Scroll,
+  Speaker,
+  SpeakerOff,
   Sparkle,
   User,
   VideoMark,
@@ -350,6 +352,57 @@ function BenchWorkspace({
     });
   };
 
+  /** The video half of the draft, narrowed once — the callbacks below lose it otherwise. */
+  const videoParams = draft.params.kind === "video" ? draft.params : null;
+  /**
+   * The lengths this model offers, and where the draft sits among them. Read once: the track,
+   * its fill, its end labels and its handle all have to agree, and four calls to the same
+   * function is four chances for them to drift apart.
+   *
+   * `auto` is a state, not a stop. A model that takes "auto" is being asked to choose the
+   * length itself, so the track shows no fill and no chosen value — a handle parked on the
+   * shortest stop would say the shot is 4 seconds when nobody has said that yet.
+   */
+  const withReferences = session.composer.activeTokens.length > 0;
+  const durationStops = videoParams !== null && model !== null ? durationOptions(model, { withReferences }) : [];
+  /**
+   * A length chosen before a reference was attached can fall outside the range that reference
+   * leaves. Nothing is silently rewritten — the composer keeps what was asked for, marks it as
+   * out of reach, and Generate refuses in words. Clamping it would change the shot behind the
+   * user's back; parking the handle at the minimum would claim they asked for the shortest take.
+   */
+  const durationOverCeiling =
+    videoParams?.durationSec !== undefined && durationStops.length > 0 && !durationStops.includes(videoParams.durationSec);
+  const durationIndex = durationOverCeiling
+    ? durationStops.length - 1
+    : Math.max(0, durationStops.indexOf(videoParams?.durationSec ?? durationStops[0] ?? 0));
+  /**
+   * The track carries one position below its shortest stop, and that position means "unsaid".
+   *
+   * It has to exist. A range input fires no change when a click lands on the value it already
+   * holds, so with the handle parked on the first stop, the shortest length — which is also the
+   * cheapest — could not be chosen at all: clicking it did nothing, and the only way in was to
+   * pick another length and come back. Below the first stop is also where "unsaid" honestly
+   * sits, so the dead end and the state share one fix.
+   */
+  const durationUnset = videoParams?.durationSec === undefined;
+  const durationMin = -1;
+  const durationMax = Math.max(0, durationStops.length - 1);
+  const durationValue = durationUnset ? durationMin : durationIndex;
+  const durationFill =
+    durationUnset || durationMax <= durationMin
+      ? 0
+      : ((durationValue - durationMin) / (durationMax - durationMin)) * 100;
+  /**
+   * What attaching a reference costs in length, where the two routes disagree. Shown struck at
+   * the end of the track beside the ceiling, in the same vocabulary as a model that simply runs
+   * shorter than its neighbours — the user learns the range moved rather than finding out at
+   * dispatch, and learns that removing the reference is what gives it back.
+   */
+  const durationLostToReferences =
+    withReferences && model !== null && durationOptions(model).length > durationStops.length
+      ? (durationOptions(model).at(-1) ?? null)
+      : null;
   const aspects = model?.limits.aspects ?? [];
   const aspectSelect = (
     <select
@@ -793,27 +846,124 @@ function BenchWorkspace({
                     ))}
                   </select>
                 )}
-                {durationOptions(model).length > 0 && (
-                  <select
-                    aria-label="Duration"
-                    className="fy-bench__chip"
-                    value={draft.params.durationSec ?? ""}
-                    onChange={(e) => {
-                      const { durationSec: _cleared, ...rest } = draft.params as BenchParams & { durationSec?: number };
-                      compose({ ...draft, params: { ...rest, ...(e.target.value ? { durationSec: Number(e.target.value) } : {}) } as BenchParams });
+                {/* Sound exists only where the route publishes the choice. Wan and minimax
+                    make audio and offer no switch, and a switch that changed nothing would be
+                    a control that lies (issue 305 §3). */}
+                {model.limits.soundChoice === true && (
+                  <button
+                    type="button"
+                    className={cx("fy-bench__chip", "fy-bench__sound", videoParams?.sound === false && "fy-bench__sound--off")}
+                    data-testid="bench-sound"
+                    aria-pressed={videoParams?.sound !== false}
+                    title={videoParams?.sound === false ? "Sound off — the shot comes back silent" : "Sound on — the model scores the shot"}
+                    onClick={() => {
+                      const on = videoParams?.sound !== false;
+                      compose({ ...draft, params: { ...draft.params, kind: "video", sound: !on } as BenchParams });
                     }}
                   >
-                    <option value="">length · default</option>
-                    {durationOptions(model).map((s) => (
-                      <option key={s} value={s}>
-                        {`${s}s`}
-                      </option>
-                    ))}
-                  </select>
+                    {videoParams?.sound === false ? <SpeakerOff size={12} /> : <Speaker size={12} />}
+                    {videoParams?.sound === false ? "silent" : "sound"}
+                  </button>
                 )}
               </>
             )}
           </div>
+
+          {/* The length, as a track rather than a list: the stops are the route's own, and a
+              length it cannot reach is struck through rather than hidden — the shape Runway
+              uses, and the reason is the same as the bench's own rule about disabled controls:
+              seeing the ceiling teaches you the model, hiding it teaches you nothing. */}
+          {model && durationStops.length > 0 && (
+            <div className="fy-bench__duration">
+              <div className="fy-bench__durationhead">
+                <span className="fy-bench__durationlabel">Duration</span>
+                {model.limits.durationAuto === true && (
+                  <button
+                    type="button"
+                    className={cx("fy-bench__durationpill", durationUnset && "fy-bench__durationpill--on")}
+                    data-testid="duration-auto"
+                    title="Let the model choose the length"
+                    onClick={() => {
+                      const { durationSec: _cleared, ...rest } = draft.params as BenchParams & { durationSec?: number };
+                      compose({ ...draft, params: { ...rest } as BenchParams });
+                    }}
+                  >
+                    Auto
+                  </button>
+                )}
+                {/* One value, in one place. Where Auto is offered, the lit pill above already
+                    says who is choosing, and a second pill reading "auto" says it twice. Where
+                    it is not, "default" is the honest word: no length goes on the wire, and
+                    printing the shortest stop would name a length nobody asked for. */}
+                {durationUnset ? (
+                  model.limits.durationAuto !== true && (
+                    <span className="fy-bench__durationpill fy-bench__durationpill--value" data-testid="duration-value">
+                      default
+                    </span>
+                  )
+                ) : (
+                  <span
+                    className={cx(
+                      "fy-bench__durationpill",
+                      "fy-bench__durationpill--value",
+                      "fy-bench__durationpill--on",
+                      durationOverCeiling && "fy-bench__durationpill--over",
+                    )}
+                    data-testid="duration-value"
+                    {...(durationOverCeiling
+                      ? { title: `Longer than this model makes with references — at most ${durationStops.at(-1)}s` }
+                      : {})}
+                  >
+                    {`${videoParams?.durationSec} s`}
+                  </span>
+                )}
+              </div>
+              <input
+                type="range"
+                className={cx("fy-bench__durationrange", durationUnset && "fy-bench__durationrange--auto")}
+                style={{ "--fy-duration-fill": `${durationFill}%` } as CSSProperties}
+                aria-label="Duration in seconds"
+                aria-valuetext={durationUnset ? "unset — the model chooses" : `${videoParams?.durationSec} seconds`}
+                data-testid="duration-range"
+                min={durationMin}
+                max={durationMax}
+                step={1}
+                value={durationValue}
+                onChange={(e) => {
+                  const index = Number(e.target.value);
+                  if (index < 0) {
+                    // Dragged below the shortest stop: back to unsaid, the same state the Auto
+                    // pill sets, rather than a length nobody chose.
+                    const { durationSec: _cleared, ...rest } = draft.params as BenchParams & { durationSec?: number };
+                    compose({ ...draft, params: { ...rest } as BenchParams });
+                    return;
+                  }
+                  const seconds = durationStops[index]!;
+                  compose({ ...draft, params: { ...draft.params, kind: "video", durationSec: seconds } as BenchParams });
+                }}
+              />
+              <div className="fy-bench__durationends">
+                <span>{`${durationStops[0]}s`}</span>
+                <span>
+                  {`${durationStops[durationStops.length - 1]}s`}
+                  {/* What this model cannot reach, shown struck rather than hidden — either
+                      because the references shortened its range, or because it simply runs
+                      shorter than the longest model on offer. */}
+                  {durationLostToReferences !== null ? (
+                    <s className="fy-bench__durationover" data-testid="duration-lost" title="Without references">
+                      {`${durationLostToReferences}s`}
+                    </s>
+                  ) : (
+                    longestOffered(models) > durationStops[durationStops.length - 1]! && (
+                      <s className="fy-bench__durationover" title="Longer than this model runs">
+                        {`${longestOffered(models)}s`}
+                      </s>
+                    )
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* dispatch row */}
           <div className="fy-bench__dispatch">
@@ -1196,6 +1346,19 @@ function takeMeta(take: BenchTake): string {
   ]
     .filter((part): part is string => part !== undefined)
     .join(" · ");
+}
+
+/**
+ * The longest length any model on offer can reach. The duration track strikes this through
+ * when the chosen model stops short, so the ceiling is visible rather than merely missing —
+ * the same reason the bench shows a refusal instead of hiding a control.
+ */
+function longestOffered(models: readonly ManifestModel[]): number {
+  return models.reduce((longest, model) => {
+    const options = durationOptions(model);
+    const last = options[options.length - 1] ?? 0;
+    return last > longest ? last : longest;
+  }, 0);
 }
 
 /** The brief's text with the session's own tokens marked — never token-shaped strangers. */

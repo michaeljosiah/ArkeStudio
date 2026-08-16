@@ -154,11 +154,16 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "capability": "video",
     "displayName": "Seedance 2.0 Text to Video API",
     "accepts": {
-      "referenceImages": 0,
+      "referenceImages": 9,
       "startFrame": false,
       "endFrame": false
     },
     "limits": {
+      "maxReferenceVideoSec": 15,
+      "maxReferenceAudioSec": 15,
+      "referencesField": "image_urls",
+      "soundChoice": true,
+      "durationAuto": true,
       "maxDurationSec": 15,
       "durations": {
         "4": "4",
@@ -208,11 +213,6 @@ export const FAL_MODELS: readonly ManifestModel[] = [
         "locked": [
           "aspect"
         ]
-      },
-      "keyframe-sequence": {
-        "route": "bytedance/seedance-2.0/reference-to-video",
-        "locked": [],
-        "maxFrames": 9
       }
     }
   },
@@ -222,11 +222,16 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "capability": "video",
     "displayName": "Seedance 2.0 Fast Text to Video",
     "accepts": {
-      "referenceImages": 0,
+      "referenceImages": 9,
       "startFrame": false,
       "endFrame": false
     },
     "limits": {
+      "maxReferenceVideoSec": 15,
+      "maxReferenceAudioSec": 15,
+      "referencesField": "image_urls",
+      "soundChoice": true,
+      "durationAuto": true,
       "maxDurationSec": 15,
       "durations": {
         "4": "4",
@@ -271,11 +276,6 @@ export const FAL_MODELS: readonly ManifestModel[] = [
         "locked": [
           "aspect"
         ]
-      },
-      "keyframe-sequence": {
-        "route": "bytedance/seedance-2.0/fast/reference-to-video",
-        "locked": [],
-        "maxFrames": 9
       }
     }
   },
@@ -291,6 +291,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     },
     "limits": {
       "maxPromptChars": 20000,
+      "soundChoice": true,
       "maxDurationSec": 8,
       "durations": {
         "4": "4s",
@@ -323,6 +324,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     },
     "limits": {
       "maxPromptChars": 20000,
+      "soundChoice": true,
       "maxDurationSec": 8,
       "durations": {
         "4": "4s",
@@ -348,12 +350,15 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "capability": "video",
     "displayName": "MiniMax H3",
     "accepts": {
-      "referenceImages": 0,
+      "referenceImages": 9,
       "startFrame": false,
       "endFrame": false
     },
     "limits": {
       "maxPromptChars": 50000,
+      "maxReferenceVideoSec": 15,
+      "maxReferenceAudioSec": 15,
+      "referencesField": "reference_image_urls",
       "maxDurationSec": 15,
       "durationWire": "number",
       "durations": {
@@ -410,12 +415,6 @@ export const FAL_MODELS: readonly ManifestModel[] = [
         "locked": [
           "aspect"
         ]
-      },
-      "keyframe-sequence": {
-        "route": "minimax/h3/reference-to-video",
-        "locked": [],
-        "maxFrames": 9,
-        "framesField": "reference_image_urls"
       }
     }
   },
@@ -431,6 +430,8 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     },
     "limits": {
       "maxPromptChars": 5000,
+      "soundChoice": true,
+      "durationAuto": true,
       "maxDurationSec": 10,
       "durationWire": "number",
       "durations": {
@@ -482,6 +483,8 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     },
     "limits": {
       "maxPromptChars": 5000,
+      "soundChoice": true,
+      "durationAuto": true,
       "maxDurationSec": 20,
       "durationWire": "number",
       "durations": {
@@ -536,11 +539,13 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     "capability": "video",
     "displayName": "Wan 2.7",
     "accepts": {
-      "referenceImages": 0,
+      "referenceImages": 4,
       "startFrame": false,
       "endFrame": false
     },
     "limits": {
+      "referencesField": "reference_image_urls",
+      "maxReferenceDurationSec": 10,
       "maxDurationSec": 15,
       "durationWire": "number",
       "durations": {
@@ -595,11 +600,6 @@ export const FAL_MODELS: readonly ManifestModel[] = [
         "locked": [
           "aspect"
         ]
-      },
-      "keyframe-sequence": {
-        "route": "fal-ai/wan/v2.7/reference-to-video",
-        "locked": [],
-        "framesField": "reference_image_urls"
       }
     }
   },
@@ -615,6 +615,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     },
     "limits": {
       "maxPromptChars": 2500,
+      "soundChoice": true,
       "maxDurationSec": 15,
       "durations": {
         "3": "3",
@@ -654,6 +655,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     },
     "limits": {
       "maxPromptChars": 2500,
+      "soundChoice": true,
       "maxDurationSec": 15,
       "durations": {
         "3": "3",
@@ -708,5 +710,9 @@ export const FAL_ENDPOINTS: Record<string, string> = {
 export const FAL_EDIT_ENDPOINTS: Record<string, string> = {
   "nano-banana-2": "fal-ai/nano-banana-2/edit",
   "nano-banana-pro": "fal-ai/nano-banana-pro/edit",
-  "gpt-image-2-fal": "openai/gpt-image-2/edit"
+  "gpt-image-2-fal": "openai/gpt-image-2/edit",
+  "seedance-2.0": "bytedance/seedance-2.0/reference-to-video",
+  "seedance-2.0-fast": "bytedance/seedance-2.0/fast/reference-to-video",
+  "minimax-h3": "minimax/h3/reference-to-video",
+  "wan-2.7": "fal-ai/wan/v2.7/reference-to-video"
 };

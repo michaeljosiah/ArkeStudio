@@ -27,7 +27,7 @@ import {
   type ClientDeclarations,
 } from "@arke-studio/contracts";
 import { requireModel, SHIPPED_MANIFEST } from "../src/manifest-data.js";
-import { FAL_ENDPOINTS } from "../src/fal-catalogue.generated.js";
+import { FAL_EDIT_ENDPOINTS, FAL_ENDPOINTS } from "../src/fal-catalogue.generated.js";
 
 const model = (id: string) => {
   const hit = SHIPPED_MANIFEST.models.find((m) => m.id === id);
@@ -67,12 +67,16 @@ describe("the shipped manifest (R-9, §3.2)", () => {
   });
 
   it("capability copy matches the manifest for accepting and refusing models (R-10)", () => {
-    // No frames on the fal video routes: they are text-to-video, and their schemas declare no
-    // image or frame field at all (#154). The copy said "frames" because the row did.
-    assert.equal(modelCapabilityCopy(model("seedance-2.0")), "no refs · 15s");
-    // The accepting side. This used to be Higgsfield's "halcyon-1.5", whose row claimed both
-    // frames — for a model that turned out not to exist in the catalogue under any name (#137).
-    // Soul is the real row, and it takes exactly one reference.
+    // The refusing side. ltx ships a text route and nothing else, so its row takes no references
+    // — and still names its length, because a video row's length is the other half of the copy.
+    assert.equal(modelCapabilityCopy(model("ltx-2.5-pro")), "no refs · 10s");
+    // The accepting side, on video. These rows read "no refs" for as long as the families were
+    // curated as text-only (#154); the reference-to-video siblings were there the whole time,
+    // and a row that hides a route it has is the same lie as one that claims a route it lacks.
+    assert.equal(modelCapabilityCopy(model("seedance-2.0")), "refs ×9 · 15s");
+    // And on image. This used to be Higgsfield's "halcyon-1.5", whose row claimed both frames —
+    // for a model that turned out not to exist in the catalogue under any name (#137). Soul is
+    // the real row, and it takes exactly one reference.
     assert.equal(modelCapabilityCopy(model("text2image_soul_v2")), "refs ×1");
   });
 
@@ -131,7 +135,7 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     assert.deepEqual(dispatchDuration(veo, 4), { kind: "asked", seconds: 4, wire: "4s" });
     // Longer than anything the route offers is refused, not clamped: a 22s shot dispatched as
     // a 15s clip is paid-for footage that cannot cover the shot.
-    assert.deepEqual(dispatchDuration(veo, 99), { kind: "over-cap", longest: 8 });
+    assert.deepEqual(dispatchDuration(veo, 99), { kind: "over-cap", longest: 8, becauseReferences: false });
     assert.equal(pricedDuration(veo, 99), 99, "and it is not priced as if it had been shortened");
     // And the estimate follows the snap rather than the request.
     assert.equal(
@@ -693,20 +697,49 @@ describe("the new video families carry the routes' own numbers (fal catalogue sy
     assert.equal(byId("seedance-2.0").limits.durationWire, undefined, "seedance keeps its strings");
   });
 
-  it("names the frames field where the family disagrees with seedance", () => {
+  it("names the references field where the family disagrees with seedance", () => {
     // minimax and wan call the array `reference_image_urls`; seedance calls it `image_urls`.
-    assert.equal(byId("minimax-h3").modes?.["keyframe-sequence"]?.framesField, "reference_image_urls");
-    assert.equal(byId("wan-2.7").modes?.["keyframe-sequence"]?.framesField, "reference_image_urls");
-    assert.equal(byId("seedance-2.0").modes?.["keyframe-sequence"]?.framesField, undefined);
-    // ltx ships no reference route at all, so it offers no sequence to mis-name.
-    assert.equal(byId("ltx-2.5-pro").modes?.["keyframe-sequence"], undefined);
+    assert.equal(byId("minimax-h3").limits.referencesField, "reference_image_urls");
+    assert.equal(byId("wan-2.7").limits.referencesField, "reference_image_urls");
+    assert.equal(byId("seedance-2.0").limits.referencesField, "image_urls");
+    // ltx ships no reference route at all, so it has no array to mis-name.
+    assert.equal(byId("ltx-2.5-pro").limits.referencesField, undefined);
   });
 
-  it("only claims a frame ceiling the route published", () => {
-    // minimax's reference route declares maxItems 9; wan's declares none, so a sequence past
-    // two refuses rather than probing a paid route with a guess.
-    assert.equal(byId("minimax-h3").modes?.["keyframe-sequence"]?.maxFrames, 9);
-    assert.equal(byId("wan-2.7").modes?.["keyframe-sequence"]?.maxFrames, undefined);
+  it("carries references as references, not as a sequence of keyframes", () => {
+    // These routes were first curated as `keyframe-sequence`, which is what an array of images
+    // beside a video model looks like from the outside. Their own schemas say otherwise:
+    // seedance's reads "refer to them in the prompt as @Image1, @Image2", minimax's "referenced
+    // in the prompt as Image 1, Image 2". That is this studio's reference vocabulary — images
+    // the shot may cite — not frames the shot passes through, and a sequence mode would have
+    // promised an ordering the route never honors.
+    for (const id of ["minimax-h3", "wan-2.7", "seedance-2.0", "seedance-2.0-fast"]) {
+      assert.equal(byId(id).modes?.["keyframe-sequence"], undefined, `${id} claims no sequence`);
+    }
+  });
+
+  it("only claims a reference ceiling the route published", () => {
+    // minimax's and seedance's reference routes declare maxItems 9. wan's declares none, so 4
+    // is a deliberate under-promise rather than a guess at a ceiling: a dropped reference costs
+    // less than a dispatch that dies after the estimate was accepted. Raise it from a live call.
+    assert.equal(byId("minimax-h3").accepts.referenceImages, 9);
+    assert.equal(byId("seedance-2.0").accepts.referenceImages, 9);
+    assert.equal(byId("wan-2.7").accepts.referenceImages, 4);
+  });
+
+  it("routes every row that accepts references somewhere that takes them", () => {
+    // The failure this prevents is the expensive one: a row advertising "refs ×9" whose only
+    // endpoint is text-to-video, so the picker offers references, the estimate prices them, and
+    // the submitted job either drops them silently or dies after the user has committed. The
+    // reference route and the field it names are two halves of one claim — neither alone works.
+    for (const m of SHIPPED_MANIFEST.models.filter((c) => c.provider === "fal" && c.accepts.referenceImages > 0)) {
+      assert.ok(FAL_EDIT_ENDPOINTS[m.id], `${m.id} accepts references and has a route that takes them`);
+    }
+    // ...and nothing routes references for a row that says it takes none, which would be a
+    // capability the app can reach but never offers.
+    for (const id of Object.keys(FAL_EDIT_ENDPOINTS)) {
+      assert.ok(model(id).accepts.referenceImages > 0, `${id} offers the references its route takes`);
+    }
   });
 
   it("offers a prompt counter only where the route publishes a cap", () => {
@@ -749,6 +782,53 @@ describe("a length goes in the route's own type (fal 422, 2026-08-16)", () => {
       if (choice.kind !== "asked") continue;
       const expected = model.limits.durationWire === "number" ? "number" : "string";
       assert.equal(typeof choice.wire, expected, `${model.id} sends a ${expected} duration`);
+    }
+  });
+});
+
+describe("the reference route's own ceiling (probed 2026-08-16)", () => {
+  const wan = () => FAL_MODELS.find((m) => m.id === "wan-2.7")!;
+
+  /**
+   * A row's lengths are transcribed from the route it dispatches to by default, but a job
+   * carrying references goes to a different endpoint — and wan's two disagree: text-to-video
+   * declares 2–15, reference-to-video 2–10. Read from the wrong one, the composer offers 12s,
+   * the estimate prices 12s, the user accepts, and the route rejects a length it never offered.
+   */
+  it("shortens the offered lengths for a job that carries references", () => {
+    assert.equal(durationOptions(wan()).at(-1), 15);
+    assert.equal(durationOptions(wan(), { withReferences: true }).at(-1), 10);
+    // Only the tail goes: every length both routes make is still on offer.
+    assert.deepEqual(durationOptions(wan(), { withReferences: true }), [2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("refuses a length the reference route will not make, and says the references did it", () => {
+    const plain = dispatchDuration(wan(), 12);
+    assert.equal(plain.kind, "asked", "12s is fine without references");
+    const withRefs = dispatchDuration(wan(), 12, { withReferences: true });
+    assert.equal(withRefs.kind, "over-cap");
+    if (withRefs.kind === "over-cap") {
+      assert.equal(withRefs.longest, 10);
+      // The distinction the refusal is built on: there is a shot to be had by removing one.
+      assert.equal(withRefs.becauseReferences, true);
+    }
+    const genuinelyOver = dispatchDuration(wan(), 30, { withReferences: false });
+    if (genuinelyOver.kind === "over-cap") assert.equal(genuinelyOver.becauseReferences, false);
+  });
+
+  it("prices what will be dispatched, on the route it will be dispatched to", () => {
+    // The estimate and the dispatch read one function so they cannot disagree about the length.
+    assert.equal(pricedDuration(wan(), 9, { withReferences: true }), 9);
+    assert.equal(dispatchDuration(wan(), 9, { withReferences: true }).kind, "asked");
+  });
+
+  it("states a shorter reference ceiling only where the row has a reference route to shorten", () => {
+    for (const m of FAL_MODELS) {
+      const ceiling = m.limits.maxReferenceDurationSec;
+      if (ceiling === undefined) continue;
+      assert.ok(FAL_EDIT_ENDPOINTS[m.id], `${m.id} has the reference route this ceiling describes`);
+      const longest = durationOptions(m).at(-1);
+      assert.ok(longest !== undefined && ceiling < longest, `${m.id}'s reference ceiling is the shorter of the two`);
     }
   });
 });

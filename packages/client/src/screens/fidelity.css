@@ -4242,3 +4242,65 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-bench__enhnote { font: 400 10.5px var(--font-sans); color: var(--muted-foreground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 @media (prefers-reduced-motion: reduce) { .fy-bench__footicon--busy { animation: none; } }
 .fy-bench__nomodel { flex: 1; min-width: 0; font: 400 11px var(--font-sans); color: var(--muted-foreground); }
+
+/* The sound choice: a chip that reads its own state, present only where the route publishes
+   `generate_audio`. Off is stated in words as well as the struck speaker — an icon alone makes
+   the user guess which way the toggle sits. */
+.fy-bench__sound { display: inline-flex; align-items: center; gap: 5px; }
+/* Semantic tokens only: the neutral ramp does not move between themes, so a --neutral-* border
+   here would stay light grey on a dark surface. */
+.fy-bench__sound[aria-pressed="true"] { color: var(--foreground); border-color: var(--ring); }
+.fy-bench__sound--off { color: var(--muted-foreground); }
+
+/* The length, as a track (the shape Runway uses). The stops are the route's own, and a length
+   this model cannot reach is struck through rather than hidden. */
+.fy-bench__duration {
+  margin-top: 10px; padding: 11px 12px 9px; flex: none;
+  border: 1px solid var(--border); border-radius: 11px; background: var(--muted);
+}
+.fy-bench__durationhead { display: flex; align-items: center; gap: 7px; }
+.fy-bench__durationlabel { flex: 1; font: 500 12px var(--font-sans); color: var(--foreground); }
+.fy-bench__durationpill {
+  appearance: none; border: 1px solid transparent; border-radius: 8px; background: transparent;
+  color: var(--muted-foreground); font: 500 11.5px var(--font-sans); padding: 4px 11px; cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-bench__durationpill:hover { color: var(--foreground); }
+.fy-bench__durationpill--value { cursor: default; font-family: var(--font-mono); }
+/* A length that was chosen before a reference shortened the range: kept, not rewritten, and
+   marked so the refusal at Generate is not a surprise. */
+.fy-bench__durationpill--over { color: var(--destructive); text-decoration: line-through; }
+.fy-bench__durationpill--on {
+  border-color: var(--border); background: var(--background); color: var(--foreground);
+  box-shadow: var(--shadow-xs);
+}
+/* The track fills to the handle: how far along the model's own range this length sits is the
+   thing the control is for, and an unfilled track reads as a scrollbar. --fy-duration-fill is
+   set per render from the chosen stop's index, and is 0 under Auto, where no length is chosen. */
+.fy-bench__durationrange {
+  appearance: none; width: 100%; height: 22px; margin: 4px 0 0; background: transparent; cursor: pointer;
+  --fy-duration-fill: 0%;
+}
+.fy-bench__durationrange::-webkit-slider-runnable-track {
+  height: 22px; border-radius: 7px; border: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    var(--muted-foreground) 0 var(--fy-duration-fill),
+    var(--background) var(--fy-duration-fill) 100%
+  );
+}
+.fy-bench__durationrange::-webkit-slider-thumb {
+  appearance: none; width: 9px; height: 20px; margin-top: 0px; border-radius: 5px;
+  background: var(--foreground); border: 2px solid var(--background);
+}
+/* Under Auto the handle is still draggable — that is how you leave Auto — but it states
+   nothing, so it is drawn as an unset control rather than a choice sitting at the minimum. */
+.fy-bench__durationrange--auto::-webkit-slider-thumb { background: var(--muted-foreground); opacity: 0.45; }
+.fy-bench__durationrange:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.fy-bench__durationends {
+  display: flex; justify-content: space-between; margin-top: 3px;
+  font: 400 10.5px var(--font-mono); color: var(--muted-foreground);
+}
+.fy-bench__durationends > span { display: inline-flex; gap: 6px; }
+/* What this model stops short of: visible, struck, and not clickable. */
+.fy-bench__durationover { color: var(--neutral-400); text-decoration-thickness: 1px; }

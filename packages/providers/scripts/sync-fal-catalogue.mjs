@@ -129,11 +129,16 @@ const CURATED = {
       generate: { locked: [] },
       "first-frame": { route: "bytedance/seedance-2.0/image-to-video", locked: ["aspect"] },
       "first-and-last-frame": { route: "bytedance/seedance-2.0/image-to-video", locked: ["aspect"] },
-      // maxFrames from the route schema: image_urls declares maxItems 9.
-      "keyframe-sequence": { route: "bytedance/seedance-2.0/reference-to-video", locked: [], maxFrames: 9 },
     },
-    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    editRoute: "bytedance/seedance-2.0/reference-to-video",
+    // "Refer to them in the prompt as @Image1, @Image2" — references, not keyframes.
+    accepts: { referenceImages: 9, startFrame: false, endFrame: false },
     limits: {
+      maxReferenceVideoSec: 15,
+      maxReferenceAudioSec: 15,
+      referencesField: "image_urls",
+      soundChoice: true,
+      durationAuto: true,
       maxDurationSec: 15,
       durations: { "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" },
       resolutions: ["720p", "1080p"],
@@ -156,13 +161,17 @@ const CURATED = {
       generate: { locked: [] },
       "first-frame": { route: "bytedance/seedance-2.0/fast/image-to-video", locked: ["aspect"] },
       "first-and-last-frame": { route: "bytedance/seedance-2.0/fast/image-to-video", locked: ["aspect"] },
-      // maxFrames from the route schema: image_urls declares maxItems 9.
-      "keyframe-sequence": { route: "bytedance/seedance-2.0/fast/reference-to-video", locked: [], maxFrames: 9 },
     },
-    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    editRoute: "bytedance/seedance-2.0/fast/reference-to-video",
+    accepts: { referenceImages: 9, startFrame: false, endFrame: false },
     // The fast route tops out at 720p — its schema offers 480p and 720p only. It was listed at
     // 1080p, a size it cannot make, which the picker offered and the price list charged for.
     limits: {
+      maxReferenceVideoSec: 15,
+      maxReferenceAudioSec: 15,
+      referencesField: "image_urls",
+      soundChoice: true,
+      durationAuto: true,
       maxDurationSec: 15,
       durations: { "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" },
       resolutions: ["720p"],
@@ -179,6 +188,7 @@ const CURATED = {
     // Veo counts in "4s"/"6s"/"8s" and takes nothing between them.
     limits: {
       maxPromptChars: 20000,
+      soundChoice: true,
       maxDurationSec: 8,
       durations: { "4": "4s", "6": "6s", "8": "8s" },
       resolutions: ["720p", "1080p"],
@@ -191,6 +201,7 @@ const CURATED = {
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     limits: {
       maxPromptChars: 20000,
+      soundChoice: true,
       maxDurationSec: 8,
       durations: { "4": "4s", "6": "6s", "8": "8s" },
       resolutions: ["720p"],
@@ -207,7 +218,11 @@ const CURATED = {
     displayName: "MiniMax H3",
     capability: "video",
     family: "minimax-h3",
-    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    // The reference route describes its images as "referenced in the prompt as Image 1,
+    // Image 2" — which is this studio's own token vocabulary, not a sequence of keyframes the
+    // shot passes through. A job carrying references dispatches there instead of the text route.
+    editRoute: "minimax/h3/reference-to-video",
+    accepts: { referenceImages: 9, startFrame: false, endFrame: false },
     // Priced per second by resolution and the route's own default is 2K, so the base rate is
     // 2K's — an estimate computed at 480P's rate would understate every unpicked job by 2.6x.
     defaultResolution: "2K",
@@ -216,15 +231,15 @@ const CURATED = {
       // image-to-video declares no aspect_ratio at all: the frame decides the shape.
       "first-frame": { route: "minimax/h3/image-to-video", locked: ["aspect"] },
       "first-and-last-frame": { route: "minimax/h3/image-to-video", locked: ["aspect"] },
-      "keyframe-sequence": {
-        route: "minimax/h3/reference-to-video",
-        locked: [],
-        maxFrames: 9,
-        framesField: "reference_image_urls",
-      },
     },
     limits: {
       maxPromptChars: 50000,
+      // The reference route's own allowances: 9 images, 3 videos and 3 audio clips, each 2-15s
+      // with a combined 15s ceiling. Audio and video are budgeted in seconds because that is
+      // what the route limits.
+      maxReferenceVideoSec: 15,
+      maxReferenceAudioSec: 15,
+      referencesField: "reference_image_urls",
       maxDurationSec: 15,
       // duration is an integer 5..15 on this route, not a string out of a list.
       durationWire: "number",
@@ -253,6 +268,8 @@ const CURATED = {
     },
     limits: {
       maxPromptChars: 5000,
+      soundChoice: true,
+      durationAuto: true,
       maxDurationSec: 10,
       durationWire: "number",
       durations: { 6: "6", 8: "8", 10: "10" },
@@ -277,6 +294,8 @@ const CURATED = {
     },
     limits: {
       maxPromptChars: 5000,
+      soundChoice: true,
+      durationAuto: true,
       maxDurationSec: 20,
       durationWire: "number",
       durations: { 6: "6", 8: "8", 10: "10", 12: "12", 14: "14", 16: "16", 18: "18", 20: "20" },
@@ -292,21 +311,24 @@ const CURATED = {
     displayName: "Wan 2.7",
     capability: "video",
     family: "wan",
-    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    editRoute: "fal-ai/wan/v2.7/reference-to-video",
+    // This route publishes no maxItems on reference_image_urls, so 4 is a deliberate
+    // under-promise in the nano-banana pattern: a dropped reference costs less than a dispatch
+    // that dies after the estimate was accepted. Raise it from a live call, never from a guess.
+    accepts: { referenceImages: 4, startFrame: false, endFrame: false },
     defaultResolution: "1080p",
     modes: {
       generate: { locked: [] },
       "first-frame": { route: "fal-ai/wan/v2.7/image-to-video", locked: ["aspect"] },
       "first-and-last-frame": { route: "fal-ai/wan/v2.7/image-to-video", locked: ["aspect"] },
-      // No maxItems on this route's reference_image_urls: the ceiling was never published, so
-      // a sequence past two refuses rather than probing a paid route with a guess.
-      "keyframe-sequence": {
-        route: "fal-ai/wan/v2.7/reference-to-video",
-        locked: [],
-        framesField: "reference_image_urls",
-      },
     },
     limits: {
+      referencesField: "reference_image_urls",
+      // The two routes disagree about length (probed 2026-08-16): text-to-video declares
+      // duration 2–15, reference-to-video 2–10. The row's `durations` come from the text route,
+      // so the reference ceiling is stated separately and the composer shortens the track when
+      // a reference is attached.
+      maxReferenceDurationSec: 10,
       // The wan 2.7 schema declares no maxLength on prompt, so no counter is offered: "the
       // provider does not say" is not the same as "unlimited".
       maxDurationSec: 15,
@@ -323,14 +345,14 @@ const CURATED = {
     // No resolutions at all: the kling v3 text-to-video schema has no resolution field, so a
     // size listed here was offered in the picker and sent as a word the route does not know.
     limits: {
-      maxPromptChars: 2500, maxDurationSec: 15, durations: { "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" }, aspects: ["16:9", "9:16", "1:1"] },
+      maxPromptChars: 2500, soundChoice: true, maxDurationSec: 15, durations: { "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" }, aspects: ["16:9", "9:16", "1:1"] },
   },
   "fal-ai/kling-video/v3/standard/text-to-video": {
     id: "kling-3-standard",
     capability: "video",
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     limits: {
-      maxPromptChars: 2500, maxDurationSec: 15, durations: { "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" }, aspects: ["16:9", "9:16"] },
+      maxPromptChars: 2500, soundChoice: true, maxDurationSec: 15, durations: { "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" }, aspects: ["16:9", "9:16"] },
   },
 };
 

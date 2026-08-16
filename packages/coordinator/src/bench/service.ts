@@ -489,9 +489,20 @@ export function planBenchDispatch(
       });
     } else {
       const requestedSec = params.durationSec ?? 0;
-      const choice = requestedSec > 0 ? dispatchDuration(model, requestedSec) : { kind: "provider-default" as const };
+      // The route this job lands on is the one whose ceiling applies: references send it to a
+      // different endpoint, and wan's makes 10s where its text route makes 15.
+      const withReferences = referencePaths.length > 0;
+      const choice =
+        requestedSec > 0
+          ? dispatchDuration(model, requestedSec, { withReferences })
+          : { kind: "provider-default" as const };
       if (choice.kind === "over-cap") {
-        return { ok: false, reason: `${model.displayName} runs at most ${choice.longest}s.` };
+        return {
+          ok: false,
+          reason: choice.becauseReferences
+            ? `${model.displayName} runs at most ${choice.longest}s with references — remove them, or shorten the shot.`
+            : `${model.displayName} runs at most ${choice.longest}s.`,
+        };
       }
       inputs.push({
         worldId: options.worldId,
@@ -522,10 +533,17 @@ export function planBenchDispatch(
                 ...(params.aspect !== undefined ? { aspect: params.aspect } : {}),
                 ...(referencePaths.length > 0 ? { references: referencePaths } : {}),
               }),
-          ...(params.sound !== undefined ? { sound: params.sound } : {}),
+          // Only where the route publishes the choice. A recipe carries the params it was saved
+          // with, so a silent shot saved against seedance can be applied to a model that has no
+          // audio switch — and putting a field on the wire that the route never declared is how
+          // a job gets accepted, billed, and refused on its result.
+          ...(params.sound !== undefined && model.limits.soundChoice === true ? { sound: params.sound } : {}),
         },
         estimatedMicroUsd: estimateMicroUsd(model, {
-          durationSec: requestedSec > 0 ? pricedDuration(model, requestedSec) : (model.limits.maxDurationSec ?? 5),
+          // Priced at the length that will actually be asked for, on the route it will be asked
+          // of — the estimate and the dispatch read the same function for that reason.
+          durationSec:
+            requestedSec > 0 ? pricedDuration(model, requestedSec, { withReferences }) : (model.limits.maxDurationSec ?? 5),
           ...(params.resolution !== undefined ? { resolution: params.resolution } : {}),
         }),
         landing: { dir: sessionMediaDir(session.id, takeId) },

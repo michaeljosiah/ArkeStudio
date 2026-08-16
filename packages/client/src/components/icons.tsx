@@ -236,3 +236,12 @@ export const Expand = icon(
     <path d="M9 9 3 3" />
   </>,
 );
+
+/** The speaker with its waves struck out: sound is offered here, and turned off. */
+export const SpeakerOff = icon(
+  <>
+    <path d="M11 5 6 9H2v6h4l5 4z" />
+    <line x1="22" x2="16" y1="9" y2="15" />
+    <line x1="16" x2="22" y1="9" y2="15" />
+  </>,
+);

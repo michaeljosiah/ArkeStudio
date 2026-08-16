@@ -65,6 +65,25 @@ async function refolded(opened: { store: BenchStore }) {
   return session === null ? null : { store: opened.store, session };
 }
 
+async function fileImage(dir: string, name: string, id: string, hash: string) {
+  await mkdir(join(dir, "artifacts"), { recursive: true });
+  await writeFile(join(dir, "artifacts", name), `bytes of ${name}`);
+  await writeFile(
+    join(dir, "artifacts", `${name}.json`),
+    JSON.stringify({ id, kind: "image", file: name, hash, origin: { by: "user" }, links: [], created: CLOCK() }),
+  );
+}
+
+/** A world with one filed image, scanned — the reference every lane test attaches. */
+async function withImage(name = "frame.png") {
+  const { dir, store } = await open();
+  await fileImage(dir, name, `ar_${"01JKKKKKKKKKKKKKKKKKKKKKKK".slice(0, 26)}`, "sha256:deadbeefdeadbeef");
+  await store.reload();
+  const mine = store.getBundle().artifacts.find((a) => a.file === name);
+  if (!mine) throw new Error("the filed sidecar did not scan");
+  return { dir, store, artifactId: mine.id };
+}
+
 describe("the bench store (issue 305 §6)", () => {
   it("appends land durably and a repeated requestId writes nothing", async () => {
     const dir = await makeTempWorld();
@@ -412,24 +431,6 @@ describe("the Keyframe lane (issue 305 §3)", () => {
   };
   const VIDEO_MANIFEST: ModelManifest = { manifestVersion: 1, generated: "2026-08-16", models: [IMAGE_MODEL, VIDEO_MODEL] };
 
-  async function fileImage(dir: string, name: string, id: string, hash: string) {
-    await mkdir(join(dir, "artifacts"), { recursive: true });
-    await writeFile(join(dir, "artifacts", name), `bytes of ${name}`);
-    await writeFile(
-      join(dir, "artifacts", `${name}.json`),
-      JSON.stringify({ id, kind: "image", file: name, hash, origin: { by: "user" }, links: [], created: CLOCK() }),
-    );
-  }
-
-  async function withImage(name = "frame.png") {
-    const { dir, store } = await open();
-    await fileImage(dir, name, `ar_${"01JKKKKKKKKKKKKKKKKKKKKKKK".slice(0, 26)}`, "sha256:deadbeefdeadbeef");
-    await store.reload();
-    const mine = store.getBundle().artifacts.find((a) => a.file === name);
-    if (!mine) throw new Error("the filed sidecar did not scan");
-    return { dir, store, artifactId: mine.id };
-  }
-
   it("a keyframe pick lands in its own lane, never among the riding references", async () => {
     const { dir, store, artifactId } = await withImage();
     const opened = await freshBench(dir);
@@ -752,5 +753,97 @@ describe("the review's reckonings (issue 305 §3)", () => {
       assert.ok(!("taskMode" in plan.inputs[0]!.params));
       assert.equal(plan.reserved[0]!.request.keyframes.length, 0);
     }
+  });
+});
+
+describe("what a video dispatch may say about sound and length (asked for 2026-08-16)", () => {
+  /** Declares both the audio switch and a reference route that runs shorter than the text one. */
+  const SOUNDED: ManifestModel = {
+    id: "test-sounded",
+    provider: "fal",
+    capability: "video",
+    displayName: "Sounded Video",
+    accepts: { referenceImages: 2, startFrame: false, endFrame: false },
+    limits: {
+      maxDurationSec: 10,
+      durations: { 4: "4", 6: "6", 8: "8", 10: "10" },
+      maxReferenceDurationSec: 6,
+      soundChoice: true,
+      resolutions: ["720p"],
+      aspects: ["16:9"],
+    },
+    pricing: { kind: "perSecond", microUsdPerSecond: 100000 },
+    modes: { generate: { locked: [] } },
+  };
+  /** The same row with neither declaration — the audio switch is not universal. */
+  const MUTE: ManifestModel = {
+    ...SOUNDED,
+    id: "test-mute",
+    displayName: "Mute Video",
+    limits: { maxDurationSec: 10, durations: { 4: "4", 6: "6", 8: "8", 10: "10" }, resolutions: ["720p"], aspects: ["16:9"] },
+  };
+  const MANIFEST_2: ModelManifest = {
+    manifestVersion: 1,
+    generated: "2026-08-16",
+    models: [IMAGE_MODEL, SOUNDED, MUTE],
+  };
+
+  async function planWith(model: ManifestModel, params: Record<string, unknown>, withReference: boolean) {
+    const { dir, store, artifactId } = await withImage();
+    const opened = await freshBench(dir);
+    if (withReference) {
+      await addBenchReference(opened, store.getBundle(), model, {
+        source: { source: "artifact", artifactId },
+        requestId: "r1",
+        at: CLOCK(),
+      });
+    }
+    await opened.store.append(
+      {
+        type: "composer-set",
+        mode: "video",
+        provider: "fal",
+        model: model.id,
+        params: { kind: "video", resolution: "720p", ...params },
+        brief: "the tide going still",
+      },
+      { at: CLOCK() },
+    );
+    return planBenchDispatch((await opened.store.fold())!, store.getBundle(), MANIFEST_2, {
+      worldId: store.worldId,
+      requestId: "r2",
+      at: CLOCK(),
+    });
+  }
+
+  it("sends the audio choice only where the route publishes one", async () => {
+    const sounded = await planWith(SOUNDED, { durationSec: 4, sound: false }, false);
+    assert.ok(sounded.ok, sounded.ok ? undefined : sounded.reason);
+    if (sounded.ok) assert.equal(sounded.inputs[0]!.params["sound"], false);
+    // A recipe saved against a model that has the switch, applied to one that does not: the
+    // field is dropped rather than put on a route that never declared it.
+    const mute = await planWith(MUTE, { durationSec: 4, sound: false }, false);
+    assert.ok(mute.ok, mute.ok ? undefined : mute.reason);
+    if (mute.ok) assert.ok(!("sound" in mute.inputs[0]!.params), "no audio field on a route without one");
+  });
+
+  it("refuses a length the reference route will not make, and says the references did it", async () => {
+    // 8s is fine from text and beyond what this row's reference route makes.
+    const free = await planWith(SOUNDED, { durationSec: 8 }, false);
+    assert.ok(free.ok, free.ok ? undefined : free.reason);
+    const held = await planWith(SOUNDED, { durationSec: 8 }, true);
+    assert.equal(held.ok, false);
+    if (!held.ok) {
+      assert.match(held.reason, /at most 6s with references/);
+      // The way out is named: the shot is reachable, just not with this attached.
+      assert.match(held.reason, /remove them|shorten/);
+    }
+  });
+
+  it("prices a reference job at the length its own route will run", async () => {
+    const plan = await planWith(SOUNDED, { durationSec: 6 }, true);
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    // 6s at $0.10/s, the length the reference route actually accepts.
+    if (plan.ok) assert.equal(plan.inputs[0]!.estimatedMicroUsd, 600000);
   });
 });
