@@ -113,6 +113,14 @@ export const Speaker = icon(
     <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
   </>,
 );
+/** The stopwatch that opens the length: a duration, not a time of day. */
+export const Timer = icon(
+  <>
+    <path d="M10 2h4" />
+    <path d="M12 14v-4" />
+    <circle cx="12" cy="14" r="8" />
+  </>,
+);
 export const Copy = icon(
   <>
     <rect x="8" y="8" width="14" height="14" rx="2" ry="2" />

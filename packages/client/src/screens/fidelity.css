@@ -4254,9 +4254,18 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 /* The length, as a track (the shape Runway uses). The stops are the route's own, and a length
    this model cannot reach is struck through rather than hidden. */
+/* The length lives behind its own pill and opens upward over the composer, the way the recipes
+   menu does — the shape the reference shot uses. */
+.fy-bench__durationanchor { position: relative; display: inline-flex; }
+.fy-bench__durationtrigger { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); }
+.fy-bench__durationtrigger[aria-expanded="true"] { color: var(--foreground); border-color: var(--ring); }
+/* A length the chosen route will not make, said on the closed pill too: the panel is shut most
+   of the time, and a refusal the user cannot see coming arrives as a surprise. */
+.fy-bench__durationtrigger--over { color: var(--destructive); border-color: var(--destructive); }
 .fy-bench__duration {
-  margin-top: 10px; padding: 11px 12px 9px; flex: none;
-  border: 1px solid var(--border); border-radius: 11px; background: var(--muted);
+  position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 40; width: 268px;
+  padding: 11px 12px 9px;
+  border: 1px solid var(--border); border-radius: 13px; background: var(--card); box-shadow: var(--shadow-lg);
 }
 .fy-bench__durationhead { display: flex; align-items: center; gap: 7px; }
 .fy-bench__durationlabel { flex: 1; font: 500 12px var(--font-sans); color: var(--foreground); }

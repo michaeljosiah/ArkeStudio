@@ -342,8 +342,16 @@ describe("the video length and its sound (asked for 2026-08-16)", () => {
     displayName: "Bare Video",
     limits: { maxDurationSec: 8, durations: { 4: "4s", 6: "6s", 8: "8s" } },
   };
+  /** A row whose reference route runs shorter than its text route, as wan's does. */
+  const SHORTER: ManifestModel = {
+    ...LONG,
+    id: "test-shorter-with-refs",
+    displayName: "Shorter With Refs",
+    accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
+    limits: { ...LONG.limits, maxReferenceDurationSec: 6 },
+  };
 
-  function lengthState(model: ManifestModel, params: Record<string, unknown>): ClientState {
+  function lengthState(model: ManifestModel, params: Record<string, unknown>, tokens?: string[]): ClientState {
     const base = stateWithBench();
     const session = base.bench!.session;
     return {
@@ -359,146 +367,51 @@ describe("the video length and its sound (asked for 2026-08-16)", () => {
             provider: model.provider,
             model: model.id,
             params: { kind: "video", ...params },
+            ...(tokens === undefined ? {} : { activeTokens: tokens }),
           },
         },
       },
     };
   }
 
-  const render = (model: ManifestModel, params: Record<string, unknown> = {}) =>
-    renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, lengthState(model, params));
+  const render = (model: ManifestModel, params: Record<string, unknown> = {}, tokens?: string[]) =>
+    renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, lengthState(model, params, tokens));
 
   it("offers each control only where the route publishes the choice", () => {
     const offered = render(LONG);
     assert.match(offered, /data-testid="bench-sound"/);
-    assert.match(offered, /data-testid="duration-auto"/);
     // A switch over a route that publishes no such field would change nothing, and a control
     // that changes nothing is a control that lies.
-    const bare = render(BARE);
-    assert.doesNotMatch(bare, /data-testid="bench-sound"/);
-    assert.doesNotMatch(bare, /data-testid="duration-auto"/);
-    // The track itself is not conditional on either: every row with lengths gets one.
-    assert.match(bare, /data-testid="duration-range"/);
-  });
-
-  it("under Auto the track states no length, because none has been chosen", () => {
-    const auto = render(LONG);
-    // No competing value pill beside the lit Auto, and no fill: a handle parked on the shortest
-    // stop over a filled track would claim 4 seconds when nobody has said 4 seconds.
-    assert.doesNotMatch(auto, /data-testid="duration-value"/);
-    assert.match(auto, /--fy-duration-fill:\s*0%/);
-    assert.match(auto, /fy-bench__durationrange--auto/);
-  });
-
-  it("a chosen length fills the track to its own place in the model's range", () => {
-    // The track runs from one position below the shortest stop — that position is "unsaid" —
-    // so [4, 6, 8] occupies four positions and 6s sits two of three along.
-    const middle = render(LONG, { durationSec: 6 });
-    assert.match(middle, /data-testid="duration-value"/);
-    assert.match(middle, /6 s/);
-    assert.match(middle, /--fy-duration-fill:\s*66\.6/);
-    assert.doesNotMatch(middle, /fy-bench__durationrange--auto/);
-    assert.match(render(LONG, { durationSec: 8 }), /--fy-duration-fill:\s*100%/);
-    assert.match(render(LONG, { durationSec: 4 }), /--fy-duration-fill:\s*33\.3/);
+    assert.doesNotMatch(render(BARE), /data-testid="bench-sound"/);
+    // The length is not conditional on either: every row with lengths gets its pill.
+    assert.match(offered, /data-testid="duration-open"/);
+    assert.match(render(BARE), /data-testid="duration-open"/);
   });
 
   /**
-   * A range input fires no change when the click lands on the value it already holds. With the
-   * handle parked on the first stop, the shortest length — the cheapest one — could not be
-   * picked at all. The track carries a position below the shortest stop so every real stop is
-   * one the handle can move *to*, and that position is where "unsaid" honestly lives.
+   * The panel is a popover. Shut, none of the track is in the document, so the pill has to
+   * carry the answer — otherwise the row goes quiet about what will be made. (The track's own
+   * geometry is pinned in duration-track.test.ts, where it can be read directly.)
    */
-  it("keeps a position below the shortest stop, so the shortest stop can be reached", () => {
-    const unset = render(LONG);
-    assert.match(unset, /min="-1"/);
-    assert.match(unset, /value="-1"/);
-    assert.match(unset, /--fy-duration-fill:\s*0%/);
-    // And a chosen shortest length is a real position on the track, not the same one.
-    assert.match(render(LONG, { durationSec: 4 }), /value="0"/);
+  it("the closed pill says the length, or who is choosing it", () => {
+    assert.match(render(LONG, { durationSec: 6 }), /data-testid="duration-open"[^>]*>[\s\S]{0,600}?6s</);
+    assert.match(render(LONG), /data-testid="duration-open"[^>]*>[\s\S]{0,600}?Auto</);
+    // BARE declares lengths but no `auto`: no duration goes on the wire, and printing the
+    // shortest stop would name a length nobody asked for.
+    assert.match(render(BARE), /data-testid="duration-open"[^>]*>[\s\S]{0,600}?default</);
   });
 
-  it("says 'default' where no length was chosen and the model offers no Auto", () => {
-    // BARE declares lengths but no `auto`. Printing its shortest stop would name a length
-    // nobody asked for, while the wire carries no duration at all.
-    const bare = render(BARE);
-    assert.match(bare, /data-testid="duration-value"/);
-    assert.match(bare, />default</);
-    assert.doesNotMatch(bare, /4 s/);
+  it("marks a length the chosen route will not make, on the pill itself", () => {
+    // Shut, the panel cannot warn: a refusal the user cannot see coming arrives as a surprise.
+    const held = render(SHORTER, { durationSec: 8 }, ["Image 1"]);
+    assert.match(held, /fy-bench__durationtrigger--over/);
+    // The same length without the reference is perfectly reachable and unmarked.
+    assert.doesNotMatch(render(SHORTER, { durationSec: 8 }, []), /fy-bench__durationtrigger--over/);
   });
 
   it("says in words which way the sound sits, rather than leaving an icon to be read", () => {
     assert.match(render(LONG), />sound</);
     assert.match(render(LONG, { sound: false }), />silent</);
-  });
-
-  /**
-   * Wan makes 15 seconds from text and 10 from references — two routes, two ceilings. The track
-   * has to follow the route the job will land on, or the user picks 12s, accepts an estimate for
-   * 12s, and learns at dispatch that the endpoint never offered it.
-   */
-  describe("when a reference shortens the range", () => {
-    const SHORTER: ManifestModel = {
-      ...LONG,
-      id: "test-shorter-with-refs",
-      displayName: "Shorter With Refs",
-      accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
-      limits: { ...LONG.limits, maxReferenceDurationSec: 6 },
-    };
-
-    /** The fixture already registers Image 1; this only makes sure the lane is carrying it. */
-    function withReference(model: ManifestModel, params: Record<string, unknown>): ClientState {
-      const state = lengthState(model, params);
-      const session = state.bench!.session;
-      return {
-        ...state,
-        bench: {
-          worldId: FIXTURE_WORLD_ID,
-          session: { ...session, composer: { ...session.composer, activeTokens: ["Image 1"] } },
-        },
-      };
-    }
-
-    const renderWith = (params: Record<string, unknown> = {}) =>
-      renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, withReference(SHORTER, params));
-
-    /** The same model with the lane emptied — the fixture ships a reference, so this is explicit. */
-    const renderWithout = (params: Record<string, unknown> = {}) => {
-      const state = lengthState(SHORTER, params);
-      const session = state.bench!.session;
-      return renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, {
-        ...state,
-        bench: {
-          worldId: FIXTURE_WORLD_ID,
-          session: { ...session, composer: { ...session.composer, activeTokens: [] } },
-        },
-      });
-    };
-
-    it("ends the track at the reference route's ceiling, with the rest struck rather than hidden", () => {
-      const html = renderWith({ durationSec: 6 });
-      assert.match(html, /data-testid="duration-lost"/);
-      // 6s is the end of the shortened track [4, 6], and 8s is what the reference cost.
-      assert.match(html, /--fy-duration-fill:\s*100%/);
-      assert.match(html, />8s</);
-      // Without the reference the same model runs the full range and strikes nothing.
-      const free = renderWithout({ durationSec: 6 });
-      assert.doesNotMatch(free, /data-testid="duration-lost"/);
-      // 6s of [4, 6, 8] no longer sits at the end — the track really did change shape.
-      assert.match(free, /--fy-duration-fill:\s*66\.6/);
-    });
-
-    it("keeps a length chosen before the reference, and marks it out of reach", () => {
-      // Nothing is rewritten behind the user: 8s was asked for, 8s is still what it says, and
-      // the mark is what tells them Generate will refuse.
-      const html = renderWith({ durationSec: 8 });
-      assert.match(html, /8 s/);
-      assert.match(html, /fy-bench__durationpill--over/);
-      // And the handle sits one position PAST the ceiling rather than on it, so the ceiling is
-      // still somewhere the handle can be clicked back onto — the way out of the refusal.
-      const stops = 2; // [4, 6] once the reference shortens the range
-      assert.match(html, new RegExp(`max="${stops}"`));
-      assert.match(html, new RegExp(`value="${stops}"`));
-    });
   });
 });
 
