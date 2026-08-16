@@ -323,3 +323,21 @@ describe("a lingering keyframe stays visible (issue 305 §3)", () => {
     assert.doesNotMatch(html, /takes no keyframes/);
   });
 });
+
+describe("the enhancer (asked for 2026-08-16)", () => {
+  it("the sparkle exists exactly where a model and words both do", () => {
+    const withWords = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, stateWithBench());
+    assert.match(withWords, /data-testid="bench-enhance"/);
+
+    const state = stateWithBench();
+    const wordless = {
+      ...state,
+      bench: {
+        worldId: FIXTURE_WORLD_ID,
+        session: { ...state.bench!.session, composer: { ...state.bench!.session.composer, brief: "" } },
+      },
+    };
+    const without = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, wordless);
+    assert.doesNotMatch(without, /data-testid="bench-enhance"/);
+  });
+});

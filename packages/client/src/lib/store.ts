@@ -259,6 +259,12 @@ const jobReadyListeners = new Set<(job: Job) => void>();
 /** A correlated filing request's answer (issue 305): ordered artifact ids, by requestId. */
 export type FiledBatch = Extract<DomainEvent, { type: "artifact.filed-batch" }>;
 const filedBatchListeners = new Set<(batch: FiledBatch) => void>();
+export type BriefEnhanced = Extract<DomainEvent, { type: "bench.brief-enhanced" }>;
+const briefEnhancedListeners = new Set<(answer: BriefEnhanced) => void>();
+export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void): () => void {
+  briefEnhancedListeners.add(listener);
+  return () => briefEnhancedListeners.delete(listener);
+}
 
 export function subscribeFiledBatch(listener: (batch: FiledBatch) => void): () => void {
   filedBatchListeners.add(listener);
@@ -471,6 +477,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
+    }
+    if (event.type === "bench.brief-enhanced") {
+      for (const listener of briefEnhancedListeners) listener(event);
     }
     if (event.type === "artifact.filed-batch") {
       for (const listener of filedBatchListeners) listener(event);
@@ -2469,6 +2478,18 @@ export function sendBenchAddReference(
     picks: picks.map((p) => ({ source: p.pick, ...(p.replace !== undefined ? { replace: p.replace } : {}) })),
     ...(lane !== undefined ? { lane } : {}),
   } as ClientMessage);
+}
+
+export function sendBenchEnhanceBrief(input: {
+  worldId: string;
+  sessionId: string;
+  brief: string;
+  provider: string;
+  model: string;
+}): string {
+  const requestId = ulid();
+  send({ kind: "bench-enhance-brief", requestId, ...input } as ClientMessage);
+  return requestId;
 }
 
 export function sendBenchRecipeSave(input: {

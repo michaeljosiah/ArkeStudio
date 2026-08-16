@@ -9,6 +9,7 @@ import {
   ProposalIdSchema,
   ShotIdSchema,
   SlugSchema,
+  SessionIdSchema,
   UlidSchema,
 } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema, ReconcileActionSchema } from "./job.js";
@@ -655,6 +656,18 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("models.changed"),
       models: ModelAvailabilitySchema,
       faults: z.array(RoutingFaultSchema),
+    })
+    .strict(),
+  /** The enhancer's answer: the rewritten prompt, or null with why not (never silence). */
+  z
+    .object({
+      ...base,
+      type: z.literal("bench.brief-enhanced"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      prompt: z.string().nullable(),
+      reason: z.string().optional(),
     })
     .strict(),
   /** Saved bench setups changed (issue 305 §3): the whole list rides, it is small. */

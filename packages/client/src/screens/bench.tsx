@@ -24,6 +24,7 @@ import {
   sendBenchCompose,
   sendBenchDiscard,
   sendBenchDispatch,
+  sendBenchEnhanceBrief,
   sendBenchKeep,
   sendBenchNewSession,
   sendBenchOpen,
@@ -34,6 +35,7 @@ import {
   sendBenchSelectTake,
   sendBenchTitle,
   sendBenchUploadReferences,
+  subscribeBriefEnhanced,
   subscribeQueueResults,
   useBench,
   useClientState,
@@ -53,6 +55,7 @@ import {
   Message,
   Plus,
   Scroll,
+  Sparkle,
   User,
   VideoMark,
   Wand,
@@ -60,6 +63,7 @@ import {
 } from "../components/icons.js";
 import { Portrait } from "../components/portrait.js";
 import { mediaUrl } from "../lib/media.js";
+import { usableModels } from "../components/dispatch-bar.js";
 import {
   ReferencePickerDialog,
   carriedForPicker,
@@ -151,10 +155,7 @@ function BenchWorkspace({
     if (pushTimer.current) clearTimeout(pushTimer.current);
   }, []);
 
-  const models = useMemo(() => {
-    const disabled = new Set(state?.app.models.disabled ?? []);
-    return (manifest?.models ?? []).filter((m) => m.capability === draft.mode && !disabled.has(m.id));
-  }, [manifest, draft.mode, state?.app.models.disabled]);
+  const models = useMemo(() => usableModels(state, draft.mode), [state, draft.mode]);
   const model: ManifestModel | null =
     models.find((m) => m.id === draft.model && m.provider === draft.provider) ?? null;
   const modelName = (provider: string, id: string): string =>
@@ -201,6 +202,40 @@ function BenchWorkspace({
   const recipes = state?.app.recipes ?? [];
   const [briefExpanded, setBriefExpanded] = useState(false);
   const briefUnder = useRef<HTMLDivElement>(null);
+
+  // ---- the enhancer's round trip: request out, answer in, the author's hand between ----
+  const [enhancing, setEnhancing] = useState(false);
+  const enhancingRef = useRef<{ requestId: string; sentBrief: string } | null>(null);
+  /** The previous words after an auto-apply — one press brings them back. */
+  const [enhanceUndo, setEnhanceUndo] = useState<string | null>(null);
+  /** An answer that arrived after the words moved — offered, never imposed. */
+  const [enhanceOffer, setEnhanceOffer] = useState<string | null>(null);
+  const [enhanceNote, setEnhanceNote] = useState<string | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  useEffect(
+    () =>
+      subscribeBriefEnhanced((answer) => {
+        const pending = enhancingRef.current;
+        if (!pending || answer.requestId !== pending.requestId) return;
+        enhancingRef.current = null;
+        setEnhancing(false);
+        if (answer.prompt === null) {
+          setEnhanceNote(answer.reason ?? "the art director had no answer this time");
+          return;
+        }
+        if (draftRef.current.brief === pending.sentBrief) {
+          // Unmoved words: the enhancement lands, and the originals are one press away.
+          setEnhanceUndo(pending.sentBrief);
+          compose({ ...draftRef.current, brief: answer.prompt });
+        } else {
+          setEnhanceOffer(answer.prompt);
+        }
+      }),
+    // compose is re-created per render but only closes over stable senders + refs here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
   const tokens = useMemo(() => new Set(session.tokenRegistry.map((e) => e.token)), [session.tokenRegistry]);
 
   // ---- dispatch + its refusal ----
@@ -282,8 +317,7 @@ function BenchWorkspace({
 
   const switchMode = (mode: "image" | "video") => {
     if (mode === draft.mode) return;
-    const disabled = new Set(state?.app.models.disabled ?? []);
-    const first = (manifest?.models ?? []).find((m) => m.capability === mode && !disabled.has(m.id));
+    const first = usableModels(state, mode)[0];
     const params: BenchParams = mode === "image" ? { kind: "image", count: 1 } : { kind: "video" };
     compose({
       ...draft,
@@ -578,6 +612,74 @@ function BenchWorkspace({
                 <Expand size={13} />
               </button>
               <ComposerMic onText={(text) => compose({ ...draft, brief: draft.brief.length > 0 ? `${draft.brief}\n${text}` : text })} />
+              {/* The enhancer (asked for 2026-08-16): the art director rewrites the ask for
+                  the chosen model, grounded in the world's look and canon. Absent without a
+                  model or words — a control that could do nothing does not exist (§3). */}
+              {model !== null && draft.brief.trim().length > 0 && (
+                <button
+                  type="button"
+                  className={cx("fy-bench__footicon", enhancing && "fy-bench__footicon--busy")}
+                  data-testid="bench-enhance"
+                  disabled={enhancing}
+                  title={`Enhance — the art director rewrites this for ${model.displayName}, grounded in the world's look and canon`}
+                  onClick={() => {
+                    setEnhanceNote(null);
+                    setEnhanceOffer(null);
+                    setEnhanceUndo(null);
+                    if (pushTimer.current) clearTimeout(pushTimer.current);
+                    sendBenchCompose(worldId, session.id, draft);
+                    const requestId = sendBenchEnhanceBrief({
+                      worldId,
+                      sessionId: session.id,
+                      brief: draft.brief,
+                      provider: model.provider,
+                      model: model.id,
+                    });
+                    enhancingRef.current = { requestId, sentBrief: draft.brief };
+                    setEnhancing(true);
+                  }}
+                >
+                  <Sparkle size={13} />
+                </button>
+              )}
+              {enhancing && <span className="fy-bench__enhnote">writing…</span>}
+              {enhanceUndo !== null && (
+                <button
+                  type="button"
+                  className="fy-bench__enhchip"
+                  onClick={() => {
+                    compose({ ...draft, brief: enhanceUndo });
+                    setEnhanceUndo(null);
+                  }}
+                >
+                  Enhanced · undo
+                </button>
+              )}
+              {enhanceOffer !== null && (
+                <>
+                  {/* The words moved while the director wrote — applying is the author's call. */}
+                  <button
+                    type="button"
+                    className="fy-bench__enhchip"
+                    onClick={() => {
+                      setEnhanceUndo(draft.brief);
+                      compose({ ...draft, brief: enhanceOffer });
+                      setEnhanceOffer(null);
+                    }}
+                  >
+                    Apply enhanced
+                  </button>
+                  <button
+                    type="button"
+                    className="fy-bench__footicon"
+                    aria-label="Discard the enhanced version"
+                    onClick={() => setEnhanceOffer(null)}
+                  >
+                    <X size={11} />
+                  </button>
+                </>
+              )}
+              {enhanceNote !== null && <span className="fy-bench__enhnote">{enhanceNote}</span>}
               <span style={{ flex: 1 }} />
               {/* The counter exists only where the model publishes a cap (issue 305 §5.1). */}
               {promptCap !== undefined && (
@@ -756,27 +858,34 @@ function BenchWorkspace({
                 </>
               )}
             </span>
-            <span className="fy-bench__modelwrap">
-              <select
-                aria-label="Model"
-                className="fy-bench__model"
-                value={model ? `${model.provider}/${model.id}` : ""}
-                onChange={(e) => {
-                  const chosen = models.find((m) => `${m.provider}/${m.id}` === e.target.value);
-                  if (chosen) compose({ ...draft, provider: chosen.provider, model: chosen.id });
-                }}
-              >
-                <option value="" disabled>
-                  choose a model
-                </option>
-                {models.map((m) => (
-                  <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
-                    {m.displayName}
+            {models.length === 0 ? (
+              /* An empty select is mute; the bar says the repair (dispatch-bar's own words). */
+              <span className="fy-bench__nomodel">
+                {`No ${draft.mode} model is available — add a provider key in Settings.`}
+              </span>
+            ) : (
+              <span className="fy-bench__modelwrap">
+                <select
+                  aria-label="Model"
+                  className="fy-bench__model"
+                  value={model ? `${model.provider}/${model.id}` : ""}
+                  onChange={(e) => {
+                    const chosen = models.find((m) => `${m.provider}/${m.id}` === e.target.value);
+                    if (chosen) compose({ ...draft, provider: chosen.provider, model: chosen.id });
+                  }}
+                >
+                  <option value="" disabled>
+                    choose a model
                   </option>
-                ))}
-              </select>
-              <ChevronDown size={12} />
-            </span>
+                  {models.map((m) => (
+                    <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
+                      {m.displayName}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={12} />
+              </span>
+            )}
             <span style={{ flex: 1 }} />
             {estimate !== null && (
               <span data-testid="bench-estimate" className="fy-bench__estimate">
