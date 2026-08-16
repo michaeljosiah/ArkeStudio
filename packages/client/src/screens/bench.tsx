@@ -6,6 +6,7 @@ import {
   frameTaskModes,
   imageOutputFor,
   durationOptions,
+  keyframeAddable,
   keyframeCapacity,
   keyframePlan,
   pricedDuration,
@@ -186,10 +187,13 @@ function BenchWorkspace({
     [model, draft.mode],
   );
   const frames = session.composer.keyframeTokens;
+  // The tab exists where the model verifies a frame mode OR frames already ride: what is
+  // attached stays visible and removable even under a model that cannot honor it (§3).
+  const laneTabs = frameModes.length > 0 || (draft.mode === "video" && frames.length > 0);
   const [lane, setLane] = useState<"reference" | "keyframe">("reference");
   useEffect(() => {
-    if (frameModes.length === 0 && lane === "keyframe") setLane("reference");
-  }, [frameModes.length, lane]);
+    if (!laneTabs && lane === "keyframe") setLane("reference");
+  }, [laneTabs, lane]);
 
   // ---- the breadcrumb's session switcher + the brief's expanded editor ----
   const [sessionsOpen, setSessionsOpen] = useState(false);
@@ -441,7 +445,7 @@ function BenchWorkspace({
           {/* The lane tabs (issue 305 §3): Keyframe exists only where the model verifies a
               frame task mode; a model that takes no keyframes shows no tab, and the composer
               says so in a line rather than a tooltip (design 68b's dv-rule). */}
-          {frameModes.length > 0 && (
+          {laneTabs && (
             <div className="fy-bench__lanes" role="tablist" aria-label="What the pictures are for">
               {(["reference", "keyframe"] as const).map((l) => (
                 <button
@@ -456,7 +460,7 @@ function BenchWorkspace({
               ))}
             </div>
           )}
-          {draft.mode === "video" && model !== null && frameModes.length === 0 && (
+          {draft.mode === "video" && model !== null && frameModes.length === 0 && frames.length === 0 && (
             <p className="fy-bench__nolane">{`${model.displayName} takes no keyframes.`}</p>
           )}
 
@@ -525,7 +529,7 @@ function BenchWorkspace({
                   );
                 })}
                 {/* At the lane's ceiling the tile leaves — absent, not disabled (§3). */}
-                {model !== null && frames.length < keyframeCapacity(model) && (
+                {model !== null && keyframeAddable(model, frames.length) && (
                   <button
                     type="button"
                     className="fy-bench__reftile fy-bench__reftile--add"
@@ -533,7 +537,7 @@ function BenchWorkspace({
                     data-testid="bench-add-keyframe"
                   >
                     <ImageMark size={14} />
-                    {frames.length === 0 ? "Start frame" : "End frame"}
+                    {frames.length === 0 ? "Start frame" : frames.length === 1 ? "End frame" : "Add frame"}
                   </button>
                 )}
               </div>
@@ -975,7 +979,11 @@ function BenchWorkspace({
             open={pickerOpen}
             mode="slot"
             title="Add a keyframe"
-            note="A frame the shot must pass through — start first, then end."
+            note={
+              model !== null && keyframeCapacity(model) > 2
+                ? "Frames the shot passes through, in order."
+                : "A frame the shot must pass through — start first, then end."
+            }
             only="image"
             budget="none"
             worldSlug={worldSlug}
@@ -988,7 +996,7 @@ function BenchWorkspace({
               setPickerOpen(false);
             }}
             onUpload={() => {
-              sendBenchUploadReferences(worldId, session.id);
+              sendBenchUploadReferences(worldId, session.id, "keyframe");
             }}
             onClose={() => setPickerOpen(false)}
           />

@@ -702,3 +702,17 @@ export function recipeFault(
   }
   return { ok: true };
 }
+
+/**
+ * Whether one more frame can be picked at this count — reachability, not the next count's
+ * legality. A mode set with a gap (first-frame and a sequence, no first-and-last) must be
+ * fillable THROUGH its illegal middle: the pick is admitted when any larger count the lane
+ * can grow to dispatches legally, and the composer states the middle's refusal until it does.
+ */
+export function keyframeAddable(model: ManifestModel, count: number): boolean {
+  const ceiling = keyframeCapacity(model);
+  for (let n = count + 1; n <= ceiling; n++) {
+    if (keyframePlan(model, n).ok) return true;
+  }
+  return false;
+}

@@ -305,7 +305,7 @@ export function ReferencePickerBody({
           <button type="button" aria-pressed={lane === "world"} onClick={() => setLane("world")}>
             {`World artifacts ${offered(world).length}`}
           </button>
-          {mode === "bench" && (
+          {offered(session).length > 0 && (
             <button type="button" aria-pressed={lane === "session"} onClick={() => setLane("session")}>
               {`This session ${offered(session).length}`}
             </button>

@@ -644,3 +644,113 @@ describe("recipes (issue 305 §3)", () => {
     assert.deepEqual(reread.models.disabled, ["something-off"], "the rest of settings survives too");
   });
 });
+
+describe("the review's reckonings (issue 305 §3)", () => {
+  const GAPPED_MODEL: ManifestModel = {
+    id: "test-gapped",
+    provider: "fal",
+    capability: "video",
+    displayName: "Gapped Video",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: { maxDurationSec: 10 },
+    pricing: { kind: "perSecond", microUsdPerSecond: 100000 },
+    modes: {
+      generate: { locked: [] },
+      "first-frame": { route: "test/image-to-video", locked: [] },
+      "keyframe-sequence": { route: "test/reference-to-video", locked: [], maxFrames: 3 },
+    },
+  };
+  const GAPPED_MANIFEST: ModelManifest = { manifestVersion: 1, generated: "2026-08-16", models: [GAPPED_MODEL] };
+
+  async function threeImages() {
+    const { dir, store } = await open();
+    await mkdir(join(dir, "artifacts"), { recursive: true });
+    const ids: string[] = [];
+    for (const [i, name] of ["kf-a.png", "kf-b.png", "kf-c.png"].entries()) {
+      await writeFile(join(dir, "artifacts", name), `bytes ${name}`);
+      const id = `ar_01JW${"WWWWWWWWWWWWWWWWWWWWW"}${i}`;
+      await writeFile(
+        join(dir, "artifacts", `${name}.json`),
+        JSON.stringify({ id, kind: "image", file: name, hash: `sha256:ab${i}dab${i}dab${i}dab${i}d`, origin: { by: "user" }, links: [], created: CLOCK() }),
+      );
+      ids.push(id);
+    }
+    await store.reload();
+    const found = ["kf-a.png", "kf-b.png", "kf-c.png"].map((f) => store.getBundle().artifacts.find((a) => a.file === f)!.id);
+    return { dir, store, ids: found };
+  }
+
+  it("a gapped mode set fills THROUGH its illegal middle, which dispatch states until it passes", async () => {
+    const { dir, store, ids } = await threeImages();
+    const opened = await freshBench(dir);
+    const bundle = store.getBundle();
+    // No first-and-last-frame mode: two frames is illegal, three is legal. Both picks admit.
+    for (const [i, id] of ids.slice(0, 2).entries()) {
+      const ok = await addBenchReference((await refolded(opened))!, bundle, GAPPED_MODEL, {
+        source: { source: "artifact", artifactId: id },
+        lane: "keyframe",
+        requestId: `g${i}`,
+        at: CLOCK(),
+      });
+      assert.equal(ok.outcome, "added", JSON.stringify(ok));
+    }
+    await opened.store.append(
+      { type: "composer-set", mode: "video", provider: "fal", model: "test-gapped", params: { kind: "video" }, brief: "x" },
+      { at: CLOCK() },
+    );
+    // The middle is stated, not silently dead:
+    const midway = planBenchDispatch((await opened.store.fold())!, bundle, GAPPED_MANIFEST, {
+      worldId: store.worldId,
+      requestId: "g-mid",
+      at: CLOCK(),
+    });
+    assert.ok(!midway.ok);
+    assert.match((midway as { reason: string }).reason, /first and last frame route/);
+    // …and the third pick makes it legal on the sequence route.
+    const third = await addBenchReference((await refolded(opened))!, bundle, GAPPED_MODEL, {
+      source: { source: "artifact", artifactId: ids[2]! },
+      lane: "keyframe",
+      requestId: "g2",
+      at: CLOCK(),
+    });
+    assert.equal(third.outcome, "added");
+    const plan = planBenchDispatch((await opened.store.fold())!, bundle, GAPPED_MANIFEST, {
+      worldId: store.worldId,
+      requestId: "g-full",
+      at: CLOCK(),
+    });
+    assert.ok(plan.ok, (plan as { reason?: string }).reason);
+    if (plan.ok) {
+      assert.equal(plan.inputs[0]!.params["taskMode"], "keyframe-sequence");
+      assert.equal(plan.inputs[0]!.params["route"], "test/reference-to-video");
+    }
+  });
+
+  it("an image dispatch ignores riding keyframes instead of refusing from hidden state", async () => {
+    const { dir, store, ids } = await threeImages();
+    const opened = await freshBench(dir);
+    const bundle = store.getBundle();
+    const added = await addBenchReference(opened, bundle, GAPPED_MODEL, {
+      source: { source: "artifact", artifactId: ids[0]! },
+      lane: "keyframe",
+      requestId: "i0",
+      at: CLOCK(),
+    });
+    assert.equal(added.outcome, "added");
+    // The composer moves on to an image request; the lane rides along, ignored.
+    await opened.store.append(
+      { type: "composer-set", mode: "image", provider: "fal", model: "test-image", params: { kind: "image", count: 1 }, brief: "a tide-clock" },
+      { at: CLOCK() },
+    );
+    const plan = planBenchDispatch((await opened.store.fold())!, bundle, MANIFEST, {
+      worldId: store.worldId,
+      requestId: "i1",
+      at: CLOCK(),
+    });
+    assert.ok(plan.ok, (plan as { reason?: string }).reason);
+    if (plan.ok) {
+      assert.ok(!("taskMode" in plan.inputs[0]!.params));
+      assert.equal(plan.reserved[0]!.request.keyframes.length, 0);
+    }
+  });
+});

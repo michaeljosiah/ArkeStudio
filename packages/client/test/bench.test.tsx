@@ -284,3 +284,42 @@ describe("recipes (issue 305 §3)", () => {
     assert.match(html, /Recipes/);
   });
 });
+
+describe("a lingering keyframe stays visible (issue 305 §3)", () => {
+  it("the tab renders for riding frames even when the model verifies no frame mode", () => {
+    const PLAIN: ManifestModel = {
+      id: "test-plain-video2",
+      provider: "fal",
+      capability: "video",
+      displayName: "Plain Video 2",
+      accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
+      limits: { maxDurationSec: 10 },
+      pricing: { kind: "perSecond", microUsdPerSecond: 100000 },
+      modes: { generate: { locked: [] } },
+    };
+    const base = stateWithBench();
+    const session = base.bench!.session;
+    const state: ClientState = {
+      ...base,
+      app: { ...base.app, manifest: { ...base.app.manifest!, models: [...base.app.manifest!.models, PLAIN] } },
+      bench: {
+        worldId: FIXTURE_WORLD_ID,
+        session: {
+          ...session,
+          composer: {
+            ...session.composer,
+            mode: "video",
+            provider: PLAIN.provider,
+            model: PLAIN.id,
+            params: { kind: "video" },
+            keyframeTokens: ["Image 1"],
+          },
+        },
+      },
+    };
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, state);
+    // What is attached stays visible and removable — no hidden state, no dead end.
+    assert.match(html, /Keyframe/);
+    assert.doesNotMatch(html, /takes no keyframes/);
+  });
+});

@@ -2512,9 +2512,19 @@ export function sendBenchRemoveReference(
 }
 
 /** Returns the requestId the artifact.filed-batch answer will carry. */
-export function sendBenchUploadReferences(worldId: string, sessionId: string): string {
+export function sendBenchUploadReferences(
+  worldId: string,
+  sessionId: string,
+  lane?: "reference" | "keyframe",
+): string {
   const requestId = ulid();
-  send({ kind: "bench-upload-references", worldId, sessionId, requestId } as ClientMessage);
+  send({
+    kind: "bench-upload-references",
+    worldId,
+    sessionId,
+    requestId,
+    ...(lane !== undefined ? { lane } : {}),
+  } as ClientMessage);
   return requestId;
 }
 

@@ -7,6 +7,7 @@ import {
   dispatchDuration,
   estimateMicroUsd,
   imageOutputFor,
+  keyframeAddable,
   keyframePlan,
   mappedReferenceKinds,
   newId,
@@ -263,8 +264,10 @@ export async function addBenchReference(
   if (lane === "keyframe") {
     // Frames are not budgeted references — the lane's ceiling is the frame task modes' own,
     // and the plan that admits the pick is the plan dispatch will re-run (issue 305 §3).
-    const plan = keyframePlan(model, session.composer.keyframeTokens.length + 1);
-    if (!plan.ok) return { outcome: "refused", reason: plan.reason };
+    if (!keyframeAddable(model, session.composer.keyframeTokens.length)) {
+      const plan = keyframePlan(model, session.composer.keyframeTokens.length + 1);
+      return { outcome: "refused", reason: plan.ok ? "the keyframe lane is full" : plan.reason };
+    }
   } else {
     const carried = activeReferenceItems(session, bundle).filter((item) => item.token !== input.replace);
     const verdict = admitReference({ kind: resolved.kind, durationSec: resolved.durationSec }, carried, model);
@@ -400,9 +403,11 @@ export function planBenchDispatch(
   // declaring a task-mode route without sending to it is not support.
   const keyframes: BenchReferenceToken[] = options.fromTake
     ? options.fromTake.request.keyframes
-    : session.composer.keyframeTokens
-        .map((token) => session.tokenRegistry.find((e) => e.token === token))
-        .filter((e): e is BenchReferenceToken => e !== undefined);
+    : composer.mode === "video"
+      ? session.composer.keyframeTokens
+          .map((token) => session.tokenRegistry.find((e) => e.token === token))
+          .filter((e): e is BenchReferenceToken => e !== undefined)
+      : []; // an image request never claimed frames — the lane rides along, ignored, not refused
   let frame: { mode: TaskMode; route: string | null; paths: string[] } | null = null;
   if (keyframes.length > 0) {
     if (composer.mode !== "video") return { ok: false, reason: "Keyframes ride video, not image." };

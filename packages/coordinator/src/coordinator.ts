@@ -84,7 +84,7 @@ import {
   verifyCandidates,
   type RawCandidate,
 } from "./artifacts/extraction.js";
-import { ATTACHABLE_EXTENSIONS, backfillMediaInfo, fileArtifact, fileGeneratedArtifact, importFolder } from "./artifacts/filing.js";
+import { ATTACHABLE_EXTENSIONS, ATTACHABLE_IMAGE_EXTENSIONS, backfillMediaInfo, fileArtifact, fileGeneratedArtifact, importFolder } from "./artifacts/filing.js";
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
@@ -3293,7 +3293,10 @@ export class Coordinator {
         const bench = await this.benchFor(msg.worldId, msg.sessionId);
         const pick = this.opts.pickFiles;
         if (!store || !bench || !pick) return;
-        const paths = await pick({ accept: [...ATTACHABLE_EXTENSIONS] }).catch(() => [] as readonly string[]);
+        const lane = msg.lane ?? "reference";
+        const paths = await pick({
+          accept: lane === "keyframe" ? [...ATTACHABLE_IMAGE_EXTENSIONS] : [...ATTACHABLE_EXTENSIONS],
+        }).catch(() => [] as readonly string[]);
         const artifactIds: Array<string | null> = [];
         for (const sourcePath of paths) {
           artifactIds.push(await this.fileOne(msg.worldId, sourcePath, { allowLarge: msg.allowLarge ?? false }));
@@ -3316,11 +3319,16 @@ export class Coordinator {
             manifest?.models.find(
               (m) => m.id === fresh.session.composer.model && m.provider === fresh.session.composer.provider,
             ) ?? null;
-          await addBenchReference(fresh, store.getBundle(), model, {
+          const outcome = await addBenchReference(fresh, store.getBundle(), model, {
             source: { source: "artifact", artifactId },
+            lane: msg.lane,
             requestId: `${msg.requestId}/attach/${index}`,
             at: this.nowIso(),
           });
+          // Filed but not attached is a real outcome — recorded, never swallowed.
+          if (outcome.outcome === "refused") {
+            void this.appLog?.append({ kind: "bench.reference-refused", worldId: msg.worldId, reason: outcome.reason });
+          }
         }
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;

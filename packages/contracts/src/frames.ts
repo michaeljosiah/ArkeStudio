@@ -1425,6 +1425,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sessionId: SessionIdSchema,
       requestId: UlidSchema,
       allowLarge: z.boolean().optional(),
+      /** Which lane the uploads attach to. Absent is the reference lane (issue 305 §3). */
+      lane: z.enum(["reference", "keyframe"]).optional(),
     })
     .strict(),
   /**

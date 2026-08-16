@@ -11,6 +11,7 @@ import {
   foldBenchSession,
   formatSeconds,
   frameTaskModes,
+  keyframeAddable,
   keyframeCapacity,
   keyframePlan,
   multimediaCapacity,
@@ -414,5 +415,28 @@ describe("recipes (issue 305 §3)", () => {
     assert.ok(!gone.ok && /no longer in the manifest/.test(gone.reason));
     const off = recipeFault(recipe, { models: [MODEL] }, ["test-image"]);
     assert.ok(!off.ok && /switched off in Providers/.test(off.reason));
+  });
+});
+
+describe("keyframeAddable — reachability, not the next count's legality", () => {
+  it("a gapped mode set admits picks through its illegal middle, and stops at the ceiling", () => {
+    const gapped: ManifestModel = {
+      id: "gapped",
+      provider: "fal",
+      capability: "video",
+      displayName: "Gapped",
+      accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
+      limits: {},
+      pricing: { kind: "perSecond", microUsdPerSecond: 1 },
+      modes: {
+        generate: { locked: [] },
+        "first-frame": { route: "t/i2v", locked: [] },
+        "keyframe-sequence": { route: "t/r2v", locked: [], maxFrames: 3 },
+      },
+    };
+    assert.equal(keyframeAddable(gapped, 0), true); // → 1, first-frame
+    assert.equal(keyframeAddable(gapped, 1), true); // 2 is illegal, but 3 is reachable
+    assert.equal(keyframeAddable(gapped, 2), true); // → 3, sequence
+    assert.equal(keyframeAddable(gapped, 3), false); // the ceiling
   });
 });
