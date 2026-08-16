@@ -3,6 +3,7 @@ import {
   FrameSchema,
   type AskCandidate,
   type AskResult,
+  type BenchParams,
   type Capability,
   type ClientMessage,
   type ClientState,
@@ -324,6 +325,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, providers: event.providers } };
     case "routing.changed":
       return { ...state, app: { ...state.app, routing: { defaults: event.routing, faults: event.faults } } };
+    case "recipes.changed":
+      return { ...state, app: { ...state.app, recipes: event.recipes } };
     case "models.changed":
       // Faults travel with availability because they are the same act: switching a model off can
       // strand the default that points at it, and the two arriving separately would show a
@@ -2455,6 +2458,7 @@ export function sendBenchAddReference(
     pick: { source: "artifact"; artifactId: string } | { source: "take"; takeId: string };
     replace?: string;
   }>,
+  lane?: "reference" | "keyframe",
 ): void {
   if (picks.length === 0) return;
   send({
@@ -2463,17 +2467,64 @@ export function sendBenchAddReference(
     sessionId,
     requestId: ulid(),
     picks: picks.map((p) => ({ source: p.pick, ...(p.replace !== undefined ? { replace: p.replace } : {}) })),
+    ...(lane !== undefined ? { lane } : {}),
   } as ClientMessage);
 }
 
-export function sendBenchRemoveReference(worldId: string, sessionId: string, token: string): void {
-  send({ kind: "bench-remove-reference", worldId, sessionId, requestId: ulid(), token } as ClientMessage);
+export function sendBenchRecipeSave(input: {
+  name: string;
+  mode: "image" | "video";
+  provider: string;
+  model: string;
+  params: BenchParams;
+  brief?: string;
+}): void {
+  send({
+    kind: "bench-recipe-save",
+    requestId: ulid(),
+    name: input.name,
+    mode: input.mode,
+    provider: input.provider,
+    model: input.model,
+    params: input.params,
+    ...(input.brief !== undefined ? { brief: input.brief } : {}),
+  } as ClientMessage);
+}
+
+export function sendBenchRecipeDelete(recipeId: string): void {
+  send({ kind: "bench-recipe-delete", requestId: ulid(), recipeId } as ClientMessage);
+}
+
+export function sendBenchRemoveReference(
+  worldId: string,
+  sessionId: string,
+  token: string,
+  lane?: "reference" | "keyframe",
+): void {
+  send({
+    kind: "bench-remove-reference",
+    worldId,
+    sessionId,
+    requestId: ulid(),
+    token,
+    ...(lane !== undefined ? { lane } : {}),
+  } as ClientMessage);
 }
 
 /** Returns the requestId the artifact.filed-batch answer will carry. */
-export function sendBenchUploadReferences(worldId: string, sessionId: string): string {
+export function sendBenchUploadReferences(
+  worldId: string,
+  sessionId: string,
+  lane?: "reference" | "keyframe",
+): string {
   const requestId = ulid();
-  send({ kind: "bench-upload-references", worldId, sessionId, requestId } as ClientMessage);
+  send({
+    kind: "bench-upload-references",
+    worldId,
+    sessionId,
+    requestId,
+    ...(lane !== undefined ? { lane } : {}),
+  } as ClientMessage);
   return requestId;
 }
 

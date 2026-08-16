@@ -3,9 +3,14 @@ import { useNavigate, useParams } from "react-router";
 import {
   estimateMicroUsd,
   formatMicroUsd,
+  frameTaskModes,
   imageOutputFor,
   durationOptions,
+  keyframeAddable,
+  keyframeCapacity,
+  keyframePlan,
   pricedDuration,
+  recipeFault,
   tiersFor,
   type BenchParams,
   type BenchSession,
@@ -22,6 +27,8 @@ import {
   sendBenchKeep,
   sendBenchNewSession,
   sendBenchOpen,
+  sendBenchRecipeDelete,
+  sendBenchRecipeSave,
   sendBenchRemoveReference,
   sendBenchRerun,
   sendBenchSelectTake,
@@ -156,14 +163,42 @@ function BenchWorkspace({
   // ---- references ----
   const worldSources = useMemo(() => worldPickerSources(world?.artifacts ?? [], session), [world?.artifacts, session]);
   const sessionSources = useMemo(() => sessionPickerSources(session), [session]);
+  // The same rows with the OTHER lane's occupancy: what already rides as a keyframe.
+  const worldFrameSources = useMemo(
+    () => worldPickerSources(world?.artifacts ?? [], session, "keyframe"),
+    [world?.artifacts, session],
+  );
+  const sessionFrameSources = useMemo(() => sessionPickerSources(session, "keyframe"), [session]);
   const carried = useMemo(
     () => carriedForPicker(session, worldSources, sessionSources),
     [session, worldSources, sessionSources],
   );
   const [pickerOpen, setPickerOpen] = useState(false);
+  /** Which lane the open picker fills — the tabs choose what a picked picture is FOR. */
+  const [pickerLane, setPickerLane] = useState<"reference" | "keyframe">("reference");
+  const openPicker = (l: "reference" | "keyframe") => {
+    setPickerLane(l);
+    setPickerOpen(true);
+  };
+
+  // ---- the Keyframe lane (issue 305 §3): exists only where the model verifies a frame mode ----
+  const frameModes = useMemo(
+    () => (model !== null && draft.mode === "video" ? frameTaskModes(model) : []),
+    [model, draft.mode],
+  );
+  const frames = session.composer.keyframeTokens;
+  // The tab exists where the model verifies a frame mode OR frames already ride: what is
+  // attached stays visible and removable even under a model that cannot honor it (§3).
+  const laneTabs = frameModes.length > 0 || (draft.mode === "video" && frames.length > 0);
+  const [lane, setLane] = useState<"reference" | "keyframe">("reference");
+  useEffect(() => {
+    if (!laneTabs && lane === "keyframe") setLane("reference");
+  }, [laneTabs, lane]);
 
   // ---- the breadcrumb's session switcher + the brief's expanded editor ----
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [recipesOpen, setRecipesOpen] = useState(false);
+  const recipes = state?.app.recipes ?? [];
   const [briefExpanded, setBriefExpanded] = useState(false);
   const briefUnder = useRef<HTMLDivElement>(null);
   const tokens = useMemo(() => new Set(session.tokenRegistry.map((e) => e.token)), [session.tokenRegistry]);
@@ -407,39 +442,113 @@ function BenchWorkspace({
             </button>
           </div>
 
+          {/* The lane tabs (issue 305 §3): Keyframe exists only where the model verifies a
+              frame task mode; a model that takes no keyframes shows no tab, and the composer
+              says so in a line rather than a tooltip (design 68b's dv-rule). */}
+          {laneTabs && (
+            <div className="fy-bench__lanes" role="tablist" aria-label="What the pictures are for">
+              {(["reference", "keyframe"] as const).map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  role="tab"
+                  aria-selected={lane === l}
+                  onClick={() => setLane(l)}
+                >
+                  {l === "reference" ? "Reference" : "Keyframe"}
+                </button>
+              ))}
+            </div>
+          )}
+          {draft.mode === "video" && model !== null && frameModes.length === 0 && frames.length === 0 && (
+            <p className="fy-bench__nolane">{`${model.displayName} takes no keyframes.`}</p>
+          )}
+
           {/* reference tiles */}
-          <div className="fy-bench__refgrid">
-            {session.composer.activeTokens.map((token) => {
-              const source = [...worldSources, ...sessionSources].find((s) => s.existingToken === token);
-              return (
-                <div key={token} className="fy-bench__reftile">
-                  {source?.imagePath ? (
-                    <Portrait worldSlug={worldSlug} path={source.imagePath} label={token} radius={0} />
-                  ) : (
-                    <span className="fy-bench__takestate">{source?.kind ?? "missing"}</span>
-                  )}
-                  <span className="fy-bench__tokenchip">{token}</span>
+          {lane === "reference" && (
+            <div className="fy-bench__refgrid">
+              {session.composer.activeTokens.map((token) => {
+                const source = [...worldSources, ...sessionSources].find((s) => s.existingToken === token);
+                return (
+                  <div key={token} className="fy-bench__reftile">
+                    {source?.imagePath ? (
+                      <Portrait worldSlug={worldSlug} path={source.imagePath} label={token} radius={0} />
+                    ) : (
+                      <span className="fy-bench__takestate">{source?.kind ?? "missing"}</span>
+                    )}
+                    <span className="fy-bench__tokenchip">{token}</span>
+                    <button
+                      type="button"
+                      className="fy-bench__tokenremove"
+                      aria-label={`Remove ${token}`}
+                      onClick={() => sendBenchRemoveReference(worldId, session.id, token)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+              <button
+                type="button"
+                className="fy-bench__reftile fy-bench__reftile--add"
+                onClick={() => openPicker("reference")}
+                data-testid="bench-add-reference"
+              >
+                <ImageMark size={14} />
+                Reference
+              </button>
+            </div>
+          )}
+
+          {/* keyframe tiles — the pictures the shot must pass through, in order */}
+          {lane === "keyframe" && (
+            <>
+              <div className="fy-bench__refgrid" data-testid="keyframe-lane">
+                {frames.map((token, index) => {
+                  const source = [...worldSources, ...sessionSources].find((s) => s.existingToken === token);
+                  return (
+                    <div key={token} className="fy-bench__reftile">
+                      {source?.imagePath ? (
+                        <Portrait worldSlug={worldSlug} path={source.imagePath} label={token} radius={0} />
+                      ) : (
+                        <span className="fy-bench__takestate">{source?.kind ?? "missing"}</span>
+                      )}
+                      {frames.length <= 2 && (
+                        <span className="fy-bench__slotchip">{index === 0 ? "start" : "end"}</span>
+                      )}
+                      <span className="fy-bench__tokenchip">{token}</span>
+                      <button
+                        type="button"
+                        className="fy-bench__tokenremove"
+                        aria-label={`Remove ${token} from the keyframes`}
+                        onClick={() => sendBenchRemoveReference(worldId, session.id, token, "keyframe")}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+                {/* At the lane's ceiling the tile leaves — absent, not disabled (§3). */}
+                {model !== null && keyframeAddable(model, frames.length) && (
                   <button
                     type="button"
-                    className="fy-bench__tokenremove"
-                    aria-label={`Remove ${token}`}
-                    onClick={() => sendBenchRemoveReference(worldId, session.id, token)}
+                    className="fy-bench__reftile fy-bench__reftile--add"
+                    onClick={() => openPicker("keyframe")}
+                    data-testid="bench-add-keyframe"
                   >
-                    ×
+                    <ImageMark size={14} />
+                    {frames.length === 0 ? "Start frame" : frames.length === 1 ? "End frame" : "Add frame"}
                   </button>
-                </div>
-              );
-            })}
-            <button
-              type="button"
-              className="fy-bench__reftile fy-bench__reftile--add"
-              onClick={() => setPickerOpen(true)}
-              data-testid="bench-add-reference"
-            >
-              <ImageMark size={14} />
-              Reference
-            </button>
-          </div>
+                )}
+              </div>
+              {/* The same plan dispatch will run, said before Generate is pressed. */}
+              {model !== null && frames.length > 0 && !keyframePlan(model, frames.length).ok && (
+                <p className="fy-bench__refusal">
+                  {(keyframePlan(model, frames.length) as { ok: false; reason: string }).reason}
+                </p>
+              )}
+            </>
+          )}
 
           {/* brief — tokens the session knows render as chips inline (issue 305 §3) */}
           <div className="fy-bench__brief">
@@ -481,7 +590,7 @@ function BenchWorkspace({
 
           {/* the mode's settings row */}
           <div className="fy-bench__settings">
-            <button type="button" className="fy-bench__chip fy-bench__chip--refs" onClick={() => setPickerOpen(true)}>
+            <button type="button" className="fy-bench__chip fy-bench__chip--refs" onClick={() => openPicker("reference")}>
               <Plus size={11} />
               References
             </button>
@@ -565,6 +674,88 @@ function BenchWorkspace({
 
           {/* dispatch row */}
           <div className="fy-bench__dispatch">
+            {/* Recipes (issue 305 §3): saved setups, applied into the draft — the ghost
+                trigger the master puts left of the model select (68b). */}
+            <span style={{ position: "relative", display: "inline-flex" }}>
+              <button
+                type="button"
+                className="fy-bench__recipes"
+                aria-expanded={recipesOpen}
+                data-testid="bench-recipes"
+                onClick={() => setRecipesOpen((v) => !v)}
+              >
+                Recipes
+                <ChevronDown size={11} />
+              </button>
+              {recipesOpen && (
+                <>
+                  <div className="fy-bench__scrim" onClick={() => setRecipesOpen(false)} />
+                  <div className="fy-bench__recipemenu" role="menu" aria-label="Recipes">
+                    {recipes.length === 0 && <span className="fy-bench__recipenone">No recipes yet.</span>}
+                    {recipes.map((recipe) => {
+                      const fault = recipeFault(recipe, manifest, state?.app.models.disabled ?? []);
+                      return (
+                        <div key={recipe.id} className="fy-bench__reciperow">
+                          <button
+                            type="button"
+                            className="fy-bench__sessionrow"
+                            disabled={!fault.ok}
+                            title={fault.ok ? undefined : fault.reason}
+                            onClick={() => {
+                              if (!fault.ok) return;
+                              setRecipesOpen(false);
+                              compose({
+                                mode: recipe.mode,
+                                provider: recipe.provider,
+                                model: recipe.model,
+                                params: recipe.params,
+                                brief: recipe.brief ?? draft.brief,
+                              });
+                            }}
+                          >
+                            <span className="fy-bench__sessionname">{recipe.name}</span>
+                            <span className="fy-bench__sessionmeta">
+                              {fault.ok ? modelName(recipe.provider, recipe.model) : fault.reason}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            className="fy-bench__recipedelete"
+                            aria-label={`Delete the recipe ${recipe.name}`}
+                            onClick={() => sendBenchRecipeDelete(recipe.id)}
+                          >
+                            <X size={11} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {/* Saving needs a model the manifest can honor — absent otherwise (§3). */}
+                    {model !== null && (
+                      <input
+                        aria-label="Save the current setup as a recipe"
+                        className="fy-bench__rename"
+                        placeholder="Save current setup as…"
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter") return;
+                          const name = (e.target as HTMLInputElement).value.trim();
+                          if (name.length === 0) return;
+                          sendBenchRecipeSave({
+                            name,
+                            mode: draft.mode,
+                            provider: model.provider,
+                            model: model.id,
+                            params: draft.params,
+                            ...(draft.brief.trim().length > 0 ? { brief: draft.brief } : {}),
+                          });
+                          (e.target as HTMLInputElement).value = "";
+                          setRecipesOpen(false);
+                        }}
+                      />
+                    )}
+                  </div>
+                </>
+              )}
+            </span>
             <span className="fy-bench__modelwrap">
               <select
                 aria-label="Model"
@@ -764,22 +955,52 @@ function BenchWorkspace({
           )}
         </div>
 
-        <ReferencePickerDialog
-          open={pickerOpen}
-          mode="bench"
-          worldSlug={worldSlug}
-          model={model}
-          carried={carried}
-          world={worldSources}
-          session={sessionSources}
-          onAdd={(picks) => {
-            sendBenchAddReference(worldId, session.id, picks);
-          }}
-          onUpload={() => {
-            sendBenchUploadReferences(worldId, session.id);
-          }}
-          onClose={() => setPickerOpen(false)}
-        />
+        {pickerLane === "reference" ? (
+          <ReferencePickerDialog
+            open={pickerOpen}
+            mode="bench"
+            worldSlug={worldSlug}
+            model={model}
+            carried={carried}
+            world={worldSources}
+            session={sessionSources}
+            onAdd={(picks) => {
+              sendBenchAddReference(worldId, session.id, picks);
+            }}
+            onUpload={() => {
+              sendBenchUploadReferences(worldId, session.id);
+            }}
+            onClose={() => setPickerOpen(false)}
+          />
+        ) : (
+          /* The keyframe pick is one slot at a time — start, then end — and frames are not
+             budgeted references, so the picker carries no capacity arithmetic here. */
+          <ReferencePickerDialog
+            open={pickerOpen}
+            mode="slot"
+            title="Add a keyframe"
+            note={
+              model !== null && keyframeCapacity(model) > 2
+                ? "Frames the shot passes through, in order."
+                : "A frame the shot must pass through — start first, then end."
+            }
+            only="image"
+            budget="none"
+            worldSlug={worldSlug}
+            model={model}
+            carried={carried}
+            world={worldFrameSources}
+            session={sessionFrameSources}
+            onChoose={(pick) => {
+              sendBenchAddReference(worldId, session.id, [{ pick }], "keyframe");
+              setPickerOpen(false);
+            }}
+            onUpload={() => {
+              sendBenchUploadReferences(worldId, session.id, "keyframe");
+            }}
+            onClose={() => setPickerOpen(false)}
+          />
+        )}
 
         {briefExpanded && (
           <div className="fy-bench__briefmodal" role="dialog" aria-label="The brief, large">

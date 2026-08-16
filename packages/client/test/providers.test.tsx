@@ -42,6 +42,7 @@ const stateWith = (patch: { disabled?: string[]; faults?: ClientState["app"]["ro
       models: [...FIXTURE_STATE.app.manifest!.models, NANO, GPT],
     },
     models: { disabled: patch.disabled ?? [] },
+    recipes: [],
     routing: {
       defaults: FIXTURE_STATE.app.routing.defaults,
       faults: patch.faults ?? [],

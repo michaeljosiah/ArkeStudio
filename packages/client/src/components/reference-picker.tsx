@@ -44,13 +44,20 @@ export interface PickerSource {
   pick: { source: "artifact"; artifactId: string } | { source: "take"; takeId: string };
 }
 
-/** The world's artifacts as picker rows, supersession already excluded. */
+/**
+ * The world's artifacts as picker rows, supersession already excluded. `activeIn` names the
+ * lane whose tokens read as "already riding" — a picture riding as a style reference is still
+ * pickable as a keyframe, and the other way round (issue 305 §3).
+ */
 export function worldPickerSources(
   artifacts: readonly ArtifactSidecar[],
   session: BenchSession | null,
+  activeIn: "reference" | "keyframe" = "reference",
 ): PickerSource[] {
   const registry = new Map((session?.tokenRegistry ?? []).map((e) => [benchSourceKey(e.source), e.token]));
-  const active = new Set(session?.composer.activeTokens ?? []);
+  const active = new Set(
+    (activeIn === "keyframe" ? session?.composer.keyframeTokens : session?.composer.activeTokens) ?? [],
+  );
   return pickableArtifacts(artifacts).map((a) => {
     const kind: PickerSource["kind"] =
       a.kind === "image" || a.kind === "board" ? "image" : a.kind === "audio" || a.kind === "video" ? a.kind : a.kind === "document" ? "document" : "other";
@@ -73,9 +80,12 @@ export function worldPickerSources(
 }
 
 /** The session's own takes as picker rows — picking an unkept one keeps its bytes riding. */
-export function sessionPickerSources(session: BenchSession): PickerSource[] {
+export function sessionPickerSources(
+  session: BenchSession,
+  activeIn: "reference" | "keyframe" = "reference",
+): PickerSource[] {
   const registry = new Map(session.tokenRegistry.map((e) => [benchSourceKey(e.source), e.token]));
-  const active = new Set(session.composer.activeTokens);
+  const active = new Set(activeIn === "keyframe" ? session.composer.keyframeTokens : session.composer.activeTokens);
   return session.takes
     .filter((t) => t.media !== undefined)
     .map((t) => {
@@ -118,9 +128,20 @@ export function ReferencePickerBody({
   onChoose,
   onUpload,
   onClose,
+  title,
+  note,
+  only,
+  budget = "model",
 }: {
   /** "bench": ordered multi-pick with tokens. "slot": exactly one, no token namespace. */
   mode: "bench" | "slot";
+  /** The dialog's own words, where the default headline is not the ask (keyframes). */
+  title?: string;
+  note?: string;
+  /** Offer only sources of this kind — the keyframe lane takes pictures alone. */
+  only?: ReferenceKind;
+  /** "none": picks are not budgeted references (keyframes), so no capacity arithmetic. */
+  budget?: "model" | "none";
   worldSlug: string | undefined;
   /** The chosen model, whose row is the only authority the capacity chip speaks from. */
   model: ManifestModel | null;
@@ -143,7 +164,8 @@ export function ReferencePickerBody({
   /** The image tile waiting on "which token gives way" at the ceiling. */
   const [replacing, setReplacing] = useState<PickerSource | null>(null);
 
-  const sources = lane === "world" ? world : session;
+  const offered = (list: PickerSource[]): PickerSource[] => (only !== undefined ? list.filter((s) => s.kind === only) : list);
+  const sources = offered(lane === "world" ? world : session);
   const searched = search.trim().toLowerCase();
   const visible = sources.filter(
     (s) =>
@@ -176,6 +198,7 @@ export function ReferencePickerBody({
     if (source.kind === "document") return "a document cannot be sent";
     if (source.kind === "other") return "this file cannot be sent";
     if (!model) return "choose a model first";
+    if (budget === "none") return null;
     const verdict = admitReference({ kind: source.kind, durationSec: source.durationSec }, effectiveCarried, model);
     if (verdict.ok) return null;
     // At the image ceiling in bench mode the tile stays pickable — picking asks which token
@@ -240,7 +263,7 @@ export function ReferencePickerBody({
   }
 
   const capacityChip =
-    model && capacity ? (
+    model && capacity && budget === "model" ? (
       <span className="fy-refpicker__capacity">
         <strong style={{ fontWeight: 600, color: "var(--foreground)", fontFamily: "var(--font-sans)" }}>{model.displayName}</strong>
         <span>
@@ -264,7 +287,7 @@ export function ReferencePickerBody({
       <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <h2 style={{ margin: 0, font: "650 17px var(--font-sans)", letterSpacing: "-0.01em" }}>
-            {mode === "slot" ? "Reference image" : "Add a reference"}
+            {title ?? (mode === "slot" ? "Reference image" : "Add a reference")}
           </h2>
         </div>
         <button
@@ -280,11 +303,11 @@ export function ReferencePickerBody({
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div className="fy-refpicker__lanes" role="group" aria-label="Where from">
           <button type="button" aria-pressed={lane === "world"} onClick={() => setLane("world")}>
-            {`World artifacts ${world.length}`}
+            {`World artifacts ${offered(world).length}`}
           </button>
-          {mode === "bench" && (
+          {offered(session).length > 0 && (
             <button type="button" aria-pressed={lane === "session"} onClick={() => setLane("session")}>
-              {`This session ${session.length}`}
+              {`This session ${offered(session).length}`}
             </button>
           )}
           <button type="button" aria-pressed={false} onClick={onUpload}>
@@ -448,7 +471,7 @@ export function ReferencePickerBody({
               </>
             )
           ) : (
-            "One picture rides with this brief."
+            note ?? "One picture rides with this brief."
           )}
         </span>
         {mode === "bench" ? (

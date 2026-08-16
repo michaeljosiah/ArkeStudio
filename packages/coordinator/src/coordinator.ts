@@ -84,7 +84,7 @@ import {
   verifyCandidates,
   type RawCandidate,
 } from "./artifacts/extraction.js";
-import { ATTACHABLE_EXTENSIONS, backfillMediaInfo, fileArtifact, fileGeneratedArtifact, importFolder } from "./artifacts/filing.js";
+import { ATTACHABLE_EXTENSIONS, ATTACHABLE_IMAGE_EXTENSIONS, backfillMediaInfo, fileArtifact, fileGeneratedArtifact, importFolder } from "./artifacts/filing.js";
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
@@ -1049,6 +1049,7 @@ export class Coordinator {
         ? { routing: { defaults: settings.routing, faults: routingFaults(settings, manifest) } }
         : {}),
       ...(settings ? { models: settings.models } : {}),
+      ...(settings ? { recipes: settings.recipes } : {}),
       ...(settings ? { spend: evaluateSpend(entries, settings.spend, new Date()) } : {}),
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
@@ -3257,6 +3258,7 @@ export class Coordinator {
           const outcome = await addBenchReference(bench, store.getBundle(), model, {
             source: pick.source,
             replace: pick.replace,
+            lane: msg.lane,
             requestId: `${msg.requestId}/${index}`,
             at: this.nowIso(),
           });
@@ -3272,8 +3274,16 @@ export class Coordinator {
       case "bench-remove-reference": {
         const bench = await this.benchFor(msg.worldId, msg.sessionId);
         if (!bench) return;
-        if (bench.session.composer.activeTokens.includes(msg.token)) {
-          await bench.store.append({ type: "reference-removed", token: msg.token }, { at: this.nowIso(), requestId: msg.requestId });
+        const lane = msg.lane ?? "reference";
+        const held =
+          lane === "keyframe"
+            ? bench.session.composer.keyframeTokens.includes(msg.token)
+            : bench.session.composer.activeTokens.includes(msg.token);
+        if (held) {
+          await bench.store.append(
+            { type: "reference-removed", token: msg.token, ...(lane === "keyframe" ? { lane } : {}) },
+            { at: this.nowIso(), requestId: msg.requestId },
+          );
         }
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;
@@ -3283,7 +3293,10 @@ export class Coordinator {
         const bench = await this.benchFor(msg.worldId, msg.sessionId);
         const pick = this.opts.pickFiles;
         if (!store || !bench || !pick) return;
-        const paths = await pick({ accept: [...ATTACHABLE_EXTENSIONS] }).catch(() => [] as readonly string[]);
+        const lane = msg.lane ?? "reference";
+        const paths = await pick({
+          accept: lane === "keyframe" ? [...ATTACHABLE_IMAGE_EXTENSIONS] : [...ATTACHABLE_EXTENSIONS],
+        }).catch(() => [] as readonly string[]);
         const artifactIds: Array<string | null> = [];
         for (const sourcePath of paths) {
           artifactIds.push(await this.fileOne(msg.worldId, sourcePath, { allowLarge: msg.allowLarge ?? false }));
@@ -3306,11 +3319,16 @@ export class Coordinator {
             manifest?.models.find(
               (m) => m.id === fresh.session.composer.model && m.provider === fresh.session.composer.provider,
             ) ?? null;
-          await addBenchReference(fresh, store.getBundle(), model, {
+          const outcome = await addBenchReference(fresh, store.getBundle(), model, {
             source: { source: "artifact", artifactId },
+            lane: msg.lane,
             requestId: `${msg.requestId}/attach/${index}`,
             at: this.nowIso(),
           });
+          // Filed but not attached is a real outcome — recorded, never swallowed.
+          if (outcome.outcome === "refused") {
+            void this.appLog?.append({ kind: "bench.reference-refused", worldId: msg.worldId, reason: outcome.reason });
+          }
         }
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;
@@ -3392,6 +3410,7 @@ export class Coordinator {
           takeNumber: take.n,
           brief: take.request.brief,
           references: take.request.references,
+          keyframes: take.request.keyframes,
           provider: take.request.provider,
           model: take.request.model,
           params: take.request.params,
@@ -3437,6 +3456,35 @@ export class Coordinator {
         if (!bench) return;
         await bench.store.append({ type: "take-cleared", takeId: msg.takeId }, { at: this.nowIso(), requestId: msg.requestId });
         await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "bench-recipe-save": {
+        if (!this.appSettings || !this.opts.manifest) return;
+        const outcome = await this.appSettings.saveRecipe(
+          {
+            name: msg.name,
+            mode: msg.mode,
+            provider: msg.provider,
+            model: msg.model,
+            params: msg.params,
+            ...(msg.brief !== undefined ? { brief: msg.brief } : {}),
+          },
+          this.opts.manifest,
+          this.nowIso(),
+        );
+        // The composer can only offer models the manifest carries, so landing here means a
+        // racing manifest change — recorded, not silent.
+        if (!outcome.ok) {
+          void this.appLog?.append({ kind: "bench.recipe-refused", reason: outcome.reason });
+          return;
+        }
+        this.emit({ at: this.nowIso(), type: "recipes.changed", recipes: outcome.settings.recipes });
+        return;
+      }
+      case "bench-recipe-delete": {
+        if (!this.appSettings) return;
+        const settings = await this.appSettings.deleteRecipe(msg.recipeId);
+        this.emit({ at: this.nowIso(), type: "recipes.changed", recipes: settings.recipes });
         return;
       }
       case "bench-select-take": {

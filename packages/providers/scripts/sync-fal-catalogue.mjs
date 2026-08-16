@@ -129,7 +129,8 @@ const CURATED = {
       generate: { locked: [] },
       "first-frame": { route: "bytedance/seedance-2.0/image-to-video", locked: ["aspect"] },
       "first-and-last-frame": { route: "bytedance/seedance-2.0/image-to-video", locked: ["aspect"] },
-      "keyframe-sequence": { route: "bytedance/seedance-2.0/reference-to-video", locked: [] },
+      // maxFrames from the route schema: image_urls declares maxItems 9.
+      "keyframe-sequence": { route: "bytedance/seedance-2.0/reference-to-video", locked: [], maxFrames: 9 },
     },
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     limits: {
@@ -155,7 +156,8 @@ const CURATED = {
       generate: { locked: [] },
       "first-frame": { route: "bytedance/seedance-2.0/fast/image-to-video", locked: ["aspect"] },
       "first-and-last-frame": { route: "bytedance/seedance-2.0/fast/image-to-video", locked: ["aspect"] },
-      "keyframe-sequence": { route: "bytedance/seedance-2.0/fast/reference-to-video", locked: [] },
+      // maxFrames from the route schema: image_urls declares maxItems 9.
+      "keyframe-sequence": { route: "bytedance/seedance-2.0/fast/reference-to-video", locked: [], maxFrames: 9 },
     },
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     // The fast route tops out at 720p — its schema offers 480p and 720p only. It was listed at

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BenchRecipeSchema } from "./bench.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 
 /**
@@ -106,6 +107,17 @@ export const AppSettingsSchema = z
       .default({ executablePath: null, modelRoot: null, extraArgs: [] }),
     /** Per-agent overrides, keyed by roster name. */
     agents: z.record(z.string().min(1), AgentSettingsSchema).default({}),
+    /**
+     * Saved bench setups (issue 305 §3). Guarded per entry: one recipe a future build cannot
+     * read drops alone, because a corrupt row that takes the whole settings file down would
+     * cost the user their routing and spend choices with it.
+     */
+    recipes: z
+      .preprocess(
+        (value) => (Array.isArray(value) ? value.filter((r) => BenchRecipeSchema.safeParse(r).success) : []),
+        z.array(BenchRecipeSchema),
+      )
+      .default([]),
   })
   .strict();
 export type AppSettings = z.infer<typeof AppSettingsSchema>;

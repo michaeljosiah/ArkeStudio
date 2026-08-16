@@ -688,3 +688,56 @@ describe("which account the provider bills (issue 137)", () => {
     );
   });
 });
+
+describe("fal frame task modes (issue 305 §3; SPEC-019 T-1)", () => {
+  const frame = (name: string) => ({ name, contentType: "image/png" as const, data: new Uint8Array([1, 2, 3]) });
+
+  it("dispatches to the mode's own route and names the frames the route's way", async () => {
+    // Field names read from the route's published schema: image-to-video takes `image_url`
+    // (start, required) and `end_image_url` — never the edit siblings' `image_urls`.
+    let url = "";
+    let sent: Record<string, unknown> = {};
+    const fetchImpl: FetchLike = async (u, init) => {
+      url = String(u);
+      sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ request_id: "req-1" }), { status: 200 });
+    };
+    const client = new FalClient(fetchImpl);
+    const result = await client.submit("k", {
+      model: "seedance-2.0",
+      capability: "video",
+      params: {
+        prompt: "the tide going still",
+        references: ["a.png", "b.png"],
+        taskMode: "first-and-last-frame",
+        route: "bytedance/seedance-2.0/image-to-video",
+      },
+      imageReferences: [frame("a.png"), frame("b.png")],
+    });
+    assert.ok(url.endsWith("/bytedance/seedance-2.0/image-to-video"), url);
+    assert.ok(String(sent["image_url"]).startsWith("data:image/png"));
+    assert.ok(String(sent["end_image_url"]).startsWith("data:image/png"));
+    assert.ok(!("image_urls" in sent), "frame modes never send the edit siblings' field");
+    assert.ok(!("taskMode" in sent) && !("route" in sent), "ours, not fal's");
+    assert.equal(result.remoteId, "bytedance/seedance-2.0/image-to-video::req-1");
+  });
+
+  it("a first-frame dispatch with the wrong image count refuses before fetch", async () => {
+    const client = new FalClient(fakeFetch([]));
+    await assert.rejects(
+      () =>
+        client.submit("k", {
+          model: "seedance-2.0",
+          capability: "video",
+          params: {
+            prompt: "x",
+            references: ["a.png", "b.png"],
+            taskMode: "first-frame",
+            route: "bytedance/seedance-2.0/image-to-video",
+          },
+          imageReferences: [frame("a.png"), frame("b.png")],
+        }),
+      /first-frame needs 1 frame image/,
+    );
+  });
+});

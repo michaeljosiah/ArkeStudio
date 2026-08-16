@@ -90,6 +90,7 @@ const state: ClientState = {
     },
     routing: { defaults: { video: "seedance-2.0" }, faults: [] },
     models: { disabled: [] },
+    recipes: [],
     spend: {
       settings: { thresholdMicroUsd: 50_000_000, periodDays: 7 },
       rollingMicroUsd: 128400,

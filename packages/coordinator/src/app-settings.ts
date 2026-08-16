@@ -1,8 +1,10 @@
 import { readFile } from "node:fs/promises";
 import {
   AppSettingsSchema,
+  newId,
   type AppSettings,
   type BackgroundNotificationPreference,
+  type BenchRecipe,
   type Capability,
   type ModelManifest,
   type RoutingFault,
@@ -126,6 +128,47 @@ export class AppSettingsFile {
     const next: AppSettings = { ...current, voxa: { ...current.voxa, ...patch } };
     await this.persist(next);
     return next;
+  }
+
+  /**
+   * Save a bench setup (issue 305 §3): validated against the manifest the way a routing
+   * default is — the model must exist and match the mode. Saving under an existing name
+   * replaces that recipe: "update" and "save as" are one gesture with one spelling. App-level
+   * on purpose: what makes a good setup is the model's, not any one world's.
+   */
+  async saveRecipe(
+    input: Omit<BenchRecipe, "id" | "createdAt">,
+    manifest: ModelManifest,
+    now: string,
+  ): Promise<{ ok: true; settings: AppSettings; recipe: BenchRecipe } | { ok: false; reason: string }> {
+    const model = manifest.models.find((m) => m.id === input.model && m.provider === input.provider);
+    if (!model) return { ok: false, reason: `"${input.model}" is not in the model manifest` };
+    if (model.capability !== input.mode) {
+      return { ok: false, reason: `${model.displayName} is a ${model.capability} model, not ${input.mode}` };
+    }
+    if (input.params.kind !== input.mode) {
+      return { ok: false, reason: "the recipe's controls do not match its mode" };
+    }
+    const current = await this.load();
+    const existing = current.recipes.find((r) => r.name === input.name);
+    const recipe: BenchRecipe = {
+      id: (existing?.id ?? newId("rcp")) as BenchRecipe["id"],
+      createdAt: existing?.createdAt ?? now,
+      ...input,
+    };
+    const recipes = existing
+      ? current.recipes.map((r) => (r.id === existing.id ? recipe : r))
+      : [...current.recipes, recipe];
+    const settings: AppSettings = { ...current, recipes };
+    await this.persist(settings);
+    return { ok: true, settings, recipe };
+  }
+
+  async deleteRecipe(recipeId: string): Promise<AppSettings> {
+    const current = await this.load();
+    const settings: AppSettings = { ...current, recipes: current.recipes.filter((r) => r.id !== recipeId) };
+    await this.persist(settings);
+    return settings;
   }
 }
 

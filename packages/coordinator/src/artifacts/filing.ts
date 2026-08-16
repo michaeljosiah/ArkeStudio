@@ -43,6 +43,11 @@ export function kindForFile(name: string): ArtifactKind {
  */
 export const ATTACHABLE_EXTENSIONS: readonly string[] = Object.keys(KIND_BY_EXT).map((e) => e.slice(1));
 
+/** The picture rows of the same table — the keyframe lane's upload offers only these. */
+export const ATTACHABLE_IMAGE_EXTENSIONS: readonly string[] = Object.entries(KIND_BY_EXT)
+  .filter(([, kind]) => kind === "image")
+  .map(([ext]) => ext.slice(1));
+
 /** Anything over this states its size and needs explicit consent before copying (R-6). */
 export const LARGE_FILE_BYTES = 100 * 1024 * 1024;
 

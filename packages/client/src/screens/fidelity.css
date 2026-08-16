@@ -3912,6 +3912,23 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-bench__clear:hover { background: var(--accent); color: var(--foreground); }
 
+/* The lane tabs (design 68b): a full-width track; the active lane is the white cell. */
+.fy-bench__lanes { display: flex; gap: 3px; background: var(--muted); border-radius: 9px; padding: 3px; margin-top: 11px; flex: none; }
+.fy-bench__lanes button {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  flex: 1; text-align: center; padding: 6px 0; border-radius: 7px;
+  font: 400 12px var(--font-sans); color: var(--muted-foreground); transition: var(--transition-control);
+}
+.fy-bench__lanes button:hover { color: var(--foreground); }
+.fy-bench__lanes button[aria-selected="true"] { background: var(--background); box-shadow: var(--shadow-xs); color: var(--foreground); font-weight: 500; }
+/* "A model that takes no keyframes shows no Keyframe tab, and the composer says so in a line." */
+.fy-bench__nolane { margin: 10px 2px 0; font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
+.fy-bench__slotchip {
+  position: absolute; left: 6px; top: 5px; font: 500 8.5px var(--font-mono); letter-spacing: 0.08em;
+  color: var(--media-overlay-fg); text-shadow: 0 0 4px color-mix(in srgb, var(--media-overlay-bg) 70%, transparent);
+  text-transform: uppercase;
+}
+
 .fy-bench__refgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; flex: none; }
 .fy-bench__reftile { position: relative; height: 66px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .fy-bench__reftile--add {
@@ -4179,3 +4196,33 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   text-underline-offset: 2px; transition: var(--transition-control);
 }
 .fy-liftfacts:hover { color: var(--foreground); }
+
+/* Recipes (issue 305 §3): the ghost trigger left of the model select, menu opening upward. */
+.fy-bench__recipes {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px; padding: 7px 6px; border-radius: 8px;
+  font: 400 12px var(--font-sans); color: var(--muted-foreground); transition: var(--transition-control);
+}
+.fy-bench__recipes:hover { color: var(--foreground); }
+.fy-bench__recipes svg { color: var(--neutral-400); }
+.fy-bench__recipemenu {
+  position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 40; min-width: 250px;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  border: 1px solid var(--border); border-radius: 11px; background: var(--card); box-shadow: var(--shadow-lg);
+}
+.fy-bench__recipenone { padding: 6px 8px; font: 400 11.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-bench__reciperow { display: flex; align-items: center; gap: 2px; }
+.fy-bench__reciperow .fy-bench__sessionrow { flex: 1; min-width: 0; }
+.fy-bench__reciperow .fy-bench__sessionrow:disabled { cursor: not-allowed; }
+.fy-bench__reciperow .fy-bench__sessionrow:disabled .fy-bench__sessionname { color: var(--muted-foreground); }
+/* Delete appears when asked after — hover or focus — never at rest. */
+.fy-bench__recipedelete {
+  appearance: none; width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--neutral-400); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0; transition: var(--transition-control); flex: none;
+}
+.fy-bench__reciperow:hover .fy-bench__recipedelete,
+.fy-bench__reciperow:focus-within .fy-bench__recipedelete { opacity: 1; }
+.fy-bench__recipedelete:hover { background: var(--accent); color: var(--foreground); }
+/* The name is the row's point; a long model name yields rather than crushing it. */
+.fy-bench__reciperow .fy-bench__sessionmeta { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; }

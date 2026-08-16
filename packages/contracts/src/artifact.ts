@@ -59,6 +59,9 @@ export const ArtifactGenerationSchema = z
     brief: z.string(),
     /** Token and source snapshot, with content hashes — what actually rode along. */
     references: z.array(BenchReferenceTokenSchema),
+    /** The frames the shot passed through (issue 305 §3), same shape — defaulted so every
+        sidecar written before the Keyframe lane existed still scans. */
+    keyframes: z.array(BenchReferenceTokenSchema).default([]),
     provider: z.string().min(1),
     model: z.string().min(1),
     params: BenchParamsSchema,

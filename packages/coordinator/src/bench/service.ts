@@ -7,9 +7,13 @@ import {
   dispatchDuration,
   estimateMicroUsd,
   imageOutputFor,
+  keyframeAddable,
+  keyframePlan,
   mappedReferenceKinds,
   newId,
   pricedDuration,
+  routeFor,
+  sizeParamsFor,
   validateReferences,
   type ArtifactSidecar,
   type BenchReferenceSource,
@@ -24,6 +28,7 @@ import {
   type MultimediaReference,
   type ReferenceKind,
   type SessionId,
+  type TaskMode,
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
@@ -223,11 +228,14 @@ export async function addBenchReference(
   input: {
     source: { source: "artifact"; artifactId: string } | { source: "take"; takeId: string };
     replace?: string | undefined;
+    /** Which lane the pick lands in. Absent is the reference lane (issue 305 §3). */
+    lane?: "reference" | "keyframe" | undefined;
     requestId: string;
     at: string;
   },
 ): Promise<AddReferenceOutcome> {
   const { store, session } = opened;
+  const lane = input.lane ?? "reference";
   const wanted = input.source;
   let resolved: ResolvedSource | BenchRefusal;
   if (wanted.source === "artifact") {
@@ -237,10 +245,14 @@ export async function addBenchReference(
     resolved = resolveTakeSource(session, wanted.takeId);
   }
   if ("refused" in resolved) return { outcome: "refused", reason: resolved.refused };
+  if (lane === "keyframe" && resolved.kind !== "image") {
+    return { outcome: "refused", reason: "only an image can ride as a keyframe" };
+  }
 
   const key = benchSourceKey(resolved.source);
   const existing = session.tokenRegistry.find((e) => benchSourceKey(e.source) === key);
-  if (existing && session.composer.activeTokens.includes(existing.token)) {
+  const laneTokens = lane === "keyframe" ? session.composer.keyframeTokens : session.composer.activeTokens;
+  if (existing && laneTokens.includes(existing.token)) {
     // "The same bench source is never active twice or assigned two tokens" (§4).
     return { outcome: "already-active", token: existing.token };
   }
@@ -249,19 +261,32 @@ export async function addBenchReference(
   // offer capacity it cannot state.
   if (model === null) return { outcome: "refused", reason: "choose a model first" };
 
-  const carried = activeReferenceItems(session, bundle).filter((item) => item.token !== input.replace);
-  const verdict = admitReference({ kind: resolved.kind, durationSec: resolved.durationSec }, carried, model);
-  if (!verdict.ok) {
-    // At the image ceiling the caller may name which active token gives way; with a valid
-    // `replace` the swap is one atomic event, so the set is never over the ceiling.
-    const replacing = input.replace !== undefined && session.composer.activeTokens.includes(input.replace);
-    if (!(verdict.binding === "images" && replacing)) {
-      return { outcome: "refused", reason: verdict.reason };
+  if (lane === "keyframe") {
+    // Frames are not budgeted references — the lane's ceiling is the frame task modes' own,
+    // and the plan that admits the pick is the plan dispatch will re-run (issue 305 §3).
+    if (!keyframeAddable(model, session.composer.keyframeTokens.length)) {
+      const plan = keyframePlan(model, session.composer.keyframeTokens.length + 1);
+      return { outcome: "refused", reason: plan.ok ? "the keyframe lane is full" : plan.reason };
+    }
+  } else {
+    const carried = activeReferenceItems(session, bundle).filter((item) => item.token !== input.replace);
+    const verdict = admitReference({ kind: resolved.kind, durationSec: resolved.durationSec }, carried, model);
+    if (!verdict.ok) {
+      // At the image ceiling the caller may name which active token gives way; with a valid
+      // `replace` the swap is one atomic event, so the set is never over the ceiling.
+      const replacing = input.replace !== undefined && session.composer.activeTokens.includes(input.replace);
+      if (!(verdict.binding === "images" && replacing)) {
+        return { outcome: "refused", reason: verdict.reason };
+      }
     }
   }
 
+  const laneField = lane === "keyframe" ? ({ lane: "keyframe" } as const) : {};
   if (existing) {
-    await store.append({ type: "reference-restored", token: existing.token }, { at: input.at, requestId: input.requestId });
+    await store.append(
+      { type: "reference-restored", token: existing.token, ...laneField },
+      { at: input.at, requestId: input.requestId },
+    );
     return { outcome: "restored", token: existing.token };
   }
   const n = session.nextToken[resolved.kind] ?? 1;
@@ -270,14 +295,14 @@ export async function addBenchReference(
     kind: resolved.kind,
     source: resolved.source,
   };
-  if (input.replace !== undefined && session.composer.activeTokens.includes(input.replace)) {
+  if (lane === "reference" && input.replace !== undefined && session.composer.activeTokens.includes(input.replace)) {
     await store.append(
       { type: "reference-replaced", removed: input.replace, entry },
       { at: input.at, requestId: input.requestId },
     );
     return { outcome: "replaced", token: entry.token };
   }
-  await store.append({ type: "reference-added", entry }, { at: input.at, requestId: input.requestId });
+  await store.append({ type: "reference-added", entry, ...laneField }, { at: input.at, requestId: input.requestId });
   return { outcome: "added", token: entry.token };
 }
 
@@ -373,10 +398,41 @@ export function planBenchDispatch(
   const params = composer.params;
   if (params.kind !== composer.mode) return { ok: false, reason: "The controls do not match the mode." };
 
+  // The Keyframe lane (issue 305 §3): resolve the snapshot's own frames (re-run) or the live
+  // lane, derive the task mode from the count, and honor the model's route for that mode —
+  // declaring a task-mode route without sending to it is not support.
+  const keyframes: BenchReferenceToken[] = options.fromTake
+    ? options.fromTake.request.keyframes
+    : composer.mode === "video"
+      ? session.composer.keyframeTokens
+          .map((token) => session.tokenRegistry.find((e) => e.token === token))
+          .filter((e): e is BenchReferenceToken => e !== undefined)
+      : []; // an image request never claimed frames — the lane rides along, ignored, not refused
+  let frame: { mode: TaskMode; route: string | null; paths: string[] } | null = null;
+  if (keyframes.length > 0) {
+    if (composer.mode !== "video") return { ok: false, reason: "Keyframes ride video, not image." };
+    if (references.length > 0) {
+      // One request, one meaning: the frame routes take frames, not style references, and
+      // sending both down one array would silently change what each image is for.
+      return { ok: false, reason: "References and keyframes cannot ride one request yet — remove one set." };
+    }
+    const plan = keyframePlan(model, keyframes.length);
+    if (!plan.ok) return { ok: false, reason: plan.reason };
+    const paths: string[] = [];
+    for (const entry of keyframes) {
+      const resolved = resolveTokenEntry(entry, session, bundle);
+      if ("refused" in resolved) return { ok: false, reason: `${entry.token}: ${resolved.refused}` };
+      if (resolved.kind !== "image") return { ok: false, reason: `${entry.token}: only an image can ride as a keyframe` };
+      paths.push(resolved.path);
+    }
+    frame = { mode: plan.mode, route: routeFor(model, plan.mode), paths };
+  }
+
   const snapshotBase: Omit<BenchRequestSnapshot, "params"> = {
     mode: composer.mode,
     brief: composer.brief,
     references,
+    keyframes,
     provider: model.provider,
     model: model.id,
   };
@@ -440,10 +496,26 @@ export function planBenchDispatch(
         params: {
           prompt: composer.brief,
           ...(choice.kind === "asked" ? { duration: choice.wire } : {}),
-          ...(params.resolution !== undefined ? { resolution: params.resolution } : {}),
-          ...(params.aspect !== undefined ? { aspect: params.aspect } : {}),
+          // A frame mode sends the size fields its route leaves unlocked (SPEC-019 R-33);
+          // plain generation sends what was chosen. The frames travel as `references` so the
+          // dispatcher's existing byte preparation carries them; `taskMode` tells the client
+          // which wire fields they become, and `route` is the mode's own endpoint.
+          ...(frame !== null
+            ? {
+                ...sizeParamsFor(model, frame.mode, {
+                  ...(params.resolution !== undefined ? { resolution: params.resolution } : {}),
+                  ...(params.aspect !== undefined ? { aspect: params.aspect } : {}),
+                }),
+                taskMode: frame.mode,
+                ...(frame.route !== null ? { route: frame.route } : {}),
+                references: frame.paths,
+              }
+            : {
+                ...(params.resolution !== undefined ? { resolution: params.resolution } : {}),
+                ...(params.aspect !== undefined ? { aspect: params.aspect } : {}),
+                ...(referencePaths.length > 0 ? { references: referencePaths } : {}),
+              }),
           ...(params.sound !== undefined ? { sound: params.sound } : {}),
-          ...(referencePaths.length > 0 ? { references: referencePaths } : {}),
         },
         estimatedMicroUsd: estimateMicroUsd(model, {
           durationSec: requestedSec > 0 ? pricedDuration(model, requestedSec) : (model.limits.maxDurationSec ?? 5),

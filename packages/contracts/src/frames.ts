@@ -2,7 +2,7 @@ import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema } from "./bench.js";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema } from "./ids.js";
+import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, RecipeIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
@@ -1398,6 +1398,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         )
         .min(1)
         .max(24),
+      /** Which lane the picks land in. Absent is the reference lane (issue 305 §3). */
+      lane: z.enum(["reference", "keyframe"]).optional(),
     })
     .strict(),
   z
@@ -1407,6 +1409,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sessionId: SessionIdSchema,
       requestId: UlidSchema,
       token: z.string().min(1),
+      /** Which lane loses the token. Absent is the reference lane (issue 305 §3). */
+      lane: z.enum(["reference", "keyframe"]).optional(),
     })
     .strict(),
   /**
@@ -1421,6 +1425,31 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sessionId: SessionIdSchema,
       requestId: UlidSchema,
       allowLarge: z.boolean().optional(),
+      /** Which lane the uploads attach to. Absent is the reference lane (issue 305 §3). */
+      lane: z.enum(["reference", "keyframe"]).optional(),
+    })
+    .strict(),
+  /**
+   * Save the composer's current setup as a recipe (issue 305 §3). Saving under an existing
+   * name replaces that recipe; the coordinator validates the model against the manifest.
+   */
+  z
+    .object({
+      kind: z.literal("bench-recipe-save"),
+      requestId: UlidSchema,
+      name: z.string().min(1).max(80),
+      mode: BenchModeSchema,
+      provider: z.string().min(1),
+      model: z.string().min(1),
+      params: BenchParamsSchema,
+      brief: z.string().max(100_000).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("bench-recipe-delete"),
+      requestId: UlidSchema,
+      recipeId: RecipeIdSchema,
     })
     .strict(),
   /** Dispatch the composer as written. Count N reserves N takes and enqueues N jobs. */
