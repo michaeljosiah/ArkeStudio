@@ -248,12 +248,29 @@ export class FalClient implements ProviderClient {
     return { endpoint: remoteId.slice(0, i), requestId: remoteId.slice(i + 2) };
   }
 
+  /**
+   * The queue is keyed on the APP, not the route.
+   *
+   * A job is submitted to the full path — `fal-ai/wan/v2.7/text-to-video` — but its status,
+   * result and cancel live under the first two segments alone: `fal-ai/wan/requests/<id>/…`.
+   * fal's per-endpoint OpenAPI templates the full path for all four, and the server answers
+   * 405 to it; the two-segment form answers 401 unauthenticated, which is a path that exists.
+   *
+   * This was invisible while every route we shipped had exactly two segments. Every video
+   * model has more, so every video job submitted, was charged, and then failed on the first
+   * status read with its result still sitting in the queue — the worst shape a bug can take,
+   * because the money leaves and nothing comes back.
+   */
+  private queueApp(endpoint: string): string {
+    return endpoint.split("/").slice(0, 2).join("/");
+  }
+
   async poll(key: string, remoteId: string): Promise<PollResult> {
     const { endpoint, requestId } = this.split(remoteId);
     const { status, body } = await jsonRequest(
       this.fetchImpl,
       this.id,
-      `${this.baseUrl}/${endpoint}/requests/${requestId}/status`,
+      `${this.baseUrl}/${this.queueApp(endpoint)}/requests/${requestId}/status`,
       { headers: this.headers(key) },
     );
     if (status >= 400) return { state: "failed", error: `fal: status read failed (HTTP ${status})` };
@@ -269,7 +286,7 @@ export class FalClient implements ProviderClient {
     const { status, body } = await jsonRequest(
       this.fetchImpl,
       this.id,
-      `${this.baseUrl}/${endpoint}/requests/${requestId}`,
+      `${this.baseUrl}/${this.queueApp(endpoint)}/requests/${requestId}`,
       { headers: this.headers(key) },
     );
     if (status >= 400) throw new Error(`fal: result fetch failed (HTTP ${status})`);
@@ -291,7 +308,7 @@ export class FalClient implements ProviderClient {
 
   async cancel(key: string, remoteId: string): Promise<void> {
     const { endpoint, requestId } = this.split(remoteId);
-    await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/${endpoint}/requests/${requestId}/cancel`, {
+    await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/${this.queueApp(endpoint)}/requests/${requestId}/cancel`, {
       method: "PUT",
       headers: this.headers(key),
     });
