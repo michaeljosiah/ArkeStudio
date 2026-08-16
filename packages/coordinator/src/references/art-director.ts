@@ -26,7 +26,6 @@ import { toExtendedLength } from "../world/paths.js";
  * written. Extraction allows 120s for the same kind of turn; this matches it.
  */
 const WALL_CLOCK_MS = 120_000;
-const PromptSchema = z.object({ prompt: z.string().min(1).max(2000) });
 
 /** What the art director is told. Only what the world itself says — no invented context. */
 export function worldBrief(meta: WorldMeta, canonLines: readonly string[]): string {
@@ -44,12 +43,21 @@ export function makeArtDirector(
   adapter: HarnessAdapter,
   buildConfig: (input: { worldQueryUrl?: string }) => Record<string, unknown>,
   scratchRoot: string,
+  options: {
+    /** Which roster agent answers. The default is the key-art writer this file was born for. */
+    agent?: "art-director" | "prompt-enhancer";
+    /** The longest answer accepted. Key art keeps its ~60-word posture; the enhancer's
+        ceiling is the chosen model's own published cap, so a long valid rewrite is never
+        thrown away as "no answer". */
+    maxChars?: number;
+  } = {},
 ): (brief: string) => Promise<string | null> {
+  const PromptSchema = z.object({ prompt: z.string().min(1).max(options.maxChars ?? 2000) });
   return async (brief) => {
     const sandbox = join(scratchRoot, `art-${Date.now().toString(36)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
     await atomicWriteFile(join(sandbox, "opencode.json"), JSON.stringify(buildConfig({}), null, 2) + "\n");
-    const session = await adapter.createSession({ purpose: "art-prompt", cwd: sandbox, agent: "art-director" });
+    const session = await adapter.createSession({ purpose: "art-prompt", cwd: sandbox, agent: options.agent ?? "art-director" });
 
     let finalText = "";
     const abort = new AbortController();

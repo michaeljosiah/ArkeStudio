@@ -118,6 +118,7 @@ import {
   tileRequest,
 } from "./references/generate.js";
 import { makeArtDirector, worldBrief } from "./references/art-director.js";
+import { enhancerBrief } from "./bench/enhancer.js";
 import {
   KEY_ART_EXTENSIONS,
   WORLD_IMAGE_DIR,
@@ -3457,6 +3458,41 @@ export class Coordinator {
         await bench.store.append({ type: "take-cleared", takeId: msg.takeId }, { at: this.nowIso(), requestId: msg.requestId });
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;
+      }
+      case "bench-enhance-brief": {
+        // The same art-director machinery the world image trusts (references/art-director.ts):
+        // one harness turn, JSON or nothing — and the answer is an EVENT, because the words
+        // land in the composer only by the author's hand.
+        const answer = (prompt: string | null, reason?: string) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "bench.brief-enhanced",
+            worldId: msg.worldId,
+            sessionId: msg.sessionId,
+            requestId: msg.requestId,
+            prompt,
+            ...(reason !== undefined ? { reason } : {}),
+          });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
+        const model =
+          this.opts.manifest?.models.find((m) => m.id === msg.model && m.provider === msg.provider) ?? null;
+        if (!model) return answer(null, "that model is no longer offered");
+        if (!this.opts.adapter?.readiness().ready || !this.buildConfig) {
+          return answer(null, "the writing harness is not running");
+        }
+        const director = makeArtDirector(
+          this.opts.adapter,
+          this.buildConfig,
+          this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
+          { agent: "prompt-enhancer", maxChars: model.limits.maxPromptChars ?? 4000 },
+        );
+        const prompt = await director(enhancerBrief(store.getBundle(), model, msg.brief)).catch(() => null);
+        void this.appLog?.append({
+          kind: prompt ? "bench.brief-enhanced" : "bench.brief-enhance-unavailable",
+          worldId: msg.worldId,
+        });
+        return answer(prompt, prompt === null ? "the art director had no answer this time" : undefined);
       }
       case "bench-recipe-save": {
         if (!this.appSettings || !this.opts.manifest) return;

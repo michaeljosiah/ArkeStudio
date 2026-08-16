@@ -1430,6 +1430,22 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * The art director rewrites the author's ask for the chosen model, grounded in the world's
+   * look and settled canon. Answered by `bench.brief-enhanced` under this requestId — the
+   * enhanced words land in the composer only by the author's hand, never by surprise.
+   */
+  z
+    .object({
+      kind: z.literal("bench-enhance-brief"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      brief: z.string().min(1).max(100_000),
+      provider: z.string().min(1),
+      model: z.string().min(1),
+    })
+    .strict(),
+  /**
    * Save the composer's current setup as a recipe (issue 305 §3). Saving under an existing
    * name replaces that recipe; the coordinator validates the model against the manifest.
    */
