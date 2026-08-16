@@ -89,6 +89,8 @@ export function GenerationDialog({
   selected = null,
   onSelect,
   commit,
+  panel,
+  onPanelClose,
 }: {
   open: boolean;
   /** Called for every way out — Esc, the backdrop, Cancel, and a submit that went through. */
@@ -207,6 +209,15 @@ export function GenerationDialog({
      */
     secondary?: { label: string; onAction: () => void; disabled?: boolean };
   };
+  /**
+   * A surface that takes over the dialog's own frame (issue 305 §4): the reference picker,
+   * asked for from inside this dialog, renders here INSTEAD of the composer — never as a
+   * second dialog over this one, which design 41c forbids. While set, Escape and the close
+   * control return to the composer (via `onPanelClose`) with prompt, model and controls
+   * untouched, because the host still owns all of that state.
+   */
+  panel?: ReactNode;
+  onPanelClose?: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -257,10 +268,23 @@ export function GenerationDialog({
         returnFocus?.current?.focus();
         onClose();
       }}
+      onCancel={(event) => {
+        // Escape inside the picker panel is "back to the brief", not "throw the brief away".
+        if (panel !== undefined && onPanelClose) {
+          event.preventDefault();
+          onPanelClose();
+        }
+      }}
       onClick={(event) => {
-        if (event.target === event.currentTarget) dialog.current?.close();
+        if (event.target === event.currentTarget) {
+          if (panel !== undefined && onPanelClose) onPanelClose();
+          else dialog.current?.close();
+        }
       }}
     >
+      {panel !== undefined ? (
+        <div className="fy-gendialog__panel">{panel}</div>
+      ) : (
       <div className="fy-gendialog__panel">
         <div className="fy-gendialog__head">
           <div>
@@ -443,6 +467,7 @@ export function GenerationDialog({
         )}
         </div>
       </div>
+      )}
     </dialog>
   );
 }

@@ -57,6 +57,8 @@ export const REFERENCE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
 export const REPLAYABLE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
   ...REFERENCE_FINALIZATION_TARGETS,
   "voice-preview",
+  /** A bench take (issue 305): media lands in the session, the log records hash/info/cost. */
+  "bench-take",
 ]);
 
 export const JobFinalizationSchema = z

@@ -83,6 +83,13 @@ export const ProposalIdSchema = prefixedIdSchema("pr");
 export const ArtifactIdSchema = prefixedIdSchema("ar");
 export const ProviderCallIdSchema = prefixedIdSchema("pc");
 
+/**
+ * A bench session's durable id (issue 305). The `sess` prefix predates this and was loosely
+ * used for ephemeral harness sessions; those are never ULID-shaped (`sess_mock_…`), so nothing
+ * that satisfies this schema can collide with one. This is the first durable record keyed on it.
+ */
+export const SessionIdSchema = prefixedIdSchema("sess");
+
 export const ConversationIdSchema = prefixedIdSchema("cv");
 export const TurnIdSchema = prefixedIdSchema("turn");
 export const MessageIdSchema = prefixedIdSchema("msg");
@@ -96,6 +103,7 @@ export const ChatEventIdSchema = prefixedIdSchema("wce");
 /** The World Chat ids all carry their type; this one predates them and had only a schema. */
 export type ProposalId = z.infer<typeof ProposalIdSchema>;
 
+export type SessionId = z.infer<typeof SessionIdSchema>;
 export type ConversationId = z.infer<typeof ConversationIdSchema>;
 export type TurnId = z.infer<typeof TurnIdSchema>;
 export type MessageId = z.infer<typeof MessageIdSchema>;

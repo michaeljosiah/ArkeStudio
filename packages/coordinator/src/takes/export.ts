@@ -71,6 +71,9 @@ export const WORLD_EXPORT_EXCLUDED = [
   ".proposals",
   // Unfinished thinking, like .proposals. A world archive carries it; an export does not.
   ".conversations",
+  // Bench sessions are operational history too (issue 305 §6). What a session KEPT is an
+  // ordinary artifact and exports with the world; the takes it did not keep do not.
+  ".sessions",
   ".staging",
   ".cache",
   "world.lock",

@@ -441,6 +441,7 @@ const state: ClientState = {
     ],
     // Rows only, never transcripts — a world snapshot must not carry what was said.
     conversations: [],
+  benchSessions: [],
     changes: [
       {
         ts: "2026-07-14T09:00:00Z",
@@ -461,6 +462,7 @@ const state: ClientState = {
   },
   // No conversation open by default: the workspace is loaded by id when one is chosen.
   worldChat: null,
+  bench: null,
 };
 
 /** Runtime-validated on import so a drifted fixture fails the suite immediately. */

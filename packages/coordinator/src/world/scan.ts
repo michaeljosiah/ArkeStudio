@@ -4,6 +4,7 @@ import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { discoverConversations } from "../world-chat/discover.js";
+import { discoverBenchSessions } from "../bench/service.js";
 import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
@@ -125,7 +126,24 @@ async function readStagedReferences(dir: string): Promise<Record<string, string>
   const root = join("incoming", "staged-refs");
   for (const key of await listDir(join(dir, root))) {
     const image = await firstImageIn(dir, join(root, key), `incoming/staged-refs/${key}`);
-    if (image !== null) staged[key] = image;
+    if (image !== null) {
+      staged[key] = image;
+      continue;
+    }
+    // An artifact-backed slot (issue 305 §4) holds a pointer, never a copy: the staged path is
+    // the artifact's own file, so clearing the slot removes this directory and nothing else.
+    try {
+      const raw = await readFile(toExtendedLength(join(dir, root, key, "artifact.json")), "utf8");
+      const parsed = JSON.parse(raw) as { file?: unknown };
+      if (typeof parsed.file === "string" && parsed.file.length > 0 && !parsed.file.includes("/") && !parsed.file.includes("\\")) {
+        const target = join(dir, "artifacts", parsed.file);
+        if (await stat(toExtendedLength(target)).then(() => true, () => false)) {
+          staged[key] = `artifacts/${parsed.file}`;
+        }
+      }
+    } catch {
+      /* an empty or malformed slot simply stages nothing */
+    }
   }
   return staged;
 }
@@ -682,6 +700,8 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     proposals,
     // Rows only. discoverConversations reads summaries, never transcripts.
     conversations: (await discoverConversations(dir)).summaries,
+    // Same split for the bench (issue 305): rows to resume from, never the takes.
+    benchSessions: await discoverBenchSessions(dir),
     changes,
     problems,
     externalEdits: [],

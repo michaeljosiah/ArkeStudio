@@ -5,6 +5,7 @@ import { TakeIdSchema } from "./ids.js";
 import { CutFileSchema } from "./cut.js";
 import { WorldChatSummarySchema, WorldChatWorkspaceSchema } from "./world-chat.js";
 import { ArtifactSidecarSchema } from "./artifact.js";
+import { BenchSessionSummarySchema, BenchWorkspaceSchema } from "./bench.js";
 import { ArtDirectionRecordSchema, ResolvedArtDirectionSchema } from "./art-direction.js";
 import { EMPTY_BIBLE, WorldBibleSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
@@ -220,6 +221,8 @@ export const WorldBundleSchema = z
      * conversation ever had, so the full workspace is loaded by id when one is chosen.
      */
     conversations: z.array(WorldChatSummarySchema).default([]),
+    /** Bench session rows, same split as conversations: enough to resume, never the takes. */
+    benchSessions: z.array(BenchSessionSummarySchema).default([]),
     /** Recent tail of changes.jsonl, newest last. */
     changes: z.array(ChangeRecordSchema),
     /** Files that failed to parse; the valid entities are still usable (SPEC-002 R-2). */
@@ -381,6 +384,8 @@ export const ClientStateSchema = z
      * it — the same reason the world snapshot carries conversation rows and not their contents.
      */
     worldChat: WorldChatWorkspaceSchema.nullable().default(null),
+    /** The open bench session, or null. One at a time, mirroring worldChat (issue 305 §5.3). */
+    bench: BenchWorkspaceSchema.nullable().default(null),
   })
   .strict();
 export type ClientState = z.infer<typeof ClientStateSchema>;

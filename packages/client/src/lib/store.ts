@@ -255,6 +255,15 @@ const pendingQueueRequests = new Map<string, { command: QueueCommand; characterN
 const queueResultListeners = new Set<(result: QueueEnqueueResult) => void>();
 const jobReadyListeners = new Set<(job: Job) => void>();
 
+/** A correlated filing request's answer (issue 305): ordered artifact ids, by requestId. */
+export type FiledBatch = Extract<DomainEvent, { type: "artifact.filed-batch" }>;
+const filedBatchListeners = new Set<(batch: FiledBatch) => void>();
+
+export function subscribeFiledBatch(listener: (batch: FiledBatch) => void): () => void {
+  filedBatchListeners.add(listener);
+  return () => filedBatchListeners.delete(listener);
+}
+
 export function subscribeQueueResults(listener: (result: QueueEnqueueResult) => void): () => void {
   queueResultListeners.add(listener);
   return () => queueResultListeners.delete(listener);
@@ -459,6 +468,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
+    }
+    if (event.type === "artifact.filed-batch") {
+      for (const listener of filedBatchListeners) listener(event);
     }
     if (event.type === "proposal.blocked") {
       gateNotices = {
@@ -2396,4 +2408,109 @@ export function unarchiveWorldChat(worldId: string, conversationId: string): voi
 /** Return a proposal to the conversation it came from, and reopen it. */
 export function sendProposalBack(worldId: string, proposalId: string): void {
   send({ kind: "proposal-send-back", worldId, proposalId });
+}
+
+// ---------------------------------------------------------------------------
+// The bench (issue 305)
+// ---------------------------------------------------------------------------
+
+export function useBench(): ClientState["bench"] {
+  return useStore().state?.bench ?? null;
+}
+
+export function sendBenchOpen(worldId: string, sessionId?: string): void {
+  send({ kind: "bench-open", worldId, ...(sessionId !== undefined ? { sessionId } : {}) } as ClientMessage);
+}
+
+export function sendBenchNewSession(worldId: string): void {
+  send({ kind: "bench-new-session", worldId });
+}
+
+export function sendBenchClose(worldId: string): void {
+  send({ kind: "bench-close", worldId });
+}
+
+export function sendBenchTitle(worldId: string, sessionId: string, title: string | null): void {
+  send({ kind: "bench-set-title", worldId, sessionId, requestId: ulid(), title } as ClientMessage);
+}
+
+export function sendBenchCompose(
+  worldId: string,
+  sessionId: string,
+  composer: {
+    mode: "image" | "video";
+    provider: string;
+    model: string;
+    params: Extract<ClientMessage, { kind: "bench-compose" }>["params"];
+    brief: string;
+  },
+): void {
+  send({ kind: "bench-compose", worldId, sessionId, requestId: ulid(), ...composer } as ClientMessage);
+}
+
+export function sendBenchAddReference(
+  worldId: string,
+  sessionId: string,
+  source: { source: "artifact"; artifactId: string } | { source: "take"; takeId: string },
+  replace?: string,
+): void {
+  send({
+    kind: "bench-add-reference",
+    worldId,
+    sessionId,
+    requestId: ulid(),
+    source,
+    ...(replace !== undefined ? { replace } : {}),
+  } as ClientMessage);
+}
+
+export function sendBenchRemoveReference(worldId: string, sessionId: string, token: string): void {
+  send({ kind: "bench-remove-reference", worldId, sessionId, requestId: ulid(), token } as ClientMessage);
+}
+
+/** Returns the requestId the artifact.filed-batch answer will carry. */
+export function sendBenchUploadReferences(worldId: string, sessionId: string): string {
+  const requestId = ulid();
+  send({ kind: "bench-upload-references", worldId, sessionId, requestId } as ClientMessage);
+  return requestId;
+}
+
+/** Returns the requestId so the screen can correlate the queue.enqueue-result. */
+export function sendBenchDispatch(worldId: string, sessionId: string): string {
+  const requestId = queueRequest("bench-dispatch");
+  send({ kind: "bench-dispatch", worldId, sessionId, requestId } as ClientMessage);
+  return requestId;
+}
+
+export function sendBenchRerun(worldId: string, sessionId: string, takeId: string): string {
+  const requestId = queueRequest("bench-rerun");
+  send({ kind: "bench-rerun", worldId, sessionId, requestId, takeId } as ClientMessage);
+  return requestId;
+}
+
+export function sendBenchKeep(worldId: string, sessionId: string, takeId: string): void {
+  send({ kind: "bench-keep", worldId, sessionId, requestId: ulid(), takeId } as ClientMessage);
+}
+
+export function sendBenchDiscard(worldId: string, sessionId: string, takeId: string): void {
+  send({ kind: "bench-discard", worldId, sessionId, requestId: ulid(), takeId } as ClientMessage);
+}
+
+export function sendBenchClearView(worldId: string, sessionId: string, takeId: string): void {
+  send({ kind: "bench-clear-view", worldId, sessionId, requestId: ulid(), takeId } as ClientMessage);
+}
+
+export function sendBenchSelectTake(worldId: string, sessionId: string, takeId: string): void {
+  send({ kind: "bench-select-take", worldId, sessionId, requestId: ulid(), takeId } as ClientMessage);
+}
+
+export function sendStageArtifactReference(worldId: string, key: string, artifactId: string): void {
+  send({ kind: "stage-artifact-reference", worldId, key, artifactId } as ClientMessage);
+}
+
+/** Returns the requestId the artifact.filed-batch answer will carry. */
+export function sendAttachFilesCorrelated(worldId: string, links?: string[]): string {
+  const requestId = ulid();
+  send({ kind: "attach-files-correlated", worldId, requestId, ...(links !== undefined ? { links } : {}) } as ClientMessage);
+  return requestId;
 }

@@ -1,7 +1,15 @@
 import { createHash } from "node:crypto";
 import { copyFile, readdir, readFile, realpath, stat, statfs } from "node:fs/promises";
 import { basename, extname, join, sep } from "node:path";
-import { ArtifactSidecarSchema, ulid, type ArtifactKind, type ArtifactSidecar, type MediaInfo } from "@arke-studio/contracts";
+import {
+  ArtifactSidecarSchema,
+  pickableArtifacts,
+  ulid,
+  type ArtifactGeneration,
+  type ArtifactKind,
+  type ArtifactSidecar,
+  type MediaInfo,
+} from "@arke-studio/contracts";
 import { measureMediaInfo, type MediaProbe } from "../media/probe.js";
 import type { CommitInput } from "../world/commit.js";
 import { toExtendedLength } from "../world/paths.js";
@@ -266,8 +274,69 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
 
 /** Pickers exclude superseded artifacts — derived, never a flag on the old one (R-5, D10). */
 export function pickable(artifacts: ArtifactSidecar[]): ArtifactSidecar[] {
-  const superseded = new Set(artifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
-  return artifacts.filter((a) => !superseded.has(a.id));
+  // The selector itself lives in contracts so the client's reference picker applies the same
+  // exclusion without importing coordinator code (issue 305 §4). This export is the seam every
+  // existing coordinator caller already uses.
+  return pickableArtifacts(artifacts);
+}
+
+/**
+ * File a bench take's media as a world artifact (issue 305 §7): trusted system origin, explicit
+ * generation provenance, world-owned.
+ *
+ * Deliberately NOT `fileArtifact`. Content-hash dedup is the wrong rule here twice over: a
+ * generated occurrence must not collapse into an earlier user upload of the same bytes, and two
+ * generated occurrences with different provenance stay two artifacts — why and how the bytes
+ * were made is part of the artifact's identity. The idempotency key is the take id instead: a
+ * retry of Keep for the same take returns the artifact it already made.
+ */
+export async function fileGeneratedArtifact(
+  store: WorldStore,
+  input: {
+    /** Absolute path to the take's landed media, inside the session directory. */
+    sourcePath: string;
+    generation: ArtifactGeneration;
+    mediaProbe?: MediaProbe | null;
+    abandoned?: () => boolean;
+  },
+): Promise<ArtifactSidecar> {
+  const existing = store
+    .getBundle()
+    .artifacts.find((a) => a.generation?.takeId === input.generation.takeId);
+  if (existing) return existing;
+
+  const bytes = await readFile(toExtendedLength(input.sourcePath));
+  const hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
+
+  const original = basename(input.sourcePath);
+  const ext = extname(original).toLowerCase();
+  const stem = slugify(input.generation.brief.slice(0, 48)) || "bench";
+  const taken = new Set(store.getBundle().artifacts.map((a) => a.file));
+  let file = `${stem}-take-${input.generation.takeNumber}${ext}`;
+  for (let i = 2; taken.has(file); i++) file = `${stem}-take-${input.generation.takeNumber}-${i}${ext}`;
+
+  const kind = kindForFile(original);
+  const sidecar: ArtifactSidecar = {
+    id: `ar_${ulid()}`,
+    kind,
+    file,
+    hash: hash as ArtifactSidecar["hash"],
+    origin: { by: "system", producedBy: "bench" },
+    links: [],
+    // No `production` key: the world owns it (SPEC-020 R-13). The bench never belongs to one.
+    generation: input.generation,
+    created: store.now(),
+  };
+  await store.gateOp(async () => {
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(toExtendedLength(join(store.dir, "artifacts")), { recursive: true });
+    await copyFile(toExtendedLength(input.sourcePath), toExtendedLength(join(store.dir, "artifacts", file)));
+    await writeSidecar(store, sidecar, null);
+  });
+  if (kind === "audio" || kind === "video") {
+    await measureInto(store, file, input.mediaProbe ?? null, input.abandoned);
+  }
+  return sidecar;
 }
 
 // ---------------------------------------------------------------------------
