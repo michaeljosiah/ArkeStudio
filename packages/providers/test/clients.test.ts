@@ -741,3 +741,45 @@ describe("fal frame task modes (issue 305 §3; SPEC-019 T-1)", () => {
     );
   });
 });
+
+describe("fal's queue is keyed on the app, not the route", () => {
+  /**
+   * Submit takes the full path; status, result and cancel take the first two segments alone.
+   * fal's per-endpoint OpenAPI templates the full path for all four and the server answers 405
+   * to it — which stayed invisible while every shipped route had exactly two segments. Every
+   * video route has more, so every video job submitted, was charged, and then failed on its
+   * first status read with the result still sitting in the queue.
+   */
+  const seen: string[] = [];
+  const recording: FetchLike = async (url) => {
+    seen.push(String(url));
+    return new Response(JSON.stringify({ status: "COMPLETED", request_id: "r1" }), { status: 200 });
+  };
+
+  it("submits to the route and polls the app", async () => {
+    seen.length = 0;
+    const client = new FalClient(recording);
+    await client.poll("k", "fal-ai/wan/v2.7/text-to-video::abc");
+    assert.equal(seen[0], "https://queue.fal.run/fal-ai/wan/requests/abc/status");
+  });
+
+  it("fetches results and cancels under the same app path", async () => {
+    seen.length = 0;
+    const client = new FalClient(async (url) => {
+      seen.push(String(url));
+      return new Response(JSON.stringify({ video: {} }), { status: 200 });
+    });
+    await client.fetchArtifacts("k", "bytedance/seedance-2.0/text-to-video::xyz").catch(() => {});
+    assert.equal(seen[0], "https://queue.fal.run/bytedance/seedance-2.0/requests/xyz/status".replace("/status", ""));
+    seen.length = 0;
+    await client.cancel("k", "minimax/h3/image-to-video::q9").catch(() => {});
+    assert.equal(seen[0], "https://queue.fal.run/minimax/h3/requests/q9/cancel");
+  });
+
+  it("leaves a two-segment route exactly as it was", async () => {
+    seen.length = 0;
+    const client = new FalClient(recording);
+    await client.poll("k", "fal-ai/flux-2-pro::abc");
+    assert.equal(seen[0], "https://queue.fal.run/fal-ai/flux-2-pro/requests/abc/status");
+  });
+});
