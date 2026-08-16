@@ -197,6 +197,125 @@ const CURATED = {
       aspects: ["16:9", "9:16"],
     },
   },
+  // ---- minimax H3 -------------------------------------------------------
+  // The three siblings are one model: text-to-video generates, image-to-video takes a start
+  // frame (`image_url`) and optionally an end one (`end_image_url`), reference-to-video takes
+  // up to nine `reference_image_urls`. That last name is why framesField exists — seedance's
+  // reference route calls the same array `image_urls`.
+  "minimax/h3/text-to-video": {
+    id: "minimax-h3",
+    displayName: "MiniMax H3",
+    capability: "video",
+    family: "minimax-h3",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    // Priced per second by resolution and the route's own default is 2K, so the base rate is
+    // 2K's — an estimate computed at 480P's rate would understate every unpicked job by 2.6x.
+    defaultResolution: "2K",
+    modes: {
+      generate: { locked: [] },
+      // image-to-video declares no aspect_ratio at all: the frame decides the shape.
+      "first-frame": { route: "minimax/h3/image-to-video", locked: ["aspect"] },
+      "first-and-last-frame": { route: "minimax/h3/image-to-video", locked: ["aspect"] },
+      "keyframe-sequence": {
+        route: "minimax/h3/reference-to-video",
+        locked: [],
+        maxFrames: 9,
+        framesField: "reference_image_urls",
+      },
+    },
+    limits: {
+      maxPromptChars: 50000,
+      maxDurationSec: 15,
+      // duration is an integer 5..15 on this route, not a string out of a list.
+      durationWire: "number",
+      durations: { 5: "5", 6: "6", 7: "7", 8: "8", 9: "9", 10: "10", 11: "11", 12: "12", 13: "13", 14: "14", 15: "15" },
+      resolutions: ["2K", "480P", "768P", "4K"],
+      aspects: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
+    },
+  },
+  // ---- LTX 2.5 ----------------------------------------------------------
+  // No reference-to-video sibling in this family, so no keyframe sequence: two frames is the
+  // most it can be asked for, and the composer says so rather than offering a third.
+  "lightricks/ltx-2.5/text-to-video/pro": {
+    id: "ltx-2.5-pro",
+    // fal titles this route "Ltx 2.5 Text to Video Fast" — the same string it gives the fast
+    // route. Two rows with one name is a picker nobody can choose from.
+    displayName: "LTX 2.5 Pro",
+    capability: "video",
+    family: "ltx",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    defaultResolution: "1080p",
+    modes: {
+      generate: { locked: [] },
+      // Unlike minimax and wan, ltx's image route DOES take an aspect_ratio, so nothing locks.
+      "first-frame": { route: "lightricks/ltx-2.5/image-to-video/pro", locked: [] },
+      "first-and-last-frame": { route: "lightricks/ltx-2.5/image-to-video/pro", locked: [] },
+    },
+    limits: {
+      maxPromptChars: 5000,
+      maxDurationSec: 10,
+      durationWire: "number",
+      durations: { 6: "6", 8: "8", 10: "10" },
+      resolutions: ["1080p", "720p"],
+      aspects: ["16:9", "9:16"],
+    },
+  },
+  "lightricks/ltx-2.5/text-to-video/fast": {
+    id: "ltx-2.5-fast",
+    displayName: "LTX 2.5 Fast",
+    capability: "video",
+    family: "ltx",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    defaultResolution: "1080p",
+    // The price list bills "4K"; the schema dispatches "2160p". One tier, two spellings — and
+    // without the bridge the 4K rate is dropped and 2160p is estimated at the 1080p rate.
+    priceAliases: { "4k": "2160p" },
+    modes: {
+      generate: { locked: [] },
+      "first-frame": { route: "lightricks/ltx-2.5/image-to-video/fast", locked: [] },
+      "first-and-last-frame": { route: "lightricks/ltx-2.5/image-to-video/fast", locked: [] },
+    },
+    limits: {
+      maxPromptChars: 5000,
+      maxDurationSec: 20,
+      durationWire: "number",
+      durations: { 6: "6", 8: "8", 10: "10", 12: "12", 14: "14", 16: "16", 18: "18", 20: "20" },
+      // The schema spells 4K as "2160p"; the tier map is what turns a chosen 4K into that word.
+      resolutions: ["1080p", "720p", "1440p", "2160p"],
+      aspects: ["16:9", "9:16"],
+    },
+  },
+  // ---- wan 2.7 ----------------------------------------------------------
+  "fal-ai/wan/v2.7/text-to-video": {
+    id: "wan-2.7",
+    // "Wan Text to Video" names no version, and the catalogue carries 2.1 through 2.7.
+    displayName: "Wan 2.7",
+    capability: "video",
+    family: "wan",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    defaultResolution: "1080p",
+    modes: {
+      generate: { locked: [] },
+      "first-frame": { route: "fal-ai/wan/v2.7/image-to-video", locked: ["aspect"] },
+      "first-and-last-frame": { route: "fal-ai/wan/v2.7/image-to-video", locked: ["aspect"] },
+      // No maxItems on this route's reference_image_urls: the ceiling was never published, so
+      // a sequence past two refuses rather than probing a paid route with a guess.
+      "keyframe-sequence": {
+        route: "fal-ai/wan/v2.7/reference-to-video",
+        locked: [],
+        framesField: "reference_image_urls",
+      },
+    },
+    limits: {
+      // The wan 2.7 schema declares no maxLength on prompt, so no counter is offered: "the
+      // provider does not say" is not the same as "unlimited".
+      maxDurationSec: 15,
+      durationWire: "number",
+      durations: { 2: "2", 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8", 9: "9", 10: "10", 11: "11", 12: "12", 13: "13", 14: "14", 15: "15" },
+      resolutions: ["1080p", "720p"],
+      aspects: ["16:9", "9:16", "1:1", "4:3", "3:4"],
+    },
+  },
   "fal-ai/kling-video/v3/pro/text-to-video": {
     id: "kling-3-pro",
     capability: "video",
@@ -222,7 +341,7 @@ const money = String.raw`\*{0,2}\$([0-9]+(?:\.[0-9]+)?)\*{0,2}`;
  * from the API; anything that does not match returns null and the model is dropped rather than
  * guessed at.
  */
-function pricingFrom(text, tokenAssumption) {
+function pricingFrom(text, tokenAssumption, defaultResolution) {
   const clean = (text ?? "").replace(/\s+/g, " ");
   const micro = (s) => Math.round(Number.parseFloat(s) * 1_000_000);
 
@@ -252,6 +371,33 @@ function pricingFrom(text, tokenAssumption) {
     };
   }
 
+  // A per-second table of any length, in either order: "$0.05 per second at 480p, $0.08 per
+  // second at 768p" and "for 720p ... $0.09 per second; for 1080p, $0.13" are both this shape.
+  // Read whole, because a row that keeps only the first number prices every other resolution
+  // wrong — and the price a user is shown before they spend is the whole point of the manifest.
+  //
+  // The resolution must sit directly after "at"/"for", or directly before the rate. Anything
+  // looser paired seedance's 720p rate with the 1080p that happened to follow it.
+  const res = String.raw`(\d+[pPkK]|[24][kK])`;
+  const forward = [
+    ...clean.matchAll(
+      new RegExp(String.raw`${money}\s*(?:/|per\s*)second\s*(?:at|for)\s*\**${res}`, "gi"),
+    ),
+  ].map((m) => [m[2], micro(m[1])]);
+  const backward = [
+    ...clean.matchAll(new RegExp(String.raw`${res}\**[^.$]{0,30}?${money}\s*(?:/|per\s*)second`, "gi")),
+  ].map((m) => [m[1], micro(m[2])]);
+  // Forward last, so it wins. Both shapes can match one sentence — "$0.05 per second at 480p,
+  // $0.08 per second at 768p" reads correctly forwards and one-off backwards, pairing every
+  // resolution with the NEXT price — and the reading anchored on "at"/"for" is the true one.
+  const table = new Map([...backward, ...forward].map(([r, rate]) => [String(r).toLowerCase(), rate]));
+  if (table.size > 1) {
+    // The base is the rate of the route's OWN default resolution: a job that picks nothing is
+    // charged that, and basing it on the cheapest tier understates every such job.
+    const key = defaultResolution?.toLowerCase();
+    const base = (key !== undefined ? table.get(key) : undefined) ?? [...table.values()][0];
+    return { kind: "perSecond", microUsdPerSecond: base, byResolution: Object.fromEntries(table) };
+  }
   // "For every second of 720p video ... **$0.3034/second** and for 1080p ... **$0.682/second**"
   const perSecondByRes = clean.match(new RegExp(`${money}\\s*/?\\s*second[\\s\\S]{0,80}?1080p[^$]{0,40}${money}`, "i"));
   if (perSecondByRes) {
@@ -272,6 +418,31 @@ function pricingFrom(text, tokenAssumption) {
   const perImage = clean.match(new RegExp(`${money}\\s*(?:per|/)\\s*image`, "i"));
   if (perImage) return { kind: "perImage", microUsdPerImage: micro(perImage[1]) };
   return null;
+}
+
+/**
+ * Re-key a parsed rate table onto the words the picker actually sends.
+ *
+ * fal's price prose and its schemas disagree about spelling: the ltx fast route is billed for
+ * "4K" and dispatched with "2160p"; minimax writes "480p" in prose and "480P" in its enum. A
+ * key that is not the wire word is a lookup that misses in silence — the estimate then quietly
+ * falls back to the base rate, which is the understatement this table exists to prevent. A rate
+ * that matches no offered resolution is dropped and reported rather than carried as noise.
+ */
+function keyRatesToWireWords(pricing, curated, skipped, route) {
+  if (pricing.kind !== "perSecond" || !pricing.byResolution) return pricing;
+  const offered = curated.limits.resolutions ?? [];
+  const aliases = curated.priceAliases ?? {};
+  const out = {};
+  for (const [key, rate] of Object.entries(pricing.byResolution)) {
+    const wire = aliases[key] ?? offered.find((r) => r.toLowerCase() === key);
+    if (wire === undefined) {
+      skipped.push(`${route} — a ${key} rate the row offers no resolution for; rate dropped`);
+      continue;
+    }
+    out[wire] = rate;
+  }
+  return { ...pricing, byResolution: out };
 }
 
 async function fetchCatalogue() {
@@ -316,7 +487,8 @@ for (const [route, curated] of Object.entries(CURATED)) {
     skipped.push(`${route} — no longer in the catalogue`);
     continue;
   }
-  const pricing = pricingFrom(live.pricingInfoOverride, curated.tokenAssumption);
+  const parsed = pricingFrom(live.pricingInfoOverride, curated.tokenAssumption, curated.defaultResolution);
+  const pricing = parsed === null ? null : keyRatesToWireWords(parsed, curated, skipped, route);
   if (!pricing) {
     skipped.push(`${route} — no price we could read from "${(live.pricingInfoOverride ?? "").slice(0, 60)}…"`);
     continue;
