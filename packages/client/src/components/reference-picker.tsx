@@ -193,9 +193,9 @@ export function ReferencePickerBody({
 
   const capacityChip =
     model && capacity ? (
-      <span className="fy-filterchip" style={{ cursor: "default", display: "inline-flex", gap: 8 }}>
-        <strong style={{ fontWeight: 600 }}>{model.displayName}</strong>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted-foreground)" }}>
+      <span className="fy-refpicker__capacity">
+        <strong style={{ fontWeight: 600, color: "var(--foreground)", fontFamily: "var(--font-sans)" }}>{model.displayName}</strong>
+        <span>
           {`${capacity.imagesUsed} of ${capacity.imageCeiling} images`}
           {capacity.audioCeilingSec > 0
             ? ` · ${formatSeconds(capacity.audioUsedSec)} of ${formatSeconds(capacity.audioCeilingSec)} audio`
@@ -286,7 +286,7 @@ export function ReferencePickerBody({
         </div>
       )}
 
-      <div className="fy-cardgrid" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12, paddingTop: 0 }}>
+      <div className="fy-refpicker__grid">
         {visible.map((source) => {
           const refusal = source.active ? null : refusalFor(source);
           const preview = refusal === null && !source.active ? tokenPreview(source) : null;
@@ -294,39 +294,24 @@ export function ReferencePickerBody({
             <button
               key={source.key}
               type="button"
-              className="fy-gridcard"
+              className={cx("fy-refpicker__tile", source.active && "fy-refpicker__tile--picked")}
               data-testid="picker-tile"
               data-refused={refusal !== null || undefined}
               disabled={refusal !== null && !source.active}
               onClick={() => pickTile(source)}
-              style={{
-                padding: 10,
-                textAlign: "left",
-                opacity: refusal !== null || source.active ? 0.55 : 1,
-                cursor: refusal !== null || source.active ? "not-allowed" : "pointer",
-              }}
             >
-              <div style={{ width: "100%", height: 84, position: "relative" }}>
+              <div className="fy-refpicker__thumb">
                 {source.imagePath ? (
-                  <Portrait worldSlug={worldSlug} path={source.imagePath} label={source.name} />
+                  <Portrait worldSlug={worldSlug} path={source.imagePath} label={source.name} radius={0} />
                 ) : (
-                  <div
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      borderRadius: 7,
-                      background: "var(--muted)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      font: "400 10px var(--font-mono)",
-                      color: "var(--muted-foreground)",
-                    }}
-                  >
+                  <div className="fy-refpicker__kind">
                     {source.kind}
                     {source.durationSec !== null && source.kind !== "image" ? ` · ${formatSeconds(source.durationSec)}` : ""}
                   </div>
                 )}
+                <span className={cx("fy-refpicker__check", source.active && "fy-refpicker__check--on")} aria-hidden="true">
+                  {source.active ? "✓" : ""}
+                </span>
                 {(source.existingToken ?? preview) && (
                   <span
                     style={{
@@ -344,53 +329,20 @@ export function ReferencePickerBody({
                   </span>
                 )}
               </div>
-              <div style={{ font: "600 11.5px var(--font-sans)", marginTop: 8, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                {source.name}
-              </div>
-              <div
-                style={{
-                  font: "400 9.5px var(--font-mono)",
-                  color: refusal !== null ? "var(--destructive)" : "var(--neutral-400)",
-                  marginTop: 2,
-                }}
-              >
+              <div className="fy-refpicker__name">{source.name}</div>
+              <div className={cx("fy-refpicker__meta", refusal !== null && "fy-refpicker__meta--refused")}>
                 {refusal ?? source.meta}
               </div>
             </button>
           );
         })}
-        <button
-          type="button"
-          onClick={onUpload}
-          style={{
-            border: "1.5px dashed var(--neutral-300)",
-            borderRadius: 11,
-            minHeight: 120,
-            background: "transparent",
-            color: "var(--muted-foreground)",
-            font: "500 11px var(--font-sans)",
-            cursor: "pointer",
-          }}
-        >
+        <button type="button" className="fy-refpicker__upload" onClick={onUpload}>
           Upload a file
         </button>
       </div>
 
       {replacing !== null && (
-        <div
-          role="group"
-          aria-label="Choose which reference to replace"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "9px 12px",
-            border: "1px solid var(--border)",
-            borderLeft: "2px solid var(--warning)",
-            borderRadius: 9,
-            background: "var(--muted)",
-          }}
-        >
+        <div role="group" aria-label="Choose which reference to replace" className="fy-refpicker__replace">
           <span style={{ flex: 1, font: "400 11.5px var(--font-sans)" }}>
             <strong style={{ fontWeight: 600 }}>
               {`${capacity?.imageCeiling} of ${capacity?.imageCeiling} images.`}
@@ -415,7 +367,7 @@ export function ReferencePickerBody({
         </div>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+      <div className="fy-refpicker__foot">
         <span style={{ flex: 1, font: "400 11.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
           {mode === "bench" ? `${carried.length} riding` : "One picture rides with this brief."}
         </span>
