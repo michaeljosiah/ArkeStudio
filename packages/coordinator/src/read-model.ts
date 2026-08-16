@@ -49,6 +49,7 @@ export class ReadModel {
       worlds: [],
       world: null,
       worldChat: null,
+      bench: null,
     };
   }
 
@@ -109,7 +110,13 @@ export class ReadModel {
   setWorld(world: WorldBundle | null): void {
     // Closing or switching worlds drops the open conversation with it: a transcript belongs to
     // the world it was about, and leaving one behind would show it under the next world opened.
-    this.state = { ...this.state, world, worldChat: world === null ? null : this.state.worldChat };
+    // The open bench session goes the same way, for the same reason (issue 305).
+    this.state = {
+      ...this.state,
+      world,
+      worldChat: world === null ? null : this.state.worldChat,
+      bench: world === null ? null : this.state.bench,
+    };
   }
 
   /**
@@ -126,6 +133,16 @@ export class ReadModel {
 
   setWorldChat(worldChat: ClientState["worldChat"]): void {
     this.state = { ...this.state, worldChat };
+  }
+
+  setBench(bench: ClientState["bench"]): void {
+    this.state = { ...this.state, bench };
+  }
+
+  /** Session rows without a rescan — `.sessions` is watcher-ignored, like `.conversations`. */
+  setBenchSessions(benchSessions: NonNullable<ClientState["world"]>["benchSessions"]): void {
+    if (!this.state.world) return;
+    this.state = { ...this.state, world: { ...this.state.world, benchSessions } };
   }
 
   setHealth(component: HealthComponent, health: AppHealth[HealthComponent]): void {

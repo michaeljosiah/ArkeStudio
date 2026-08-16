@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
+import type { ReferenceKind } from "./reference-budget.js";
 
 /**
  * Providers, capabilities and their availability (SPEC-008 §2.1, §2.2). Three layers: a
@@ -45,6 +46,14 @@ export interface ProviderInfo {
   credential: CredentialKind;
   /** How the key is entered — a hint for the Settings form, not a behaviour switch. */
   keyHint?: string;
+  /**
+   * Which reference kinds this provider's transport actually carries to the wire (issue 305
+   * §5.2). A kind a model's limits admit but the transport does not map is refused BEFORE
+   * enqueue — declaring an audio allowance without a mapped payload path would accept a file
+   * and then silently not send it, which is the failure the whole budget exists to prevent.
+   * Absent means images only, which is what every existing client transport implements.
+   */
+  mapsReferenceKinds?: ReferenceKind[];
 }
 
 /** The provider table (§2.2). Gateways and direct providers differ only in the manifest. */
@@ -89,6 +98,16 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
  */
 export function credentialKindOf(provider: string): CredentialKind {
   return (PROVIDERS as Record<string, ProviderInfo | undefined>)[provider]?.credential ?? "in-app";
+}
+
+/**
+ * The reference kinds a provider's transport maps, for the gate before enqueue. An unknown
+ * provider maps nothing: refusing a reference nobody can carry beats accepting one nobody sends.
+ */
+export function mappedReferenceKinds(provider: string): readonly ReferenceKind[] {
+  const info = (PROVIDERS as Record<string, ProviderInfo | undefined>)[provider];
+  if (!info) return [];
+  return info.mapsReferenceKinds ?? ["image"];
 }
 
 /**

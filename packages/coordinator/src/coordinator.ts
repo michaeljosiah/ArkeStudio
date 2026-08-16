@@ -42,7 +42,20 @@ import {
   type QueueCommand,
   type RuntimeProbes,
   type VoiceCandidate,
+  type ArtifactGeneration,
+  type BenchSession,
+  type SessionId,
 } from "@arke-studio/contracts";
+import { BenchStore, sessionDir as benchSessionDir } from "./bench/store.js";
+import {
+  discoverBenchSessions,
+  openBenchSession,
+  planBenchDispatch,
+  addBenchReference,
+  recoverBenchSession,
+  type BenchRecoveryJobFacts,
+  type OpenedBench,
+} from "./bench/service.js";
 import { AppLog } from "./app-log.js";
 import { AppSettingsFile, routingFaults } from "./app-settings.js";
 import { AskService } from "./canon/ask.js";
@@ -72,13 +85,13 @@ import {
   verifyCandidates,
   type RawCandidate,
 } from "./artifacts/extraction.js";
-import { ATTACHABLE_EXTENSIONS, backfillMediaInfo, fileArtifact, importFolder } from "./artifacts/filing.js";
+import { ATTACHABLE_EXTENSIONS, backfillMediaInfo, fileArtifact, fileGeneratedArtifact, importFolder } from "./artifacts/filing.js";
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
-import type { MediaProbe } from "./media/probe.js";
+import { measureMediaInfo, type MediaProbe } from "./media/probe.js";
 import { acceptTake, audioDesignFor, rejectTake, saveAudioTracks } from "./takes/review.js";
 import {
   normalizeSpeechText,
@@ -1083,9 +1096,52 @@ export class Coordinator {
           error: "Voice synthesis failed. Open Activity for details.",
         });
       }
+      // A bench take's failure reaches its session log, so the strip says so after a restart
+      // without waiting for recovery to notice (issue 305 §6).
+      if (job.target.kind === "bench-take") await this.recordBenchTerminal(job).catch(() => {});
       return;
     }
     const finalize = async (store: WorldStore) => {
+      if (job.target.kind === "bench-take") {
+        const [benchSessionId, benchTakeId] = (job.target.id ?? "").split("/") as [
+          SessionId | undefined,
+          string | undefined,
+        ];
+        if (!benchSessionId || !benchTakeId) throw new Error("bench take finalization target is unavailable");
+        const landed = job.landedFiles?.[0];
+        // Provider success without an artifact is a failed finalization, not an empty take (§6).
+        if (landed === undefined) throw new Error("the provider reported success and returned no file");
+        const benchStore = new BenchStore(benchSessionDir(store.dir, benchSessionId));
+        const session = await benchStore.fold();
+        if (!session) throw new Error("the bench session's log is unavailable");
+        const take = session.takes.find((t) => t.id === benchTakeId);
+        // Replay-safe: a completion already recorded is not recorded again (§6).
+        if (take?.media !== undefined) return;
+        const bytes = await readFile(toExtendedLength(join(store.dir, landed)));
+        const hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
+        const info = this.opts.mediaProbe
+          ? await measureMediaInfo(store, landed, this.opts.mediaProbe).catch(() => null)
+          : null;
+        const ledgerEntry = this.ledger
+          ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+          : undefined;
+        await benchStore.append({
+          type: "take-completed",
+          takeId: benchTakeId as never,
+          media: {
+            file: basename(landed),
+            hash: hash as never,
+            ...(info !== null ? { info } : {}),
+          },
+          cost: {
+            estimatedMicroUsd: job.estimatedMicroUsd,
+            actualMicroUsd: ledgerEntry?.actualMicroUsd ?? null,
+            ...(ledgerEntry?.actualSource !== undefined ? { actualSource: ledgerEntry.actualSource } : {}),
+          },
+          completedAt: this.nowIso(),
+        });
+        return;
+      }
       if (job.target.kind === "reference-tile" && job.landedFiles?.[0] !== undefined) {
         const [sheetId, angle] = (job.target.id ?? "").split("/") as [string, never];
         const sheet = store.getBundle().sheets.find((s) => s.id === sheetId);
@@ -1215,6 +1271,11 @@ export class Coordinator {
     }
     if (this.opts.provider.openStore?.()?.worldId === job.worldId) {
       await this.refreshWorldSnapshot(job.worldId).catch(() => {});
+      // A landed bench take reaches the open workspace without waiting for a reopen.
+      if (job.target.kind === "bench-take") {
+        const benchSessionId = job.target.id?.split("/")[0] as SessionId | undefined;
+        if (benchSessionId) await this.refreshBench(job.worldId, benchSessionId).catch(() => {});
+      }
     }
   }
 
@@ -3134,6 +3195,303 @@ export class Coordinator {
           });
         });
         void this.appLog?.append({ kind: "world-export.done", target });
+        return;
+      }
+      // ---- the bench (issue 305) ------------------------------------------
+      case "bench-open": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await this.openBenchWorkspace(store, msg.sessionId);
+        return;
+      }
+      case "bench-new-session": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await this.openBenchWorkspace(store, undefined, true);
+        return;
+      }
+      case "bench-close": {
+        this.readModel.setBench(null);
+        this.transport.broadcastSnapshot();
+        return;
+      }
+      case "bench-set-title": {
+        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        if (!bench) return;
+        await bench.store.append({ type: "title-set", title: msg.title }, { at: this.nowIso(), requestId: msg.requestId });
+        await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "bench-compose": {
+        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        if (!bench) return;
+        await bench.store.append(
+          {
+            type: "composer-set",
+            mode: msg.mode,
+            provider: msg.provider,
+            model: msg.model,
+            params: msg.params,
+            brief: msg.brief,
+          },
+          { at: this.nowIso(), requestId: msg.requestId },
+        );
+        await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "bench-add-reference": {
+        const store = this.opts.provider.openStore?.();
+        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        if (!store || !bench) return;
+        const manifest = this.opts.manifest ?? null;
+        const model =
+          manifest?.models.find(
+            (m) => m.id === bench.session.composer.model && m.provider === bench.session.composer.provider,
+          ) ?? null;
+        const outcome = await addBenchReference(bench, store.getBundle(), model, {
+          source: msg.source,
+          replace: msg.replace,
+          requestId: msg.requestId,
+          at: this.nowIso(),
+        });
+        // The tile predicted this refusal with the same shared functions; landing here means a
+        // racing client. The refreshed workspace shows the set unchanged — recorded, not silent.
+        if (outcome.outcome === "refused") {
+          void this.appLog?.append({ kind: "bench.reference-refused", worldId: msg.worldId, reason: outcome.reason });
+        }
+        await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "bench-remove-reference": {
+        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        if (!bench) return;
+        if (bench.session.composer.activeTokens.includes(msg.token)) {
+          await bench.store.append({ type: "reference-removed", token: msg.token }, { at: this.nowIso(), requestId: msg.requestId });
+        }
+        await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "bench-upload-references": {
+        const store = this.opts.provider.openStore?.();
+        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        const pick = this.opts.pickFiles;
+        if (!store || !bench || !pick) return;
+        const paths = await pick({ accept: [...ATTACHABLE_EXTENSIONS] }).catch(() => [] as readonly string[]);
+        const artifactIds: Array<string | null> = [];
+        for (const sourcePath of paths) {
+          artifactIds.push(await this.fileOne(msg.worldId, sourcePath, { allowLarge: msg.allowLarge ?? false }));
+        }
+        // The answer carries ordered ids whatever happens next: filing survives a cancelled
+        // picker, and attaching is a separate act the budget may refuse per item.
+        this.emit({
+          at: this.nowIso(),
+          type: "artifact.filed-batch",
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          artifactIds,
+        });
+        const manifest = this.opts.manifest ?? null;
+        for (const [index, artifactId] of artifactIds.entries()) {
+          if (artifactId === null) continue;
+          const fresh = await this.benchFor(msg.worldId, msg.sessionId);
+          if (!fresh) break;
+          const model =
+            manifest?.models.find(
+              (m) => m.id === fresh.session.composer.model && m.provider === fresh.session.composer.provider,
+            ) ?? null;
+          await addBenchReference(fresh, store.getBundle(), model, {
+            source: { source: "artifact", artifactId },
+            requestId: `${msg.requestId}/attach/${index}`,
+            at: this.nowIso(),
+          });
+        }
+        await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "bench-dispatch":
+      case "bench-rerun": {
+        const store = this.opts.provider.openStore?.();
+        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        if (!store || !bench) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The bench is unavailable. Reopen the world and try again.");
+          return;
+        }
+        const fromTake =
+          msg.kind === "bench-rerun" ? bench.session.takes.find((t) => t.id === msg.takeId) : undefined;
+        if (msg.kind === "bench-rerun" && !fromTake) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That take is no longer in this session.");
+          return;
+        }
+        const plan = planBenchDispatch(bench.session, store.getBundle(), this.opts.manifest ?? null, {
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          at: this.nowIso(),
+          fromTake,
+        });
+        if (!plan.ok) {
+          this.rejectEnqueue(msg.requestId, msg.kind, plan.reason);
+          return;
+        }
+        // The reservation is fsynced BEFORE any job exists — the record that authorizes spend.
+        // A resent command finds its requestId already in the log and must not enqueue twice.
+        const reservation = await bench.store.append(
+          { type: "takes-reserved", takes: plan.reserved },
+          { at: this.nowIso(), requestId: msg.requestId },
+        );
+        if (reservation.deduplicated) {
+          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+          await this.refreshBench(msg.worldId, msg.sessionId);
+          return;
+        }
+        const outcome = await enqueueInputs(plan.inputs, (input) => {
+          if (!this.jobQueue) throw new Error("the job queue is unavailable");
+          return this.jobQueue.enqueue(input);
+        });
+        // Jobs join their reserved takes in order: a failure keeps its number and says why.
+        const failed = new Map(outcome.failures.map((f) => [f.index, f.reason]));
+        let accepted = 0;
+        for (const [index, reserved] of plan.reserved.entries()) {
+          const reason = failed.get(index);
+          if (reason !== undefined) {
+            await bench.store.append(
+              { type: "take-status", takeId: reserved.id, status: "failed", error: reason },
+              { at: this.nowIso() },
+            );
+            continue;
+          }
+          const jobId = outcome.acceptedJobIds[accepted++];
+          if (jobId !== undefined) {
+            await bench.store.append({ type: "take-job", takeId: reserved.id, jobId }, { at: this.nowIso() });
+          }
+        }
+        this.emitEnqueueResult(msg.requestId, msg.kind, outcome.requestedCount, outcome.acceptedJobIds, outcome.failures);
+        await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "bench-keep": {
+        const store = this.opts.provider.openStore?.();
+        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        if (!store || !bench) return;
+        const take = bench.session.takes.find((t) => t.id === msg.takeId);
+        if (!take || !take.media) return;
+        // Idempotent by take id: a filed take answers with the artifact it already made.
+        if (take.disposition === "filed" && take.keptArtifactId !== undefined) {
+          await this.refreshBench(msg.worldId, msg.sessionId);
+          return;
+        }
+        const generation: ArtifactGeneration = {
+          sessionId: bench.session.id,
+          takeId: take.id,
+          takeNumber: take.n,
+          brief: take.request.brief,
+          references: take.request.references,
+          provider: take.request.provider,
+          model: take.request.model,
+          params: take.request.params,
+          ...(take.request.requestedSeed !== undefined ? { requestedSeed: take.request.requestedSeed } : {}),
+          costMicroUsd: take.cost?.actualMicroUsd ?? null,
+        };
+        const sourcePath = join(store.dir, ".sessions", bench.session.id, "media", take.id, take.media.file);
+        try {
+          const artifact = await fileGeneratedArtifact(store, {
+            sourcePath,
+            generation,
+            ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
+            abandoned: () => !this.stillOpen(store) || this.stopping,
+          });
+          await bench.store.append(
+            { type: "take-filed", takeId: take.id, artifactId: artifact.id },
+            { at: this.nowIso(), requestId: msg.requestId },
+          );
+        } catch (err) {
+          void this.appLog?.append({
+            kind: "bench.keep-failed",
+            worldId: msg.worldId,
+            takeId: take.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        // Keeping changed the world's artifacts, so the whole snapshot refreshes, not just the bench.
+        await this.refreshWorldSnapshot(msg.worldId);
+        await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "bench-discard": {
+        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        if (!bench) return;
+        if (bench.session.takes.some((t) => t.id === msg.takeId && t.disposition === "open")) {
+          await bench.store.append({ type: "take-discarded", takeId: msg.takeId }, { at: this.nowIso(), requestId: msg.requestId });
+        }
+        await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "bench-clear-view": {
+        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        if (!bench) return;
+        await bench.store.append({ type: "take-cleared", takeId: msg.takeId }, { at: this.nowIso(), requestId: msg.requestId });
+        await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "bench-select-take": {
+        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        if (!bench) return;
+        if (bench.session.takes.some((t) => t.id === msg.takeId)) {
+          await bench.store.append({ type: "take-selected", takeId: msg.takeId }, { at: this.nowIso(), requestId: msg.requestId });
+        }
+        await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "stage-artifact-reference": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const artifact = store.getBundle().artifacts.find((a) => a.id === msg.artifactId);
+        if (!artifact || (artifact.kind !== "image" && artifact.kind !== "board")) return;
+        // A pointer, not a copy (issue 305 §4): the staged path IS the artifact's own file, so
+        // clearing the slot later deletes the pointer and the artifact stays where it was.
+        const landed = await store
+          .gateOp(async () => {
+            await rm(toExtendedLength(join(store.dir, stagedReferenceDir(msg.key))), { recursive: true, force: true });
+            await atomicWriteFile(
+              join(store.dir, stagedReferenceDir(msg.key), "artifact.json"),
+              Buffer.from(JSON.stringify({ file: artifact.file }), "utf8"),
+            );
+          })
+          .then(
+            () => true,
+            () => false,
+          );
+        if (landed) await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "attach-files-correlated": {
+        const pick = this.opts.pickFiles;
+        if (!pick) {
+          this.emit({
+            at: this.nowIso(),
+            type: "artifact.filed-batch",
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            artifactIds: [],
+          });
+          return;
+        }
+        const paths = await pick({ accept: [...ATTACHABLE_EXTENSIONS] }).catch(() => [] as readonly string[]);
+        const artifactIds: Array<string | null> = [];
+        for (const sourcePath of paths) {
+          artifactIds.push(
+            await this.fileOne(msg.worldId, sourcePath, {
+              ...(msg.links !== undefined ? { links: msg.links } : {}),
+              ...(msg.allowLarge !== undefined ? { allowLarge: msg.allowLarge } : {}),
+            }),
+          );
+        }
+        this.emit({
+          at: this.nowIso(),
+          type: "artifact.filed-batch",
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          artifactIds,
+        });
         return;
       }
       case "check-updates": {
@@ -5097,13 +5455,101 @@ export class Coordinator {
     }
   }
 
+  private nowIso(): string {
+    return new Date().toISOString();
+  }
+
+  /** The open world's bench session by id, or null — a closed world answers no bench command. */
+  private async benchFor(worldId: string, sessionId: SessionId): Promise<OpenedBench | null> {
+    const store = this.opts.provider.openStore?.();
+    if (!store || store.worldId !== worldId) return null;
+    const benchStore = new BenchStore(benchSessionDir(store.dir, sessionId));
+    const session = await benchStore.fold();
+    return session === null ? null : { store: benchStore, session };
+  }
+
+  /** Every bench-take job of this world, as the facts recovery joins on. */
+  private benchJobFacts(worldId: string): BenchRecoveryJobFacts[] {
+    return this.getState()
+      .app.jobs.filter((job) => job.worldId === worldId && job.target.kind === "bench-take" && job.target.id !== undefined)
+      .map((job) => ({
+        jobId: job.id,
+        targetId: job.target.id!,
+        status: job.status,
+        error: job.error,
+      }));
+  }
+
+  /**
+   * Open (or create) a session, run recovery against the job journal, and push the workspace.
+   * Recovery is idempotent, so running it on every open costs a read and buys the two crash
+   * windows their answer (issue 305 §6).
+   */
+  private async openBenchWorkspace(store: WorldStore, sessionId?: SessionId, fresh = false): Promise<void> {
+    const settings = this.appSettings ? await this.appSettings.load() : null;
+    const routed = this.opts.manifest ? imageModelFor(settings, this.opts.manifest) : null;
+    const opened = await openBenchSession(store.dir, () => this.nowIso(), {
+      sessionId,
+      fresh,
+      ...(routed ? { defaultModel: { provider: routed.provider, model: routed.id } } : {}),
+    }).catch(() => null);
+    if (!opened) {
+      this.readModel.setBench(null);
+      this.transport.broadcastSnapshot();
+      return;
+    }
+    const touched = await recoverBenchSession(opened, this.benchJobFacts(store.worldId), () => this.nowIso()).catch(
+      () => false,
+    );
+    const session = touched ? ((await opened.store.fold()) ?? opened.session) : opened.session;
+    this.readModel.setBench({ worldId: store.worldId, session });
+    this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
+    this.transport.broadcastSnapshot();
+  }
+
+  /** Re-fold and push the open workspace + the bundle's session rows after a command. */
+  private async refreshBench(worldId: string, sessionId: SessionId): Promise<void> {
+    const store = this.opts.provider.openStore?.();
+    if (!store || store.worldId !== worldId) return;
+    const bench = await this.benchFor(worldId, sessionId);
+    if (bench) this.readModel.setBench({ worldId, session: bench.session });
+    this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
+    this.transport.broadcastSnapshot();
+  }
+
+  /**
+   * Append a bench take's terminal outcome to its session log, joining by the job's target id.
+   * Success is deliberately not handled here — the replayable finalization records completion
+   * WITH media and cost, and recording it twice would race the landing.
+   */
+  private async recordBenchTerminal(job: Job): Promise<void> {
+    const [sessionId, takeId] = (job.target.id ?? "").split("/") as [SessionId | undefined, string | undefined];
+    if (!sessionId || !takeId) return;
+    const bench = await this.benchFor(job.worldId, sessionId);
+    if (!bench) return;
+    const take = bench.session.takes.find((t) => t.id === takeId);
+    if (!take || take.status === job.status) return;
+    await bench.store
+      .append(
+        {
+          type: "take-status",
+          takeId: takeId as never,
+          status: job.status,
+          ...(job.error !== null ? { error: job.error } : {}),
+        },
+        { at: this.nowIso() },
+      )
+      .catch(() => {});
+    await this.refreshBench(job.worldId, sessionId);
+  }
+
   private async fileOne(
     worldId: string,
     sourcePath: string,
     opts: { links?: string[]; allowLarge?: boolean; supersedes?: string; production?: string | null },
-  ): Promise<void> {
+  ): Promise<string | null> {
     const store = this.opts.provider.openStore?.();
-    if (!store) return;
+    if (!store) return null;
     const outcome = await fileArtifact(store, {
       sourcePath,
       // Measured once, at the moment the bytes land, rather than by every reader afterwards (#283).
@@ -5125,7 +5571,7 @@ export class Coordinator {
         reason: outcome.reason,
         sizeBytes: outcome.outcome === "needs-consent" ? outcome.sizeBytes : null,
       });
-      return;
+      return null;
     }
     this.emit({
       at: new Date().toISOString(),
@@ -5140,6 +5586,7 @@ export class Coordinator {
     // loadWorld, so filing that finished after the user switched worlds would have closed the
     // world they just chose and reopened the one they left (Codex round 6).
     this.refreshIfStillOpen(store);
+    return outcome.artifact.id;
   }
 
   /**

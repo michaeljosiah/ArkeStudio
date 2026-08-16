@@ -16,6 +16,9 @@ const IGNORED = [
   // Conversation writes are app-owned and frequent. Without this every message would raise
   // "this world changed outside Arke Studio" against the app's own append.
   /^\.conversations([/\\]|$)/,
+  // Bench sessions are the same operational history (issue 305 §6): every event append and
+  // every landed take would otherwise accuse the app of editing its own world.
+  /^\.sessions([/\\]|$)/,
   /^\.cache([/\\]|$)/,
   /^\.staging([/\\]|$)/,
   /^world\.lock$/,
