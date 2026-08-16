@@ -217,11 +217,12 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     try {
       await adapter.init();
       const ref = await adapter.createSession({ purpose: "authoring", agent: "scene-writer" });
-      const seen = stub.requests.filter((r) => /\/prompt$/.test(r.path)).length;
+      const isPrompt = (r: { path: string }) => r.path.endsWith("/prompt");
+      const seen = stub.requests.filter(isPrompt).length;
       await adapter.dispatchAsync({ sessionId: ref.sessionId, parts: [{ type: "text", text: "one" }] });
       await adapter.dispatchAsync({ sessionId: ref.sessionId, parts: [{ type: "text", text: "two" }] });
-      await until(() => stub.requests.filter((r) => /\/prompt$/.test(r.path)).length >= seen + 2);
-      const prompts = stub.requests.filter((r) => /\/prompt$/.test(r.path)).slice(-2);
+      await until(() => stub.requests.filter(isPrompt).length >= seen + 2);
+      const prompts = stub.requests.filter(isPrompt).slice(-2);
       const ids = prompts.map((p) => (p.body as { id?: string }).id);
       assert.ok(ids.every((id) => id?.startsWith("msg_arke_")), `wire ids in the msg_ namespace: ${ids.join(", ")}`);
       assert.notEqual(ids[0], ids[1], "wire ids never repeat — a reuse answers 409");
