@@ -40,12 +40,17 @@ export const FALLBACK_BUDGET_CHARS = 120_000;
 const CHARS_PER_TOKEN = 3;
 
 /**
- * How much of the input window this prompt may fill.
+ * How much of the input window this prompt may fill: all of it.
  *
- * The rest is the model's to work in: the reply, and whatever tool results a turn reads on its
- * way to one. Half is not a measured figure; it is room to be wrong in without failing a turn.
+ * The window a provider states as `input` is already the room a prompt has — `input` plus
+ * `output` is the whole context, so the reply is accounted for before this arithmetic starts.
+ * Holding back a further half was reserving space that had already been reserved.
+ *
+ * What a turn reads afterwards through its tools comes out of the same window, and the slack for
+ * that is in `CHARS_PER_TOKEN` above: assuming three characters a token against prose that runs
+ * nearer four leaves roughly a quarter of the window unspent by the arithmetic itself.
  */
-const WINDOW_SHARE = 0.5;
+const WINDOW_SHARE = 1;
 
 /** A character budget from a model's input-token limit, or the floor when there is none. */
 export function budgetFor(inputTokenLimit: number | undefined): number {
