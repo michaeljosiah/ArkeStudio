@@ -85,6 +85,13 @@ export interface RetrievalDeps {
   getIndex: () => WorldIndex | null;
   attachments: WorldChatAttachmentStore;
   findAttachment: (lease: QueryLease, attachmentId: string) => Promise<WorldChatAttachment | null>;
+  /**
+   * What one run may read out of attachments in total, from the answering model's window.
+   *
+   * Absent means nobody could name a window and `MAX_TEXT_PER_RUN_CHARS` applies — the figure
+   * this was before it was asked of the harness rather than picked.
+   */
+  textBudgetChars?: () => number;
   now?: () => string;
 }
 
@@ -274,8 +281,9 @@ export class WorldChatRetrieval {
           return { result: { found: false, id }, receipt: receipt("empty", { querySummary: summarise(id) }) };
         }
 
+        const budget = this.deps.textBudgetChars?.() ?? MAX_TEXT_PER_RUN_CHARS;
         const spent = this.textSpentByRun.get(lease.runId) ?? 0;
-        if (spent >= MAX_TEXT_PER_RUN_CHARS) {
+        if (spent >= budget) {
           throw new RetrievalError(
             "budget-exhausted",
             "This run has read as much attachment text as it may.",
@@ -284,7 +292,7 @@ export class WorldChatRetrieval {
 
         const offset = typeof args["offset"] === "number" ? args["offset"] : 0;
         const requested = typeof args["limit"] === "number" ? args["limit"] : undefined;
-        const remaining = MAX_TEXT_PER_RUN_CHARS - spent;
+        const remaining = budget - spent;
         const read = await this.deps.attachments.readText(attachment, {
           offset,
           ...(requested !== undefined ? { limit: Math.min(requested, remaining) } : { limit: remaining }),

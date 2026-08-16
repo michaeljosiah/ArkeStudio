@@ -184,7 +184,7 @@ import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
 import { titleFrom } from "./world-chat/title.js";
 import { describeEntryContext } from "./world-chat/entry-context.js";
-import { currentLookContext } from "./world-chat/context.js";
+import { budgetFor, currentLookContext } from "./world-chat/context.js";
 import { discoverConversations } from "./world-chat/discover.js";
 import { recordResolution, sendBack } from "./world-chat/resolution.js";
 import { WorldChatStore, conversationDir } from "./world-chat/store.js";
@@ -197,6 +197,7 @@ import {
   CHAT_DOCUMENT_EXTENSIONS,
   refuseUnreadable,
   WorldChatAttachmentStore,
+  MAX_TEXT_PER_RUN_CHARS,
 } from "./world-chat/attachments.js";
 import { planFor } from "./world-chat/check-plan.js";
 import { createRunScratch, removeRunScratch } from "./world-chat/run-scratch.js";
@@ -5711,6 +5712,10 @@ export class Coordinator {
     const tokenByRun = new Map<string, string>();
     const retrieval = new WorldChatRetrieval({
       leases,
+      // The same window the prompt is budgeted from: a run that may be handed a whole library
+      // should be able to page back through it as well.
+      textBudgetChars: () =>
+        Math.max(MAX_TEXT_PER_RUN_CHARS, budgetFor(this.opts.adapter?.knownInputTokenLimit?.() ?? undefined)),
       getBundle: () => this.opts.provider.openStore?.()?.getBundle() ?? null,
       getIndex: () => this.opts.provider.openStore?.()?.getIndex() ?? null,
       attachments,
@@ -5872,8 +5877,9 @@ export class Coordinator {
         attachmentText: new Map(),
       }),
       readAttachmentText: async (attachment) => {
-        const read = await attachments.readText(attachment).catch(() => null);
-        return read?.text ?? null;
+        // Whole. What reaches the model is the prompt budget's decision, taken against the
+        // window with every other section in view — not a per-document cut made before it.
+        return attachments.readWholeText(attachment).catch(() => null);
       },
       // Whatever this run pulled through get_attachment_text, so a passage the model paged to is
       // quotable even though the prompt only ever inlined the document's opening.
