@@ -6,7 +6,7 @@ import { buildSessionConfig } from "@arke-studio/adapter-opencode";
 import type { DomainEvent, HarnessAdapter, HarnessEvent } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { attachToSandbox } from "../../src/artifacts/genesis-attachments.js";
-import { GenesisService } from "../../src/harness/genesis.js";
+import { GenesisService, genesisTokenBudget } from "../../src/harness/genesis.js";
 
 /** An adapter that behaves like a world-author: writes draft.json into its cwd, then replies. */
 function draftingAdapter(): HarnessAdapter & { created: string[] } {
@@ -375,5 +375,29 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     assert.ok(!events.some((e) => e.type === "genesis.draft"), "nothing settled, nothing emitted");
     const statuses = events.filter((e) => e.type === "genesis.status").map((e) => (e.type === "genesis.status" ? e.status : ""));
     assert.deepEqual(statuses, ["running", "completed"], "and it is still a completed turn");
+  });
+});
+
+/**
+ * What one creation conversation may spend (§8.5).
+ *
+ * The guard is against a runaway — an agent looping on its own output — and as a flat 120,000 it
+ * rationed honest work instead: an author who attaches a series bible spends most of that having
+ * it read, and the turns after were interrupted with "passed the 120,000-token budget".
+ */
+describe("the creation conversation's token budget", () => {
+  it("falls back when no model window can be named", () => {
+    assert.equal(genesisTokenBudget(undefined), 120_000);
+    assert.equal(genesisTokenBudget(null), 120_000);
+    assert.equal(genesisTokenBudget(0), 120_000, "a nonsense window is no window");
+  });
+
+  it("takes it from the window of the model that answers", () => {
+    // The window this machine's harness actually reports.
+    assert.equal(genesisTokenBudget(922_000), 9_220_000);
+  });
+
+  it("never drops below the floor for a very small window", () => {
+    assert.equal(genesisTokenBudget(1_000), 120_000);
   });
 });

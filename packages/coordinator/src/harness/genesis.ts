@@ -30,7 +30,32 @@ interface ActiveTurn {
 }
 
 const DEFAULT_WALL_CLOCK_MS = 3 * 60_000;
-const DEFAULT_TOKEN_BUDGET = 120_000;
+
+/**
+ * The floor for one creation conversation's spend, when nobody can say what model is answering.
+ *
+ * What this guards is a runaway — an agent looping on its own output until somebody notices. It
+ * was never meant to ration honest work, and as a flat 120,000 it did: a creation conversation
+ * where the author attaches a series bible spends most of that reading it, and the turns after
+ * were interrupted mid-sentence with "passed the 120,000-token budget".
+ */
+const FALLBACK_TOKEN_BUDGET = 120_000;
+
+/**
+ * How many full windows one creation conversation may spend before it is called a runaway.
+ *
+ * A turn may legitimately fill the model's input window — that is what the prompt budget now
+ * allows — so a session budget worth less than a few of them stops the work rather than the loop.
+ * Ten is not a measured figure; it is comfortably more than a person types through and still
+ * finite, which is the only property the guard actually needs.
+ */
+const SESSION_WINDOWS = 10;
+
+/** What one creation conversation may spend, from the window of the model that answers it. */
+export function genesisTokenBudget(inputTokenLimit: number | null | undefined): number {
+  if (!inputTokenLimit || inputTokenLimit <= 0) return FALLBACK_TOKEN_BUDGET;
+  return Math.max(FALLBACK_TOKEN_BUDGET, inputTokenLimit * SESSION_WINDOWS);
+}
 /** The follow-up that asks for the draft alone is short work; it does not get the full clock. */
 const DRAFT_ASK_MS = 60_000;
 
@@ -150,7 +175,8 @@ export class GenesisService {
     status("running");
 
     const wallClock = this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS;
-    const tokenBudget = this.opts.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
+    const tokenBudget =
+      this.opts.tokenBudget ?? genesisTokenBudget(this.adapter.knownInputTokenLimit?.());
     const abort = new AbortController();
     let ending: { state: "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed"; detail?: string } | null =
       null;
