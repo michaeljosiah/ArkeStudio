@@ -3485,6 +3485,7 @@ export class Coordinator {
           this.opts.adapter,
           this.buildConfig,
           this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
+          { agent: "prompt-enhancer", maxChars: model.limits.maxPromptChars ?? 4000 },
         );
         const prompt = await director(enhancerBrief(store.getBundle(), model, msg.brief)).catch(() => null);
         void this.appLog?.append({

@@ -21,27 +21,27 @@ export function enhancerBrief(
     .map((c) => `- ${c.title}`);
   const meta = bundle.meta;
   const cap = model.limits.maxPromptChars;
-  const lines = [
+  const world = [
+    `World: ${meta.name}`,
+    meta.logline?.trim() ? `Logline: ${meta.logline.trim()}` : null,
+    meta.tone?.trim() ? `Tone: ${meta.tone.trim()}` : null,
+    meta.genre?.trim() ? `Genre: ${meta.genre.trim()}` : null,
+    `The world's look, binding: ${bundle.artDirection.description}`,
+    canonLines.length > 0 ? `Established, and binding:\n${canonLines.join("\n")}` : null,
+  ].filter((l): l is string => l !== null);
+  const rules = [
+    "- Keep the author's subject; translate it into what an image or video model wants - subject, light, lens, material, motion.",
+    "- Stay inside the world's look and its established canon; invent nothing the world has not said.",
+    '- Reference tokens like "Image 1" or "Audio 2" are citations the pipeline resolves - keep any the ask uses, verbatim.',
+    ...(cap !== undefined ? [`- ${model.displayName} takes at most ${cap} characters of prompt; stay well inside it.`] : []),
+    '- Answer with JSON only: {"prompt": "..."} - no prose around it.',
+  ];
+  return [
     `Rewrite the author's ask below as a single ${model.capability} prompt for ${model.displayName}` +
       (model.family !== undefined ? ` (the ${model.family} family)` : "") +
       ".",
-    "",
-    `World: ${meta.name}`,
-    meta.logline?.trim() ? `Logline: ${meta.logline.trim()}` : "",
-    meta.tone?.trim() ? `Tone: ${meta.tone.trim()}` : "",
-    meta.genre?.trim() ? `Genre: ${meta.genre.trim()}` : "",
-    `The world's look, binding: ${bundle.artDirection.description}`,
-    canonLines.length > 0 ? `Established, and binding:\n${canonLines.join("\n")}` : "",
-    "",
-    "The author's ask, whose subject and intent are not yours to change:",
-    ask.trim(),
-    "",
-    "Rules:",
-    "- Keep the author's subject; translate it into what an image or video model wants — subject, light, lens, material, motion.",
-    "- Stay inside the world's look and its established canon; invent nothing the world has not said.",
-    "- Reference tokens like \"Image 1\" or \"Audio 2\" are citations the pipeline resolves — keep any the ask uses, verbatim.",
-    ...(cap !== undefined ? [`- ${model.displayName} takes at most ${cap} characters of prompt; stay well inside it.`] : []),
-    '- Answer with JSON only: {"prompt": "..."} — no prose around it.',
-  ];
-  return lines.filter((l) => l.length > 0 || l === "").join("\n");
+    world.join("\n"),
+    `The author's ask, whose subject and intent are not yours to change:\n${ask.trim()}`,
+    `Rules:\n${rules.join("\n")}`,
+  ].join("\n\n");
 }

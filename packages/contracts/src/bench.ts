@@ -11,6 +11,7 @@ import {
 import { JobStatusSchema } from "./job.js";
 import { SizeTierSchema, modeSpec, modeUnavailableReason, supportsMode, type ManifestModel, type TaskMode } from "./manifest.js";
 import { MediaInfoSchema } from "./media.js";
+import { PROVIDERS } from "./provider.js";
 import { ReferenceKindSchema, type ReferenceKind } from "./reference-budget.js";
 import { TakeCostSchema } from "./take.js";
 
@@ -691,6 +692,8 @@ export function recipeFault(
   recipe: BenchRecipe,
   manifest: { models: readonly ManifestModel[] } | null,
   disabled: readonly string[],
+  /** Providers whose stored key unlocks this capability. Absent = do not judge credentials. */
+  unlocked?: readonly string[],
 ): RecipeFault {
   const model = manifest?.models.find((m) => m.id === recipe.model && m.provider === recipe.provider);
   if (!model) return { ok: false, reason: `"${recipe.model}" is no longer in the manifest` };
@@ -699,6 +702,9 @@ export function recipeFault(
   }
   if (disabled.includes(recipe.model)) {
     return { ok: false, reason: `${model.displayName} is switched off in Providers` };
+  }
+  if (unlocked !== undefined && !unlocked.includes(recipe.provider) && PROVIDERS[model.provider]?.local !== true) {
+    return { ok: false, reason: `no provider key unlocks ${model.displayName}` };
   }
   return { ok: true };
 }

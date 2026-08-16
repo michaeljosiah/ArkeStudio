@@ -145,6 +145,22 @@ Respond with ONLY a JSON object: {"prompt": "..."}
 - Around 60 words. One paragraph, no line breaks, no lists, no headings.`,
   },
   {
+    name: "prompt-enhancer",
+    description: "Rewrite an author's ask as a prompt for the chosen image or video model",
+    // No proposal directory: it writes nothing, it answers. Same shape as art-director.
+    needsProposal: false,
+    brief: `You rewrite an author's rough ask as ONE prompt for the image or video model the task names.
+
+Respond with ONLY a JSON object: {"prompt": "..."}
+
+- The task text states the model, the world's look, what is established, and any length
+  ceiling - follow it exactly; it outranks any habit about length or subject matter.
+- Keep the author's subject and intent; translate the wording toward what the named model
+  wants: subject, action, setting, time of day, light, materials, lens or medium, motion.
+- Keep reference names like "Image 1" or "Audio 2" verbatim wherever the ask uses them.
+- Invent nothing the task did not state.`,
+  },
+  {
     name: "canon-qa",
     description: "Answer questions from retrieved canon",
     needsProposal: false,

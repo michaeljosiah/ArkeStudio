@@ -2486,10 +2486,10 @@ export function sendBenchEnhanceBrief(input: {
   brief: string;
   provider: string;
   model: string;
-}): string {
+}): string | null {
   const requestId = ulid();
-  send({ kind: "bench-enhance-brief", requestId, ...input } as ClientMessage);
-  return requestId;
+  const sent = send({ kind: "bench-enhance-brief", requestId, ...input } as ClientMessage);
+  return sent ? requestId : null;
 }
 
 export function sendBenchRecipeSave(input: {

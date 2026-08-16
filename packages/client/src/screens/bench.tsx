@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
+  deriveCapabilityAvailability,
   estimateMicroUsd,
   formatMicroUsd,
   frameTaskModes,
@@ -200,12 +201,27 @@ function BenchWorkspace({
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [recipesOpen, setRecipesOpen] = useState(false);
   const recipes = state?.app.recipes ?? [];
+  // Which providers a stored key actually unlocks, per capability - the recipes menu judges
+  // its rows with the same evidence the model dropdown does.
+  const unlockedFor = useMemo(() => {
+    const availability = deriveCapabilityAvailability(state?.app.providers ?? []);
+    return {
+      image: availability.find((a) => a.capability === "image")?.via ?? [],
+      video: availability.find((a) => a.capability === "video")?.via ?? [],
+    } as const;
+  }, [state?.app.providers]);
   const [briefExpanded, setBriefExpanded] = useState(false);
   const briefUnder = useRef<HTMLDivElement>(null);
 
   // ---- the enhancer's round trip: request out, answer in, the author's hand between ----
   const [enhancing, setEnhancing] = useState(false);
-  const enhancingRef = useRef<{ requestId: string; sentBrief: string } | null>(null);
+  const enhancingRef = useRef<{ requestId: string; sentBrief: string; provider: string; model: string; mode: string } | null>(null);
+  const enhanceDeadline = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearEnhanceDeadline = () => {
+    if (enhanceDeadline.current) clearTimeout(enhanceDeadline.current);
+    enhanceDeadline.current = null;
+  };
+  useEffect(() => clearEnhanceDeadline, []);
   /** The previous words after an auto-apply — one press brings them back. */
   const [enhanceUndo, setEnhanceUndo] = useState<string | null>(null);
   /** An answer that arrived after the words moved — offered, never imposed. */
@@ -219,12 +235,18 @@ function BenchWorkspace({
         const pending = enhancingRef.current;
         if (!pending || answer.requestId !== pending.requestId) return;
         enhancingRef.current = null;
+        clearEnhanceDeadline();
         setEnhancing(false);
         if (answer.prompt === null) {
           setEnhanceNote(answer.reason ?? "the art director had no answer this time");
           return;
         }
-        if (draftRef.current.brief === pending.sentBrief) {
+        const unmoved =
+          draftRef.current.brief === pending.sentBrief &&
+          draftRef.current.provider === pending.provider &&
+          draftRef.current.model === pending.model &&
+          draftRef.current.mode === pending.mode;
+        if (unmoved) {
           // Unmoved words: the enhancement lands, and the originals are one press away.
           setEnhanceUndo(pending.sentBrief);
           compose({ ...draftRef.current, brief: answer.prompt });
@@ -635,8 +657,27 @@ function BenchWorkspace({
                       provider: model.provider,
                       model: model.id,
                     });
-                    enhancingRef.current = { requestId, sentBrief: draft.brief };
+                    if (requestId === null) {
+                      setEnhanceNote("not connected - try again");
+                      return;
+                    }
+                    enhancingRef.current = {
+                      requestId,
+                      sentBrief: draft.brief,
+                      provider: model.provider,
+                      model: model.id,
+                      mode: draft.mode,
+                    };
                     setEnhancing(true);
+                    // The coordinator's own wall clock is 120s; a lost answer says so rather
+                    // than pulsing forever with the button locked.
+                    clearEnhanceDeadline();
+                    enhanceDeadline.current = setTimeout(() => {
+                      if (enhancingRef.current?.requestId !== requestId) return;
+                      enhancingRef.current = null;
+                      setEnhancing(false);
+                      setEnhanceNote("the art director did not answer - try again");
+                    }, 130_000);
                   }}
                 >
                   <Sparkle size={13} />
@@ -795,7 +836,7 @@ function BenchWorkspace({
                   <div className="fy-bench__recipemenu" role="menu" aria-label="Recipes">
                     {recipes.length === 0 && <span className="fy-bench__recipenone">No recipes yet.</span>}
                     {recipes.map((recipe) => {
-                      const fault = recipeFault(recipe, manifest, state?.app.models.disabled ?? []);
+                      const fault = recipeFault(recipe, manifest, state?.app.models.disabled ?? [], unlockedFor[recipe.mode]);
                       return (
                         <div key={recipe.id} className="fy-bench__reciperow">
                           <button
@@ -886,7 +927,7 @@ function BenchWorkspace({
                 <ChevronDown size={12} />
               </span>
             )}
-            <span style={{ flex: 1 }} />
+            {models.length > 0 && <span style={{ flex: 1 }} />}
             {estimate !== null && (
               <span data-testid="bench-estimate" className="fy-bench__estimate">
                 {`~${formatMicroUsd(estimate)}`}
