@@ -104,19 +104,81 @@ export interface DiscoveryOptions {
   runCommand?: CommandRunner;
 }
 
-/** Resolve the OpenCode to use, or null with the honest reason. */
-export async function discoverOpenCode(opts: DiscoveryOptions = {}): Promise<DiscoveredOpenCode | null> {
+async function discoverCommand(
+  command: string,
+  opts: DiscoveryOptions,
+): Promise<DiscoveredOpenCode | null> {
   const run = opts.runCommand ?? runCommand;
   if (opts.configuredPath && existsSync(opts.configuredPath)) {
     const version = await versionOf(opts.configuredPath, run);
     if (version !== null) return { command: opts.configuredPath, source: "configured", version };
   }
-  const fromPath = await resolveOnPath("opencode", run);
+  const fromPath = await resolveOnPath(command, run);
   if (fromPath) {
     return { command: fromPath, source: "path", version: await versionOf(fromPath, run) };
   }
   if (opts.bundledPath && existsSync(opts.bundledPath)) {
     return { command: opts.bundledPath, source: "bundled", version: await versionOf(opts.bundledPath, run) };
+  }
+  return null;
+}
+
+/** Resolve the OpenCode v1 to use, or null with the honest reason. */
+export async function discoverOpenCode(opts: DiscoveryOptions = {}): Promise<DiscoveredOpenCode | null> {
+  return discoverCommand("opencode", opts);
+}
+
+/**
+ * The v2 build floor. Beta versions are `0.0.0-next-<build>`, which no semver comparison
+ * orders usefully, so the gate reads the build number. The floor is the build every wire
+ * shape in the v2 backing was measured against (issue 327 §3); a binary older than the pin
+ * is treated as absent, with the reason surfaced by the caller.
+ */
+export const OPENCODE2_MIN_BUILD = 17_444;
+
+/** Whether a discovered v2 version satisfies the pinned-contract gate. */
+export function meetsV2Gate(version: string | null, minBuild: number = OPENCODE2_MIN_BUILD): boolean {
+  if (version === null) return false;
+  const next = /next-(\d+)/.exec(version);
+  if (next) return Number(next[1]) >= minBuild;
+  // A stable release (2.x and beyond) postdates every next-build.
+  const major = /^(\d+)\./.exec(version);
+  return major !== null && Number(major[1]) >= 2;
+}
+
+/** Resolve the opencode2 to use — the gate is part of discovery, not a runtime probe. */
+export async function discoverOpenCode2(
+  opts: DiscoveryOptions & { minBuild?: number } = {},
+): Promise<DiscoveredOpenCode | null> {
+  const found = await discoverCommand("opencode2", opts);
+  if (found === null) return null;
+  if (!meetsV2Gate(found.version, opts.minBuild)) return null;
+  return found;
+}
+
+export interface DiscoveredHarness {
+  generation: "v2" | "v1";
+  discovery: DiscoveredOpenCode;
+}
+
+/**
+ * Both binaries coexist by design; v2 wins unless Settings says otherwise (issue 327 §3).
+ * The choice is a launch-time decision — it never changes under a running session.
+ */
+export async function discoverPreferredHarness(opts: {
+  preferV1?: boolean;
+  v1?: DiscoveryOptions;
+  v2?: DiscoveryOptions & { minBuild?: number };
+} = {}): Promise<DiscoveredHarness | null> {
+  if (!opts.preferV1) {
+    const v2 = await discoverOpenCode2(opts.v2 ?? {});
+    if (v2) return { generation: "v2", discovery: v2 };
+  }
+  const v1 = await discoverOpenCode(opts.v1 ?? {});
+  if (v1) return { generation: "v1", discovery: v1 };
+  if (opts.preferV1) {
+    const v2 = await discoverOpenCode2(opts.v2 ?? {});
+    if (v2) return { generation: "v2", discovery: v2 };
   }
   return null;
 }
