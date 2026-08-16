@@ -716,3 +716,39 @@ describe("the new video families carry the routes' own numbers (fal catalogue sy
     assert.equal(byId("wan-2.7").limits.maxPromptChars, undefined);
   });
 });
+
+describe("a length goes in the route's own type (fal 422, 2026-08-16)", () => {
+  /**
+   * Wan accepted the submission, queued the job, and answered its result with
+   * `Input should be 2, 3, ... 15` for an input of "2". The lengths are stored as strings
+   * because they are record keys; the wire value must be the route's declared type, and it is
+   * converted here — at the one place every surface asks for a length — rather than at each
+   * caller, which is how the bench came to send a quoted number while the client sent a bare one.
+   */
+  it("sends a number where the route declares one, a string where it declares that", () => {
+    const wan = FAL_MODELS.find((m) => m.id === "wan-2.7")!;
+    const asked = dispatchDuration(wan, 2);
+    assert.equal(asked.kind, "asked");
+    if (asked.kind === "asked") {
+      assert.equal(asked.wire, 2);
+      assert.equal(typeof asked.wire, "number");
+    }
+    const seedance = FAL_MODELS.find((m) => m.id === "seedance-2.0")!;
+    const legacy = dispatchDuration(seedance, 5);
+    if (legacy.kind === "asked") {
+      assert.equal(legacy.wire, "5");
+      assert.equal(typeof legacy.wire, "string");
+    }
+  });
+
+  it("covers every video row the catalogue ships, so a new family cannot reintroduce it", () => {
+    for (const model of FAL_MODELS.filter((m) => m.capability === "video")) {
+      const options = Object.keys(model.limits.durations ?? {}).map(Number);
+      if (options.length === 0) continue;
+      const choice = dispatchDuration(model, options[0]!);
+      if (choice.kind !== "asked") continue;
+      const expected = model.limits.durationWire === "number" ? "number" : "string";
+      assert.equal(typeof choice.wire, expected, `${model.id} sends a ${expected} duration`);
+    }
+  });
+});
