@@ -7,6 +7,7 @@ bundling; `scripts/verify-licenses.mjs` gates packaging on this file staying com
 | Component | Licence | Obligations, as shipped |
 |---|---|---|
 | OpenCode (harness binary) | MIT | Attribution: licence text shipped here. Redistribution in a signed installer permitted. Invoked as a separate supervised process. |
+| OpenCode 2 (harness binary, beta) | MIT | Attribution: licence text ships beside the binary as `resources/opencode2/LICENSE.opencode2.txt`, pinned to the upstream commit it was fetched from. Redistribution in a signed installer permitted (anomalyco/opencode). Invoked as a separate supervised process, never linked; exact build pinned in `apps/desktop/runtime-sources.json`. |
 | Voxa (voice sidecar) | MIT | First-party sibling project; self-contained separate process. Voxa, .NET, ONNX Runtime, Whisper.net, NAudio, and all managed dependency licence/notice material ship inside `resources/voxa/THIRD-PARTY-NOTICES`. |
 | Microsoft Visual C++ runtime | Microsoft redistributable licence | Matching-architecture runtime DLLs bundled with Voxa so native ONNX/Whisper libraries do not depend on machine-global installation. |
 | espeak-ng (phonemizer) | GPL-3.0 | **Never linked** — invoked strictly as a separate executable (R-10), the same arrangement Voxa makes. Exact GPL text and the complete pinned 1.52.0 source archive ship beside the executable. |

@@ -72,6 +72,22 @@ export default async function verifyPackagedRuntimes(context) {
     throw new Error(`resources/ffmpeg was staged for a different architecture than ${arch}`);
   }
 
+  /*
+   * The bundled v2 harness (issue 327 §9). Same stance as ffmpeg above: an extraResources
+   * entry that quietly fails to copy does not fail the build, and the app then degrades to
+   * "OpenCode: not found — authoring disabled" on machines with no PATH install — a fresh
+   * machine's first run, exactly who the bundle exists for. The v1 entry lived that way for
+   * every release to date; the v2 one is checked.
+   */
+  const opencode2 = join(resources, "opencode2");
+  if (!existsSync(join(opencode2, "opencode2.exe"))) {
+    throw new Error("resources/opencode2 is missing opencode2.exe — the bundled harness did not copy");
+  }
+  assertPeArchitecture(join(opencode2, "opencode2.exe"), arch);
+  if (verifyManifest(opencode2).arch !== arch) {
+    throw new Error(`resources/opencode2 was staged for a different architecture than ${arch}`);
+  }
+
   const forbidden = new Set(["kokoro-82m", "whisper-base-en", "model_quantized.onnx", "ggml-base.en.bin"]);
   const inspect = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
