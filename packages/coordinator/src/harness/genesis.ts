@@ -30,7 +30,16 @@ interface ActiveTurn {
   cancelled: boolean;
 }
 
-const DEFAULT_WALL_CLOCK_MS = 3 * 60_000;
+/**
+ * How long before a turn is called hung rather than slow (§19).
+ *
+ * It catches a run that will never arrive; it is not there to police work that takes a while.
+ * Two things make a generous figure the right one: a person can stop a turn themselves, from the
+ * working line where they can see how long it has been going — so the clock is the backstop and
+ * not the control — and a turn may now legitimately take far longer than it used to, because the
+ * prompt it carries is bounded by the model's window rather than by a fixed character count.
+ */
+const DEFAULT_WALL_CLOCK_MS = 15 * 60_000;
 
 /**
  * The floor for one creation conversation, when no model window can be named.
@@ -40,7 +49,7 @@ const DEFAULT_WALL_CLOCK_MS = 3 * 60_000;
 const FALLBACK_TOKEN_BUDGET = 120_000;
 
 /** The follow-up that asks for the draft alone is short work; it does not get the full clock. */
-const DRAFT_ASK_MS = 60_000;
+const DRAFT_ASK_MS = 5 * 60_000;
 
 /** Asked only when the agent replied without touching draft.json. */
 const DRAFT_REQUEST = `Now write ./draft.json for the world as it stands after that reply, and return its

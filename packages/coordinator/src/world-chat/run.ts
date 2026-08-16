@@ -43,8 +43,16 @@ import { WorldChatStore } from "./store.js";
  * which did not persist is worse than no reply.
  */
 
-/** A turn that takes longer than this is not going to arrive (§19). */
-export const DEFAULT_TURN_TIMEOUT_MS = 120_000;
+/**
+ * How long before a turn is called hung rather than slow (§19).
+ *
+ * It catches a run that will never arrive; it is not there to police work that takes a while.
+ * Two things make a generous figure the right one: a person can stop a turn themselves, from the
+ * working line where they can see how long it has been going — so the clock is the backstop and
+ * not the control — and a turn may now legitimately take far longer than it used to, because the
+ * prompt it carries is bounded by the model's window rather than by a fixed character count.
+ */
+export const DEFAULT_TURN_TIMEOUT_MS = 15 * 60_000;
 
 export interface RunDeps {
   adapter: HarnessAdapter | null;

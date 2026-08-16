@@ -33,7 +33,16 @@ interface ActiveRun {
   cancelled: boolean;
 }
 
-const DEFAULT_WALL_CLOCK_MS = 5 * 60_000;
+/**
+ * How long before a turn is called hung rather than slow (§19).
+ *
+ * It catches a run that will never arrive; it is not there to police work that takes a while.
+ * Two things make a generous figure the right one: a person can stop a turn themselves, from the
+ * working line where they can see how long it has been going — so the clock is the backstop and
+ * not the control — and a turn may now legitimately take far longer than it used to, because the
+ * prompt it carries is bounded by the model's window rather than by a fixed character count.
+ */
+const DEFAULT_WALL_CLOCK_MS = 15 * 60_000;
 /**
  * The floor for one proposal's drafting conversation, when no model window can be named.
  *
