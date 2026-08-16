@@ -1372,9 +1372,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
-   * Attach one already-filed source. Token allocation is the coordinator's: re-adding a source
-   * the registry knows restores its old token; a new source takes the next number of its kind.
-   * `replace` names the active token that gives way when the set is at the model's ceiling.
+   * Attach already-filed sources, in the order picked. Token allocation is the coordinator's:
+   * re-adding a source the registry knows restores its old token; a new source takes the next
+   * number of its kind. Each pick's `replace` names the active token that gives way when the
+   * set is at the model's ceiling. One message on purpose — the picker commits a checked set
+   * together, and N separate frames would race each other's token allocation.
    */
   z
     .object({
@@ -1382,11 +1384,20 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       sessionId: SessionIdSchema,
       requestId: UlidSchema,
-      source: z.discriminatedUnion("source", [
-        z.object({ source: z.literal("artifact"), artifactId: z.string().min(1) }).strict(),
-        z.object({ source: z.literal("take"), takeId: TakeIdSchema }).strict(),
-      ]),
-      replace: z.string().optional(),
+      picks: z
+        .array(
+          z
+            .object({
+              source: z.discriminatedUnion("source", [
+                z.object({ source: z.literal("artifact"), artifactId: z.string().min(1) }).strict(),
+                z.object({ source: z.literal("take"), takeId: TakeIdSchema }).strict(),
+              ]),
+              replace: z.string().optional(),
+            })
+            .strict(),
+        )
+        .min(1)
+        .max(24),
     })
     .strict(),
   z

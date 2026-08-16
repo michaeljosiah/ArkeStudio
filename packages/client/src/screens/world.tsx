@@ -3506,7 +3506,7 @@ export function ArtifactsScreen() {
         {/* A cell of the same grid, filling out the last row (design 68a) — never its own band. */}
         <div
           className="fy-gridcard fy-gridcard--quiet"
-          style={{ gridColumn: "auto / -1", border: "1.5px dashed var(--neutral-300)", background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", gap: 14, minHeight: 176, boxShadow: "none" }}
+          style={{ border: "1.5px dashed var(--neutral-300)", background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", gap: 14, minHeight: 176, boxShadow: "none" }}
         >
           <span className="fy-newprodcard__ring" style={{ width: 40, height: 40 }}>
             <Plus size={18} />

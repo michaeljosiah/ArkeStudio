@@ -265,16 +265,11 @@ function BenchWorkspace({
       aria-label="Aspect"
       className="fy-bench__chip"
       value={draft.params.aspect ?? ""}
-      onChange={(e) =>
-        compose({
-          ...draft,
-          params: {
-            ...draft.params,
-            kind: draft.params.kind,
-            ...(e.target.value ? { aspect: e.target.value } : {}),
-          } as BenchParams,
-        })
-      }
+      onChange={(e) => {
+        // "default" means the key is absent, not the old value carried under a new label.
+        const { aspect: _cleared, ...rest } = draft.params;
+        compose({ ...draft, params: { ...rest, ...(e.target.value ? { aspect: e.target.value } : {}) } as BenchParams });
+      }}
     >
       <option value="">aspect · default</option>
       {aspects.map((a) => (
@@ -327,7 +322,12 @@ function BenchWorkspace({
                         aria-current={s.id === session.id}
                         onClick={() => {
                           setSessionsOpen(false);
-                          if (s.id !== session.id) void navigate(`/w/${worldId}/artifacts/bench/${s.id}`);
+                          if (s.id === session.id) return;
+                          // The open is sent here, not left to the URL effect: the address may
+                          // already read this id (the workspace moved on without it), and a
+                          // same-path navigate re-fires nothing.
+                          sendBenchOpen(worldId, s.id);
+                          void navigate(`/w/${worldId}/artifacts/bench/${s.id}`, { replace: true });
                         }}
                       >
                         <span className="fy-bench__sessionname">{s.title ?? "Untitled session"}</span>
@@ -342,6 +342,9 @@ function BenchWorkspace({
                       onClick={() => {
                         setSessionsOpen(false);
                         sendBenchNewSession(worldId);
+                        // Back to the id-less address: the fresh session's id fills it in when
+                        // the workspace arrives, so the URL never names a session it left.
+                        void navigate(`/w/${worldId}/artifacts/bench`, { replace: true });
                       }}
                     >
                       <Plus size={12} />
@@ -361,7 +364,10 @@ function BenchWorkspace({
             type="button"
             className="fy-bench__railnew"
             title="Clear the bench — a new session; this one keeps running"
-            onClick={() => sendBenchNewSession(worldId)}
+            onClick={() => {
+              sendBenchNewSession(worldId);
+              void navigate(`/w/${worldId}/artifacts/bench`, { replace: true });
+            }}
           >
             <Plus size={14} />
           </button>
@@ -487,12 +493,10 @@ function BenchWorkspace({
                     aria-label="Size"
                     className="fy-bench__chip"
                     value={draft.params.tier ?? ""}
-                    onChange={(e) =>
-                      compose({
-                        ...draft,
-                        params: { ...draft.params, kind: "image", ...(e.target.value ? { tier: e.target.value as SizeTier } : {}) } as BenchParams,
-                      })
-                    }
+                    onChange={(e) => {
+                      const { tier: _cleared, ...rest } = draft.params as BenchParams & { tier?: SizeTier };
+                      compose({ ...draft, params: { ...rest, ...(e.target.value ? { tier: e.target.value as SizeTier } : {}) } as BenchParams });
+                    }}
                   >
                     <option value="">size · default</option>
                     {tiersFor(model).map((tier) => (
@@ -524,12 +528,10 @@ function BenchWorkspace({
                     aria-label="Resolution"
                     className="fy-bench__chip"
                     value={draft.params.resolution ?? ""}
-                    onChange={(e) =>
-                      compose({
-                        ...draft,
-                        params: { ...draft.params, kind: "video", ...(e.target.value ? { resolution: e.target.value } : {}) } as BenchParams,
-                      })
-                    }
+                    onChange={(e) => {
+                      const { resolution: _cleared, ...rest } = draft.params as BenchParams & { resolution?: string };
+                      compose({ ...draft, params: { ...rest, ...(e.target.value ? { resolution: e.target.value } : {}) } as BenchParams });
+                    }}
                   >
                     <option value="">resolution · default</option>
                     {(model.limits.resolutions ?? []).map((r) => (
@@ -544,16 +546,10 @@ function BenchWorkspace({
                     aria-label="Duration"
                     className="fy-bench__chip"
                     value={draft.params.durationSec ?? ""}
-                    onChange={(e) =>
-                      compose({
-                        ...draft,
-                        params: {
-                          ...draft.params,
-                          kind: "video",
-                          ...(e.target.value ? { durationSec: Number(e.target.value) } : {}),
-                        } as BenchParams,
-                      })
-                    }
+                    onChange={(e) => {
+                      const { durationSec: _cleared, ...rest } = draft.params as BenchParams & { durationSec?: number };
+                      compose({ ...draft, params: { ...rest, ...(e.target.value ? { durationSec: Number(e.target.value) } : {}) } as BenchParams });
+                    }}
                   >
                     <option value="">length · default</option>
                     {durationOptions(model).map((s) => (
@@ -776,8 +772,8 @@ function BenchWorkspace({
           carried={carried}
           world={worldSources}
           session={sessionSources}
-          onAdd={(pick, replace) => {
-            sendBenchAddReference(worldId, session.id, pick, replace);
+          onAdd={(picks) => {
+            sendBenchAddReference(worldId, session.id, picks);
           }}
           onUpload={() => {
             sendBenchUploadReferences(worldId, session.id);

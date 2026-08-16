@@ -3949,8 +3949,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-bench__brieftext {
   position: absolute; inset: 0; width: 100%; height: 100%; padding: 11px 12px;
   font: 400 12px/1.65 var(--font-sans); white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
+  scrollbar-gutter: stable;
 }
-.fy-bench__briefunder { overflow: hidden; color: var(--foreground); pointer-events: none; }
+.fy-bench__briefunder { overflow-y: hidden; color: var(--foreground); pointer-events: none; }
 .fy-bench__brieftext {
   resize: none; border: 0; outline: none; background: transparent; overflow-y: auto;
   color: transparent; caret-color: var(--foreground);
@@ -3959,7 +3960,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-bench__brieftext::selection { background: color-mix(in srgb, var(--primary) 18%, transparent); }
 .fy-bench__briefchip {
   background: var(--secondary); color: var(--foreground); border-radius: 5px;
-  box-shadow: 0 0 0 2.5px var(--secondary); font-weight: 500;
+  box-shadow: 0 0 0 2.5px var(--secondary);
 }
 .fy-bench__brieffoot { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-top: 1px solid var(--border); flex: none; }
 .fy-bench__footicon {
@@ -4099,6 +4100,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-refpicker__wave { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--neutral-500); }
 .fy-refpicker__wave--muted { color: var(--neutral-300); }
+.dark .fy-refpicker__wave--muted { color: var(--neutral-700); }
 .fy-refpicker__doc {
   position: absolute; inset: 12px 20px; border-radius: 7px; background: var(--background); box-shadow: var(--shadow-xs);
   display: flex; flex-direction: column; gap: 5px; padding: 12px 11px 0;
@@ -4166,6 +4168,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 /* The Artifacts door (design 68a): the pair rides the pill nav's own row. The screen wrapper
    is static, so the anchor is .fy-content — top 13px centres 36px buttons on the 40px nav. */
 .fy-artifacts-door { position: absolute; top: 13px; right: 48px; z-index: 21; display: flex; align-items: center; gap: 8px; }
+@media (max-width: 1240px) {
+  .fy-artifacts-door { position: static; justify-content: flex-end; padding: 12px 24px 0; }
+}
 
 /* "Lift facts" is an offer in the card's meta register, not the card's headline (68a). */
 .fy-liftfacts {

@@ -128,8 +128,8 @@ export function ReferencePickerBody({
   carried: readonly MultimediaReference[];
   world: PickerSource[];
   session: PickerSource[];
-  /** Bench: one committed pick, optionally replacing an active token at the image ceiling. */
-  onAdd?: (pick: PickerSource["pick"], replace?: string) => void;
+  /** Bench: the checked set, committed together and in order — one message, not N races. */
+  onAdd?: (picks: ReadonlyArray<{ pick: PickerSource["pick"]; replace?: string }>) => void;
   /** Slot: the one choice. */
   onChoose?: (pick: PickerSource["pick"]) => void;
   onUpload: () => void;
@@ -461,7 +461,7 @@ export function ReferencePickerBody({
               data-testid="picker-add"
               disabled={picks.length === 0}
               onClick={() => {
-                for (const p of picks) onAdd?.(p.source.pick, p.replace);
+                onAdd?.(picks.map((p) => ({ pick: p.source.pick, ...(p.replace !== undefined ? { replace: p.replace } : {}) })));
                 setPicks([]);
                 onClose();
               }}
