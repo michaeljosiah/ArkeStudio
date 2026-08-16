@@ -493,6 +493,11 @@ describe("the video length and its sound (asked for 2026-08-16)", () => {
       const html = renderWith({ durationSec: 8 });
       assert.match(html, /8 s/);
       assert.match(html, /fy-bench__durationpill--over/);
+      // And the handle sits one position PAST the ceiling rather than on it, so the ceiling is
+      // still somewhere the handle can be clicked back onto — the way out of the refusal.
+      const stops = 2; // [4, 6] once the reference shortens the range
+      assert.match(html, new RegExp(`max="${stops}"`));
+      assert.match(html, new RegExp(`value="${stops}"`));
     });
   });
 });

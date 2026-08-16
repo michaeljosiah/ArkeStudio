@@ -373,9 +373,8 @@ function BenchWorkspace({
    */
   const durationOverCeiling =
     videoParams?.durationSec !== undefined && durationStops.length > 0 && !durationStops.includes(videoParams.durationSec);
-  const durationIndex = durationOverCeiling
-    ? durationStops.length - 1
-    : Math.max(0, durationStops.indexOf(videoParams?.durationSec ?? durationStops[0] ?? 0));
+  /** Where the chosen length sits among the stops; meaningless when it is over the ceiling. */
+  const durationIndex = Math.max(0, durationStops.indexOf(videoParams?.durationSec ?? durationStops[0] ?? 0));
   /**
    * The track carries one position below its shortest stop, and that position means "unsaid".
    *
@@ -387,8 +386,13 @@ function BenchWorkspace({
    */
   const durationUnset = videoParams?.durationSec === undefined;
   const durationMin = -1;
-  const durationMax = Math.max(0, durationStops.length - 1);
-  const durationValue = durationUnset ? durationMin : durationIndex;
+  /**
+   * A length past the ceiling gets a position past the end, for the same reason "unsaid" gets
+   * one below the start: parked *on* the ceiling, the handle could not be clicked back onto it,
+   * and the one obvious way out of the refusal would do nothing.
+   */
+  const durationMax = Math.max(0, durationStops.length - 1) + (durationOverCeiling ? 1 : 0);
+  const durationValue = durationUnset ? durationMin : durationOverCeiling ? durationMax : durationIndex;
   const durationFill =
     durationUnset || durationMax <= durationMin
       ? 0
@@ -938,7 +942,9 @@ function BenchWorkspace({
                     compose({ ...draft, params: { ...rest } as BenchParams });
                     return;
                   }
-                  const seconds = durationStops[index]!;
+                  // The position past the end exists only to hold an over-ceiling length; landing
+                  // on it means the ceiling itself.
+                  const seconds = durationStops[index] ?? durationStops[durationStops.length - 1]!;
                   compose({ ...draft, params: { ...draft.params, kind: "video", durationSec: seconds } as BenchParams });
                 }}
               />
