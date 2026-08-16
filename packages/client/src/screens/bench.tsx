@@ -68,6 +68,7 @@ import {
 import { Portrait } from "../components/portrait.js";
 import { mediaUrl } from "../lib/media.js";
 import { durationTrack, durationPillLabel } from "../lib/duration.js";
+import { setupForMode, type ModeSetup } from "../lib/composer-mode.js";
 import { usableModels } from "../components/dispatch-bar.js";
 import {
   ReferencePickerDialog,
@@ -365,17 +366,27 @@ function BenchWorkspace({
   const promptCap = model?.limits.maxPromptChars;
   const overCap = promptCap !== undefined && draft.brief.length > promptCap;
 
+  /**
+   * What each mode was last left in, so glancing at the other one costs nothing.
+   *
+   * Switching used to reset the model and every parameter to the mode's defaults, in both
+   * directions. A video setup — the model, its length, whether it makes sound — was therefore
+   * destroyed by a single press of *Image* and not restored by pressing *Video* again: the
+   * round trip looked free and was not, and nothing said a thing had been lost. Seeded from the
+   * stored composer so the mode the session was saved in is remembered from the first press.
+   */
+  const modeMemory = useRef<Partial<Record<"image" | "video", ModeSetup>>>({
+    [session.composer.mode]: {
+      provider: session.composer.provider,
+      model: session.composer.model,
+      params: session.composer.params,
+    },
+  });
+
   const switchMode = (mode: "image" | "video") => {
     if (mode === draft.mode) return;
-    const first = usableModels(state, mode)[0];
-    const params: BenchParams = mode === "image" ? { kind: "image", count: 1 } : { kind: "video" };
-    compose({
-      ...draft,
-      mode,
-      params,
-      provider: first?.provider ?? "",
-      model: first?.id ?? "",
-    });
+    modeMemory.current[draft.mode] = { provider: draft.provider, model: draft.model, params: draft.params };
+    compose({ ...draft, mode, ...setupForMode(mode, modeMemory.current[mode], usableModels(state, mode)) });
   };
 
   /** The video half of the draft, narrowed once — the callbacks below lose it otherwise. */
