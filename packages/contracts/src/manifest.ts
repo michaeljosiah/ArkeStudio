@@ -109,6 +109,22 @@ export const ModelLimitsSchema = z
      * which is what every earlier row meant implicitly.
      */
     durationWire: z.enum(["string", "number"]).optional(),
+    /**
+     * The route takes "auto" as a length: it chooses, and no number is sent. Offered as its own
+     * choice rather than a value, the way the provider offers it.
+     */
+    durationAuto: z.boolean().optional(),
+    /**
+     * The route lets the caller choose whether sound is generated (`generate_audio`). Absent
+     * means no choice exists — which is NOT the same as no sound: wan and minimax produce audio
+     * and simply publish no switch for it, and offering one would be a control that lies.
+     */
+    soundChoice: z.boolean().optional(),
+    /**
+     * What the reference route calls its image array. Seedance says `image_urls`; minimax and
+     * wan say `reference_image_urls`. Data for the same reason `framesField` is.
+     */
+    referencesField: z.string().min(1).optional(),
     resolutions: z.array(z.string()).optional(),
     /**
      * Normalised tier → the provider's own word for it. The tier is what a user chooses; the
@@ -136,6 +152,17 @@ export const ModelLimitsSchema = z
     maxReferenceVideoSec: z.number().min(0).optional(),
     /** Aggregate seconds of audio reference this model accepts across all clips (R-40, R-41). */
     maxReferenceAudioSec: z.number().min(0).optional(),
+    /**
+     * The longest output the *reference* route will make, where it is shorter than the text
+     * route's (probed 2026-08-16).
+     *
+     * A row's `durations` are transcribed from the route it dispatches to by default, but a job
+     * carrying references lands on a different route — and those two routes do not always agree.
+     * Wan 2.7 makes 15 seconds from text and 10 from references. Without this, the composer
+     * offers 12s, the estimate prices 12s, the user accepts, and the route rejects a length it
+     * never advertised. Absent means the two routes agree.
+     */
+    maxReferenceDurationSec: z.number().min(0).optional(),
     /**
      * Characters of prompt this model accepts, where the provider publishes one (design 68).
      *
@@ -736,10 +763,20 @@ export function modelCapabilityCopy(model: ManifestModel): string {
   return parts.join(" · ");
 }
 
-/** The lengths this model can actually be asked for, in seconds, ascending. */
-export function durationOptions(model: ManifestModel): number[] {
+/**
+ * The lengths this model can actually be asked for, in seconds, ascending.
+ *
+ * `withReferences` picks the route the job will really land on. The reference route is a
+ * different endpoint with its own ceiling, and offering a length only the text route makes is
+ * how a user comes to accept an estimate for footage that cannot be produced. Filtering rather
+ * than substituting is deliberate: a reference route that ever offers a length the text route
+ * does not would be under-promised here, which costs a choice, where over-promising costs money.
+ */
+export function durationOptions(model: ManifestModel, opts?: { withReferences?: boolean }): number[] {
+  const ceiling = opts?.withReferences === true ? model.limits.maxReferenceDurationSec : undefined;
   return Object.keys(model.limits.durations ?? {})
     .map((seconds) => Number.parseInt(seconds, 10))
+    .filter((seconds) => ceiling === undefined || seconds <= ceiling)
     .sort((a, b) => a - b);
 }
 
@@ -756,13 +793,24 @@ export function durationOptions(model: ManifestModel): number[] {
 export type DurationChoice =
   | { kind: "asked"; seconds: number; wire: string | number }
   | { kind: "provider-default" }
-  | { kind: "over-cap"; longest: number };
+  | { kind: "over-cap"; longest: number; becauseReferences: boolean };
 
-export function dispatchDuration(model: ManifestModel, requestedSec: number): DurationChoice {
-  const options = durationOptions(model);
+export function dispatchDuration(
+  model: ManifestModel,
+  requestedSec: number,
+  opts?: { withReferences?: boolean },
+): DurationChoice {
+  const options = durationOptions(model, opts);
   if (options.length === 0) return { kind: "provider-default" };
   const longest = options[options.length - 1]!;
-  if (requestedSec > longest) return { kind: "over-cap", longest };
+  if (requestedSec > longest) {
+    // Whether the references are what shortened it, so the refusal can say so: "runs at most
+    // 10s" reads as a fact about the model, where "at most 10s with references" tells the user
+    // there is a shot to be had by removing one.
+    const unrestricted = durationOptions(model);
+    const becauseReferences = longest < (unrestricted[unrestricted.length - 1] ?? longest);
+    return { kind: "over-cap", longest, becauseReferences };
+  }
   const chosen = options.find((seconds) => seconds >= requestedSec)!;
   const wire = model.limits.durations![String(chosen)]!;
   // In the route's own type. The lengths are stored as strings because they are keys, but a
@@ -772,8 +820,8 @@ export function dispatchDuration(model: ManifestModel, requestedSec: number): Du
 }
 
 /** The seconds a dispatch will run for, for pricing — the request itself when we cannot ask. */
-export function pricedDuration(model: ManifestModel, requestedSec: number): number {
-  const choice = dispatchDuration(model, requestedSec);
+export function pricedDuration(model: ManifestModel, requestedSec: number, opts?: { withReferences?: boolean }): number {
+  const choice = dispatchDuration(model, requestedSec, opts);
   return choice.kind === "asked" ? choice.seconds : requestedSec;
 }
 

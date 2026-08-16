@@ -18,6 +18,7 @@ import {
   estimateMicroUsd,
   pricedDuration,
   sceneImageOutput,
+  type DurationChoice,
   type ManifestModel,
   type SizeTier,
 } from "./manifest.js";
@@ -1247,7 +1248,9 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       : sceneBudget.dropped;
   const overlongShots = scene.shots
     .map((shot) => ({ shot, choice: dispatchDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC) }))
-    .filter((entry): entry is { shot: Shot; choice: { kind: "over-cap"; longest: number } } =>
+    // Extracted from the union rather than restated: a hand-written copy of the variant's shape
+    // stops compiling the day the variant gains a field, which is how this line broke once.
+    .filter((entry): entry is { shot: Shot; choice: Extract<DurationChoice, { kind: "over-cap" }> } =>
       entry.choice.kind === "over-cap",
     )
     .map((entry) => ({

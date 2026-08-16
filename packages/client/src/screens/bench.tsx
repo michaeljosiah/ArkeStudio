@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   deriveCapabilityAvailability,
@@ -56,6 +56,9 @@ import {
   Message,
   Plus,
   Scroll,
+  Speaker,
+  Timer,
+  SpeakerOff,
   Sparkle,
   User,
   VideoMark,
@@ -64,6 +67,7 @@ import {
 } from "../components/icons.js";
 import { Portrait } from "../components/portrait.js";
 import { mediaUrl } from "../lib/media.js";
+import { durationTrack, durationPillLabel } from "../lib/duration.js";
 import { usableModels } from "../components/dispatch-bar.js";
 import {
   ReferencePickerDialog,
@@ -107,7 +111,14 @@ export function BenchScreen() {
       </div>
     );
   }
-  return <BenchWorkspace key={session.id} worldId={worldId} session={session} manifest={state?.app.manifest ?? null} />;
+  return (
+    <BenchWorkspace
+      key={session.id}
+      worldId={worldId}
+      session={session}
+      manifest={state?.app.manifest ?? null}
+    />
+  );
 }
 
 /** The 44px destination rail (issue 305 §3): the world's places, by mark alone. */
@@ -152,9 +163,12 @@ function BenchWorkspace({
       sendBenchCompose(worldId, session.id, next);
     }, 350);
   };
-  useEffect(() => () => {
-    if (pushTimer.current) clearTimeout(pushTimer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (pushTimer.current) clearTimeout(pushTimer.current);
+    },
+    [],
+  );
 
   const models = useMemo(() => usableModels(state, draft.mode), [state, draft.mode]);
   const model: ManifestModel | null =
@@ -163,7 +177,10 @@ function BenchWorkspace({
     manifest?.models.find((m) => m.provider === provider && m.id === id)?.displayName ?? id;
 
   // ---- references ----
-  const worldSources = useMemo(() => worldPickerSources(world?.artifacts ?? [], session), [world?.artifacts, session]);
+  const worldSources = useMemo(
+    () => worldPickerSources(world?.artifacts ?? [], session),
+    [world?.artifacts, session],
+  );
   const sessionSources = useMemo(() => sessionPickerSources(session), [session]);
   // The same rows with the OTHER lane's occupancy: what already rides as a keyframe.
   const worldFrameSources = useMemo(
@@ -200,6 +217,7 @@ function BenchWorkspace({
   // ---- the breadcrumb's session switcher + the brief's expanded editor ----
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [recipesOpen, setRecipesOpen] = useState(false);
+  const [durationOpen, setDurationOpen] = useState(false);
   const recipes = state?.app.recipes ?? [];
   // Which providers a stored key actually unlocks, per capability - the recipes menu judges
   // its rows with the same evidence the model dropdown does.
@@ -215,7 +233,13 @@ function BenchWorkspace({
 
   // ---- the enhancer's round trip: request out, answer in, the author's hand between ----
   const [enhancing, setEnhancing] = useState(false);
-  const enhancingRef = useRef<{ requestId: string; sentBrief: string; provider: string; model: string; mode: string } | null>(null);
+  const enhancingRef = useRef<{
+    requestId: string;
+    sentBrief: string;
+    provider: string;
+    model: string;
+    mode: string;
+  } | null>(null);
   const enhanceDeadline = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearEnhanceDeadline = () => {
     if (enhanceDeadline.current) clearTimeout(enhanceDeadline.current);
@@ -268,7 +292,11 @@ function BenchWorkspace({
       subscribeQueueResults((result) => {
         if (result.requestId !== pendingDispatch.current) return;
         pendingDispatch.current = null;
-        setRefusal(result.disposition === "rejected" ? (result.failures[0]?.reason ?? "That could not be dispatched.") : null);
+        setRefusal(
+          result.disposition === "rejected"
+            ? (result.failures[0]?.reason ?? "That could not be dispatched.")
+            : null,
+        );
       }),
     [],
   );
@@ -350,6 +378,136 @@ function BenchWorkspace({
     });
   };
 
+  /** The video half of the draft, narrowed once — the callbacks below lose it otherwise. */
+  const videoParams = draft.params.kind === "video" ? draft.params : null;
+  /**
+   * The lengths this model offers, and where the draft sits among them. Read once: the track,
+   * its fill, its end labels and its handle all have to agree, and four calls to the same
+   * function is four chances for them to drift apart.
+   *
+   * `auto` is a state, not a stop. A model that takes "auto" is being asked to choose the
+   * length itself, so the track shows no fill and no chosen value — a handle parked on the
+   * shortest stop would say the shot is 4 seconds when nobody has said that yet.
+   */
+  const withReferences = session.composer.activeTokens.length > 0;
+  // The track's geometry and its states, worked out in one place so the fill, the ends, the
+  // handle and the pill cannot drift apart. See lib/duration.ts for why it has two extra stops.
+  const track =
+    videoParams !== null && model !== null
+      ? durationTrack(model, videoParams.durationSec, { withReferences })
+      : null;
+  const durationStops = track?.stops ?? [];
+  const durationUnset = track?.unset ?? true;
+  const durationOverCeiling = track?.overCeiling ?? false;
+  const durationMin = track?.min ?? -1;
+  const durationMax = track?.max ?? 0;
+  const durationValue = track?.value ?? -1;
+  const durationFill = track?.fill ?? 0;
+  const durationLostToReferences = track?.lostToReferences ?? null;
+  const durationPanel =
+    model === null ? null : (
+      <div className="fy-bench__duration" role="dialog" aria-label="Duration">
+        <div className="fy-bench__durationhead">
+          <span className="fy-bench__durationlabel">Duration</span>
+          {model.limits.durationAuto === true && (
+            <button
+              type="button"
+              className={cx("fy-bench__durationpill", durationUnset && "fy-bench__durationpill--on")}
+              data-testid="duration-auto"
+              title="Let the model choose the length"
+              onClick={() => {
+                const { durationSec: _cleared, ...rest } = draft.params as BenchParams & {
+                  durationSec?: number;
+                };
+                compose({ ...draft, params: { ...rest } as BenchParams });
+              }}
+            >
+              Auto
+            </button>
+          )}
+          {/* One value, in one place. Where Auto is offered, the lit pill above already
+                  says who is choosing, and a second pill reading "auto" says it twice. Where
+                  it is not, "default" is the honest word: no length goes on the wire, and
+                  printing the shortest stop would name a length nobody asked for. */}
+          {durationUnset ? (
+            model.limits.durationAuto !== true && (
+              <span
+                className="fy-bench__durationpill fy-bench__durationpill--value"
+                data-testid="duration-value"
+              >
+                default
+              </span>
+            )
+          ) : (
+            <span
+              className={cx(
+                "fy-bench__durationpill",
+                "fy-bench__durationpill--value",
+                "fy-bench__durationpill--on",
+                durationOverCeiling && "fy-bench__durationpill--over",
+              )}
+              data-testid="duration-value"
+              {...(durationOverCeiling
+                ? { title: `Longer than this model makes with references — at most ${durationStops.at(-1)}s` }
+                : {})}
+            >
+              {`${videoParams?.durationSec} s`}
+            </span>
+          )}
+        </div>
+        <input
+          type="range"
+          className={cx("fy-bench__durationrange", durationUnset && "fy-bench__durationrange--auto")}
+          style={{ "--fy-duration-fill": `${durationFill}%` } as CSSProperties}
+          aria-label="Duration in seconds"
+          aria-valuetext={durationUnset ? "unset — the model chooses" : `${videoParams?.durationSec} seconds`}
+          data-testid="duration-range"
+          min={durationMin}
+          max={durationMax}
+          step={1}
+          value={durationValue}
+          onChange={(e) => {
+            const index = Number(e.target.value);
+            if (index < 0) {
+              // Dragged below the shortest stop: back to unsaid, the same state the Auto
+              // pill sets, rather than a length nobody chose.
+              const { durationSec: _cleared, ...rest } = draft.params as BenchParams & {
+                durationSec?: number;
+              };
+              compose({ ...draft, params: { ...rest } as BenchParams });
+              return;
+            }
+            // The position past the end exists only to hold an over-ceiling length; landing
+            // on it means the ceiling itself.
+            const seconds = durationStops[index] ?? durationStops[durationStops.length - 1]!;
+            compose({
+              ...draft,
+              params: { ...draft.params, kind: "video", durationSec: seconds } as BenchParams,
+            });
+          }}
+        />
+        <div className="fy-bench__durationends">
+          <span>{`${durationStops[0]}s`}</span>
+          <span>
+            {`${durationStops[durationStops.length - 1]}s`}
+            {/* What this model cannot reach, shown struck rather than hidden — either
+                    because the references shortened its range, or because it simply runs
+                    shorter than the longest model on offer. */}
+            {durationLostToReferences !== null ? (
+              <s className="fy-bench__durationover" data-testid="duration-lost" title="Without references">
+                {`${durationLostToReferences}s`}
+              </s>
+            ) : (
+              longestOffered(models) > durationStops[durationStops.length - 1]! && (
+                <s className="fy-bench__durationover" title="Longer than this model runs">
+                  {`${longestOffered(models)}s`}
+                </s>
+              )
+            )}
+          </span>
+        </div>
+      </div>
+    );
   const aspects = model?.limits.aspects ?? [];
   const aspectSelect = (
     <select
@@ -359,7 +517,10 @@ function BenchWorkspace({
       onChange={(e) => {
         // "default" means the key is absent, not the old value carried under a new label.
         const { aspect: _cleared, ...rest } = draft.params;
-        compose({ ...draft, params: { ...rest, ...(e.target.value ? { aspect: e.target.value } : {}) } as BenchParams });
+        compose({
+          ...draft,
+          params: { ...rest, ...(e.target.value ? { aspect: e.target.value } : {}) } as BenchParams,
+        });
       }}
     >
       <option value="">aspect · default</option>
@@ -372,7 +533,10 @@ function BenchWorkspace({
   );
 
   return (
-    <div data-screen="bench" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+    <div
+      data-screen="bench"
+      style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}
+    >
       <AppChrome
         back={{ label: world?.meta.name ?? "Artifacts", to: `/w/${worldId}/artifacts` }}
         menu={
@@ -402,7 +566,8 @@ function BenchWorkspace({
                       }}
                       onBlur={(e) => {
                         const title = e.target.value.trim();
-                        if (title !== (session.title ?? "")) sendBenchTitle(worldId, session.id, title.length > 0 ? title : null);
+                        if (title !== (session.title ?? ""))
+                          sendBenchTitle(worldId, session.id, title.length > 0 ? title : null);
                       }}
                     />
                     {(world?.benchSessions ?? []).map((s) => (
@@ -481,7 +646,12 @@ function BenchWorkspace({
           <div className="fy-bench__composerbar">
             <div className="fy-bench__mode" role="group" aria-label="What to make">
               {(["image", "video"] as const).map((mode) => (
-                <button key={mode} type="button" aria-pressed={draft.mode === mode} onClick={() => switchMode(mode)}>
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={draft.mode === mode}
+                  onClick={() => switchMode(mode)}
+                >
                   {mode === "image" ? <ImageMark size={13} /> : <VideoMark size={13} />}
                   {mode === "image" ? "Image" : "Video"}
                 </button>
@@ -633,7 +803,11 @@ function BenchWorkspace({
               >
                 <Expand size={13} />
               </button>
-              <ComposerMic onText={(text) => compose({ ...draft, brief: draft.brief.length > 0 ? `${draft.brief}\n${text}` : text })} />
+              <ComposerMic
+                onText={(text) =>
+                  compose({ ...draft, brief: draft.brief.length > 0 ? `${draft.brief}\n${text}` : text })
+                }
+              />
               {/* The enhancer (asked for 2026-08-16): the art director rewrites the ask for
                   the chosen model, grounded in the world's look and canon. Absent without a
                   model or words — a control that could do nothing does not exist (§3). */}
@@ -724,7 +898,10 @@ function BenchWorkspace({
               <span style={{ flex: 1 }} />
               {/* The counter exists only where the model publishes a cap (issue 305 §5.1). */}
               {promptCap !== undefined && (
-                <span data-testid="prompt-counter" className={cx("fy-bench__counter", overCap && "fy-bench__counter--over")}>
+                <span
+                  data-testid="prompt-counter"
+                  className={cx("fy-bench__counter", overCap && "fy-bench__counter--over")}
+                >
                   {`${draft.brief.length}/${promptCap}`}
                 </span>
               )}
@@ -733,7 +910,11 @@ function BenchWorkspace({
 
           {/* the mode's settings row */}
           <div className="fy-bench__settings">
-            <button type="button" className="fy-bench__chip fy-bench__chip--refs" onClick={() => openPicker("reference")}>
+            <button
+              type="button"
+              className="fy-bench__chip fy-bench__chip--refs"
+              onClick={() => openPicker("reference")}
+            >
               <Plus size={11} />
               References
             </button>
@@ -747,7 +928,13 @@ function BenchWorkspace({
                     value={draft.params.tier ?? ""}
                     onChange={(e) => {
                       const { tier: _cleared, ...rest } = draft.params as BenchParams & { tier?: SizeTier };
-                      compose({ ...draft, params: { ...rest, ...(e.target.value ? { tier: e.target.value as SizeTier } : {}) } as BenchParams });
+                      compose({
+                        ...draft,
+                        params: {
+                          ...rest,
+                          ...(e.target.value ? { tier: e.target.value as SizeTier } : {}),
+                        } as BenchParams,
+                      });
                     }}
                   >
                     <option value="">size · default</option>
@@ -762,7 +949,16 @@ function BenchWorkspace({
                   aria-label="How many takes"
                   className="fy-bench__chip"
                   value={draft.params.count}
-                  onChange={(e) => compose({ ...draft, params: { ...draft.params, kind: "image", count: Number(e.target.value) } as BenchParams })}
+                  onChange={(e) =>
+                    compose({
+                      ...draft,
+                      params: {
+                        ...draft.params,
+                        kind: "image",
+                        count: Number(e.target.value),
+                      } as BenchParams,
+                    })
+                  }
                 >
                   {[1, 2, 3, 4].map((count) => (
                     <option key={count} value={count}>
@@ -781,8 +977,16 @@ function BenchWorkspace({
                     className="fy-bench__chip"
                     value={draft.params.resolution ?? ""}
                     onChange={(e) => {
-                      const { resolution: _cleared, ...rest } = draft.params as BenchParams & { resolution?: string };
-                      compose({ ...draft, params: { ...rest, ...(e.target.value ? { resolution: e.target.value } : {}) } as BenchParams });
+                      const { resolution: _cleared, ...rest } = draft.params as BenchParams & {
+                        resolution?: string;
+                      };
+                      compose({
+                        ...draft,
+                        params: {
+                          ...rest,
+                          ...(e.target.value ? { resolution: e.target.value } : {}),
+                        } as BenchParams,
+                      });
                     }}
                   >
                     <option value="">resolution · default</option>
@@ -793,23 +997,63 @@ function BenchWorkspace({
                     ))}
                   </select>
                 )}
-                {durationOptions(model).length > 0 && (
-                  <select
-                    aria-label="Duration"
-                    className="fy-bench__chip"
-                    value={draft.params.durationSec ?? ""}
-                    onChange={(e) => {
-                      const { durationSec: _cleared, ...rest } = draft.params as BenchParams & { durationSec?: number };
-                      compose({ ...draft, params: { ...rest, ...(e.target.value ? { durationSec: Number(e.target.value) } : {}) } as BenchParams });
+                {/* Sound exists only where the route publishes the choice. Wan and minimax
+                    make audio and offer no switch, and a switch that changed nothing would be
+                    a control that lies (issue 305 §3). */}
+                {model.limits.soundChoice === true && (
+                  <button
+                    type="button"
+                    className={cx(
+                      "fy-bench__chip",
+                      "fy-bench__sound",
+                      videoParams?.sound === false && "fy-bench__sound--off",
+                    )}
+                    data-testid="bench-sound"
+                    aria-pressed={videoParams?.sound !== false}
+                    title={
+                      videoParams?.sound === false
+                        ? "Sound off — the shot comes back silent"
+                        : "Sound on — the model scores the shot"
+                    }
+                    onClick={() => {
+                      const on = videoParams?.sound !== false;
+                      compose({
+                        ...draft,
+                        params: { ...draft.params, kind: "video", sound: !on } as BenchParams,
+                      });
                     }}
                   >
-                    <option value="">length · default</option>
-                    {durationOptions(model).map((s) => (
-                      <option key={s} value={s}>
-                        {`${s}s`}
-                      </option>
-                    ))}
-                  </select>
+                    {videoParams?.sound === false ? <SpeakerOff size={12} /> : <Speaker size={12} />}
+                    {videoParams?.sound === false ? "silent" : "sound"}
+                  </button>
+                )}
+                {/* The length sits behind its own pill, the way the other output controls do.
+                    The pill carries the answer — a length, "Auto", or "default" — so the row
+                    still says what will be made without the panel being open. */}
+                {durationStops.length > 0 && (
+                  <span className="fy-bench__durationanchor">
+                    <button
+                      type="button"
+                      className={cx(
+                        "fy-bench__chip",
+                        "fy-bench__durationtrigger",
+                        durationOverCeiling && "fy-bench__durationtrigger--over",
+                      )}
+                      data-testid="duration-open"
+                      aria-expanded={durationOpen}
+                      aria-haspopup="dialog"
+                      onClick={() => setDurationOpen((v) => !v)}
+                    >
+                      <Timer size={12} />
+                      {durationPillLabel(model, videoParams?.durationSec)}
+                    </button>
+                    {durationOpen && (
+                      <>
+                        <div className="fy-bench__scrim" onClick={() => setDurationOpen(false)} />
+                        {durationPanel}
+                      </>
+                    )}
+                  </span>
                 )}
               </>
             )}
@@ -836,7 +1080,12 @@ function BenchWorkspace({
                   <div className="fy-bench__recipemenu" role="menu" aria-label="Recipes">
                     {recipes.length === 0 && <span className="fy-bench__recipenone">No recipes yet.</span>}
                     {recipes.map((recipe) => {
-                      const fault = recipeFault(recipe, manifest, state?.app.models.disabled ?? [], unlockedFor[recipe.mode]);
+                      const fault = recipeFault(
+                        recipe,
+                        manifest,
+                        state?.app.models.disabled ?? [],
+                        unlockedFor[recipe.mode],
+                      );
                       return (
                         <div key={recipe.id} className="fy-bench__reciperow">
                           <button
@@ -936,7 +1185,12 @@ function BenchWorkspace({
             <Button
               variant="primary"
               data-testid="bench-generate"
-              disabled={model === null || draft.brief.trim().length === 0 || overCap || pendingDispatch.current !== null}
+              disabled={
+                model === null ||
+                draft.brief.trim().length === 0 ||
+                overCap ||
+                pendingDispatch.current !== null
+              }
               onClick={() => {
                 setRefusal(null);
                 if (pushTimer.current) clearTimeout(pushTimer.current);
@@ -944,7 +1198,9 @@ function BenchWorkspace({
                 pendingDispatch.current = sendBenchDispatch(worldId, session.id);
               }}
             >
-              {draft.params.kind === "image" && draft.params.count > 1 ? `Generate ${draft.params.count}` : "Generate"}
+              {draft.params.kind === "image" && draft.params.count > 1
+                ? `Generate ${draft.params.count}`
+                : "Generate"}
             </Button>
           </div>
           {refusal !== null && (
@@ -957,16 +1213,18 @@ function BenchWorkspace({
         {/* ---- the wall --------------------------------------------------- */}
         <div className="fy-bench__wall">
           <div className="fy-bench__wallbar">
-            {(["all", "filed", "discarded", ...(hasVideoTakes ? (["4k"] as const) : [])] as const).map((f) => (
-              <button
-                key={f}
-                type="button"
-                className={cx("fy-bench__tab", wallFilter === f && "fy-bench__tab--active")}
-                onClick={() => setWallFilter(f)}
-              >
-                {f === "all" ? "All" : f === "filed" ? "Filed" : f === "discarded" ? "Discarded" : "4K"}
-              </button>
-            ))}
+            {(["all", "filed", "discarded", ...(hasVideoTakes ? (["4k"] as const) : [])] as const).map(
+              (f) => (
+                <button
+                  key={f}
+                  type="button"
+                  className={cx("fy-bench__tab", wallFilter === f && "fy-bench__tab--active")}
+                  onClick={() => setWallFilter(f)}
+                >
+                  {f === "all" ? "All" : f === "filed" ? "Filed" : f === "discarded" ? "Discarded" : "4K"}
+                </button>
+              ),
+            )}
           </div>
 
           {/* The selected take's request, said back (design 68b): model · brief, then its
@@ -1009,22 +1267,28 @@ function BenchWorkspace({
                 worldSlug ? (
                   <video
                     key={selected.id}
-                    src={mediaUrl(worldSlug, `.sessions/${session.id}/media/${selected.id}/${selected.media.file}`)}
+                    src={mediaUrl(
+                      worldSlug,
+                      `.sessions/${session.id}/media/${selected.id}/${selected.media.file}`,
+                    )}
                     controls
                   />
                 ) : null
-              ) : (
-                worldSlug ? (
-                  <img
-                    src={mediaUrl(worldSlug, `.sessions/${session.id}/media/${selected.id}/${selected.media.file}`)}
-                    alt={`Take ${selected.n}`}
-                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
-                  />
-                ) : null
-              )}
+              ) : worldSlug ? (
+                <img
+                  src={mediaUrl(
+                    worldSlug,
+                    `.sessions/${session.id}/media/${selected.id}/${selected.media.file}`,
+                  )}
+                  alt={`Take ${selected.n}`}
+                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                />
+              ) : null}
               <div className="fy-bench__overlaychips">
                 <span className="fy-bench__overlaychip fy-bench__overlaychip--name">{`TAKE ${selected.n}`}</span>
-                {takeMeta(selected).length > 0 && <span className="fy-bench__overlaychip">{takeMeta(selected)}</span>}
+                {takeMeta(selected).length > 0 && (
+                  <span className="fy-bench__overlaychip">{takeMeta(selected)}</span>
+                )}
               </div>
             </div>
           ) : (
@@ -1033,14 +1297,22 @@ function BenchWorkspace({
                 {selected ? statusLine(liveStatus(selected), selected) : "The bench is empty"}
               </strong>
               {selected?.error !== undefined && (
-                <span style={{ font: "400 11.5px var(--font-sans)", color: "var(--destructive)", maxWidth: 420 }}>{selected.error}</span>
+                <span
+                  style={{ font: "400 11.5px var(--font-sans)", color: "var(--destructive)", maxWidth: 420 }}
+                >
+                  {selected.error}
+                </span>
               )}
             </div>
           )}
 
           {/* View latest returns from a scrolled-back selection (design 68b). */}
           {selected !== null && latest !== null && selected.id !== latest.id && (
-            <button type="button" className="fy-bench__viewlatest" onClick={() => sendBenchSelectTake(worldId, session.id, latest.id)}>
+            <button
+              type="button"
+              className="fy-bench__viewlatest"
+              onClick={() => sendBenchSelectTake(worldId, session.id, latest.id)}
+            >
               View latest ↓
             </button>
           )}
@@ -1054,7 +1326,11 @@ function BenchWorkspace({
                 <Button variant="outline" onClick={() => sendBenchDiscard(worldId, session.id, selected.id)}>
                   Discard
                 </Button>
-                <Button variant="primary" data-testid="bench-keep" onClick={() => sendBenchKeep(worldId, session.id, selected.id)}>
+                <Button
+                  variant="primary"
+                  data-testid="bench-keep"
+                  onClick={() => sendBenchKeep(worldId, session.id, selected.id)}
+                >
                   Keep · file as artifact
                 </Button>
               </>
@@ -1088,7 +1364,8 @@ function BenchWorkspace({
                     <span
                       className={cx(
                         "fy-bench__takestate",
-                        (status === "failed" || status === "needs-reconciliation") && "fy-bench__takestate--failed",
+                        (status === "failed" || status === "needs-reconciliation") &&
+                          "fy-bench__takestate--failed",
                       )}
                     >
                       {status === "allocating" || status === "queued" ? "queued" : status}
@@ -1099,7 +1376,14 @@ function BenchWorkspace({
             );
           })}
           {wallTakes.length === 0 && (
-            <span style={{ font: "400 9.5px var(--font-mono)", color: "var(--neutral-400)", textAlign: "center", marginTop: 8 }}>
+            <span
+              style={{
+                font: "400 9.5px var(--font-mono)",
+                color: "var(--neutral-400)",
+                textAlign: "center",
+                marginTop: 8,
+              }}
+            >
               takes land here
             </span>
           )}
@@ -1166,7 +1450,10 @@ function BenchWorkspace({
               />
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                 {promptCap !== undefined && (
-                  <span className={cx("fy-bench__counter", overCap && "fy-bench__counter--over")} style={{ alignSelf: "center" }}>
+                  <span
+                    className={cx("fy-bench__counter", overCap && "fy-bench__counter--over")}
+                    style={{ alignSelf: "center" }}
+                  >
                     {`${draft.brief.length}/${promptCap}`}
                   </span>
                 )}
@@ -1198,19 +1485,30 @@ function takeMeta(take: BenchTake): string {
     .join(" · ");
 }
 
+/**
+ * The longest length any model on offer can reach. The duration track strikes this through
+ * when the chosen model stops short, so the ceiling is visible rather than merely missing —
+ * the same reason the bench shows a refusal instead of hiding a control.
+ */
+function longestOffered(models: readonly ManifestModel[]): number {
+  return models.reduce((longest, model) => {
+    const options = durationOptions(model);
+    const last = options[options.length - 1] ?? 0;
+    return last > longest ? last : longest;
+  }, 0);
+}
+
 /** The brief's text with the session's own tokens marked — never token-shaped strangers. */
 function briefWithChips(text: string, tokens: Set<string>): ReactNode[] {
-  return text
-    .split(/((?:Image|Video|Audio) [1-9][0-9]*)/g)
-    .map((part, i) =>
-      tokens.has(part) ? (
-        <mark key={i} className="fy-bench__briefchip">
-          {part}
-        </mark>
-      ) : (
-        part
-      ),
-    );
+  return text.split(/((?:Image|Video|Audio) [1-9][0-9]*)/g).map((part, i) =>
+    tokens.has(part) ? (
+      <mark key={i} className="fy-bench__briefchip">
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
 }
 
 function statusLine(status: BenchTake["status"], take: BenchTake): string {

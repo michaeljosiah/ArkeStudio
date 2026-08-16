@@ -113,6 +113,14 @@ export const Speaker = icon(
     <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
   </>,
 );
+/** The stopwatch that opens the length: a duration, not a time of day. */
+export const Timer = icon(
+  <>
+    <path d="M10 2h4" />
+    <path d="M12 14v-4" />
+    <circle cx="12" cy="14" r="8" />
+  </>,
+);
 export const Copy = icon(
   <>
     <rect x="8" y="8" width="14" height="14" rx="2" ry="2" />
@@ -234,5 +242,14 @@ export const Expand = icon(
     <path d="m3 21 6-6" />
     <path d="M3 8V3h5" />
     <path d="M9 9 3 3" />
+  </>,
+);
+
+/** The speaker with its waves struck out: sound is offered here, and turned off. */
+export const SpeakerOff = icon(
+  <>
+    <path d="M11 5 6 9H2v6h4l5 4z" />
+    <line x1="22" x2="16" y1="9" y2="15" />
+    <line x1="16" x2="22" y1="9" y2="15" />
   </>,
 );

@@ -324,6 +324,97 @@ describe("a lingering keyframe stays visible (issue 305 §3)", () => {
   });
 });
 
+describe("the video length and its sound (asked for 2026-08-16)", () => {
+  const LONG: ManifestModel = {
+    id: "test-long-video",
+    provider: "fal",
+    capability: "video",
+    displayName: "Long Video",
+    accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
+    limits: { maxDurationSec: 8, durations: { 4: "4s", 6: "6s", 8: "8s" }, soundChoice: true, durationAuto: true },
+    pricing: { kind: "perSecond", microUsdPerSecond: 100000 },
+    modes: { generate: { locked: [] } },
+  };
+  /** The same row without the two declarations, to prove each control is earned, not decorative. */
+  const BARE: ManifestModel = {
+    ...LONG,
+    id: "test-bare-video",
+    displayName: "Bare Video",
+    limits: { maxDurationSec: 8, durations: { 4: "4s", 6: "6s", 8: "8s" } },
+  };
+  /** A row whose reference route runs shorter than its text route, as wan's does. */
+  const SHORTER: ManifestModel = {
+    ...LONG,
+    id: "test-shorter-with-refs",
+    displayName: "Shorter With Refs",
+    accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
+    limits: { ...LONG.limits, maxReferenceDurationSec: 6 },
+  };
+
+  function lengthState(model: ManifestModel, params: Record<string, unknown>, tokens?: string[]): ClientState {
+    const base = stateWithBench();
+    const session = base.bench!.session;
+    return {
+      ...base,
+      app: { ...base.app, manifest: { ...base.app.manifest!, models: [...base.app.manifest!.models, model] } },
+      bench: {
+        worldId: FIXTURE_WORLD_ID,
+        session: {
+          ...session,
+          composer: {
+            ...session.composer,
+            mode: "video",
+            provider: model.provider,
+            model: model.id,
+            params: { kind: "video", ...params },
+            ...(tokens === undefined ? {} : { activeTokens: tokens }),
+          },
+        },
+      },
+    };
+  }
+
+  const render = (model: ManifestModel, params: Record<string, unknown> = {}, tokens?: string[]) =>
+    renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, lengthState(model, params, tokens));
+
+  it("offers each control only where the route publishes the choice", () => {
+    const offered = render(LONG);
+    assert.match(offered, /data-testid="bench-sound"/);
+    // A switch over a route that publishes no such field would change nothing, and a control
+    // that changes nothing is a control that lies.
+    assert.doesNotMatch(render(BARE), /data-testid="bench-sound"/);
+    // The length is not conditional on either: every row with lengths gets its pill.
+    assert.match(offered, /data-testid="duration-open"/);
+    assert.match(render(BARE), /data-testid="duration-open"/);
+  });
+
+  /**
+   * The panel is a popover. Shut, none of the track is in the document, so the pill has to
+   * carry the answer — otherwise the row goes quiet about what will be made. (The track's own
+   * geometry is pinned in duration-track.test.ts, where it can be read directly.)
+   */
+  it("the closed pill says the length, or who is choosing it", () => {
+    assert.match(render(LONG, { durationSec: 6 }), /data-testid="duration-open"[^>]*>[\s\S]{0,600}?6s</);
+    assert.match(render(LONG), /data-testid="duration-open"[^>]*>[\s\S]{0,600}?Auto</);
+    // BARE declares lengths but no `auto`: no duration goes on the wire, and printing the
+    // shortest stop would name a length nobody asked for.
+    assert.match(render(BARE), /data-testid="duration-open"[^>]*>[\s\S]{0,600}?default</);
+  });
+
+  it("marks a length the chosen route will not make, on the pill itself", () => {
+    // Shut, the panel cannot warn: a refusal the user cannot see coming arrives as a surprise.
+    const held = render(SHORTER, { durationSec: 8 }, ["Image 1"]);
+    assert.match(held, /fy-bench__durationtrigger--over/);
+    // The same length without the reference is perfectly reachable and unmarked.
+    assert.doesNotMatch(render(SHORTER, { durationSec: 8 }, []), /fy-bench__durationtrigger--over/);
+  });
+
+  it("says in words which way the sound sits, rather than leaving an icon to be read", () => {
+    assert.match(render(LONG), />sound</);
+    assert.match(render(LONG, { sound: false }), />silent</);
+  });
+});
+
 describe("the enhancer (asked for 2026-08-16)", () => {
   it("the sparkle exists exactly where a model and words both do", () => {
     const withWords = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, stateWithBench());
