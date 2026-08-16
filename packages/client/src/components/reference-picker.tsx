@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   admitReference,
   benchSourceKey,
@@ -15,15 +15,18 @@ import {
 } from "@arke-studio/contracts";
 import { Button, cx } from "./ui.js";
 import { Portrait } from "./portrait.js";
+import { Search, Upload } from "./icons.js";
+import { Wave } from "../screens/production.js";
 
 /**
  * One reference picker for every surface that asks for one (issue 305 §4, design 69).
  *
- * Three entrances, two frames: the bench opens it as a dialog and picks an ordered set; the
- * standard GenerationDialog hands it the dialog's own panel and picks exactly one — never a
- * dialog over a dialog. The refusals here are predictions made with the SAME functions the
- * coordinator re-runs before enqueue, so a tile that says "this model takes no audio" is the
- * same sentence dispatch would have refused with.
+ * Three entrances, two frames: the bench opens it as a dialog and picks an ordered set —
+ * checked tiles are a selection, committed together by "Add N" the way the master commits
+ * them (69a) — while the standard GenerationDialog hands it the dialog's own panel and picks
+ * exactly one, immediately; never a dialog over a dialog. The refusals here are predictions
+ * made with the SAME functions the coordinator re-runs before enqueue, so a tile that says
+ * "this model takes no audio" is the same sentence dispatch would have refused with.
  */
 
 export interface PickerSource {
@@ -91,6 +94,19 @@ export function sessionPickerSources(session: BenchSession): PickerSource[] {
     });
 }
 
+/** A staged pick: the tile, and — at the image ceiling — which active token gives way. */
+interface StagedPick {
+  source: PickerSource;
+  replace?: string;
+}
+
+const KIND_LABEL: Record<string, string> = {
+  image: "Images",
+  video: "Video",
+  audio: "Audio",
+  document: "Documents",
+};
+
 export function ReferencePickerBody({
   mode,
   worldSlug,
@@ -112,7 +128,7 @@ export function ReferencePickerBody({
   carried: readonly MultimediaReference[];
   world: PickerSource[];
   session: PickerSource[];
-  /** Bench: one pick, optionally replacing an active token at the image ceiling. */
+  /** Bench: one committed pick, optionally replacing an active token at the image ceiling. */
   onAdd?: (pick: PickerSource["pick"], replace?: string) => void;
   /** Slot: the one choice. */
   onChoose?: (pick: PickerSource["pick"]) => void;
@@ -122,6 +138,8 @@ export function ReferencePickerBody({
   const [lane, setLane] = useState<"world" | "session">("world");
   const [kindFilter, setKindFilter] = useState<PickerSource["kind"] | null>(null);
   const [search, setSearch] = useState("");
+  /** The checked set, in pick order — committed together by Add (design 69a). */
+  const [picks, setPicks] = useState<StagedPick[]>([]);
   /** The image tile waiting on "which token gives way" at the ceiling. */
   const [replacing, setReplacing] = useState<PickerSource | null>(null);
 
@@ -132,63 +150,93 @@ export function ReferencePickerBody({
       (kindFilter === null || s.kind === kindFilter) &&
       (searched.length === 0 || s.name.toLowerCase().includes(searched) || s.meta.toLowerCase().includes(searched)),
   );
-  const sendable = visible.filter((s) => refusalFor(s) === null).length;
 
-  const capacity = model ? multimediaCapacity(carried, model) : null;
+  const staged = (source: PickerSource): boolean => picks.some((p) => p.source.key === source.key);
+
+  // Capacity counts what is riding AND what is checked — the chip answers "if I press Add".
+  // A staged replacement frees the token it names, so the freed image leaves the count.
+  const effectiveCarried = useMemo<MultimediaReference[]>(() => {
+    const replaced = new Set(picks.map((p) => p.replace).filter((r): r is string => r !== undefined));
+    return [
+      ...(carried as Array<MultimediaReference & { token?: string }>).filter(
+        (c) => c.token === undefined || !replaced.has(c.token),
+      ),
+      ...picks
+        .filter((p) => p.source.kind !== "document" && p.source.kind !== "other")
+        .map((p) => ({ kind: p.source.kind as ReferenceKind, durationSec: p.source.durationSec })),
+    ];
+  }, [carried, picks]);
+
+  const capacity = model ? multimediaCapacity(effectiveCarried, model) : null;
+  const sendable = visible.filter((s) => refusalFor(s) === null).length;
 
   /** The tile's refusal, or null when it can be picked as things stand. */
   function refusalFor(source: PickerSource): string | null {
-    if (source.active) return null; // "already riding" is a state, not a refusal
+    if (source.active || staged(source)) return null; // a state, not a refusal
     if (source.kind === "document") return "a document cannot be sent";
     if (source.kind === "other") return "this file cannot be sent";
     if (!model) return "choose a model first";
-    const verdict = admitReference({ kind: source.kind, durationSec: source.durationSec }, carried, model);
+    const verdict = admitReference({ kind: source.kind, durationSec: source.durationSec }, effectiveCarried, model);
     if (verdict.ok) return null;
     // At the image ceiling in bench mode the tile stays pickable — picking asks which token
     // gives way instead of refusing outright ("A fourth replaces one", design 69b).
-    if (verdict.binding === "images" && mode === "bench" && activeImageTokens().length > 0) return null;
+    if (verdict.binding === "images" && mode === "bench" && replaceableTokens().length > 0) return null;
     return verdict.reason;
   }
 
-  function activeImageTokens(): string[] {
+  /** Active image tokens not already claimed by a staged replacement. */
+  function replaceableTokens(): string[] {
+    const claimed = new Set(picks.map((p) => p.replace).filter((r): r is string => r !== undefined));
     return (carried as Array<MultimediaReference & { token?: string }>)
-      .filter((c) => c.kind === "image" && typeof c.token === "string")
+      .filter((c) => c.kind === "image" && typeof c.token === "string" && !claimed.has(c.token))
       .map((c) => c.token as string);
   }
 
-  /** The name a NEW pick will carry, said before it is added (issue 305 §4). */
-  function tokenPreview(source: PickerSource): string | null {
-    if (mode !== "bench" || !session) return null;
-    if (source.existingToken !== undefined) return source.existingToken;
-    if (source.kind === "document" || source.kind === "other") return null;
-    // Next number of this kind, from the workspace the host passed via existing tokens.
-    const used = [...world, ...session]
-      .map((s) => s.existingToken)
-      .filter((t): t is string => t !== undefined)
-      .map((t) => parseBenchToken(t))
-      .filter((p): p is NonNullable<ReturnType<typeof parseBenchToken>> => p !== null && p.kind === source.kind)
-      .map((p) => p.n);
-    const next = used.length === 0 ? 1 : Math.max(...used) + 1;
-    return benchTokenFor(source.kind, next);
-  }
+  /** The names the checked set will carry, said before they are added (issue 305 §4). */
+  const previews = useMemo(() => {
+    const used = new Map<ReferenceKind, number>();
+    for (const s of [...world, ...session]) {
+      if (s.existingToken === undefined) continue;
+      const parsed = parseBenchToken(s.existingToken);
+      if (parsed) used.set(parsed.kind, Math.max(used.get(parsed.kind) ?? 0, parsed.n));
+    }
+    const byKey = new Map<string, string>();
+    for (const p of picks) {
+      if (p.source.existingToken !== undefined) {
+        byKey.set(p.source.key, p.source.existingToken);
+        continue;
+      }
+      if (p.source.kind === "document" || p.source.kind === "other") continue;
+      const next = (used.get(p.source.kind) ?? 0) + 1;
+      used.set(p.source.kind, next);
+      byKey.set(p.source.key, benchTokenFor(p.source.kind, next));
+    }
+    return byKey;
+  }, [picks, world, session]);
 
   function pickTile(source: PickerSource): void {
     if (source.active) return;
-    const refusal = refusalFor(source);
-    if (refusal !== null) return;
     if (mode === "slot") {
-      onChoose?.(source.pick);
+      if (refusalFor(source) === null) onChoose?.(source.pick);
       return;
     }
-    if (!model) return;
-    const verdict = admitReference({ kind: source.kind as ReferenceKind, durationSec: source.durationSec }, carried, model);
+    if (staged(source)) {
+      setPicks((prev) => prev.filter((p) => p.source.key !== source.key));
+      return;
+    }
+    if (refusalFor(source) !== null || !model) return;
+    const verdict = admitReference(
+      { kind: source.kind as ReferenceKind, durationSec: source.durationSec },
+      effectiveCarried,
+      model,
+    );
     if (!verdict.ok && verdict.binding === "images") {
       // The replacement chooser (issue 305 §4): the new source takes its own next token; the
       // replaced token goes inactive; nothing inherits the removed name.
       setReplacing(source);
       return;
     }
-    onAdd?.(source.pick);
+    setPicks((prev) => [...prev, { source }]);
   }
 
   const capacityChip =
@@ -206,6 +254,10 @@ export function ReferencePickerBody({
         </span>
       </span>
     ) : null;
+
+  const kindsPresent = (["image", "video", "audio", "document"] as const).filter(
+    (k) => sources.some((s) => s.kind === k) || kindFilter === k,
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }} data-testid="reference-picker">
@@ -226,46 +278,47 @@ export function ReferencePickerBody({
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div className="fy-filterrow" style={{ marginTop: 0 }}>
-          <button
-            type="button"
-            className={cx("fy-filterchip", lane === "world" && "fy-filterchip--active")}
-            onClick={() => setLane("world")}
-          >
+        <div className="fy-refpicker__lanes" role="group" aria-label="Where from">
+          <button type="button" aria-pressed={lane === "world"} onClick={() => setLane("world")}>
             {`World artifacts ${world.length}`}
           </button>
           {mode === "bench" && (
-            <button
-              type="button"
-              className={cx("fy-filterchip", lane === "session" && "fy-filterchip--active")}
-              onClick={() => setLane("session")}
-            >
+            <button type="button" aria-pressed={lane === "session"} onClick={() => setLane("session")}>
               {`This session ${session.length}`}
             </button>
           )}
-          <button type="button" className="fy-filterchip" onClick={onUpload}>
+          <button type="button" aria-pressed={false} onClick={onUpload}>
             Upload
           </button>
         </div>
         <span style={{ flex: 1 }} />
-        <input
-          className="scr-input"
-          style={{ minWidth: 180, height: 30 }}
-          placeholder="Search artifacts"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <span className="fy-refpicker__searchwrap">
+          <Search size={13} />
+          <input
+            className="fy-refpicker__search"
+            placeholder="Search artifacts"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </span>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        {([null, "image", "video", "audio", "document"] as const).map((k) => (
+        <button
+          type="button"
+          className={cx("fy-filterchip", kindFilter === null && "fy-filterchip--active")}
+          onClick={() => setKindFilter(null)}
+        >
+          {`All ${sources.length}`}
+        </button>
+        {kindsPresent.map((k) => (
           <button
-            key={k ?? "all"}
+            key={k}
             type="button"
             className={cx("fy-filterchip", kindFilter === k && "fy-filterchip--active")}
             onClick={() => setKindFilter(k)}
           >
-            {k === null ? `All ${sources.length}` : `${k[0]!.toUpperCase()}${k.slice(1)} ${sources.filter((s) => s.kind === k).length}`}
+            {`${KIND_LABEL[k]} ${sources.filter((s) => s.kind === k).length}`}
           </button>
         ))}
         <span style={{ flex: 1 }} />
@@ -288,13 +341,15 @@ export function ReferencePickerBody({
 
       <div className="fy-refpicker__grid">
         {visible.map((source) => {
-          const refusal = source.active ? null : refusalFor(source);
-          const preview = refusal === null && !source.active ? tokenPreview(source) : null;
+          const isStaged = staged(source);
+          const refusal = source.active || isStaged ? null : refusalFor(source);
+          const preview = isStaged ? previews.get(source.key) : null;
+          const checked = source.active === true || isStaged;
           return (
             <button
               key={source.key}
               type="button"
-              className={cx("fy-refpicker__tile", source.active && "fy-refpicker__tile--picked")}
+              className={cx("fy-refpicker__tile", checked && "fy-refpicker__tile--picked")}
               data-testid="picker-tile"
               data-refused={refusal !== null || undefined}
               disabled={refusal !== null && !source.active}
@@ -303,33 +358,36 @@ export function ReferencePickerBody({
               <div className="fy-refpicker__thumb">
                 {source.imagePath ? (
                   <Portrait worldSlug={worldSlug} path={source.imagePath} label={source.name} radius={0} />
+                ) : source.kind === "audio" ? (
+                  <span className={cx("fy-refpicker__wave", refusal !== null && "fy-refpicker__wave--muted")}>
+                    <Wave seed={source.name} width={104} height={20} />
+                  </span>
+                ) : source.kind === "document" ? (
+                  <span className="fy-refpicker__doc" aria-hidden>
+                    <span />
+                    <span />
+                    <span />
+                  </span>
                 ) : (
-                  <div className="fy-refpicker__kind">
-                    {source.kind}
-                    {source.durationSec !== null && source.kind !== "image" ? ` · ${formatSeconds(source.durationSec)}` : ""}
-                  </div>
+                  <div className="fy-refpicker__kind">{source.kind}</div>
                 )}
-                <span className={cx("fy-refpicker__check", source.active && "fy-refpicker__check--on")} aria-hidden="true">
-                  {source.active ? "✓" : ""}
-                </span>
-                {(source.existingToken ?? preview) && (
-                  <span
-                    style={{
-                      position: "absolute",
-                      left: 6,
-                      bottom: 6,
-                      padding: "2px 7px",
-                      borderRadius: 5,
-                      background: "color-mix(in srgb, var(--media-overlay-bg) 68%, transparent)",
-                      color: "var(--media-overlay-fg)",
-                      font: "500 9.5px var(--font-sans)",
-                    }}
-                  >
-                    {source.active ? `already ${source.existingToken}` : (source.existingToken ?? preview)}
+                {/* The mark exists only where picking is possible — an ineligible tile carries
+                    its reason, not an empty circle (design 69a). */}
+                {(refusal === null || source.active) && (
+                  <span className={cx("fy-refpicker__check", checked && "fy-refpicker__check--on")} aria-hidden="true">
+                    {checked ? "✓" : ""}
+                  </span>
+                )}
+                {source.kind === "audio" && source.durationSec !== null && (
+                  <span className="fy-refpicker__stamp">{formatSeconds(source.durationSec)}</span>
+                )}
+                {(source.active ? source.existingToken : (preview ?? source.existingToken)) && (
+                  <span className="fy-refpicker__token">
+                    {source.active ? `already ${source.existingToken}` : (preview ?? source.existingToken)}
                   </span>
                 )}
               </div>
-              <div className="fy-refpicker__name">{source.name}</div>
+              <div className={cx("fy-refpicker__name", refusal !== null && "fy-refpicker__name--muted")}>{source.name}</div>
               <div className={cx("fy-refpicker__meta", refusal !== null && "fy-refpicker__meta--refused")}>
                 {refusal ?? source.meta}
               </div>
@@ -337,6 +395,7 @@ export function ReferencePickerBody({
           );
         })}
         <button type="button" className="fy-refpicker__upload" onClick={onUpload}>
+          <Upload size={16} />
           Upload a file
         </button>
       </div>
@@ -349,12 +408,12 @@ export function ReferencePickerBody({
             </strong>{" "}
             Which does {replacing.name} replace?
           </span>
-          {activeImageTokens().map((token) => (
+          {replaceableTokens().map((token) => (
             <Button
               key={token}
               variant="ghost"
               onClick={() => {
-                onAdd?.(replacing.pick, token);
+                setPicks((prev) => [...prev, { source: replacing, replace: token }]);
                 setReplacing(null);
               }}
             >
@@ -368,12 +427,53 @@ export function ReferencePickerBody({
       )}
 
       <div className="fy-refpicker__foot">
-        <span style={{ flex: 1, font: "400 11.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
-          {mode === "bench" ? `${carried.length} riding` : "One picture rides with this brief."}
+        <span style={{ flex: 1, display: "inline-flex", alignItems: "center", gap: 7, font: "400 11.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
+          {mode === "bench" ? (
+            picks.length === 0 ? (
+              "Nothing picked yet."
+            ) : (
+              <>
+                <strong style={{ fontWeight: 600, color: "var(--foreground)" }}>{`${picks.length} picked`}</strong>
+                {picks.map((p) => {
+                  const token = previews.get(p.source.key);
+                  return token !== undefined ? (
+                    <span key={p.source.key} className="fy-refpicker__pickchip">
+                      {token}
+                    </span>
+                  ) : null;
+                })}
+                <button type="button" className="fy-refpicker__clear" onClick={() => setPicks([])}>
+                  Clear
+                </button>
+              </>
+            )
+          ) : (
+            "One picture rides with this brief."
+          )}
         </span>
-        <Button variant="ghost" onClick={onClose}>
-          {mode === "slot" ? "Back to the brief" : "Done"}
-        </Button>
+        {mode === "bench" ? (
+          <>
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              data-testid="picker-add"
+              disabled={picks.length === 0}
+              onClick={() => {
+                for (const p of picks) onAdd?.(p.source.pick, p.replace);
+                setPicks([]);
+                onClose();
+              }}
+            >
+              {picks.length > 0 ? `Add ${picks.length}` : "Add"}
+            </Button>
+          </>
+        ) : (
+          <Button variant="ghost" onClick={onClose}>
+            Back to the brief
+          </Button>
+        )}
       </div>
     </div>
   );
