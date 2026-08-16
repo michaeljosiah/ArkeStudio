@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   estimateMicroUsd,
@@ -34,6 +34,23 @@ import {
 } from "../lib/store.js";
 import { Button, Badge, cx } from "../components/ui.js";
 import { AppChrome } from "../components/chrome.js";
+import { ComposerMic } from "../components/dictation.js";
+import {
+  Book,
+  ChevronDown,
+  Expand,
+  Film,
+  Folder,
+  Home,
+  ImageMark,
+  Message,
+  Plus,
+  Scroll,
+  User,
+  VideoMark,
+  Wand,
+  X,
+} from "../components/icons.js";
 import { Portrait } from "../components/portrait.js";
 import { mediaUrl } from "../lib/media.js";
 import {
@@ -48,8 +65,9 @@ import {
  * waiting on it. A session, not a dialog — leaving does not end it, takes are numbered in the
  * order asked for, and selecting an old take restores the request that made it.
  *
- * Layout is the master's: a fixed workspace with its own breadcrumb chrome — 380px composer,
- * the wall, a 116px take strip — never the hero-and-scroll shape the world pages use.
+ * Layout is the master's: a fixed workspace with its own breadcrumb chrome — a 44px
+ * destination rail, a 380px composer, the wall, a 116px take strip — never the
+ * hero-and-scroll shape the world pages use.
  */
 export function BenchScreen() {
   const { worldId, sessionId } = useParams();
@@ -80,6 +98,18 @@ export function BenchScreen() {
   return <BenchWorkspace key={session.id} worldId={worldId} session={session} manifest={state?.app.manifest ?? null} />;
 }
 
+/** The 44px destination rail (issue 305 §3): the world's places, by mark alone. */
+const DESTINATIONS = [
+  ["", "Overview", Home],
+  ["art-direction", "Art direction", Wand],
+  ["cast", "Cast", User],
+  ["bible", "Bible", Book],
+  ["canon", "Canon", Scroll],
+  ["chat", "World Chat", Message],
+  ["artifacts", "Artifacts", Folder],
+  ["productions", "Productions", Film],
+] as const;
+
 function BenchWorkspace({
   worldId,
   session,
@@ -91,6 +121,7 @@ function BenchWorkspace({
 }) {
   const world = useWorld();
   const state = useClientState();
+  const navigate = useNavigate();
   const worldSlug = world?.meta.slug;
 
   // ---- the composer draft: local while typing, pushed debounced, restored by selection ----
@@ -119,6 +150,8 @@ function BenchWorkspace({
   }, [manifest, draft.mode, state?.app.models.disabled]);
   const model: ManifestModel | null =
     models.find((m) => m.id === draft.model && m.provider === draft.provider) ?? null;
+  const modelName = (provider: string, id: string): string =>
+    manifest?.models.find((m) => m.provider === provider && m.id === id)?.displayName ?? id;
 
   // ---- references ----
   const worldSources = useMemo(() => worldPickerSources(world?.artifacts ?? [], session), [world?.artifacts, session]);
@@ -128,6 +161,12 @@ function BenchWorkspace({
     [session, worldSources, sessionSources],
   );
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  // ---- the breadcrumb's session switcher + the brief's expanded editor ----
+  const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [briefExpanded, setBriefExpanded] = useState(false);
+  const briefUnder = useRef<HTMLDivElement>(null);
+  const tokens = useMemo(() => new Set(session.tokenRegistry.map((e) => e.token)), [session.tokenRegistry]);
 
   // ---- dispatch + its refusal ----
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -152,11 +191,19 @@ function BenchWorkspace({
     return job ? job.status : take.status;
   };
 
-  const [wallFilter, setWallFilter] = useState<"all" | "filed" | "discarded">("all");
+  // 4K joins the wall only when the session has video to answer for it (issue 305 §3).
+  const hasVideoTakes = session.takes.some((t) => t.request.mode === "video");
+  const [wallFilter, setWallFilter] = useState<"all" | "filed" | "discarded" | "4k">("all");
   const wallTakes = session.takes.filter(
     (t) =>
       t.clearedFromView !== true &&
-      (wallFilter === "all" ? true : wallFilter === "filed" ? t.disposition === "filed" : t.disposition === "discarded"),
+      (wallFilter === "all"
+        ? true
+        : wallFilter === "filed"
+          ? t.disposition === "filed"
+          : wallFilter === "discarded"
+            ? t.disposition === "discarded"
+            : is4k(t)),
   );
 
   const restore = (take: BenchTake) => {
@@ -212,34 +259,144 @@ function BenchWorkspace({
     });
   };
 
+  const aspects = model?.limits.aspects ?? [];
+  const aspectSelect = (
+    <select
+      aria-label="Aspect"
+      className="fy-bench__chip"
+      value={draft.params.aspect ?? ""}
+      onChange={(e) => {
+        // "default" means the key is absent, not the old value carried under a new label.
+        const { aspect: _cleared, ...rest } = draft.params;
+        compose({ ...draft, params: { ...rest, ...(e.target.value ? { aspect: e.target.value } : {}) } as BenchParams });
+      }}
+    >
+      <option value="">aspect · default</option>
+      {aspects.map((a) => (
+        <option key={a} value={a}>
+          {a}
+        </option>
+      ))}
+    </select>
+  );
+
   return (
-    <div data-screen="bench" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+    <div data-screen="bench" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <AppChrome
-        back={{ label: "Artifacts", to: `/w/${worldId}/artifacts` }}
-        context={{ label: `${world?.meta.name ?? ""} · ${session.title ?? "Untitled session"}` }}
+        back={{ label: world?.meta.name ?? "Artifacts", to: `/w/${worldId}/artifacts` }}
+        menu={
+          <span className="fy-bench__crumb">
+            <span className="fy-bench__crumbsep">/</span>
+            <span style={{ position: "relative", display: "inline-flex" }}>
+              <button
+                type="button"
+                className="fy-bench__session"
+                aria-expanded={sessionsOpen}
+                onClick={() => setSessionsOpen((v) => !v)}
+              >
+                {session.title ?? "Untitled session"}
+                <ChevronDown size={12} />
+              </button>
+              {sessionsOpen && (
+                <>
+                  <div className="fy-bench__scrim" onClick={() => setSessionsOpen(false)} />
+                  <div className="fy-bench__sessionmenu" role="menu" aria-label="Bench sessions">
+                    <input
+                      aria-label="Session title"
+                      className="fy-bench__rename"
+                      placeholder="Name this session"
+                      defaultValue={session.title ?? ""}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
+                      onBlur={(e) => {
+                        const title = e.target.value.trim();
+                        if (title !== (session.title ?? "")) sendBenchTitle(worldId, session.id, title.length > 0 ? title : null);
+                      }}
+                    />
+                    {(world?.benchSessions ?? []).map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        className="fy-bench__sessionrow"
+                        aria-current={s.id === session.id}
+                        onClick={() => {
+                          setSessionsOpen(false);
+                          if (s.id === session.id) return;
+                          // The open is sent here, not left to the URL effect: the address may
+                          // already read this id (the workspace moved on without it), and a
+                          // same-path navigate re-fires nothing.
+                          sendBenchOpen(worldId, s.id);
+                          void navigate(`/w/${worldId}/artifacts/bench/${s.id}`, { replace: true });
+                        }}
+                      >
+                        <span className="fy-bench__sessionname">{s.title ?? "Untitled session"}</span>
+                        <span className="fy-bench__sessionmeta">
+                          {`${s.takeCount} take${s.takeCount === 1 ? "" : "s"}`}
+                        </span>
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      className="fy-bench__sessionrow fy-bench__sessionrow--new"
+                      onClick={() => {
+                        setSessionsOpen(false);
+                        sendBenchNewSession(worldId);
+                        // Back to the id-less address: the fresh session's id fills it in when
+                        // the workspace arrives, so the URL never names a session it left.
+                        void navigate(`/w/${worldId}/artifacts/bench`, { replace: true });
+                      }}
+                    >
+                      <Plus size={12} />
+                      New session
+                    </button>
+                  </div>
+                </>
+              )}
+            </span>
+          </span>
+        }
       />
       <div className="fy-bench">
+        {/* ---- the destination rail --------------------------------------- */}
+        <nav className="fy-bench__rail" aria-label="World destinations">
+          <button
+            type="button"
+            className="fy-bench__railnew"
+            title="Clear the bench — a new session; this one keeps running"
+            onClick={() => {
+              sendBenchNewSession(worldId);
+              void navigate(`/w/${worldId}/artifacts/bench`, { replace: true });
+            }}
+          >
+            <Plus size={14} />
+          </button>
+          {DESTINATIONS.map(([slug, label, Mark]) => (
+            <button
+              key={slug}
+              type="button"
+              className="fy-bench__raildest"
+              aria-current={slug === "artifacts"}
+              title={label}
+              onClick={() => void navigate(`/w/${worldId}${slug ? `/${slug}` : ""}`)}
+            >
+              <Mark size={15} />
+            </button>
+          ))}
+        </nav>
+
         {/* ---- composer -------------------------------------------------- */}
         <div className="fy-bench__composer">
           <div className="fy-bench__composerbar">
             <div className="fy-bench__mode" role="group" aria-label="What to make">
               {(["image", "video"] as const).map((mode) => (
                 <button key={mode} type="button" aria-pressed={draft.mode === mode} onClick={() => switchMode(mode)}>
+                  {mode === "image" ? <ImageMark size={13} /> : <VideoMark size={13} />}
                   {mode === "image" ? "Image" : "Video"}
                 </button>
               ))}
             </div>
             <span style={{ flex: 1 }} />
-            <input
-              aria-label="Session title"
-              className="fy-bench__title"
-              placeholder="Untitled session"
-              defaultValue={session.title ?? ""}
-              onBlur={(e) => {
-                const title = e.target.value.trim();
-                if (title !== (session.title ?? "")) sendBenchTitle(worldId, session.id, title.length > 0 ? title : null);
-              }}
-            />
             <button
               type="button"
               className="fy-bench__clear"
@@ -279,19 +436,40 @@ function BenchWorkspace({
               onClick={() => setPickerOpen(true)}
               data-testid="bench-add-reference"
             >
+              <ImageMark size={14} />
               Reference
             </button>
           </div>
 
-          {/* brief */}
+          {/* brief — tokens the session knows render as chips inline (issue 305 §3) */}
           <div className="fy-bench__brief">
-            <textarea
-              aria-label="Brief"
-              value={draft.brief}
-              onChange={(e) => compose({ ...draft, brief: e.target.value })}
-              placeholder="Say what to make. Reference tokens — Image 1, Audio 2 — may be cited by name."
-            />
+            <div className="fy-bench__briefstack">
+              <div ref={briefUnder} className="fy-bench__briefunder" aria-hidden>
+                {briefWithChips(draft.brief, tokens)}
+                {"​"}
+              </div>
+              <textarea
+                aria-label="Brief"
+                className="fy-bench__brieftext"
+                value={draft.brief}
+                onChange={(e) => compose({ ...draft, brief: e.target.value })}
+                onScroll={(e) => {
+                  if (briefUnder.current) briefUnder.current.scrollTop = e.currentTarget.scrollTop;
+                }}
+                placeholder="Say what to make. Reference tokens — Image 1, Audio 2 — may be cited by name."
+              />
+            </div>
             <div className="fy-bench__brieffoot">
+              <button
+                type="button"
+                className="fy-bench__footicon"
+                title="Write large — the brief in its own window"
+                onClick={() => setBriefExpanded(true)}
+              >
+                <Expand size={13} />
+              </button>
+              <ComposerMic onText={(text) => compose({ ...draft, brief: draft.brief.length > 0 ? `${draft.brief}\n${text}` : text })} />
+              <span style={{ flex: 1 }} />
               {/* The counter exists only where the model publishes a cap (issue 305 §5.1). */}
               {promptCap !== undefined && (
                 <span data-testid="prompt-counter" className={cx("fy-bench__counter", overCap && "fy-bench__counter--over")}>
@@ -303,19 +481,22 @@ function BenchWorkspace({
 
           {/* the mode's settings row */}
           <div className="fy-bench__settings">
+            <button type="button" className="fy-bench__chip fy-bench__chip--refs" onClick={() => setPickerOpen(true)}>
+              <Plus size={11} />
+              References
+            </button>
             {model && draft.params.kind === "image" && (
               <>
+                {aspects.length > 0 && aspectSelect}
                 {tiersFor(model).length > 0 && (
                   <select
                     aria-label="Size"
                     className="fy-bench__chip"
                     value={draft.params.tier ?? ""}
-                    onChange={(e) =>
-                      compose({
-                        ...draft,
-                        params: { ...draft.params, kind: "image", ...(e.target.value ? { tier: e.target.value as SizeTier } : {}) } as BenchParams,
-                      })
-                    }
+                    onChange={(e) => {
+                      const { tier: _cleared, ...rest } = draft.params as BenchParams & { tier?: SizeTier };
+                      compose({ ...draft, params: { ...rest, ...(e.target.value ? { tier: e.target.value as SizeTier } : {}) } as BenchParams });
+                    }}
                   >
                     <option value="">size · default</option>
                     {tiersFor(model).map((tier) => (
@@ -325,33 +506,32 @@ function BenchWorkspace({
                     ))}
                   </select>
                 )}
-                <span className="fy-bench__count" role="group" aria-label="How many takes">
+                <select
+                  aria-label="How many takes"
+                  className="fy-bench__chip"
+                  value={draft.params.count}
+                  onChange={(e) => compose({ ...draft, params: { ...draft.params, kind: "image", count: Number(e.target.value) } as BenchParams })}
+                >
                   {[1, 2, 3, 4].map((count) => (
-                    <button
-                      key={count}
-                      type="button"
-                      aria-pressed={draft.params.kind === "image" && draft.params.count === count}
-                      onClick={() => compose({ ...draft, params: { ...draft.params, kind: "image", count } as BenchParams })}
-                    >
-                      {count}
-                    </button>
+                    <option key={count} value={count}>
+                      {count === 1 ? "1 take" : `${count} takes`}
+                    </option>
                   ))}
-                </span>
+                </select>
               </>
             )}
             {model && draft.params.kind === "video" && (
               <>
+                {aspects.length > 0 && aspectSelect}
                 {(model.limits.resolutions ?? []).length > 0 && (
                   <select
                     aria-label="Resolution"
                     className="fy-bench__chip"
                     value={draft.params.resolution ?? ""}
-                    onChange={(e) =>
-                      compose({
-                        ...draft,
-                        params: { ...draft.params, kind: "video", ...(e.target.value ? { resolution: e.target.value } : {}) } as BenchParams,
-                      })
-                    }
+                    onChange={(e) => {
+                      const { resolution: _cleared, ...rest } = draft.params as BenchParams & { resolution?: string };
+                      compose({ ...draft, params: { ...rest, ...(e.target.value ? { resolution: e.target.value } : {}) } as BenchParams });
+                    }}
                   >
                     <option value="">resolution · default</option>
                     {(model.limits.resolutions ?? []).map((r) => (
@@ -366,16 +546,10 @@ function BenchWorkspace({
                     aria-label="Duration"
                     className="fy-bench__chip"
                     value={draft.params.durationSec ?? ""}
-                    onChange={(e) =>
-                      compose({
-                        ...draft,
-                        params: {
-                          ...draft.params,
-                          kind: "video",
-                          ...(e.target.value ? { durationSec: Number(e.target.value) } : {}),
-                        } as BenchParams,
-                      })
-                    }
+                    onChange={(e) => {
+                      const { durationSec: _cleared, ...rest } = draft.params as BenchParams & { durationSec?: number };
+                      compose({ ...draft, params: { ...rest, ...(e.target.value ? { durationSec: Number(e.target.value) } : {}) } as BenchParams });
+                    }}
                   >
                     <option value="">length · default</option>
                     {durationOptions(model).map((s) => (
@@ -391,24 +565,27 @@ function BenchWorkspace({
 
           {/* dispatch row */}
           <div className="fy-bench__dispatch">
-            <select
-              aria-label="Model"
-              className="fy-bench__model"
-              value={model ? `${model.provider}/${model.id}` : ""}
-              onChange={(e) => {
-                const chosen = models.find((m) => `${m.provider}/${m.id}` === e.target.value);
-                if (chosen) compose({ ...draft, provider: chosen.provider, model: chosen.id });
-              }}
-            >
-              <option value="" disabled>
-                choose a model
-              </option>
-              {models.map((m) => (
-                <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
-                  {m.displayName}
+            <span className="fy-bench__modelwrap">
+              <select
+                aria-label="Model"
+                className="fy-bench__model"
+                value={model ? `${model.provider}/${model.id}` : ""}
+                onChange={(e) => {
+                  const chosen = models.find((m) => `${m.provider}/${m.id}` === e.target.value);
+                  if (chosen) compose({ ...draft, provider: chosen.provider, model: chosen.id });
+                }}
+              >
+                <option value="" disabled>
+                  choose a model
                 </option>
-              ))}
-            </select>
+                {models.map((m) => (
+                  <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
+                    {m.displayName}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={12} />
+            </span>
             <span style={{ flex: 1 }} />
             {estimate !== null && (
               <span data-testid="bench-estimate" className="fy-bench__estimate">
@@ -416,6 +593,7 @@ function BenchWorkspace({
               </span>
             )}
             <Button
+              variant="primary"
               data-testid="bench-generate"
               disabled={model === null || draft.brief.trim().length === 0 || overCap || pendingDispatch.current !== null}
               onClick={() => {
@@ -438,23 +616,51 @@ function BenchWorkspace({
         {/* ---- the wall --------------------------------------------------- */}
         <div className="fy-bench__wall">
           <div className="fy-bench__wallbar">
-            {(["all", "filed", "discarded"] as const).map((f) => (
+            {(["all", "filed", "discarded", ...(hasVideoTakes ? (["4k"] as const) : [])] as const).map((f) => (
               <button
                 key={f}
                 type="button"
-                className={cx("fy-filterchip", wallFilter === f && "fy-filterchip--active")}
+                className={cx("fy-bench__tab", wallFilter === f && "fy-bench__tab--active")}
                 onClick={() => setWallFilter(f)}
               >
-                {f === "all" ? "All" : f === "filed" ? "Filed" : "Discarded"}
+                {f === "all" ? "All" : f === "filed" ? "Filed" : f === "discarded" ? "Discarded" : "4K"}
               </button>
             ))}
-            <span style={{ flex: 1 }} />
-            {selected && (
-              <span className="fy-bench__wallmeta">
-                {`take ${selected.n} · ${selected.request.model} · ${liveStatus(selected)}`}
-              </span>
-            )}
           </div>
+
+          {/* The selected take's request, said back (design 68b): model · brief, then its
+              actions as quiet marks — restore, re-run, clear from view. */}
+          {selected && (
+            <div className="fy-bench__briefrow">
+              <span className="fy-bench__briefline">
+                {`${modelName(selected.request.provider, selected.request.model)} · ${selected.request.brief}`}
+              </span>
+              <button
+                type="button"
+                className="fy-bench__rowicon"
+                title="Restore this take's brief and settings"
+                onClick={() => restore(selected)}
+              >
+                ⟲
+              </button>
+              <button
+                type="button"
+                className="fy-bench__rowicon"
+                title="Re-run — a new take from this snapshot"
+                onClick={() => (pendingDispatch.current = sendBenchRerun(worldId, session.id, selected.id))}
+              >
+                ↻
+              </button>
+              <button
+                type="button"
+                className="fy-bench__rowicon"
+                title="Clear from view — the take keeps its number"
+                onClick={() => sendBenchClearView(worldId, session.id, selected.id)}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
 
           {selected && selected.media ? (
             <div className="fy-bench__media">
@@ -467,20 +673,17 @@ function BenchWorkspace({
                   />
                 ) : null
               ) : (
-                <Portrait
-                  worldSlug={worldSlug}
-                  path={`.sessions/${session.id}/media/${selected.id}/${selected.media.file}`}
-                  label={`Take ${selected.n}`}
-                  radius={0}
-                />
+                worldSlug ? (
+                  <img
+                    src={mediaUrl(worldSlug, `.sessions/${session.id}/media/${selected.id}/${selected.media.file}`)}
+                    alt={`Take ${selected.n}`}
+                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                  />
+                ) : null
               )}
               <div className="fy-bench__overlaychips">
                 <span className="fy-bench__overlaychip fy-bench__overlaychip--name">{`TAKE ${selected.n}`}</span>
-                {selected.cost && (
-                  <span className="fy-bench__overlaychip">
-                    {formatMicroUsd(selected.cost.actualMicroUsd ?? selected.cost.estimatedMicroUsd)}
-                  </span>
-                )}
+                {takeMeta(selected).length > 0 && <span className="fy-bench__overlaychip">{takeMeta(selected)}</span>}
               </div>
             </div>
           ) : (
@@ -502,19 +705,6 @@ function BenchWorkspace({
           )}
 
           <div className="fy-bench__wallactions">
-            {selected && (
-              <>
-                <Button variant="ghost" onClick={() => restore(selected)} title="Restore this take's brief and settings">
-                  Restore brief
-                </Button>
-                <Button variant="ghost" onClick={() => (pendingDispatch.current = sendBenchRerun(worldId, session.id, selected.id))}>
-                  Re-run
-                </Button>
-                <Button variant="ghost" onClick={() => sendBenchClearView(worldId, session.id, selected.id)}>
-                  Clear from view
-                </Button>
-              </>
-            )}
             <span style={{ flex: 1 }} />
             {selected && selected.disposition === "filed" && <Badge tone="neutral">filed as artifact</Badge>}
             {selected && selected.disposition === "discarded" && <Badge tone="neutral">discarded</Badge>}
@@ -523,7 +713,7 @@ function BenchWorkspace({
                 <Button variant="outline" onClick={() => sendBenchDiscard(worldId, session.id, selected.id)}>
                   Discard
                 </Button>
-                <Button data-testid="bench-keep" onClick={() => sendBenchKeep(worldId, session.id, selected.id)}>
+                <Button variant="primary" data-testid="bench-keep" onClick={() => sendBenchKeep(worldId, session.id, selected.id)}>
                   Keep · file as artifact
                 </Button>
               </>
@@ -582,17 +772,74 @@ function BenchWorkspace({
           carried={carried}
           world={worldSources}
           session={sessionSources}
-          onAdd={(pick, replace) => {
-            sendBenchAddReference(worldId, session.id, pick, replace);
+          onAdd={(picks) => {
+            sendBenchAddReference(worldId, session.id, picks);
           }}
           onUpload={() => {
             sendBenchUploadReferences(worldId, session.id);
           }}
           onClose={() => setPickerOpen(false)}
         />
+
+        {briefExpanded && (
+          <div className="fy-bench__briefmodal" role="dialog" aria-label="The brief, large">
+            <div className="fy-bench__briefmodalpanel">
+              <textarea
+                autoFocus
+                aria-label="Brief"
+                value={draft.brief}
+                onChange={(e) => compose({ ...draft, brief: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setBriefExpanded(false);
+                }}
+              />
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                {promptCap !== undefined && (
+                  <span className={cx("fy-bench__counter", overCap && "fy-bench__counter--over")} style={{ alignSelf: "center" }}>
+                    {`${draft.brief.length}/${promptCap}`}
+                  </span>
+                )}
+                <Button variant="ghost" onClick={() => setBriefExpanded(false)}>
+                  Done
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function is4k(t: BenchTake): boolean {
+  return t.request.params.kind === "video" && /4k|2160/i.test(t.request.params.resolution ?? "");
+}
+
+/** The selected take's viewer chip: the request's own facts, nothing invented. */
+function takeMeta(take: BenchTake): string {
+  return [
+    take.request.params.kind === "image" ? take.request.params.tier : take.request.params.resolution,
+    take.request.params.aspect,
+    take.request.requestedSeed !== undefined ? `seed ${take.request.requestedSeed}` : undefined,
+    take.cost ? formatMicroUsd(take.cost.actualMicroUsd ?? take.cost.estimatedMicroUsd) : undefined,
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join(" · ");
+}
+
+/** The brief's text with the session's own tokens marked — never token-shaped strangers. */
+function briefWithChips(text: string, tokens: Set<string>): ReactNode[] {
+  return text
+    .split(/((?:Image|Video|Audio) [1-9][0-9]*)/g)
+    .map((part, i) =>
+      tokens.has(part) ? (
+        <mark key={i} className="fy-bench__briefchip">
+          {part}
+        </mark>
+      ) : (
+        part
+      ),
+    );
 }
 
 function statusLine(status: BenchTake["status"], take: BenchTake): string {

@@ -5,6 +5,7 @@ import {
   deriveCut,
   designatedCompilation,
   formatMicroUsd,
+  formatSeconds,
   mainPhotoFor,
   pendingSheets,
   pendingWorldSheets,
@@ -3276,6 +3277,8 @@ export function ArtifactsScreen() {
   const report = useImportReport();
   const notices = useArtifactNotices();
   const [importPath, setImportPath] = useState("");
+  // The path row appears on request (design 68a puts only the button pair in the header row).
+  const [importing, setImporting] = useState(false);
   const [kindFilter, setKindFilter] = useState<string | null>(null);
   // "Made here" combines with the kind filter rather than replacing it (issue 305 §2).
   const [madeHereOnly, setMadeHereOnly] = useState(false);
@@ -3288,8 +3291,26 @@ export function ArtifactsScreen() {
   const kinds = [...new Set(artifacts.map((a) => a.kind))];
   const madeHereCount = artifacts.filter((a) => !superseded.has(a.id) && madeHere(a)).length;
   const batches = artifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
+  // The design's card metas name things, not slugs ("The Vigil", never "the-vigil"). Sheets
+  // resolve by id, canon by CANON id; a link that names neither keeps its own spelling.
+  const linkName = (link: string): string =>
+    world?.sheets.find((s) => s.id === link)?.name ?? world?.canon.find((c) => c.id === link)?.title ?? link;
+  const kindLabel: Record<string, string> = { image: "Images", board: "Boards", audio: "Audio", video: "Video", document: "Documents" };
   return (
-    <div data-screen="artifacts" style={{ position: "relative" }}>
+    <div data-screen="artifacts">
+      {/* The only entrance to the bench (issue 305 §2), placed as the master places it
+          (design 68a): on the pill nav's own row, right-aligned. Outside the hero — the
+          hero's entrance animation leaves a transform behind, and a transformed ancestor
+          would quietly become this pair's containing block. A production's Generate has
+          shots to answer to, so it never grows one. */}
+      <div className="fy-artifacts-door">
+        <Button variant="outline" onClick={() => setImporting((v) => !v)}>
+          Import folder
+        </Button>
+        <Button variant="primary" data-testid="artifacts-generate" onClick={() => void navigate(`/w/${worldId}/artifacts/bench`)}>
+          Generate
+        </Button>
+      </div>
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {visible.length} file{visible.length === 1 ? "" : "s"}
@@ -3299,24 +3320,16 @@ export function ArtifactsScreen() {
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Artifacts
         </h1>
-        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 500 }}>
+        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 460 }}>
           Recordings, documents and references: filed against the world, attachable to any generation.
         </p>
-        {/* The only entrance to the bench (issue 305 §2), placed as the master places it
-            (design 68a): top-right of the hero, out of its flow. A production's Generate has
-            shots to answer to, so it never grows one. */}
-        <div className="fy-artifacts-door">
-          <Button data-testid="artifacts-generate" onClick={() => void navigate(`/w/${worldId}/artifacts/bench`)}>
-            Generate
-          </Button>
-        </div>
         <div className="fy-filterrow">
           <button type="button" className={cx("fy-filterchip", kindFilter === null && "fy-filterchip--active")} onClick={() => setKindFilter(null)}>
             All {artifacts.filter((a) => !superseded.has(a.id)).length}
           </button>
           {kinds.map((k) => (
             <button key={k} type="button" className={cx("fy-filterchip", kindFilter === k && "fy-filterchip--active")} onClick={() => setKindFilter(k)}>
-              {k.charAt(0).toUpperCase() + k.slice(1)} {artifacts.filter((a) => a.kind === k && !superseded.has(a.id)).length}
+              {kindLabel[k] ?? k.charAt(0).toUpperCase() + k.slice(1)} {artifacts.filter((a) => a.kind === k && !superseded.has(a.id)).length}
             </button>
           ))}
           {madeHereCount > 0 && (
@@ -3329,25 +3342,27 @@ export function ArtifactsScreen() {
             </button>
           )}
         </div>
-        <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 16 }}>
-          <Input
-            // A JSX attribute string is literal — no escapes — so backslashes doubled for a JS
-            // string rendered on screen as they were written. The braces make it a JS string.
-            placeholder={"C:\\path\\to\\your\\notes"}
-            value={importPath}
-            onChange={(e) => setImportPath(e.target.value)}
-            style={{ minWidth: 280 }}
-          />
-          <Button
-            variant="primary"
-            disabled={importPath.trim().length === 0}
-            onClick={() => {
-              if (worldId) importFolder(worldId, importPath.trim());
-            }}
-          >
-            Import folder
-          </Button>
-        </div>
+        {importing && (
+          <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 16 }}>
+            <Input
+              // A JSX attribute string is literal — no escapes — so backslashes doubled for a JS
+              // string rendered on screen as they were written. The braces make it a JS string.
+              placeholder={"C:\\path\\to\\your\\notes"}
+              value={importPath}
+              onChange={(e) => setImportPath(e.target.value)}
+              style={{ minWidth: 280 }}
+            />
+            <Button
+              variant="primary"
+              disabled={importPath.trim().length === 0}
+              onClick={() => {
+                if (worldId) importFolder(worldId, importPath.trim());
+              }}
+            >
+              Import
+            </Button>
+          </div>
+        )}
       </div>
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "12px 24px 0", display: "grid", gap: 10 }}>
       {notices.map((n, i) => (
@@ -3433,10 +3448,13 @@ export function ArtifactsScreen() {
         {visible.map((a) => {
           const name = a.file.split("/").pop() ?? a.file;
           const isImage = a.kind === "image" || /\.(png|jpe?g|webp|gif)$/i.test(a.file);
+          // One line, the design's vocabulary (68a): type · made here · duration · linked. An
+          // uploaded file carries no provenance token — where it came from is not what it is.
           const meta = [
             name.includes(".") ? name.split(".").pop() : a.kind,
-            a.origin.by === "user" ? "filed by you" : `produced by ${a.origin.producedBy}`,
-            ...(a.links.length > 0 ? [`linked: ${a.links.slice(0, 2).join(", ")}`] : []),
+            ...(madeHere(a) ? ["made here"] : []),
+            ...(a.mediaInfo?.durationSec !== undefined ? [formatSeconds(a.mediaInfo.durationSec)] : []),
+            ...(a.links.length > 0 ? [`linked: ${a.links.slice(0, 2).map(linkName).join(", ")}`] : []),
           ].join(" · ");
           return (
             <div key={a.id} className="fy-gridcard" style={isImage ? { padding: "10px 10px 14px" } : { padding: 16 }}>
@@ -3470,33 +3488,33 @@ export function ArtifactsScreen() {
                 <div className="fy-mono">{meta}</div>
                 {a.supersedes !== undefined && <div className="fy-mono">supersedes {a.supersedes.slice(0, 10)}…</div>}
                 {a.kind === "document" && (
-                  <div style={{ marginTop: 10 }}>
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        if (worldId) extractArtifact(worldId, a.id);
-                      }}
-                    >
-                      Lift facts — gated, grounded, optional
-                    </Button>
-                  </div>
+                  /* An offer, not a headline — card-meta quiet, or it reads as the card's title. */
+                  <button
+                    type="button"
+                    className="fy-liftfacts"
+                    onClick={() => {
+                      if (worldId) extractArtifact(worldId, a.id);
+                    }}
+                  >
+                    Lift facts
+                  </button>
                 )}
               </div>
             </div>
           );
         })}
+        {/* A cell of the same grid, filling out the last row (design 68a) — never its own band. */}
         <div
           className="fy-gridcard fy-gridcard--quiet"
-          style={{ gridColumn: "span 2", border: "1.5px dashed var(--neutral-300)", background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", gap: 14, minHeight: 120, boxShadow: "none" }}
+          style={{ border: "1.5px dashed var(--neutral-300)", background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", gap: 14, minHeight: 176, boxShadow: "none" }}
         >
           <span className="fy-newprodcard__ring" style={{ width: 40, height: 40 }}>
             <Plus size={18} />
           </span>
-          <div style={{ maxWidth: 320 }}>
+          <div>
             <div style={{ font: "600 14px var(--font-sans)" }}>Drop anything</div>
-            <div style={{ font: "400 12px/1.5 var(--font-sans)", color: "var(--muted-foreground)" }}>
-              Audio, documents, boards, stems: filed here via Import folder above, linkable to characters, canon and
-              shots.
+            <div style={{ font: "400 10.5px var(--font-mono)", color: "var(--muted-foreground)", marginTop: 4 }}>
+              audio · documents · boards · stems
             </div>
           </div>
         </div>

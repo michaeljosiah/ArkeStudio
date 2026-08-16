@@ -2451,16 +2451,18 @@ export function sendBenchCompose(
 export function sendBenchAddReference(
   worldId: string,
   sessionId: string,
-  source: { source: "artifact"; artifactId: string } | { source: "take"; takeId: string },
-  replace?: string,
+  picks: ReadonlyArray<{
+    pick: { source: "artifact"; artifactId: string } | { source: "take"; takeId: string };
+    replace?: string;
+  }>,
 ): void {
+  if (picks.length === 0) return;
   send({
     kind: "bench-add-reference",
     worldId,
     sessionId,
     requestId: ulid(),
-    source,
-    ...(replace !== undefined ? { replace } : {}),
+    picks: picks.map((p) => ({ source: p.pick, ...(p.replace !== undefined ? { replace: p.replace } : {}) })),
   } as ClientMessage);
 }
 

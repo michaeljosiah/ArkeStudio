@@ -29,6 +29,7 @@ import { useStore } from "../lib/store.js";
 export function AppChrome({
   back,
   context,
+  menu,
   controls = true,
   current,
   divided = true,
@@ -36,6 +37,8 @@ export function AppChrome({
   back?: { label: string; to: string };
   /** Where you are. Optional — the world picker is not "somewhere", it is the top. */
   context?: { label: string; to?: string };
+  /** Rendered after the context — the bench's session switcher lives here (design 68b). */
+  menu?: React.ReactNode;
   /** Launch is the one screen without them: nothing is set up yet and nothing has happened. */
   controls?: boolean;
   current?: "proposals" | "activity" | "settings";
@@ -69,6 +72,7 @@ export function AppChrome({
           ) : (
             <span className="fy-titlebar__context">{context.label}</span>
           ))}
+        {menu}
       </div>
       <button type="button" className="fy-titlebar__brand" onClick={() => navigate("/worlds")} title="Arke Studio">
         <span className="fy-brand__arke">Arke</span>

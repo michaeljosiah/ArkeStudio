@@ -147,3 +147,92 @@ export const Lock = icon(
     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
   </>,
 );
+
+// ---- the bench's icon vocabulary (design 68b/69a) --------------------------
+// Destination-rail marks, the composer's mode glyphs, and the picker's furniture,
+// all from the same Lucide sheet the rest of the set is transcribed from.
+
+export const Home = icon(
+  <>
+    <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    <polyline points="9 22 9 12 15 12 15 22" />
+  </>,
+);
+export const Wand = icon(
+  <>
+    <path d="M15 4V2" />
+    <path d="M15 16v-2" />
+    <path d="M8 9h2" />
+    <path d="M20 9h2" />
+    <path d="M17.8 11.8 19 13" />
+    <path d="M15 9h.01" />
+    <path d="M17.8 6.2 19 5" />
+    <path d="m3 21 9-9" />
+    <path d="M12.2 6.2 11 5" />
+  </>,
+);
+export const User = icon(
+  <>
+    <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </>,
+);
+export const Book = icon(
+  <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />,
+);
+export const Scroll = icon(
+  <>
+    <path d="M19 17V5a2 2 0 0 0-2-2H4" />
+    <path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" />
+  </>,
+);
+export const Message = icon(
+  <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />,
+);
+export const Folder = icon(
+  <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />,
+);
+export const Film = icon(
+  <>
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="M7 3v18" />
+    <path d="M3 7.5h4" />
+    <path d="M3 12h18" />
+    <path d="M3 16.5h4" />
+    <path d="M17 3v18" />
+    <path d="M17 7.5h4" />
+    <path d="M17 16.5h4" />
+  </>,
+);
+export const ImageMark = icon(
+  <>
+    <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+    <circle cx="9" cy="9" r="2" />
+    <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+  </>,
+);
+export const VideoMark = icon(
+  <>
+    <path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5" />
+    <rect x="2" y="6" width="14" height="12" rx="2" />
+  </>,
+);
+export const Upload = icon(
+  <>
+    <path d="M12 3v12" />
+    <path d="m17 8-5-5-5 5" />
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+  </>,
+);
+export const Expand = icon(
+  <>
+    <path d="m15 15 6 6" />
+    <path d="m15 9 6-6" />
+    <path d="M21 16v5h-5" />
+    <path d="M21 8V3h-5" />
+    <path d="M3 16v5h5" />
+    <path d="m3 21 6-6" />
+    <path d="M3 8V3h5" />
+    <path d="M9 9 3 3" />
+  </>,
+);

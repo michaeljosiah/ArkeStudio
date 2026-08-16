@@ -3240,23 +3240,31 @@ export class Coordinator {
       }
       case "bench-add-reference": {
         const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!store || !bench) return;
+        if (!store) return;
         const manifest = this.opts.manifest ?? null;
-        const model =
-          manifest?.models.find(
-            (m) => m.id === bench.session.composer.model && m.provider === bench.session.composer.provider,
-          ) ?? null;
-        const outcome = await addBenchReference(bench, store.getBundle(), model, {
-          source: msg.source,
-          replace: msg.replace,
-          requestId: msg.requestId,
-          at: this.nowIso(),
-        });
-        // The tile predicted this refusal with the same shared functions; landing here means a
-        // racing client. The refreshed workspace shows the set unchanged — recorded, not silent.
-        if (outcome.outcome === "refused") {
-          void this.appLog?.append({ kind: "bench.reference-refused", worldId: msg.worldId, reason: outcome.reason });
+        // In order, re-folding between picks so each allocation and admission sees the pick
+        // before it — the same shape bench-upload-references attaches with. The batch arrives
+        // as ONE message because token numbering lives outside the append queue: two handlers
+        // folding the same log would hand two sources one token, and an append-only log has
+        // no way to take that back.
+        for (const [index, pick] of msg.picks.entries()) {
+          const bench = await this.benchFor(msg.worldId, msg.sessionId);
+          if (!bench) break;
+          const model =
+            manifest?.models.find(
+              (m) => m.id === bench.session.composer.model && m.provider === bench.session.composer.provider,
+            ) ?? null;
+          const outcome = await addBenchReference(bench, store.getBundle(), model, {
+            source: pick.source,
+            replace: pick.replace,
+            requestId: `${msg.requestId}/${index}`,
+            at: this.nowIso(),
+          });
+          // The tile predicted this refusal with the same shared functions; landing here means
+          // a racing client. The refreshed workspace shows what held — recorded, not silent.
+          if (outcome.outcome === "refused") {
+            void this.appLog?.append({ kind: "bench.reference-refused", worldId: msg.worldId, reason: outcome.reason });
+          }
         }
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;
