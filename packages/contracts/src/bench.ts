@@ -206,6 +206,12 @@ export const BenchRequestSnapshotSchema = z
     references: z.array(BenchReferenceTokenSchema),
     provider: z.string().min(1),
     model: z.string().min(1),
+    /**
+     * The recipe version, when the model is a local recipe (SPEC-021 R-13, R-15). The snapshot
+     * is what re-run reads, and a recipe re-run must mean "that version", not "whatever the
+     * catalogue holds now".
+     */
+    recipeVersion: z.number().int().min(1).optional(),
     params: BenchParamsSchema,
     /**
      * The keyframes that rode, in order, with their content hashes — the same self-contained

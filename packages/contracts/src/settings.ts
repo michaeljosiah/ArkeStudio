@@ -60,6 +60,28 @@ export const VoxaSettingsSchema = z
 export type VoxaSettings = z.infer<typeof VoxaSettingsSchema>;
 
 /**
+ * Where the ComfyUI engine is (SPEC-021 §2.2). Path and URL are both user direction, and both
+ * beat the managed install (D5); they are separate fields because they mean different things —
+ * a path is spawned and supervised, a URL is probed and never spawned (D13).
+ */
+export const ComfyUiSettingsSchema = z
+  .object({
+    /** An install Arke launches as its own supervised child. */
+    enginePath: z.string().min(1).nullable().default(null),
+    /** An already-running engine. Probed, never spawned; wins over `enginePath` when both are set. */
+    engineUrl: z.string().min(1).nullable().default(null),
+    /**
+     * The models folder presence detection, downloads and pre-flight verification all resolve
+     * against (§2.4). null → `<engineRoot>/models`. For a URL engine this is the explicit
+     * filesystem mapping D13 requires — the user's assertion that this folder is the one the
+     * engine reads — and without it recipes stay disabled with verification stated unavailable.
+     */
+    modelsDir: z.string().min(1).nullable().default(null),
+  })
+  .strict();
+export type ComfyUiSettings = z.infer<typeof ComfyUiSettingsSchema>;
+
+/**
  * What the user has changed about an agent. Absent fields mean "as shipped": no model pins the
  * agent to whatever the harness is configured with, and no brief leaves the shipped one alone.
  *
@@ -133,6 +155,13 @@ export const AppSettingsSchema = z
         VoxaSettingsSchema,
       )
       .default({ executablePath: null, modelRoot: null, extraArgs: [] }),
+    /** Where the ComfyUI engine is (SPEC-021 §2.2); guarded the same way voxa is. */
+    comfyui: z
+      .preprocess(
+        (value) => (ComfyUiSettingsSchema.safeParse(value).success ? value : {}),
+        ComfyUiSettingsSchema,
+      )
+      .default({ enginePath: null, engineUrl: null, modelsDir: null }),
     /** The voice the app reads text aloud in. Null uses the local default (see the schema). */
     narrator: z
       .preprocess(

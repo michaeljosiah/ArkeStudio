@@ -3,6 +3,7 @@ import { ArtifactKindSchema } from "./artifact.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
 import { BenchRecipeSchema } from "./bench.js";
 import { ChangeRecordSchema } from "./change.js";
+import { ComfyUiStatusSchema } from "./comfyui.js";
 import {
   IsoDateTimeSchema,
   JobIdSchema,
@@ -709,6 +710,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
   /** Local runtime detection completed (SPEC-008 R-22, D12). */
   z.object({ ...base, type: z.literal("runtime.status"), runtime: LocalRuntimeStatusSchema }).strict(),
+  /** The ComfyUI engine and its recipes, whole each time (SPEC-021 §2.12). */
+  z.object({ ...base, type: z.literal("comfyui.status"), comfyui: ComfyUiStatusSchema }).strict(),
   /** Estimate-versus-actual divergence crossed the drift threshold (SPEC-008 R-13, §2.11). */
   z.object({ ...base, type: z.literal("manifest.drift"), reports: z.array(ManifestDriftSchema) }).strict(),
 

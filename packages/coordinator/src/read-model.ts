@@ -248,6 +248,10 @@ export class ReadModel {
         this.state = { ...this.state, app: { ...this.state.app, runtime: event.runtime } };
         return;
       }
+      case "comfyui.status": {
+        this.state = { ...this.state, app: { ...this.state.app, comfyui: event.comfyui } };
+        return;
+      }
       case "voice.sidecar": {
         this.state = {
           ...this.state,

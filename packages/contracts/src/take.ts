@@ -58,6 +58,13 @@ export const ProvenanceSchema = z
     sheets: z.record(SlugSchema, z.number().int().min(1)),
     /** Frozen at dispatch; later world-look versions never rewrite this value. */
     artDirectionVersion: z.number().int().min(1).optional(),
+    /**
+     * The recipe version a local-recipe take was made with (SPEC-021 §2.9, R-13). The recipe id
+     * is already `model`; this is what keeps "made with Draft Video v1, which no longer exists"
+     * answerable after the catalogue advances. Read from the identity frozen on the job at
+     * enqueue, never looked up at arrival.
+     */
+    recipeVersion: z.number().int().min(1).optional(),
   })
   .strict();
 export type Provenance = z.infer<typeof ProvenanceSchema>;

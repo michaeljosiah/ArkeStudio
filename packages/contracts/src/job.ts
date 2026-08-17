@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { JobEngineIdentitySchema, RecipeIdentitySchema } from "./comfyui.js";
 import { IsoDateTimeSchema, JobIdSchema, ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { CapabilitySchema } from "./provider.js";
 
@@ -84,6 +85,18 @@ export const JobSchema = z
     params: z.record(z.string(), z.unknown()).default({}),
     /** Manifest-derived pre-dispatch estimate in integer micro-dollars (R-PROV-4, SPEC-008 R-14). */
     estimatedMicroUsd: z.number().int().min(0),
+    /**
+     * Which recipe, exactly, a local-recipe job was dispatched as (SPEC-021 §2.11, R-15).
+     * Frozen at enqueue: a job that outlives an app update executes and is recorded as what it
+     * was dispatched as, never as whatever the catalogue holds by the time it lands.
+     */
+    recipe: RecipeIdentitySchema.optional(),
+    /**
+     * Which engine it was dispatched against, as source kind and opaque instance digest —
+     * job rows reach the renderer, so never a path (SPEC-021 §2.11). Recovery policy reads
+     * this; an old prompt id is never polled against a different engine.
+     */
+    engine: JobEngineIdentitySchema.optional(),
     status: JobStatusSchema,
     /** The provider's own job id, recorded before the state moves to running. */
     providerJobId: z.string().nullable().default(null),
