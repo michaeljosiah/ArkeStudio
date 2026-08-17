@@ -121,9 +121,10 @@ export class ProviderCallStore {
             : null,
         });
       }
-      if (Buffer.byteLength(JSON.stringify(clean), "utf8") > MAX_RECORD_BYTES) {
-        throw new Error("provider call metadata exceeded the 512 KiB record limit");
-      }
+      // The request branch has to come BEFORE the throw, or it can never run: a record still
+      // oversized after the response truncation used to throw here, so an oversized *request*
+      // body — a big graph, a large upload manifest — lost its whole call record instead of
+      // being truncated like the response (found in issue 354's review).
       if (Buffer.byteLength(JSON.stringify(clean), "utf8") > MAX_RECORD_BYTES) {
         clean = ProviderCallRecordSchema.parse({
           ...clean,
@@ -132,6 +133,9 @@ export class ProviderCallStore {
             body: { truncated: true, reason: "provider request exceeded the 512 KiB call-record limit" },
           },
         });
+      }
+      if (Buffer.byteLength(JSON.stringify(clean), "utf8") > MAX_RECORD_BYTES) {
+        throw new Error("provider call metadata exceeded the 512 KiB record limit");
       }
       await mkdir(dirname(this.path), { recursive: true });
       await appendFile(this.path, `${JSON.stringify(clean)}\n`, "utf8");

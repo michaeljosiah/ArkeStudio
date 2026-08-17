@@ -25,6 +25,7 @@ import {
   CutFileSchema,
   deriveCut,
   designatedCompilation,
+  comfyUiRecoveryDecision,
   estimateMicroUsd,
   modelForCapability,
   gateLocalRuntimes,
@@ -189,6 +190,9 @@ import { ChangeLog } from "./change-log.js";
 import { AuthoringService, settlePermission } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
+import { SETUP_CATALOGUE, type CatalogueEntry } from "./setup/catalogue.js";
+import { sanitizeComfyUiMedia } from "./comfyui/sanitize.js";
+import type { ComfyUiEngineService } from "./comfyui/engine.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
@@ -400,6 +404,21 @@ export interface CoordinatorOptions {
   manifest?: ModelManifest;
   /** SPEC-008: local runtime probing, injected so tests measure nothing. */
   probeRuntime?: () => Promise<RuntimeProbes>;
+  /**
+   * The ComfyUI engine (SPEC-021): the service that discovers, supervises and verifies it,
+   * plus the host's own directory pickers — selected paths go straight to settings and never
+   * cross to the renderer, the same discipline Voxa's executable picker keeps.
+   */
+  comfyui?: {
+    service: ComfyUiEngineService;
+    choosePath?: () => Promise<string | null>;
+    chooseModelsDir?: () => Promise<string | null>;
+  };
+  /**
+   * Catalogue entries the host derives from data this package must not own — the per-recipe
+   * weight entries, built from the provider layer's recipe facts (SPEC-021 §2.4).
+   */
+  setupExtraEntries?: readonly CatalogueEntry[];
   /**
    * Fetching the local runtimes at setup: Ollama and its default model, the voice models.
    * Absent → nothing is fetched and the app behaves exactly as before.
@@ -642,6 +661,40 @@ export class Coordinator {
                 targetKind: job.target.kind,
               });
             },
+            // Enqueue admission (SPEC-021 R-16): a recipe whose readiness is not ready is
+            // refused with the readiness reason before anything is journalled. `unknown`
+            // dispatches (D15) — the floor could not be checked, which is not a refusal.
+            admit: async (input) => {
+              if (input.provider !== "comfyui") return { ok: true };
+              const service = this.opts.comfyui?.service;
+              if (!service) return { ok: false, reason: "local recipes are not configured in this build" };
+              const status = await service.status(this.readModel.getState().app.runtime?.probes ?? null);
+              const recipe = status.recipes.find((r) => r.recipeId === input.model);
+              if (!recipe) return { ok: false, reason: `"${input.model}" is not a shipped recipe` };
+              if (recipe.state === "disabled") {
+                return { ok: false, reason: recipe.reason ?? "the recipe is not ready on this machine" };
+              }
+              return { ok: true };
+            },
+            // Per-source recovery for local-engine jobs (SPEC-021 §2.11): the pure decision
+            // table over the identity frozen at enqueue, against the engine resolved now.
+            recoverLocal: (job) => {
+              if (job.provider !== "comfyui") return null;
+              if (job.status !== "running" && job.status !== "submitting") return null;
+              return comfyUiRecoveryDecision({
+                status: job.status,
+                engine: job.engine,
+                currentInstanceId: this.opts.comfyui?.service.instanceId() ?? null,
+              });
+            },
+            // Landed-media sanitisation (SPEC-021 §2.10): strip embedded workflow metadata
+            // before verification; refuse containers the sanitiser does not handle.
+            prepareArtifact: (job, artifact) => {
+              if (job.provider !== "comfyui") return { ok: true, artifact };
+              const result = sanitizeComfyUiMedia(artifact.name, artifact.data);
+              if (!result.ok) return result;
+              return { ok: true, artifact: { ...artifact, data: result.data } };
+            },
           })
         : null;
     this.voiceService = opts.voice
@@ -729,7 +782,15 @@ export class Coordinator {
               }
               this.emit(event);
             },
-            { appRoot: opts.appRoot },
+            {
+              appRoot: opts.appRoot,
+              // The static catalogue plus what the host derives from provider-owned data —
+              // the per-recipe weight entries (SPEC-021 §2.4). One list, one service.
+              catalogue: [...SETUP_CATALOGUE, ...(opts.setupExtraEntries ?? [])],
+              // Weight entries land in the folder the engine actually reads: the same
+              // resolver detection, launch and pre-flight use, so nothing can disagree.
+              externalDirs: { "comfyui-models": () => this.opts.comfyui?.service.modelsDir() ?? null },
+            },
           )
         : null;
     this.askService = opts.authoring
@@ -928,6 +989,23 @@ export class Coordinator {
     // Local runtimes arrive in the background (R-5 revised): the app is usable throughout, and
     // every component can be skipped. Detection runs first, so a second launch fetches nothing.
     void this.setup?.run();
+
+    // The ComfyUI engine (SPEC-021): apply stored settings — which resolves, detects, and
+    // spawns supervision where it is Arke's to run — then publish the combined status. In the
+    // background, like setup: the app never waits on an engine (R-6).
+    if (this.opts.comfyui && this.appSettings) {
+      const service = this.opts.comfyui.service;
+      service.subscribe(() => {
+        this.trackBackground(this.refreshComfyUi().catch(() => {}));
+      });
+      this.trackBackground(
+        (async () => {
+          const settings = await this.appSettings!.load();
+          await service.applySettings(settings.comfyui);
+          await this.refreshComfyUi();
+        })().catch(() => {}),
+      );
+    }
 
     // The sidecar's four degradation states (SPEC-011 §2.10), polled gently; the app is fully
     // usable in every one of them (R-4).
@@ -1327,23 +1405,31 @@ export class Coordinator {
         const ledgerEntry = this.ledger
           ? (await this.ledger.readAll()).find((e) => e.jobId === job.id)
           : undefined;
-        const takes = await recordTakesFromJob(store, job, ledgerEntry?.actualMicroUsd ?? null, {
-          ...(this.opts.takeQcAnalyzer !== undefined ? { analyzer: this.opts.takeQcAnalyzer } : {}),
-          ...(this.opts.takePosterMaker !== undefined ? { poster: this.opts.takePosterMaker } : {}),
-          onPosterUnavailable: (reason) => {
-            void this.appLog?.append({ kind: "take.poster-unavailable", jobId: job.id, targetKind: job.target.kind, reason });
+        const takes = await recordTakesFromJob(
+          store,
+          job,
+          ledgerEntry?.actualMicroUsd ?? null,
+          {
+            ...(this.opts.takeQcAnalyzer !== undefined ? { analyzer: this.opts.takeQcAnalyzer } : {}),
+            ...(this.opts.takePosterMaker !== undefined ? { poster: this.opts.takePosterMaker } : {}),
+            onPosterUnavailable: (reason) => {
+              void this.appLog?.append({ kind: "take.poster-unavailable", jobId: job.id, targetKind: job.target.kind, reason });
+            },
+            // Why a measurement is missing, and nothing else: no media path, no prompt, no world
+            // prose, no provider payload. A diagnostic about a clip is not a place to leak one.
+            onQcUnavailable: (reason) => {
+              void this.appLog?.append({
+                kind: "take.qc-unavailable",
+                jobId: job.id,
+                targetKind: job.target.kind,
+                reason,
+              });
+            },
           },
-          // Why a measurement is missing, and nothing else: no media path, no prompt, no world
-          // prose, no provider payload. A diagnostic about a clip is not a place to leak one.
-          onQcUnavailable: (reason) => {
-            void this.appLog?.append({
-              kind: "take.qc-unavailable",
-              jobId: job.id,
-              targetKind: job.target.kind,
-              reason,
-            });
-          },
-        });
+          // The take agrees with its ledger row about where the figure came from (SPEC-021
+          // §2.9): a local job's takes carry local-zero, not manifest-derived.
+          ledgerEntry?.actualSource ?? "manifest-derived",
+        );
         if (takes.length === 0) throw new Error("production take finalization produced no take");
         for (const take of takes) {
           this.emit({
@@ -1402,6 +1488,26 @@ export class Coordinator {
     }
   }
 
+  /** Patch the comfyui settings block, re-apply to the engine service, and republish. */
+  private async applyComfyUiPatch(
+    patch: Partial<import("@arke-studio/contracts").ComfyUiSettings>,
+  ): Promise<void> {
+    if (!this.appSettings || !this.opts.comfyui) return;
+    const settings = await this.appSettings.setComfyUi(patch);
+    await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
+    await this.setup?.detect().catch(() => {});
+    await this.refreshComfyUi();
+  }
+
+  /** Publish the combined engine + recipe readiness (SPEC-021 §2.12), whole each time. */
+  private async refreshComfyUi(): Promise<void> {
+    const service = this.opts.comfyui?.service;
+    if (!service) return;
+    const probes = this.readModel.getState().app.runtime?.probes ?? null;
+    const status = await service.status(probes);
+    this.emit({ at: new Date().toISOString(), type: "comfyui.status", comfyui: status });
+  }
+
   /**
    * Enqueue a fully-formed dispatch (SPEC-009 §1.2): callers hand over model, params and
    * estimate; the queue owns durability, reconciliation and the ledger. SPEC-012/013 compose
@@ -1409,7 +1515,24 @@ export class Coordinator {
    */
   async enqueueJob(input: EnqueueInput): Promise<Job> {
     if (!this.jobQueue) throw new Error("dispatch is not configured (no app root or provider clients)");
-    return this.jobQueue.enqueue(input);
+    return this.jobQueue.enqueue(this.freezeLocalIdentity(input));
+  }
+
+  /**
+   * Freeze recipe and engine identity onto a local-recipe dispatch before it is journalled
+   * (SPEC-021 §2.11, R-15). Cloud inputs pass through untouched; a comfyui input for a model
+   * the catalogue does not carry passes through too — admission refuses it with the reason,
+   * which beats inventing identity for work that cannot run.
+   */
+  private freezeLocalIdentity(input: EnqueueInput): EnqueueInput {
+    if (input.provider !== "comfyui" || input.recipe !== undefined) return input;
+    const identity = this.opts.comfyui?.service.identityFor(input.model);
+    if (!identity) return input;
+    return {
+      ...input,
+      recipe: identity.recipe,
+      ...(identity.engine !== null ? { engine: identity.engine } : {}),
+    };
   }
 
   private emitEnqueueResult(
@@ -1460,7 +1583,7 @@ export class Coordinator {
       this.emitEnqueueResult(requestId, command, 0, [], [], true);
       return { accepted: true };
     }
-    const outcome = await enqueueInputs(inputs, (input) => this.jobQueue!.enqueue(input));
+    const outcome = await enqueueInputs(inputs, (input) => this.jobQueue!.enqueue(this.freezeLocalIdentity(input)));
     this.emitEnqueueResult(
       requestId,
       command,
@@ -2771,6 +2894,69 @@ export class Coordinator {
         await this.opts.voice?.restart?.().catch(() => {});
         return;
       }
+      case "choose-comfyui-path": {
+        if (!this.appSettings || !this.opts.comfyui?.choosePath) return;
+        const enginePath = await this.opts.comfyui.choosePath().catch(() => null);
+        if (enginePath === null) return;
+        await this.applyComfyUiPatch({ enginePath, engineUrl: null });
+        return;
+      }
+      case "choose-comfyui-models-dir": {
+        if (!this.appSettings || !this.opts.comfyui?.chooseModelsDir) return;
+        const modelsDir = await this.opts.comfyui.chooseModelsDir().catch(() => null);
+        if (modelsDir === null) return;
+        await this.applyComfyUiPatch({ modelsDir });
+        return;
+      }
+      case "clear-comfyui-models-dir": {
+        await this.applyComfyUiPatch({ modelsDir: null });
+        return;
+      }
+      case "set-comfyui-url": {
+        // A URL is user-typed data, not a filesystem path; loopback and LAN engines only would
+        // be a lie — the spec allows anywhere reachable (§1.2) — but it must at least parse.
+        let parsed: URL;
+        try {
+          parsed = new URL(msg.url);
+        } catch {
+          return;
+        }
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
+        await this.applyComfyUiPatch({ engineUrl: msg.url, enginePath: null });
+        return;
+      }
+      case "clear-comfyui-engine": {
+        await this.applyComfyUiPatch({ enginePath: null, engineUrl: null });
+        return;
+      }
+      case "use-detected-comfyui": {
+        // Only a location the host itself just discovered and published (SPEC-021 D10): the
+        // renderer selects among offers, it does not originate paths.
+        const service = this.opts.comfyui?.service;
+        if (!service) return;
+        const offered = service.engineStatus().detected.find((d) => d.location === msg.location);
+        if (!offered) return;
+        const isUrl = /^https?:\/\//i.test(offered.location);
+        await this.applyComfyUiPatch(
+          isUrl ? { engineUrl: offered.location, enginePath: null } : { enginePath: offered.location, engineUrl: null },
+        );
+        return;
+      }
+      case "comfyui-refresh": {
+        if (!this.appSettings || !this.opts.comfyui) return;
+        const settings = await this.appSettings.load();
+        await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
+        await this.setup?.detect().catch(() => {});
+        await this.refreshComfyUi();
+        return;
+      }
+      case "comfyui-verify-recipe": {
+        const service = this.opts.comfyui?.service;
+        if (!service) return;
+        await service.preflight(msg.recipeId).catch(() => {});
+        await this.refreshComfyUi();
+        return;
+      }
       case "repair-voice-models": {
         await this.setup?.repair("kokoro-82m");
         await this.setup?.repair("whisper-base-en");
@@ -3510,7 +3696,7 @@ export class Coordinator {
         }
         const outcome = await enqueueInputs(plan.inputs, (input) => {
           if (!this.jobQueue) throw new Error("the job queue is unavailable");
-          return this.jobQueue.enqueue(input);
+          return this.jobQueue.enqueue(this.freezeLocalIdentity(input));
         });
         // Jobs join their reserved takes in order: a failure keeps its number and says why.
         const failed = new Map(outcome.failures.map((f) => [f.index, f.reason]));

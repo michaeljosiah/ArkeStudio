@@ -6,6 +6,7 @@ import {
   type BackgroundNotificationPreference,
   type BenchRecipe,
   type Capability,
+  type ComfyUiSettings,
   type ModelManifest,
   type RoutingFault,
   type ThemePreference,
@@ -135,6 +136,14 @@ export class AppSettingsFile {
   async setVoxa(patch: Partial<VoxaSettings>): Promise<AppSettings> {
     const current = await this.load();
     const next: AppSettings = { ...current, voxa: { ...current.voxa, ...patch } };
+    await this.persist(next);
+    return next;
+  }
+
+  /** Where the ComfyUI engine is (SPEC-021 §2.2), patched the same way voxa's block is. */
+  async setComfyUi(patch: Partial<ComfyUiSettings>): Promise<AppSettings> {
+    const current = await this.load();
+    const next: AppSettings = { ...current, comfyui: { ...current.comfyui, ...patch } };
     await this.persist(next);
     return next;
   }

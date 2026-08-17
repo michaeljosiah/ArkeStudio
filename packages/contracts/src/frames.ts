@@ -759,6 +759,22 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("clear-voxa-executable") }).strict(),
   z.object({ kind: z.literal("use-bundled-voxa") }).strict(),
   z.object({ kind: z.literal("restart-voxa") }).strict(),
+  /**
+   * The ComfyUI engine (SPEC-021 §2.2). Filesystem paths never originate in the renderer:
+   * choosing a path or models folder goes through the host's own picker, and adopting a
+   * detected install names a location the host itself discovered and just published — the
+   * coordinator refuses one it did not.
+   */
+  z.object({ kind: z.literal("choose-comfyui-path") }).strict(),
+  z.object({ kind: z.literal("choose-comfyui-models-dir") }).strict(),
+  z.object({ kind: z.literal("clear-comfyui-models-dir") }).strict(),
+  z.object({ kind: z.literal("set-comfyui-url"), url: z.string().min(1).max(2000) }).strict(),
+  z.object({ kind: z.literal("clear-comfyui-engine") }).strict(),
+  z.object({ kind: z.literal("use-detected-comfyui"), location: z.string().min(1) }).strict(),
+  /** Re-run detection, probing and readiness on demand — the Settings refresh. */
+  z.object({ kind: z.literal("comfyui-refresh") }).strict(),
+  /** Re-hash one recipe's pinned files (§2.5): the "Re-verify" affordance. */
+  z.object({ kind: z.literal("comfyui-verify-recipe"), recipeId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("repair-voice-models") }).strict(),
   z.object({ kind: z.literal("open-model-folder") }).strict(),
   z.object({ kind: z.literal("test-local-voice"), requestId: UlidSchema }).strict(),

@@ -38,6 +38,7 @@ export class ReadModel {
         narrator: null,
         appearance: { theme: "system" },
         runtime: null,
+        comfyui: null,
         voiceRuntime: null,
         drift: [],
         agents: [],

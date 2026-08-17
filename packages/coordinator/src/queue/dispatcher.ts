@@ -10,11 +10,14 @@ import {
   ulid,
   type Capability,
   type ClientDeclarations,
+  type ComfyUiRecoveryDecision,
   type DomainEvent,
   type Job,
+  type JobEngineIdentity,
   type JobTarget,
   type LedgerEntry,
   type QueueStatus,
+  type RecipeIdentity,
   type ReconcileAction,
 } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
@@ -78,6 +81,10 @@ export interface EnqueueInput {
   params: Record<string, unknown>;
   estimatedMicroUsd: number;
   landing?: { dir: string; name?: string };
+  /** Frozen recipe identity for a local-recipe dispatch (SPEC-021 §2.11, R-15). */
+  recipe?: RecipeIdentity;
+  /** Frozen engine identity — source kind and opaque instance digest, never a path. */
+  engine?: JobEngineIdentity;
 }
 
 export interface JobQueueOptions {
@@ -104,6 +111,27 @@ export interface JobQueueOptions {
   onTerminal?: (job: Job) => void | Promise<void>;
   /** Safe operational notice for a persisted domain-finalization failure. */
   onFinalizationFailure?: (job: Job) => void;
+  /**
+   * Coordinator enqueue admission (SPEC-021 §2.12, R-16): consulted before anything is
+   * journalled, so a stale picker can never commit work the coordinator knows cannot run.
+   * A refusal's reason is the readiness reason, and it reaches the caller as the failure.
+   */
+  admit?: (input: EnqueueInput) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  /**
+   * Recovery policy for a local provider's non-terminal jobs (SPEC-021 §2.11): a decision per
+   * engine source instead of the declaration-driven default. Null means "no policy — use the
+   * standing behaviour", which is what every cloud job gets.
+   */
+  recoverLocal?: (job: Job, prior: Job | undefined) => ComfyUiRecoveryDecision | null;
+  /**
+   * Last transform before verification and landing (SPEC-021 §2.10): media sanitisation for
+   * providers whose engines embed workflow metadata. A refusal fails the job with the reason —
+   * an unsanitisable artifact is never landed as-is.
+   */
+  prepareArtifact?: (
+    job: Job,
+    artifact: DispatchArtifact,
+  ) => { ok: true; artifact: DispatchArtifact } | { ok: false; reason: string };
   clock?: () => string;
   rng?: () => number;
   maxAttempts?: number;
@@ -285,6 +313,10 @@ export class JobQueue {
   /** Durable before any network call (R-1): the returned job is already journalled. */
   async enqueue(input: EnqueueInput): Promise<Job> {
     if (!this.accepting) throw new Error("the queue is not accepting work yet (recovery first, R-18)");
+    // Admission before durability (SPEC-021 R-16): a dispatch the coordinator knows cannot run
+    // is refused with the readiness reason, and nothing is journalled for it.
+    const admitted = await this.opts.admit?.(input);
+    if (admitted !== undefined && !admitted.ok) throw new Error(admitted.reason);
     const now = this.clock();
     const job: Job = {
       id: `jb_${ulid()}`,
@@ -297,6 +329,10 @@ export class JobQueue {
       model: input.model,
       params: input.params,
       estimatedMicroUsd: input.estimatedMicroUsd,
+      // Identity frozen before the journal line exists (SPEC-021 §2.11): what this job IS can
+      // never depend on what the catalogue or Settings hold by the time it runs.
+      ...(input.recipe !== undefined ? { recipe: input.recipe } : {}),
+      ...(input.engine !== undefined ? { engine: input.engine } : {}),
       status: "queued",
       providerJobId: null,
       attempt: 0,
@@ -603,6 +639,21 @@ export class JobQueue {
       }
       if (this.disposed) return;
       if (this.jobs.get(job.id)?.status === "cancelled") return; // discard on arrival (§2.10)
+      // Sanitisation before verification (SPEC-021 §2.10): an engine that embeds workflow
+      // metadata has it stripped here, and a container the sanitiser cannot process fails the
+      // job with the reason — never landed as-is.
+      if (this.opts.prepareArtifact) {
+        const prepared: DispatchArtifact[] = [];
+        for (const artifact of artifacts) {
+          const result = this.opts.prepareArtifact(job, artifact);
+          if (!result.ok) {
+            await this.terminalize(job, "failed", `artifact "${artifact.name}" was refused: ${result.reason}`);
+            return;
+          }
+          prepared.push(result.artifact);
+        }
+        artifacts = prepared;
+      }
       // Verify everything before anything lands (R-13): all-or-nothing.
       for (const artifact of artifacts) {
         const verified = verifyArtifact(artifact);
@@ -837,12 +888,27 @@ export class JobQueue {
         continue;
       }
       if (job.status === "running") {
+        // A local engine's job first consults the per-source policy (SPEC-021 §2.11): a spawned
+        // engine's old prompt id means nothing, and an old id is never polled against a
+        // different engine. Cloud jobs keep the standing behaviour untouched.
+        const decision = this.opts.recoverLocal?.(job, prior) ?? null;
+        if (decision !== null && decision.action !== "resume") {
+          report.push(await this.applyLocalRecovery(job, decision));
+          continue;
+        }
         // R-5: a recorded remote id resumes by polling, never by resubmitting.
         report.push({ jobId: job.id, action: "resumed-polling" });
         this.trackRun(this.resumePolling(job));
         continue;
       }
       if (job.status === "submitting") {
+        // "resume" cannot apply to a job with no recorded remote id; it falls through to the
+        // standing reconciliation, which for an all-false local provider is the honest hold.
+        const decision = this.opts.recoverLocal?.(job, prior) ?? null;
+        if (decision !== null && decision.action !== "resume") {
+          report.push(await this.applyLocalRecovery(job, decision));
+          continue;
+        }
         const action = await this.reconcileSubmitting(job);
         report.push(action);
       }
@@ -930,15 +996,37 @@ export class JobQueue {
     this.lane(job.provider).fifo.push(job.id);
   }
 
+  /** The per-source policy's outcome, applied (SPEC-021 §2.11). `resume` is handled by the caller. */
+  private async applyLocalRecovery(
+    job: Job,
+    decision: Exclude<ComfyUiRecoveryDecision, { action: "resume" }>,
+  ): Promise<ReconcileAction> {
+    if (decision.action === "requeue") {
+      await this.requeueSafely(job);
+      return { jobId: job.id, action: "requeued", detail: "the engine was relaunched and holds no old work" };
+    }
+    if (decision.action === "fail") {
+      await this.terminalize(job, "failed", decision.reason);
+      return { jobId: job.id, action: "failed", detail: decision.reason };
+    }
+    return this.holdForUser(job);
+  }
+
   private async holdForUser(job: Job): Promise<ReconcileAction> {
-    const duplicateCost =
-      job.estimatedMicroUsd > 0
+    const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
+    // A duplicate on a local engine costs this machine's own GPU time and nothing else (R-12) —
+    // wording that said "charge" here would be a hold nobody can price honestly.
+    const duplicateCost = local
+      ? "re-runs it on this machine's own GPU time — no charge"
+      : job.estimatedMicroUsd > 0
         ? `may charge about ${formatMicroUsd(job.estimatedMicroUsd)} again`
         : "may create another charge of unknown size";
     const held: Job = {
       ...job,
       status: "needs-reconciliation",
-      error: `Arke did not witness the submission result. ${job.provider} may have accepted and charged it, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}; the prior actual cost is unknown.`,
+      error: local
+        ? `Arke did not witness the submission result — the engine kept running while Arke restarted, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}.`
+        : `Arke did not witness the submission result. ${job.provider} may have accepted and charged it, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}; the prior actual cost is unknown.`,
       updatedAt: this.clock(),
     };
     await this.transition(held);
