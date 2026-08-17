@@ -48,6 +48,7 @@ const base = { at: IsoDateTimeSchema };
 export const QueueCommandSchema = z.enum([
   "dispatch-scene",
   "voice-preview",
+  "voice-line",
   "read-sheet-section",
   "generate-world-image",
   "upload-world-image",

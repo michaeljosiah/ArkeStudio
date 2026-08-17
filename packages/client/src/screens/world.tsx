@@ -2150,6 +2150,7 @@ function VoiceCandidatesPanel({
   const sheet = useSheet(worldId, sheetId);
   const [requests, setRequests] = useState<Record<string, string>>({});
   const [assigning, setAssigning] = useState<string | null>(null);
+  const [where, setWhere] = useState<"all" | "cloud" | "local">("all");
   const autoPlayed = useRef(new Set<string>());
   // Assigning commits straight through (no gate), so the change lands in the next world snapshot:
   // the pressed row stays busy until this sheet's voice is the one we just assigned.
@@ -2200,9 +2201,37 @@ function VoiceCandidatesPanel({
             : "loading voices…"}
         </span>
       </div>
+      {/* Where a voice lives, as a tab — the same organisation the bench's reading picker uses
+          (design 70). Six local voices were otherwise lost among fifty cloud ones, and "can this
+          machine say it without spending" is the first question anyone asks of this list. */}
       {candidates && (
-        <div style={{ display: "grid", gap: 8 }}>
-          {candidates.ranked.map(({ candidate }) => {
+        <div className="fy-voices__tabs" style={{ padding: 0 }}>
+          {(["all", "cloud", "local"] as const).map((tab) => {
+            const count =
+              tab === "all"
+                ? candidates.ranked.length
+                : candidates.ranked.filter(({ candidate }) => (tab === "local" ? candidate.local : !candidate.local)).length;
+            return (
+              <button
+                key={tab}
+                type="button"
+                className={cx("fy-voices__tab", where === tab && "fy-voices__tab--on")}
+                data-testid={`voice-tab-${tab}`}
+                onClick={() => setWhere(tab)}
+              >
+                {`${tab === "all" ? "All" : tab === "cloud" ? "Cloud" : "On this machine"} ${count}`}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {/* The catalogue scrolls inside its own pane rather than growing the page: fifty voices
+          otherwise push the assign controls, and the sheet under them, off the bottom. */}
+      {candidates && (
+        <div className="fy-voicelist">
+          {candidates.ranked
+            .filter(({ candidate }) => (where === "all" ? true : where === "local" ? candidate.local : !candidate.local))
+            .map(({ candidate }) => {
             const key = `${candidate.provider}/${candidate.voiceId}`;
             const preview = previews[key];
             const requestId = requests[key];

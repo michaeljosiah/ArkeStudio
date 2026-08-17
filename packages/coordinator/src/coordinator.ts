@@ -44,6 +44,8 @@ import {
   type VoiceCandidate,
   type ArtifactGeneration,
   type SessionId,
+  deliveryParams as mapDelivery,
+  type Delivery,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir } from "./bench/store.js";
 import {
@@ -100,6 +102,7 @@ import {
   VoiceService,
   type CloudVoiceSource,
   type SidecarLike,
+  voiceLineRequest,
 } from "./voice/service.js";
 import { atomicWriteFile } from "./world/atomic.js";
 import { applyTurnBibleEdits, readBible, restoreBible, saveBible } from "./world/bible.js";
@@ -3947,6 +3950,68 @@ export class Coordinator {
               .map((sheet) => sheet.name),
           })),
         });
+        return;
+      }
+      case "voice-line": {
+        // Speak a shot's line in its character's own voice (SPEC-011 R-14). The voice is not a
+        // parameter of this message: it is read from the speaker's sheet here, so a retake
+        // keeps it by construction and only the delivery can differ.
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.voiceService) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Voice generation is unavailable.");
+          return;
+        }
+        const bundle = store.getBundle();
+        const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
+        const shot = production?.scenes.flatMap((scene) => scene.shots).find((s) => s.id === msg.shotId);
+        if (!shot?.audio?.line) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That shot has no spoken line.");
+          return;
+        }
+        const sheet = shot.audio.speaker ? bundle.sheets.find((c) => c.id === shot.audio!.speaker) : undefined;
+        if (!sheet) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The speaker is no longer in the cast.");
+          return;
+        }
+        const voice = sheet.voice;
+        if (!voice) {
+          // The sheet is where a voice is given, and saying so names the place to go.
+          this.rejectEnqueue(msg.requestId, msg.kind, `${sheet.name} has no assigned voice — choose one on their sheet.`);
+          return;
+        }
+        const model = this.opts.manifest?.models.find(
+          (m) => m.provider === voice.provider && m.capability === "voice-tts",
+        );
+        if (!model) {
+          this.rejectEnqueue(msg.requestId, msg.kind, `No ${voice.provider} voice model is available.`);
+          return;
+        }
+        // A delivery this provider cannot express is stated and travels with the job rather
+        // than being dropped into a read that quietly ignores it (R-15).
+        let deliveryParams: Record<string, number> | null = null;
+        let deliveryNotice: string | null = null;
+        if (msg.delivery !== undefined) {
+          const mapped = mapDelivery(voice.provider, msg.delivery as Delivery);
+          if (mapped.ok) deliveryParams = mapped.params;
+          else deliveryNotice = mapped.reason;
+        }
+        let input;
+        try {
+          input = voiceLineRequest({
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            shotId: msg.shotId,
+            sheet,
+            text: shot.audio.line,
+            deliveryParams,
+            deliveryNotice,
+            model,
+          });
+        } catch (err) {
+          this.rejectEnqueue(msg.requestId, msg.kind, err instanceof Error ? err.message : "The line could not be prepared.");
+          return;
+        }
+        await this.enqueueBatch(msg.requestId, msg.kind, [input]);
         return;
       }
       case "voice-candidates": {

@@ -4371,3 +4371,14 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-bench__voicename { font: 500 12px var(--font-sans); }
 .fy-bench__voicedelivery { font: 400 11px var(--font-mono); color: var(--muted-foreground); }
 .fy-bench__voicetake audio { width: 100%; }
+
+/* The voice catalogue scrolls in place. A world with fifty cloud voices otherwise grows the
+   page until the assign controls sit below the fold, which is the one place a long list must
+   not reach. The height is a band, not a fixed figure: a short list stays short. */
+.fy-voicelist {
+  display: grid; gap: 8px; max-height: min(52vh, 420px); overflow-y: auto;
+  padding-right: 4px; margin-right: -4px;
+}
+.fy-voicelist::-webkit-scrollbar { width: 8px; }
+.fy-voicelist::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+.fy-voicelist::-webkit-scrollbar-track { background: transparent; }

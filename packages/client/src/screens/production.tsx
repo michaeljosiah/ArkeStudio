@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   assemblePrompt,
@@ -47,6 +47,8 @@ import {
   useExports,
   useStore,
   useWorld,
+  requestVoiceLine,
+  subscribeQueueResults,
 } from "../lib/store.js";
 
 /** Production screens (§2.9), composed to the prototype frames 11a/14a/11b/24a/25a/25b/10b. */
@@ -1685,10 +1687,29 @@ export function DispatchDialogScreen() {
 
 export function VoiceLineDialogScreen() {
   const { worldId, prodId } = useParams();
+  const [params] = useSearchParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
-  const shot = production?.scenes.flatMap((s) => s.shots).find((s) => s.audio?.line && s.audio.speaker);
+  const spoken = production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.line && s.audio.speaker) ?? [];
+  // The shot the row asked for. Without this the dialog showed whichever line came first, so
+  // pressing Generate beside one character opened another character's line.
+  const asked = params.get("shot");
+  const shot = spoken.find((s) => s.id === asked) ?? spoken[0];
   const speaker = shot?.audio?.speaker ? world?.sheets.find((c) => c.id === shot.audio!.speaker) : undefined;
+  const [sending, setSending] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const pending = useRef<string | null>(null);
+  useEffect(
+    () =>
+      subscribeQueueResults((result) => {
+        if (result.requestId !== pending.current) return;
+        pending.current = null;
+        setSending(false);
+        if (result.disposition === "accepted") navigate(`/w/${worldId}/p/${prodId}/audio`);
+        else setRefusal(result.failures[0]?.reason ?? "The line could not be queued.");
+      }),
+    [navigate, worldId, prodId],
+  );
   return (
     <div className="fy-dialogwrap" data-screen="voice-line-dialog">
       <div className="fy-dialog" style={{ maxWidth: 560 }}>
@@ -1720,9 +1741,25 @@ export function VoiceLineDialogScreen() {
         ) : (
           <EmptyState title="No spoken lines in this production yet" />
         )}
+        {refusal !== null && <p className="fy-refusal">{refusal}</p>}
         <div>
-          <Button variant="primary" disabled title="Voice generation arrives with SPEC-011">
-            Generate line
+          <Button
+            variant="primary"
+            data-testid="voice-line-generate"
+            disabled={shot === undefined || speaker === undefined || speaker.voice === undefined || sending}
+            title={
+              speaker !== undefined && speaker.voice === undefined
+                ? `${speaker.name} has no assigned voice — choose one on their sheet`
+                : undefined
+            }
+            onClick={() => {
+              if (!worldId || !prodId || !shot) return;
+              setRefusal(null);
+              setSending(true);
+              pending.current = requestVoiceLine({ worldId, productionId: prodId, shotId: shot.id });
+            }}
+          >
+            {sending ? "Generating…" : "Generate line"}
           </Button>
         </div>
       </div>
@@ -1916,7 +1953,9 @@ export function AudioScreen() {
                 <span className="fy-dot fy-dot--warn" />
                 not generated
               </span>
-              <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/voice-line`)}>Generate</Button>
+              <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/voice-line?shot=${encodeURIComponent(s.id)}`)}>
+                Generate
+              </Button>
             </div>
           );
         })}

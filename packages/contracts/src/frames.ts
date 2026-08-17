@@ -1046,6 +1046,22 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    */
   z.object({ kind: z.literal("voice-catalogue"), worldId: UlidSchema }).strict(),
   /**
+   * Speak a shot's line in its character's own voice (SPEC-011 R-14). The voice is not a
+   * parameter: it is the speaker's, read from their sheet at dispatch, so a retake keeps it by
+   * construction and only the delivery can change.
+   */
+  z
+    .object({
+      kind: z.literal("voice-line"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      shotId: z.string().min(1),
+      /** One of DELIVERIES; absent leaves the read at the provider's own default. */
+      delivery: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
    * SPEC-011 R-9/R-10: audition one candidate with the character's line. Cloud previews cost;
    * the client shows the stated figure before this message is sent.
    */

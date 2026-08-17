@@ -304,3 +304,62 @@ describe("authoritative sheet speech", () => {
     assert.throws(() => authoritativeSheetSpeech({ ...SHEET, sections: [{ heading: "Essence", body: "  " }] } as Sheet, "Essence"), /Nothing to read/);
   });
 });
+
+describe("a spoken line reaches the queue (built 2026-08-17)", () => {
+  /**
+   * The screens, the dialog and voiceLineRequest all existed; nothing connected them, and the
+   * button was hardcoded `disabled` with "Voice generation arrives with SPEC-011". These pin
+   * the shape the handler now depends on.
+   */
+  // The file's own sheet, given the local voice this world actually assigns her.
+  const SPEAKER = {
+    ...SHEET,
+    voice: { provider: "kokoro", voiceId: "af_bella", label: "Bella", assignedAtVersion: 4 },
+  } as unknown as Sheet;
+  const LOCAL_MODEL: ManifestModel = {
+    id: "kokoro-82m",
+    provider: "kokoro",
+    capability: "voice-tts",
+    displayName: "Kokoro 82M",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: {},
+    pricing: { kind: "unmetered" },
+  };
+
+  it("speaks in the sheet's own voice, never one passed in", () => {
+    const request = voiceLineRequest({
+      worldId: "w",
+      productionId: "saltlight",
+      shotId: "sh_12",
+      sheet: SPEAKER,
+      text: "the verse, under the water",
+      deliveryParams: null,
+      deliveryNotice: null,
+      model: LOCAL_MODEL,
+    });
+    assert.equal(request.params["voiceId"], "af_bella", "the voice is the speaker's");
+    assert.equal(request.params["text"], "the verse, under the water");
+    assert.equal(request.capability, "voice-tts");
+    assert.deepEqual(request.target, { kind: "voice-line", id: "sh_12" });
+    // Lands beside the production it belongs to, not in the world's artifacts.
+    assert.equal(request.landing?.dir, "productions/saltlight/audio");
+  });
+
+  it("refuses a speaker with no voice, naming where one is given", () => {
+    const voiceless = { ...SPEAKER, voice: undefined } as unknown as Sheet;
+    assert.throws(
+      () =>
+        voiceLineRequest({
+          worldId: "w",
+          productionId: "saltlight",
+          shotId: "sh_12",
+          sheet: voiceless,
+          text: "x",
+          deliveryParams: null,
+          deliveryNotice: null,
+          model: LOCAL_MODEL,
+        }),
+      /has no assigned voice/,
+    );
+  });
+});
