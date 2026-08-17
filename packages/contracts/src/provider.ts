@@ -8,7 +8,26 @@ import type { ReferenceKind } from "./reference-budget.js";
  * concrete dispatch target. Routing stores models; providers are how they are displayed.
  */
 
-export const CapabilitySchema = z.enum(["image", "video", "llm", "voice-tts", "voice-clone", "voice-stt"]);
+/**
+ * `music` is generated audio the studio owns as its own track — a score bed, or the song a music
+ * video is cut against. It is deliberately not a kind of `voice-tts`: speech is generated per line
+ * against a character's assigned voice, and music is generated once per production and placed on a
+ * timeline. They share a file format and nothing else.
+ *
+ * It is also the opposite of `AudioPolicy.music` (art-direction.ts), which is a *negative* — it
+ * tells a video model not to score a clip, because a video model returns one mixed track that can
+ * never be separated afterwards. A track generated here is separable by construction, which is
+ * what makes it something the cut can place, duck and replace.
+ */
+export const CapabilitySchema = z.enum([
+  "image",
+  "video",
+  "music",
+  "llm",
+  "voice-tts",
+  "voice-clone",
+  "voice-stt",
+]);
 export type Capability = z.infer<typeof CapabilitySchema>;
 
 export const ProviderIdSchema = z.enum([
@@ -60,7 +79,7 @@ export interface ProviderInfo {
 export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   fal: {
     displayName: "FAL",
-    capabilities: ["image", "video"],
+    capabilities: ["image", "video", "music"],
     local: false,
     credential: "in-app",
     keyHint: "key id:secret",

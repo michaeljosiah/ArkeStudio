@@ -1,4 +1,4 @@
-import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
+import { PROVIDERS, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
 import { jsonRequest, tryProbe } from "./http.js";
 // Generated beside the manifest rows, from the same fetch, so a model can never be offered
 // with no route behind it — the failure that used to read "no endpoint mapping" at dispatch,
@@ -121,23 +121,24 @@ export class FalClient implements ProviderClient {
 
   /**
    * One free probe covers the gateway: a status read of a nonexistent request authenticates
-   * without generating. One key unlocks image and video together (R-1).
+   * without generating. One key unlocks every capability fal serves together (R-1) — the gateway
+   * authenticates once and routes per model, so probing per capability would be three identical
+   * requests answering one question.
    */
   async validateKey(key: string): Promise<CapabilityProbe[]> {
     const url = `${this.baseUrl}/fal-ai/flux-pro/requests/00000000-0000-0000-0000-000000000000/status`;
     const probe = await tryProbe(() => jsonRequest(this.fetchImpl, this.id, url, { headers: this.headers(key) }));
+    // Every capability the provider table says fal serves, answered from the one probe. Listing
+    // them here as well would be a second place to update, and the failure mode of forgetting is
+    // silent: deriveCapabilityAvailability reads a missing probe as "not available", so a
+    // capability fal genuinely unlocks would read as locked with a valid key in the box.
+    const capabilities = PROVIDERS[this.id].capabilities;
     if (!probe.ok) {
       const reason = probe.auth ? "FAL rejected this key" : `FAL could not be reached: ${probe.message}`;
-      return [
-        { capability: "image", available: false, reason },
-        { capability: "video", available: false, reason },
-      ];
+      return capabilities.map((capability) => ({ capability, available: false, reason }));
     }
     // Any non-auth status (404 for the bogus id) means the key authenticated the gateway.
-    return [
-      { capability: "image", available: true },
-      { capability: "video", available: true },
-    ];
+    return capabilities.map((capability) => ({ capability, available: true }));
   }
 
   /**
