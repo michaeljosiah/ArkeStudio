@@ -303,6 +303,11 @@ function emitChange(next: StoreState): void {
   for (const l of listeners) l();
 }
 
+/** Test hook: apply one event to a state, so a reducer can be pinned without a socket. */
+export function __applyForTest(state: ClientState, event: DomainEvent): ClientState {
+  return fold(state, event);
+}
+
 function fold(state: ClientState, event: DomainEvent): ClientState {
   switch (event.type) {
     case "health.changed":
@@ -355,6 +360,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, backgroundNotifications: event.preference } };
     case "appearance.changed":
       return { ...state, app: { ...state.app, appearance: { theme: event.preference } } };
+    case "narrator.changed":
+      return { ...state, app: { ...state.app, narrator: event.voice } };
     case "runtime.status":
       return { ...state, app: { ...state.app, runtime: event.runtime } };
     case "voice.sidecar":

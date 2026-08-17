@@ -4,7 +4,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __setStateForTest } from "../src/lib/store.js";
+import { __applyForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 
@@ -156,5 +156,28 @@ describe("the narrator in Settings", () => {
     assert.match(html, /billed per character/);
     // And there is a way back to the free one.
     assert.match(html, /data-testid="narrator-reset"/);
+  });
+});
+
+describe("the narrator round trip", () => {
+  /**
+   * The write reached settings.json and the row never changed: the reducer existed on the
+   * coordinator's read model but not on the client's, so the event arrived and nothing applied
+   * it. Found on the first press in the installed app.
+   */
+  it("applies narrator.changed to the app state", () => {
+    const before = __applyForTest(FIXTURE_STATE, {
+      at: "2026-08-17T10:00:00.000Z",
+      type: "narrator.changed",
+      voice: { provider: "elevenlabs", voiceId: "v_roger", label: "Roger" },
+    });
+    assert.deepEqual(before.app.narrator, { provider: "elevenlabs", voiceId: "v_roger", label: "Roger" });
+    // And clearing it returns to the shipped local voice.
+    const cleared = __applyForTest(before, {
+      at: "2026-08-17T10:00:01.000Z",
+      type: "narrator.changed",
+      voice: null,
+    });
+    assert.equal(cleared.app.narrator, null);
   });
 });
