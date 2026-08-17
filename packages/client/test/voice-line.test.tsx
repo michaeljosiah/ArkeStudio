@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -179,5 +180,15 @@ describe("the narrator round trip", () => {
       voice: null,
     });
     assert.equal(cleared.app.narrator, null);
+  });
+});
+
+describe("the voice tabs stay readable", () => {
+  it("gives the chosen tab a hover rule of its own", () => {
+    // `:hover` outranks a single class, so the tab you just clicked went white on white —
+    // invisible precisely while the pointer was still on it. Found in the installed app.
+    const css = readFileSync(new URL("../src/screens/fidelity.css", import.meta.url), "utf8");
+    const rule = css.slice(css.indexOf(".fy-voices__tab--on"));
+    assert.match(rule.slice(0, 200), /\.fy-voices__tab--on:hover/);
   });
 });
