@@ -1054,7 +1054,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * one ranks the catalogue against a character's written voice, which is the wrong question
    * for a voice that is only reading. No sheet id, and nothing ranked.
    */
-  z.object({ kind: z.literal("voice-catalogue"), worldId: UlidSchema }).strict(),
+  /**
+   * `worldId` is optional because the catalogue is the app's — local presets plus whatever the
+   * stored keys unlock. A world only adds `usedBy`, so Settings can ask for it with no world
+   * open. It could not, at first: an empty id failed frame validation and the request was
+   * dropped, leaving the picker reading a catalogue that never arrived.
+   */
+  z.object({ kind: z.literal("voice-catalogue"), worldId: UlidSchema.optional() }).strict(),
   /**
    * Speak a shot's line in its character's own voice (SPEC-011 R-14). The voice is not a
    * parameter: it is the speaker's, read from their sheet at dispatch, so a retake keeps it by

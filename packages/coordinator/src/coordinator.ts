@@ -3951,7 +3951,7 @@ export class Coordinator {
         this.emit({
           at: new Date().toISOString(),
           type: "voice.catalogue",
-          worldId: msg.worldId,
+          ...(msg.worldId !== undefined ? { worldId: msg.worldId } : {}),
           voices: voices.map((v) => ({
             ...v,
             usedBy: sheets

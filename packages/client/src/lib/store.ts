@@ -1781,8 +1781,8 @@ export function setNarrator(voice: { provider: string; voiceId: string; label?: 
   send({ kind: "set-narrator", voice });
 }
 
-export function requestVoiceCatalogue(worldId: string): void {
-  send({ kind: "voice-catalogue", worldId });
+export function requestVoiceCatalogue(worldId?: string): void {
+  send({ kind: "voice-catalogue", ...(worldId ? { worldId } : {}) });
 }
 
 /**

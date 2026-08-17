@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { narratorFor, DEFAULT_NARRATOR } from "../src/voice.js";
+import { ClientMessageSchema } from "../src/frames.js";
 
 /**
  * The narrator (asked for 2026-08-17): a third voice role, and deliberately not either of the
@@ -43,5 +44,19 @@ describe("who narrates (asked for 2026-08-17)", () => {
     const chosen = narratorFor({ provider: "elevenlabs", voiceId: "v_deleted" }, catalogue);
     assert.equal(chosen.fallback, true);
     assert.equal(chosen.provider, "kokoro");
+  });
+});
+
+describe("the voice catalogue belongs to the app, not a world", () => {
+  it("asks for voices with no world open", () => {
+    // Settings is reached from the world picker, where no world is open. An empty worldId
+    // failed frame validation and the request was dropped, so the narrator's picker sat on
+    // "Reading the catalogue…" forever — found on the first press in the installed app.
+    assert.equal(ClientMessageSchema.safeParse({ kind: "voice-catalogue" }).success, true);
+    assert.equal(
+      ClientMessageSchema.safeParse({ kind: "voice-catalogue", worldId: "" }).success,
+      false,
+      "an empty id is still a bad id — absent is the way to say 'no world'",
+    );
   });
 });

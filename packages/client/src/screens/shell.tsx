@@ -1944,7 +1944,7 @@ export function SettingsLocalRuntimeScreen() {
       </div>
       <VoicePickerDialog
         open={narratorOpen}
-        worldId={worldIdForVoices ?? ""}
+        {...(worldIdForVoices !== undefined ? { worldId: worldIdForVoices } : {})}
         chosenId={narrator?.voiceId}
         onClose={() => setNarratorOpen(false)}
         onPick={(voice: ReadingVoice) => {

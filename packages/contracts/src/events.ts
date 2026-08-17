@@ -266,7 +266,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .object({
       ...base,
       type: z.literal("voice.catalogue"),
-      worldId: UlidSchema,
+      worldId: UlidSchema.optional(),
       voices: z.array(
         VoiceCandidateSchema.extend({ usedBy: z.array(z.string()).default([]) }).strict(),
       ),
