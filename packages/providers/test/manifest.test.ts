@@ -650,9 +650,13 @@ describe("the new video families carry the routes' own numbers (fal catalogue sy
     const h3 = byId("minimax-h3");
     assert.equal(h3.pricing.kind, "perSecond");
     if (h3.pricing.kind === "perSecond") {
+      // 768P was $0.08 when this row was first synced and is $0.06 as of 2026-08-17 — a real cut
+      // by fal, re-read from the route's prose, not a re-pairing by the parser. The guard above
+      // still holds precisely because 480P did NOT move with it: a shifted read would have
+      // carried every tier along, and each of these is its own published number.
       assert.deepEqual(h3.pricing.byResolution, {
         "480P": 50000,
-        "768P": 80000,
+        "768P": 60000,
         "2K": 130000,
         "4K": 160000,
       });
