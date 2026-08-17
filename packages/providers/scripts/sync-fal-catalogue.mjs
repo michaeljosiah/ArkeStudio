@@ -354,6 +354,52 @@ const CURATED = {
     limits: {
       maxPromptChars: 2500, soundChoice: true, maxDurationSec: 15, durations: { "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "10": "10", "11": "11", "12": "12", "13": "13", "14": "14", "15": "15" }, aspects: ["16:9", "9:16"] },
   },
+  // ---- music ------------------------------------------------------------
+  // The route id carries no `fal-ai/` prefix — it is `minimax/music-3`, the same shape as the H3
+  // rows above. Worth stating because most families here do carry the prefix, and a wrong guess
+  // is a 404 at dispatch, long after the estimate was shown and accepted.
+  "minimax/music-3": {
+    id: "minimax-music-3",
+    capability: "music",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    /**
+     * Transcribed from the model page, which publishes the rate twice — as prose ("Your request
+     * will cost $0.002 per second") and as a structured record
+     * (`endpointBilling: { billing_unit: "seconds", price: 0.002 }`). Read 2026-08-17.
+     *
+     * The catalogue API's row for this route carries no pricing field at all, which is what
+     * `priceWhenCatalogueIsSilent` exists for. The moment fal publishes one there, it wins.
+     */
+    priceWhenCatalogueIsSilent: { kind: "perSecond", microUsdPerSecond: 2000 },
+    limits: {
+      /**
+       * Unlike every video route here, this one takes a *continuous* length: `duration` is a
+       * number in 1..300, not a member of a fixed enum. So these are a curated menu rather than a
+       * transcription of what the route accepts — the same kind of choice the resolution and
+       * aspect lists already are, and made for the same reason: a picker is a short list, not a
+       * spinner over three hundred values. They run from a sting to the model's five-minute
+       * ceiling, and 60 is the route's own default.
+       *
+       * What matters is that every one of them is a length dispatch can actually ask for. The
+       * estimate is priced per second from the number the user picked, so a length the picker
+       * offered but the wire could not carry would price one job and run another.
+       */
+      durations: {
+        "30": "30",
+        "60": "60",
+        "90": "90",
+        "120": "120",
+        "150": "150",
+        "180": "180",
+        "240": "240",
+        "300": "300",
+      },
+      // The schema types `duration` as a number, so the quoted form is rejected.
+      durationWire: "number",
+      // No maxPromptChars: Music3Input declares no maxLength on `prompt` or `lyrics`, and an
+      // invented ceiling would refuse briefs the model would have taken.
+    },
+  },
 };
 
 const money = String.raw`\*{0,2}\$([0-9]+(?:\.[0-9]+)?)\*{0,2}`;
@@ -503,18 +549,33 @@ function limitsFor(curated) {
 }
 
 const skipped = [];
+const transcribed = [];
 for (const [route, curated] of Object.entries(CURATED)) {
   const live = byRoute.get(route);
   if (!live) {
     skipped.push(`${route} — no longer in the catalogue`);
     continue;
   }
-  const parsed = pricingFrom(live.pricingInfoOverride, curated.tokenAssumption, curated.defaultResolution);
-  const pricing = parsed === null ? null : keyRatesToWireWords(parsed, curated, skipped, route);
-  if (!pricing) {
+  const read = pricingFrom(live.pricingInfoOverride, curated.tokenAssumption, curated.defaultResolution);
+  /**
+   * The catalogue API carries no price for every route fal sells. Some models publish their rate
+   * only on their own model page — where it appears both as prose and as an `endpointBilling`
+   * record — and `pricingInfoOverride` is simply absent on the API's row for them.
+   *
+   * `priceWhenCatalogueIsSilent` is the hand transcription for exactly that case, and its name is
+   * the whole contract: it is consulted only when the API said nothing. A price the API *does*
+   * publish always wins, so this can never quietly hold a rate above a cut fal has made — the
+   * failure that put MiniMax H3's 768P estimate 33% high. The same doctrine the rest of this
+   * script already runs on, one field wider: what the API does not say is curated by hand rather
+   * than guessed, and a model with no price from either source is still refused below.
+   */
+  const parsed = read ?? curated.priceWhenCatalogueIsSilent ?? null;
+  if (parsed === null) {
     skipped.push(`${route} — no price we could read from "${(live.pricingInfoOverride ?? "").slice(0, 60)}…"`);
     continue;
   }
+  if (read === null) transcribed.push(route);
+  const pricing = keyRatesToWireWords(parsed, curated, skipped, route);
   models.push({
     id: curated.id,
     provider: "fal",
@@ -543,6 +604,12 @@ for (const [route, curated] of Object.entries(CURATED)) {
 }
 
 for (const line of skipped) console.warn(`[fal] skipped ${line}`);
+// Loud on purpose. A transcribed price is the one number in this file no fetch will correct, so
+// every regeneration should say out loud which rows are running on one and want re-checking
+// against the model page.
+for (const route of transcribed) {
+  console.warn(`[fal] ${route} — price transcribed by hand; the catalogue API publishes none for it`);
+}
 
 const banner = `// Generated by packages/providers/scripts/sync-fal-catalogue.mjs — do not edit by hand.
 // Route ids and prices come from https://fal.ai/api/models (public, no key). What a model

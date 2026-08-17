@@ -460,6 +460,42 @@ describe("fal submit/poll round-trip carries the endpoint in the remote id", () 
     assert.equal(kling["duration"], "5");
   });
 
+  it("dispatches a music job to its own route, carrying the lyrics the route requires", async () => {
+    // The first capability here that is neither image nor video, so it is worth proving the
+    // whole path rather than assuming it: the route id has no `fal-ai/` prefix, `lyrics` is a
+    // required field with no analogue in any earlier dispatch, and the length is a number in a
+    // continuous range rather than a member of a published enum.
+    let url = "";
+    let sent: Record<string, unknown> = {};
+    const client = new FalClient(async (requested, init) => {
+      url = requested;
+      sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ request_id: "req-music" }), { status: 200 });
+    });
+    const submitted = await client.submit("k", {
+      model: "minimax-music-3",
+      capability: "music",
+      params: {
+        prompt: "slow gospel soul, 68 bpm, Rhodes and brushed drums",
+        lyrics: "[verse]\nthe harbour keeps what the tide forgets",
+        durationSec: 180,
+        references: [],
+      },
+    });
+
+    assert.match(url, /minimax\/music-3$/, "the route carries no fal-ai prefix");
+    assert.equal(sent["prompt"], "slow gospel soul, 68 bpm, Rhodes and brushed drums");
+    // Required by Music3Input. A pass-through field, but the one whose absence 422s the job.
+    assert.equal(sent["lyrics"], "[verse]\nthe harbour keeps what the tide forgets");
+    // A number, not "180": the schema types `duration` as a number.
+    assert.equal(sent["duration"], 180);
+    assert.equal(typeof sent["duration"], "number");
+    assert.ok(!("durationSec" in sent), "our own field name never reaches the wire");
+    assert.ok(!("references" in sent), "an empty reference list is ours, not fal's");
+    // The remote id carries the endpoint so polling knows where to look.
+    assert.match(submitted.remoteId, /minimax\/music-3/);
+  });
+
   it("refuses a length the route does not offer, rather than dropping it", async () => {
     // Sending nothing is the bug this replaced: the provider's default length runs while the
     // estimate was computed from the seconds the job carries. The reachable case is a job

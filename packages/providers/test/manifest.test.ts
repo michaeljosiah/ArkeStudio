@@ -701,6 +701,56 @@ describe("the new video families carry the routes' own numbers (fal catalogue sy
     assert.equal(byId("seedance-2.0").limits.durationWire, undefined, "seedance keeps its strings");
   });
 
+  /**
+   * The music row is the only one here whose price no fetch will ever correct: fal publishes it
+   * on the model page but carries no pricing field for the route in the catalogue API, so the
+   * sync script falls back to a hand transcription. That makes these figures worth pinning more
+   * than the parsed ones, not less — a stale transcription cannot announce itself the way
+   * MiniMax H3's 768P cut did.
+   */
+  it("prices minimax-music-3 from its transcribed rate, per second of audio", () => {
+    const music = byId("minimax-music-3");
+    assert.equal(music.capability, "music");
+    // Read 2026-08-17 from the model page, which states it as prose and as an endpointBilling
+    // record: billing_unit "seconds", price 0.002.
+    assert.equal(music.pricing.kind, "perSecond");
+    if (music.pricing.kind === "perSecond") {
+      assert.equal(music.pricing.microUsdPerSecond, 2000);
+      // Per second of audio and nothing else — a byResolution table here would mean a tier the
+      // route does not have, and would silently take over the rate for anything keyed to it.
+      assert.equal(music.pricing.byResolution, undefined);
+    }
+    // The route has no `fal-ai/` prefix, unlike most of this catalogue.
+    assert.equal(FAL_ENDPOINTS["minimax-music-3"], "minimax/music-3");
+    // A minute of audio is $0.12, and the five-minute ceiling is $0.60.
+    assert.equal(estimateMicroUsd(music, { durationSec: 60 }), 120000);
+    assert.equal(estimateMicroUsd(music, { durationSec: 300 }), 600000);
+  });
+
+  it("offers minimax-music-3 only lengths the route can be asked for", () => {
+    const music = byId("minimax-music-3");
+    const options = durationOptions(music);
+    // The estimate is priced from the length the user picked, so an offered length the wire
+    // cannot carry would price one job and run another. `duration` is a number in 1..300 here,
+    // and these are a curated menu over that range rather than an enum the route publishes.
+    assert.ok(options.length > 0, "the row declares lengths");
+    for (const seconds of options) {
+      assert.ok(seconds >= 1 && seconds <= 300, `${seconds}s is inside the route's 1..300 range`);
+      const choice = dispatchDuration(music, seconds);
+      assert.equal(choice.kind, "asked", `${seconds}s is dispatchable`);
+      if (choice.kind === "asked") {
+        // Numeric on the wire: the schema types `duration` as a number, and the quoted form is
+        // not a member of it.
+        assert.equal(typeof choice.wire, "number", `${seconds}s goes as a number`);
+        assert.equal(choice.wire, seconds);
+      }
+    }
+    assert.equal(music.limits.maxDurationSec, 300, "the ceiling is the model's own five minutes");
+    // Past the ceiling is refused rather than clamped — spending on a shorter track than was
+    // asked for is the failure that rule exists to prevent.
+    assert.equal(dispatchDuration(music, 301).kind, "over-cap");
+  });
+
   it("names the references field where the family disagrees with seedance", () => {
     // minimax and wan call the array `reference_image_urls`; seedance calls it `image_urls`.
     assert.equal(byId("minimax-h3").limits.referencesField, "reference_image_urls");

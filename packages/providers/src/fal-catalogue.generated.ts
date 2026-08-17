@@ -681,6 +681,35 @@ export const FAL_MODELS: readonly ManifestModel[] = [
       "kind": "perSecond",
       "microUsdPerSecond": 84000
     }
+  },
+  {
+    "id": "minimax-music-3",
+    "provider": "fal",
+    "capability": "music",
+    "displayName": "MiniMax Music 3",
+    "accepts": {
+      "referenceImages": 0,
+      "startFrame": false,
+      "endFrame": false
+    },
+    "limits": {
+      "durations": {
+        "30": "30",
+        "60": "60",
+        "90": "90",
+        "120": "120",
+        "150": "150",
+        "180": "180",
+        "240": "240",
+        "300": "300"
+      },
+      "durationWire": "number",
+      "maxDurationSec": 300
+    },
+    "pricing": {
+      "kind": "perSecond",
+      "microUsdPerSecond": 2000
+    }
   }
 ] as const;
 
@@ -699,7 +728,8 @@ export const FAL_ENDPOINTS: Record<string, string> = {
   "ltx-2.5-fast": "lightricks/ltx-2.5/text-to-video/fast",
   "wan-2.7": "fal-ai/wan/v2.7/text-to-video",
   "kling-3-pro": "fal-ai/kling-video/v3/pro/text-to-video",
-  "kling-3-standard": "fal-ai/kling-video/v3/standard/text-to-video"
+  "kling-3-standard": "fal-ai/kling-video/v3/standard/text-to-video",
+  "minimax-music-3": "minimax/music-3"
 };
 
 /**
