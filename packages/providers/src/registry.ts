@@ -3,6 +3,7 @@ import { AnthropicClient } from "./clients/anthropic.js";
 import { ElevenLabsClient } from "./clients/elevenlabs.js";
 import { FalClient } from "./clients/fal.js";
 import { HiggsfieldClient } from "./clients/higgsfield.js";
+import { KokoroClient, type SidecarBaseUrl } from "./clients/kokoro.js";
 import { OllamaClient } from "./clients/ollama.js";
 import { OpenAiClient } from "./clients/openai.js";
 import { captureProviderClient } from "./capture.js";
@@ -17,13 +18,22 @@ export interface ProviderClientDeps {
    * as "Higgsfield is not installed" instead of as the shot having failed (R-4).
    */
   higgsfield?: CommandRunner;
+  /**
+   * Where the Voxa sidecar is listening, resolved per call. Omitted where local voice cannot
+   * run at all — the Kokoro client is then absent rather than present and always failing.
+   */
+  voxa?: SidecarBaseUrl;
   capture?: ProviderCallCapture;
 }
 
 /**
- * The client registry (T-9): one instance per provider, declarations included. Kokoro and
- * whisper.cpp run inside the Voxa sidecar (SPEC-011) and have no client here — their manifest
- * entries are gated by runtime detection, not by a credential.
+ * The client registry (T-9): one instance per provider, declarations included.
+ *
+ * Kokoro is here (design 70) but is not a cloud client: it reaches the local Voxa sidecar over
+ * loopback and has no credential, so its manifest row is gated by runtime detection rather
+ * than by a secret. It exists so a local read is a job like any other — numbered, priced at
+ * nothing, re-runnable and recoverable — instead of a second path around the queue. whisper.cpp
+ * is still absent: transcription never travels this way.
  *
  * Higgsfield is the one client that is not an HTTP client (issue #137): it drives the vendor's
  * CLI as a subprocess and still takes `fetch`, because results are URLs and the bytes come
@@ -48,6 +58,16 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
     anthropic: captureProviderClient("anthropic", (fetch) => new AnthropicClient(fetch), fetchImpl, capture),
     elevenlabs: captureProviderClient("elevenlabs", (fetch) => new ElevenLabsClient(fetch), fetchImpl, capture),
     ollama: captureProviderClient("ollama", (fetch) => new OllamaClient(fetch), fetchImpl, capture),
+    ...(deps.voxa === undefined
+      ? {}
+      : {
+          kokoro: captureProviderClient(
+            "kokoro",
+            (fetch) => new KokoroClient(fetch, deps.voxa!),
+            fetchImpl,
+            capture,
+          ),
+        }),
   };
 }
 

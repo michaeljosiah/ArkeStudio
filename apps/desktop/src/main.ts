@@ -437,9 +437,20 @@ async function initialize(): Promise<{ port: number }> {
     const fetched = fetchedHiggsfieldPath(appRoot);
     return discoverHiggsfield(fetched ? { bundledPath: fetched } : {});
   };
+  // The sidecar is started further down, and its port is assigned at launch — so the Kokoro
+  // client resolves its address per call rather than capturing one that a restart invalidates.
+  // Healthy, not merely running: a sidecar still starting reads as absent, which refuses with a
+  // remedy instead of failing halfway through a dispatch.
+  let voxaSupervisorRef: ChildSupervisor | null = null;
+  const voxaBaseUrl = (): string | null => {
+    const port = voxaSupervisorRef?.port ?? null;
+    if (port === null || voxaSupervisorRef?.status !== "healthy") return null;
+    return `http://127.0.0.1:${port}`;
+  };
   const providerClients = createProviderClients({
     fetch: (url, init) => fetch(url, init),
     higgsfield: lazyHiggsfieldRunner(findHiggsfield),
+    voxa: voxaBaseUrl,
     capture: providerCalls,
   });
 
@@ -498,7 +509,7 @@ async function initialize(): Promise<{ port: number }> {
       inheritEnv: false,
     };
   };
-  const voxaSupervisor = new ChildSupervisor(
+  const voxaSupervisor: ChildSupervisor = new ChildSupervisor(
     {
       id: "voxa",
       ...voxaLaunch(voxaSelection, voxaSettings),
@@ -527,6 +538,7 @@ async function initialize(): Promise<{ port: number }> {
     },
     { ledger: childLedger },
   );
+  voxaSupervisorRef = voxaSupervisor;
   registerExitBackstop(opencodeSupervisor, voxaSupervisor);
   const voxaAt = () =>
     new VoxaClient((url, init) => fetch(url, init), `http://127.0.0.1:${voxaSupervisor.port ?? 0}`);
