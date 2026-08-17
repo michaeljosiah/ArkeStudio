@@ -2053,7 +2053,7 @@ export function SettingsLocalRuntimeScreen() {
 }
 
 /** The capability rows the routing surface offers, in product language. */
-const ROUTED_CAPABILITIES: readonly Capability[] = ["video", "image", "voice-tts", "llm"];
+const ROUTED_CAPABILITIES: readonly Capability[] = ["video", "image", "music", "voice-tts", "llm"];
 
 export function SettingsWhoDoesWhatScreen() {
   const { state } = useStore();
