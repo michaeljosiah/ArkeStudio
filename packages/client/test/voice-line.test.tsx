@@ -211,4 +211,14 @@ describe("reading a sheet aloud", () => {
     assert.match(html, /Read aloud/);
     assert.doesNotMatch(html, /Choose a voice to read this aloud/);
   });
+
+  it("names the narrator on the clip, in both places that build one", () => {
+    // There are two: the one the section control offers, and the effect that plays a read as
+    // soon as it lands. Only the second actually sounds, and it still said the character's
+    // voice — so the player named a voice that had not read a word of it.
+    const source = readFileSync(new URL("../src/screens/world.tsx", import.meta.url), "utf8");
+    const subs = [...source.matchAll(/sub: `read aloud · \$\{([^}]+)\}`/g)].map((m) => m[1]);
+    assert.equal(subs.length, 2, "both clip builders are accounted for");
+    for (const sub of subs) assert.equal(sub, "narratorLabel", "each names who is reading");
+  });
 });
