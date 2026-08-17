@@ -146,10 +146,10 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     },
     // ---- voice ------------------------------------------------------------
     {
-      id: "eleven-v3",
+      id: "eleven_multilingual_v2",
       provider: "elevenlabs",
       capability: "voice-tts",
-      displayName: "Eleven v3",
+      displayName: "Eleven Multilingual v2",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
       limits: {},
       pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },

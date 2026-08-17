@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises";
 import {
   admitReference,
   benchSessionSummary,
+  deliveryParams,
   benchSourceKey,
   benchTokenFor,
   dispatchDuration,
@@ -11,6 +12,7 @@ import {
   keyframePlan,
   modeSpec,
   mappedReferenceKinds,
+  modeCapability,
   newId,
   pricedDuration,
   routeFor,
@@ -24,6 +26,8 @@ import {
   type BenchSession,
   type BenchSessionSummary,
   type BenchTake,
+  type Capability,
+  type Delivery,
   type ManifestModel,
   type ModelManifest,
   type MultimediaReference,
@@ -171,7 +175,10 @@ export function resolveArtifactSource(artifact: ArtifactSidecar): ResolvedSource
 export function resolveTakeSource(session: BenchSession, takeId: string): ResolvedSource | BenchRefusal {
   const take = session.takes.find((t) => t.id === takeId);
   if (!take || !take.media) return { refused: "that take has no media yet" };
-  const kind: ReferenceKind = take.request.mode === "video" ? "video" : "image";
+  // What the take actually IS, by the mode that made it. Read as "video or else image" this
+  // sent a spoken take to a picture model as though it were a still.
+  const kind: ReferenceKind =
+    take.request.mode === "video" ? "video" : take.request.mode === "voice" ? "audio" : "image";
   return {
     source: { source: "take", takeId: take.id, hash: take.media.hash },
     kind,
@@ -314,7 +321,7 @@ export async function addBenchReference(
 export interface BenchEnqueueInput {
   worldId: string;
   target: { kind: "bench-take"; id: string };
-  capability: "image" | "video";
+  capability: Capability;
   provider: string;
   model: string;
   params: Record<string, unknown>;
@@ -355,7 +362,8 @@ export function planBenchDispatch(
     : session.composer;
   const model = manifest?.models.find((m) => m.id === composer.model && m.provider === composer.provider) ?? null;
   if (!model) return { ok: false, reason: "No model is chosen, or the chosen model is no longer in the manifest." };
-  if (model.capability !== composer.mode) {
+  // Through the map, not compared: `voice` dispatches against `voice-tts` (design 70).
+  if (model.capability !== modeCapability(composer.mode)) {
     return { ok: false, reason: `${model.displayName} is a ${model.capability} model; this is a ${composer.mode} request.` };
   }
   if (composer.brief.trim().length === 0) return { ok: false, reason: "An empty brief is not a brief." };
@@ -368,11 +376,17 @@ export function planBenchDispatch(
 
   // References: resolve the snapshot's own set (re-run) or the live active set, then validate
   // kinds, durations and ceilings as one whole.
+  // A lane the mode has no use for rides along, ignored — the rule the keyframe lane already
+  // follows for an image request. Found live: a session that had carried a reference for a shot
+  // refused a spoken line over it, and voice mode hides the very lane that could have removed
+  // it, so the refusal named something the user had no way to act on (design 70).
   const references: BenchReferenceToken[] = options.fromTake
     ? options.fromTake.request.references
-    : session.composer.activeTokens
-        .map((token) => session.tokenRegistry.find((e) => e.token === token))
-        .filter((e): e is BenchReferenceToken => e !== undefined);
+    : composer.mode === "voice"
+      ? []
+      : session.composer.activeTokens
+          .map((token) => session.tokenRegistry.find((e) => e.token === token))
+          .filter((e): e is BenchReferenceToken => e !== undefined);
   const resolvedRefs: Array<{ entry: BenchReferenceToken; resolved: ResolvedSource }> = [];
   for (const entry of references) {
     const resolved = resolveTokenEntry(entry, session, bundle);
@@ -443,16 +457,29 @@ export function planBenchDispatch(
     model: model.id,
   };
 
+  // A delivery this provider cannot express refuses here rather than being dropped on the way
+  // out: a take that silently ignores the direction is a take the user has to listen to before
+  // discovering the direction never applied (SPEC-011 R-15).
+  let voiceSettings: Record<string, number> | null = null;
+  if (params.kind === "voice" && params.delivery !== undefined) {
+    const mapped = deliveryParams(model.provider, params.delivery as Delivery);
+    if (!mapped.ok) return { ok: false, reason: mapped.reason };
+    voiceSettings = mapped.params;
+  }
+  if (params.kind === "voice" && params.voiceId === undefined) {
+    return { ok: false, reason: "No voice is chosen — pick one to read this." };
+  }
+
   const reserved: BenchReservedTake[] = [];
   const inputs: BenchEnqueueInput[] = [];
-  const count = params.kind === "image" ? (options.fromTake ? 1 : params.count) : 1;
+  const count = params.kind === "video" ? 1 : options.fromTake ? 1 : params.count;
 
   for (let index = 0; index < count; index++) {
     const takeId = newId("tk");
     const n = session.nextTake + index;
     const snapshot: BenchRequestSnapshot = {
       ...snapshotBase,
-      params: params.kind === "image" ? { ...params, count: 1 } : { ...params },
+      params: params.kind === "video" ? { ...params } : { ...params, count: 1 },
     };
     reserved.push({
       id: takeId as BenchReservedTake["id"],
@@ -487,7 +514,7 @@ export function planBenchDispatch(
         }),
         landing: { dir: sessionMediaDir(session.id, takeId) },
       });
-    } else {
+    } else if (params.kind === "video") {
       const requestedSec = params.durationSec ?? 0;
       // The route this job lands on is the one whose ceiling applies: references send it to a
       // different endpoint, and wan's makes 10s where its text route makes 15.
@@ -546,6 +573,29 @@ export function planBenchDispatch(
             requestedSec > 0 ? pricedDuration(model, requestedSec, { withReferences }) : (model.limits.maxDurationSec ?? 5),
           ...(params.resolution !== undefined ? { resolution: params.resolution } : {}),
         }),
+        landing: { dir: sessionMediaDir(session.id, takeId) },
+      });
+    } else {
+      // A spoken line (design 70). The brief IS the words, so it goes as `text` rather than a
+      // prompt, and the price is exact: the characters are already typed, so nothing here is an
+      // upper bound the way a duration or a megapixel count is.
+      inputs.push({
+        worldId: options.worldId,
+        target: { kind: "bench-take", id: `${session.id}/${takeId}` },
+        capability: "voice-tts",
+        provider: model.provider,
+        model: model.id,
+        params: {
+          text: composer.brief,
+          ...(params.voiceId !== undefined ? { voiceId: params.voiceId } : {}),
+          // The delivery is sent in the provider's own vocabulary, or not at all — a row that
+          // cannot express one says so rather than having a neighbour's settings guessed at.
+          ...(voiceSettings !== null ? { voiceSettings } : {}),
+          // No container choice: the elevenlabs client caches what it is handed as mp3, so a
+          // format control here would change nothing on the wire — and design 70's own rule is
+          // that a control which changes nothing is a control that lies.
+        },
+        estimatedMicroUsd: estimateMicroUsd(model, { characters: composer.brief.length }),
         landing: { dir: sessionMediaDir(session.id, takeId) },
       });
     }

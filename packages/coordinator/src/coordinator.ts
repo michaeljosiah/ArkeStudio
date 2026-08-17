@@ -3928,6 +3928,27 @@ export class Coordinator {
         });
         return;
       }
+      case "voice-catalogue": {
+        // The plain list, for a voice that is only reading (design 70). `usedBy` comes from the
+        // sheets themselves, so the picker can say a character already uses a voice without
+        // that meaning anything about the pick.
+        if (!this.voiceService) return;
+        const store = this.opts.provider.openStore?.();
+        const voices = await this.voiceService.catalogue().catch(() => []);
+        const sheets = store?.getBundle().sheets ?? [];
+        this.emit({
+          at: new Date().toISOString(),
+          type: "voice.catalogue",
+          worldId: msg.worldId,
+          voices: voices.map((v) => ({
+            ...v,
+            usedBy: sheets
+              .filter((sheet) => sheet.voice?.provider === v.provider && sheet.voice?.voiceId === v.voiceId)
+              .map((sheet) => sheet.name),
+          })),
+        });
+        return;
+      }
       case "voice-candidates": {
         const store = this.opts.provider.openStore?.();
         if (!store || !this.voiceService) return;
@@ -4018,7 +4039,7 @@ export class Coordinator {
             sheetVersion: sheet.version,
             purpose: "candidate-preview",
             provider: "elevenlabs",
-            model: "eleven-v3",
+            model: "eleven_multilingual_v2",
             voiceId: msg.voiceId,
             status: "ready",
             file: cached,
@@ -4076,7 +4097,7 @@ export class Coordinator {
           worldId: msg.worldId, sheetId: msg.sheetId, sheetVersion: sheet?.version ?? 1,
           purpose: "sheet-section", sectionHeading: msg.sectionHeading,
           provider: sheet?.voice?.provider === "elevenlabs" ? "elevenlabs" : "kokoro",
-          model: sheet?.voice?.provider === "elevenlabs" ? "eleven-v3" : "kokoro-82m",
+          model: sheet?.voice?.provider === "elevenlabs" ? "eleven_multilingual_v2" : "kokoro-82m",
           voiceId: sheet?.voice?.voiceId ?? "unassigned", status: "failed", file: null,
           cached: false, characterCount: text.length, estimatedMicroUsd: 0, error,
         } as DomainEvent);

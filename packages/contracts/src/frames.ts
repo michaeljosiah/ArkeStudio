@@ -1040,6 +1040,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   /** SPEC-011 R-7: rank the voice catalogue against the sheet's written voice. */
   z.object({ kind: z.literal("voice-candidates"), worldId: UlidSchema, sheetId: SlugSchema }).strict(),
   /**
+   * The plain catalogue, for the bench (design 70). Deliberately NOT `voice-candidates`: that
+   * one ranks the catalogue against a character's written voice, which is the wrong question
+   * for a voice that is only reading. No sheet id, and nothing ranked.
+   */
+  z.object({ kind: z.literal("voice-catalogue"), worldId: UlidSchema }).strict(),
+  /**
    * SPEC-011 R-9/R-10: audition one candidate with the character's line. Cloud previews cost;
    * the client shows the stated figure before this message is sent.
    */

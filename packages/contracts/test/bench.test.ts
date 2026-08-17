@@ -341,20 +341,28 @@ describe("the Keyframe lane (issue 305 §3)", () => {
     );
   });
 
-  it("keyframes ride video, not image — the snapshot itself says so", () => {
-    assert.throws(
-      () =>
-        BenchRequestSnapshotSchema.parse({
-          mode: "image",
-          brief: "x",
-          references: [],
-          keyframes: [entry(1)],
-          provider: "fal",
-          model: "m",
-          params: { kind: "image", count: 1 },
-        }),
-      /keyframes ride video, not image/,
-    );
+  it("keyframes ride video, and nothing else — the snapshot itself says so", () => {
+    // Once a third mode exists the refusal cannot name only the other one: a spoken take has
+    // no frames either, and the message has to hold for both.
+    for (const [mode, params] of [
+      ["image", { kind: "image", count: 1 }],
+      ["voice", { kind: "voice", count: 1 }],
+    ] as const) {
+      assert.throws(
+        () =>
+          BenchRequestSnapshotSchema.parse({
+            mode,
+            brief: "x",
+            references: [],
+            keyframes: [entry(1)],
+            provider: "fal",
+            model: "m",
+            params,
+          }),
+        /keyframes ride video, and nothing else/,
+        `${mode} refuses keyframes`,
+      );
+    }
   });
 
   it("the plan maps count to mode strictly, with worded refusals from the manifest", () => {

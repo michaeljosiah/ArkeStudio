@@ -9,10 +9,13 @@ import {
   durationOptions,
   keyframeAddable,
   keyframeCapacity,
+  DELIVERIES,
   keyframePlan,
+  modeCapability,
   pricedDuration,
   recipeFault,
   tiersFor,
+  type BenchMode,
   type BenchParams,
   type BenchSession,
   type BenchTake,
@@ -58,6 +61,7 @@ import {
   Scroll,
   Speaker,
   Timer,
+  Waveform,
   SpeakerOff,
   Sparkle,
   User,
@@ -69,6 +73,7 @@ import { Portrait } from "../components/portrait.js";
 import { mediaUrl } from "../lib/media.js";
 import { durationTrack, durationPillLabel } from "../lib/duration.js";
 import { setupForMode, type ModeSetup } from "../lib/composer-mode.js";
+import { VoicePickerDialog } from "../components/voice-picker.js";
 import { usableModels } from "../components/dispatch-bar.js";
 import {
   ReferencePickerDialog,
@@ -171,7 +176,7 @@ function BenchWorkspace({
     [],
   );
 
-  const models = useMemo(() => usableModels(state, draft.mode), [state, draft.mode]);
+  const models = useMemo(() => usableModels(state, modeCapability(draft.mode)), [state, draft.mode]);
   const model: ManifestModel | null =
     models.find((m) => m.id === draft.model && m.provider === draft.provider) ?? null;
   const modelName = (provider: string, id: string): string =>
@@ -209,7 +214,8 @@ function BenchWorkspace({
   const frames = session.composer.keyframeTokens;
   // The tab exists where the model verifies a frame mode OR frames already ride: what is
   // attached stays visible and removable even under a model that cannot honor it (§3).
-  const laneTabs = frameModes.length > 0 || (draft.mode === "video" && frames.length > 0);
+  const speaking = draft.mode === "voice";
+  const laneTabs = !speaking && (frameModes.length > 0 || (draft.mode === "video" && frames.length > 0));
   const [lane, setLane] = useState<"reference" | "keyframe">("reference");
   useEffect(() => {
     if (!laneTabs && lane === "keyframe") setLane("reference");
@@ -219,6 +225,7 @@ function BenchWorkspace({
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [recipesOpen, setRecipesOpen] = useState(false);
   const [durationOpen, setDurationOpen] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const recipes = state?.app.recipes ?? [];
   // Which providers a stored key actually unlocks, per capability - the recipes menu judges
   // its rows with the same evidence the model dropdown does.
@@ -227,6 +234,7 @@ function BenchWorkspace({
     return {
       image: availability.find((a) => a.capability === "image")?.via ?? [],
       video: availability.find((a) => a.capability === "video")?.via ?? [],
+      voice: availability.find((a) => a.capability === "voice-tts")?.via ?? [],
     } as const;
   }, [state?.app.providers]);
   const [briefExpanded, setBriefExpanded] = useState(false);
@@ -356,6 +364,10 @@ function BenchWorkspace({
       });
       return each * draft.params.count;
     }
+    if (draft.params.kind === "voice") {
+      // Exact, not a ceiling: speech bills per character and the characters are already typed.
+      return estimateMicroUsd(model, { characters: draft.brief.length }) * draft.params.count;
+    }
     const seconds = draft.params.durationSec ?? model.limits.maxDurationSec ?? 5;
     return estimateMicroUsd(model, {
       durationSec: pricedDuration(model, seconds),
@@ -375,7 +387,7 @@ function BenchWorkspace({
    * round trip looked free and was not, and nothing said a thing had been lost. Seeded from the
    * stored composer so the mode the session was saved in is remembered from the first press.
    */
-  const modeMemory = useRef<Partial<Record<"image" | "video", ModeSetup>>>({
+  const modeMemory = useRef<Partial<Record<BenchMode, ModeSetup>>>({
     [session.composer.mode]: {
       provider: session.composer.provider,
       model: session.composer.model,
@@ -383,10 +395,10 @@ function BenchWorkspace({
     },
   });
 
-  const switchMode = (mode: "image" | "video") => {
+  const switchMode = (mode: BenchMode) => {
     if (mode === draft.mode) return;
     modeMemory.current[draft.mode] = { provider: draft.provider, model: draft.model, params: draft.params };
-    compose({ ...draft, mode, ...setupForMode(mode, modeMemory.current[mode], usableModels(state, mode)) });
+    compose({ ...draft, mode, ...setupForMode(mode, modeMemory.current[mode], usableModels(state, modeCapability(mode))) });
   };
 
   /** The video half of the draft, narrowed once — the callbacks below lose it otherwise. */
@@ -519,15 +531,18 @@ function BenchWorkspace({
         </div>
       </div>
     );
-  const aspects = model?.limits.aspects ?? [];
+  const aspects = draft.params.kind === "voice" ? [] : (model?.limits.aspects ?? []);
+  /** Narrowed once: the size controls belong to the two modes that make a picture. */
+  const sizedParams = draft.params.kind === "voice" ? null : draft.params;
   const aspectSelect = (
     <select
       aria-label="Aspect"
       className="fy-bench__chip"
-      value={draft.params.aspect ?? ""}
+      value={sizedParams?.aspect ?? ""}
       onChange={(e) => {
         // "default" means the key is absent, not the old value carried under a new label.
-        const { aspect: _cleared, ...rest } = draft.params;
+        if (sizedParams === null) return;
+        const { aspect: _cleared, ...rest } = sizedParams;
         compose({
           ...draft,
           params: { ...rest, ...(e.target.value ? { aspect: e.target.value } : {}) } as BenchParams,
@@ -656,15 +671,15 @@ function BenchWorkspace({
         <div className="fy-bench__composer">
           <div className="fy-bench__composerbar">
             <div className="fy-bench__mode" role="group" aria-label="What to make">
-              {(["image", "video"] as const).map((mode) => (
+              {(["image", "video", "voice"] as const).map((mode) => (
                 <button
                   key={mode}
                   type="button"
                   aria-pressed={draft.mode === mode}
                   onClick={() => switchMode(mode)}
                 >
-                  {mode === "image" ? <ImageMark size={13} /> : <VideoMark size={13} />}
-                  {mode === "image" ? "Image" : "Video"}
+                  {mode === "image" ? <ImageMark size={13} /> : mode === "video" ? <VideoMark size={13} /> : <Waveform size={13} />}
+                  {mode === "image" ? "Image" : mode === "video" ? "Video" : "Voice"}
                 </button>
               ))}
             </div>
@@ -702,7 +717,7 @@ function BenchWorkspace({
           )}
 
           {/* reference tiles */}
-          {lane === "reference" && (
+          {lane === "reference" && !speaking && (
             <div className="fy-bench__refgrid">
               {session.composer.activeTokens.map((token) => {
                 const source = [...worldSources, ...sessionSources].find((s) => s.existingToken === token);
@@ -822,7 +837,7 @@ function BenchWorkspace({
               {/* The enhancer (asked for 2026-08-16): the art director rewrites the ask for
                   the chosen model, grounded in the world's look and canon. Absent without a
                   model or words — a control that could do nothing does not exist (§3). */}
-              {model !== null && draft.brief.trim().length > 0 && (
+              {model !== null && !speaking && draft.brief.trim().length > 0 && (
                 <button
                   type="button"
                   className={cx("fy-bench__footicon", enhancing && "fy-bench__footicon--busy")}
@@ -921,14 +936,16 @@ function BenchWorkspace({
 
           {/* the mode's settings row */}
           <div className="fy-bench__settings">
-            <button
-              type="button"
-              className="fy-bench__chip fy-bench__chip--refs"
-              onClick={() => openPicker("reference")}
-            >
-              <Plus size={11} />
-              References
-            </button>
+            {!speaking && (
+              <button
+                type="button"
+                className="fy-bench__chip fy-bench__chip--refs"
+                onClick={() => openPicker("reference")}
+              >
+                <Plus size={11} />
+                References
+              </button>
+            )}
             {model && draft.params.kind === "image" && (
               <>
                 {aspects.length > 0 && aspectSelect}
@@ -974,6 +991,57 @@ function BenchWorkspace({
                   {[1, 2, 3, 4].map((count) => (
                     <option key={count} value={count}>
                       {count === 1 ? "1 take" : `${count} takes`}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+            {model && draft.params.kind === "voice" && (
+              <>
+                {/* Who reads it. Choosing here never assigns the voice to anybody — that is a
+                    separate act on the sheet (design 70). */}
+                <button
+                  type="button"
+                  className="fy-bench__chip"
+                  data-testid="voice-pick"
+                  onClick={() => setVoiceOpen(true)}
+                >
+                  <Waveform size={12} />
+                  {draft.params.voiceLabel ?? "choose a voice"}
+                </button>
+                <select
+                  aria-label="Delivery"
+                  className="fy-bench__chip"
+                  value={draft.params.delivery ?? ""}
+                  onChange={(e) => {
+                    const { delivery: _cleared, ...rest } = draft.params as BenchParams & { delivery?: string };
+                    compose({
+                      ...draft,
+                      params: { ...rest, ...(e.target.value ? { delivery: e.target.value } : {}) } as BenchParams,
+                    });
+                  }}
+                >
+                  <option value="">delivery · default</option>
+                  {DELIVERIES.map((delivery) => (
+                    <option key={delivery} value={delivery}>
+                      {delivery}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label="How many reads"
+                  className="fy-bench__chip"
+                  value={draft.params.count}
+                  onChange={(e) =>
+                    compose({
+                      ...draft,
+                      params: { ...draft.params, kind: "voice", count: Number(e.target.value) } as BenchParams,
+                    })
+                  }
+                >
+                  {[1, 2, 3, 4].map((count) => (
+                    <option key={count} value={count}>
+                      {count === 1 ? "1 read" : `${count} reads`}
                     </option>
                   ))}
                 </select>
@@ -1190,7 +1258,7 @@ function BenchWorkspace({
             {models.length > 0 && <span style={{ flex: 1 }} />}
             {estimate !== null && (
               <span data-testid="bench-estimate" className="fy-bench__estimate">
-                {`~${formatMicroUsd(estimate)}`}
+                {speaking ? formatMicroUsd(estimate) : `~${formatMicroUsd(estimate)}`}
               </span>
             )}
             <Button
@@ -1274,7 +1342,31 @@ function BenchWorkspace({
 
           {selected && selected.media ? (
             <div className="fy-bench__media">
-              {selected.request.mode === "video" ? (
+              {selected.request.mode === "voice" ? (
+                // A spoken take has nothing to look at. Read as "video or else a picture", this
+                // rendered a broken image (design 70).
+                worldSlug ? (
+                  <div className="fy-bench__voicetake" data-testid="voice-take">
+                    <div className="fy-bench__voicehead">
+                      <span className="fy-bench__takestate">{`TAKE ${selected.n}`}</span>
+                      {selected.request.params.kind === "voice" && selected.request.params.voiceLabel !== undefined && (
+                        <span className="fy-bench__voicename">{selected.request.params.voiceLabel}</span>
+                      )}
+                      {selected.request.params.kind === "voice" && selected.request.params.delivery !== undefined && (
+                        <span className="fy-bench__voicedelivery">{selected.request.params.delivery}</span>
+                      )}
+                    </div>
+                    <audio
+                      key={selected.id}
+                      src={mediaUrl(
+                        worldSlug,
+                        `.sessions/${session.id}/media/${selected.id}/${selected.media.file}`,
+                      )}
+                      controls
+                    />
+                  </div>
+                ) : null
+              ) : selected.request.mode === "video" ? (
                 worldSlug ? (
                   <video
                     key={selected.id}
@@ -1400,6 +1492,24 @@ function BenchWorkspace({
           )}
         </div>
 
+        <VoicePickerDialog
+          open={voiceOpen}
+          worldId={worldId}
+          chosenId={draft.params.kind === "voice" ? draft.params.voiceId : undefined}
+          onClose={() => setVoiceOpen(false)}
+          onPick={(voice) => {
+            setVoiceOpen(false);
+            compose({
+              ...draft,
+              // The label rides with the id so a take can name its voice without the catalogue.
+              params: { ...draft.params, kind: "voice", voiceId: voice.voiceId, voiceLabel: voice.label } as BenchParams,
+              // A voice belongs to a provider, so choosing one may change which model reads it.
+              ...(models.some((m) => m.provider === voice.provider)
+                ? { provider: voice.provider, model: models.find((m) => m.provider === voice.provider)!.id }
+                : {}),
+            });
+          }}
+        />
         {pickerLane === "reference" ? (
           <ReferencePickerDialog
             open={pickerOpen}
@@ -1486,9 +1596,10 @@ function is4k(t: BenchTake): boolean {
 
 /** The selected take's viewer chip: the request's own facts, nothing invented. */
 function takeMeta(take: BenchTake): string {
+  const p = take.request.params;
   return [
-    take.request.params.kind === "image" ? take.request.params.tier : take.request.params.resolution,
-    take.request.params.aspect,
+    p.kind === "image" ? p.tier : p.kind === "video" ? p.resolution : p.voiceLabel,
+    p.kind === "voice" ? p.delivery : p.aspect,
     take.request.requestedSeed !== undefined ? `seed ${take.request.requestedSeed}` : undefined,
     take.cost ? formatMicroUsd(take.cost.actualMicroUsd ?? take.cost.estimatedMicroUsd) : undefined,
   ]

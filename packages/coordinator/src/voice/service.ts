@@ -94,7 +94,7 @@ export function speechCacheFile(spec: SpeechSpec): string {
 export function previewCacheFile(provider: string, voiceId: string, line: string, ext: string): string {
   return speechCacheFile({
     provider: provider === "kokoro" ? "kokoro" : "elevenlabs",
-    model: provider === "kokoro" ? "kokoro-82m" : "eleven-v3",
+    model: provider === "kokoro" ? "kokoro-82m" : "eleven_multilingual_v2",
     voiceId,
     text: line,
     format: ext === "wav" ? "wav" : "mp3",

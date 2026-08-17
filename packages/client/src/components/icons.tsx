@@ -113,6 +113,9 @@ export const Speaker = icon(
     <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
   </>,
 );
+/** Bars, not a mouth: the mode makes a recording, and the wall shows one (design 70). */
+export const Waveform = icon(<path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4" />);
+
 /** The stopwatch that opens the length: a duration, not a time of day. */
 export const Timer = icon(
   <>

@@ -847,3 +847,173 @@ describe("what a video dispatch may say about sound and length (asked for 2026-0
     if (plan.ok) assert.equal(plan.inputs[0]!.estimatedMicroUsd, 600000);
   });
 });
+
+describe("reading a line on the bench (design 70)", () => {
+  const VOICE: ManifestModel = {
+    id: "test-tts",
+    provider: "elevenlabs",
+    capability: "voice-tts",
+    displayName: "Test Voice",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: {},
+    pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
+  };
+  /** A local row, which maps far fewer deliveries than the cloud one. */
+  const LOCAL: ManifestModel = {
+    ...VOICE,
+    id: "test-local-tts",
+    provider: "kokoro",
+    displayName: "Local Voice",
+    pricing: { kind: "unmetered" },
+  };
+  const MANIFEST_3: ModelManifest = {
+    manifestVersion: 1,
+    generated: "2026-08-17",
+    models: [IMAGE_MODEL, VOICE, LOCAL],
+  };
+  const LINE = "The tide-clock keeps the drowned god's hours.";
+
+  async function planVoice(model: ManifestModel, params: Record<string, unknown>, brief = LINE) {
+    const { dir, store } = await open();
+    const opened = await freshBench(dir);
+    await opened.store.append(
+      {
+        type: "composer-set",
+        mode: "voice",
+        provider: model.provider,
+        model: model.id,
+        params: { kind: "voice", count: 1, ...params },
+        brief,
+      },
+      { at: CLOCK() },
+    );
+    return planBenchDispatch((await opened.store.fold())!, store.getBundle(), MANIFEST_3, {
+      worldId: store.worldId,
+      requestId: "v1",
+      at: CLOCK(),
+    });
+  }
+
+  it("sends the words themselves, and prices them exactly", async () => {
+    const plan = await planVoice(VOICE, { voiceId: "vale", voiceLabel: "Vale" });
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (plan.ok) {
+      const params = plan.inputs[0]!.params;
+      assert.equal(params["text"], LINE, "the brief IS the line, not a prompt describing it");
+      assert.equal(params["voiceId"], "vale");
+      assert.ok(!("prompt" in params), "nothing here is a prompt");
+      // Exact, not a ceiling: 44 characters at 300 microUSD each. A duration estimate can only
+      // guess; the characters are already typed.
+      assert.equal(plan.inputs[0]!.estimatedMicroUsd, LINE.length * 300);
+      assert.equal(plan.inputs[0]!.capability, "voice-tts", "the mode is voice; the capability is not");
+    }
+  });
+
+  it("refuses a delivery the provider cannot express, rather than dropping it", async () => {
+    // Kokoro shapes pace only. Sending "breaking" anyway would come back as a neutral read with
+    // nothing said about the direction having been ignored (SPEC-011 R-15).
+    const refused = await planVoice(LOCAL, { voiceId: "af_heart", delivery: "breaking" });
+    assert.equal(refused.ok, false);
+    if (!refused.ok) assert.match(refused.reason, /cannot express "breaking"/);
+    // The same delivery on a row that maps it goes as settings the provider understands.
+    const ok = await planVoice(VOICE, { voiceId: "vale", delivery: "breaking" });
+    assert.ok(ok.ok, ok.ok ? undefined : ok.reason);
+    if (ok.ok) assert.ok(ok.inputs[0]!.params["voiceSettings"], "the direction reaches the wire");
+  });
+
+  it("will not read without a voice, and says which is missing", async () => {
+    const plan = await planVoice(VOICE, {});
+    assert.equal(plan.ok, false);
+    if (!plan.ok) assert.match(plan.reason, /No voice is chosen/);
+  });
+
+  it("asks for N reads the way image asks for N stills", async () => {
+    const plan = await planVoice(VOICE, { voiceId: "vale", count: 3 });
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (plan.ok) {
+      assert.equal(plan.inputs.length, 3);
+      assert.equal(plan.reserved.length, 3);
+      // Each take records one read, not the batch it was asked for in.
+      for (const take of plan.reserved) {
+        assert.equal(take.request.params.kind === "voice" && take.request.params.count, 1);
+      }
+    }
+  });
+
+  it("refuses a picture model for a spoken line, naming both", async () => {
+    const { dir, store } = await open();
+    const opened = await freshBench(dir);
+    await opened.store.append(
+      {
+        type: "composer-set",
+        mode: "voice",
+        provider: "fal",
+        model: "test-image",
+        params: { kind: "voice", count: 1, voiceId: "vale" },
+        brief: LINE,
+      },
+      { at: CLOCK() },
+    );
+    const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), MANIFEST_3, {
+      worldId: store.worldId,
+      requestId: "v2",
+      at: CLOCK(),
+    });
+    assert.equal(plan.ok, false);
+    if (!plan.ok) assert.match(plan.reason, /is a image model; this is a voice request/);
+  });
+});
+
+describe("a lane the mode has no use for rides along (found live, 2026-08-17)", () => {
+  const VOICE_ROW: ManifestModel = {
+    id: "test-tts-2",
+    provider: "elevenlabs",
+    capability: "voice-tts",
+    displayName: "Test Voice",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: {},
+    pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
+  };
+  const MANIFEST_4: ModelManifest = {
+    manifestVersion: 1,
+    generated: "2026-08-17",
+    models: [IMAGE_MODEL, VOICE_ROW],
+  };
+
+  it("does not refuse a spoken line over a picture the session was carrying", async () => {
+    // The failure this prevents, seen in the installed app: a session that had carried a
+    // reference for a shot refused every read with "Eleven v3 accepts no reference images" —
+    // and voice mode hides the very lane that could have removed it, so the refusal named
+    // something the user had no way to act on.
+    const { dir, store, artifactId } = await withImage();
+    const opened = await freshBench(dir);
+    await addBenchReference(opened, store.getBundle(), IMAGE_MODEL, {
+      source: { source: "artifact", artifactId },
+      requestId: "r1",
+      at: CLOCK(),
+    });
+    await opened.store.append(
+      {
+        type: "composer-set",
+        mode: "voice",
+        provider: "elevenlabs",
+        model: "test-tts-2",
+        params: { kind: "voice", count: 1, voiceId: "vale" },
+        brief: "the tide-clock keeps the drowned god's hours",
+      },
+      { at: CLOCK() },
+    );
+    const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), MANIFEST_4, {
+      worldId: store.worldId,
+      requestId: "r2",
+      at: CLOCK(),
+    });
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (plan.ok) {
+      // Ignored, not sent: the reference stays attached to the session for the modes that can
+      // carry it, and nothing about it reaches a route that takes none.
+      assert.ok(!("references" in plan.inputs[0]!.params), "no references on the wire");
+      assert.equal(plan.reserved[0]!.request.references.length, 0, "and none recorded on the take");
+    }
+  });
+});

@@ -8,6 +8,7 @@ import { OllamaClient } from "../src/clients/ollama.js";
 import { OpenAiClient } from "../src/clients/openai.js";
 import { higgsfieldSelectWorkspace, higgsfieldWorkspaces, lazyHiggsfieldRunner } from "../src/higgsfield-cli.js";
 import { ProviderAuthError, type CommandRunner, type FetchLike } from "../src/types.js";
+import { KokoroClient } from "../src/clients/kokoro.js";
 
 /** A fetch fake: route → {status, body}. Anything unrouted throws (network unreachable). */
 function fakeFetch(routes: Array<{ match: RegExp; status: number; body?: unknown }>): FetchLike {
@@ -781,5 +782,62 @@ describe("fal's queue is keyed on the app, not the route", () => {
     const client = new FalClient(recording);
     await client.poll("k", "fal-ai/flux-2-pro::abc");
     assert.equal(seen[0], "https://queue.fal.run/fal-ai/flux-2-pro/requests/abc/status");
+  });
+});
+
+describe("local speech rides the same queue as the cloud (design 70)", () => {
+  const WAV = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45, 9, 9]);
+  const okFetch = (seen: { url?: string; body?: string }) =>
+    (async (url: string, init?: { body?: string }) => {
+      seen.url = String(url);
+      seen.body = init?.body;
+      return {
+        status: 200,
+        arrayBuffer: async () => WAV.buffer.slice(WAV.byteOffset, WAV.byteOffset + WAV.byteLength),
+      } as unknown as Response;
+    }) as unknown as FetchLike;
+
+  it("synthesises through the sidecar and hands back a WAV take", async () => {
+    const seen: { url?: string; body?: string } = {};
+    const client = new KokoroClient(okFetch(seen), () => "http://127.0.0.1:7777");
+    const submitted = await client.submit("", {
+      model: "kokoro-82m",
+      params: { voiceId: "af_heart", text: "the tide-clock", voiceSettings: { speed: 0.92 } },
+    } as never);
+    assert.equal(seen.url, "http://127.0.0.1:7777/tts");
+    // The sidecar's own vocabulary: `voice`, and the shaping flattened alongside it.
+    assert.deepEqual(JSON.parse(seen.body ?? "{}"), { voice: "af_heart", text: "the tide-clock", speed: 0.92 });
+    // Synchronous engine, but it still produces a real job with a real id — which is the whole
+    // point of it being here rather than bypassing the queue.
+    assert.equal((await client.poll("", submitted.remoteId)).state, "succeeded");
+    const artifacts = await client.fetchArtifacts("", submitted.remoteId);
+    assert.equal(artifacts[0]?.name, "speech.wav");
+    assert.equal(artifacts[0]?.contentType, "audio/wav");
+  });
+
+  it("refuses with the remedy when local voice is not running", async () => {
+    const client = new KokoroClient(okFetch({}), () => null);
+    await assert.rejects(
+      () => client.submit("", { model: "kokoro-82m", params: { voiceId: "af_heart", text: "x" } } as never),
+      /local voice is not running/,
+    );
+    // And says so as availability rather than as a failed generation.
+    assert.deepEqual(await client.validateKey(), [
+      { capability: "voice-tts", available: false, reason: "the Voxa sidecar is not running" },
+    ]);
+  });
+
+  it("will not file bytes that are not a WAV", async () => {
+    // A port that belongs to something other than Voxa answers 200 with anything at all; the
+    // bytes would otherwise be filed as a take and played as silence.
+    const notWav = (async () => ({
+      status: 200,
+      arrayBuffer: async () => new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]).buffer,
+    })) as unknown as FetchLike;
+    const client = new KokoroClient(notWav, () => "http://127.0.0.1:7777");
+    await assert.rejects(
+      () => client.submit("", { model: "kokoro-82m", params: { voiceId: "af_heart", text: "x" } } as never),
+      /did not answer with a WAV/,
+    );
   });
 });

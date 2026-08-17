@@ -11,6 +11,7 @@ import {
   PROVIDERS,
   tiersFor,
   type CharacterImageWorkflow,
+  type Capability,
   type ManifestModel,
   type SizeTier,
 } from "@arke-studio/contracts";
@@ -70,7 +71,9 @@ const TIERS: SizeTier[] = ["1K", "2K", "4K"];
  */
 export function usableModels(
   state: ReturnType<typeof useStore>["state"],
-  capability: "image" | "video",
+  // A capability, not a bench mode: `voice` dispatches against `voice-tts`, so the caller maps
+  // through modeCapability rather than handing a mode name straight in (design 70).
+  capability: Capability,
 ): ManifestModel[] {
   const manifest = state?.app.manifest;
   if (!manifest) return [];

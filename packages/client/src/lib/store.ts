@@ -16,6 +16,7 @@ import {
   type RankedVoice,
   type ReconcileAction,
   type WorldChatContext,
+  type BenchMode,
   ulid,
 } from "@arke-studio/contracts";
 import type { ArkeBridge, AttachTarget } from "../arke-bridge.js";
@@ -129,6 +130,8 @@ interface StoreState {
   reconcileReport: ReconcileAction[] | null;
   /** SPEC-011: ranked voice candidates per sheet, with the honest overlap framing. */
   voiceCandidates: Record<string, VoiceCandidatesState>;
+  /** Every voice the world can read with (design 70) — unranked, and not per sheet. */
+  voiceCatalogue: ReadingVoice[] | null;
   /** SPEC-011: audition results keyed provider/voiceId — cached files replay free. */
   voicePreviews: Record<string, { file: string | null; error: string | null }>;
   voiceAudio: Record<string, Extract<DomainEvent, { type: "voice.audio" }>>;
@@ -229,6 +232,7 @@ let current: StoreState = {
   sheetRefs: {},
   reconcileReport: null,
   voiceCandidates: {},
+  voiceCatalogue: null,
   voicePreviews: {},
   voiceAudio: {},
   dictation: {},
@@ -446,6 +450,7 @@ function handleFrame(json: string): void {
       gateNotices,
       sheetRefs: changedWorld ? {} : current.sheetRefs,
       voiceCandidates: changedWorld ? {} : current.voiceCandidates,
+      voiceCatalogue: changedWorld ? null : current.voiceCatalogue,
       voicePreviews: changedWorld ? {} : current.voicePreviews,
       voiceAudio: { ...(changedWorld ? {} : current.voiceAudio), ...durableVoiceAudio },
       // Both are keyed by sheet slug alone, and slugs recur across worlds: a failure left over
@@ -618,6 +623,7 @@ function handleFrame(json: string): void {
       reconcileReport = event.report;
     }
     let voiceCandidates = current.voiceCandidates;
+    let voiceCatalogue = current.voiceCatalogue;
     let voicePreviews = current.voicePreviews;
     let voiceAudio = current.voiceAudio;
     let dictation = current.dictation;
@@ -629,6 +635,9 @@ function handleFrame(json: string): void {
     let mainPhotoAcceptance = current.mainPhotoAcceptance;
     let characterSheetAcceptance = current.characterSheetAcceptance;
     let locationViewUpload = current.locationViewUpload;
+    if (event.type === "voice.catalogue") {
+      voiceCatalogue = event.voices;
+    }
     if (event.type === "voice.candidates") {
       voiceCandidates = {
         ...voiceCandidates,
@@ -807,6 +816,7 @@ function handleFrame(json: string): void {
       sheetRefs,
       reconcileReport,
       voiceCandidates,
+      voiceCatalogue,
       voicePreviews,
       voiceAudio,
       dictation,
@@ -1759,6 +1769,17 @@ export function setStyleOverride(worldId: string, sheetId: string, style: string
 
 // ---- SPEC-011: voice -------------------------------------------------------
 
+/** One row of the reading catalogue: a voice, and whom the world already gives it to. */
+export type ReadingVoice = Extract<DomainEvent, { type: "voice.catalogue" }>["voices"][number];
+
+/**
+ * The plain catalogue for the bench. Not `requestVoiceCandidates`, which ranks the same voices
+ * against a character's written voice — the wrong question for one that is only reading.
+ */
+export function requestVoiceCatalogue(worldId: string): void {
+  send({ kind: "voice-catalogue", worldId });
+}
+
 export function requestVoiceCandidates(worldId: string, sheetId: string): void {
   send({ kind: "voice-candidates", worldId, sheetId });
 }
@@ -2161,6 +2182,7 @@ export function __setStateForTest(state: ClientState): void {
     sheetRefs: {},
     reconcileReport: null,
     voiceCandidates: {},
+    voiceCatalogue: null,
     voicePreviews: {},
     voiceAudio: {},
     dictation: {},
@@ -2450,7 +2472,7 @@ export function sendBenchCompose(
   worldId: string,
   sessionId: string,
   composer: {
-    mode: "image" | "video";
+    mode: BenchMode;
     provider: string;
     model: string;
     params: Extract<ClientMessage, { kind: "bench-compose" }>["params"];
@@ -2494,7 +2516,7 @@ export function sendBenchEnhanceBrief(input: {
 
 export function sendBenchRecipeSave(input: {
   name: string;
-  mode: "image" | "video";
+  mode: BenchMode;
   provider: string;
   model: string;
   params: BenchParams;

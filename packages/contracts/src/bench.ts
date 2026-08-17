@@ -11,7 +11,7 @@ import {
 import { JobStatusSchema } from "./job.js";
 import { SizeTierSchema, modeSpec, modeUnavailableReason, supportsMode, type ManifestModel, type TaskMode } from "./manifest.js";
 import { MediaInfoSchema } from "./media.js";
-import { PROVIDERS } from "./provider.js";
+import { PROVIDERS, type Capability } from "./provider.js";
 import { ReferenceKindSchema, type ReferenceKind } from "./reference-budget.js";
 import { TakeCostSchema } from "./take.js";
 
@@ -25,8 +25,28 @@ import { TakeCostSchema } from "./take.js";
  * half-wrote. Everything below is the *folded* view of that log plus the events themselves.
  */
 
-export const BenchModeSchema = z.enum(["image", "video"]);
+export const BenchModeSchema = z.enum(["image", "video", "voice"]);
 export type BenchMode = z.infer<typeof BenchModeSchema>;
+
+/**
+ * The capability a mode dispatches against (design 70).
+ *
+ * `image` and `video` are both mode names *and* capability names, which let the two be compared
+ * directly for as long as those were the only modes. Speech breaks that: the mode is `voice`
+ * and the capability is `voice-tts`. Read through this map rather than compared, so the day a
+ * fourth mode arrives the mismatch is a compile error rather than a model that silently never
+ * matches.
+ */
+export function modeCapability(mode: BenchMode): Capability {
+  switch (mode) {
+    case "image":
+      return "image";
+    case "video":
+      return "video";
+    case "voice":
+      return "voice-tts";
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Composer parameters — one shape per mode, discriminated so a video duration
@@ -58,7 +78,31 @@ export const BenchVideoParamsSchema = z
   .strict();
 export type BenchVideoParams = z.infer<typeof BenchVideoParamsSchema>;
 
-export const BenchParamsSchema = z.discriminatedUnion("kind", [BenchImageParamsSchema, BenchVideoParamsSchema]);
+/**
+ * A spoken line (design 70). The words themselves live in the composer's brief, as the brief of
+ * an image request holds the prompt — what differs is that these are the content rather than a
+ * description of it, which is why nothing here rewrites them.
+ */
+export const BenchVoiceParamsSchema = z
+  .object({
+    kind: z.literal("voice"),
+    /** The provider's own id for the voice reading this. Absent until one is chosen. */
+    voiceId: z.string().min(1).optional(),
+    /** What the picker showed, kept so a take can name its voice without the catalogue. */
+    voiceLabel: z.string().min(1).optional(),
+    /** One of DELIVERIES (voice.ts); the row maps it, or states that it cannot. */
+    delivery: z.string().min(1).optional(),
+    /** How many reads one press asks for — each its own numbered take, as images are. */
+    count: z.number().int().min(1).max(4),
+  })
+  .strict();
+export type BenchVoiceParams = z.infer<typeof BenchVoiceParamsSchema>;
+
+export const BenchParamsSchema = z.discriminatedUnion("kind", [
+  BenchImageParamsSchema,
+  BenchVideoParamsSchema,
+  BenchVoiceParamsSchema,
+]);
 export type BenchParams = z.infer<typeof BenchParamsSchema>;
 
 // ---------------------------------------------------------------------------
@@ -142,7 +186,7 @@ export const BenchRequestSnapshotSchema = z
       ctx.addIssue({ code: "custom", message: `params are for "${request.params.kind}" but the mode is "${request.mode}"` });
     }
     if (request.keyframes.length > 0 && request.mode !== "video") {
-      ctx.addIssue({ code: "custom", message: "keyframes ride video, not image" });
+      ctx.addIssue({ code: "custom", message: "keyframes ride video, and nothing else" });
     }
   });
 export type BenchRequestSnapshot = z.infer<typeof BenchRequestSnapshotSchema>;
@@ -697,7 +741,7 @@ export function recipeFault(
 ): RecipeFault {
   const model = manifest?.models.find((m) => m.id === recipe.model && m.provider === recipe.provider);
   if (!model) return { ok: false, reason: `"${recipe.model}" is no longer in the manifest` };
-  if (model.capability !== recipe.mode) {
+  if (model.capability !== modeCapability(recipe.mode)) {
     return { ok: false, reason: `${model.displayName} is a ${model.capability} model, not ${recipe.mode}` };
   }
   if (disabled.includes(recipe.model)) {
