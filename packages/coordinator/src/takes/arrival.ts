@@ -41,6 +41,25 @@ export interface TakeArrivalOptions {
   onPosterUnavailable?: (reason: TakePosterUnavailableReason) => void;
 }
 
+/**
+ * The parts of a dispatch that already have somewhere better to live, and so are not settings.
+ *
+ * `prompt` and `text` are the take's prompt, `references` its references, `provenance` its
+ * provenance, and `shotPlan` describes a pass's segments rather than how it was generated.
+ * Everything else — duration, aspect, resolution, sound, seed, voice — describes how to make
+ * this again, which is the whole point of keeping it.
+ */
+const NOT_A_SETTING = new Set(["prompt", "text", "references", "provenance", "shotPlan"]);
+
+function settingsFrom(params: Job["params"]): Record<string, unknown> {
+  const settings: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (NOT_A_SETTING.has(key) || value === undefined) continue;
+    settings[key] = value;
+  }
+  return settings;
+}
+
 /** Only a video clip has motion to measure; a still or a voice line has no question to ask. */
 function qcApplies(job: Job): boolean {
   return job.capability === "video" && (job.target.kind === "shot" || job.target.kind === "scene-pass");
@@ -131,9 +150,14 @@ export async function recordTakesFromJob(
           ? { prompt: job.params["text"] as string }
           : {}),
       references: (job.params["references"] as string[] | undefined) ?? [],
-      // Which voice read it. The sheet holds today's voice, so deriving it later would
-      // re-attribute every old take the moment a character is recast.
-      params: typeof job.params["voiceId"] === "string" ? { voiceId: job.params["voiceId"] as string } : {},
+      // How it was made: everything the dispatch carried that is not already a field of its own.
+      //
+      // Stated as an exclusion rather than a list of settings to keep. A list would have to be
+      // edited every time a model gains a control — and the one that was missed would be missing
+      // from the record silently, which is exactly how `durationSec`, the aspect and the
+      // resolution came to be dropped while the schema and the fixtures both showed them being
+      // kept. A new setting is recorded the day it is dispatched, with nobody remembering to.
+      params: settingsFrom(job.params),
       dispatchedAt: job.createdAt,
       completedAt: now,
     };

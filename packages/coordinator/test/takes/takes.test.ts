@@ -536,6 +536,45 @@ describe("take QC at arrival (#248)", () => {
   });
 
   /**
+   * How the take was made, kept with it (2026-08-17). The dispatch carries the duration, the
+   * aspect and the resolution; arrival kept none of them, so nothing on disk said how to make
+   * the clip again. The fixtures showed those fields populated, which is exactly why it went
+   * unnoticed — they are hand-authored, and the code that writes real takes never filled them.
+   */
+  it("records the settings a take was made with, and not the fields that live elsewhere", async () => {
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const takes = await recordTakesFromJob(
+      store,
+      {
+        ...shotJob(landed),
+        params: {
+          prompt: "Maren at the rail",
+          references: ["references/maren-kest/model-sheet-v4.png"],
+          provenance: { canonRevision: 42, sheets: {} },
+          durationSec: 6,
+          aspect: "16:9",
+          resolution: "720p",
+          sound: false,
+          seed: 4417,
+        },
+      },
+      400000,
+    );
+    const take = takes[0]!;
+    // Everything describing how to make it again.
+    assert.deepEqual(take.params, { durationSec: 6, aspect: "16:9", resolution: "720p", sound: false, seed: 4417 });
+    // And nothing that already has a home of its own — duplicated state is state that can disagree.
+    assert.equal(take.prompt, "Maren at the rail");
+    assert.deepEqual(take.references, ["references/maren-kest/model-sheet-v4.png"]);
+    assert.equal(take.provenance.canonRevision, 42);
+    for (const key of ["prompt", "references", "provenance"]) {
+      assert.equal(key in take.params, false, `${key} is a field, not a setting`);
+    }
+    await store.close();
+  });
+
+  /**
    * The picture every screen shows for a video take (2026-08-17). The `frame.png` convention
    * had readers on four screens and no writer anywhere, so a generated clip was a grey box
    * with a label in it wherever it appeared.
