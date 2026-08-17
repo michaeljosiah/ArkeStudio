@@ -19,8 +19,11 @@ describe("who narrates (asked for 2026-08-17)", () => {
     // Local by default on purpose: "read aloud" is a passive press, and no other preference in
     // this app spends money on one.
     const chosen = narratorFor(null, catalogue);
-    assert.equal(chosen.provider, "kokoro");
+    assert.equal(chosen.provider, DEFAULT_NARRATOR.provider);
+    assert.equal(chosen.voiceId, DEFAULT_NARRATOR.voiceId);
     assert.equal(chosen.fallback, true);
+    // Local is not incidental: it is what keeps a passive press from spending.
+    assert.equal(catalogue.find((v) => v.voiceId === DEFAULT_NARRATOR.voiceId)?.local, true);
   });
 
   it("uses the chosen voice, carrying its own provider", () => {
