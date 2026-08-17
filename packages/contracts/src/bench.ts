@@ -601,6 +601,19 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
           if (event.cost !== undefined) take.cost = event.cost;
           take.completedAt = event.completedAt;
           session.selectedTakeId = take.id;
+          // A start frame is spent by the take that used it. Nothing used to retire one, so it
+          // sat in the lane for every request after — invisible unless the Keyframe tab happened
+          // to be open, and fatal to the next request that also carried references, which is
+          // refused outright ("References and keyframes cannot ride one request yet"). Someone
+          // adding a reference for a new shot met a refusal naming frames they could not see.
+          //
+          // Exactly the tokens that rode, not the whole lane: a frame staged for the NEXT take
+          // while this one was in flight is a live choice and survives. The take's own request
+          // snapshot keeps its copy, so re-run still replays the frames it was made with.
+          if (take.request.keyframes.length > 0) {
+            const spent = new Set(take.request.keyframes.map((entry) => entry.token));
+            session.composer.keyframeTokens = session.composer.keyframeTokens.filter((t) => !spent.has(t));
+          }
         }
         break;
       }

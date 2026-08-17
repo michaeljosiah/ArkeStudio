@@ -111,6 +111,60 @@ describe("the fold", () => {
     assert.equal(parsed.selectedTakeId, TK);
   });
 
+  /**
+   * A spent start frame retires with its take (reported 2026-08-17, from the app).
+   *
+   * Nothing used to retire one, so a frame used by take 2 was still in the lane for take 3 —
+   * invisible unless the Keyframe tab happened to be open. Adding a reference for the next shot
+   * then met "References and keyframes cannot ride one request yet", a refusal naming frames the
+   * user could not see and had not chosen.
+   */
+  it("retires the start frame the completed take actually used", () => {
+    const framed = { ...SNAPSHOT, mode: "video" as const, keyframes: [ref("Image 1", AR)] };
+    const session = foldBenchSession(META, [
+      env(1, { type: "reference-added", entry: ref("Image 1", AR), lane: "keyframe" }),
+      env(2, { type: "reference-added", entry: ref("Image 2", "ar_01JAAAAAAAAAAAAAAAAAAAAAA1") }),
+      env(3, { type: "takes-reserved", takes: [{ id: TK as never, n: 1, requestId: "r1", request: framed, createdAt: "2026-08-16T10:00:03.000Z" }] }),
+      env(4, {
+        type: "take-completed",
+        takeId: TK as never,
+        media: { file: "clip.mp4", hash: "sha256:beefbeef" as never },
+        completedAt: "2026-08-16T10:00:06.000Z",
+      }),
+    ]);
+    assert.deepEqual(session.composer.keyframeTokens, [], "the frame it was made with is spent");
+    // The reference lane is a working set and is left alone — that is what the next request wants.
+    assert.deepEqual(session.composer.activeTokens, ["Image 2"]);
+    // And the take keeps its own copy, so a re-run replays the frames it was made with.
+    assert.deepEqual(session.takes[0]!.request.keyframes.map((k) => k.token), ["Image 1"]);
+  });
+
+  it("keeps a frame staged for the next take, and one whose take has not landed", () => {
+    const framed = { ...SNAPSHOT, mode: "video" as const, keyframes: [ref("Image 1", AR)] };
+    const staged = (events: BenchEventEnvelope[]) => foldBenchSession(META, events).composer.keyframeTokens;
+
+    // Image 2 was staged while take 1 was in flight: a live choice, not a spent one.
+    assert.deepEqual(
+      staged([
+        env(1, { type: "reference-added", entry: ref("Image 1", AR), lane: "keyframe" }),
+        env(2, { type: "takes-reserved", takes: [{ id: TK as never, n: 1, requestId: "r1", request: framed, createdAt: "2026-08-16T10:00:02.000Z" }] }),
+        env(3, { type: "reference-added", entry: ref("Image 2", "ar_01JAAAAAAAAAAAAAAAAAAAAAA1"), lane: "keyframe" }),
+        env(4, { type: "take-completed", takeId: TK as never, media: { file: "clip.mp4", hash: "sha256:beefbeef" as never }, completedAt: "2026-08-16T10:00:06.000Z" }),
+      ]),
+      ["Image 2"],
+    );
+
+    // A take that failed keeps its frame: there is something to retry with.
+    assert.deepEqual(
+      staged([
+        env(1, { type: "reference-added", entry: ref("Image 1", AR), lane: "keyframe" }),
+        env(2, { type: "takes-reserved", takes: [{ id: TK as never, n: 1, requestId: "r1", request: framed, createdAt: "2026-08-16T10:00:02.000Z" }] }),
+        env(3, { type: "take-status", takeId: TK as never, status: "failed", error: "the provider refused" }),
+      ]),
+      ["Image 1"],
+    );
+  });
+
   it("removing a token deactivates it and restoring brings the same name back", () => {
     const session = foldBenchSession(META, [
       env(1, { type: "reference-added", entry: ref("Image 1", AR) }),
