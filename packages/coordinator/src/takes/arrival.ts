@@ -111,9 +111,18 @@ export async function recordTakesFromJob(
       provider: job.provider,
       model: job.model,
       provenance,
-      ...(typeof job.params["prompt"] === "string" ? { prompt: job.params["prompt"] as string } : {}),
+      // A spoken job's prompt is its line: it travels as `text`, because that is what a
+      // synthesis endpoint calls it. Without this fallback a landed read recorded no words at
+      // all, and nothing on disk could say what had been said.
+      ...(typeof job.params["prompt"] === "string"
+        ? { prompt: job.params["prompt"] as string }
+        : typeof job.params["text"] === "string"
+          ? { prompt: job.params["text"] as string }
+          : {}),
       references: (job.params["references"] as string[] | undefined) ?? [],
-      params: {},
+      // Which voice read it. The sheet holds today's voice, so deriving it later would
+      // re-attribute every old take the moment a character is recast.
+      params: typeof job.params["voiceId"] === "string" ? { voiceId: job.params["voiceId"] as string } : {},
       dispatchedAt: job.createdAt,
       completedAt: now,
     };

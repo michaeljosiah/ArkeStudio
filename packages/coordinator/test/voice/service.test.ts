@@ -9,6 +9,7 @@ import { authoritativeSheetSpeech, normalizeSpeechText, previewCacheFile, speech
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { FakeProvider } from "../queue/fake-provider.js";
+import { AppSettingsFile } from "../../src/app-settings.js";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
 
@@ -281,26 +282,111 @@ describe("the preview cache key", () => {
 });
 
 describe("authoritative sheet speech", () => {
-  it("reads exact normalized Essence from a supported assignment", () => {
-    assert.deepEqual(authoritativeSheetSpeech(SHEET, "Essence"), {
-      text: "Tide-caller",
-      provider: "elevenlabs",
-      voiceId: "v_8Kq2",
-    });
+  /**
+   * It returns the words, and only the words. It used to resolve the voice as well, from
+   * `sheet.voice` — which read prose *about* a character in that character's own voice, and
+   * refused outright for the many characters who have none. Who narrates is a separate question
+   * with a separate answer (narratorFor, in contracts).
+   */
+  it("reads exact normalized Essence, and says nothing about who reads it", () => {
+    assert.deepEqual(authoritativeSheetSpeech(SHEET, "Essence"), { text: "Tide-caller" });
   });
 
-  it("reads Appearance too, and rejects unknown headings, empty text, and legacy assignments", () => {
+  it("reads Appearance too, and rejects unknown headings and empty text", () => {
     const withAppearance = {
       ...SHEET,
       sections: [...SHEET.sections, { heading: "Appearance", body: "Salt-crusted braids, pale grey eyes." }],
     } as Sheet;
     assert.deepEqual(authoritativeSheetSpeech(withAppearance, "Appearance"), {
       text: "Salt-crusted braids, pale grey eyes.",
-      provider: "elevenlabs",
-      voiceId: "v_8Kq2",
     });
     assert.throws(() => authoritativeSheetSpeech(SHEET, "Relationships"), /not available/);
-    assert.throws(() => authoritativeSheetSpeech({ ...SHEET, voice: { ...SHEET.voice!, provider: "openai" } } as Sheet, "Essence"), /supported voice/);
     assert.throws(() => authoritativeSheetSpeech({ ...SHEET, sections: [{ heading: "Essence", body: "  " }] } as Sheet, "Essence"), /Nothing to read/);
+  });
+
+  it("reads a character who has no voice of their own", () => {
+    // The behaviour this replaced refused here, which meant most of a cast could not be read.
+    const voiceless = { ...SHEET, voice: undefined } as unknown as Sheet;
+    assert.deepEqual(authoritativeSheetSpeech(voiceless, "Essence"), { text: "Tide-caller" });
+  });
+});
+
+describe("a spoken line reaches the queue (built 2026-08-17)", () => {
+  /**
+   * The screens, the dialog and voiceLineRequest all existed; nothing connected them, and the
+   * button was hardcoded `disabled` with "Voice generation arrives with SPEC-011". These pin
+   * the shape the handler now depends on.
+   */
+  // The file's own sheet, given the local voice this world actually assigns her.
+  const SPEAKER = {
+    ...SHEET,
+    voice: { provider: "kokoro", voiceId: "af_bella", label: "Bella", assignedAtVersion: 4 },
+  } as unknown as Sheet;
+  const LOCAL_MODEL: ManifestModel = {
+    id: "kokoro-82m",
+    provider: "kokoro",
+    capability: "voice-tts",
+    displayName: "Kokoro 82M",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: {},
+    pricing: { kind: "unmetered" },
+  };
+
+  it("speaks in the sheet's own voice, never one passed in", () => {
+    const request = voiceLineRequest({
+      worldId: "w",
+      productionId: "saltlight",
+      shotId: "sh_12",
+      sheet: SPEAKER,
+      text: "the verse, under the water",
+      deliveryParams: null,
+      deliveryNotice: null,
+      model: LOCAL_MODEL,
+    });
+    assert.equal(request.params["voiceId"], "af_bella", "the voice is the speaker's");
+    assert.equal(request.params["text"], "the verse, under the water");
+    assert.equal(request.capability, "voice-tts");
+    assert.deepEqual(request.target, { kind: "voice-line", id: "sh_12" });
+    // Lands beside the production it belongs to, not in the world's artifacts.
+    assert.equal(request.landing?.dir, "productions/saltlight/audio");
+  });
+
+  it("refuses a speaker with no voice, naming where one is given", () => {
+    const voiceless = { ...SPEAKER, voice: undefined } as unknown as Sheet;
+    assert.throws(
+      () =>
+        voiceLineRequest({
+          worldId: "w",
+          productionId: "saltlight",
+          shotId: "sh_12",
+          sheet: voiceless,
+          text: "x",
+          deliveryParams: null,
+          deliveryNotice: null,
+          model: LOCAL_MODEL,
+        }),
+      /has no assigned voice/,
+    );
+  });
+});
+
+describe("the narrator survives a restart (found live, 2026-08-17)", () => {
+  /**
+   * Three separate places have to agree for a preference to be real: the file, the event, and
+   * the snapshot that a fresh window reads. This one was written correctly and left out of the
+   * snapshot, so restarting the app showed the shipped local voice while a cloud voice was
+   * actually stored — a narrator that would have billed every read while claiming to be free.
+   */
+  it("reads back what was written", async () => {
+    const dir = await tempDir("narrator");
+    const file = new AppSettingsFile(join(dir, "settings.json"));
+    const chosen = { provider: "elevenlabs", voiceId: "v_roger", label: "Roger" };
+    await file.setNarrator(chosen);
+    // A second reader — the one a restart uses — sees it.
+    const reopened = new AppSettingsFile(join(dir, "settings.json"));
+    assert.deepEqual((await reopened.load()).narrator, chosen);
+    // And clearing returns to null, which is how "the shipped local voice" is stored.
+    await file.setNarrator(null);
+    assert.equal((await new AppSettingsFile(join(dir, "settings.json")).load()).narrator, null);
   });
 });

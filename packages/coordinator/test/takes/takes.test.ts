@@ -505,4 +505,33 @@ describe("take QC at arrival (#248)", () => {
     assert.deepEqual(reasons, [], "and nothing to explain, so nothing is logged");
     await store.close();
   });
+
+  /**
+   * A read that records neither its words nor its voice (found driving the installed app,
+   * 2026-08-17). `prompt` was only ever read from `params.prompt`, and a synthesis job calls
+   * its words `text` — so a landed line said nothing about itself, and the voice could only be
+   * recovered from the sheet, which recasting would silently rewrite under every old take.
+   */
+  it("a spoken take records the line it read and the voice that read it", async () => {
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const takes = await recordTakesFromJob(
+      store,
+      {
+        ...shotJob(landed),
+        capability: "voice-tts",
+        target: { kind: "voice-line", id: "sh_12", coversShots: ["sh_12"] },
+        params: { text: "the verse, under the water", voiceId: "af_bella" },
+      },
+      0,
+    );
+    assert.equal(takes[0]!.prompt, "the verse, under the water");
+    assert.deepEqual(takes[0]!.params, { voiceId: "af_bella" });
+    // On disk, not merely returned — the take is what a later reader has.
+    const written = JSON.parse(
+      await readFile(join(dir, "productions", "saltlight", "takes", takes[0]!.id, "take.json"), "utf8"),
+    );
+    assert.equal(written.prompt, "the verse, under the water");
+    await store.close();
+  });
 });

@@ -303,6 +303,11 @@ function emitChange(next: StoreState): void {
   for (const l of listeners) l();
 }
 
+/** Test hook: apply one event to a state, so a reducer can be pinned without a socket. */
+export function __applyForTest(state: ClientState, event: DomainEvent): ClientState {
+  return fold(state, event);
+}
+
 function fold(state: ClientState, event: DomainEvent): ClientState {
   switch (event.type) {
     case "health.changed":
@@ -355,6 +360,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, backgroundNotifications: event.preference } };
     case "appearance.changed":
       return { ...state, app: { ...state.app, appearance: { theme: event.preference } } };
+    case "narrator.changed":
+      return { ...state, app: { ...state.app, narrator: event.voice } };
     case "runtime.status":
       return { ...state, app: { ...state.app, runtime: event.runtime } };
     case "voice.sidecar":
@@ -1776,8 +1783,35 @@ export type ReadingVoice = Extract<DomainEvent, { type: "voice.catalogue" }>["vo
  * The plain catalogue for the bench. Not `requestVoiceCandidates`, which ranks the same voices
  * against a character's written voice — the wrong question for one that is only reading.
  */
-export function requestVoiceCatalogue(worldId: string): void {
-  send({ kind: "voice-catalogue", worldId });
+/** Choose who narrates; null returns to the shipped local voice, which costs nothing. */
+export function setNarrator(voice: { provider: string; voiceId: string; label?: string } | null): void {
+  send({ kind: "set-narrator", voice });
+}
+
+export function requestVoiceCatalogue(worldId?: string): void {
+  send({ kind: "voice-catalogue", ...(worldId ? { worldId } : {}) });
+}
+
+/**
+ * Speak a shot's line (SPEC-011 R-14). No voice argument: it is the speaker's own, read from
+ * their sheet at dispatch, so a retake keeps it by construction.
+ */
+export function requestVoiceLine(input: {
+  worldId: string;
+  productionId: string;
+  shotId: string;
+  delivery?: string;
+}): string {
+  const requestId = ulid();
+  send({
+    kind: "voice-line",
+    requestId,
+    worldId: input.worldId,
+    productionId: input.productionId,
+    shotId: input.shotId,
+    ...(input.delivery !== undefined ? { delivery: input.delivery } : {}),
+  });
+  return requestId;
 }
 
 export function requestVoiceCandidates(worldId: string, sheetId: string): void {
@@ -2163,8 +2197,12 @@ export function useWorld(): ClientState["world"] {
   return useStore().state?.world ?? null;
 }
 
-/** Test hook: inject a full state and mark the connection open. */
-export function __setStateForTest(state: ClientState): void {
+/**
+ * Test hook: inject a full state and mark the connection open. `extra` overrides the slots that
+ * live beside the coordinator's snapshot — voice candidates, permissions and the like — which a
+ * screen reads through useStore rather than useClientState.
+ */
+export function __setStateForTest(state: ClientState, extra: Partial<StoreState> = {}): void {
   emitChange({
     connection: "open",
     state,
@@ -2201,6 +2239,7 @@ export function __setStateForTest(state: ClientState): void {
     envCheck: null,
     diagnosticsBundle: null,
     providerCallsByJob: {},
+    ...extra,
   });
 }
 

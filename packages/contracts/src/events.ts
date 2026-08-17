@@ -29,6 +29,7 @@ import {
 import { SetupStatusSchema } from "./setup.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
 import { RankedVoiceSchema, VoiceCandidateSchema, VoiceRuntimeStatusSchema } from "./voice.js";
+import { NarratorSettingsSchema } from "./settings.js";
 import { UpdateStateSchema } from "./update.js";
 
 /**
@@ -48,6 +49,7 @@ const base = { at: IsoDateTimeSchema };
 export const QueueCommandSchema = z.enum([
   "dispatch-scene",
   "voice-preview",
+  "voice-line",
   "read-sheet-section",
   "generate-world-image",
   "upload-world-image",
@@ -264,12 +266,14 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .object({
       ...base,
       type: z.literal("voice.catalogue"),
-      worldId: UlidSchema,
+      worldId: UlidSchema.optional(),
       voices: z.array(
         VoiceCandidateSchema.extend({ usedBy: z.array(z.string()).default([]) }).strict(),
       ),
     })
     .strict(),
+  /** Who reads the app's prose aloud changed; null is the shipped local voice. */
+  z.object({ ...base, type: z.literal("narrator.changed"), voice: NarratorSettingsSchema }).strict(),
   /** Ranked voice candidates for a sheet, matched attributes shown (SPEC-011 R-7, R-8). */
   z
     .object({

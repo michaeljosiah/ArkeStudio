@@ -211,3 +211,42 @@ export function deliveryParams(provider: string, delivery: Delivery): DeliveryMa
   }
   return { ok: false, reason: `${provider} has no declared delivery mapping — the read will use provider defaults` };
 }
+
+// ---------------------------------------------------------------------------
+// The narrator — who reads the app's own prose (asked for 2026-08-17)
+// ---------------------------------------------------------------------------
+
+/**
+ * The local voice the app narrates in when nobody has chosen one.
+ *
+ * Local by default on purpose: "read this aloud" is a passive press, and no other preference in
+ * this app spends money on one. A cloud narrator is available, and is chosen deliberately with
+ * its per-character price stated.
+ */
+export const DEFAULT_NARRATOR = { provider: "kokoro", voiceId: "bm_george", label: "George" } as const;
+
+export interface NarratorChoice {
+  provider: string;
+  voiceId: string;
+  label: string | undefined;
+  /** True when nobody chose this — the shipped local voice, and free. */
+  fallback: boolean;
+}
+
+/**
+ * Who narrates, decided in one place.
+ *
+ * A stored narrator whose voice is no longer in the catalogue falls back rather than failing:
+ * a key withdrawn or a runtime uninstalled should quieten the reading to the local voice, not
+ * turn every "read aloud" into an error about a voice the user cannot see any more.
+ */
+export function narratorFor(
+  stored: { provider: string; voiceId: string; label?: string } | null,
+  catalogue: readonly VoiceCandidate[],
+): NarratorChoice {
+  if (stored !== null) {
+    const live = catalogue.find((v) => v.provider === stored.provider && v.voiceId === stored.voiceId);
+    if (live) return { provider: live.provider, voiceId: live.voiceId, label: live.label, fallback: false };
+  }
+  return { ...DEFAULT_NARRATOR, label: DEFAULT_NARRATOR.label as string | undefined, fallback: true };
+}

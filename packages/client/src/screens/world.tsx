@@ -14,6 +14,7 @@ import {
   type PendingSheet,
   type Sheet,
   type WorldBundle,
+  DEFAULT_NARRATOR,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
@@ -1283,6 +1284,12 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   // the user last asked to hear so the clip, cost note and failure attach to the right block.
   const [read, setRead] = useState<{ requestId: string; section: "Essence" | "Appearance" } | null>(null);
   const readResult = read ? voiceAudio[read.requestId] : undefined;
+  // Reading a section aloud is narration, not dialogue: it uses the app's narrator, so it does
+  // not depend on this character having a voice of their own. Gating it on `sheet.voice` was
+  // the client half of the same mistake the coordinator made — prose ABOUT somebody read in
+  // their voice, and unreadable for the many characters who have none.
+  const narrator = useStore().state?.app.narrator ?? null;
+  const narratorLabel = narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label;
   // A read the user asked for plays as soon as it lands, rather than making them click twice.
   useEffect(() => {
     if (read && readResult?.status === "ready" && readResult.file && world && sheet) {
@@ -1290,10 +1297,10 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         id: readResult.requestId,
         url: mediaUrl(world.meta.slug, readResult.file),
         title: `${sheet.name} · ${read.section}`,
-        sub: `read aloud · ${sheet.voice?.label ?? sheet.voice?.provider ?? "voice"}`,
+        sub: `read aloud · ${narratorLabel}`,
       });
     }
-  }, [read?.section, readResult?.requestId, readResult?.status, readResult?.file, world?.meta.slug, sheet?.name]);
+  }, [read?.section, readResult?.requestId, readResult?.status, readResult?.file, world?.meta.slug, sheet?.name, narratorLabel]);
   const sheetRefsMap = useSheetRefs();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState<string | null>(null);
@@ -1328,7 +1335,6 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   // The Essence is the lead paragraph under the name (design 3a); the grid holds the rest.
   const essence = isCharacter ? sheet.sections.find((s) => s.heading === "Essence") : undefined;
   const gridSections = essence ? sheet.sections.filter((s) => s !== essence) : sheet.sections;
-  const voiceUsable = sheet.voice !== undefined && ["kokoro", "elevenlabs"].includes(sheet.voice.provider);
   // The read controls, the loaded clip and the cost note for one section. Essence and Appearance
   // share this; each shows its own speaker on hover and its own "preparing"/confirmation state.
   const sectionAudio = (heading: "Essence" | "Appearance") => {
@@ -1339,14 +1345,12 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
             id: active.requestId,
             url: mediaUrl(slug, active.file),
             title: `${sheet.name} · ${heading}`,
-            sub: `read aloud · ${sheet.voice?.label ?? sheet.voice?.provider ?? "voice"}`,
+            sub: `read aloud · ${narratorLabel}`,
           }
         : null;
     const onRead = () => {
       if (!worldId) return;
-      // No usable voice yet: the read starts by choosing one, which is where this leads.
-      if (!voiceUsable) navigate(`/w/${worldId}/cast/${sheet.id}/voice`);
-      else setRead({ requestId: readSheetSection(worldId, sheet.id, heading), section: heading });
+      setRead({ requestId: readSheetSection(worldId, sheet.id, heading), section: heading });
     };
     const note =
       active?.status === "confirmation-required" ? (
@@ -1377,7 +1381,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           clip={clip}
           onRead={onRead}
           copyText={body}
-          readLabel={voiceUsable ? "Read aloud" : "Choose a voice to read this aloud"}
+          readLabel="Read aloud"
           note={note}
         />
         {read?.section === heading && readResult?.status === "failed" && (
@@ -2150,6 +2154,7 @@ function VoiceCandidatesPanel({
   const sheet = useSheet(worldId, sheetId);
   const [requests, setRequests] = useState<Record<string, string>>({});
   const [assigning, setAssigning] = useState<string | null>(null);
+  const [where, setWhere] = useState<"all" | "cloud" | "local">("all");
   const autoPlayed = useRef(new Set<string>());
   // Assigning commits straight through (no gate), so the change lands in the next world snapshot:
   // the pressed row stays busy until this sheet's voice is the one we just assigned.
@@ -2200,9 +2205,37 @@ function VoiceCandidatesPanel({
             : "loading voices…"}
         </span>
       </div>
+      {/* Where a voice lives, as a tab — the same organisation the bench's reading picker uses
+          (design 70). Six local voices were otherwise lost among fifty cloud ones, and "can this
+          machine say it without spending" is the first question anyone asks of this list. */}
       {candidates && (
-        <div style={{ display: "grid", gap: 8 }}>
-          {candidates.ranked.map(({ candidate }) => {
+        <div className="fy-voices__tabs" style={{ padding: 0 }}>
+          {(["all", "cloud", "local"] as const).map((tab) => {
+            const count =
+              tab === "all"
+                ? candidates.ranked.length
+                : candidates.ranked.filter(({ candidate }) => (tab === "local" ? candidate.local : !candidate.local)).length;
+            return (
+              <button
+                key={tab}
+                type="button"
+                className={cx("fy-voices__tab", where === tab && "fy-voices__tab--on")}
+                data-testid={`voice-tab-${tab}`}
+                onClick={() => setWhere(tab)}
+              >
+                {`${tab === "all" ? "All" : tab === "cloud" ? "Cloud" : "On this machine"} ${count}`}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {/* The catalogue scrolls inside its own pane rather than growing the page: fifty voices
+          otherwise push the assign controls, and the sheet under them, off the bottom. */}
+      {candidates && (
+        <div className="fy-voicelist">
+          {candidates.ranked
+            .filter(({ candidate }) => (where === "all" ? true : where === "local" ? candidate.local : !candidate.local))
+            .map(({ candidate }) => {
             const key = `${candidate.provider}/${candidate.voiceId}`;
             const preview = previews[key];
             const requestId = requests[key];

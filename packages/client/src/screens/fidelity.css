@@ -4331,7 +4331,11 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   transition: var(--transition-control);
 }
 .fy-voices__tab:hover { color: var(--foreground); }
-.fy-voices__tab--on { background: var(--foreground); color: var(--background); font-weight: 500; }
+/* The chosen tab keeps its colour under the cursor. `:hover` outranks a single class, so the
+   label of the tab you just clicked went white on white — invisible exactly while the pointer
+   was still resting on it, which is always. */
+.fy-voices__tab--on,
+.fy-voices__tab--on:hover { background: var(--foreground); color: var(--background); font-weight: 500; }
 .fy-voices__rows { border-top: 1px solid var(--border); max-height: 352px; overflow-y: auto; }
 .fy-voices__none { padding: 18px 16px; font: 400 11.5px var(--font-sans); color: var(--muted-foreground); }
 .fy-voices__row {
@@ -4371,3 +4375,14 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-bench__voicename { font: 500 12px var(--font-sans); }
 .fy-bench__voicedelivery { font: 400 11px var(--font-mono); color: var(--muted-foreground); }
 .fy-bench__voicetake audio { width: 100%; }
+
+/* The voice catalogue scrolls in place. A world with fifty cloud voices otherwise grows the
+   page until the assign controls sit below the fold, which is the one place a long list must
+   not reach. The height is a band, not a fixed figure: a short list stays short. */
+.fy-voicelist {
+  display: grid; gap: 8px; max-height: min(52vh, 420px); overflow-y: auto;
+  padding-right: 4px; margin-right: -4px;
+}
+.fy-voicelist::-webkit-scrollbar { width: 8px; }
+.fy-voicelist::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+.fy-voicelist::-webkit-scrollbar-track { background: transparent; }

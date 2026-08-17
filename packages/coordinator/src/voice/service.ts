@@ -56,21 +56,22 @@ export function normalizeSpeechText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-export function authoritativeSheetSpeech(sheet: Sheet, heading: string): {
-  text: string;
-  provider: "kokoro" | "elevenlabs";
-  voiceId: string;
-} {
+/**
+ * The words of a readable section — and only the words.
+ *
+ * It used to resolve the voice too, from `sheet.voice`, which read prose *about* a character in
+ * that character's own voice and refused outright for the many characters who have none. Who
+ * narrates is a separate question with a separate answer (`narratorFor`), and asking it here
+ * was what tied one to the other.
+ */
+export function authoritativeSheetSpeech(sheet: Sheet, heading: string): { text: string } {
   if (sheet.type !== "character") throw new Error("Only character sections can be read aloud.");
   if (heading !== "Essence" && heading !== "Appearance") {
     throw new Error("This section is not available for read aloud.");
   }
   const text = normalizeSpeechText(sheet.sections.find((section) => section.heading === heading)?.body ?? "");
   if (!text) throw new Error("Nothing to read yet.");
-  if (!sheet.voice || (sheet.voice.provider !== "kokoro" && sheet.voice.provider !== "elevenlabs")) {
-    throw new Error("Choose a supported voice again before reading aloud.");
-  }
-  return { text, provider: sheet.voice.provider, voiceId: sheet.voice.voiceId };
+  return { text };
 }
 
 export interface SpeechSpec {

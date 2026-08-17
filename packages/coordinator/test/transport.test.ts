@@ -22,6 +22,7 @@ const STATE: ClientState = {
     recipes: [],
     spend: null,
     backgroundNotifications: "issues-only",
+  narrator: null,
     appearance: { theme: "system" },
     runtime: null,
     voiceRuntime: null,

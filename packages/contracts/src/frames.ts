@@ -6,7 +6,7 @@ import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, RecipeIdSchema, Ses
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
-import { BackgroundNotificationPreferenceSchema, ThemePreferenceSchema } from "./settings.js";
+import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
 import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
 import { CHARACTER_ROLE_MAX } from "./world.js";
 import { WorldChatContextSchema } from "./world-chat.js";
@@ -774,6 +774,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       preference: ThemePreferenceSchema,
     })
     .strict(),
+  /**
+   * Choose who reads the app's prose aloud (asked for 2026-08-17). Null returns to the shipped
+   * local voice, which costs nothing — the point of having a default at all.
+   */
+  z
+    .object({
+      kind: z.literal("set-narrator"),
+      voice: NarratorSettingsSchema,
+    })
+    .strict(),
   /** SPEC-009 R-14: cancel a job in any non-terminal state; remote cancel attempted where supported. */
   z.object({ kind: z.literal("cancel-job"), jobId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("list-provider-calls"), jobId: JobIdSchema.nullable() }).strict(),
@@ -1044,7 +1054,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * one ranks the catalogue against a character's written voice, which is the wrong question
    * for a voice that is only reading. No sheet id, and nothing ranked.
    */
-  z.object({ kind: z.literal("voice-catalogue"), worldId: UlidSchema }).strict(),
+  /**
+   * `worldId` is optional because the catalogue is the app's — local presets plus whatever the
+   * stored keys unlock. A world only adds `usedBy`, so Settings can ask for it with no world
+   * open. It could not, at first: an empty id failed frame validation and the request was
+   * dropped, leaving the picker reading a catalogue that never arrived.
+   */
+  z.object({ kind: z.literal("voice-catalogue"), worldId: UlidSchema.optional() }).strict(),
+  /**
+   * Speak a shot's line in its character's own voice (SPEC-011 R-14). The voice is not a
+   * parameter: it is the speaker's, read from their sheet at dispatch, so a retake keeps it by
+   * construction and only the delivery can change.
+   */
+  z
+    .object({
+      kind: z.literal("voice-line"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      shotId: z.string().min(1),
+      /** One of DELIVERIES; absent leaves the read at the provider's own default. */
+      delivery: z.string().min(1).optional(),
+    })
+    .strict(),
   /**
    * SPEC-011 R-9/R-10: audition one candidate with the character's line. Cloud previews cost;
    * the client shows the stated figure before this message is sent.

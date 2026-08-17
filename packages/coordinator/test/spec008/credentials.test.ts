@@ -127,6 +127,7 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
         recipes: [],
         spend: null,
         backgroundNotifications: "issues-only",
+        narrator: null,
         appearance: { theme: "system" },
         runtime: null,
         voiceRuntime: null,

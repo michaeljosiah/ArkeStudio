@@ -19,7 +19,8 @@ export function VoicePickerDialog({
   onPick,
 }: {
   open: boolean;
-  worldId: string;
+  /** Absent in Settings, where no world need be open — only `usedBy` depends on one. */
+  worldId?: string;
   chosenId: string | undefined;
   onClose: () => void;
   onPick: (voice: ReadingVoice) => void;
