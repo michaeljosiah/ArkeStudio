@@ -73,6 +73,7 @@ import { Portrait } from "../components/portrait.js";
 import { mediaUrl } from "../lib/media.js";
 import { durationTrack, durationPillLabel } from "../lib/duration.js";
 import { posterNameFor } from "../lib/poster.js";
+import { laneRestorePlan } from "../lib/restore.js";
 import { setupForMode, type ModeSetup } from "../lib/composer-mode.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { usableModels } from "../components/dispatch-bar.js";
@@ -346,6 +347,24 @@ function BenchWorkspace({
       params: take.request.params,
       brief: take.request.brief,
     });
+    // ...and the pictures it was made with. Restoring the words and the settings but not the
+    // images gave back a request that could not be re-made: press ⟲ on a take built from a
+    // start frame, and you got its prompt over whatever happened to be in the lanes. The
+    // snapshot has carried them all along — only this had never read them.
+    //
+    // Each lane is set to exactly the snapshot's list: what it does not name is dropped, and
+    // what it names is re-added. Re-adding a source the registry already knows restores its old
+    // token rather than claiming a new one, so the brief's "Image 1" still means Image 1.
+    for (const lane of ["reference", "keyframe"] as const) {
+      const plan = laneRestorePlan(
+        lane === "keyframe" ? take.request.keyframes : take.request.references,
+        lane === "keyframe" ? session.composer.keyframeTokens : session.composer.activeTokens,
+      );
+      for (const token of plan.remove) sendBenchRemoveReference(worldId, session.id, token, lane);
+      if (plan.add.length > 0) {
+        sendBenchAddReference(worldId, session.id, plan.add.map((entry) => ({ pick: entry.source })), lane);
+      }
+    }
   };
 
   // ---- the estimate, from the manifest row and the controls above it ----
