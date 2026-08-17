@@ -1,5 +1,6 @@
 import type { ClientDeclarations, ProviderId } from "@arke-studio/contracts";
 import { AnthropicClient } from "./clients/anthropic.js";
+import { ComfyUiClient, type ComfyUiPreflight, type EngineBaseUrl } from "./clients/comfyui.js";
 import { ElevenLabsClient } from "./clients/elevenlabs.js";
 import { FalClient } from "./clients/fal.js";
 import { HiggsfieldClient } from "./clients/higgsfield.js";
@@ -23,6 +24,12 @@ export interface ProviderClientDeps {
    * run at all — the Kokoro client is then absent rather than present and always failing.
    */
   voxa?: SidecarBaseUrl;
+  /**
+   * The ComfyUI engine (SPEC-021): where it listens right now, and the pre-flight verification
+   * every submit re-runs before touching the wire (§2.5). Omitted where no engine service is
+   * wired — the client is then absent rather than present and dispatching unverified.
+   */
+  comfyui?: { baseUrl: EngineBaseUrl; preflight: ComfyUiPreflight };
   capture?: ProviderCallCapture;
 }
 
@@ -68,6 +75,16 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
             capture,
           ),
         }),
+    ...(deps.comfyui === undefined
+      ? {}
+      : {
+          comfyui: captureProviderClient(
+            "comfyui",
+            (fetch) => new ComfyUiClient(fetch, deps.comfyui!.baseUrl, deps.comfyui!.preflight),
+            fetchImpl,
+            capture,
+          ),
+        }),
   };
 }
 
@@ -77,6 +94,10 @@ export const PROVIDER_DECLARATIONS: Partial<Record<ProviderId, ClientDeclaration
     createProviderClients({
       fetch: (() => Promise.reject(new Error("declarations-only"))) as FetchLike,
       higgsfield: () => Promise.reject(new Error("declarations-only")),
+      comfyui: {
+        baseUrl: () => null,
+        preflight: () => Promise.reject(new Error("declarations-only")),
+      },
     }),
   ).map(([id, client]) => [id, client.declarations]),
 );
