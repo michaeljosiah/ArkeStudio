@@ -8,6 +8,9 @@ Character portraits share an extra clause so the roster reads as one cast:
 
 > …consistent character-sheet style, three-quarter view, plain dark neutral backdrop, chest-up framing
 
+Prompts and copy for the Arke Worlds YouTube channel — banner, avatar and description — live in
+[`channel-identity.md`](channel-identity.md). They inherit the same style suffix and palette.
+
 ## Website motion artifacts
 
 The refreshed website is media-led. It renders a poster image while an artifact is unavailable, so each video can be produced independently without blocking the page. Deliver final files to `assets/site-video/` under the filenames below.
