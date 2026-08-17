@@ -13,7 +13,7 @@ import { FakeProvider } from "../queue/fake-provider.js";
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
 
 const ELEVEN_MODEL: ManifestModel = {
-  id: "eleven-v3",
+  id: "eleven_multilingual_v2",
   provider: "elevenlabs",
   capability: "voice-tts",
   displayName: "Eleven v3",

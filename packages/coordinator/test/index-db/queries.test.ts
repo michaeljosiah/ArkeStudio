@@ -172,7 +172,7 @@ describe("needs-you (R-14) — computed, never stored", () => {
         target: { kind: "voice-line" },
         capability: "voice-tts",
         provider: "elevenlabs",
-        model: "eleven-v3",
+        model: "eleven_multilingual_v2",
         params: {},
         estimatedMicroUsd: 6000,
         status: "failed",

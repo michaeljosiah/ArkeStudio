@@ -4039,7 +4039,7 @@ export class Coordinator {
             sheetVersion: sheet.version,
             purpose: "candidate-preview",
             provider: "elevenlabs",
-            model: "eleven-v3",
+            model: "eleven_multilingual_v2",
             voiceId: msg.voiceId,
             status: "ready",
             file: cached,
@@ -4097,7 +4097,7 @@ export class Coordinator {
           worldId: msg.worldId, sheetId: msg.sheetId, sheetVersion: sheet?.version ?? 1,
           purpose: "sheet-section", sectionHeading: msg.sectionHeading,
           provider: sheet?.voice?.provider === "elevenlabs" ? "elevenlabs" : "kokoro",
-          model: sheet?.voice?.provider === "elevenlabs" ? "eleven-v3" : "kokoro-82m",
+          model: sheet?.voice?.provider === "elevenlabs" ? "eleven_multilingual_v2" : "kokoro-82m",
           voiceId: sheet?.voice?.voiceId ?? "unassigned", status: "failed", file: null,
           cached: false, characterCount: text.length, estimatedMicroUsd: 0, error,
         } as DomainEvent);
