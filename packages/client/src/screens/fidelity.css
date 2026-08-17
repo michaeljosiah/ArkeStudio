@@ -4070,6 +4070,13 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
    "keep" and `transparent` means "fade out", and neither is a value any theme should own. */
 .fy-bench__waiting {
   width: min(420px, 70%); aspect-ratio: 640 / 368; border-radius: 10px; object-fit: cover;
+  border: 1px solid var(--border);
+}
+/* Dark is the theme this clip was shot for: the plate dissolves into the panel and the light
+   in it is the only edge. On a light panel the same feather is a dark oval with no border,
+   which reads as a stain rather than a screen — so there it stays a contained plate. */
+.dark .fy-bench__waiting {
+  border-color: transparent;
   -webkit-mask-image: radial-gradient(ellipse at center, black 50%, transparent 86%);
   mask-image: radial-gradient(ellipse at center, black 50%, transparent 86%);
 }
