@@ -534,4 +534,66 @@ describe("take QC at arrival (#248)", () => {
     assert.equal(written.prompt, "the verse, under the water");
     await store.close();
   });
+
+  /**
+   * The picture every screen shows for a video take (2026-08-17). The `frame.png` convention
+   * had readers on four screens and no writer anywhere, so a generated clip was a grey box
+   * with a label in it wherever it appeared.
+   */
+  it("draws a video take's first frame beside the clip", async () => {
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const drawn: Array<{ input: string; output: string }> = [];
+    const takes = await recordTakesFromJob(store, shotJob(landed), 400000, {
+      poster: {
+        write: async (input, output) => {
+          drawn.push({ input, output });
+          await writeFile(output, Buffer.from("fake-png"));
+          return { ok: true };
+        },
+      },
+    });
+    assert.equal(drawn.length, 1, "asked for exactly once, against the landed clip");
+    assert.match(drawn[0]!.input, /output-1\.mp4$/);
+    assert.match(drawn[0]!.output, /frame\.png$/);
+    // Beside the clip in the take's own directory — which is where every reader looks.
+    const takeDir = join(dir, "productions", "saltlight", "takes", takes[0]!.id);
+    assert.deepEqual((await readdir(takeDir)).sort(), ["frame.png", "output-1.mp4", "take.json"]);
+    await store.close();
+  });
+
+  it("asks for no picture of a voice line, and loses no take when drawing fails", async () => {
+    const { dir, store } = await open();
+
+    // A spoken take has nothing to look at, so nothing is asked for and nothing is reported.
+    await landPass(dir);
+    const spokenRel = "productions/saltlight/incoming/sc_04-pass-1/speech.wav";
+    await writeFile(join(dir, spokenRel), Buffer.from("RIFFfake"));
+    let asked = 0;
+    const reasons: string[] = [];
+    await recordTakesFromJob(
+      store,
+      {
+        ...shotJob(spokenRel),
+        capability: "voice-tts",
+        target: { kind: "voice-line", id: "sh_12", coversShots: ["sh_12"] },
+        params: { text: "the verse", voiceId: "af_bella" },
+        landedFiles: [spokenRel],
+      },
+      0,
+      { poster: { write: async () => { asked += 1; return { ok: true }; } } },
+    );
+    assert.equal(asked, 0, "a voice line is never a picture");
+
+    // And a thrown extraction is survivable: finalization is not replayable, so a diagnostic
+    // that fails must never cost a paid take.
+    const landed = await landPass(dir);
+    const takes = await recordTakesFromJob(store, shotJob(landed), 400000, {
+      poster: { write: async () => { throw new Error("ffmpeg exploded"); } },
+      onPosterUnavailable: (reason) => reasons.push(reason),
+    });
+    assert.equal(takes.length, 1, "the take is recorded regardless");
+    assert.deepEqual(reasons, ["process-failed"], "and the reason is said rather than swallowed");
+    await store.close();
+  });
 });

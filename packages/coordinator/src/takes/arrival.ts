@@ -5,6 +5,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import type { TakeQcAnalyzer, TakeQcUnavailableReason } from "./qc.js";
+import { writePosterFor, type TakePosterMaker, type TakePosterUnavailableReason } from "./poster.js";
 
 /**
  * Take arrival (SPEC-013 §2.2, §2.3): SPEC-009 landed verified media; this writes the
@@ -34,6 +35,10 @@ export interface TakeArrivalOptions {
   analyzer?: TakeQcAnalyzer;
   /** Told why a measurement is missing, so "not measured" is explicable rather than silent. */
   onQcUnavailable?: (reason: TakeQcUnavailableReason) => void;
+  /** Absent on any build without ffmpeg, exactly as the analyzer is — see takes/poster.ts. */
+  poster?: TakePosterMaker;
+  /** Told why a video take has no picture beside it, for the same reason as the measurement. */
+  onPosterUnavailable?: (reason: TakePosterUnavailableReason) => void;
 }
 
 /** Only a video clip has motion to measure; a still or a voice line has no question to ask. */
@@ -105,6 +110,12 @@ export async function recordTakesFromJob(
     // failure below is swallowed by design: finalization is not replayable, and a paid clip
     // must never be lost to a diagnostic that could not run.
     const qc = await measureArrival(qcApplies(job) ? join(takeDir, mediaName) : null, options);
+
+    // The picture every screen shows for this take. Drawn here, beside the clip, for the same
+    // reason the measurement is: the take is about to become immutable, and this is the last
+    // moment its media is known to be in one known place. Best-effort throughout — a take with
+    // no poster is the state every reader already handles.
+    await writePosterFor(join(takeDir, mediaName), options.poster, options.onPosterUnavailable);
 
     const base = {
       jobId: job.id,

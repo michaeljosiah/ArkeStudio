@@ -32,6 +32,7 @@ import { mediaUrl } from "../lib/media.js";
 import { CanonEntryRow } from "../domain/domain.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
+import { posterize, posterNameFor } from "../lib/poster.js";
 import {
   acceptTake,
   cancelExport,
@@ -100,16 +101,10 @@ export function Wave({ seed, width = 290, height = 16 }: { seed: string; width?:
   );
 }
 
-/** A take's poster image: video takes keep a frame.png beside the clip, stills are their own poster. */
+/** A take's poster image, on the shared convention (lib/poster.ts). */
 function takeMediaPath(prodId: string, take: { id: string; media?: string }): string | null {
   if (!take.media) return null;
-  const poster = /\.(mp4|webm)$/i.test(take.media) ? "frame.png" : take.media;
-  return `productions/${prodId}/takes/${take.id}/${poster}`;
-}
-
-/** Same convention for paths that arrive already assembled (the derived cut). */
-function posterize(path: string): string {
-  return path.replace(/[^/]+\.(mp4|webm)$/i, "frame.png");
+  return `productions/${prodId}/takes/${take.id}/${posterNameFor(take.media)}`;
 }
 
 function sceneFileOf(scene: Scene): string {

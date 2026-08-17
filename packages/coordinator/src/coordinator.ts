@@ -43,12 +43,13 @@ import {
   type RuntimeProbes,
   type VoiceCandidate,
   type ArtifactGeneration,
+  type BenchSession,
   type SessionId,
   deliveryParams as mapDelivery,
   type Delivery,
   narratorFor,
 } from "@arke-studio/contracts";
-import { BenchStore, sessionDir as benchSessionDir } from "./bench/store.js";
+import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
 import {
   discoverBenchSessions,
   openBenchSession,
@@ -92,6 +93,13 @@ import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachm
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import type { TakeQcAnalyzer } from "./takes/qc.js";
+import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
+
+/**
+ * How long an opening bench session may spend drawing pictures it should already have. Long
+ * enough for an ordinary session in one pass, short enough that nobody waits on it.
+ */
+const BENCH_POSTER_BACKFILL_MS = 5_000;
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { measureMediaInfo, type MediaProbe } from "./media/probe.js";
 import { acceptTake, audioDesignFor, rejectTake, saveAudioTracks } from "./takes/review.js";
@@ -351,6 +359,7 @@ export interface CoordinatorOptions {
    * simply record no measurement.
    */
   takeQcAnalyzer?: TakeQcAnalyzer;
+  takePosterMaker?: TakePosterMaker;
   /**
    * The credential file's name inside the app root. Only dev overrides it, and only because its
    * cipher is not safeStorage: `ARKE_STUDIO_ROOT` can point the dev coordinator at a real app
@@ -1189,6 +1198,16 @@ export class Coordinator {
         if (take?.media !== undefined) return;
         const bytes = await readFile(toExtendedLength(join(store.dir, landed)));
         const hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
+        // Drawn before the take is recorded, so the strip never renders a completed video take
+        // in the moment before its picture exists. Best-effort: a poster that could not be made
+        // leaves the tile exactly as it was before this existed.
+        await writePosterFor(
+          toExtendedLength(join(store.dir, landed)),
+          this.opts.takePosterMaker,
+          (reason) => {
+            void this.appLog?.append({ kind: "take.poster-unavailable", jobId: job.id, targetKind: job.target.kind, reason });
+          },
+        );
         const info = this.opts.mediaProbe
           ? await measureMediaInfo(store, landed, this.opts.mediaProbe).catch(() => null)
           : null;
@@ -1280,6 +1299,10 @@ export class Coordinator {
           : undefined;
         const takes = await recordTakesFromJob(store, job, ledgerEntry?.actualMicroUsd ?? null, {
           ...(this.opts.takeQcAnalyzer !== undefined ? { analyzer: this.opts.takeQcAnalyzer } : {}),
+          ...(this.opts.takePosterMaker !== undefined ? { poster: this.opts.takePosterMaker } : {}),
+          onPosterUnavailable: (reason) => {
+            void this.appLog?.append({ kind: "take.poster-unavailable", jobId: job.id, targetKind: job.target.kind, reason });
+          },
           // Why a measurement is missing, and nothing else: no media path, no prompt, no world
           // prose, no provider payload. A diagnostic about a clip is not a place to leak one.
           onQcUnavailable: (reason) => {
@@ -5767,9 +5790,39 @@ export class Coordinator {
       () => false,
     );
     const session = touched ? ((await opened.store.fold()) ?? opened.session) : opened.session;
+    await this.backfillBenchPosters(store, session);
     this.readModel.setBench({ worldId: store.worldId, session });
     this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
     this.transport.broadcastSnapshot();
+  }
+
+  /**
+   * Draw the missing pictures for video takes that landed before posters existed.
+   *
+   * Before the snapshot, not after: the strip's `Portrait` remembers a failed decode per source
+   * URL, and the URL does not change when the file finally appears — so a poster drawn a moment
+   * late would sit on disk unseen until the screen was rebuilt. Blocking the open by a second is
+   * the cheaper of the two.
+   *
+   * Bounded by a wall-clock budget rather than a count. A session with forty old clips draws
+   * what it can and the rest next time, which is self-healing and never a session that will not
+   * open; and once drawn, every later open finds them all and does nothing at all.
+   */
+  private async backfillBenchPosters(store: WorldStore, session: BenchSession): Promise<void> {
+    await backfillPosters(
+      session.takes.flatMap((take) =>
+        take.media === undefined
+          ? []
+          : [{ id: take.id, file: take.media.file, dir: join(store.dir, sessionMediaDir(session.id, take.id)) }],
+      ),
+      this.opts.takePosterMaker,
+      {
+        budgetMs: BENCH_POSTER_BACKFILL_MS,
+        onUnavailable: (takeId, reason) => {
+          void this.appLog?.append({ kind: "take.poster-unavailable", takeId, backfill: true, reason });
+        },
+      },
+    );
   }
 
   /** Re-fold and push the open workspace + the bundle's session rows after a command. */

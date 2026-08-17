@@ -1,5 +1,11 @@
 import { spawn as nodeSpawn } from "node:child_process";
-import { createTakeQcAnalyzer, type MediaProbeRunner, type TakeQcAnalyzer } from "@arke-studio/coordinator";
+import {
+  createTakePosterMaker,
+  createTakeQcAnalyzer,
+  type MediaProbeRunner,
+  type TakePosterMaker,
+  type TakeQcAnalyzer,
+} from "@arke-studio/coordinator";
 
 /**
  * The host half of arrival-time motion QC (#248).
@@ -65,4 +71,20 @@ export function takeQcOptions(
 ): { takeQcAnalyzer?: TakeQcAnalyzer } {
   if (ffmpeg === null) return {};
   return { takeQcAnalyzer: createTakeQcAnalyzer(createFfmpegProbeRunner(ffmpeg, spawn)) };
+}
+
+/**
+ * The poster maker, on the same runner and the same terms (see coordinator takes/poster.ts).
+ *
+ * It shares `createFfmpegProbeRunner` rather than growing a second spawn: writing one frame to
+ * a file needs exactly what a probe needs — a bounded process whose exit code is the answer —
+ * and the picture never travels through stdout, so the output ceiling only ever catches
+ * diagnostics.
+ */
+export function takePosterOptions(
+  ffmpeg: string | null,
+  spawn: SpawnLike = nodeSpawn,
+): { takePosterMaker?: TakePosterMaker } {
+  if (ffmpeg === null) return {};
+  return { takePosterMaker: createTakePosterMaker(createFfmpegProbeRunner(ffmpeg, spawn)) };
 }

@@ -72,6 +72,7 @@ import {
 import { Portrait } from "../components/portrait.js";
 import { mediaUrl } from "../lib/media.js";
 import { durationTrack, durationPillLabel } from "../lib/duration.js";
+import { posterNameFor } from "../lib/poster.js";
 import { setupForMode, type ModeSetup } from "../lib/composer-mode.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { usableModels } from "../components/dispatch-bar.js";
@@ -1457,9 +1458,11 @@ function BenchWorkspace({
                 <span className="fy-bench__taken">{take.n}</span>
                 <span className="fy-bench__takeframe">
                   {take.media ? (
+                    // Its first frame, not the clip: an <img> pointed at an .mp4 cannot decode,
+                    // and every video take on this strip was a grey box with a label in it.
                     <Portrait
                       worldSlug={worldSlug}
-                      path={`.sessions/${session.id}/media/${take.id}/${take.media.file}`}
+                      path={`.sessions/${session.id}/media/${take.id}/${posterNameFor(take.media.file)}`}
                       label={`take ${take.n}`}
                       radius={0}
                     />

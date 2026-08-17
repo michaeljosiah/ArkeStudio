@@ -120,6 +120,21 @@ export {
   type TakeQcAnalyzer,
   type TakeQcUnavailableReason,
 } from "./takes/qc.js";
+export {
+  backfillPosters,
+  createTakePosterMaker,
+  isVideoMedia,
+  posterArgs,
+  posterNameFor,
+  writePosterFor,
+  POSTER_MAX_OUTPUT_BYTES,
+  POSTER_MAX_WIDTH,
+  POSTER_NAME,
+  POSTER_TIMEOUT_MS,
+  type PosterCandidate,
+  type TakePosterMaker,
+  type TakePosterUnavailableReason,
+} from "./takes/poster.js";
 export { exportWorld, runExport, WORLD_EXPORT_EXCLUDED, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 export { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
 export {

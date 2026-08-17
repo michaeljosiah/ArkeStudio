@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -520,5 +521,57 @@ describe("the bench in voice mode (design 70)", () => {
     const html = render({ voiceId: "vale", voiceLabel: "Vale", delivery: "measured" });
     assert.match(html, />Vale</);
     assert.doesNotMatch(html, /choose a voice/);
+  });
+});
+
+/**
+ * The strip's picture (2026-08-17). Every tile rendered `<Portrait>` — an `<img>` — pointed at
+ * the take's media file. For an image take that is the picture; for a video take it is an
+ * `.mp4`, which cannot decode, so the strip full of generated video was a column of grey
+ * fallback boxes. It now asks for the frame written beside the clip.
+ */
+describe("the strip shows a video take's first frame", () => {
+  function withTake(file: string, mode: "image" | "video"): ClientState {
+    const state = stateWithBench();
+    const session = state.bench!.session!;
+    const take = session.takes[0]!;
+    return {
+      ...state,
+      bench: {
+        ...state.bench!,
+        session: {
+          ...session,
+          takes: [{ ...take, media: { ...take.media!, file }, request: { ...take.request, mode } }],
+        },
+      },
+    };
+  }
+
+  it("asks for frame.png beside the clip, never the clip itself", () => {
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, withTake("output-1.mp4", "video"));
+    assert.match(html, new RegExp(`media/${TAKE_ID}/frame\\.png`));
+    assert.doesNotMatch(html, /<img[^>]+output-1\.mp4/, "an img pointed at an mp4 can only fail");
+  });
+
+  it("leaves a still alone — it is already its own picture", () => {
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, withTake("take.png", "image"));
+    assert.match(html, new RegExp(`media/${TAKE_ID}/take\\.png`));
+    assert.doesNotMatch(html, /frame\.png/);
+  });
+});
+
+describe("the poster convention", () => {
+  it("is spelled the same on both sides of the wire", () => {
+    // The coordinator writes the file and the client asks for it. Two regexes in two packages
+    // that must agree: a video kind added to one and not the other is a silently blank tile.
+    const client = readFileSync(new URL("../src/lib/poster.ts", import.meta.url), "utf8");
+    const server = readFileSync(
+      new URL("../../coordinator/src/takes/poster.ts", import.meta.url),
+      "utf8",
+    );
+    const extensions = (source: string) => /\/\\.\(([a-z0-9|]+)\)\$\/i/.exec(source)?.[1];
+    assert.equal(extensions(client), extensions(server), "the same video extensions");
+    assert.ok(extensions(client), "and both were actually found");
+    for (const source of [client, server]) assert.match(source, /"frame\.png"/);
   });
 });
