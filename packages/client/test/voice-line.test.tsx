@@ -222,3 +222,49 @@ describe("reading a sheet aloud", () => {
     for (const sub of subs) assert.equal(sub, "narratorLabel", "each names who is reading");
   });
 });
+
+describe("the Audio row reports what exists", () => {
+  /**
+   * "not generated" was hardcoded, so a line that had been read landed in the production and
+   * the row went on claiming nothing existed — with no way to hear it. The same
+   * correct-on-disk-invisible-in-the-app shape as the narrator's three layers.
+   */
+  function withVoiceTake(): { state: ClientState; prodId: string } {
+    const prod = production()!;
+    const shot = spokenShots()[0]!;
+    // Derived from a take the fixture already ships, so this stays a Take when Take changes.
+    const take = {
+      ...prod.takes[0]!,
+      id: "tk_voice_1",
+      coversShots: [shot.id],
+      kind: "voice" as const,
+      provider: "kokoro",
+      model: "kokoro-82m",
+      media: "speech.wav",
+    };
+    return {
+      state: {
+        ...FIXTURE_STATE,
+        world: {
+          ...FIXTURE_STATE.world!,
+          productions: [
+            { ...prod, takes: [...prod.takes, take] },
+            ...FIXTURE_STATE.world!.productions.slice(1),
+          ],
+        },
+      },
+      prodId: prod.meta.id,
+    };
+  }
+
+  it("says a line is read, and offers it back, once one exists", () => {
+    const { state, prodId } = withVoiceTake();
+    const html = render(`/w/${FIXTURE_WORLD_ID}/p/${prodId}/audio`, state);
+    assert.match(html, />read</);
+    assert.match(html, />Again</, "and the action becomes a retake rather than a first read");
+    // Before it exists, the row says so and offers the first read.
+    const empty = render(`/w/${FIXTURE_WORLD_ID}/p/${prodId}/audio`);
+    assert.match(empty, /not generated/);
+    assert.match(empty, />Generate</);
+  });
+});

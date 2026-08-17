@@ -1932,6 +1932,10 @@ export function AudioScreen() {
         {voLines.length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>no spoken lines in the shots yet</div>}
         {voLines.map((s) => {
           const speaker = speakerOf(s.audio?.speaker);
+          // The most recent spoken take covering this shot, if one has been made.
+          const read = production
+            ? [...takesForShot(production, s.id)].reverse().find((t) => t.kind === "voice")
+            : undefined;
           return (
             <div key={s.id} className="fy-audiorow">
               {/* Nothing is generated for these lines yet, so there is no circle to press —
@@ -1949,12 +1953,33 @@ export function AudioScreen() {
               <div className="fy-audiorow__wave">
                 <Wave seed={s.id + (s.audio?.line ?? "")} />
               </div>
-              <span className="fy-audiorow__status">
-                <span className="fy-dot fy-dot--warn" />
-                not generated
-              </span>
+              {/* What is actually here. "not generated" was hardcoded, so a line that had been
+                  read landed in the production and the row went on claiming nothing existed —
+                  with no way to hear it. */}
+              {read === undefined ? (
+                <span className="fy-audiorow__status">
+                  <span className="fy-dot fy-dot--warn" />
+                  not generated
+                </span>
+              ) : (
+                <span className="fy-audiorow__status">
+                  <span className="fy-dot fy-dot--ok" />
+                  {read.completedAt ? "read" : "reading…"}
+                </span>
+              )}
+              {read?.media && world ? (
+                <ClipPlayButton
+                  small
+                  clip={{
+                    id: `take:${read.id}`,
+                    url: mediaUrl(world.meta.slug, `productions/${prodId}/takes/${read.id}/${read.media}`),
+                    title: `${speaker?.name ?? "line"} · ${s.id.replace("sh_", "shot ")}`,
+                    sub: `voice line · ${speaker?.voice?.label ?? speaker?.voice?.provider ?? "voice"}`,
+                  }}
+                />
+              ) : null}
               <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/voice-line?shot=${encodeURIComponent(s.id)}`)}>
-                Generate
+                {read === undefined ? "Generate" : "Again"}
               </Button>
             </div>
           );
