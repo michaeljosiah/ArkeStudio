@@ -11,11 +11,29 @@ import type { BenchReferenceToken } from "@arke-studio/contracts";
  * A plan rather than a loop of sends, so the decision — what to drop, what to bring back — can
  * be read and tested without a socket.
  */
+/**
+ * A source as the wire accepts it — the discriminant and its id, and nothing else.
+ *
+ * The stored token's source carries a content `hash` besides, and the frame's pick schema is
+ * `.strict()`: handing it the stored shape unchanged fails validation, and a rejected frame is
+ * dropped in silence — no event, no error, the lane simply never fills. TypeScript does not
+ * catch it either, because excess-property checks apply to object literals and not to a value
+ * passed through a variable. Narrowing here, inside the tested unit, is what stops the call
+ * site from having to remember.
+ */
+export type WirePick = { source: "artifact"; artifactId: string } | { source: "take"; takeId: string };
+
 export interface LaneRestorePlan {
   /** Tokens active now that the snapshot does not name. */
   remove: string[];
-  /** Snapshot entries that are not active now. Re-adding a known source restores its old token. */
-  add: BenchReferenceToken[];
+  /** Sources to re-add. Re-adding a source the registry knows restores its old token. */
+  add: Array<{ token: string; pick: WirePick }>;
+}
+
+function toPick(source: BenchReferenceToken["source"]): WirePick {
+  return source.source === "artifact"
+    ? { source: "artifact", artifactId: source.artifactId }
+    : { source: "take", takeId: source.takeId };
 }
 
 /**
@@ -32,6 +50,8 @@ export function laneRestorePlan(
   const wantedTokens = new Set(wanted.map((entry) => entry.token));
   return {
     remove: current.filter((token) => !wantedTokens.has(token)),
-    add: wanted.filter((entry) => !current.includes(entry.token)),
+    add: wanted
+      .filter((entry) => !current.includes(entry.token))
+      .map((entry) => ({ token: entry.token, pick: toPick(entry.source) })),
   };
 }
