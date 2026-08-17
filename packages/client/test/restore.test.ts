@@ -36,14 +36,30 @@ describe("restoring a take's pictures", () => {
     assert.deepEqual(plan.add, []);
   });
 
-  it("carries the source, so a known one restores its old token rather than claiming a new name", () => {
-    // The brief says "Image 1"; if restoring re-added it as Image 4 the words would stop
-    // matching the pictures.
+  it("hands the wire the discriminant and its id, and nothing else", () => {
+    /*
+     * The bug this test was written the wrong way round for, and which shipped in 0.5.19.
+     *
+     * The stored token's source carries a content `hash`; the frame's pick schema is `.strict()`.
+     * Passing the stored shape through made the coordinator reject the whole frame and drop it
+     * without a word — the lane simply never filled, while the paired `reference-removed` in the
+     * same restore landed fine, so the half that worked disguised the half that did not.
+     *
+     * The first version of this test asserted the hash WAS carried, which is exactly the shape
+     * that fails. A green test is not evidence when it pins the wrong requirement.
+     */
     const plan = laneRestorePlan([entry("Image 1", "ar_01JA1")], []);
-    assert.deepEqual(plan.add[0]!.source, {
-      source: "artifact",
-      artifactId: "ar_01JA1",
-      hash: "sha256:deadbeef",
-    });
+    assert.deepEqual(plan.add, [{ token: "Image 1", pick: { source: "artifact", artifactId: "ar_01JA1" } }]);
+    assert.equal("hash" in plan.add[0]!.pick, false, "a key the strict schema does not know sinks the frame");
+  });
+
+  it("narrows a take source the same way", () => {
+    const fromTake: BenchReferenceToken = {
+      token: "Image 2",
+      kind: "image",
+      source: { source: "take", takeId: "tk_01J8F3K2QW9VZX4N7M0RTYB6HE" as never, hash: "sha256:deadbeef" as never },
+    };
+    const plan = laneRestorePlan([fromTake], []);
+    assert.deepEqual(plan.add[0]!.pick, { source: "take", takeId: "tk_01J8F3K2QW9VZX4N7M0RTYB6HE" });
   });
 });

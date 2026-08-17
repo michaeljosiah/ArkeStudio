@@ -362,7 +362,7 @@ function BenchWorkspace({
       );
       for (const token of plan.remove) sendBenchRemoveReference(worldId, session.id, token, lane);
       if (plan.add.length > 0) {
-        sendBenchAddReference(worldId, session.id, plan.add.map((entry) => ({ pick: entry.source })), lane);
+        sendBenchAddReference(worldId, session.id, plan.add.map((entry) => ({ pick: entry.pick })), lane);
       }
     }
   };
