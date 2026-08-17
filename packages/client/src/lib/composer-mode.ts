@@ -1,4 +1,4 @@
-import type { BenchParams, ManifestModel } from "@arke-studio/contracts";
+import type { BenchMode, BenchParams, ManifestModel } from "@arke-studio/contracts";
 
 /** What a composer is set to within one mode: which model, and the controls under it. */
 export interface ModeSetup {
@@ -20,7 +20,7 @@ export interface ModeSetup {
  * composer that the dispatch is bound to refuse.
  */
 export function setupForMode(
-  mode: "image" | "video",
+  mode: BenchMode,
   remembered: ModeSetup | undefined,
   usable: readonly ManifestModel[],
 ): ModeSetup {
@@ -32,6 +32,11 @@ export function setupForMode(
   return {
     provider: first?.provider ?? "",
     model: first?.id ?? "",
-    params: mode === "image" ? { kind: "image", count: 1 } : { kind: "video" },
+    params:
+      mode === "image"
+        ? { kind: "image", count: 1 }
+        : mode === "video"
+          ? { kind: "video" }
+          : { kind: "voice", count: 1 },
   };
 }

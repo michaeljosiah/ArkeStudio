@@ -4313,3 +4313,61 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-bench__durationends > span { display: inline-flex; gap: 6px; }
 /* What this model stops short of: visible, struck, and not clickable. */
 .fy-bench__durationover { color: var(--neutral-400); text-decoration-thickness: 1px; }
+
+/* Choosing a voice to read with (design 70). Not the character-voice picker: nothing here is
+   ranked against anybody, and nothing here assigns. */
+.fy-voices {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 40;
+  width: 720px; max-width: calc(100% - 48px); display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: 15px; background: var(--background);
+  box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.fy-voices__head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 12px; }
+.fy-voices__title { font: 600 14.5px var(--font-sans); }
+.fy-voices__tabs { display: flex; align-items: center; gap: 6px; padding: 0 16px 11px; }
+.fy-voices__tab {
+  appearance: none; border: none; background: transparent; cursor: pointer;
+  padding: 4px 11px; border-radius: 999px; font: 400 11px var(--font-sans); color: var(--muted-foreground);
+  transition: var(--transition-control);
+}
+.fy-voices__tab:hover { color: var(--foreground); }
+.fy-voices__tab--on { background: var(--foreground); color: var(--background); font-weight: 500; }
+.fy-voices__rows { border-top: 1px solid var(--border); max-height: 352px; overflow-y: auto; }
+.fy-voices__none { padding: 18px 16px; font: 400 11.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-voices__row {
+  appearance: none; width: 100%; border: none; border-top: 1px solid var(--border); background: transparent;
+  display: flex; align-items: center; gap: 11px; padding: 9px 12px; cursor: pointer; text-align: left;
+  color: var(--foreground); transition: var(--transition-control);
+}
+.fy-voices__row:first-child { border-top: none; }
+.fy-voices__row:hover { background: var(--muted); }
+.fy-voices__row--on { background: var(--accent); }
+.fy-voices__name { width: 96px; flex: none; font: 500 12px var(--font-sans); }
+.fy-voices__attrs {
+  flex: 1; min-width: 0; font: 400 10.5px var(--font-mono); color: var(--muted-foreground);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Whom the world already gives this voice to — data on the row, never a warning. */
+.fy-voices__usedby {
+  flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 5px;
+  background: var(--muted); font: 400 9.5px var(--font-mono); color: var(--muted-foreground);
+}
+.fy-voices__where { flex: none; width: 112px; text-align: right; font: 400 10px var(--font-mono); color: var(--muted-foreground); }
+.fy-voices__foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.fy-voices__picked { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
+.fy-voices__use {
+  appearance: none; border: none; cursor: pointer; padding: 6px 14px; border-radius: 8px;
+  background: var(--foreground); color: var(--background); font: 500 11.5px var(--font-sans);
+  transition: var(--transition-control);
+}
+.fy-voices__use:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* A spoken take: there is nothing to look at, so the wall names the read and plays it. */
+.fy-bench__voicetake {
+  width: min(560px, 100%); margin: auto; padding: 20px 22px; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: 14px; background: var(--background); box-shadow: var(--shadow-xs);
+}
+.fy-bench__voicehead { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; }
+.fy-bench__voicename { font: 500 12px var(--font-sans); }
+.fy-bench__voicedelivery { font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+.fy-bench__voicetake audio { width: 100%; }

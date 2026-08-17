@@ -28,7 +28,7 @@ import {
 } from "./settings.js";
 import { SetupStatusSchema } from "./setup.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
-import { RankedVoiceSchema, VoiceRuntimeStatusSchema } from "./voice.js";
+import { RankedVoiceSchema, VoiceCandidateSchema, VoiceRuntimeStatusSchema } from "./voice.js";
 import { UpdateStateSchema } from "./update.js";
 
 /**
@@ -255,6 +255,21 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   /** What start-up reconciliation resolved, reported once (SPEC-009 R-18). */
   z.object({ ...base, type: z.literal("queue.reconciled"), report: z.array(ReconcileActionSchema) }).strict(),
 
+  /**
+   * Every voice the world can read with (design 70), unranked. `usedBy` is stated so the picker
+   * can say a character already uses a voice — data on the row, not a warning, and choosing it
+   * still only reads.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("voice.catalogue"),
+      worldId: UlidSchema,
+      voices: z.array(
+        VoiceCandidateSchema.extend({ usedBy: z.array(z.string()).default([]) }).strict(),
+      ),
+    })
+    .strict(),
   /** Ranked voice candidates for a sheet, matched attributes shown (SPEC-011 R-7, R-8). */
   z
     .object({

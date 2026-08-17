@@ -3928,6 +3928,27 @@ export class Coordinator {
         });
         return;
       }
+      case "voice-catalogue": {
+        // The plain list, for a voice that is only reading (design 70). `usedBy` comes from the
+        // sheets themselves, so the picker can say a character already uses a voice without
+        // that meaning anything about the pick.
+        if (!this.voiceService) return;
+        const store = this.opts.provider.openStore?.();
+        const voices = await this.voiceService.catalogue().catch(() => []);
+        const sheets = store?.getBundle().sheets ?? [];
+        this.emit({
+          at: new Date().toISOString(),
+          type: "voice.catalogue",
+          worldId: msg.worldId,
+          voices: voices.map((v) => ({
+            ...v,
+            usedBy: sheets
+              .filter((sheet) => sheet.voice?.provider === v.provider && sheet.voice?.voiceId === v.voiceId)
+              .map((sheet) => sheet.name),
+          })),
+        });
+        return;
+      }
       case "voice-candidates": {
         const store = this.opts.provider.openStore?.();
         if (!store || !this.voiceService) return;

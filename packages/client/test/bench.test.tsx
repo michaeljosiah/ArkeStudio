@@ -432,3 +432,93 @@ describe("the enhancer (asked for 2026-08-16)", () => {
     assert.doesNotMatch(without, /data-testid="bench-enhance"/);
   });
 });
+
+describe("the bench in voice mode (design 70)", () => {
+  const TTS: ManifestModel = {
+    id: "test-tts",
+    provider: "elevenlabs",
+    capability: "voice-tts",
+    displayName: "Test Voice",
+    accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
+    limits: {},
+    pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
+  };
+  const LINE = "The tide-clock keeps the drowned god's hours.";
+
+  function voiceState(params: Record<string, unknown> = {}): ClientState {
+    const base = stateWithBench();
+    const session = base.bench!.session;
+    return {
+      ...base,
+      app: {
+        ...base.app,
+        manifest: { ...base.app.manifest!, models: [...base.app.manifest!.models, TTS] },
+        // The controls exist only for a model the key can actually reach, so the key has to be
+        // in the fixture — the same gate that keeps unusable rows out of the dropdown.
+        providers: [
+          ...base.app.providers,
+          {
+            id: "elevenlabs" as const,
+            configured: true,
+            validation: "valid" as const,
+            probes: [{ capability: "voice-tts" as const, available: true }],
+            lastValidated: "2026-08-17T10:00:00.000Z",
+            fault: null,
+          },
+        ],
+      },
+      bench: {
+        worldId: FIXTURE_WORLD_ID,
+        session: {
+          ...session,
+          composer: {
+            ...session.composer,
+            mode: "voice",
+            provider: TTS.provider,
+            model: TTS.id,
+            params: { kind: "voice", count: 1, ...params },
+            brief: LINE,
+          },
+        },
+      },
+    };
+  }
+  const render = (params: Record<string, unknown> = {}) =>
+    renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, voiceState(params));
+
+  it("offers a voice and a delivery, and no way to attach a picture", () => {
+    const html = render();
+    assert.match(html, /data-testid="voice-pick"/);
+    assert.match(html, /choose a voice/);
+    // A text-to-speech route takes neither references nor keyframes, so both LEAVE rather than
+    // stand there to refuse a pick.
+    assert.doesNotMatch(html, /data-testid="bench-add-reference"/);
+    assert.doesNotMatch(html, /Keyframe/);
+    assert.doesNotMatch(html, /takes no keyframes/);
+  });
+
+  it("does not offer to rewrite the line", () => {
+    // The brief IS the words here. Rewriting them is editing the script, not enhancing a prompt.
+    assert.doesNotMatch(render(), /data-testid="bench-enhance"/);
+    // ...while the same control is there for a prompt.
+    assert.match(
+      renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, stateWithBench()),
+      /data-testid="bench-enhance"/,
+    );
+  });
+
+  it("prices the read exactly, with no tilde", () => {
+    // 44 characters at 300 microUSD each is $0.01, and it is the price rather than a ceiling —
+    // every other estimate on this screen is written with a leading tilde.
+    const html = render();
+    assert.match(html, /data-testid="bench-estimate"/);
+    assert.doesNotMatch(html, /~\$0\.01/);
+    assert.match(html, /\$0\.01/);
+  });
+
+  it("names the chosen voice on the control once one is picked", () => {
+    const html = render({ voiceId: "vale", voiceLabel: "Vale", delivery: "measured" });
+    assert.match(html, />Vale</);
+    assert.doesNotMatch(html, /choose a voice/);
+  });
+});
