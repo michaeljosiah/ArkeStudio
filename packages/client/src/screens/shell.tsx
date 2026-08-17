@@ -1238,6 +1238,7 @@ function ProbeChips({ status }: { status: ProviderStatus | undefined }) {
 const CAPABILITY_LABEL: Record<Capability, string> = {
   image: "Frames & stills",
   video: "Clips",
+  music: "Score & songs",
   llm: "Direct LLM work",
   "voice-tts": "Voice",
   "voice-clone": "Voice cloning",

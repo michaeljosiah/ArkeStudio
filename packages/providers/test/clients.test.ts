@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { describe, it } from "node:test";
+import { PROVIDERS } from "@arke-studio/contracts";
 import { ElevenLabsClient } from "../src/clients/elevenlabs.js";
 import { FalClient } from "../src/clients/fal.js";
 import { HiggsfieldClient } from "../src/clients/higgsfield.js";
@@ -20,16 +21,26 @@ function fakeFetch(routes: Array<{ match: RegExp; status: number; body?: unknown
 }
 
 describe("key validation probes what the key unlocks (R-3, D5, §3.2)", () => {
-  it("fal: one key probe answers both gateway capabilities (R-1)", async () => {
+  it("fal: one key probe answers every gateway capability (R-1)", async () => {
     const ok = new FalClient(fakeFetch([{ match: /queue\.fal\.run/, status: 404, body: { detail: "not found" } }]));
     assert.deepEqual(await ok.validateKey("good"), [
       { capability: "image", available: true },
       { capability: "video", available: true },
+      { capability: "music", available: true },
     ]);
+
+    // The probe set has to be the provider table's own list, not a subset of it. A capability fal
+    // serves but never probes reads as *locked* with a valid key in the box, because
+    // deriveCapabilityAvailability treats an absent probe as unavailable — a silent failure, and
+    // the reason this asserts the relationship rather than only the literal list above.
+    assert.deepEqual(
+      (await ok.validateKey("good")).map((p) => p.capability),
+      [...PROVIDERS.fal.capabilities],
+    );
 
     const bad = new FalClient(fakeFetch([{ match: /queue\.fal\.run/, status: 401 }]));
     const probes = await bad.validateKey("bad");
-    assert.equal(probes.length, 2);
+    assert.equal(probes.length, PROVIDERS.fal.capabilities.length);
     assert.ok(probes.every((p) => !p.available && /rejected/.test(p.reason ?? "")));
   });
 
