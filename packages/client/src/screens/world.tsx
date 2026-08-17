@@ -14,6 +14,7 @@ import {
   type PendingSheet,
   type Sheet,
   type WorldBundle,
+  DEFAULT_NARRATOR,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
@@ -1328,7 +1329,12 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   // The Essence is the lead paragraph under the name (design 3a); the grid holds the rest.
   const essence = isCharacter ? sheet.sections.find((s) => s.heading === "Essence") : undefined;
   const gridSections = essence ? sheet.sections.filter((s) => s !== essence) : sheet.sections;
-  const voiceUsable = sheet.voice !== undefined && ["kokoro", "elevenlabs"].includes(sheet.voice.provider);
+  // Reading a section aloud is narration, not dialogue: it uses the app's narrator, so it does
+  // not depend on this character having a voice of their own. Gating it on `sheet.voice` was
+  // the client half of the same mistake the coordinator made — prose ABOUT somebody read in
+  // their voice, and unreadable for the many characters who have none.
+  const narrator = useStore().state?.app.narrator ?? null;
+  const narratorLabel = narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label;
   // The read controls, the loaded clip and the cost note for one section. Essence and Appearance
   // share this; each shows its own speaker on hover and its own "preparing"/confirmation state.
   const sectionAudio = (heading: "Essence" | "Appearance") => {
@@ -1339,14 +1345,12 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
             id: active.requestId,
             url: mediaUrl(slug, active.file),
             title: `${sheet.name} · ${heading}`,
-            sub: `read aloud · ${sheet.voice?.label ?? sheet.voice?.provider ?? "voice"}`,
+            sub: `read aloud · ${narratorLabel}`,
           }
         : null;
     const onRead = () => {
       if (!worldId) return;
-      // No usable voice yet: the read starts by choosing one, which is where this leads.
-      if (!voiceUsable) navigate(`/w/${worldId}/cast/${sheet.id}/voice`);
-      else setRead({ requestId: readSheetSection(worldId, sheet.id, heading), section: heading });
+      setRead({ requestId: readSheetSection(worldId, sheet.id, heading), section: heading });
     };
     const note =
       active?.status === "confirmation-required" ? (
@@ -1377,7 +1381,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           clip={clip}
           onRead={onRead}
           copyText={body}
-          readLabel={voiceUsable ? "Read aloud" : "Choose a voice to read this aloud"}
+          readLabel="Read aloud"
           note={note}
         />
         {read?.section === heading && readResult?.status === "failed" && (

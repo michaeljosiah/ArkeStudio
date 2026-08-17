@@ -192,3 +192,23 @@ describe("the voice tabs stay readable", () => {
     assert.match(rule.slice(0, 200), /\.fy-voices__tab--on:hover/);
   });
 });
+
+describe("reading a sheet aloud", () => {
+  const sheetId = FIXTURE_STATE.world!.sheets[0]!.id;
+
+  it("offers the read to a character with no voice of their own", () => {
+    // The client half of the same mistake the coordinator made: read-aloud was gated on
+    // `sheet.voice`, so it sent you to the voice picker instead of reading. Narration uses the
+    // app's narrator, so having a voice of one's own has nothing to do with it.
+    const voiceless: ClientState = {
+      ...FIXTURE_STATE,
+      world: {
+        ...FIXTURE_STATE.world!,
+        sheets: FIXTURE_STATE.world!.sheets.map((s) => ({ ...s, voice: undefined })),
+      },
+    };
+    const html = render(`/w/${FIXTURE_WORLD_ID}/cast/${sheetId}`, voiceless);
+    assert.match(html, /Read aloud/);
+    assert.doesNotMatch(html, /Choose a voice to read this aloud/);
+  });
+});
