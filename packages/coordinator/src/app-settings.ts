@@ -9,6 +9,7 @@ import {
   type ModelManifest,
   type RoutingFault,
   type ThemePreference,
+  type NarratorSettings,
   type VoxaSettings,
 } from "@arke-studio/contracts";
 import { atomicWriteFile } from "./world/atomic.js";
@@ -119,6 +120,14 @@ export class AppSettingsFile {
   async setAppearanceTheme(theme: ThemePreference): Promise<AppSettings> {
     const current = await this.load();
     const next: AppSettings = { ...current, appearance: { theme } };
+    await this.persist(next);
+    return next;
+  }
+
+  /** Who reads the app's prose aloud; null returns to the shipped local voice. */
+  async setNarrator(voice: NarratorSettings): Promise<AppSettings> {
+    const current = await this.load();
+    const next: AppSettings = { ...current, narrator: voice };
     await this.persist(next);
     return next;
   }

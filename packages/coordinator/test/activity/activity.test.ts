@@ -59,6 +59,7 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
         recipes: [],
       spend: null,
       backgroundNotifications: "issues-only",
+        narrator: null,
       appearance: { theme: "system" },
       runtime: null,
       voiceRuntime: null,

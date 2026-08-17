@@ -87,6 +87,34 @@ export const ModelAvailabilitySchema = z
   .strict();
 export type ModelAvailability = z.infer<typeof ModelAvailabilitySchema>;
 
+/**
+ * The voice the app reads its own prose in (design 70; asked for 2026-08-17).
+ *
+ * A third role, and deliberately not either of the other two. A **character voice** lives on a
+ * sheet and answers who speaks; a **reading voice** is chosen per take on the bench and belongs
+ * to one recording. The narrator is neither: it reads text *about* the world rather than lines
+ * *in* it, which is why reading a sheet section aloud in that character's own voice — the
+ * behaviour this replaces — described Bray in Bray's voice, and refused entirely for the many
+ * characters who have no voice at all.
+ *
+ * It carries its provider, the way a sheet's assignment does. Routing chooses a *model* and can
+ * disagree with a voice's provider; the narrator wins, because a voice that resolves to a
+ * provider that cannot say it is the silent-mismatch failure this codebase keeps paying for.
+ *
+ * Null means the local default: unmetered, so pressing "read aloud" never spends. Cloud is an
+ * opt-in the user makes with the per-character price in front of them — no other preference in
+ * this app spends money on a passive action, and this one must not be the first.
+ */
+export const NarratorSettingsSchema = z
+  .object({
+    provider: z.string().min(1),
+    voiceId: z.string().min(1),
+    label: z.string().min(1).optional(),
+  })
+  .strict()
+  .nullable();
+export type NarratorSettings = z.infer<typeof NarratorSettingsSchema>;
+
 export const AppSettingsSchema = z
   .object({
     routing: RoutingDefaultsSchema.default({}),
@@ -105,6 +133,13 @@ export const AppSettingsSchema = z
         VoxaSettingsSchema,
       )
       .default({ executablePath: null, modelRoot: null, extraArgs: [] }),
+    /** The voice the app reads text aloud in. Null uses the local default (see the schema). */
+    narrator: z
+      .preprocess(
+        (value) => (NarratorSettingsSchema.safeParse(value).success ? value : null),
+        NarratorSettingsSchema,
+      )
+      .default(null),
     /** Per-agent overrides, keyed by roster name. */
     agents: z.record(z.string().min(1), AgentSettingsSchema).default({}),
     /**

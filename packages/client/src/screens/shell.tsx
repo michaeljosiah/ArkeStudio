@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { Badge, Button, Callout, Input, StatusDot, Textarea, cx, type StatusDotTone } from "../components/ui.js";
+import { VoicePickerDialog } from "../components/voice-picker.js";
 import { EmptyState } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
 import { Archive, ChevronDown, ChevronRight, Plus, Sparkle, X } from "../components/icons.js";
@@ -73,6 +74,8 @@ import {
   useBundledVoxa,
   testLocalVoice,
   validateProvider,
+  setNarrator,
+  type ReadingVoice,
 } from "../lib/store.js";
 import { ArtStyleGrid, ArtStyleWords } from "../components/art-style-picker.js";
 import { seedFrom } from "../lib/art-styles.js";
@@ -95,6 +98,7 @@ import {
   type ProviderCallRecord,
   type ProviderStatus,
   type ProviderWorkspace,
+  DEFAULT_NARRATOR,
 } from "@arke-studio/contracts";
 
 /** Shell screens: launch, first run, world picker, new world, settings, activity (§2.9). */
@@ -1861,6 +1865,10 @@ export function SettingsLocalRuntimeScreen() {
   const runtime = state?.app.runtime ?? null;
   const voiceRuntime = state?.app.voiceRuntime ?? null;
   const voiceTest = useVoiceRuntimeTest();
+  const narrator = state?.app.narrator ?? null;
+  const [narratorOpen, setNarratorOpen] = useState(false);
+  // The catalogue is fetched per world; Settings uses whichever world is open.
+  const worldIdForVoices = state?.world?.meta.worldId;
   const playback = usePlayback();
   const playedTest = useRef<string | null>(null);
   useEffect(() => {
@@ -1908,6 +1916,42 @@ export function SettingsLocalRuntimeScreen() {
       </div>
 
       <SetupComponents />
+
+      {/* Who reads the app's prose aloud. A third role: a character's voice lives on their
+          sheet, a reading voice belongs to one bench take, and this one narrates. It stays on
+          the shipped local voice unless somebody chooses otherwise, because "read aloud" is a
+          passive press and no other preference here spends money on one. */}
+      <div className="fy-set__eyebrow">NARRATOR</div>
+      <div className="fy-set__row fy-set__row--stack">
+        <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
+          <div className="fy-set__name fy-set__name--wide">
+            <div className="fy-set__title" data-testid="narrator-name">
+              {narrator === null ? `${DEFAULT_NARRATOR.label} · on this machine` : `${narrator.label ?? narrator.voiceId} · ${narrator.provider}`}
+            </div>
+            <div className="fy-set__caps">
+              {narrator === null || narrator.provider === "kokoro"
+                ? "reads on this machine · free"
+                : "reads in the cloud · billed per character"}
+            </div>
+          </div>
+          <Button onClick={() => setNarratorOpen(true)}>Choose voice</Button>
+          {narrator !== null && (
+            <button type="button" className="fy-set__link" data-testid="narrator-reset" onClick={() => setNarrator(null)}>
+              Use the local voice
+            </button>
+          )}
+        </div>
+      </div>
+      <VoicePickerDialog
+        open={narratorOpen}
+        worldId={worldIdForVoices ?? ""}
+        chosenId={narrator?.voiceId}
+        onClose={() => setNarratorOpen(false)}
+        onPick={(voice: ReadingVoice) => {
+          setNarratorOpen(false);
+          setNarrator({ provider: voice.provider, voiceId: voice.voiceId, label: voice.label });
+        }}
+      />
 
       <div className="fy-set__eyebrow">LOCAL VOICE RUNTIME</div>
       <div className="fy-set__row fy-set__row--stack">

@@ -6,7 +6,7 @@ import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, RecipeIdSchema, Ses
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
-import { BackgroundNotificationPreferenceSchema, ThemePreferenceSchema } from "./settings.js";
+import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
 import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
 import { CHARACTER_ROLE_MAX } from "./world.js";
 import { WorldChatContextSchema } from "./world-chat.js";
@@ -772,6 +772,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("set-appearance-theme"),
       preference: ThemePreferenceSchema,
+    })
+    .strict(),
+  /**
+   * Choose who reads the app's prose aloud (asked for 2026-08-17). Null returns to the shipped
+   * local voice, which costs nothing — the point of having a default at all.
+   */
+  z
+    .object({
+      kind: z.literal("set-narrator"),
+      voice: NarratorSettingsSchema,
     })
     .strict(),
   /** SPEC-009 R-14: cancel a job in any non-terminal state; remote cancel attempted where supported. */

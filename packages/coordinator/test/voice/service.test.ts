@@ -281,27 +281,32 @@ describe("the preview cache key", () => {
 });
 
 describe("authoritative sheet speech", () => {
-  it("reads exact normalized Essence from a supported assignment", () => {
-    assert.deepEqual(authoritativeSheetSpeech(SHEET, "Essence"), {
-      text: "Tide-caller",
-      provider: "elevenlabs",
-      voiceId: "v_8Kq2",
-    });
+  /**
+   * It returns the words, and only the words. It used to resolve the voice as well, from
+   * `sheet.voice` — which read prose *about* a character in that character's own voice, and
+   * refused outright for the many characters who have none. Who narrates is a separate question
+   * with a separate answer (narratorFor, in contracts).
+   */
+  it("reads exact normalized Essence, and says nothing about who reads it", () => {
+    assert.deepEqual(authoritativeSheetSpeech(SHEET, "Essence"), { text: "Tide-caller" });
   });
 
-  it("reads Appearance too, and rejects unknown headings, empty text, and legacy assignments", () => {
+  it("reads Appearance too, and rejects unknown headings and empty text", () => {
     const withAppearance = {
       ...SHEET,
       sections: [...SHEET.sections, { heading: "Appearance", body: "Salt-crusted braids, pale grey eyes." }],
     } as Sheet;
     assert.deepEqual(authoritativeSheetSpeech(withAppearance, "Appearance"), {
       text: "Salt-crusted braids, pale grey eyes.",
-      provider: "elevenlabs",
-      voiceId: "v_8Kq2",
     });
     assert.throws(() => authoritativeSheetSpeech(SHEET, "Relationships"), /not available/);
-    assert.throws(() => authoritativeSheetSpeech({ ...SHEET, voice: { ...SHEET.voice!, provider: "openai" } } as Sheet, "Essence"), /supported voice/);
     assert.throws(() => authoritativeSheetSpeech({ ...SHEET, sections: [{ heading: "Essence", body: "  " }] } as Sheet, "Essence"), /Nothing to read/);
+  });
+
+  it("reads a character who has no voice of their own", () => {
+    // The behaviour this replaced refused here, which meant most of a cast could not be read.
+    const voiceless = { ...SHEET, voice: undefined } as unknown as Sheet;
+    assert.deepEqual(authoritativeSheetSpeech(voiceless, "Essence"), { text: "Tide-caller" });
   });
 });
 

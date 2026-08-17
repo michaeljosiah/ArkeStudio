@@ -35,6 +35,7 @@ export class ReadModel {
         recipes: [],
         spend: null,
         backgroundNotifications: "issues-only",
+        narrator: null,
         appearance: { theme: "system" },
         runtime: null,
         voiceRuntime: null,
@@ -69,6 +70,7 @@ export class ReadModel {
         | "spend"
         | "backgroundNotifications"
         | "appearance"
+        | "narrator"
         | "runtime"
         | "drift"
         | "harnessInfo"
@@ -232,6 +234,10 @@ export class ReadModel {
       }
       case "background-notifications.changed": {
         this.state = { ...this.state, app: { ...this.state.app, backgroundNotifications: event.preference } };
+        return;
+      }
+      case "narrator.changed": {
+        this.state = { ...this.state, app: { ...this.state.app, narrator: event.voice } };
         return;
       }
       case "appearance.changed": {

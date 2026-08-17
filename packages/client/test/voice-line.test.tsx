@@ -133,3 +133,28 @@ describe("choosing a character's voice", () => {
     assert.match(html, /class="fy-voicelist"/);
   });
 });
+
+describe("the narrator in Settings", () => {
+  it("names the shipped local voice, and says it is free, until one is chosen", () => {
+    const html = render("/settings/local-runtime");
+    assert.match(html, /data-testid="narrator-name"/);
+    assert.match(html, /George · on this machine/);
+    assert.match(html, /reads on this machine · free/);
+    // Nothing to reset when nothing was chosen.
+    assert.doesNotMatch(html, /data-testid="narrator-reset"/);
+  });
+
+  it("says plainly when the narrator will be billed", () => {
+    // The one thing this control must never do quietly: a cloud narrator bills every press of
+    // "read aloud", so the row says so rather than leaving it to be discovered on the ledger.
+    const chosen: ClientState = {
+      ...FIXTURE_STATE,
+      app: { ...FIXTURE_STATE.app, narrator: { provider: "elevenlabs", voiceId: "v_roger", label: "Roger" } },
+    };
+    const html = render("/settings/local-runtime", chosen);
+    assert.match(html, /Roger · elevenlabs/);
+    assert.match(html, /billed per character/);
+    // And there is a way back to the free one.
+    assert.match(html, /data-testid="narrator-reset"/);
+  });
+});

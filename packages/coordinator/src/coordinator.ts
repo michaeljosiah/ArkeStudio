@@ -46,6 +46,7 @@ import {
   type SessionId,
   deliveryParams as mapDelivery,
   type Delivery,
+  narratorFor,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir } from "./bench/store.js";
 import {
@@ -2674,6 +2675,14 @@ export class Coordinator {
         });
         return;
       }
+      case "set-narrator": {
+        // Who reads the app's prose aloud. Null returns to the shipped local voice, which is
+        // the whole point of a default: pressing "read aloud" must never spend by accident.
+        if (!this.appSettings) return;
+        const saved = await this.appSettings.setNarrator(msg.voice);
+        this.emit({ at: new Date().toISOString(), type: "narrator.changed", voice: saved.narrator });
+        return;
+      }
       case "set-appearance-theme": {
         if (!this.appSettings) return;
         this.appearanceWrite = this.appearanceWrite.catch(() => {}).then(async () => {
@@ -4169,46 +4178,52 @@ export class Coordinator {
         if (!sheet) { fail("The character is no longer available."); return; }
         try { resolved = authoritativeSheetSpeech(sheet, msg.sectionHeading); }
         catch (error) { fail(error instanceof Error ? error.message : "Read aloud is unavailable."); return; }
-        const assignmentExists = (await this.voiceService.catalogue()).some(
-          (voice) => voice.provider === resolved!.provider && voice.voiceId === resolved!.voiceId,
-        );
-        if (!assignmentExists) { fail("Choose an available voice again before reading aloud."); return; }
-        if (resolved.provider === "kokoro") {
+        // Who narrates is the app's preference, not the character's. Reading prose ABOUT
+        // somebody in their own voice was the old behaviour, and it refused entirely for the
+        // many characters who have no voice assigned.
+        const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
+        const narrator = narratorFor(narratorSettings?.narrator ?? null, await this.voiceService.catalogue());
+        if (narrator.provider !== "kokoro" && narrator.provider !== "elevenlabs") {
+          fail("The narrator's voice is not available — choose another in Settings.");
+          return;
+        }
+        const speaking = { provider: narrator.provider, voiceId: narrator.voiceId };
+        if (speaking.provider === "kokoro") {
           try {
-            const result = await this.voiceService.localSpeech(store, resolved.voiceId, text);
+            const result = await this.voiceService.localSpeech(store, speaking.voiceId, text);
             this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
               worldId: msg.worldId, sheetId: sheet.id, sheetVersion: sheet.version, purpose: "sheet-section",
               sectionHeading: msg.sectionHeading, provider: "kokoro", model: "kokoro-82m",
-              voiceId: resolved.voiceId, status: "ready", file: result.file, cached: result.cached,
+              voiceId: speaking.voiceId, status: "ready", file: result.file, cached: result.cached,
               characterCount: text.length, estimatedMicroUsd: 0 });
           } catch (error) { fail(error instanceof Error ? error.message : "Local voice failed."); }
           return;
         }
         const model = this.opts.manifest?.models.find((candidate) => candidate.provider === "elevenlabs" && candidate.capability === "voice-tts");
         if (!model) { fail("ElevenLabs voice is unavailable."); return; }
-        const file = speechCacheFile({ provider: "elevenlabs", model: model.id, voiceId: resolved.voiceId, text, format: "mp3" });
+        const file = speechCacheFile({ provider: "elevenlabs", model: model.id, voiceId: speaking.voiceId, text, format: "mp3" });
         try {
           const bytes = await readFile(toExtendedLength(join(store.dir, fromPortable(file))));
           const mp3 = bytes.subarray(0, 3).toString("ascii") === "ID3" || (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0);
           if (!mp3) throw new Error("invalid cache");
           this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
             worldId: msg.worldId, sheetId: sheet.id, sheetVersion: sheet.version, purpose: "sheet-section",
-            sectionHeading: msg.sectionHeading, provider: "elevenlabs", model: model.id, voiceId: resolved.voiceId,
+            sectionHeading: msg.sectionHeading, provider: "elevenlabs", model: model.id, voiceId: speaking.voiceId,
             status: "ready", file, cached: true, characterCount: text.length, estimatedMicroUsd: 0 });
           return;
         } catch { /* confirmation required */ }
         const estimate = estimateMicroUsd(model, { characters: text.length });
         const token = createHash("sha256").update(`${sheet.id}\n${sheet.version}\n${file}`).digest("hex");
-        const input: EnqueueInput = { worldId: msg.worldId, target: { kind: "voice-preview", id: `${sheet.id}/elevenlabs/${resolved.voiceId}` },
+        const input: EnqueueInput = { worldId: msg.worldId, target: { kind: "voice-preview", id: `${sheet.id}/elevenlabs/${speaking.voiceId}` },
           capability: "voice-tts", provider: "elevenlabs", model: model.id,
-          params: { voiceId: resolved.voiceId, text, requestId: msg.requestId, purpose: "sheet-section",
+          params: { voiceId: speaking.voiceId, text, requestId: msg.requestId, purpose: "sheet-section",
             sheetId: sheet.id, sheetVersion: sheet.version, sectionHeading: msg.sectionHeading, characterCount: text.length },
           estimatedMicroUsd: estimate, landing: { dir: ".cache/voice-previews", name: file.split("/").pop()! } };
         if (msg.confirmationToken !== token) {
           this.pendingVoiceReads.set(msg.requestId, { token, input });
           this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
             worldId: msg.worldId, sheetId: sheet.id, sheetVersion: sheet.version, purpose: "sheet-section",
-            sectionHeading: msg.sectionHeading, provider: "elevenlabs", model: model.id, voiceId: resolved.voiceId,
+            sectionHeading: msg.sectionHeading, provider: "elevenlabs", model: model.id, voiceId: speaking.voiceId,
             status: "confirmation-required", file: null, cached: false, characterCount: text.length,
             estimatedMicroUsd: estimate, confirmationToken: token });
           return;

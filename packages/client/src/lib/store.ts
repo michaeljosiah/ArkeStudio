@@ -1776,6 +1776,11 @@ export type ReadingVoice = Extract<DomainEvent, { type: "voice.catalogue" }>["vo
  * The plain catalogue for the bench. Not `requestVoiceCandidates`, which ranks the same voices
  * against a character's written voice — the wrong question for one that is only reading.
  */
+/** Choose who narrates; null returns to the shipped local voice, which costs nothing. */
+export function setNarrator(voice: { provider: string; voiceId: string; label?: string } | null): void {
+  send({ kind: "set-narrator", voice });
+}
+
 export function requestVoiceCatalogue(worldId: string): void {
   send({ kind: "voice-catalogue", worldId });
 }

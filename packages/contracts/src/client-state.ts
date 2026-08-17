@@ -24,6 +24,7 @@ import {
   ModelAvailabilitySchema,
   RoutingFaultSchema,
   SpendStatusSchema,
+  NarratorSettingsSchema,
 } from "./settings.js";
 import { SetupStatusSchema } from "./setup.js";
 import { ReferenceKitSchema } from "./reference.js";
@@ -351,6 +352,8 @@ export const ClientStateSchema = z
         spend: SpendStatusSchema.nullable().default(null),
         backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
         appearance: AppearanceSettingsSchema.default({ theme: "system" }),
+        /** Who reads the app's prose aloud. Null is the shipped local voice, and free. */
+        narrator: NarratorSettingsSchema.default(null),
         runtime: LocalRuntimeStatusSchema.nullable().default(null),
         voiceRuntime: VoiceRuntimeStatusSchema.nullable().default(null),
         drift: z.array(ManifestDriftSchema).default([]),
