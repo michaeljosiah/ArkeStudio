@@ -575,3 +575,46 @@ describe("the poster convention", () => {
     for (const source of [client, server]) assert.match(source, /"frame\.png"/);
   });
 });
+
+/**
+ * The waiting loop (2026-08-17). Generation takes anywhere from twenty seconds to three
+ * minutes, and the panel said "Take 3 is running" and then held perfectly still for all of it.
+ */
+describe("something to watch while a take is out", () => {
+  function atStatus(status: BenchSession["takes"][number]["status"]): ClientState {
+    const state = stateWithBench();
+    const session = state.bench!.session!;
+    const take = session.takes[0]!;
+    const { media: _dropped, ...withoutMedia } = take;
+    return {
+      ...state,
+      bench: { ...state.bench!, session: { ...session, takes: [{ ...withoutMedia, status }] } },
+    };
+  }
+
+  it("plays while the work is outstanding", () => {
+    for (const status of ["allocating", "queued", "submitting", "running"] as const) {
+      const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, atStatus(status));
+      assert.match(html, /data-testid="bench-waiting"/, status);
+      assert.match(html, /bench-generating\.mp4/, status);
+      assert.match(html, /muted/, "and never makes a sound");
+    }
+  });
+
+  it("holds still when nothing is happening", () => {
+    // A failed take and an empty bench are both finished states. A moving picture reads as work
+    // happening, and in neither case is any work happening.
+    for (const status of ["failed", "cancelled", "needs-reconciliation"] as const) {
+      const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, atStatus(status));
+      assert.doesNotMatch(html, /data-testid="bench-waiting"/, status);
+    }
+    // And a take that has landed shows the take, not the loop.
+    const landed = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, stateWithBench());
+    assert.doesNotMatch(landed, /data-testid="bench-waiting"/);
+  });
+
+  it("keeps the status line: the picture is company, not the answer", () => {
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, atStatus("running"));
+    assert.match(html, /Take 1 is running/);
+  });
+});

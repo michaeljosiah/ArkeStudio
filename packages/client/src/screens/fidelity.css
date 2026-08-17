@@ -4063,6 +4063,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
   text-align: center; padding: 24px;
 }
+/* The waiting loop: a plate, not a full bleed. The clip is opaque and dark rather than
+   transparent, so its edges are feathered into the panel — otherwise it stops at a hard
+   rectangle, which reads as a dropped-in asset on the dark theme and as a slab on the light one.
+   The gradient is a stencil rather than a colour — only its alpha is read, so `black` means
+   "keep" and `transparent` means "fade out", and neither is a value any theme should own. */
+.fy-bench__waiting {
+  width: min(420px, 70%); aspect-ratio: 640 / 368; border-radius: 10px; object-fit: cover;
+  -webkit-mask-image: radial-gradient(ellipse at center, black 50%, transparent 86%);
+  mask-image: radial-gradient(ellipse at center, black 50%, transparent 86%);
+}
 .fy-bench__overlaychips { position: absolute; left: 12px; top: 12px; display: flex; gap: 7px; }
 /* Chips on the card wear a lighter charcoal fill — translucent black on black is no chip. */
 .fy-bench__overlaychip {

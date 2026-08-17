@@ -1397,6 +1397,21 @@ function BenchWorkspace({
             </div>
           ) : (
             <div className="fy-bench__empty">
+              {/* Something to watch while a take is out. Only while it is out: an empty bench
+                  and a failed take are both still, because a moving picture reads as work
+                  happening and neither of those is work happening. */}
+              {selected !== null && inFlight(liveStatus(selected)) && (
+                <video
+                  className="fy-bench__waiting"
+                  data-testid="bench-waiting"
+                  src={GENERATING_LOOP}
+                  autoPlay={!stillPreferred()}
+                  loop
+                  muted
+                  playsInline
+                  aria-hidden
+                />
+              )}
               <strong style={{ font: "600 15px var(--font-sans)" }}>
                 {selected ? statusLine(liveStatus(selected), selected) : "The bench is empty"}
               </strong>
@@ -1634,6 +1649,28 @@ function briefWithChips(text: string, tokens: Set<string>): ReactNode[] {
       part
     ),
   );
+}
+
+/**
+ * The waiting loop, played in the preview panel while a take is out.
+ *
+ * In public/ rather than imported, on the setup reel's precedent (shell.tsx): a plain file the
+ * bundler copies as-is, so the route tests — which render every screen through node's loader —
+ * never have to know how to load an mp4. Relative, because the packaged app opens over file://.
+ *
+ * Cut forward-then-reversed from the source clip, which makes the loop seamless by construction
+ * rather than by crossfade: the last frame IS the first frame. Silent, and 119KB.
+ */
+const GENERATING_LOOP = "./bench-generating.mp4";
+
+/** Has this machine asked for less movement? Server-rendered tests have no matchMedia. */
+function stillPreferred(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+}
+
+/** The states where work is actually outstanding — the only ones the loop plays for. */
+function inFlight(status: BenchTake["status"]): boolean {
+  return status === "allocating" || status === "queued" || status === "submitting" || status === "running";
 }
 
 function statusLine(status: BenchTake["status"], take: BenchTake): string {
