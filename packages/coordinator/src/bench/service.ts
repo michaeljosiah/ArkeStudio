@@ -376,11 +376,17 @@ export function planBenchDispatch(
 
   // References: resolve the snapshot's own set (re-run) or the live active set, then validate
   // kinds, durations and ceilings as one whole.
+  // A lane the mode has no use for rides along, ignored — the rule the keyframe lane already
+  // follows for an image request. Found live: a session that had carried a reference for a shot
+  // refused a spoken line over it, and voice mode hides the very lane that could have removed
+  // it, so the refusal named something the user had no way to act on (design 70).
   const references: BenchReferenceToken[] = options.fromTake
     ? options.fromTake.request.references
-    : session.composer.activeTokens
-        .map((token) => session.tokenRegistry.find((e) => e.token === token))
-        .filter((e): e is BenchReferenceToken => e !== undefined);
+    : composer.mode === "voice"
+      ? []
+      : session.composer.activeTokens
+          .map((token) => session.tokenRegistry.find((e) => e.token === token))
+          .filter((e): e is BenchReferenceToken => e !== undefined);
   const resolvedRefs: Array<{ entry: BenchReferenceToken; resolved: ResolvedSource }> = [];
   for (const entry of references) {
     const resolved = resolveTokenEntry(entry, session, bundle);

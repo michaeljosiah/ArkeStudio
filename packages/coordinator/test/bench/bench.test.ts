@@ -963,3 +963,57 @@ describe("reading a line on the bench (design 70)", () => {
     if (!plan.ok) assert.match(plan.reason, /is a image model; this is a voice request/);
   });
 });
+
+describe("a lane the mode has no use for rides along (found live, 2026-08-17)", () => {
+  const VOICE_ROW: ManifestModel = {
+    id: "test-tts-2",
+    provider: "elevenlabs",
+    capability: "voice-tts",
+    displayName: "Test Voice",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: {},
+    pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
+  };
+  const MANIFEST_4: ModelManifest = {
+    manifestVersion: 1,
+    generated: "2026-08-17",
+    models: [IMAGE_MODEL, VOICE_ROW],
+  };
+
+  it("does not refuse a spoken line over a picture the session was carrying", async () => {
+    // The failure this prevents, seen in the installed app: a session that had carried a
+    // reference for a shot refused every read with "Eleven v3 accepts no reference images" —
+    // and voice mode hides the very lane that could have removed it, so the refusal named
+    // something the user had no way to act on.
+    const { dir, store, artifactId } = await withImage();
+    const opened = await freshBench(dir);
+    await addBenchReference(opened, store.getBundle(), IMAGE_MODEL, {
+      source: { source: "artifact", artifactId },
+      requestId: "r1",
+      at: CLOCK(),
+    });
+    await opened.store.append(
+      {
+        type: "composer-set",
+        mode: "voice",
+        provider: "elevenlabs",
+        model: "test-tts-2",
+        params: { kind: "voice", count: 1, voiceId: "vale" },
+        brief: "the tide-clock keeps the drowned god's hours",
+      },
+      { at: CLOCK() },
+    );
+    const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), MANIFEST_4, {
+      worldId: store.worldId,
+      requestId: "r2",
+      at: CLOCK(),
+    });
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (plan.ok) {
+      // Ignored, not sent: the reference stays attached to the session for the modes that can
+      // carry it, and nothing about it reaches a route that takes none.
+      assert.ok(!("references" in plan.inputs[0]!.params), "no references on the wire");
+      assert.equal(plan.reserved[0]!.request.references.length, 0, "and none recorded on the take");
+    }
+  });
+});
