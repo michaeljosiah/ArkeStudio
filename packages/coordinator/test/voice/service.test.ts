@@ -9,6 +9,7 @@ import { authoritativeSheetSpeech, normalizeSpeechText, previewCacheFile, speech
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { FakeProvider } from "../queue/fake-provider.js";
+import { AppSettingsFile } from "../../src/app-settings.js";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
 
@@ -366,5 +367,26 @@ describe("a spoken line reaches the queue (built 2026-08-17)", () => {
         }),
       /has no assigned voice/,
     );
+  });
+});
+
+describe("the narrator survives a restart (found live, 2026-08-17)", () => {
+  /**
+   * Three separate places have to agree for a preference to be real: the file, the event, and
+   * the snapshot that a fresh window reads. This one was written correctly and left out of the
+   * snapshot, so restarting the app showed the shipped local voice while a cloud voice was
+   * actually stored — a narrator that would have billed every read while claiming to be free.
+   */
+  it("reads back what was written", async () => {
+    const dir = await tempDir("narrator");
+    const file = new AppSettingsFile(join(dir, "settings.json"));
+    const chosen = { provider: "elevenlabs", voiceId: "v_roger", label: "Roger" };
+    await file.setNarrator(chosen);
+    // A second reader — the one a restart uses — sees it.
+    const reopened = new AppSettingsFile(join(dir, "settings.json"));
+    assert.deepEqual((await reopened.load()).narrator, chosen);
+    // And clearing returns to null, which is how "the shipped local voice" is stored.
+    await file.setNarrator(null);
+    assert.equal((await new AppSettingsFile(join(dir, "settings.json")).load()).narrator, null);
   });
 });

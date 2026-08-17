@@ -1119,6 +1119,9 @@ export class Coordinator {
       ...(settings ? { spend: evaluateSpend(entries, settings.spend, new Date()) } : {}),
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
+      // Without this the narrator was correct on disk and absent from every snapshot, so a
+      // restart showed the shipped local voice while a cloud one was actually stored.
+      ...(settings ? { narrator: settings.narrator } : {}),
       ...(manifest ? { drift: detectDrift(entries, manifest) } : {}),
       ...(this.opts.harnessInfo ? { harnessInfo: this.opts.harnessInfo } : {}),
     });
