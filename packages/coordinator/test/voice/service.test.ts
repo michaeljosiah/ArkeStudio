@@ -272,6 +272,24 @@ describe("the preview cache key", () => {
     assert.notEqual(a, previewCacheFile("elevenlabs", "v2", "line one", "mp3"));
     assert.notEqual(a, previewCacheFile("elevenlabs", "v1", "line two", "mp3"));
   });
+  it("separates providers over the same voice and line (SPEC-022 §2.7)", () => {
+    // The branch this replaces was binary — anything not Kokoro keyed as ElevenLabs — so a second
+    // local provider filed onto the cloud key and replayed the wrong audio for the same voice id.
+    const paths = ["elevenlabs", "kokoro", "indextts"].map((p) => previewCacheFile(p, "v1", "line one", "mp3"));
+    assert.equal(new Set(paths).size, 3, "each provider must own its cache key");
+  });
+  it("keys an unknown provider under itself rather than a neighbour", () => {
+    assert.notEqual(
+      previewCacheFile("someday-tts", "v1", "line one", "mp3"),
+      previewCacheFile("elevenlabs", "v1", "line one", "mp3"),
+    );
+  });
+  it("takes the model from the caller when one is named", () => {
+    assert.notEqual(
+      previewCacheFile("indextts", "v1", "line one", "wav"),
+      previewCacheFile("indextts", "v1", "line one", "wav", "indextts-3-0"),
+    );
+  });
   it("includes model, format, settings and normalized text", () => {
     const base = { provider: "kokoro" as const, model: "kokoro-82m", voiceId: "af_bella", text: "hello   harbour", format: "wav" as const };
     assert.equal(normalizeSpeechText(base.text), "hello harbour");
