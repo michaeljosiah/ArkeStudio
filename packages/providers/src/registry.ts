@@ -4,6 +4,7 @@ import { ComfyUiClient, type ComfyUiPreflight, type EngineBaseUrl } from "./clie
 import { ElevenLabsClient } from "./clients/elevenlabs.js";
 import { FalClient } from "./clients/fal.js";
 import { HiggsfieldClient } from "./clients/higgsfield.js";
+import { IndexTtsClient, type EngineBaseUrl as IndexTtsBaseUrl } from "./clients/indextts.js";
 import { KokoroClient, type SidecarBaseUrl } from "./clients/kokoro.js";
 import { OllamaClient } from "./clients/ollama.js";
 import { OpenAiClient } from "./clients/openai.js";
@@ -24,6 +25,13 @@ export interface ProviderClientDeps {
    * run at all — the Kokoro client is then absent rather than present and always failing.
    */
   voxa?: SidecarBaseUrl;
+  /**
+   * Where the IndexTTS engine is listening (SPEC-022), resolved per call for the same reason
+   * Voxa's is: the port is assigned at launch, and a client that captured it at construction
+   * would keep pointing at a dead port across a restart. Omitted where local cloned voice cannot
+   * run — the client is then absent rather than present and always failing.
+   */
+  indextts?: IndexTtsBaseUrl;
   /**
    * The ComfyUI engine (SPEC-021): where it listens right now, and the pre-flight verification
    * every submit re-runs before touching the wire (§2.5). Omitted where no engine service is
@@ -71,6 +79,16 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
           kokoro: captureProviderClient(
             "kokoro",
             (fetch) => new KokoroClient(fetch, deps.voxa!),
+            fetchImpl,
+            capture,
+          ),
+        }),
+    ...(deps.indextts === undefined
+      ? {}
+      : {
+          indextts: captureProviderClient(
+            "indextts",
+            (fetch) => new IndexTtsClient(fetch, deps.indextts!),
             fetchImpl,
             capture,
           ),

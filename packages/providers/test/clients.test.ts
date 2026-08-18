@@ -9,6 +9,7 @@ import { OllamaClient } from "../src/clients/ollama.js";
 import { OpenAiClient } from "../src/clients/openai.js";
 import { higgsfieldSelectWorkspace, higgsfieldWorkspaces, lazyHiggsfieldRunner } from "../src/higgsfield-cli.js";
 import { ProviderAuthError, type CommandRunner, type FetchLike } from "../src/types.js";
+import { IndexTtsClient } from "../src/clients/indextts.js";
 import { KokoroClient } from "../src/clients/kokoro.js";
 
 /** A fetch fake: route → {status, body}. Anything unrouted throws (network unreachable). */
@@ -884,6 +885,93 @@ describe("local speech rides the same queue as the cloud (design 70)", () => {
     const client = new KokoroClient(notWav, () => "http://127.0.0.1:7777");
     await assert.rejects(
       () => client.submit("", { model: "kokoro-82m", params: { voiceId: "af_heart", text: "x" } } as never),
+      /did not answer with a WAV/,
+    );
+  });
+});
+
+describe("a cloned voice is a clip the engine never has to look up (SPEC-022)", () => {
+  const WAV = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45, 9, 9]);
+  const okFetch = (seen: { url?: string; body?: string }) =>
+    (async (url: string, init?: { body?: string }) => {
+      seen.url = String(url);
+      seen.body = init?.body;
+      return {
+        status: 200,
+        arrayBuffer: async () => WAV.buffer.slice(WAV.byteOffset, WAV.byteOffset + WAV.byteLength),
+      } as unknown as Response;
+    }) as unknown as FetchLike;
+
+  it("sends the resolved clip and the delivery already in the engine's vocabulary", async () => {
+    const seen: { url?: string; body?: string } = {};
+    const client = new IndexTtsClient(okFetch(seen), () => "http://127.0.0.1:7801");
+    const submitted = await client.submit("", {
+      model: "indextts-2-5",
+      params: {
+        speakerFile: "voices/harbour-glass.wav",
+        text: "the tide turns when it turns",
+        voiceSettings: { emo_vector: [0, 0, 0.8, 0, 0, 0, 0, 0], emo_alpha: 0.9, duration_factor: 1 },
+      },
+    } as never);
+    assert.equal(seen.url, "http://127.0.0.1:7801/tts");
+    // `speaker` is a path the app resolved from its voice library — the engine is a synthesiser,
+    // not a second catalogue, so it is never asked to know what a voice id means (§2.3).
+    assert.deepEqual(JSON.parse(seen.body ?? "{}"), {
+      speaker: "voices/harbour-glass.wav",
+      text: "the tide turns when it turns",
+      emo_vector: [0, 0, 0.8, 0, 0, 0, 0, 0],
+      emo_alpha: 0.9,
+      duration_factor: 1,
+    });
+    assert.equal((await client.poll("", submitted.remoteId)).state, "succeeded");
+    assert.equal((await client.fetchArtifacts("", submitted.remoteId))[0]?.contentType, "audio/wav");
+  });
+
+  it("refuses a dispatch with no clip rather than synthesising in some default voice", async () => {
+    const client = new IndexTtsClient(okFetch({}), () => "http://127.0.0.1:7801");
+    await assert.rejects(
+      () => client.submit("", { model: "indextts-2-5", params: { text: "x" } } as never),
+      /speakerFile is required/,
+    );
+  });
+
+  it("reports both capabilities unavailable, with the remedy, when the engine is not running", async () => {
+    const client = new IndexTtsClient(okFetch({}), () => null);
+    await assert.rejects(
+      () => client.submit("", { model: "indextts-2-5", params: { speakerFile: "a.wav", text: "x" } } as never),
+      /local voice engine is not running/,
+    );
+    const probes = await client.validateKey();
+    assert.deepEqual(
+      probes.map((p) => [p.capability, p.available]),
+      [
+        ["voice-tts", false],
+        ["voice-clone", false],
+      ],
+    );
+  });
+
+  it("reachable but still warming is unavailable, not ready (§2.2)", async () => {
+    // 80.5s measured between the process answering and it being able to speak. An engine that
+    // reported ready here would turn a wait into a failed take.
+    const warming = (async () => ({
+      status: 200,
+      json: async () => ({ ready: false, reason: "loading weights — about a minute" }),
+    })) as unknown as FetchLike;
+    const client = new IndexTtsClient(warming, () => "http://127.0.0.1:7801");
+    const probes = await client.validateKey();
+    assert.equal(probes[0]?.available, false);
+    assert.match(probes[0]!.reason!, /about a minute/);
+  });
+
+  it("will not file bytes that are not a WAV", async () => {
+    const notWav = (async () => ({
+      status: 200,
+      arrayBuffer: async () => new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]).buffer,
+    })) as unknown as FetchLike;
+    const client = new IndexTtsClient(notWav, () => "http://127.0.0.1:7801");
+    await assert.rejects(
+      () => client.submit("", { model: "indextts-2-5", params: { speakerFile: "a.wav", text: "x" } } as never),
       /did not answer with a WAV/,
     );
   });

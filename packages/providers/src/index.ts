@@ -4,6 +4,7 @@
  * declarations) lives in @arke-studio/contracts so the renderer shares it.
  */
 export { AnthropicClient } from "./clients/anthropic.js";
+export { IndexTtsClient, type EngineBaseUrl as IndexTtsBaseUrl } from "./clients/indextts.js";
 export {
   ComfyUiClient,
   COMFYUI_VERSION_FLOOR,
