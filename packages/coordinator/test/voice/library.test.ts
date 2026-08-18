@@ -28,7 +28,7 @@ describe("cloning a voice into a world", () => {
     const store = await WorldStore.open(dir, { clock: CLOCK });
     const source = join(await tempDir(prefix), "recording.wav");
     // A RIFF header and a little payload: enough that filing measures something real.
-    await writeFile(toExtendedLength(source), Buffer.from([0x52, 0x49, 0x46, 0x46, ...new Array(64).fill(7)]));
+    await writeFile(toExtendedLength(source), Buffer.from([0x52, 0x49, 0x46, 0x46, ...Array.from({ length: 64 }, () => 7)]));
     try {
       await body({ store, dir, source });
     } finally {
