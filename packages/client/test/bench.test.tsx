@@ -618,3 +618,157 @@ describe("something to watch while a take is out", () => {
     assert.match(html, /Take 1 is running/);
   });
 });
+
+describe("the bench in music mode (design turn 73)", () => {
+  const MUSIC_MODEL: ManifestModel = {
+    id: "test-music",
+    provider: "fal",
+    capability: "music",
+    displayName: "Test Music",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: { durations: { "60": "60" }, durationWire: "number", maxDurationSec: 300 },
+    pricing: { kind: "perSecond", microUsdPerSecond: 2000 },
+  };
+  const STYLE = "Slow sea shanty · close harmony · hand drum";
+
+  function singing(lyrics: string): ClientState {
+    const base = stateWithBench();
+    const session = benchSession();
+    return {
+      ...base,
+      app: {
+        ...base.app,
+        manifest: { ...base.app.manifest!, models: [...base.app.manifest!.models, MUSIC_MODEL] },
+        // A control exists only for a model the key can actually reach, so the probe has to say
+        // music is available — the same gate that keeps unusable rows out of the dropdown.
+        providers: [
+          ...base.app.providers.filter((p) => p.id !== "fal"),
+          {
+            id: "fal" as const,
+            configured: true,
+            validation: "valid" as const,
+            probes: [
+              { capability: "image" as const, available: true },
+              { capability: "video" as const, available: true },
+              { capability: "music" as const, available: true },
+            ],
+            lastValidated: "2026-08-18T10:00:00.000Z",
+            fault: null,
+          },
+        ],
+      },
+      bench: {
+        worldId: FIXTURE_WORLD_ID,
+        session: {
+          ...session,
+          composer: {
+            ...session.composer,
+            mode: "music",
+            provider: "fal",
+            model: "test-music",
+            params: { kind: "music", count: 1, lyrics },
+            brief: STYLE,
+            activeTokens: [],
+          },
+        },
+      },
+    };
+  }
+
+  const render = (lyrics: string) =>
+    renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, singing(lyrics));
+
+  it("offers Music as a fourth mode", () => {
+    assert.match(render(""), /Music/);
+  });
+
+  it("asks for a style and the words in two separate boxes", () => {
+    // One is a sentence about instrumentation, the other is what gets sung. A single box with a
+    // heading in it would be asking for both in the same breath.
+    const html = render("[verse]\nSalt in the rope");
+    assert.match(html, /STYLE/);
+    assert.match(html, /LYRICS/);
+    assert.match(html, /aria-label="Style"/);
+    assert.match(html, /aria-label="Lyrics"/);
+  });
+
+  it("counts the characters of the words, not of the style", () => {
+    const lyrics = "[verse]\nSalt in the rope";
+    const html = render(lyrics);
+    assert.match(html, /data-testid="lyrics-counter"/);
+    assert.match(html, new RegExp(`${lyrics.length} characters`));
+  });
+
+  it("offers to write the words, and never writes them in by itself", () => {
+    const html = render("");
+    assert.match(html, /data-testid="bench-write-lyrics"/);
+    assert.match(html, /Write for me/);
+    // The dialog is closed until asked for: a draft that appeared unbidden would be words
+    // reaching the song without the author.
+    assert.ok(!html.includes('data-testid="lyrics-dialog"'));
+  });
+
+  it("prices a song as a ceiling, because the route stops when the song is done", () => {
+    // 60s at 2000 microUSD/s. "up to", not "~": the truth is at most, not about.
+    assert.match(render("x"), /up to \$0\.12/);
+  });
+
+  it("will not offer to generate a song with no words", () => {
+    const withoutWords = render("   ");
+    const withWords = render("[verse]\nSalt in the rope");
+    const generateDisabled = (html: string) =>
+      /data-testid="bench-generate"[^>]*disabled/.test(html) ||
+      /disabled[^>]*data-testid="bench-generate"/.test(html);
+    assert.equal(generateDisabled(withoutWords), true, "both halves are required");
+    assert.equal(generateDisabled(withWords), false, "and with them it dispatches");
+  });
+
+  it("carries none of the picture controls, and nothing that speaks", () => {
+    const html = render("[verse]\nSalt in the rope");
+    assert.ok(!html.includes("References"), "the row declares it takes none");
+    assert.ok(!html.includes('aria-label="Aspect"'), "a song has no shape");
+    assert.ok(!html.includes('data-testid="bench-enhance"'), "the style is not prose to enrich");
+    assert.ok(!html.includes('data-testid="composer-mic"'), "you do not speak a song into being");
+  });
+
+  it("plays a finished song rather than trying to show it", () => {
+    // Read as "video, or else a picture", a song lands on the picture branch and renders a
+    // broken image. That is design 70's bug exactly, and it would have been a second first time.
+    const base = singing("[verse]\nSalt in the rope");
+    const session = base.bench!.session;
+    const take = session.takes[0]!;
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, {
+      ...base,
+      bench: {
+        ...base.bench!,
+        session: {
+          ...session,
+          takes: [
+            {
+              ...take,
+              request: {
+                ...take.request,
+                mode: "music",
+                model: "test-music",
+                params: { kind: "music", count: 1, lyrics: "[verse]\nSalt in the rope" },
+              },
+              media: { file: "output-1.wav", hash: take.media!.hash, info: { durationSec: 42.4, hasAudio: true } },
+            },
+          ],
+        },
+      },
+    });
+    assert.match(html, /data-testid="music-take"/);
+    assert.match(html, /<audio/);
+    assert.ok(!html.includes("output-1.wav.png"), "no poster is invented for a sound");
+    assert.match(html, /Test Music/, "the take states its model");
+    assert.match(html, /42s/, "and the length that was actually made, not the 60s ceiling asked for");
+  });
+
+  it("still offers all of them in image mode, so nothing was gated too broadly", () => {
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, stateWithBench());
+    assert.match(html, /References/);
+    assert.match(html, /data-testid="bench-enhance"/);
+    assert.ok(!html.includes('aria-label="Lyrics"'), "and a picture is never asked for words");
+  });
+});

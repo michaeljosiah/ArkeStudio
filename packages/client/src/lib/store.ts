@@ -270,6 +270,13 @@ export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void
   return () => briefEnhancedListeners.delete(listener);
 }
 
+export type LyricsDrafted = Extract<DomainEvent, { type: "bench.lyrics-drafted" }>;
+const lyricsDraftedListeners = new Set<(answer: LyricsDrafted) => void>();
+export function subscribeLyricsDrafted(listener: (answer: LyricsDrafted) => void): () => void {
+  lyricsDraftedListeners.add(listener);
+  return () => lyricsDraftedListeners.delete(listener);
+}
+
 export function subscribeFiledBatch(listener: (batch: FiledBatch) => void): () => void {
   filedBatchListeners.add(listener);
   return () => filedBatchListeners.delete(listener);
@@ -492,6 +499,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "bench.brief-enhanced") {
       for (const listener of briefEnhancedListeners) listener(event);
+    }
+    if (event.type === "bench.lyrics-drafted") {
+      for (const listener of lyricsDraftedListeners) listener(event);
     }
     if (event.type === "artifact.filed-batch") {
       for (const listener of filedBatchListeners) listener(event);
@@ -2587,6 +2597,23 @@ export function sendBenchEnhanceBrief(input: {
 }): string | null {
   const requestId = ulid();
   const sent = send({ kind: "bench-enhance-brief", requestId, ...input } as ClientMessage);
+  return sent ? requestId : null;
+}
+
+/**
+ * "Write for me" (design turn 73). The answer arrives as an event and opens a dialog; nothing
+ * here writes into the composer, which is the whole point of the control.
+ */
+export function sendBenchDraftLyrics(input: {
+  worldId: string;
+  sessionId: string;
+  description: string;
+  style?: string;
+  provider: string;
+  model: string;
+}): string | null {
+  const requestId = ulid();
+  const sent = send({ kind: "bench-draft-lyrics", requestId, ...input } as ClientMessage);
   return sent ? requestId : null;
 }
 

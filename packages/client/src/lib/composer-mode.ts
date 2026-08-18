@@ -37,6 +37,10 @@ export function setupForMode(
         ? { kind: "image", count: 1 }
         : mode === "video"
           ? { kind: "video" }
-          : { kind: "voice", count: 1 },
+          : mode === "voice"
+            ? { kind: "voice", count: 1 }
+            : // A song starts with no words. The lyrics box is empty and dispatch refuses until
+              // it is not — either the author writes them or the helper drafts them.
+              { kind: "music", count: 1, lyrics: "" },
   };
 }

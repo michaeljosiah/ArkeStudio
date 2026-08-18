@@ -131,6 +131,18 @@ export const Speaker = icon(
 /** Bars, not a mouth: the mode makes a recording, and the wall shows one (design 70). */
 export const Waveform = icon(<path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4" />);
 
+/**
+ * A note, not a waveform: Voice already owns the bars, and two modes that both make sound need
+ * to be told apart at a glance rather than by reading the label under them.
+ */
+export const MusicMark = icon(
+  <>
+    <path d="M9 18V5l12-2v13" />
+    <circle cx="6" cy="18" r="3" />
+    <circle cx="18" cy="16" r="3" />
+  </>,
+);
+
 /** The stopwatch that opens the length: a duration, not a time of day. */
 export const Timer = icon(
   <>

@@ -888,3 +888,65 @@ describe("local speech rides the same queue as the cloud (design 70)", () => {
     );
   });
 });
+
+describe("a song reaches the route, and comes back (design turn 73)", () => {
+  it("sends prompt and lyrics as the route's own fields, and the length as `duration`", async () => {
+    // minimax/music-3's schema requires both `prompt` and `lyrics`, and declares `duration` a
+    // number rather than the string enum every video route uses. Our `durationSec` is ours, not
+    // fal's, and must not reach the wire under that name.
+    let sent: Record<string, unknown> = {};
+    const client = new FalClient(async (_url, init) => {
+      sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ request_id: "req-song" }), { status: 200 });
+    });
+    const submitted = await client.submit("k", {
+      model: "minimax-music-3",
+      capability: "music",
+      params: { prompt: "Slow sea shanty, close harmony", lyrics: "[verse]\nSalt in the rope", durationSec: 60 },
+    });
+    assert.equal(submitted.remoteId, "minimax/music-3::req-song");
+    assert.equal(sent["prompt"], "Slow sea shanty, close harmony");
+    assert.equal(sent["lyrics"], "[verse]\nSalt in the rope");
+    assert.equal(sent["duration"], 60, "the route's own word, as a number");
+    assert.ok(!("durationSec" in sent), "our field name never reaches the wire");
+  });
+
+  it("refuses a length the route does not offer rather than running at another one", async () => {
+    const client = new FalClient(async () => new Response(JSON.stringify({ request_id: "r" }), { status: 200 }));
+    await assert.rejects(
+      client.submit("k", {
+        model: "minimax-music-3",
+        capability: "music",
+        params: { prompt: "p", lyrics: "l", durationSec: 45 },
+      }),
+      /cannot be asked for 45s/,
+    );
+  });
+
+  it("fetches the audio result — the payload names it `audio`, not `images` or `video`", async () => {
+    // Before this, fetchArtifacts read only `images` and `video`. A music job submitted, was
+    // charged, polled COMPLETED and handed back nothing at all.
+    const wav = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x01, 0x02]);
+    const client = new FalClient(async (url) => {
+      if (String(url).includes("fal.media")) return new Response(wav, { status: 200 });
+      return new Response(
+        JSON.stringify({ audio: { url: "https://fal.media/files/song.wav", content_type: "audio/wav" } }),
+        { status: 200 },
+      );
+    });
+    const artifacts = await client.fetchArtifacts("k", "minimax/music-3::req-song");
+    assert.equal(artifacts.length, 1, "the song came back");
+    assert.equal(artifacts[0]!.contentType, "audio/wav");
+    assert.equal(artifacts[0]!.name, "output-1.wav", "named wav, not bin — the extension is read from the type");
+    assert.deepEqual([...artifacts[0]!.data], [...wav]);
+  });
+
+  it("falls back to wav when the payload declares no content type, rather than to bytes-with-no-name", async () => {
+    const client = new FalClient(async (url) => {
+      if (String(url).includes("fal.media")) return new Response(new Uint8Array([1]), { status: 200 });
+      return new Response(JSON.stringify({ audio: { url: "https://fal.media/files/song" } }), { status: 200 });
+    });
+    const artifacts = await client.fetchArtifacts("k", "minimax/music-3::req");
+    assert.equal(artifacts[0]!.name, "output-1.wav");
+  });
+});

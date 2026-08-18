@@ -13,6 +13,7 @@ import {
   modeSpec,
   mappedReferenceKinds,
   modeCapability,
+  MUSIC_DURATION_SEC,
   newId,
   pricedDuration,
   routeFor,
@@ -531,6 +532,12 @@ export function planBenchDispatch(
   if (params.kind === "voice" && params.voiceId === undefined) {
     return { ok: false, reason: "No voice is chosen — pick one to read this." };
   }
+  // minimax-music-3 requires prompt AND lyrics. Refused here with the missing half named,
+  // rather than sent and 422'd: the brief is already guarded above, and words nobody wrote
+  // are not something to discover from a provider error.
+  if (params.kind === "music" && params.lyrics.trim().length === 0) {
+    return { ok: false, reason: "There are no lyrics yet — write them, or ask for a draft." };
+  }
 
   const reserved: BenchReservedTake[] = [];
   const inputs: BenchEnqueueInput[] = [];
@@ -637,7 +644,7 @@ export function planBenchDispatch(
         }),
         landing: { dir: sessionMediaDir(session.id, takeId) },
       });
-    } else {
+    } else if (params.kind === "voice") {
       // A spoken line (design 70). The brief IS the words, so it goes as `text` rather than a
       // prompt, and the price is exact: the characters are already typed, so nothing here is an
       // upper bound the way a duration or a megapixel count is.
@@ -658,6 +665,32 @@ export function planBenchDispatch(
           // that a control which changes nothing is a control that lies.
         },
         estimatedMicroUsd: estimateMicroUsd(model, { characters: composer.brief.length }),
+        landing: { dir: sessionMediaDir(session.id, takeId) },
+      });
+    } else {
+      // A song (design turn 73). The route asks for two things and neither can be derived from
+      // the other: the STYLE rides as `prompt` — it is a description, which is what a brief has
+      // always been here — and the LYRICS as their own field, because they are the words that
+      // get sung rather than a description of them.
+      inputs.push({
+        worldId: options.worldId,
+        target: { kind: "bench-take", id: `${session.id}/${takeId}` },
+        capability: "music",
+        provider: model.provider,
+        model: model.id,
+        params: {
+          prompt: composer.brief,
+          lyrics: params.lyrics,
+          // Sent explicitly at the route's own default rather than left off. The fal client
+          // refuses a length a model does not declare, and its comment is the reason this is
+          // here at all: a request that runs at the provider's default while the estimate was
+          // computed from a number is the bug that machinery exists to prevent.
+          durationSec: MUSIC_DURATION_SEC,
+        },
+        // A ceiling, not a quote — the route calls `duration` an upper bound and stops when the
+        // song is done. The take states the length that was actually made, measured from the
+        // file, and the ledger records what was actually charged.
+        estimatedMicroUsd: estimateMicroUsd(model, { durationSec: MUSIC_DURATION_SEC }),
         landing: { dir: sessionMediaDir(session.id, takeId) },
       });
     }

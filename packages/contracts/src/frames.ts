@@ -1504,6 +1504,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * "Write for me" (design turn 73): a description of what the song is about, drafted into
+   * lyrics. Answered by `bench.lyrics-drafted` under this requestId, and the answer opens a
+   * dialog — nothing reaches the song until the author presses Use these words, so a
+   * generation can never carry words nobody read.
+   *
+   * The style rides along because a draft written blind to the arrangement is a draft written
+   * for a different song, but it is optional: a style is not required to describe a subject.
+   */
+  z
+    .object({
+      kind: z.literal("bench-draft-lyrics"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      /** What the song is about, in the author's words. */
+      description: z.string().min(1).max(4000),
+      /** The composer's STYLE line, when one has been written. */
+      style: z.string().max(4000).optional(),
+      provider: z.string().min(1),
+      model: z.string().min(1),
+    })
+    .strict(),
+  /**
    * Save the composer's current setup as a preset (issue 305 §3). Saving under an existing
    * name replaces that preset; the coordinator validates the model against the manifest.
    */
