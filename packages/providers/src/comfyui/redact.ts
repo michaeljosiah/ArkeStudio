@@ -45,17 +45,81 @@ function summarizeQueueList(list: unknown): unknown {
 }
 
 /**
- * One history entry: `prompt` is a tuple whose third element is the graph, and `status` and
- * `outputs` are the parts worth keeping (filenames are what fetch uses; they carry no graph).
+ * A filesystem path reduced to its basename. The engine's own error text quotes the paths it
+ * resolved — a missing checkpoint names the full model path — and payload history is displayed
+ * and copied, so the name survives and the machine's shape does not.
+ */
+export function scrubPaths(text: string): string {
+  return text
+    .replace(/[A-Za-z]:[\\/](?:[^\\/\r\n"']*[\\/])*([^\\/\r\n"']*)/g, "$1")
+    .replace(/(?:^|(?<=[\s"'(]))\/(?:[^/\s"']+\/)+([^/\s"']*)/g, "$1");
+}
+
+/**
+ * What an execution failure is allowed to say. ComfyUI's `execution_error` payload carries
+ * `node_id`, `node_type`, a Python `traceback` of absolute engine paths, and `current_inputs` —
+ * the failing node's *resolved inputs*, which is a literal graph fragment. Only the message
+ * survives, with paths reduced to basenames.
+ */
+function summarizeStatusMessage(message: unknown): unknown {
+  if (!Array.isArray(message)) return { comfyui: "message-redacted" };
+  const kind = typeof message[0] === "string" ? message[0] : "message";
+  const detail = message[1] as { exception_message?: unknown } | undefined;
+  const text =
+    detail !== null && typeof detail === "object" && typeof detail.exception_message === "string"
+      ? scrubPaths(detail.exception_message).slice(0, 500)
+      : undefined;
+  return text === undefined ? [kind] : [kind, { exception_message: text }];
+}
+
+/**
+ * One history entry, built as an ALLOW-LIST rather than a spread-and-patch.
+ *
+ * A denylist over a third party's response shape is a bet lost the first time upstream adds a
+ * field — and this response has three separate graph carriers already: the `prompt` tuple's
+ * third element, `status.messages[].current_inputs`, and the node ids keying `outputs` and
+ * `meta`. Only what a diagnostic actually needs is copied forward: whether it finished, why it
+ * failed in the engine's own words, and which files came back.
  */
 function summarizeHistoryEntry(entry: unknown): unknown {
   if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return entry;
   const record = entry as Record<string, unknown>;
-  const out: Record<string, unknown> = { ...record };
+  const out: Record<string, unknown> = {};
+
   const prompt = record["prompt"];
-  if (Array.isArray(prompt)) {
-    const graph = prompt[2];
+  if (prompt !== undefined) {
+    const graph = Array.isArray(prompt) ? prompt[2] : undefined;
     out["prompt"] = looksLikeGraph(graph) ? summarizeGraph(graph) : { comfyui: "prompt-tuple-redacted" };
+  }
+
+  const status = record["status"] as Record<string, unknown> | undefined;
+  if (status !== null && typeof status === "object") {
+    const messages = status["messages"];
+    out["status"] = {
+      ...(typeof status["status_str"] === "string" ? { status_str: status["status_str"] } : {}),
+      ...(typeof status["completed"] === "boolean" ? { completed: status["completed"] } : {}),
+      ...(Array.isArray(messages) ? { messages: messages.slice(0, 20).map(summarizeStatusMessage) } : {}),
+    };
+  }
+
+  // Filenames are what a diagnostic needs and what fetch used; the node ids keying them are
+  // graph structure, so the files are flattened out from under them.
+  const outputs = record["outputs"];
+  if (outputs !== null && typeof outputs === "object" && !Array.isArray(outputs)) {
+    const files: unknown[] = [];
+    for (const byNode of Object.values(outputs as Record<string, unknown>)) {
+      if (byNode === null || typeof byNode !== "object") continue;
+      for (const value of Object.values(byNode as Record<string, unknown>)) {
+        if (!Array.isArray(value)) continue;
+        for (const item of value) {
+          const file = item as { filename?: unknown; type?: unknown } | null;
+          if (file !== null && typeof file === "object" && typeof file.filename === "string") {
+            files.push({ filename: file.filename, ...(typeof file.type === "string" ? { type: file.type } : {}) });
+          }
+        }
+      }
+    }
+    out["outputs"] = { comfyui: "outputs-summarized", files: files.slice(0, 100) };
   }
   return out;
 }

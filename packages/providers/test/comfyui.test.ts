@@ -14,7 +14,7 @@ import {
   substituteRecipeParams,
   wanFramesForSeconds,
 } from "../src/comfyui/recipes.js";
-import { redactComfyUiBody } from "../src/comfyui/redact.js";
+import { redactComfyUiBody, scrubPaths } from "../src/comfyui/redact.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
 import type { FetchLike } from "../src/types.js";
 
@@ -414,7 +414,15 @@ describe("poll maps the engine's two surfaces onto queue states, without inventi
             status: {
               status_str: "error",
               completed: false,
-              messages: [["execution_error", { exception_message: "CUDA out of memory", node_type: "KSampler" }]],
+              messages: [
+                [
+                  "execution_error",
+                  {
+                    exception_message: "CUDA out of memory loading C:\\Users\\alice\\ComfyUI\\models\\sd_xl.safetensors",
+                    node_type: "KSampler",
+                  },
+                ],
+              ],
             },
           },
         },
@@ -423,6 +431,10 @@ describe("poll maps the engine's two surfaces onto queue states, without inventi
     const result = await new ComfyUiClient(failed, BASE, OK_PREFLIGHT).poll("", "p-bad");
     assert.equal(result.state, "failed");
     assert.match(result.error!, /CUDA out of memory/);
+    // This string becomes job.error and renders in Activity: the filename is actionable, the
+    // host path and the node's class type are not ours to show (R-1, SPEC-001 R-9).
+    assert.match(result.error!, /sd_xl\.safetensors/);
+    assert.doesNotMatch(result.error!, /C:\\Users|alice|KSampler/);
   });
 
   it("an id the engine no longer knows is a stated failure — its queue was in-memory", async () => {
@@ -534,6 +546,63 @@ describe("no graph survives capture", () => {
     assert.ok(((redacted["prompt"] as Record<string, unknown>)["byteCount"] as number) > 512 * 1024);
   });
 
+  it("a FAILED history entry loses its traceback, current_inputs, node id and node type", () => {
+    // The shape ComfyUI actually returns for an execution failure: `current_inputs` is the
+    // failing node's resolved inputs — a literal graph fragment — and `traceback` is a list of
+    // absolute engine paths. The success-shaped test below never exercised either.
+    const redacted = redactComfyUiBody("response", "http://127.0.0.1:8188/history/p-1", {
+      "p-1": {
+        prompt: [3, "p-1", graph, {}, ["9"]],
+        status: {
+          status_str: "error",
+          completed: false,
+          messages: [
+            ["execution_start", { prompt_id: "p-1" }],
+            [
+              "execution_error",
+              {
+                prompt_id: "p-1",
+                node_id: "3",
+                node_type: "KSampler",
+                exception_type: "torch.cuda.OutOfMemoryError",
+                exception_message: "CUDA out of memory loading C:\\Users\\alice\\ComfyUI\\models\\checkpoints\\sd_xl_base_1.0.safetensors",
+                traceback: ["File \"C:\\\\Users\\\\alice\\\\ComfyUI\\\\execution.py\", line 317, in execute"],
+                current_inputs: { text: "the tide-clock at dusk", ckpt_name: "sd_xl_base_1.0.safetensors" },
+                current_outputs: [],
+              },
+            ],
+          ],
+        },
+        meta: { "9": { node_id: "9", display_node: "9", real_node_id: "9" } },
+      },
+    }) as Record<string, Record<string, unknown>>;
+    const text = JSON.stringify(redacted);
+    // No graph fragment, no traceback, no node identity.
+    assert.equal(text.includes("current_inputs"), false);
+    assert.equal(text.includes("traceback"), false);
+    assert.equal(text.includes("execution.py"), false);
+    assert.equal(text.includes("KSampler"), false);
+    assert.equal(text.includes("node_id"), false);
+    assert.equal(text.includes("the tide-clock at dusk"), false);
+    // No host path — the filename is the actionable half and survives.
+    assert.equal(text.includes("C:\\\\Users"), false);
+    assert.equal(text.includes("alice"), false);
+    assert.match(text, /sd_xl_base_1\.0\.safetensors/);
+    // What a diagnostic needs does survive: it failed, and why.
+    assert.equal((redacted["p-1"]!["status"] as { status_str?: string }).status_str, "error");
+    assert.match(text, /CUDA out of memory/);
+    // A field nobody allow-listed cannot ride along, however upstream grows.
+    assert.equal(text.includes("meta"), false);
+  });
+
+  it("scrubs windows and posix paths to basenames, leaving ordinary prose alone", () => {
+    assert.equal(scrubPaths("cannot read C:\\Users\\alice\\models\\vae.safetensors"), "cannot read vae.safetensors");
+    assert.equal(scrubPaths("missing /home/alice/comfy/models/x.ckpt here"), "missing x.ckpt here");
+    assert.equal(scrubPaths("a plain sentence with no path in it"), "a plain sentence with no path in it");
+    // A ratio is not a path.
+    assert.equal(scrubPaths("aspect 16/9 selected"), "aspect 16/9 selected");
+  });
+
   it("a history response's embedded prompt tuple is redacted; status and outputs survive", () => {
     const redacted = redactComfyUiBody("response", "http://127.0.0.1:8188/history/p-1", {
       "p-1": {
@@ -544,7 +613,9 @@ describe("no graph survives capture", () => {
     }) as Record<string, Record<string, unknown>>;
     assert.equal(JSON.stringify(redacted).includes("class_type"), false);
     assert.deepEqual(redacted["p-1"]!["status"], { status_str: "success", completed: true });
+    // The filenames survive; the node ids that keyed them do not.
     assert.match(JSON.stringify(redacted["p-1"]!["outputs"]), /arke_00001_/);
+    assert.equal(JSON.stringify(redacted["p-1"]!["outputs"]).includes('"9"'), false);
   });
 
   it("a queue response keeps ids and positions, and drops every embedded graph", () => {

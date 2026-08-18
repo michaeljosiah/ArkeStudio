@@ -9,6 +9,7 @@ import {
   type ComfyUiRecipe,
   type RecipeParamValues,
 } from "../comfyui/recipes.js";
+import { scrubPaths } from "../comfyui/redact.js";
 import { jsonRequest } from "./http.js";
 import type {
   FetchedArtifact,
@@ -373,9 +374,13 @@ export class ComfyUiClient implements ProviderClient {
 }
 
 /**
- * The first human-readable execution error the history's message log carries, if any. The
- * engine's own message only — never the node type, which is graph content a job error would
- * carry straight to the renderer (R-1).
+ * The first human-readable execution error the history's message log carries, if any.
+ *
+ * The engine's own message only — never the node type, which is graph content (R-1) — and with
+ * filesystem paths reduced to basenames. This string becomes `job.error`, which is journalled
+ * on the job row and rendered in Activity, and the engine quotes the paths it resolved: a
+ * missing checkpoint reports the whole models path (SPEC-001 R-9, SPEC-021 §2.11). The
+ * filename is the actionable half and it survives.
  */
 function historyError(messages: unknown[] | undefined): string | null {
   if (!Array.isArray(messages)) return null;
@@ -383,7 +388,7 @@ function historyError(messages: unknown[] | undefined): string | null {
     if (!Array.isArray(message) || message[0] !== "execution_error") continue;
     const detail = message[1] as { exception_message?: unknown } | undefined;
     if (detail && typeof detail.exception_message === "string") {
-      return `comfyui: ${detail.exception_message}`;
+      return `comfyui: ${scrubPaths(detail.exception_message).slice(0, 500)}`;
     }
   }
   return null;
