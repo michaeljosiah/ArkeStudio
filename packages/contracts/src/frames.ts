@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BenchModeSchema, BenchParamsSchema } from "./bench.js";
+import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
 import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, RecipeIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema } from "./ids.js";
@@ -1429,6 +1429,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
               source: z.discriminatedUnion("source", [
                 z.object({ source: z.literal("artifact"), artifactId: z.string().min(1) }).strict(),
                 z.object({ source: z.literal("take"), takeId: TakeIdSchema }).strict(),
+                // A picture that lives in the world without being an artifact — everything under
+                // a character. No hash here: the client names the file, the coordinator reads the
+                // bytes and hashes what it actually found.
+                z.object({ source: z.literal("world-file"), path: WorldFilePathSchema }).strict(),
               ]),
               replace: z.string().optional(),
             })

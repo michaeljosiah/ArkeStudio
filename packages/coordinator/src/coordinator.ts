@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
 import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { basename, extname, join } from "node:path";
+import { basename, extname, join, resolve, sep } from "node:path";
 import {
   DomainEventSchema,
   JobSchema,
@@ -55,6 +55,7 @@ import {
   openBenchSession,
   planBenchDispatch,
   addBenchReference,
+  type WorldFileReader,
   recoverBenchSession,
   type BenchRecoveryJobFacts,
   type OpenedBench,
@@ -464,6 +465,35 @@ const SUPERVISOR_HEALTH: Record<
   stopped: { status: "unavailable" },
   failed: { status: "unavailable" },
 };
+
+/**
+ * Reads a world-relative file for the bench, and refuses anything that is not really inside the
+ * world.
+ *
+ * The second of two gates. `WorldFilePathSchema` settles the shape of the path as it arrives;
+ * this settles the only question that shape cannot answer — where the path actually lands once
+ * the filesystem has had its say about separators, links and normalisation. A regular
+ * expression and a resolved path disagree often enough that both are worth having.
+ */
+function worldFileReader(worldDir: string): WorldFileReader {
+  return {
+    read: async (path) => {
+      const resolvedWorld = resolve(worldDir);
+      const target = resolve(resolvedWorld, path);
+      // `startsWith` on the directory plus a separator: "…/world" must not admit "…/worldly".
+      if (target !== resolvedWorld && !target.startsWith(resolvedWorld + sep)) {
+        return { refused: "that file is not in this world" };
+      }
+      let bytes: Buffer;
+      try {
+        bytes = await readFile(toExtendedLength(target));
+      } catch {
+        return { refused: "that picture is no longer in the world" };
+      }
+      return { hash: `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}` };
+    },
+  };
+}
 
 export class Coordinator {
   private readonly readModel: ReadModel;
@@ -3368,6 +3398,7 @@ export class Coordinator {
             source: pick.source,
             replace: pick.replace,
             lane: msg.lane,
+            worldFile: worldFileReader(store.dir),
             requestId: `${msg.requestId}/${index}`,
             at: this.nowIso(),
           });

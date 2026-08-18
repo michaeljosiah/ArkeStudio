@@ -2525,7 +2525,10 @@ export function sendBenchAddReference(
   worldId: string,
   sessionId: string,
   picks: ReadonlyArray<{
-    pick: { source: "artifact"; artifactId: string } | { source: "take"; takeId: string };
+    pick:
+      | { source: "artifact"; artifactId: string }
+      | { source: "take"; takeId: string }
+      | { source: "world-file"; path: string };
     replace?: string;
   }>,
   lane?: "reference" | "keyframe",
