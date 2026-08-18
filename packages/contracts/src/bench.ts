@@ -25,7 +25,7 @@ import { TakeCostSchema } from "./take.js";
  * half-wrote. Everything below is the *folded* view of that log plus the events themselves.
  */
 
-export const BenchModeSchema = z.enum(["image", "video", "voice"]);
+export const BenchModeSchema = z.enum(["image", "video", "voice", "music"]);
 export type BenchMode = z.infer<typeof BenchModeSchema>;
 
 /**
@@ -36,6 +36,10 @@ export type BenchMode = z.infer<typeof BenchModeSchema>;
  * and the capability is `voice-tts`. Read through this map rather than compared, so the day a
  * fourth mode arrives the mismatch is a compile error rather than a model that silently never
  * matches.
+ *
+ * That day came: `music` is the fourth mode (design turn 73), and it is a mode name and a
+ * capability name again — but it arrives through this map like the rest, because the next
+ * mismatch should cost a compile error too.
  */
 export function modeCapability(mode: BenchMode): Capability {
   switch (mode) {
@@ -45,6 +49,8 @@ export function modeCapability(mode: BenchMode): Capability {
       return "video";
     case "voice":
       return "voice-tts";
+    case "music":
+      return "music";
   }
 }
 
@@ -98,10 +104,49 @@ export const BenchVoiceParamsSchema = z
   .strict();
 export type BenchVoiceParams = z.infer<typeof BenchVoiceParamsSchema>;
 
+/**
+ * A song (design turn 73). The route requires two things and neither can be derived from the
+ * other, so the composer asks for exactly two: the STYLE — instrumentation, mood, arrangement —
+ * which rides in the composer's `brief` the way every other mode's description does, and the
+ * LYRICS, which live here because they are the words that get sung rather than a description
+ * of them.
+ *
+ * There is no length control, and that is a decision rather than an omission. minimax-music-3
+ * declares `duration` an *upper bound* — "the model may stop earlier; the actual duration is
+ * returned in the output" — so a number here would not buy a song of that length, only a
+ * ceiling. For a song with lyrics the length is implied by the words. The request goes at the
+ * route's own default (MUSIC_DURATION_SEC) and the take states what was actually made, measured
+ * from the file rather than taken from anyone's word.
+ */
+export const BenchMusicParamsSchema = z
+  .object({
+    kind: z.literal("music"),
+    /**
+     * The words to be sung. Structure tags the route understands — [intro], [verse], [chorus] —
+     * are the author's to write or not; nothing here inserts them.
+     */
+    lyrics: z.string().max(20_000),
+    /** How many songs one press asks for — each its own numbered take, as images are. */
+    count: z.number().int().min(1).max(4),
+  })
+  .strict();
+export type BenchMusicParams = z.infer<typeof BenchMusicParamsSchema>;
+
+/**
+ * The length every music request is made at, in seconds.
+ *
+ * minimax-music-3's own default, and deliberately the same number the estimate is computed
+ * from: a request that runs at one length while the price was quoted at another is the bug
+ * `durationParam` in the fal client exists to refuse. Because the route treats it as a ceiling,
+ * the estimate is a ceiling too — the charge follows the song that was actually made.
+ */
+export const MUSIC_DURATION_SEC = 60;
+
 export const BenchParamsSchema = z.discriminatedUnion("kind", [
   BenchImageParamsSchema,
   BenchVideoParamsSchema,
   BenchVoiceParamsSchema,
+  BenchMusicParamsSchema,
 ]);
 export type BenchParams = z.infer<typeof BenchParamsSchema>;
 
@@ -228,6 +273,11 @@ export const BenchRequestSnapshotSchema = z
     }
     if (request.keyframes.length > 0 && request.mode !== "video") {
       ctx.addIssue({ code: "custom", message: "keyframes ride video, and nothing else" });
+    }
+    // minimax-music-3 declares `referenceImages: 0`. Refused at the snapshot rather than
+    // dropped at dispatch, so a reference can never be attached, priced and silently ignored.
+    if (request.references.length > 0 && request.mode === "music") {
+      ctx.addIssue({ code: "custom", message: "a song takes no references" });
     }
   });
 export type BenchRequestSnapshot = z.infer<typeof BenchRequestSnapshotSchema>;

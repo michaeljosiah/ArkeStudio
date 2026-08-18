@@ -690,6 +690,23 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       reason: z.string().optional(),
     })
     .strict(),
+  /**
+   * The lyrics helper's answer: the draft, or null with why not (never silence).
+   *
+   * A draft, deliberately — not an edit. It lands in a dialog beside the words the author
+   * already has, and only replaces them by their hand (design turn 73).
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("bench.lyrics-drafted"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      lyrics: z.string().nullable(),
+      reason: z.string().optional(),
+    })
+    .strict(),
   /** Saved bench setups changed (issue 305 §3): the whole list rides, it is small. */
   z.object({ ...base, type: z.literal("presets.changed"), presets: z.array(BenchPresetSchema) }).strict(),
   /** Rolling spend re-evaluated on a ledger append or a settings change (SPEC-008 R-19, D10). */

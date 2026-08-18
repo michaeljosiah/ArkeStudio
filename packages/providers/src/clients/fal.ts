@@ -89,6 +89,8 @@ function extensionFor(contentType: string): string {
   if (type === "image/webp") return "webp";
   if (type === "image/png") return "png";
   if (type === "video/mp4") return "mp4";
+  if (type === "audio/wav" || type === "audio/x-wav" || type === "audio/wave") return "wav";
+  if (type === "audio/mpeg" || type === "audio/mp3") return "mp3";
   return "bin";
 }
 
@@ -304,12 +306,23 @@ export class FalClient implements ProviderClient {
     );
     if (status >= 400) throw new Error(`fal: result fetch failed (HTTP ${status})`);
     const out: FetchedArtifact[] = [];
-    const payload = body as { images?: Array<{ url?: string; content_type?: string }>; video?: { url?: string } } | null;
+    const payload = body as {
+      images?: Array<{ url?: string; content_type?: string }>;
+      video?: { url?: string };
+      audio?: { url?: string; content_type?: string };
+    } | null;
     const urls: Array<{ url: string; contentType: string }> = [];
     for (const img of payload?.images ?? []) {
       if (img.url) urls.push({ url: img.url, contentType: img.content_type ?? "application/octet-stream" });
     }
     if (payload?.video?.url) urls.push({ url: payload.video.url, contentType: "video/mp4" });
+    // Audio results (minimax/music-3 §Music3Output: `audio`, a File, 44.1 kHz 16-bit stereo
+    // WAV). Without this a music job submits, is charged, polls COMPLETED and hands back
+    // nothing — the money-leaves-and-nothing-comes-back shape `queueApp` above was written
+    // about. The route declares its content type, so it is read rather than assumed.
+    if (payload?.audio?.url) {
+      urls.push({ url: payload.audio.url, contentType: payload.audio.content_type ?? "audio/wav" });
+    }
     for (const [i, item] of urls.entries()) {
       const res = await this.fetchImpl(item.url);
       const data = new Uint8Array(await res.arrayBuffer());
