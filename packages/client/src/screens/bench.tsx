@@ -897,7 +897,7 @@ function BenchWorkspace({
               STYLE, which is a description, and so rides in the brief every other mode uses. */}
           {singing && <div className="fy-bench__eyebrow">STYLE</div>}
           {/* brief — tokens the session knows render as chips inline (issue 305 §3) */}
-          <div className="fy-bench__brief">
+          <div className={cx("fy-bench__brief", singing && "fy-bench__brief--style")}>
             <div className="fy-bench__briefstack">
               <div ref={briefUnder} className="fy-bench__briefunder" aria-hidden>
                 {briefWithChips(draft.brief, tokens)}
@@ -1048,7 +1048,7 @@ function BenchWorkspace({
                     is absent without a model — a control that could do nothing does not exist. */}
                 <button
                   type="button"
-                  className={cx("fy-bench__footicon", drafting && "fy-bench__footicon--busy")}
+                  className={cx("fy-bench__writelyrics", drafting && "fy-bench__footicon--busy")}
                   data-testid="bench-write-lyrics"
                   disabled={drafting}
                   title="Write for me — describe what the song is about and read the draft before it goes anywhere near the song"

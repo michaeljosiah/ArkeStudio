@@ -4063,14 +4063,28 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   align-items: center;
   gap: 8px;
 }
+/* The style is one line of instrumentation, so it does not get the brief's paragraph height —
+   and the words, which are the longer of the two, get the room that buys. */
+.fy-bench__brief--style { flex: none; }
+.fy-bench__brief--style .fy-bench__briefstack { min-height: 62px; }
 .fy-bench__lyrics {
-  flex: 1.4; min-height: 0; display: flex; flex-direction: column; margin-top: 4px;
+  flex: 1; min-height: 0; display: flex; flex-direction: column; margin-top: 4px;
   border: 1px solid var(--border); border-radius: 10px; background: var(--background);
   box-shadow: var(--shadow-xs); overflow: hidden;
 }
 .fy-bench__lyricshead {
-  display: flex; align-items: center; gap: 6px; padding: 5px 8px 0;
+  display: flex; align-items: center; gap: 6px; padding: 7px 10px 0;
 }
+/* A text trigger, not an icon one: `fy-bench__footicon` is 24px square because it holds a
+   single glyph, and "Write for me" put in that box wrapped to "for / me" against the edge. */
+.fy-bench__writelyrics {
+  appearance: none; border: 0; border-radius: 7px; background: transparent;
+  padding: 3px 7px; white-space: nowrap; flex: none;
+  font: 400 11px var(--font-sans); color: var(--neutral-400); cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-bench__writelyrics:hover:not(:disabled) { background: var(--secondary); color: var(--foreground); }
+.fy-bench__writelyrics:disabled { opacity: 0.5; cursor: default; }
 /* The eyebrow inside the lyrics head has the box's padding around it already. */
 .fy-bench__lyricshead .fy-bench__eyebrow { margin: 0; }
 .fy-bench__lyricstext {
