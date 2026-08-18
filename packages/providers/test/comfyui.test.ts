@@ -285,7 +285,7 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
       params: { prompt: "the tide-clock at dusk", output: { width: 1216, height: 832, aspect: "3:2" }, provenance: { canonRevision: 1 } },
     });
     assert.equal(result.remoteId, "p-1");
-    const posted = calls.find((c) => /\/prompt$/.test(c.url))!.body as {
+    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
       prompt: Record<string, { class_type: string; inputs: Record<string, unknown> }>;
       client_id: string;
     };
@@ -309,7 +309,7 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
       capability: "image",
       params: { prompt: "x", output: { width: 1500, height: 1000 } },
     });
-    const posted = calls.find((c) => /\/prompt$/.test(c.url))!.body as {
+    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
       prompt: Record<string, { inputs: Record<string, unknown> }>;
     };
     const width = posted.prompt["5"]!.inputs["width"] as number;
@@ -334,7 +334,7 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
       capability: "video",
       params: { prompt: "harbour at dawn", durationSec: 3, aspect: "9:16" },
     });
-    const posted = calls.find((c) => /\/prompt$/.test(c.url))!.body as {
+    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
       prompt: Record<string, { inputs: Record<string, unknown> }>;
     };
     assert.equal(posted.prompt["7"]!.inputs["length"], 73);
@@ -361,7 +361,7 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
       ]);
       const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT);
       await client.submit("", { model: "comfyui-draft-video", capability: "video", params: shape.params });
-      const posted = calls.find((c) => /\/prompt$/.test(c.url))!.body as {
+      const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
         prompt: Record<string, { inputs: Record<string, unknown> }>;
       };
       // Not merely accepted — the chosen length actually reaches the latent, rather than
@@ -629,7 +629,7 @@ describe("cancellation targets only the requested prompt (R-17)", () => {
       { match: /\/interrupt$/, status: 200, body: {} },
     ]);
     await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).cancel("", "mine");
-    assert.ok(calls.some((c) => /\/interrupt$/.test(c.url)));
+    assert.ok(calls.some((c) => c.url.endsWith("/interrupt")));
   });
 
   it("a stranger's running prompt on a shared engine is left exactly alone", async () => {
