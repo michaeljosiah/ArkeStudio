@@ -73,6 +73,13 @@ export interface CatalogueEntry {
   spec: ComponentKind;
   /** Nothing is attempted until these are ready — a model needs its runtime. */
   requires?: readonly string[];
+  /**
+   * Peak disk this component needs, where that differs from what it downloads — an archive
+   * that is extracted holds both copies at once before the archive is deleted. The free-disk
+   * guard measures against this; progress still counts the download, so a bar that reaches
+   * 100% still means the download finished. Absent means the two are the same.
+   */
+  installedMb?: number;
   /** Shown on the row when the thing that would *use* this is not in the build yet. */
   caveat?: string;
   /**
@@ -197,8 +204,12 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     displayName: "ComfyUI",
     purpose: "Runs the local image and video recipes — used, never fetched, when you already have one",
     sizeMb: 2034,
+    // ~6 GB extracted, and the archive is still on disk while it extracts, so the peak is both
+    // at once. Almost none of it is ComfyUI: the tree is an embedded Python plus torch and the
+    // CUDA libraries, which is the cost §2.1 says every alternative runtime pays too.
+    installedMb: 8200,
     optional: true,
-    caveat: `v${COMFYUI_VERSION} · NVIDIA build`,
+    caveat: `v${COMFYUI_VERSION} · NVIDIA build · about 6 GB on disk`,
     spec: {
       kind: "tree",
       dir: "comfyui-runtime",

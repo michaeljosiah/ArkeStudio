@@ -257,7 +257,11 @@ export class LocalSetupService {
     if (outstanding.length === 0) return;
 
     // The guard: refuse to start a download this disk cannot hold, with both figures.
-    const neededMb = outstanding.reduce((sum, c) => sum + c.sizeMb, 0);
+    // What it costs on disk, not what it costs to fetch: an extracted component needs room for
+    // the archive and the tree at once. Guarding on the download alone let a disk with 5 GB
+    // free start a 2 GB download that dies part-way through unpacking — the silent mid-way
+    // failure this guard exists to replace with a refusal.
+    const neededMb = outstanding.reduce((sum, c) => sum + (c.entry.installedMb ?? c.sizeMb), 0);
     const headroom = this.opts.headroomMb ?? DEFAULT_HEADROOM_MB;
     if (this.diskFreeMb !== null && this.diskFreeMb < neededMb + headroom) {
       for (const c of outstanding) {

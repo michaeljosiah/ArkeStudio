@@ -155,6 +155,33 @@ describe("the tree kind installs a whole runtime atomically (§2.4, D10)", () =>
     await assert.rejects(stat(join(appRoot, "comfyui-runtime")), "no half-runtime under the real name");
   });
 
+  it("the disk guard measures the extracted size, not the download", async () => {
+    // The archive is ~2 GB and the tree it becomes is ~6 GB, both on disk at once while it
+    // unpacks. Guarding on the download alone let a disk with room for the archive start a
+    // fetch that then died part-way through extraction — precisely the silent mid-way failure
+    // this guard exists to replace with a refusal stated up front.
+    const appRoot = await tempDir("arke-tree-");
+    const events: DomainEvent[] = [];
+    const d = deps();
+    d.diskFreeMb = async () => 5000; // room for the 2 GB download, not for the 8 GB peak
+    const svc = new LocalSetupService(d, (e) => events.push(e), {
+      appRoot,
+      catalogue: [{ ...treeEntry(), sizeMb: 2034, installedMb: 8200 }],
+      throttleMs: 0,
+      headroomMb: 2000,
+    });
+    svc.retry("comfyui-runtime");
+    await svc.run();
+    const status = last(events);
+    assert.equal(status.components[0]!.state, "blocked");
+    // The figure quoted is the extracted peak (8.0 GB), not the 2 GB download — with the
+    // working headroom named separately rather than folded into one number.
+    assert.match(status.components[0]!.detail!, /needs 8\.0 GB plus room to work/);
+    assert.match(status.components[0]!.detail!, /this disk has 4\.9 GB free/);
+    assert.doesNotMatch(status.components[0]!.detail!, /2\.0 GB/);
+    assert.equal(d.calls.filter((c) => c.startsWith("fetch")).length, 0, "nothing was downloaded");
+  });
+
   it("detection always wins: an externally present engine is never fetched (D10)", async () => {
     const appRoot = await tempDir("arke-tree-");
     const events: DomainEvent[] = [];
