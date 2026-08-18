@@ -467,6 +467,7 @@ const state: ClientState = {
   // No conversation open by default: the workspace is loaded by id when one is chosen.
   worldChat: null,
   bench: null,
+  authoringRuns: [],
 };
 
 /** Runtime-validated on import so a drifted fixture fails the suite immediately. */

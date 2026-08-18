@@ -8,6 +8,7 @@ import {
   type ClientMessage,
   type ClientState,
   type DomainEvent,
+  type Frame,
   type Job,
   type ProviderCallRecord,
   type ProviderId,
@@ -45,7 +46,9 @@ export interface GateNotice {
     | "target-retired"
     | "invalid"
     /** #70 SS11.4.1: an in-place edit whose outcome is unknown, so accepting is not offered. */
-    | "draft-unresolved";
+    | "draft-unresolved"
+    /** Issue 239: a turn is writing into the proposal, so it is not settled enough to act on. */
+    | "drafting";
   detail?: string;
   authoritativeSignature?: string;
 }
@@ -412,6 +415,43 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
   }
 }
 
+/**
+ * Fold the snapshot's live authoring runs into what this client has seen (issue 239).
+ *
+ * `authoring` is otherwise built only from events, so a client that reloads while the studio is
+ * drafting comes back with nothing for a run that is still going — and reads that absence as a
+ * settled proposal, offering Accept and Discard over files an agent is still writing.
+ *
+ * Seeding only, deliberately. A proposal the snapshot leaves out is one nothing is writing into
+ * now, but *how* an unseen run ended is not something a snapshot can say; inventing an ending
+ * would be the same false claim in the other direction. Entries already held keep their progress
+ * lines — it is the same run, joined further along — but never an earlier turn's `detail`, which
+ * described that turn and not this one.
+ */
+export function seedLiveRuns(
+  activity: Record<string, AuthoringActivity>,
+  runs: readonly string[],
+): Record<string, AuthoringActivity> {
+  if (runs.length === 0) return activity;
+  const next = { ...activity };
+  for (const proposalId of runs) {
+    const existing = next[proposalId];
+    if (existing?.status === "running") continue;
+    next[proposalId] = { status: "running", lines: existing?.lines ?? [] };
+  }
+  return next;
+}
+
+/**
+ * Test hook: put one frame through the real socket path, so the store's own folding is what is
+ * under test rather than a copy of it. Both halves of a proposal's gate live in here — the
+ * snapshot seeds live runs, the events end them — and neither is reachable from `__applyForTest`,
+ * which folds `ClientState` and never sees `gateNotices` or `authoring`.
+ */
+export function __handleFrameForTest(frame: Frame): void {
+  handleFrame(JSON.stringify(frame));
+}
+
 function handleFrame(json: string): void {
   let frame;
   try {
@@ -423,12 +463,19 @@ function handleFrame(json: string): void {
   }
   lastSeq = frame.seq;
   if (frame.kind === "snapshot") {
-    // Prune notices for proposals the snapshot no longer carries.
+    // Prune notices for proposals the snapshot no longer carries — and "the studio is still
+    // drafting" for any run the snapshot says has since ended. That refusal describes the run
+    // rather than the proposal, so unlike its siblings it must not wait for a resolution to
+    // clear: left standing it contradicts the Accept it is sitting beside (review of PR 371).
     const openIds = new Set((frame.state.world?.proposals ?? []).map((p) => p.proposal.id));
+    const liveRuns = new Set<string>(frame.state.authoringRuns);
     const gateNotices = Object.fromEntries(
-      Object.entries(current.gateNotices).filter(([id]) => openIds.has(id)),
+      Object.entries(current.gateNotices).filter(
+        ([id, notice]) => openIds.has(id) && (notice.reason !== "drafting" || liveRuns.has(id)),
+      ),
     );
     const changedWorld = current.state?.world?.meta.worldId !== frame.state.world?.meta.worldId;
+    const authoring = seedLiveRuns(current.authoring, frame.state.authoringRuns);
     const durableVoiceAudio: StoreState["voiceAudio"] = {};
     for (const job of frame.state.app.jobs) {
       if (job.target.kind !== "voice-preview" || typeof job.params["requestId"] !== "string") continue;
@@ -462,6 +509,7 @@ function handleFrame(json: string): void {
       ...current,
       state: frame.state,
       gateNotices,
+      authoring,
       sheetRefs: changedWorld ? {} : current.sheetRefs,
       voiceCandidates: changedWorld ? {} : current.voiceCandidates,
       voiceCatalogue: changedWorld ? null : current.voiceCatalogue,
@@ -622,6 +670,11 @@ function handleFrame(json: string): void {
           ...(event.detail !== undefined ? { detail: event.detail } : {}),
         },
       };
+      // The run this refusal was about has ended, and the buttons it explains are live again.
+      if (event.status !== "running" && gateNotices[event.proposalId]?.reason === "drafting") {
+        gateNotices = { ...gateNotices };
+        delete gateNotices[event.proposalId];
+      }
     } else if (event.type === "permission.pending") {
       permissions = {
         ...permissions,
@@ -2246,6 +2299,11 @@ export function useWorld(): ClientState["world"] {
  * live beside the coordinator's snapshot — voice candidates, permissions and the like — which a
  * screen reads through useStore rather than useClientState.
  */
+/** Test hook: read the folded store without a React render. */
+export function __stateForTest(): StoreState {
+  return current;
+}
+
 export function __setStateForTest(state: ClientState, extra: Partial<StoreState> = {}): void {
   emitChange({
     connection: "open",

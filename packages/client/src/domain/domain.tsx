@@ -193,7 +193,9 @@ export interface ProposalGateNotice {
     | "target-retired"
     | "invalid"
     /** #70 SS11.4.1: an in-place edit whose outcome is unknown; accepting is not offered. */
-    | "draft-unresolved";
+    | "draft-unresolved"
+    /** Issue 239: a turn is writing into the proposal, so it is not settled enough to act on. */
+    | "drafting";
   detail?: string;
   authoritativeSignature?: string;
 }
@@ -207,6 +209,7 @@ const NOTICE_TITLES: Record<ProposalGateNotice["reason"], string> = {
   "target-retired": "The target was retired",
   invalid: "A field is over its limit",
   "draft-unresolved": "An edit to this proposal did not finish",
+  drafting: "The studio is still drafting",
 };
 
 export function ProposalPanel({

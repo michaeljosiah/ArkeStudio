@@ -54,6 +54,9 @@ export class ReadModel {
       world: null,
       worldChat: null,
       bench: null,
+      // Always empty here, and filled on the way out by the coordinator, which is the only thing
+      // holding the running sessions (issue 239).
+      authoringRuns: [],
     };
   }
 

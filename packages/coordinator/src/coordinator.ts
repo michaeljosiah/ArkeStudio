@@ -806,7 +806,42 @@ export class Coordinator {
   private readonly pendingVoiceReads = new Map<string, { token: string; input: EnqueueInput }>();
 
   getState(): ClientState {
-    return this.readModel.getState();
+    const state = this.readModel.getState();
+    // Asked of the service on the way out rather than folded in, because a run starts and ends
+    // without the world changing, and the world is re-scanned for reasons of its own — anything
+    // stored would be stale by the next rescan (issue 239). Allocation-free when nothing is
+    // running, which is nearly always.
+    const authoringRuns = this.authoring?.liveRuns() ?? [];
+    return authoringRuns.length === 0 ? state : { ...state, authoringRuns };
+  }
+
+  /**
+   * Refuse an action that writes into a proposal while an authoring turn is still writing to it
+   * (issue 239). Answers true when it has refused, so the caller returns.
+   *
+   * Every handler that touches the proposal's files goes through here — accept, discard, rebase,
+   * an in-place field edit, a conflict choice — because they all interleave with the agent, not
+   * just the two that settle it. `proposal-mark-seen` deliberately does not: it records that a
+   * person looked, touches no file the agent is holding, and refusing it would be noise.
+   *
+   * The refusal is a `proposal.blocked` rather than silence, because a client that got here
+   * believed the proposal was settled and needs to be told why nothing happened. It is followed
+   * by a snapshot: the client only offered the action because its view of the run was stale, and
+   * a reason without the state that closes the gate leaves it free to ask again (review of
+   * PR 371). `getState()` reads the live runs at broadcast time, so this needs no rescan.
+   */
+  private refuseWhileDrafting(worldId: string, proposalId: string): boolean {
+    if (!this.authoring?.isRunning(proposalId)) return false;
+    this.emit({
+      at: new Date().toISOString(),
+      type: "proposal.blocked",
+      worldId,
+      proposalId,
+      reason: "drafting",
+      detail: "the studio is still writing into this proposal — cancel the run first",
+    });
+    this.transport.broadcastSnapshot();
+    return true;
   }
 
   private trackBackground<T>(work: Promise<T>): void {
@@ -1815,6 +1850,10 @@ export class Coordinator {
       case "proposal-accept": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
+        // A proposal being written into is not a proposal to commit (issue 239). The client hides
+        // Accept while a run is live, but it learns that from a snapshot it may have taken a
+        // moment ago, and the run is here — so the refusal is made where the answer is known.
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
         // Read before accepting: acceptance rewrites the manifest, and the origin is needed to
         // tell the conversation what became of its propositions.
         const acceptedFrom = await gate.readManifest(msg.proposalId).catch(() => null);
@@ -1885,6 +1924,9 @@ export class Coordinator {
       case "proposal-discard": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
+        // Discarding mid-run would delete the directory the agent is writing into (issue 239).
+        // Cancel is the way to stop a run, and it leaves the proposal to be discarded after.
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
         const discardedFrom = await gate.readManifest(msg.proposalId).catch(() => null);
         try {
           await gate.discard(msg.proposalId);
@@ -1909,6 +1951,8 @@ export class Coordinator {
       case "proposal-rebase": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
+        // Rebasing rewrites the captured base under files the agent has open (issue 239).
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
         await gate.rebase(msg.proposalId).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -1916,6 +1960,8 @@ export class Coordinator {
       case "proposal-resolve-conflict": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
+        // A choice written into a file the agent is still writing is a choice about to be lost.
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
         await gate.resolveConflict(msg.proposalId, msg.path, msg.field, msg.choice).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -1930,6 +1976,9 @@ export class Coordinator {
       case "proposal-update-field": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
+        // The journal's revision check cannot see the agent, which does not write through it —
+        // so an edit landing mid-run is the interleaving it exists to refuse, unnoticed.
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
         const outcome = await gate
           .updateField({
             proposalId: msg.proposalId,

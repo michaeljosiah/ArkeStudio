@@ -172,6 +172,12 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
          * proposal's files now say is unknown. Accepting is refused rather than guessed.
          */
         "draft-unresolved",
+        /**
+         * An authoring turn is writing into this proposal now, so its files are mid-flight
+         * (issue 239). Accepting would commit half a sheet and discarding would take the
+         * working directory out from under the agent — both are refused until the run ends.
+         */
+        "drafting",
       ]),
       detail: z.string().optional(),
       /** On needs-reconfirm: the authoritative set and its signature to echo back (R-10). */

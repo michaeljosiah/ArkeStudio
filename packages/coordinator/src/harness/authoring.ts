@@ -80,6 +80,17 @@ export class AuthoringService {
     return this.runs.has(proposalId);
   }
 
+  /**
+   * Every proposal with a turn in flight, for the snapshot (issue 239).
+   *
+   * The runs map is the only thing that knows this: the proposal directory looks the same
+   * whether an agent is filling it or abandoned it, so a client that reloads mid-draft has no
+   * way to learn it from the world.
+   */
+  liveRuns(): string[] {
+    return [...this.runs.keys()];
+  }
+
   /** The proposal settled (accepted or discarded) — its conversation is over. */
   release(proposalId: string): void {
     this.sessions.delete(proposalId);
