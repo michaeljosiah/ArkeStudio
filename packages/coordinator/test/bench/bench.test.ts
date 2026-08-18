@@ -5,6 +5,7 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import {
   benchSourceKey,
+  MUSIC_DURATION_SEC,
   newId,
   type BenchTake,
   type ManifestModel,
@@ -15,6 +16,7 @@ import { AppSettingsFile } from "../../src/app-settings.js";
 import { WorldStore } from "../../src/world/store.js";
 import { fileGeneratedArtifact } from "../../src/artifacts/filing.js";
 import { BenchStore, sessionDir, sessionMediaDir } from "../../src/bench/store.js";
+import { lyricistBrief } from "../../src/bench/lyricist.js";
 import {
   addBenchReference,
   discoverBenchSessions,
@@ -1095,5 +1097,115 @@ describe("a lane the mode has no use for rides along (found live, 2026-08-17)", 
       assert.ok(!("references" in plan.inputs[0]!.params), "no references on the wire");
       assert.equal(plan.reserved[0]!.request.references.length, 0, "and none recorded on the take");
     }
+  });
+});
+
+describe("making a song on the bench (design turn 73)", () => {
+  const MUSIC: ManifestModel = {
+    id: "test-music",
+    provider: "fal",
+    capability: "music",
+    displayName: "Test Music",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: { durations: { "30": "30", "60": "60" }, durationWire: "number", maxDurationSec: 300 },
+    pricing: { kind: "perSecond", microUsdPerSecond: 2000 },
+  };
+  const MANIFEST_M: ModelManifest = { manifestVersion: 1, generated: "2026-08-18", models: [IMAGE_MODEL, MUSIC] };
+  const STYLE = "Slow sea shanty · close harmony · hand drum · minor key";
+  const LYRICS = "[verse]\nThe tide-clock kept our hours and nobody wound it.";
+
+  async function planMusic(params: Record<string, unknown>, brief = STYLE) {
+    const { dir, store } = await open();
+    const opened = await freshBench(dir);
+    await opened.store.append(
+      {
+        type: "composer-set",
+        mode: "music",
+        provider: MUSIC.provider,
+        model: MUSIC.id,
+        params: { kind: "music", count: 1, lyrics: LYRICS, ...params },
+        brief,
+      },
+      { at: CLOCK() },
+    );
+    return planBenchDispatch((await opened.store.fold())!, store.getBundle(), MANIFEST_M, {
+      worldId: store.worldId,
+      requestId: "m1",
+      at: CLOCK(),
+    });
+  }
+
+  it("sends the style as the prompt and the lyrics as their own field", async () => {
+    const plan = await planMusic({});
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (plan.ok) {
+      const input = plan.inputs[0]!;
+      assert.equal(input.capability, "music");
+      assert.equal(input.params["prompt"], STYLE, "the style is the description, so it is the prompt");
+      assert.equal(input.params["lyrics"], LYRICS, "the words that get sung ride as themselves");
+      assert.ok(!("text" in input.params), "a song is not a spoken line");
+    }
+  });
+
+  it("asks at the route's own default length, and prices that length exactly", async () => {
+    const plan = await planMusic({});
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (plan.ok) {
+      // Sent, not omitted: a request that runs at the provider's default while the estimate was
+      // computed from a number is the bug `durationParam` refuses.
+      assert.equal(plan.inputs[0]!.params["durationSec"], MUSIC_DURATION_SEC);
+      // 60s at 2000 microUSD/s. A ceiling, because the route stops when the song is done.
+      assert.equal(plan.inputs[0]!.estimatedMicroUsd, MUSIC_DURATION_SEC * 2000);
+      assert.equal(plan.inputs[0]!.estimatedMicroUsd, 120_000, "the $0.12 design turn 73 draws");
+    }
+  });
+
+  it("refuses a song with no words, naming the half that is missing", async () => {
+    const refused = await planMusic({ lyrics: "   " });
+    assert.equal(refused.ok, false);
+    if (!refused.ok) assert.match(refused.reason, /no lyrics yet/);
+  });
+
+  it("still refuses when the style is the empty half", async () => {
+    const refused = await planMusic({}, "  ");
+    assert.equal(refused.ok, false);
+    if (!refused.ok) assert.match(refused.reason, /empty brief/);
+  });
+
+  it("asks for as many songs as the count, each its own take", async () => {
+    const plan = await planMusic({ count: 3 });
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (plan.ok) {
+      assert.equal(plan.inputs.length, 3);
+      assert.equal(plan.reserved.length, 3);
+      for (const input of plan.inputs) assert.equal(input.params["lyrics"], LYRICS);
+    }
+  });
+});
+
+describe("the lyrics helper drafts, and only drafts (design turn 73)", () => {
+  it("carries the description and the style, and says which is which", () => {
+    const brief = lyricistBrief({ description: "A farewell on the harbour wall", style: "Slow sea shanty" });
+    assert.match(brief, /A farewell on the harbour wall/);
+    assert.match(brief, /Slow sea shanty/);
+    assert.match(brief, /whole of what it may say/, "the description bounds the content");
+    assert.match(brief, /\{"lyrics": "\.\.\."\}/, "answers under its own key, not the enhancer's");
+  });
+
+  it("says so plainly when no style has been written yet", () => {
+    const brief = lyricistBrief({ description: "A farewell on the harbour wall" });
+    assert.match(brief, /No style has been written yet/);
+    assert.ok(!brief.includes("undefined"), "an absent style is a sentence, not the word undefined");
+  });
+
+  it("treats a blank style as no style at all", () => {
+    assert.match(lyricistBrief({ description: "x", style: "   " }), /No style has been written yet/);
+  });
+
+  it("does not carry the world's canon into a song", () => {
+    // A rewritten image prompt describes what the world established; a verse ASSERTS. Canon
+    // reaches the world through the accept gate, and a song is not that gate.
+    const brief = lyricistBrief({ description: "A farewell", style: "shanty" });
+    assert.match(brief, /Invent nothing the description did not state/);
   });
 });

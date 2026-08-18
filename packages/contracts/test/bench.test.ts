@@ -5,6 +5,7 @@ import {
   AppSettingsSchema,
   BenchPresetSchema,
   BenchRequestSnapshotSchema,
+  MUSIC_DURATION_SEC,
   BenchSessionSchema,
   benchSessionSummary,
   BenchReferenceSourceSchema,
@@ -581,5 +582,57 @@ describe("keyframeAddable — reachability, not the next count's legality", () =
     assert.equal(keyframeAddable(gapped, 1), true); // 2 is illegal, but 3 is reachable
     assert.equal(keyframeAddable(gapped, 2), true); // → 3, sequence
     assert.equal(keyframeAddable(gapped, 3), false); // the ceiling
+  });
+});
+
+describe("a song's request snapshot (design turn 73)", () => {
+  const base = {
+    mode: "music" as const,
+    brief: "Slow sea shanty · close harmony",
+    references: [],
+    provider: "fal",
+    model: "minimax-music-3",
+    params: { kind: "music" as const, lyrics: "[verse]\nSalt in the rope", count: 1 },
+    keyframes: [],
+  };
+
+  it("carries a style and its words, and asks for no length", () => {
+    const snapshot = BenchRequestSnapshotSchema.parse(base);
+    assert.equal(snapshot.params.kind, "music");
+    if (snapshot.params.kind === "music") {
+      assert.equal(snapshot.params.lyrics, "[verse]\nSalt in the rope", "the newlines are the meter — they survive");
+      assert.ok(!("durationSec" in snapshot.params), "there is no length control; the route's default is used");
+    }
+  });
+
+  it("refuses a reference riding a song, because the row declares it takes none", () => {
+    // Refused at the snapshot rather than dropped at dispatch: a reference that attaches, is
+    // priced and then silently ignored is worse than one that was never allowed on.
+    const withReference = {
+      ...base,
+      references: [
+        {
+          token: "Image 1",
+          kind: "image" as const,
+          source: {
+            source: "artifact" as const,
+            artifactId: "ar_01J8F3K2QW9VZX4N7M0RTYB6HD",
+            hash: `sha256:${"a".repeat(64)}`,
+          },
+        },
+      ],
+    };
+    const result = BenchRequestSnapshotSchema.safeParse(withReference);
+    assert.equal(result.success, false);
+    if (!result.success) assert.match(JSON.stringify(result.error.issues), /takes no references/);
+  });
+
+  it("refuses controls that belong to another mode", () => {
+    const mismatched = { ...base, params: { kind: "image" as const, count: 1 } };
+    assert.equal(BenchRequestSnapshotSchema.safeParse(mismatched).success, false);
+  });
+
+  it("prices sixty seconds at the shipped rate, which is what the screens draw", () => {
+    assert.equal(MUSIC_DURATION_SEC, 60);
   });
 });

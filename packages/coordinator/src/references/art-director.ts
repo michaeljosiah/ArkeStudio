@@ -45,14 +45,21 @@ export function makeArtDirector(
   scratchRoot: string,
   options: {
     /** Which roster agent answers. The default is the key-art writer this file was born for. */
-    agent?: "art-director" | "prompt-enhancer";
+    agent?: "art-director" | "prompt-enhancer" | "lyricist";
+    /**
+     * The JSON key the answer arrives under. Every agent here replies with one string in one
+     * object; they disagree only about what to call it, and a lyricist answering {"prompt":…}
+     * would be describing a song rather than writing one.
+     */
+    answerKey?: "prompt" | "lyrics";
     /** The longest answer accepted. Key art keeps its ~60-word posture; the enhancer's
         ceiling is the chosen model's own published cap, so a long valid rewrite is never
         thrown away as "no answer". */
     maxChars?: number;
   } = {},
 ): (brief: string) => Promise<string | null> {
-  const PromptSchema = z.object({ prompt: z.string().min(1).max(options.maxChars ?? 2000) });
+  const key = options.answerKey ?? "prompt";
+  const PromptSchema = z.object({ [key]: z.string().min(1).max(options.maxChars ?? 2000) });
   return async (brief) => {
     const sandbox = join(scratchRoot, `art-${Date.now().toString(36)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
@@ -88,7 +95,7 @@ export function makeArtDirector(
     // All of those are the same answer here: no prompt, use the plain assembly instead.
     try {
       const parsed = PromptSchema.safeParse(extractJson(finalText));
-      return parsed.success ? parsed.data.prompt.trim() : null;
+      return parsed.success ? String(parsed.data[key]).trim() : null;
     } catch {
       return null;
     }

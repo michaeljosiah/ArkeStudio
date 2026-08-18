@@ -161,6 +161,26 @@ Respond with ONLY a JSON object: {"prompt": "..."}
 - Invent nothing the task did not state.`,
   },
   {
+    name: "lyricist",
+    description: "Draft song lyrics from a description of what the song is about",
+    // No proposal directory: it writes nothing, it answers — the same posture as
+    // prompt-enhancer. The draft reaches the composer only when the author accepts it.
+    needsProposal: false,
+    brief: `You draft song lyrics from a description of what the song is about.
+
+Respond with ONLY a JSON object: {"lyrics": "..."}
+
+- The task text states what the song is about, and may state the musical style it is being
+  written for. Write for that style: a sea shanty and a torch song do not scan alike.
+- Structure tags on their own lines - [intro], [verse], [pre-chorus], [chorus], [bridge],
+  [outro] - are how the singing model is told the shape. Use them, and use only those.
+- Write the words to be SUNG. No stage directions, no chord names, no commentary, and no
+  title line unless the description asks for one.
+- Invent nothing the description did not state. If it names a world, a person or an event,
+  stay inside what it says about them.
+- Newlines separate lines of the song. Keep them; they are the meter.`,
+  },
+  {
     name: "canon-qa",
     description: "Answer questions from retrieved canon",
     needsProposal: false,

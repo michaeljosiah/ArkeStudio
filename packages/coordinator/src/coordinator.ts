@@ -133,6 +133,7 @@ import {
 } from "./references/generate.js";
 import { makeArtDirector, worldBrief } from "./references/art-director.js";
 import { enhancerBrief } from "./bench/enhancer.js";
+import { LYRICS_MAX_CHARS, lyricistBrief } from "./bench/lyricist.js";
 import {
   KEY_ART_EXTENSIONS,
   WORLD_IMAGE_DIR,
@@ -3838,6 +3839,40 @@ export class Coordinator {
           worldId: msg.worldId,
         });
         return answer(prompt, prompt === null ? "the art director had no answer this time" : undefined);
+      }
+      case "bench-draft-lyrics": {
+        // The same one-turn harness call the enhancer makes, and the same discipline: the
+        // answer is an EVENT, because a draft reaches the song only when the author presses
+        // Use these words (design turn 73). Nothing here writes into the composer.
+        const answer = (lyrics: string | null, reason?: string) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "bench.lyrics-drafted",
+            worldId: msg.worldId,
+            sessionId: msg.sessionId,
+            requestId: msg.requestId,
+            lyrics,
+            ...(reason !== undefined ? { reason } : {}),
+          });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
+        if (!this.opts.adapter?.readiness().ready || !this.buildConfig) {
+          return answer(null, "the writing harness is not running");
+        }
+        const lyricist = makeArtDirector(
+          this.opts.adapter,
+          this.buildConfig,
+          this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
+          { agent: "lyricist", answerKey: "lyrics", maxChars: LYRICS_MAX_CHARS },
+        );
+        const drafted = await lyricist(
+          lyricistBrief({ description: msg.description, ...(msg.style !== undefined ? { style: msg.style } : {}) }),
+        ).catch(() => null);
+        void this.appLog?.append({
+          kind: drafted ? "bench.lyrics-drafted" : "bench.lyrics-unavailable",
+          worldId: msg.worldId,
+        });
+        return answer(drafted, drafted === null ? "the lyricist had no answer this time" : undefined);
       }
       case "bench-preset-save": {
         if (!this.appSettings || !this.opts.manifest) return;
