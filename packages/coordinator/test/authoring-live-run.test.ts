@@ -194,6 +194,7 @@ describe("a proposal being written into, seen from a client that reloaded (issue
       );
 
       // And the coordinator refuses to settle it, whatever a client believes. Accept first.
+      const beforeAccept = reloaded.frames.length;
       reloaded.send({ kind: "proposal-accept", worldId: WORLD_ID, proposalId });
       const blockedAccept = await reloaded.until(
         (f) => f.kind === "event" && f.event.type === "proposal.blocked" && f.event.proposalId === proposalId,
@@ -203,6 +204,18 @@ describe("a proposal being written into, seen from a client that reloaded (issue
       if (blockedAccept.kind !== "event" || blockedAccept.event.type !== "proposal.blocked") return;
       assert.equal(blockedAccept.event.reason, "drafting");
       assert.match(blockedAccept.event.detail ?? "", /still writing/);
+
+      // A reason alone would leave the client believing it can try again — only a stale view of
+      // the run got it here. The refusal is followed by a snapshot it did not ask for, carrying
+      // the run it did not know about (review of PR 371).
+      const corrected = await reloaded.until(
+        (f) => f.kind === "snapshot",
+        "a snapshot correcting the client that was refused",
+        beforeAccept,
+      );
+      assert.equal(corrected.kind, "snapshot");
+      if (corrected.kind !== "snapshot") return;
+      assert.deepEqual(corrected.state.authoringRuns, [proposalId], "and it names the live run");
 
       // Then discard, which would have taken the working directory out from under the agent.
       const beforeDiscard = reloaded.frames.length;
@@ -215,6 +228,29 @@ describe("a proposal being written into, seen from a client that reloaded (issue
       assert.equal(blockedDiscard.kind, "event");
       if (blockedDiscard.kind !== "event" || blockedDiscard.event.type !== "proposal.blocked") return;
       assert.equal(blockedDiscard.event.reason, "drafting");
+
+      // Settling is not the only way to write into a proposal. An in-place field edit goes into
+      // the same files, and its revision check cannot see the agent, which does not write
+      // through the journal — so it is refused on the same grounds (review of PR 371).
+      const beforeEdit = reloaded.frames.length;
+      reloaded.send({
+        kind: "proposal-update-field",
+        worldId: WORLD_ID,
+        requestId: "01J8E10000000000000000ED11",
+        proposalId,
+        path: MAREN,
+        field: "appearance",
+        value: "typed while the agent was writing",
+        expectedDraftRevision: 1,
+      });
+      const blockedEdit = await reloaded.until(
+        (f) => f.kind === "event" && f.event.type === "proposal.blocked",
+        "the refusal to edit a field",
+        beforeEdit,
+      );
+      assert.equal(blockedEdit.kind, "event");
+      if (blockedEdit.kind !== "event" || blockedEdit.event.type !== "proposal.blocked") return;
+      assert.equal(blockedEdit.event.reason, "drafting");
 
       // Nothing settled: the proposal is still staged, and still being written into.
       const beforeHello = reloaded.frames.length;

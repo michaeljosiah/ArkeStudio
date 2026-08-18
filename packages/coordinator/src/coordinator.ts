@@ -816,11 +816,19 @@ export class Coordinator {
   }
 
   /**
-   * Refuse a settling action while an authoring turn is still writing (issue 239).
+   * Refuse an action that writes into a proposal while an authoring turn is still writing to it
+   * (issue 239). Answers true when it has refused, so the caller returns.
    *
-   * Answers true when it has refused, so the caller returns. The refusal is a `proposal.blocked`
-   * rather than silence, because a client that got here believed the proposal was settled and
-   * needs to be told why nothing happened.
+   * Every handler that touches the proposal's files goes through here — accept, discard, rebase,
+   * an in-place field edit, a conflict choice — because they all interleave with the agent, not
+   * just the two that settle it. `proposal-mark-seen` deliberately does not: it records that a
+   * person looked, touches no file the agent is holding, and refusing it would be noise.
+   *
+   * The refusal is a `proposal.blocked` rather than silence, because a client that got here
+   * believed the proposal was settled and needs to be told why nothing happened. It is followed
+   * by a snapshot: the client only offered the action because its view of the run was stale, and
+   * a reason without the state that closes the gate leaves it free to ask again (review of
+   * PR 371). `getState()` reads the live runs at broadcast time, so this needs no rescan.
    */
   private refuseWhileDrafting(worldId: string, proposalId: string): boolean {
     if (!this.authoring?.isRunning(proposalId)) return false;
@@ -832,6 +840,7 @@ export class Coordinator {
       reason: "drafting",
       detail: "the studio is still writing into this proposal — cancel the run first",
     });
+    this.transport.broadcastSnapshot();
     return true;
   }
 
@@ -1942,6 +1951,8 @@ export class Coordinator {
       case "proposal-rebase": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
+        // Rebasing rewrites the captured base under files the agent has open (issue 239).
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
         await gate.rebase(msg.proposalId).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -1949,6 +1960,8 @@ export class Coordinator {
       case "proposal-resolve-conflict": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
+        // A choice written into a file the agent is still writing is a choice about to be lost.
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
         await gate.resolveConflict(msg.proposalId, msg.path, msg.field, msg.choice).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -1963,6 +1976,9 @@ export class Coordinator {
       case "proposal-update-field": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
+        // The journal's revision check cannot see the agent, which does not write through it —
+        // so an edit landing mid-run is the interleaving it exists to refuse, unnoticed.
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
         const outcome = await gate
           .updateField({
             proposalId: msg.proposalId,

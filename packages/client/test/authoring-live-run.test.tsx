@@ -3,7 +3,13 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import type { ClientState, StagedProposal } from "@arke-studio/contracts";
 import { ConnectedProposalPanel } from "../src/domain/connected.js";
-import { __setStateForTest, seedLiveRuns, type AuthoringActivity } from "../src/lib/store.js";
+import {
+  __handleFrameForTest,
+  __setStateForTest,
+  __stateForTest,
+  seedLiveRuns,
+  type AuthoringActivity,
+} from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -100,5 +106,66 @@ describe("the gate over a proposal being written into (issue 239)", () => {
     const at = html.indexOf(">Accept<");
     assert.ok(at > 0, "Accept is on the panel");
     assert.doesNotMatch(html.slice(0, at).split("<button").pop()!, /disabled/, "and it is live");
+  });
+});
+
+/**
+ * The refusal describes the run, not the proposal — so it has to leave when the run does.
+ *
+ * Every other gate notice is sticky until the proposal resolves, which is right for the things
+ * they say: a stale base, a retired target, a field over its limit. "The studio is still
+ * drafting" is the first that is about something transient, and left to the same rule it outlives
+ * what it is about, sitting beside the Accept button it was explaining the absence of.
+ */
+describe("a drafting refusal outlives nothing (review of PR 371)", () => {
+  const notice = { drafting: { reason: "drafting" as const, detail: "cancel the run first" } };
+
+  it("clears when the run ends, without waiting for a snapshot", () => {
+    __setStateForTest(worldWith([staged()]), {
+      authoring: { [PROPOSAL]: { status: "running", lines: [] } },
+      gateNotices: { [PROPOSAL]: notice.drafting },
+    });
+    __handleFrameForTest({
+      kind: "event",
+      seq: 2,
+      event: {
+        at: "2026-08-10T12:01:00.000Z",
+        type: "authoring.status",
+        worldId: FIXTURE_STATE.world!.meta.worldId,
+        proposalId: PROPOSAL,
+        status: "completed",
+      },
+    });
+
+    assert.equal(__stateForTest().gateNotices[PROPOSAL], undefined, "the refusal went with the run");
+    assert.equal(__stateForTest().authoring[PROPOSAL]?.status, "completed");
+
+    // And the panel it was sitting on says nothing about drafting any more.
+    const html = renderToString(<ConnectedProposalPanel staged={staged()} />);
+    assert.doesNotMatch(html, /still drafting/);
+  });
+
+  it("clears on a snapshot that no longer names the run", () => {
+    __setStateForTest(worldWith([staged()]), { gateNotices: { [PROPOSAL]: notice.drafting } });
+    __handleFrameForTest({ kind: "snapshot", seq: 3, state: worldWith([staged()]) });
+    assert.equal(__stateForTest().gateNotices[PROPOSAL], undefined);
+  });
+
+  it("stands while the snapshot still names the run", () => {
+    __setStateForTest(worldWith([staged()]), { gateNotices: { [PROPOSAL]: notice.drafting } });
+    __handleFrameForTest({
+      kind: "snapshot",
+      seq: 4,
+      state: { ...worldWith([staged()]), authoringRuns: [PROPOSAL] },
+    });
+    assert.equal(__stateForTest().gateNotices[PROPOSAL]?.reason, "drafting", "the run is still going");
+  });
+
+  it("leaves every other reason alone — those are about the proposal", () => {
+    __setStateForTest(worldWith([staged()]), {
+      gateNotices: { [PROPOSAL]: { reason: "stale", detail: "moved since drafting" } },
+    });
+    __handleFrameForTest({ kind: "snapshot", seq: 5, state: worldWith([staged()]) });
+    assert.equal(__stateForTest().gateNotices[PROPOSAL]?.reason, "stale");
   });
 });

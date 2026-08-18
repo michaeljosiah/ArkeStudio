@@ -8,6 +8,7 @@ import {
   type ClientMessage,
   type ClientState,
   type DomainEvent,
+  type Frame,
   type Job,
   type ProviderCallRecord,
   type ProviderId,
@@ -441,6 +442,16 @@ export function seedLiveRuns(
   return next;
 }
 
+/**
+ * Test hook: put one frame through the real socket path, so the store's own folding is what is
+ * under test rather than a copy of it. Both halves of a proposal's gate live in here — the
+ * snapshot seeds live runs, the events end them — and neither is reachable from `__applyForTest`,
+ * which folds `ClientState` and never sees `gateNotices` or `authoring`.
+ */
+export function __handleFrameForTest(frame: Frame): void {
+  handleFrame(JSON.stringify(frame));
+}
+
 function handleFrame(json: string): void {
   let frame;
   try {
@@ -452,10 +463,16 @@ function handleFrame(json: string): void {
   }
   lastSeq = frame.seq;
   if (frame.kind === "snapshot") {
-    // Prune notices for proposals the snapshot no longer carries.
+    // Prune notices for proposals the snapshot no longer carries — and "the studio is still
+    // drafting" for any run the snapshot says has since ended. That refusal describes the run
+    // rather than the proposal, so unlike its siblings it must not wait for a resolution to
+    // clear: left standing it contradicts the Accept it is sitting beside (review of PR 371).
     const openIds = new Set((frame.state.world?.proposals ?? []).map((p) => p.proposal.id));
+    const liveRuns = new Set<string>(frame.state.authoringRuns);
     const gateNotices = Object.fromEntries(
-      Object.entries(current.gateNotices).filter(([id]) => openIds.has(id)),
+      Object.entries(current.gateNotices).filter(
+        ([id, notice]) => openIds.has(id) && (notice.reason !== "drafting" || liveRuns.has(id)),
+      ),
     );
     const changedWorld = current.state?.world?.meta.worldId !== frame.state.world?.meta.worldId;
     const authoring = seedLiveRuns(current.authoring, frame.state.authoringRuns);
@@ -653,6 +670,11 @@ function handleFrame(json: string): void {
           ...(event.detail !== undefined ? { detail: event.detail } : {}),
         },
       };
+      // The run this refusal was about has ended, and the buttons it explains are live again.
+      if (event.status !== "running" && gateNotices[event.proposalId]?.reason === "drafting") {
+        gateNotices = { ...gateNotices };
+        delete gateNotices[event.proposalId];
+      }
     } else if (event.type === "permission.pending") {
       permissions = {
         ...permissions,
@@ -2277,6 +2299,11 @@ export function useWorld(): ClientState["world"] {
  * live beside the coordinator's snapshot — voice candidates, permissions and the like — which a
  * screen reads through useStore rather than useClientState.
  */
+/** Test hook: read the folded store without a React render. */
+export function __stateForTest(): StoreState {
+  return current;
+}
+
 export function __setStateForTest(state: ClientState, extra: Partial<StoreState> = {}): void {
   emitChange({
     connection: "open",
