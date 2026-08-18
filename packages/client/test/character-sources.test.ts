@@ -56,7 +56,7 @@ describe("a character's pictures in the picker", () => {
   it("names one file once, however many ways the kit points at it", () => {
     // head-front is both the anchor and a tile; two rows for one picture would let the same
     // bytes ride under two tokens.
-    const heads = rows.filter((r) => /head-front\.png$/.test((r.pick as { path: string }).path));
+    const heads = rows.filter((r) => (r.pick as { path: string }).path.endsWith("head-front.png"));
     assert.equal(heads.length, 1);
   });
 
