@@ -4,7 +4,8 @@ import type { WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/cont
 import { Composer } from "../components/composer.js";
 import { Working } from "../components/working.js";
 import { EmptyState } from "../components/layout.js";
-import { Button, cx } from "../components/ui.js";
+import { Button, IconButton, cx } from "../components/ui.js";
+import { ChevronDown, ChevronRight, More, PanelLeft, Plus } from "../components/icons.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import {
   archiveWorldChat,
@@ -31,23 +32,24 @@ import {
 } from "../lib/store.js";
 
 /**
- * World Chat (#70 phase 3): talking about a world, and seeing what was heard.
+ * World Chat (#70 phase 3, restaged by design 71): talking about a world, and seeing what was
+ * heard.
  *
  * The design binds this to Genesis — the same split, the same composer, the same rail — so the
  * layout classes here are `fy-gate`'s, not new ones. That is not only tidiness: a creator who has
  * made a world already knows this shape, and a second nearly-identical split would teach them
  * that similar-looking screens behave differently.
  *
- * The rule that shapes everything used to be that the conversation decides nothing: a point
- * carried no control, and deciding happened twice — at wrap-up, and again on the approvals
- * screen. Both decisions were about everything at once, and that is what it cost. A conversation
- * produces a dozen points of which two are wrong, and saying so meant carrying all twelve to
- * another screen to reject two there.
+ * What 71 changed is the way in. There used to be a list screen in front of all of this, and
+ * every visit paid for it: arriving at World Chat meant choosing which conversation to read
+ * before saying anything. The address is now a conversation nobody has said anything in yet, and
+ * the conversations already had are a rail down the left that can be put away. One screen draws
+ * both — `/chat` and `/chat/:conversationId` differ by what is in the middle, not by shape.
  *
- * The rule now is that a decision belongs where the point is. Save writes that line to the world
- * and Reject drops it, both from the rail, and Accept all writes what is left and closes the
- * conversation. Talking still changes nothing — it is how a point that is nearly right gets
- * corrected, and the composer still says so.
+ * The rule that shapes the rail is that a decision belongs where the point is. Save writes that
+ * line to the world and Reject drops it, both from the rail on the right, and Accept all writes
+ * what is left and closes the conversation. Talking still changes nothing — it is how a point
+ * that is nearly right gets corrected, and the composer still says so.
  *
  * What did not change is who decides. Saving goes through the accept gate exactly as a reviewed
  * proposal does, so the history, the ripples and the change log are the same; the review is the
@@ -73,11 +75,11 @@ export function byPendingConsequence(a: WorldChatSummary, b: WorldChatSummary): 
 }
 
 /**
- * Why Delete is unavailable, in the length a row has room for (R-50).
+ * Why Delete is unavailable, in the length the menu has room for (R-50).
  *
- * Said in text beside the disabled control rather than in a tooltip. A reason only a mouse can
- * reach is not a reason, and this is the one place in the feature where the app says no to
- * something the person plainly meant.
+ * Said in text beside the disabled item rather than in a tooltip. A reason only a mouse can reach
+ * is not a reason, and this is the one place in the feature where the app says no to something
+ * the person plainly meant.
  */
 const WHY_NOT_DELETABLE: Record<WorldChatDeletionBlock, string> = {
   "active-run": "a turn is still running",
@@ -85,206 +87,265 @@ const WHY_NOT_DELETABLE: Record<WorldChatDeletionBlock, string> = {
   "unresolved-proposals": "its proposals are still waiting",
 };
 
-function whatItIsWaitingOn(row: WorldChatSummary): string {
+/**
+ * The second line on a row, or nothing at all.
+ *
+ * The list this replaces said something under every title — `open · 4 points to decide`,
+ * `closed · everything decided`. In a rail that is scanned rather than read, that is a permanent
+ * second line spent on the state a person is not looking for. What survives is the one thing a
+ * conversation can be owed: an answer.
+ */
+function whatItIsWaitingOn(row: WorldChatSummary): string | null {
   /*
-   * A proposal from a conversation is now the exception rather than the rule: what is saved from
-   * the rail is written, and only a change carrying a question a press cannot answer waits on the
-   * approvals screen. So it is worth saying which it is, rather than counting proposals as though
-   * every conversation still produced a pile of them.
+   * "Waiting on you", not "a question": most are questions a press could not answer, but one
+   * left by an accept that came back stale or unconfirmed is not — it wants a rebase or a look,
+   * and sending somebody hunting for a question that does not exist is worse than saying less.
    */
-  if (row.openProposalCount > 0) {
-    /*
-     * "Waiting on you", not "a question": most are questions a press could not answer, but one
-     * left by an accept that came back stale or unconfirmed is not — it wants a rebase or a look,
-     * and sending somebody hunting for a question that does not exist is worse than saying less.
-     */
-    return `${row.openProposalCount} waiting on you`;
-  }
-  if (row.status === "closed") return "closed · everything decided";
-  if (row.status === "archived") return "archived";
-  if (row.pointCount === 0) return "open · nothing understood yet";
-  return `open · ${row.pointCount} point${row.pointCount === 1 ? "" : "s"} to decide`;
+  if (row.openProposalCount > 0) return `${row.openProposalCount} waiting on you`;
+  return null;
+}
+
+/** What the menu on a row was opened for, and where to draw it. */
+interface RowMenu {
+  id: string;
+  x: number;
+  y: number;
+  confirming: boolean;
 }
 
 /**
- * One row, and the two things that can be done to it from here.
+ * One row in the history rail: a title, what it is owed, and the way to everything else.
  *
- * Archive sits beside Delete rather than behind it because Archive is the answer whenever Delete
- * is refused — and Delete is refused for as long as a conversation's proposals are undecided,
- * which is most of the time it has done anything at all. A list offering only the control that
- * will not work is a list that reads as broken.
- *
- * Deleting confirms in place, two clicks and no dialog, as archiving a world does. The second
- * click is the consent, and the sentence between them says what actually goes.
+ * The link stays a link and the menu button is its sibling, so keyboard order is row then menu
+ * and neither has to swallow the other's click.
  */
-function ConversationRow({ worldId, row }: { worldId: string; row: WorldChatSummary }) {
-  const [confirming, setConfirming] = useState(false);
-  const blocked = row.deletionBlock;
-
+function ConversationRow({
+  worldId,
+  row,
+  current,
+  open,
+  onOpenMenu,
+  onCloseMenu,
+}: {
+  worldId: string;
+  row: WorldChatSummary;
+  current: boolean;
+  open: boolean;
+  onOpenMenu: (menu: RowMenu) => void;
+  onCloseMenu: () => void;
+}) {
+  const waiting = whatItIsWaitingOn(row);
   return (
-    <li className="fy-chatlist__row">
-      <Link to={`/w/${worldId}/chat/${row.id}`} className="fy-chatlist__item">
-        <span className="fy-chatlist__title">{row.title}</span>
-        <span
-          className={cx("fy-chatlist__sub", row.openProposalCount > 0 && "fy-chatlist__sub--waiting")}
-        >
-          {whatItIsWaitingOn(row)}
+    <div className={cx("fy-chatnav__row", current && "fy-chatnav__row--on")}>
+      <Link to={`/w/${worldId}/chat/${row.id}`} className="fy-chatnav__item">
+        <span className={cx("fy-chatnav__title", row.status === "closed" && "fy-chatnav__title--closed")}>
+          {row.title}
         </span>
+        {waiting && <span className="fy-chatnav__waiting">{waiting}</span>}
       </Link>
-      {confirming ? (
-        <div className="fy-chatlist__confirm">
-          <span className="fy-chatlist__confirmsay">
-            Delete this conversation? Its transcript, everything it understood and anything
-            attached to it go for good, and proposals it produced can no longer be sent back here.
-          </span>
-          <span className="fy-chatlist__acts">
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => {
-                deleteWorldChat(worldId, row.id);
-                setConfirming(false);
-              }}
-            >
-              Delete
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>
-              Keep
-            </Button>
-          </span>
-        </div>
-      ) : (
-        <div className="fy-chatlist__acts">
-          {blocked && <span className="fy-chatlist__blocked">Cannot delete — {WHY_NOT_DELETABLE[blocked]}</span>}
-          {row.status === "archived" ? (
-            <Button variant="ghost" size="sm" onClick={() => unarchiveWorldChat(worldId, row.id)}>
-              Restore
-            </Button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              title="Shelve it — nothing is deleted"
-              onClick={() => archiveWorldChat(worldId, row.id)}
-            >
-              Archive
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={blocked !== undefined}
-            onClick={() => setConfirming(true)}
-          >
-            Delete
-          </Button>
-        </div>
-      )}
-    </li>
-  );
-}
-
-export function WorldChatScreen() {
-  const { worldId } = useParams();
-  useOpenWorldGuard(worldId);
-  const { state } = useStore();
-  const navigate = useNavigate();
-  const world = state?.world;
-  const [starting, setStarting] = useState(false);
-
-  /**
-   * Start one, and go to it when it opens.
-   *
-   * Creating is the coordinator's job, so the new id does not exist here yet — but the create
-   * handler opens the conversation as it finishes, so the workspace arriving in state is the
-   * signal to navigate. Watching that is exact; diffing the conversation list would also fire
-   * for one created in another window.
-   *
-   * No title is asked for. Nobody knows what a conversation is about before having it, and being
-   * made to name it first is a toll on the thing the feature exists for. It can be renamed once
-   * there is something to call it.
-   */
-  const opened = state?.worldChat?.conversationId ?? null;
-  useEffect(() => {
-    if (!starting || !opened || !worldId) return;
-    setStarting(false);
-    navigate(`/w/${worldId}/chat/${opened}`);
-  }, [starting, opened, worldId, navigate]);
-
-  const start = () => {
-    if (!worldId || starting) return;
-    setStarting(true);
-    createWorldChat(worldId, "New conversation", crypto.randomUUID());
-  };
-
-  const rows = useMemo(() => [...(world?.conversations ?? [])].sort(byPendingConsequence), [world?.conversations]);
-  const live = rows.filter((r) => r.status !== "archived");
-  const archived = rows.filter((r) => r.status === "archived");
-
-  if (!world) return null;
-
-  return (
-    <div data-screen="world-chat">
-      {rows.length === 0 ? (
-        <EmptyState
-          title="No conversations yet"
-          hint={
-            harnessReady(state)
-              ? "Talk about this world and the studio keeps track of what it understood. Nothing is written to the world until you turn a conversation into proposals and accept them."
-              : "Talk about this world and the studio keeps track of what it understood. Chat needs OpenCode running before anyone can answer — you can still start one and come back to it."
+      <IconButton
+        label="More"
+        className={cx("fy-chatnav__more", open && "fy-chatnav__more--on")}
+        aria-expanded={open}
+        onClick={(e) => {
+          if (open) {
+            onCloseMenu();
+            return;
           }
-          action={
-            <Button variant="primary" size="lg" onClick={start} disabled={starting}>
-              {starting ? "Starting…" : "Start a conversation"}
-            </Button>
-          }
-        />
-      ) : (
-        <div className="fy-chatlist">
-          <div className="fy-chatlist__head">
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="fy-eyebrow-sm">WORLD CHAT</div>
-              <h1 className="fy-story__h1">What we have been talking about</h1>
-            </div>
-            <Button variant="primary" onClick={start} disabled={starting}>
-              {starting ? "Starting…" : "New conversation"}
-            </Button>
-          </div>
-          {live.length > 0 && (
-            <ul className="fy-chatlist__items">
-              {live.map((row) => (
-                <ConversationRow key={row.id} worldId={worldId!} row={row} />
-              ))}
-            </ul>
-          )}
-          {/* Archived conversations keep their own heading rather than sinking quietly to the
-              bottom of one list. Archiving has to visibly tidy, or nobody uses it — and it is the
-              only thing available while a conversation's proposals are still undecided. */}
-          {archived.length > 0 && (
-            <>
-              <h2 className="fy-chatlist__grouphead">
-                Archived · {archived.length}
-              </h2>
-              <ul className="fy-chatlist__items">
-                {archived.map((row) => (
-                  <ConversationRow key={row.id} worldId={worldId!} row={row} />
-                ))}
-              </ul>
-            </>
-          )}
-        </div>
-      )}
+          // Measured on the press, because the menu is drawn outside the rail: the list scrolls,
+          // and a menu positioned inside it is clipped at the first row past the fold.
+          const at = e.currentTarget.getBoundingClientRect();
+          onOpenMenu({ id: row.id, x: at.right - 190, y: at.bottom + 4, confirming: false });
+        }}
+      >
+        <More size={14} />
+      </IconButton>
     </div>
   );
 }
 
 /**
- * One conversation: the transcript on the left, what was understood on the right.
+ * What a row can be told to do.
  *
- * The rail is read-only by design (§0.1). An earlier draft asked for approval point by point
- * while the conversation was still going, which meant deciding twelve times about things that had
- * not settled yet. Reading is not deciding, so there is nothing here to press.
+ * Archive sits beside Delete rather than behind it because Archive is the answer whenever Delete
+ * is refused — and Delete is refused for as long as a conversation's proposals are undecided,
+ * which is most of the time it has done anything at all. A menu offering only the control that
+ * will not work is a menu that reads as broken.
+ *
+ * Deleting confirms in place, two presses and no dialog, as archiving a world does. The second
+ * press is the consent, and the sentence between them says what actually goes.
+ *
+ * Drawn as a child of the screen rather than of the rail. The rail carries an entrance animation
+ * on `transform`, and an animated transform makes its element the containing block for anything
+ * fixed inside it — which put this menu a rail's height below the row it belongs to, and shrank
+ * the scrim that dismisses it to the width of the rail.
  */
+export function RowMenuPanel({
+  worldId,
+  row,
+  menu,
+  onOpenMenu,
+  onCloseMenu,
+}: {
+  worldId: string;
+  row: WorldChatSummary;
+  menu: RowMenu;
+  onOpenMenu: (menu: RowMenu) => void;
+  onCloseMenu: () => void;
+}) {
+  return (
+    <>
+      <div className="fy-chatnav__scrim" onClick={onCloseMenu} />
+      <div className="fy-chatnav__menu" style={{ left: menu.x, top: menu.y }} role="menu">
+        {menu.confirming ? (
+          <>
+            <div className="fy-chatnav__confirmsay">
+              Delete this conversation? Its transcript, everything it understood and anything
+              attached to it go for good, and proposals it produced can no longer be sent back
+              here.
+            </div>
+            <div className="fy-chatnav__confirmacts">
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  deleteWorldChat(worldId, row.id);
+                  onCloseMenu();
+                }}
+              >
+                Delete
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onCloseMenu}>
+                Keep
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="fy-chatnav__menuitem"
+              onClick={() => {
+                if (row.status === "archived") unarchiveWorldChat(worldId, row.id);
+                else archiveWorldChat(worldId, row.id);
+                onCloseMenu();
+              }}
+            >
+              {row.status === "archived" ? "Restore" : "Archive"}
+            </button>
+            <button
+              type="button"
+              className="fy-chatnav__menuitem"
+              disabled={row.deletionBlock !== undefined}
+              onClick={() => onOpenMenu({ ...menu, confirming: true })}
+            >
+              Delete
+              {row.deletionBlock && (
+                <span className="fy-chatnav__menuwhy">{WHY_NOT_DELETABLE[row.deletionBlock]}</span>
+              )}
+            </button>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+/**
+ * The conversations this world has had, beside the one being had now.
+ *
+ * 236px and untinted — the geometry the production rail already uses — because this is
+ * navigation between conversations rather than the content of one. The tinted 470px rail on the
+ * other side stays the only column holding something to decide.
+ *
+ * Put away it is 48px, and both its controls survive: starting a conversation is what the screen
+ * is for and must not cost an expand first.
+ */
+function HistoryRail({
+  worldId,
+  live,
+  archived,
+  currentId,
+  open,
+  onToggle,
+  onNew,
+  menu,
+  onOpenMenu,
+  onCloseMenu,
+}: {
+  worldId: string;
+  live: readonly WorldChatSummary[];
+  archived: readonly WorldChatSummary[];
+  currentId: string | undefined;
+  open: boolean;
+  onToggle: () => void;
+  onNew: () => void;
+  menu: RowMenu | null;
+  onOpenMenu: (menu: RowMenu) => void;
+  onCloseMenu: () => void;
+}) {
+  const [showArchived, setShowArchived] = useState(false);
+  const rowProps = { worldId, onOpenMenu, onCloseMenu };
+  return (
+    <div className={cx("fy-chatnav", !open && "fy-chatnav--shut")}>
+      <div className="fy-chatnav__head">
+        {open && (
+          <Button variant="outline" size="sm" className="fy-chatnav__new" onClick={onNew}>
+            New conversation
+          </Button>
+        )}
+        <IconButton label={open ? "Hide history" : "Show history"} onClick={onToggle}>
+          <PanelLeft size={14} />
+        </IconButton>
+        {!open && (
+          <IconButton label="New conversation" onClick={onNew}>
+            <Plus size={14} />
+          </IconButton>
+        )}
+      </div>
+      {open && (
+        <>
+          <div className="fy-chatnav__list">
+            {live.map((row) => (
+              <ConversationRow
+                key={row.id}
+                row={row}
+                current={row.id === currentId}
+                open={menu?.id === row.id}
+                {...rowProps}
+              />
+            ))}
+            {/* Archived conversations stay behind a disclosure rather than sinking quietly to the
+                bottom of one list. Archiving has to visibly tidy, or nobody uses it — and it is
+                the only thing available while a conversation's proposals are still undecided. */}
+            {showArchived &&
+              archived.map((row) => (
+                <ConversationRow
+                key={row.id}
+                row={row}
+                current={row.id === currentId}
+                open={menu?.id === row.id}
+                {...rowProps}
+              />
+              ))}
+          </div>
+          {archived.length > 0 && (
+            <button
+              type="button"
+              className="fy-chatnav__group"
+              aria-expanded={showArchived}
+              onClick={() => setShowArchived((v) => !v)}
+            >
+              {showArchived ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              {`Archived · ${archived.length}`}
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /**
  * One point, and the two things that can now be done to it.
  *
@@ -328,7 +389,21 @@ function PointRow({
   );
 }
 
-export function WorldChatConversationScreen() {
+/**
+ * The first thing done in a conversation that does not exist yet.
+ *
+ * Nothing is created by arriving: a rail full of empty `New conversation` rows is the cost of
+ * creating one per visit, and it is paid by everybody who ever opened the screen to read. So the
+ * conversation is created by the first act — a sentence, a file, a pasted note — and that act is
+ * held here until there is somewhere to put it.
+ */
+type Opening =
+  | { kind: "say"; text: string }
+  | { kind: "pick" }
+  | { kind: "files"; files: readonly File[] }
+  | { kind: "note"; text: string };
+
+export function WorldChatScreen() {
   const { worldId, conversationId } = useParams();
   useOpenWorldGuard(worldId);
   const { state, connection } = useStore();
@@ -343,6 +418,10 @@ export function WorldChatConversationScreen() {
    * with one yet; the same local dismissal the canon composer uses.
    */
   const [dismissed, setDismissed] = useState<string[]>([]);
+  /** Whether the history is shown. Kept for the visit, as the rail itself is. */
+  const [historyOpen, setHistoryOpen] = useState(true);
+  /** The row whose menu is open, held here so the menu can be drawn clear of the rail. */
+  const [menu, setMenu] = useState<RowMenu | null>(null);
   const refusals = useWorldChatRefusals(conversationId);
   const wrapUpRefusal = useWorldChatWrapUpRefusal(conversationId);
   /** Set while a wrap-up is in flight, so the button cannot be pressed twice into the same log. */
@@ -355,12 +434,16 @@ export function WorldChatConversationScreen() {
    * workspace comes back, which is the only thing that knows whether the point survived.
    */
   const [busyPoints, setBusyPoints] = useState<string[]>([]);
+  /** The act waiting on a conversation to exist, and what was open when it was asked for. */
+  const [opening, setOpening] = useState<{ act: Opening; wasOpen: string | null } | null>(null);
+  /** What a deferred attach would not take, since the composer's own call answered before it ran. */
+  const [deferredTrouble, setDeferredTrouble] = useState<readonly { name: string; reason: string }[]>([]);
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
 
   // Ask for the workspace on arrival and release it on the way out, so a session that visits
-  // twenty conversations still holds one.
+  // twenty conversations still holds one. A new conversation has none to ask for.
   useEffect(() => {
     if (!worldId || !conversationId) return;
     openWorldChat(worldId, conversationId);
@@ -373,23 +456,55 @@ export function WorldChatConversationScreen() {
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
   // Gated on the run's own start so a label from the previous turn is not shown for this one.
   const progress = useWorldChatProgress(conversationId, loaded?.runStartedAt ?? null);
+  const opened = workspace?.conversationId ?? null;
 
   /**
-   * Go to the proposals once there are proposals to go to.
+   * The conversation arriving is what the held act was waiting for.
    *
-   * This used to navigate on the click itself. That reads well when the wrap-up works and lies
-   * when it does not: the coordinator can refuse — the conversation moved on, nothing is settled
-   * enough, a change would not write — and the screen had already left for an approvals list that
-   * was empty, which is indistinguishable from a button that does nothing. Closing is the
-   * coordinator's own signal that every proposal is durable (R-42a), so it is the thing to wait
-   * for. The wait is a few file writes, not a model call.
+   * Creating is the coordinator's job, so the new id does not exist here yet — but the create
+   * handler opens the conversation as it finishes, so the workspace arriving in state is the
+   * signal. It has to be a *different* workspace than the one open when the act was held: a
+   * screen arrived at with somebody else's conversation still loaded would otherwise take the
+   * message meant for a new one and put it in that.
    *
-   * The connection ends the *waiting look* but not the errand. A socket that drops mid-wrap-up
-   * takes the answer with it, and leaving the button on "Turning this into proposals…" for the
-   * rest of the session is the failure this whole change is about — but the coordinator may well
-   * have finished, and the closed workspace that proves it arrives on the next connection. So the
-   * asking is remembered in a ref that no reconnection clears, and the button is freed meanwhile.
+   * The create and the act stay two frames. Related frames sent in one tick race, and the second
+   * would reach the coordinator before the conversation it names exists.
    */
+  useEffect(() => {
+    if (!opening || !worldId) return;
+    if (connection !== "open") {
+      // Nothing was transmitted, or the answer went with the socket. The draft is still here.
+      setOpening(null);
+      return;
+    }
+    if (!opened || opened === opening.wasOpen) return;
+    const act = opening.act;
+    setOpening(null);
+    if (act.kind === "say") {
+      sendWorldChat(worldId, opened, act.text);
+      setDraft("");
+    } else if (act.kind === "pick") {
+      worldChatAttachFiles(worldId, opened);
+    } else if (act.kind === "files") {
+      void attachHostFiles(worldChatAttachTarget(worldId, opened), act.files).then(setDeferredTrouble);
+    } else {
+      void attachHostText(worldChatAttachTarget(worldId, opened), act.text, "pasted-note.txt").then(
+        setDeferredTrouble,
+      );
+    }
+    navigate(`/w/${worldId}/chat/${opened}`, { replace: true });
+  }, [opening, opened, worldId, connection, navigate]);
+
+  /**
+   * Start one. No title is asked for: nobody knows what a conversation is about before having
+   * it, and the coordinator names it from the opening sentence anyway.
+   */
+  const hold = (act: Opening) => {
+    if (!worldId || opening) return;
+    setOpening({ act, wasOpen: opened });
+    createWorldChat(worldId, "New conversation", crypto.randomUUID());
+  };
+
   /*
    * A decision on one point. Save writes it; Reject drops it. Both send the revision the rail is
    * showing, so a point corrected by talking since is refused rather than acted on as it was.
@@ -427,6 +542,22 @@ export function WorldChatConversationScreen() {
   /** The attempt this window made, if any: an answer naming another one is somebody else's. */
   const asked = useRef<string | null>(null);
   const refusedMine = wrapUpRefusal !== null && wrapUpRefusal.requestId === asked.current;
+  /**
+   * Go to the proposals once there are proposals to go to.
+   *
+   * This used to navigate on the click itself. That reads well when the wrap-up works and lies
+   * when it does not: the coordinator can refuse — the conversation moved on, nothing is settled
+   * enough, a change would not write — and the screen had already left for an approvals list that
+   * was empty, which is indistinguishable from a button that does nothing. Closing is the
+   * coordinator's own signal that every proposal is durable (R-42a), so it is the thing to wait
+   * for. The wait is a few file writes, not a model call.
+   *
+   * The connection ends the *waiting look* but not the errand. A socket that drops mid-wrap-up
+   * takes the answer with it, and leaving the button on "Writing them…" for the rest of the
+   * session is the failure this whole change is about — but the coordinator may well have
+   * finished, and the closed workspace that proves it arrives on the next connection. So the
+   * asking is remembered in a ref that no reconnection clears, and the button is freed meanwhile.
+   */
   useEffect(() => {
     if (!worldId) return;
     if (asked.current && closed) {
@@ -447,6 +578,16 @@ export function WorldChatConversationScreen() {
     }
   }, [wrappingUp, closed, refusedMine, connection, worldId, navigate, row?.openProposalCount]);
 
+  const rows = useMemo(
+    () => [...(world?.conversations ?? [])].sort(byPendingConsequence),
+    [world?.conversations],
+  );
+  const live = useMemo(() => rows.filter((r) => r.status !== "archived"), [rows]);
+  const archived = useMemo(() => rows.filter((r) => r.status === "archived"), [rows]);
+  // A conversation deleted in another window takes its menu with it rather than leaving one
+  // standing over a row that is gone.
+  const menuRow = menu ? rows.find((r) => r.id === menu.id) : undefined;
+
   if (!world) return null;
   /**
    * Missing means missing from both.
@@ -456,22 +597,14 @@ export function WorldChatConversationScreen() {
    * the conversation gone because the *summary list* had not caught up is how somebody who has
    * just created one is told it does not exist.
    */
-  if (!row && !loaded) {
-    return (
-      <div data-screen="world-chat-conversation">
-        <EmptyState
-          title="That conversation is not here"
-          hint="It may have been deleted. The conversations this world still has are on the World Chat screen."
-        />
-      </div>
-    );
-  }
+  const missing = conversationId !== undefined && !row && !loaded;
   const points = loaded?.points ?? [];
   const groups = groupBySubject(points);
   const openThreads = points.filter((p) => p.kind === "question");
   const carried = points.filter((p) => p.kind === "point" && p.settled).length;
   const running = loaded?.runStatus === "running";
   const failure = loaded?.lastFailure;
+  const starting = opening !== null;
   /**
    * Attachments are private to this conversation, and the chips say which are readable.
    * An image can be attached and referred to; it cannot be quoted, and the chip should not
@@ -486,8 +619,24 @@ export function WorldChatConversationScreen() {
     }));
 
   return (
-    <div data-screen="world-chat-conversation" className="fy-chat__wrap">
+    <div
+      data-screen={conversationId ? "world-chat-conversation" : "world-chat"}
+      className="fy-chat__wrap"
+    >
       <div className="fy-gate">
+        <HistoryRail
+          worldId={worldId!}
+          live={live}
+          archived={archived}
+          currentId={conversationId}
+          open={historyOpen}
+          onToggle={() => setHistoryOpen((v) => !v)}
+          onNew={() => navigate(`/w/${worldId}/chat`)}
+          menu={menu}
+          onOpenMenu={setMenu}
+          onCloseMenu={() => setMenu(null)}
+        />
+
         <div className="fy-gate__main">
           <div className="fy-gate__head">
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -502,11 +651,16 @@ export function WorldChatConversationScreen() {
           </div>
 
           <div className="fy-gate__body">
-            {loaded === null ? (
+            {missing ? (
+              <EmptyState
+                title="That conversation is not here"
+                hint="It may have been deleted. The ones this world still has are in the history beside this."
+              />
+            ) : conversationId && loaded === null ? (
               <div className="fy-chat__loading">Opening this conversation…</div>
             ) : (
               <div className="fy-chat__transcript" aria-live="polite">
-                {loaded.messages.map((m) => (
+                {(loaded?.messages ?? []).map((m) => (
                   <div key={m.id} className={cx("fy-chat__turn", `fy-chat__turn--${m.role}`)}>
                     <div className="fy-chat__bubble">
                       {m.text}
@@ -591,31 +745,53 @@ export function WorldChatConversationScreen() {
               onChange={setDraft}
               onSubmit={() => {
                 const text = draft.trim();
-                if (!text || !worldId || running || wrappingUp) return;
-                sendWorldChat(worldId, conversationId!, text, chips.map((c) => c.id));
+                if (!text || !worldId || running || wrappingUp || starting) return;
+                if (!conversationId) {
+                  hold({ kind: "say", text });
+                  return;
+                }
+                sendWorldChat(worldId, conversationId, text, chips.map((c) => c.id));
                 setDraft("");
               }}
-              placeholder="Keep going…"
-              busy={running}
-              busyLabel="Thinking…"
+              placeholder={conversationId ? "Keep going…" : "Say something about this world…"}
+              busy={running || starting}
+              busyLabel={starting ? "Starting…" : "Thinking…"}
               attachments={chips}
-              refusals={refusals}
+              refusals={[...refusals, ...deferredTrouble]}
               // Appended to whatever is already typed, never sent: speaking gets you to a draft,
               // and the draft is still corrected and sent by hand (SPEC-018 R-2, R-5).
               onDictate={(text) => setDraft((prev) => (prev ? `${prev} ${text}` : text))}
-              {...(worldId && conversationId && !wrappingUp
-                ? { onAttach: () => worldChatAttachFiles(worldId, conversationId) }
-                : {})}
-              {...(worldId && conversationId && hostCanAttach() && !wrappingUp
+              {...(worldId && !wrappingUp
                 ? {
-                    onAttachFiles: (files: readonly File[]) =>
-                      attachHostFiles(worldChatAttachTarget(worldId, conversationId), files),
-                    onAttachText: (text: string) =>
-                      attachHostText(
-                        worldChatAttachTarget(worldId, conversationId),
-                        text,
-                        "pasted-note.txt",
-                      ),
+                    onAttach: () => {
+                      if (conversationId) worldChatAttachFiles(worldId, conversationId);
+                      else hold({ kind: "pick" });
+                    },
+                  }
+                : {})}
+              {...(worldId && hostCanAttach() && !wrappingUp
+                ? {
+                    onAttachFiles: (files: readonly File[]) => {
+                      if (conversationId) {
+                        return attachHostFiles(worldChatAttachTarget(worldId, conversationId), files);
+                      }
+                      // Held until the conversation exists, so this call has no refusals to
+                      // report yet; the ones the deferred attach earns reach the composer
+                      // through `deferredTrouble`.
+                      hold({ kind: "files", files });
+                      return Promise.resolve([]);
+                    },
+                    onAttachText: (text: string) => {
+                      if (conversationId) {
+                        return attachHostText(
+                          worldChatAttachTarget(worldId, conversationId),
+                          text,
+                          "pasted-note.txt",
+                        );
+                      }
+                      hold({ kind: "note", text });
+                      return Promise.resolve([]);
+                    },
                   }
                 : {})}
               onRemoveAttachment={(id) => setDismissed((prev) => [...prev, id])}
@@ -709,7 +885,7 @@ export function WorldChatConversationScreen() {
                 if (!worldId || !loaded) return;
                 // Waiting only on a command that was actually sent. A press made after the socket
                 // dropped transmits nothing, and nothing can then arrive to end the wait — the
-                // button would sit on "Turning this into proposals…" for the rest of the session.
+                // button would sit on "Writing them…" for the rest of the session.
                 //
                 // No confirmation sheet, and no navigation yet either: an earlier design had a
                 // sheet here that said less than the screen it stood in front of, and the version
@@ -741,6 +917,15 @@ export function WorldChatConversationScreen() {
           </div>
         </div>
       </div>
+      {menuRow && (
+        <RowMenuPanel
+          worldId={worldId!}
+          row={menuRow}
+          menu={menu!}
+          onOpenMenu={setMenu}
+          onCloseMenu={() => setMenu(null)}
+        />
+      )}
     </div>
   );
 }
@@ -775,17 +960,6 @@ function groupBySubject<P extends { id: string; kind: string; subject: string; s
 }
 
 /**
- * Why the composer cannot send, when it cannot (§2.8).
- *
- * A dead box that says nothing is the failure this avoids: without a harness there is no one to
- * answer, and the honest thing is to say so rather than accept a message that will go nowhere.
- */
-/** Whether there is anything to talk to. Starting a conversation nobody can answer is a dead end. */
-function harnessReady(state: ReturnType<typeof useStore>["state"]): boolean {
-  return state?.app.health.harness.status === "healthy";
-}
-
-/**
  * What a failed turn says.
  *
  * Plainly, and about the app rather than the person: they typed something reasonable and waited.
@@ -803,6 +977,12 @@ function failureLine(failure: { status: string; detail?: string }): string {
   return `${opening} Nothing was lost — your message is still here.`;
 }
 
+/**
+ * Why the composer cannot send, when it cannot (§2.8).
+ *
+ * A dead box that says nothing is the failure this avoids: without a harness there is no one to
+ * answer, and the honest thing is to say so rather than accept a message that will go nowhere.
+ */
 function composerReason(state: ReturnType<typeof useStore>["state"]): string | undefined {
   if (!state) return "Still connecting.";
   if (state.app.health.harness.status !== "healthy") {
@@ -811,13 +991,6 @@ function composerReason(state: ReturnType<typeof useStore>["state"]): string | u
   return undefined;
 }
 
-/**
- * A conversation that has been wrapped up takes nothing more (§11.3).
- *
- * Its propositions are proposals now, and a message arriving after the fact would be in the
- * transcript but in nothing the transcript produced — read back later as though it had been
- * considered. Send-back is how a closed conversation is reopened, and it is on the proposal.
- */
 /**
  * Why the composer cannot send — and after Accept all, it can.
  *

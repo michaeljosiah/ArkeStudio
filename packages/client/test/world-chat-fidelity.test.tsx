@@ -361,18 +361,58 @@ describe("the transcript", () => {
  * them off the row; and the controls are never revealed by hover alone, which would put deleting
  * out of reach of touch and out of sight of anyone not already pointing at it.
  */
-describe("the conversation row's controls", () => {
-  const rowBlock = /\.fy-chatlist__row \{([^}]*)\}/.exec(CSS)?.[1] ?? "";
-  const itemBlock = /\.fy-chatlist__row \.fy-chatlist__item \{([^}]*)\}/.exec(CSS)?.[1] ?? "";
+/**
+ * The history rail (design turn 71).
+ *
+ * Its numbers are the master's, read out of the same document rather than copied here: the rail
+ * is the production rail's 236px, it puts away to 48px, and what is left for the conversation is
+ * the 654px Story's column already has. A number typed twice is a number that drifts.
+ */
+describe("the history rail", () => {
+  const RAIL_WIDTH = /<code>(\d+)px<\/code>, a right border/.exec(DESIGN_MASTER)?.[1];
+  const SHUT_WIDTH = /Collapsed it is <code>(\d+)px<\/code>/.exec(DESIGN_MASTER)?.[1];
+  const railBlock = /\.fy-chatnav \{([^}]*)\}/.exec(CSS)?.[1] ?? "";
+  const rowBlock = /\.fy-chatnav__row \{([^}]*)\}/.exec(CSS)?.[1] ?? "";
+  const itemBlock = /\.fy-chatnav__item \{([^}]*)\}/.exec(CSS)?.[1] ?? "";
 
-  it("lays the row out with the link taking the width the controls do not", () => {
-    assert.match(rowBlock, /display:\s*flex/);
-    assert.match(itemBlock, /flex:\s*1/);
-    assert.match(itemBlock, /min-width:\s*0/, "or a long title refuses to shrink and pushes them out");
+  it("takes the width the master binds it to, and gives the rest to the conversation", () => {
+    assert.ok(RAIL_WIDTH, "the master states the rail's width");
+    assert.match(railBlock, new RegExp(`width:\\s*${RAIL_WIDTH}px`));
+    assert.match(railBlock, /box-sizing:\s*border-box/, "so 236 is the whole column, border included");
+    assert.match(railBlock, /border-right:\s*1px solid var\(--border\)/);
+    assert.doesNotMatch(
+      railBlock,
+      /background:/,
+      "the tinted rail is the one holding something to decide, and there is only one of those",
+    );
   });
 
-  it("keeps the controls visible without hover", () => {
-    const quiet = /\.fy-chatlist__acts \.ui-btn \{([^}]*)\}/.exec(CSS)?.[1] ?? "";
+  it("clears the floating nav by the same amount as the columns beside it", () => {
+    assert.match(railBlock, /padding:\s*52px/, "or the rail starts above the head it stands beside");
+  });
+
+  it("puts away to the master's width, keeping both its controls", () => {
+    assert.ok(SHUT_WIDTH, "the master states the width of the rail put away");
+    const shut = /\.fy-chatnav--shut \{([^}]*)\}/.exec(CSS)?.[1] ?? "";
+    assert.match(shut, new RegExp(`width:\\s*${SHUT_WIDTH}px`));
+    const html = renderChat();
+    assert.match(html, /aria-label="Hide history"/, "the control that puts it away");
+    assert.match(html, /New conversation/, "and the one that must survive it");
+  });
+
+  it("lays the row out with the link taking the width the menu does not", () => {
+    assert.match(rowBlock, /display:\s*flex/);
+    assert.match(itemBlock, /flex:\s*1/);
+    assert.match(itemBlock, /min-width:\s*0/, "or a long title refuses to shrink and pushes it out");
+    assert.match(
+      /\.fy-chatnav__title \{([^}]*)\}/.exec(CSS)?.[1] ?? "",
+      /text-overflow:\s*ellipsis/,
+      "and it is cut rather than wrapped, because the row is one line",
+    );
+  });
+
+  it("keeps the row's menu visible without hover", () => {
+    const quiet = /\.fy-chatnav__more \{([^}]*)\}/.exec(CSS)?.[1] ?? "";
     const opacity = /opacity:\s*([\d.]+)/.exec(quiet)?.[1];
     assert.ok(opacity !== undefined, "the resting state is stated rather than left to the default");
     assert.ok(
@@ -381,13 +421,24 @@ describe("the conversation row's controls", () => {
     );
   });
 
-  it("says the refusal in text, so it does not depend on a tooltip or on colour", () => {
-    assert.match(CSS, /\.fy-chatlist__blocked \{/);
-    const html = renderList();
-    assert.match(html, /Cannot delete/);
+  it("says a refused delete in text, so it does not depend on a tooltip or on colour", () => {
+    assert.match(CSS, /\.fy-chatnav__menuwhy \{/);
+    assert.match(
+      /\.fy-chatnav__menuwhy \{([^}]*)\}/.exec(CSS)?.[1] ?? "",
+      /font:/,
+      "it is a line of text on the item, not a title attribute",
+    );
   });
 
-  function renderList(): string {
+  it("draws the menu clear of the list it belongs to", () => {
+    assert.match(
+      /\.fy-chatnav__menu \{([^}]*)\}/.exec(CSS)?.[1] ?? "",
+      /position:\s*fixed/,
+      "the list scrolls, so a menu positioned inside it is clipped at the fold",
+    );
+  });
+
+  function renderChat(): string {
     __setStateForTest({
       ...FIXTURE_STATE,
       world: {

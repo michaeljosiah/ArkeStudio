@@ -13,7 +13,7 @@ import {
 } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
-import { byPendingConsequence } from "../src/screens/world-chat.js";
+import { RowMenuPanel, byPendingConsequence } from "../src/screens/world-chat.js";
 
 /**
  * The World Chat workspace (#70 phase 3).
@@ -85,13 +85,15 @@ describe("ordering conversations by pending consequence", () => {
 
 
 /**
- * There has to be a way in.
+ * The way in is the screen (design 71).
  *
  * The whole feature was built — store, retrieval, turn engine, workspace, wrap-up — with no
- * control anywhere that creates a conversation. The screen said "No conversations yet" and left
- * it at that, which is a door with no handle.
+ * control anywhere that creates a conversation, and the screen said "No conversations yet" and
+ * left it at that. The fix after that was a list with a button on it, which is a door in front of
+ * a door: arriving at World Chat meant choosing what to read before saying anything. `/chat` is
+ * now a conversation nobody has said anything in yet, and the composer is the way in.
  */
-describe("starting a conversation", () => {
+describe("arriving at World Chat", () => {
   function render(state: ClientState): string {
     __setStateForTest(state);
     return renderToString(
@@ -106,11 +108,23 @@ describe("starting a conversation", () => {
     world: { ...FIXTURE_STATE.world!, conversations: rows as never },
   });
 
-  it("offers a way in when there are none", () => {
-    assert.match(render(withConversations([])), /Start a conversation/);
+  it("opens on a conversation rather than on a list of them", () => {
+    const html = render(withConversations([]));
+    assert.match(html, /New conversation/, "the head names what this is");
+    assert.match(
+      html,
+      /Say something about this world/,
+      "and the composer says what to do with it, rather than a screen in front of it",
+    );
   });
 
-  it("offers a way in when there already are some", () => {
+  it("says nothing has been understood, because nothing has been said", () => {
+    const html = render(withConversations([]));
+    assert.match(html, /Nothing understood yet/);
+    assert.match(html, /Nothing is ready to write yet/);
+  });
+
+  it("offers another way in beside the conversations already had", () => {
     const html = render(
       withConversations([
         {
@@ -124,7 +138,31 @@ describe("starting a conversation", () => {
         },
       ]),
     );
+    assert.match(html, /The bells/, "the history is beside the conversation, not in front of it");
     assert.match(html, /New conversation/, "starting a second one must not require deleting the first");
+    assert.match(html, /Hide history/, "and it can be put away");
+  });
+
+  it("says on a row what that conversation is owed, and nothing when it is owed nothing", () => {
+    const html = render(
+      withConversations([
+        {
+          id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
+          title: "owed",
+          status: "open",
+          updatedAt: AT,
+          pointCount: 1,
+          openProposalCount: 2,
+          notCarried: [],
+        },
+      ]),
+    );
+    assert.match(html, /2 waiting on you/);
+    assert.doesNotMatch(
+      html,
+      /points to decide/,
+      "a rail is scanned, so status does not earn a permanent second line",
+    );
   });
 
   it("does not disable the way in when the studio is not running", () => {
@@ -136,7 +174,7 @@ describe("starting a conversation", () => {
       },
     };
     const html = render(down);
-    assert.match(html, /Start a conversation/);
+    assert.match(html, /New conversation/);
     assert.match(
       html,
       /needs OpenCode running/,
@@ -407,7 +445,7 @@ describe("attaching a document to a conversation", () => {
  * has done anything, and a row offering only the control that will not work reads as broken.
  */
 describe("disposing of a conversation", () => {
-  function renderList(rows: unknown[]): string {
+  function renderRail(rows: unknown[]): string {
     __setStateForTest({
       ...FIXTURE_STATE,
       world: { ...FIXTURE_STATE.world!, conversations: rows as never },
@@ -419,47 +457,72 @@ describe("disposing of a conversation", () => {
     ).replaceAll("<!-- -->", "");
   }
 
-  const listed = (over: Partial<WorldChatSummary>) => ({
-    id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
-    title: "The bells",
-    status: "open",
-    updatedAt: AT,
-    pointCount: 1,
-    openProposalCount: 0,
-    notCarried: [],
-    ...over,
+  const listed = (over: Partial<WorldChatSummary>) =>
+    ({
+      id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
+      title: "The bells",
+      status: "open",
+      updatedAt: AT,
+      pointCount: 1,
+      openProposalCount: 0,
+      notCarried: [],
+      ...over,
+    }) as WorldChatSummary;
+
+  /** The row with its menu already open — the state a press puts it in, rendered directly. */
+  function renderMenu(row: WorldChatSummary, confirming = false): string {
+    return renderToString(
+      <MemoryRouter>
+        <RowMenuPanel
+          worldId={FIXTURE_WORLD_ID}
+          row={row}
+          menu={{ id: row.id, x: 0, y: 0, confirming }}
+          onOpenMenu={() => {}}
+          onCloseMenu={() => {}}
+        />
+      </MemoryRouter>,
+    ).replaceAll("<!-- -->", "");
+  }
+
+  it("puts the menu on the row, so a rail scanned for a title still disposes of one", () => {
+    assert.match(renderRail([listed({})]), /aria-label="More"/);
   });
 
   it("offers both, because archive is the answer whenever delete is refused", () => {
-    const html = renderList([listed({})]);
+    const html = renderMenu(listed({}));
     assert.match(html, /Archive/);
     assert.match(html, /Delete/);
   });
 
   it("says why delete is unavailable, in text rather than a tooltip", () => {
-    const html = renderList([
+    const html = renderMenu(
       listed({ openProposalCount: 2, deletionBlock: "unresolved-proposals" } as never),
-    ]);
+    );
     assert.match(
       html,
-      /Cannot delete — its proposals are still waiting/,
+      /its proposals are still waiting/,
       "a reason only a mouse can reach is not a reason",
     );
     assert.match(html, /disabled/, "and the control is genuinely unavailable, not merely explained");
     assert.match(html, /Archive/, "while the thing that does work is still offered");
   });
 
-  it("does not confirm before it is asked to — the row is not a warning", () => {
-    assert.doesNotMatch(renderList([listed({})]), /go for good/);
+  it("does not confirm before it is asked to — the menu is not a warning", () => {
+    assert.doesNotMatch(renderMenu(listed({})), /go for good/);
+    assert.match(renderMenu(listed({}), true), /go for good/, "and says what goes when it is");
   });
 
-  it("gives archived conversations their own heading rather than sinking them into the list", () => {
-    const html = renderList([
+  it("offers a shelved conversation back rather than only the way to shelve it", () => {
+    assert.match(renderMenu(listed({ status: "archived" })), /Restore/);
+  });
+
+  it("keeps archived conversations behind a disclosure rather than sinking them into the list", () => {
+    const html = renderRail([
       listed({ title: "still going" }),
-      listed({ id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HD", title: "shelved", status: "archived" }),
+      listed({ id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HD", title: "shelved", status: "archived" } as never),
     ]);
     assert.match(html, /Archived · 1/, "archiving has to visibly tidy or nobody uses it");
-    assert.match(html, /Restore/, "and what was shelved can be taken back off the shelf");
+    assert.doesNotMatch(html, /shelved/, "and what was tidied away is not still in the list");
   });
 });
 
