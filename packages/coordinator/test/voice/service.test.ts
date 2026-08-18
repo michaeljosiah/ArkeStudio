@@ -272,6 +272,24 @@ describe("the preview cache key", () => {
     assert.notEqual(a, previewCacheFile("elevenlabs", "v2", "line one", "mp3"));
     assert.notEqual(a, previewCacheFile("elevenlabs", "v1", "line two", "mp3"));
   });
+  it("separates providers over the same voice and line (SPEC-022 §2.7)", () => {
+    // The branch this replaces was binary — anything not Kokoro keyed as ElevenLabs — so a second
+    // local provider filed onto the cloud key and replayed the wrong audio for the same voice id.
+    const paths = ["elevenlabs", "kokoro", "comfyui"].map((p) => previewCacheFile(p, "v1", "line one", "mp3"));
+    assert.equal(new Set(paths).size, 3, "each provider must own its cache key");
+  });
+  it("keys an unknown provider under itself rather than a neighbour", () => {
+    assert.notEqual(
+      previewCacheFile("someday-tts", "v1", "line one", "mp3"),
+      previewCacheFile("elevenlabs", "v1", "line one", "mp3"),
+    );
+  });
+  it("takes the model from the caller when one is named", () => {
+    assert.notEqual(
+      previewCacheFile("comfyui", "v1", "line one", "wav"),
+      previewCacheFile("comfyui", "v1", "line one", "wav", "comfyui-other-recipe"),
+    );
+  });
   it("includes model, format, settings and normalized text", () => {
     const base = { provider: "kokoro" as const, model: "kokoro-82m", voiceId: "af_bella", text: "hello   harbour", format: "wav" as const };
     assert.equal(normalizeSpeechText(base.text), "hello harbour");
@@ -388,5 +406,53 @@ describe("the narrator survives a restart (found live, 2026-08-17)", () => {
     // And clearing returns to null, which is how "the shipped local voice" is stored.
     await file.setNarrator(null);
     assert.equal((await new AppSettingsFile(join(dir, "settings.json")).load()).narrator, null);
+  });
+});
+
+/**
+ * The catalogue with a third source in it (SPEC-022 T-9). Kokoro's presets, ElevenLabs' library
+ * and the world's own cloned voices, ranked together against a written voice.
+ */
+describe("cloned voices join the catalogue", () => {
+  const service = () =>
+    new VoiceService({
+      sidecar: null,
+      localPresets: [
+        { provider: "kokoro", voiceId: "bm_george", label: "George", attributes: ["low", "gravel"], local: true, canClone: false },
+      ],
+      cloudSources: [],
+      getKey: async () => null,
+      emit: () => {},
+    });
+
+  const CLONED = [
+    {
+      id: "harbour-glass",
+      name: "Harbour glass",
+      clip: "voices/harbour-glass.wav",
+      description: "Low, dry, unhurried. Coastal.",
+      attributes: ["low", "dry", "unhurried", "coastal"],
+      consent: true,
+      created: "2026-08-18T10:00:00.000Z",
+    },
+  ];
+
+  it("offers them beside the presets, local and not themselves cloneable", async () => {
+    const catalogue = await service().catalogue(CLONED);
+    const cloned = catalogue.find((c) => c.voiceId === "harbour-glass");
+    assert.ok(cloned, "a cloned voice is a candidate like any other");
+    assert.equal(cloned.provider, "comfyui");
+    assert.equal(cloned.local, true);
+    assert.equal(cloned.canClone, false);
+    assert.ok(catalogue.some((c) => c.provider === "kokoro"), "the presets are still there");
+  });
+
+  it("a world with none simply has none — the two catalogues that need no world still answer", async () => {
+    const catalogue = await service().catalogue();
+    assert.deepEqual(
+      catalogue.map((c) => c.provider),
+      ["kokoro"],
+      "the narrator resolves before a world is open and must not need one",
+    );
   });
 });

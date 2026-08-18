@@ -571,6 +571,34 @@ describe("poll maps the engine's two surfaces onto queue states, without inventi
   });
 });
 
+describe("audio comes back as audio, so it can be verified (SPEC-022 spike)", () => {
+  it("names a wav's type, rather than leaving it an unverifiable blob", async () => {
+    // ComfyUI's audio save nodes emit the same {filename, subfolder, type} shape under a
+    // different key, so the fetch itself was already format-agnostic. What was missing was the
+    // TYPE: verifyArtifact dispatches on it, and an unnamed type falls through to "a non-empty
+    // body is the best check available" — a truncated download filed as a take, played as silence.
+    const wav = new Uint8Array([0x52, 0x49, 0x46, 0x46, 8, 0, 0, 0, 0x57, 0x41, 0x56, 0x45]);
+    const { fetch, calls } = engineFake([
+      {
+        match: /\/history\/p-1$/,
+        status: 200,
+        body: {
+          "p-1": {
+            outputs: { "9": { audio: [{ filename: "arke_00001_.wav", subfolder: "", type: "output" }] } },
+          },
+        },
+      },
+      { match: /\/view\?/, status: 200, bytes: wav },
+    ]);
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT);
+    const artifacts = await client.fetchArtifacts("", "p-1", { model: "comfyui-draft-image" });
+    assert.equal(artifacts.length, 1);
+    assert.equal(artifacts[0]!.contentType, "audio/wav");
+    assert.equal(artifacts[0]!.name, "output-1.wav");
+    assert.match(calls.filter((c) => /\/view\?/.test(c.url))[0]!.url, /arke_00001_\.wav/);
+  });
+});
+
 describe("fetch takes the recipe's declared output node, and nothing else (§2.6)", () => {
   it("fetches each named file through /view and ignores other nodes' outputs", async () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);

@@ -312,6 +312,9 @@ const state: ClientState = {
         created: "2026-06-11T10:00:00Z",
       },
     ],
+    // No cloned voices in the fixture world (SPEC-022): the normal state until somebody
+    // clones one, and the shape the picker's empty source renders from.
+    clonedVoices: [],
     productions: [
       {
         meta: {

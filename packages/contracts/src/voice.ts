@@ -138,6 +138,133 @@ export function rankVoices(extracted: string[], candidates: VoiceCandidate[]): R
 }
 
 // ---------------------------------------------------------------------------
+// The cloned-voice library (SPEC-022 §2.3): a clip becomes something addressable
+// ---------------------------------------------------------------------------
+
+/** World-level, beside art-direction.json. A cloned voice belongs to the world (SPEC-022 D2). */
+export const CLONED_VOICES_PATH = "voices/voices.json";
+
+/**
+ * One voice cloned from a recording.
+ *
+ * Read leniently on purpose. This file is the read path for every cloned voice a world owns, and
+ * a schema that refuses an entry deletes a voice the user made — the same failure `SheetSchema`
+ * exists to avoid. Only the three fields dispatch cannot proceed without are required; everything
+ * else has a default, and `parseVoiceLibrary` drops a bad entry rather than the whole library.
+ */
+export const ClonedVoiceSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    /** World-relative portable path to the clip, resolved to `spk_audio_prompt` at dispatch. */
+    clip: z.string().min(1),
+    /** Required when a voice is MADE (D3); defaulted here so an older file still reads. */
+    description: z.string().default(""),
+    attributes: z.array(z.string()).default([]),
+    /** The artifact the recording was filed as — provenance, not ownership (§2.3). */
+    artifactId: z.string().optional(),
+    /** Recorded once, at capture. False on an entry written before it was asked for. */
+    consent: z.boolean().default(false),
+    created: z.string().default(""),
+  })
+  .passthrough();
+export type ClonedVoice = z.infer<typeof ClonedVoiceSchema>;
+
+/**
+ * Parse a library, keeping what parses. A malformed entry costs one voice; refusing the file
+ * would cost every voice in the world, and the user would be told nothing was ever cloned.
+ */
+export function parseVoiceLibrary(raw: unknown): ClonedVoice[] {
+  const list = (raw as { voices?: unknown })?.voices;
+  if (!Array.isArray(list)) return [];
+  const out: ClonedVoice[] = [];
+  for (const entry of list) {
+    const parsed = ClonedVoiceSchema.safeParse(entry);
+    if (parsed.success) out.push(parsed.data);
+  }
+  return out;
+}
+
+/** Stable, readable, and collision-free within a world. */
+export function mintVoiceId(name: string, taken: readonly string[]): string {
+  const base =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "voice";
+  if (!taken.includes(base)) return base;
+  for (let n = 2; ; n += 1) {
+    const candidate = `${base}-${n}`;
+    if (!taken.includes(candidate)) return candidate;
+  }
+}
+
+export type NewClonedVoice =
+  | { ok: true; voice: ClonedVoice }
+  | { ok: false; reason: string };
+
+/**
+ * Make a voice from a clip (D3, and §1.3's consent tick).
+ *
+ * The description is required here and nowhere else: `rankVoices` ranks a candidate with no
+ * attributes last, so a voice cloned FOR a character would otherwise sink below every preset when
+ * ranked against that same character. Refusing at creation is the only place that cannot be
+ * skipped — a voice with no words to match by is a voice the picker buries.
+ */
+export function newClonedVoice(input: {
+  name: string;
+  description: string;
+  clip: string;
+  consent: boolean;
+  artifactId?: string;
+  created: string;
+  taken: readonly string[];
+}): NewClonedVoice {
+  const name = input.name.trim();
+  if (!name) return { ok: false, reason: "a cloned voice needs a name" };
+  const description = input.description.trim();
+  if (!description) {
+    return { ok: false, reason: "a cloned voice needs a description — it is what the picker matches on" };
+  }
+  if (!input.clip.trim()) return { ok: false, reason: "a cloned voice needs a recording" };
+  if (!input.consent) {
+    return { ok: false, reason: "confirm the person speaking agreed to have their voice cloned" };
+  }
+  return {
+    ok: true,
+    voice: {
+      id: mintVoiceId(name, input.taken),
+      name,
+      clip: input.clip,
+      description,
+      attributes: extractVoiceAttributes(description),
+      ...(input.artifactId !== undefined ? { artifactId: input.artifactId } : {}),
+      consent: true,
+      created: input.created,
+    },
+  };
+}
+
+/**
+ * The library as picker candidates. Local, and never itself cloneable: cloning a clone would
+ * copy a copy, and the original recording is already in the library beside it.
+ */
+export function clonedVoiceCandidates(voices: readonly ClonedVoice[]): VoiceCandidate[] {
+  return voices.map((v) => ({
+    // The engine is ComfyUI, running a voice recipe (SPEC-022 §2.1). A cloned voice is addressed
+    // like every other candidate — provider plus id — and the recipe is the model behind it, so
+    // swapping the engine later is a recipe edit rather than a change to what a voice IS.
+    provider: "comfyui",
+    voiceId: v.id,
+    label: v.name,
+    attributes: v.attributes,
+    local: true,
+    canClone: false,
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // Preview lines (R-9, D7): the character's own words, then drafted, then stock
 // ---------------------------------------------------------------------------
 

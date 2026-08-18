@@ -2,10 +2,13 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  clonedVoiceCandidates,
   estimateMicroUsd,
   extractVoiceAttributes,
   previewLineFor,
+  PROVIDERS,
   rankVoices,
+  type ClonedVoice,
   type DomainEvent,
   type ManifestModel,
   type ModelManifest,
@@ -75,7 +78,13 @@ export function authoritativeSheetSpeech(sheet: Sheet, heading: string): { text:
 }
 
 export interface SpeechSpec {
-  provider: "kokoro" | "elevenlabs";
+  /**
+   * A provider id, not a closed pair. This was `"kokoro" | "elevenlabs"`, which is the same
+   * two-provider assumption the cache key carried (SPEC-022 §2.7) expressed in the type system:
+   * a third voice provider could not be spelled here, so its previews had to borrow another's
+   * name. `VoiceAssignment.provider` has always been a plain string for the same reason.
+   */
+  provider: string;
   model: string;
   voiceId: string;
   text: string;
@@ -92,10 +101,32 @@ export function speechCacheFile(spec: SpeechSpec): string {
   return `${PREVIEW_CACHE_DIR}/${key}.${spec.format}`;
 }
 
-export function previewCacheFile(provider: string, voiceId: string, line: string, ext: string): string {
+/**
+ * The model a provider's previews are cached under when the caller does not name one. Read
+ * through this map rather than branched on, because the branch it replaces was binary — anything
+ * that was not Kokoro was filed as ElevenLabs, so a second *local* provider landed on the cloud
+ * key and two providers' previews of the same voice id and line collided (SPEC-022 §2.7).
+ */
+// No comfyui row: the voice recipe does not exist yet, and naming an id the manifest cannot
+// resolve mints cache keys against a model nothing can dispatch. Absent falls through to the
+// provider's own name, which is honest until the recipe lands with its real id.
+const PREVIEW_MODEL: Record<string, string> = {
+  kokoro: "kokoro-82m",
+  elevenlabs: "eleven_multilingual_v2",
+};
+
+export function previewCacheFile(
+  provider: string,
+  voiceId: string,
+  line: string,
+  ext: string,
+  model?: string,
+): string {
   return speechCacheFile({
-    provider: provider === "kokoro" ? "kokoro" : "elevenlabs",
-    model: provider === "kokoro" ? "kokoro-82m" : "eleven_multilingual_v2",
+    provider,
+    // An unknown provider keys under its own name rather than a neighbour's: a wrong path is
+    // recoverable, a shared one serves another provider's audio for this voice.
+    model: model ?? PREVIEW_MODEL[provider] ?? provider,
     voiceId,
     text: line,
     format: ext === "wav" ? "wav" : "mp3",
@@ -109,8 +140,15 @@ export class VoiceService {
     return (this.deps.clock ?? (() => new Date().toISOString()))();
   }
 
-  /** The unified catalogue (R-6): local presets (or the live sidecar list) plus cloud voices. */
-  async catalogue(): Promise<VoiceCandidate[]> {
+  /**
+   * The unified catalogue (R-6): local presets, the world's cloned voices, and cloud voices.
+   *
+   * The cloned voices are passed in rather than read here, because this service has no world —
+   * it is constructed once and a world is opened and closed around it. The caller that has a
+   * bundle supplies them; the caller that has none (the narrator, resolved before a world is
+   * open) supplies nothing and gets the two catalogues that do not depend on one.
+   */
+  async catalogue(clonedVoices: readonly ClonedVoice[] = []): Promise<VoiceCandidate[]> {
     let local = this.deps.localPresets;
     if (this.deps.sidecar) {
       const live = await this.deps.sidecar.listVoices().catch(() => []);
@@ -121,7 +159,10 @@ export class VoiceService {
           label: v.label,
           attributes: v.attributes,
           local: true,
-          canClone: false, // local means presets, cloud means cloning (D4)
+          // Kokoro's presets cannot be cloned from. That is a fact about Kokoro, not about local
+          // voice — SPEC-022 §2.4 retires "local means presets, cloud means cloning" precisely
+          // because the voices appended below are local AND cloned.
+          canClone: false,
         }));
       }
     }
@@ -131,16 +172,20 @@ export class VoiceService {
       if (key === null) continue; // unkeyed providers simply contribute nothing
       cloud.push(...(await source.list(key).catch(() => [])));
     }
-    return [...cloud, ...local];
+    return [...cloud, ...local, ...clonedVoiceCandidates(clonedVoices)];
   }
 
   /** Rank the catalogue against the sheet's written voice (R-7): emits voice.candidates. */
   async candidates(worldId: string, bundle: WorldBundle, sheet: Sheet, manifest: ModelManifest | null): Promise<void> {
     const written = sheet.sections.find((s) => s.heading === "Voice · written")?.body ?? "";
     const extracted = extractVoiceAttributes(written);
-    const ranked = rankVoices(extracted, await this.catalogue());
+    const ranked = rankVoices(extracted, await this.catalogue(bundle.clonedVoices));
     const line = previewLineFor(sheet, bundle.productions);
-    const voiceModel = manifest?.models.find((m) => m.provider === "elevenlabs" && m.capability === "voice-tts") ?? null;
+    // By capability and locality, never by vendor name: this asked for ElevenLabs specifically,
+    // so a third `voice-tts` row was simply not found (SPEC-022 §2.7). What the picker needs here
+    // is the priced cloud row — a local row is unmetered and would quote every read at nothing.
+    const voiceModel =
+      manifest?.models.find((m) => m.capability === "voice-tts" && !PROVIDERS[m.provider].local) ?? null;
     this.deps.emit({
       at: this.now(),
       type: "voice.candidates",
@@ -199,7 +244,10 @@ export class VoiceService {
     model: ManifestModel,
   ): { input: EnqueueInput; cacheFile: string } {
     const normalized = normalizeSpeechText(line.text);
-    const cacheFile = speechCacheFile({ provider: "elevenlabs", voiceId, text: normalized, model: model.id, format: "mp3" });
+    // The caller's provider, not a hardcoded one: this function already takes `provider` and used
+    // to key the cache under "elevenlabs" regardless, so a second cloud provider's preview of the
+    // same voice id and line would have replayed ElevenLabs' audio (SPEC-022 §2.7).
+    const cacheFile = speechCacheFile({ provider, voiceId, text: normalized, model: model.id, format: "mp3" });
     const name = cacheFile.slice(PREVIEW_CACHE_DIR.length + 1);
     return {
       cacheFile,
