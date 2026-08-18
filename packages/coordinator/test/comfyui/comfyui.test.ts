@@ -685,7 +685,10 @@ describe("sanitisation runs before landing, and a refusal fails the job (§2.10)
     await queue.waitForIdle();
     const landedJob = queue.listJobs().find((j) => j.id === job.id)!;
     assert.equal(landedJob.status, "succeeded");
-    const landed = await readFile(join(dir, landedJob.landedFiles![0]!.replaceAll("/", "\\")));
+    // landedFiles are world-relative and always forward-slashed; join() takes those on
+    // Windows too, so the separator swap this used to do only made the path unreadable
+    // on Linux, where a backslash is an ordinary character in a filename.
+    const landed = await readFile(join(dir, landedJob.landedFiles![0]!));
     assert.equal(new TextDecoder("latin1").decode(landed).includes("KSampler"), false);
     queue.dispose();
   });
