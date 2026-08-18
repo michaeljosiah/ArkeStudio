@@ -1,0 +1,70 @@
+/* ============================================================
+   Launch screen tokens — design master turn 75.
+
+   The launch screen is the one surface in the app that does NOT theme. It is
+   always the dark plate, whatever the user's appearance preference, so every
+   value here is theme-invariant on purpose:
+
+     · the neutral ramp (--neutral-*) is deliberately left alone by the `.dark`
+       scope, so a ramp value means the same colour in both themes. That is a
+       hazard everywhere else in the app and exactly the property this screen
+       needs. Nothing below may resolve through --foreground / --background;
+       those invert, and the screen would lose its text in light mode.
+
+     · the warm values are the plate's own light — the horizon, and the flare
+       that sits on the final O of the wordmark. They are the only colour on
+       the screen; every card, button, icon and label is neutral. That is the
+       design system's standing contract (chrome stays neutral so the imagery
+       carries the colour) rather than an exception to it.
+
+   This file exists because R-11 forbids a hard-coded colour anywhere outside
+   the token directory, and a lens flare cannot be expressed in the ramp.
+   ============================================================ */
+:root {
+  /* ---- Ink -------------------------------------------------- */
+  /* Theme-invariant by construction: the ramp is not re-scoped under .dark. */
+  --launch-ink: var(--neutral-50);
+  --launch-ink-dim: color-mix(in srgb, var(--neutral-50) 62%, transparent);
+  --launch-ink-faint: color-mix(in srgb, var(--neutral-50) 50%, transparent);
+  --launch-ink-quiet: color-mix(in srgb, var(--neutral-50) 44%, transparent);
+  --launch-ink-off: color-mix(in srgb, var(--neutral-50) 34%, transparent);
+
+  /* ---- Plate and panels ------------------------------------- */
+  /* Painted behind the image so a slow decode is never a white flash. */
+  --launch-plate: var(--neutral-950);
+  --launch-panel-bg: color-mix(in srgb, var(--neutral-950) 50%, transparent);
+  --launch-panel-line: color-mix(in srgb, var(--neutral-50) 13%, transparent);
+  /* The card whose action is not offered yet: present, dimmer, never removed. */
+  --launch-panel-bg-muted: color-mix(in srgb, var(--neutral-950) 40%, transparent);
+  --launch-panel-line-muted: color-mix(in srgb, var(--neutral-50) 12%, transparent);
+
+  /* ---- Controls --------------------------------------------- */
+  /* Exactly one filled action on the screen; everything else is outlined. */
+  --launch-action-bg: var(--neutral-50);
+  --launch-action-fg: var(--neutral-900);
+  --launch-action-ring: color-mix(in srgb, var(--neutral-50) 14%, transparent);
+  --launch-action-off-bg: color-mix(in srgb, var(--neutral-50) 3%, transparent);
+  --launch-action-off-line: color-mix(in srgb, var(--neutral-50) 12%, transparent);
+  --launch-action-off-fg: color-mix(in srgb, var(--neutral-50) 40%, transparent);
+  --launch-divider: color-mix(in srgb, var(--neutral-50) 16%, transparent);
+
+  /* ---- The lockup's light ----------------------------------- */
+  /* The bar crosses the wordmark on its baseline and brightens into the O. */
+  --launch-bar-quiet: color-mix(in srgb, var(--neutral-50) 16%, transparent);
+  --launch-bar-mid: color-mix(in srgb, var(--neutral-50) 42%, transparent);
+  --launch-bar-warm: rgba(255, 201, 142, 0.95);
+  --launch-bar-fade: color-mix(in srgb, var(--neutral-50) 28%, transparent);
+  --launch-flare-core: rgba(255, 240, 215, 0.95);
+  --launch-flare-mid: rgba(255, 205, 150, 0.4);
+  --launch-flare-haze: rgba(255, 190, 130, 0.1);
+  --launch-flare-edge: rgba(255, 180, 120, 0);
+  --launch-streak: rgba(255, 222, 180, 0.75);
+  --launch-streak-edge: rgba(255, 196, 140, 0);
+
+  /*
+   * The wordmark's face. Jost is the geometric the lockup was drawn in; it is not
+   * bundled, so this falls through to the house sans until `@fontsource/jost` is
+   * added. Adopting it is then a dependency and an import — no rule below changes.
+   */
+  --font-wordmark: "Jost", var(--font-sans);
+}

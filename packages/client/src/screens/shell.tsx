@@ -188,7 +188,7 @@ function stillPreferred(): boolean {
   return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 }
 
-export function LaunchScreen() {
+export function StartupScreen() {
   const { connection, state } = useStore();
   const navigate = useNavigate();
   const env = useEnvCheck();
@@ -263,17 +263,17 @@ export function LaunchScreen() {
   };
 
   return (
-    <div className="fy-app" data-screen="launch">
+    <div className="fy-app" data-screen="startup">
       {/* The one screen without the two controls: there is no world open to act on yet, and
           nothing has happened here that a control could take you back to. */}
       <AppChrome controls={false} divided={false} />
-      <div className="fy-launch">
-        <div className="fy-launch__reel">
+      <div className="fy-startup">
+        <div className="fy-startup__reel">
           {/* The reel plays while the runtimes come down — the wait is the only time this
               screen is ever seen. Muted and silent by design; a setup screen does not get to
               make noise. Someone who has asked for less motion gets the still first frame. */}
           <video
-            className="fy-launch__video"
+            className="fy-startup__video"
             src={SETUP_REEL}
             autoPlay={!stillPreferred()}
             loop
@@ -282,7 +282,7 @@ export function LaunchScreen() {
             preload="auto"
           />
         </div>
-        <div className="fy-launch__panel">
+        <div className="fy-startup__panel">
           {startup?.status === "failed" ? (
             <Callout tone="danger" title="The studio could not start">
               <div>{startup.detail}</div>
@@ -294,10 +294,10 @@ export function LaunchScreen() {
             </Callout>
           ) : setupRun && !settled ? (
             <>
-          <div className="fy-launch__row">
-            <span className="fy-launch__title">Setting up your studio.</span>
+          <div className="fy-startup__row">
+            <span className="fy-startup__title">Setting up your studio.</span>
           </div>
-          <div className="fy-launch__row" style={{ marginTop: 10 }}>
+          <div className="fy-startup__row" style={{ marginTop: 10 }}>
             <span className="fy-mono">{activity}</span>
             <span style={{ flex: 1 }} />
             {speed !== null && speed > 0 && <span className="fy-mono">{mb(speed)}/s</span>}
@@ -305,7 +305,7 @@ export function LaunchScreen() {
           <div className="fy-setupbar">
             <div className="fy-setupbar__fill" style={{ width: `${percent}%` }} />
           </div>
-          <div className="fy-launch__row" style={{ marginTop: 8 }}>
+          <div className="fy-startup__row" style={{ marginTop: 8 }}>
             <span className="fy-mono">{totalBytes > 0 ? `${mb(doneBytes)} of ${mb(totalBytes)}` : ""}</span>
             <span style={{ flex: 1 }} />
             <span className="fy-mono">{remaining !== null ? aboutLeft(remaining) : ""}</span>
@@ -344,7 +344,7 @@ export function LaunchScreen() {
                   with `npm run dev:coordinator`.
                 </Callout>
               )}
-              <div className="fy-launch__done">
+              <div className="fy-startup__done">
                 <Button
                   variant="primary"
                   disabled={!settled}
@@ -353,7 +353,7 @@ export function LaunchScreen() {
                 >
                   {settled ? "Continue" : "Loading…"}
                 </Button>
-                <span className="fy-launch__version">{version === null ? "" : `v${version}`}</span>
+                <span className="fy-startup__version">{version === null ? "" : `v${version}`}</span>
               </div>
             </>
           )}

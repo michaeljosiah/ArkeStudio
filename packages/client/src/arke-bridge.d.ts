@@ -22,6 +22,11 @@ export interface ArkeBridge {
   ): () => void;
   themeReady?(): void;
   /**
+   * Hold the dark caption buttons while the launch screen's plate is up, whatever the
+   * appearance preference. Optional: a browser session has no host chrome to repaint.
+   */
+  chromeOverPlate?(over: boolean): void;
+  /**
    * Desktop only, and optional for that reason: a browser session has no host to resolve a
    * dropped file's path, so the composer simply does not offer the affordance there.
    */

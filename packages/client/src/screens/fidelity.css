@@ -2617,14 +2617,14 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-worldcard__confirmacts { display: flex; gap: 8px; justify-content: center; }
 /* The finished setup screen: a door, and the version that opened it. */
-.fy-launch__done {
+.fy-startup__done {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 12px;
   padding: 8px 0 2px;
 }
-.fy-launch__version { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
+.fy-startup__version { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
 .fy-set__aboutname { font: 650 26px var(--font-sans); letter-spacing: -0.02em; }
 .fy-set__aboutmeta { font: 400 11px var(--font-mono); color: var(--neutral-400); }
 .fy-set__aboutline { font: 400 12.5px var(--font-sans); color: var(--muted-foreground); margin-top: 5px; }
@@ -2676,9 +2676,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-spendbar__fill { height: 100%; border-radius: 99px; background: var(--foreground); }
 .fy-spendbar__value { font: 400 10.5px var(--font-mono); color: var(--neutral-400); width: 56px; text-align: right; flex: none; }
 
-/* launch (15a) */
-.fy-launch { flex: 1; display: flex; flex-direction: column; align-items: center; min-height: 0; padding: 0 28px 22px; }
-.fy-launch__reel {
+/* startup (15a) — the wait, not the choice ahead of it (75a) */
+.fy-startup { flex: 1; display: flex; flex-direction: column; align-items: center; min-height: 0; padding: 0 28px 22px; }
+.fy-startup__reel {
   width: 100%;
   flex: 1;
   min-height: 0;
@@ -2694,7 +2694,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   animation: fy-fade-up 0.7s var(--ease-out) both;
 }
 /* The reel fills its frame, and carries the screen on its own — no wordmark over it. */
-.fy-launch__video {
+.fy-startup__video {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -2702,9 +2702,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   object-fit: cover;
   display: block;
 }
-.fy-launch__panel { width: 640px; max-width: 100%; margin-top: 20px; flex: none; animation: fy-fade-up 0.8s var(--ease-out) 0.15s both; }
-.fy-launch__row { display: flex; align-items: baseline; width: 100%; gap: 10px; }
-.fy-launch__title { font: 600 13px var(--font-sans); letter-spacing: -0.01em; }
+.fy-startup__panel { width: 640px; max-width: 100%; margin-top: 20px; flex: none; animation: fy-fade-up 0.8s var(--ease-out) 0.15s both; }
+.fy-startup__row { display: flex; align-items: baseline; width: 100%; gap: 10px; }
+.fy-startup__title { font: 600 13px var(--font-sans); letter-spacing: -0.01em; }
 /*
  * The track is --muted, not --neutral-100. The ramp is not overridden under .dark, so the track
  * kept its light-mode value while the fill below resolves to --foreground — in dark the two sat
@@ -2724,6 +2724,234 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   border-radius: 99px;
   background: var(--foreground);
   transition: width 0.45s var(--ease-out);
+}
+
+/* ------------------------------------------------------------------
+   launch (75a) — the choice ahead of the wait.
+
+   The one screen that does not theme. Every colour resolves through
+   theme/tokens/launch.css, which is built on the neutral ramp precisely
+   because `.dark` leaves the ramp alone: the plate is dark in both themes,
+   so the ink has to be too. Nothing here may reach for --foreground.
+   ------------------------------------------------------------------ */
+.fy-launch {
+  position: relative;
+  align-items: center;
+  justify-content: center;
+  /* Beats .fy-app's themed pair on the same element. */
+  background: var(--launch-plate);
+  color: var(--launch-ink);
+  /* Room reserved for the footer so the centred group never sits on it. */
+  padding-bottom: 96px;
+  box-sizing: border-box;
+}
+/*
+ * Anchored right, never centred. The plate is 2.52:1 against a window that runs 1.6:1 to
+ * 2.33:1, so `cover` crops up to 36% of its width; centred, the sun lands at 99.5% and the
+ * composition is gone. Right-anchored it sits at 87% and only dark sky is lost from the left.
+ */
+.fy-launch__plate {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 100% 50%;
+  pointer-events: none;
+}
+/* Frameless window: this strip is the handle. Matches titleBarOverlay's 44px. */
+.fy-launch__drag { position: absolute; top: 0; left: 0; right: 0; height: 44px; }
+.is-desktop .fy-launch__drag { app-region: drag; }
+
+.fy-launch__lockup { position: relative; display: flex; flex-direction: column; align-items: center; }
+.fy-launch__mark {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 940px;
+  max-width: 92vw;
+  height: 74px;
+}
+/* The bar crosses the wordmark on its baseline and warms into the final O. */
+.fy-launch__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 6px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--launch-bar-quiet) 14%,
+    var(--launch-bar-mid) 46%,
+    var(--launch-bar-warm) 79%,
+    var(--launch-bar-fade) 92%,
+    transparent 100%
+  );
+}
+.fy-launch__streak,
+.fy-launch__flare {
+  position: absolute;
+  left: 81.4%;
+  bottom: 6px;
+  transform: translate(-50%, 50%);
+  pointer-events: none;
+}
+.fy-launch__streak {
+  width: 300px;
+  height: 16px;
+  background: radial-gradient(closest-side, var(--launch-streak), var(--launch-streak-edge) 100%);
+}
+.fy-launch__flare {
+  width: 96px;
+  height: 96px;
+  background: radial-gradient(
+    closest-side,
+    var(--launch-flare-core),
+    var(--launch-flare-mid) 18%,
+    var(--launch-flare-haze) 44%,
+    var(--launch-flare-edge) 72%
+  );
+}
+/*
+ * Set as words, uppercased in CSS — "ARKE STUDIO" in the markup would be read out letter by
+ * letter. The trailing letter-space is pushed back with a matching indent so the run stays
+ * optically centred, which is also what puts the O under the flare at 81.4%.
+ */
+.fy-launch__wordmark {
+  position: relative;
+  margin: 0;
+  font: 200 58px/1 var(--font-wordmark);
+  letter-spacing: 0.55em;
+  text-indent: 0.55em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--launch-ink);
+}
+.fy-launch__tagline {
+  margin: 20px 0 0;
+  font: 300 16px/1 var(--font-wordmark);
+  letter-spacing: 0.83em;
+  text-indent: 0.83em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--launch-ink-faint);
+}
+
+.fy-launch__ways { display: flex; justify-content: center; gap: 52px; margin-top: 50px; }
+.fy-launch__card {
+  width: 400px;
+  height: 382px;
+  box-sizing: border-box;
+  padding: 46px 30px 26px;
+  border: 1px solid var(--launch-panel-line);
+  border-radius: 16px;
+  background: var(--launch-panel-bg);
+  backdrop-filter: blur(14px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: fy-fade-up 0.8s var(--ease-out) 0.12s both;
+}
+/* Present, dimmer, never removed — the choice is the point of the screen. */
+.fy-launch__card--soon {
+  border-color: var(--launch-panel-line-muted);
+  background: var(--launch-panel-bg-muted);
+  animation-delay: 0.2s;
+}
+.fy-launch__icon { color: var(--launch-ink); line-height: 0; }
+.fy-launch__card--soon .fy-launch__icon { opacity: 0.45; }
+.fy-launch__title {
+  margin: 30px 0 0;
+  font: 600 23px/1.2 var(--font-sans);
+  letter-spacing: -0.01em;
+  color: var(--launch-ink);
+}
+.fy-launch__card--soon .fy-launch__title { color: var(--launch-ink-dim); }
+.fy-launch__body {
+  margin: 14px 0 0;
+  text-align: center;
+  font: 400 13.5px/1.65 var(--font-sans);
+  color: var(--launch-ink-dim);
+}
+.fy-launch__card--soon .fy-launch__body { color: var(--launch-ink-quiet); }
+
+/* Exactly one filled action on the screen; everything else is outlined or plain. */
+.fy-launch__action {
+  margin-top: auto;
+  width: 100%;
+  height: 52px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: var(--launch-action-bg);
+  color: var(--launch-action-fg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  font: 600 14.5px var(--font-sans);
+  cursor: pointer;
+  transition: box-shadow 0.2s var(--ease-out);
+}
+.fy-launch__action:hover { box-shadow: 0 0 0 4px var(--launch-action-ring); }
+.fy-launch__action:focus-visible { outline: 2px solid var(--launch-ink); outline-offset: 3px; }
+.fy-launch__action--off,
+.fy-launch__action--off:hover {
+  border-color: var(--launch-action-off-line);
+  background: var(--launch-action-off-bg);
+  color: var(--launch-action-off-fg);
+  font-weight: 500;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.fy-launch__note {
+  margin: 22px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font: 400 12.5px var(--font-sans);
+  color: var(--launch-ink-faint);
+}
+.fy-launch__note--off { color: var(--launch-ink-off); }
+
+/*
+ * No rule is drawn above this row: the plate's own lit horizon sits at 86% and separates the
+ * cards from the links, and a hairline under it is swallowed by the glow (75a, binding).
+ */
+.fy-launch__foot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fy-fade-up 0.8s var(--ease-out) 0.3s both;
+}
+.fy-launch__link-wrap { display: flex; align-items: center; }
+.fy-launch__sep { width: 1px; height: 16px; background: var(--launch-divider); }
+/* Text, not buttons: none of the four has a destination yet, and a dead control is worse. */
+.fy-launch__link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 26px;
+  font: 400 13.5px var(--font-sans);
+  color: var(--launch-ink-dim);
+}
+
+/* A short window runs out of room before the plate does; the lockup gives way first. */
+@media (max-height: 780px) {
+  .fy-launch { padding-bottom: 72px; }
+  .fy-launch__mark { height: 56px; }
+  .fy-launch__wordmark { font-size: 42px; letter-spacing: 0.44em; text-indent: 0.44em; }
+  .fy-launch__tagline { margin-top: 14px; font-size: 13px; letter-spacing: 0.6em; text-indent: 0.6em; }
+  .fy-launch__ways { margin-top: 32px; }
+}
+@media (max-width: 940px) {
+  .fy-launch__ways { gap: 28px; }
+  .fy-launch__card { width: 330px; }
 }
 
 /* first run (5a) */

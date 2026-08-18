@@ -47,13 +47,13 @@ function nestedButtons(html: string): string[] {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (54 screens)", () => {
+  it("covers the full screen inventory (55 screens)", () => {
     // The number is written three times on purpose — it is a tripwire, not a fact being derived,
     // so `SCREENS.length` on both sides would assert nothing. It does mean two branches that each
     // add a screen merge cleanly and land a count that was right for neither: #268 and #243 did
     // exactly that, and this is where it surfaced.
-    assert.equal(SCREENS.length, 54);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 54, "screen ids are unique");
+    assert.equal(SCREENS.length, 55);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 55, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {
@@ -73,16 +73,16 @@ describe("screen inventory", () => {
     }
   });
 
-  it("smoke-renders the root router", () => {
-    const html = renderAt("/");
-    // The launch screen, by what it is rather than by a wordmark: the reel, and — with nothing
+  it("smoke-renders the startup screen", () => {
+    const html = renderAt("/starting");
+    // The screen that waits, by what it is rather than by a wordmark: the reel, and — with nothing
     // left to fetch — a door and a version number. The progress line, the byte counts and the
     // note about where worlds live all answered "what is it doing", which nobody is asking
     // once it is done.
-    assert.ok(html.includes('data-screen="launch"'), "the root route mounts the launch screen");
+    assert.ok(html.includes('data-screen="startup"'), "/starting mounts the screen that waits");
     assert.ok(html.includes("setup-reel.mp4"), "the reel plays while the runtimes come down");
     assert.ok(html.includes("Continue"), "and when it is ready, the way in");
-    assert.ok(html.includes("fy-launch__version"), "with the version under it");
+    assert.ok(html.includes("fy-startup__version"), "with the version under it");
     for (const chatter of ["Setting up your studio.", "One-time setup", "everything ready"]) {
       assert.ok(!html.includes(chatter), `"${chatter}" is not shown once there is nothing to wait for`);
     }
@@ -94,9 +94,9 @@ describe("screen inventory", () => {
     // bar creeping under a sentence about a one-time download that already happened.
     __connectionStatusForTest("connecting");
     try {
-      const html = renderAt("/");
+      const html = renderAt("/starting");
       assert.ok(html.includes("Loading…"), "the door is there from the first frame, and says it is opening");
-      assert.ok(html.includes("fy-launch__version"), "with the version still under it");
+      assert.ok(html.includes("fy-startup__version"), "with the version still under it");
       assert.ok(!html.includes("fy-setupbar"), "nothing is being fetched, so there is no bar");
       for (const chatter of ["Setting up your studio.", "One-time setup", "checking studio core"]) {
         assert.ok(!html.includes(chatter), `"${chatter}" belongs to the launch that is actually setting up`);
@@ -130,7 +130,7 @@ describe("screen inventory", () => {
       },
     });
     try {
-      const html = renderAt("/");
+      const html = renderAt("/starting");
       assert.ok(html.includes("Setting up your studio."), "a real download still says what it is");
       assert.ok(html.includes("fy-setupbar"), "and still shows how far along it is");
       assert.ok(html.includes("downloading kokoro voice"), "in the product's words, one line");
@@ -151,7 +151,7 @@ describe("screen inventory", () => {
       },
     });
     try {
-      const html = renderAt("/");
+      const html = renderAt("/starting");
       assert.ok(html.includes("The studio could not start"));
       assert.ok(html.includes("Startup failed safely."));
       for (const action of ["Retry", "Open data folder", "Quit"]) assert.ok(html.includes(action));
