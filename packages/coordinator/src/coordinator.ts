@@ -4209,8 +4209,9 @@ export class Coordinator {
         // that meaning anything about the pick.
         if (!this.voiceService) return;
         const store = this.opts.provider.openStore?.();
-        const voices = await this.voiceService.catalogue().catch(() => []);
-        const sheets = store?.getBundle().sheets ?? [];
+        const bundle = store?.getBundle();
+        const voices = await this.voiceService.catalogue(bundle?.clonedVoices ?? []).catch(() => []);
+        const sheets = bundle?.sheets ?? [];
         this.emit({
           at: new Date().toISOString(),
           type: "voice.catalogue",
@@ -4309,7 +4310,7 @@ export class Coordinator {
           return;
         }
         const line = previewLineFor(sheet, bundle.productions);
-        const candidate = (await this.voiceService.catalogue()).find(
+        const candidate = (await this.voiceService.catalogue(bundle.clonedVoices)).find(
           (entry) => entry.provider === msg.provider && entry.voiceId === msg.voiceId,
         );
         if (!candidate || (msg.provider !== "kokoro" && msg.provider !== "elevenlabs")) {
@@ -4445,7 +4446,11 @@ export class Coordinator {
         // somebody in their own voice was the old behaviour, and it refused entirely for the
         // many characters who have no voice assigned.
         const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
-        const narrator = narratorFor(narratorSettings?.narrator ?? null, await this.voiceService.catalogue());
+        const narratorVoices = this.opts.provider.openStore?.()?.getBundle().clonedVoices ?? [];
+        const narrator = narratorFor(
+          narratorSettings?.narrator ?? null,
+          await this.voiceService.catalogue(narratorVoices),
+        );
         if (narrator.provider !== "kokoro" && narrator.provider !== "elevenlabs") {
           fail("The narrator's voice is not available — choose another in Settings.");
           return;

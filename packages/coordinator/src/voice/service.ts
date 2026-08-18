@@ -2,11 +2,13 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  clonedVoiceCandidates,
   estimateMicroUsd,
   extractVoiceAttributes,
   previewLineFor,
   PROVIDERS,
   rankVoices,
+  type ClonedVoice,
   type DomainEvent,
   type ManifestModel,
   type ModelManifest,
@@ -136,8 +138,15 @@ export class VoiceService {
     return (this.deps.clock ?? (() => new Date().toISOString()))();
   }
 
-  /** The unified catalogue (R-6): local presets (or the live sidecar list) plus cloud voices. */
-  async catalogue(): Promise<VoiceCandidate[]> {
+  /**
+   * The unified catalogue (R-6): local presets, the world's cloned voices, and cloud voices.
+   *
+   * The cloned voices are passed in rather than read here, because this service has no world —
+   * it is constructed once and a world is opened and closed around it. The caller that has a
+   * bundle supplies them; the caller that has none (the narrator, resolved before a world is
+   * open) supplies nothing and gets the two catalogues that do not depend on one.
+   */
+  async catalogue(clonedVoices: readonly ClonedVoice[] = []): Promise<VoiceCandidate[]> {
     let local = this.deps.localPresets;
     if (this.deps.sidecar) {
       const live = await this.deps.sidecar.listVoices().catch(() => []);
@@ -148,7 +157,10 @@ export class VoiceService {
           label: v.label,
           attributes: v.attributes,
           local: true,
-          canClone: false, // local means presets, cloud means cloning (D4)
+          // Kokoro's presets cannot be cloned from. That is a fact about Kokoro, not about local
+          // voice — SPEC-022 §2.4 retires "local means presets, cloud means cloning" precisely
+          // because the voices appended below are local AND cloned.
+          canClone: false,
         }));
       }
     }
@@ -158,14 +170,14 @@ export class VoiceService {
       if (key === null) continue; // unkeyed providers simply contribute nothing
       cloud.push(...(await source.list(key).catch(() => [])));
     }
-    return [...cloud, ...local];
+    return [...cloud, ...local, ...clonedVoiceCandidates(clonedVoices)];
   }
 
   /** Rank the catalogue against the sheet's written voice (R-7): emits voice.candidates. */
   async candidates(worldId: string, bundle: WorldBundle, sheet: Sheet, manifest: ModelManifest | null): Promise<void> {
     const written = sheet.sections.find((s) => s.heading === "Voice · written")?.body ?? "";
     const extracted = extractVoiceAttributes(written);
-    const ranked = rankVoices(extracted, await this.catalogue());
+    const ranked = rankVoices(extracted, await this.catalogue(bundle.clonedVoices));
     const line = previewLineFor(sheet, bundle.productions);
     // By capability and locality, never by vendor name: this asked for ElevenLabs specifically,
     // so a third `voice-tts` row was simply not found (SPEC-022 §2.7). What the picker needs here

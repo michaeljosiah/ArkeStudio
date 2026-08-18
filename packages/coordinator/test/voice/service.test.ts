@@ -408,3 +408,51 @@ describe("the narrator survives a restart (found live, 2026-08-17)", () => {
     assert.equal((await new AppSettingsFile(join(dir, "settings.json")).load()).narrator, null);
   });
 });
+
+/**
+ * The catalogue with a third source in it (SPEC-022 T-9). Kokoro's presets, ElevenLabs' library
+ * and the world's own cloned voices, ranked together against a written voice.
+ */
+describe("cloned voices join the catalogue", () => {
+  const service = () =>
+    new VoiceService({
+      sidecar: null,
+      localPresets: [
+        { provider: "kokoro", voiceId: "bm_george", label: "George", attributes: ["low", "gravel"], local: true, canClone: false },
+      ],
+      cloudSources: [],
+      getKey: async () => null,
+      emit: () => {},
+    });
+
+  const CLONED = [
+    {
+      id: "harbour-glass",
+      name: "Harbour glass",
+      clip: "voices/harbour-glass.wav",
+      description: "Low, dry, unhurried. Coastal.",
+      attributes: ["low", "dry", "unhurried", "coastal"],
+      consent: true,
+      created: "2026-08-18T10:00:00.000Z",
+    },
+  ];
+
+  it("offers them beside the presets, local and not themselves cloneable", async () => {
+    const catalogue = await service().catalogue(CLONED);
+    const cloned = catalogue.find((c) => c.voiceId === "harbour-glass");
+    assert.ok(cloned, "a cloned voice is a candidate like any other");
+    assert.equal(cloned.provider, "indextts");
+    assert.equal(cloned.local, true);
+    assert.equal(cloned.canClone, false);
+    assert.ok(catalogue.some((c) => c.provider === "kokoro"), "the presets are still there");
+  });
+
+  it("a world with none simply has none — the two catalogues that need no world still answer", async () => {
+    const catalogue = await service().catalogue();
+    assert.deepEqual(
+      catalogue.map((c) => c.provider),
+      ["kokoro"],
+      "the narrator resolves before a world is open and must not need one",
+    );
+  });
+});
