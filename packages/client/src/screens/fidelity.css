@@ -2190,6 +2190,14 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-set__dot--ok { background: var(--success); }
 .fy-set__dot--warn { background: var(--warning); }
 .fy-set__state { font: 400 10px var(--font-mono); color: var(--muted-foreground); }
+/*
+ * A dot and the word it qualifies, as one object. Loose in the row they took the row's own 12px
+ * gap, which is the gap between *different* things — so the dot read as its own column rather
+ * than as punctuation on the state beside it. 6px is what the canvas pairs them at, and the
+ * order is the canvas's too: the dot leads, so a row can be scanned down the colour without
+ * reading a word of it, and no row ends on a 6px target hard against the scroll edge.
+ */
+.fy-set__status { display: inline-flex; align-items: center; gap: 6px; flex: none; }
 .fy-set__note { font: 400 10px/1.6 var(--font-mono); color: var(--neutral-400); margin-top: 10px; }
 .fy-theme-options { border: 0; padding: 0; margin: 4px 0 0; }
 .fy-theme-option { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
@@ -2243,6 +2251,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
  */
 /* The appearance pane fills its height so the swatches can sit at its foot, where 35d puts them;
    every other pane keeps the shared content-height grid. */
+/* Local runtime fills its pane and scrolls inside the detail (turn 75), the way the appearance
+   pane stretches so its swatches can sit at the foot. */
+.fy-settings__pane:has(.fy-set--runtime) { align-content: stretch; }
 .fy-settings__pane:has(.fy-set--appearance) { align-content: stretch; }
 .fy-set--appearance { display: flex; flex-direction: column; }
 .fy-themeswatches { display: flex; gap: 12px; margin-top: auto; padding-top: 18px; }
@@ -2431,12 +2442,30 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-artproposal__seedline { font: 400 10px var(--font-mono); color: var(--neutral-400); margin-top: 6px; }
 
 /* Providers, master and detail (design turn 40a): a rail of providers, and one provider's key
-   and models beside it. A flat list of every provider's every model was the alternative, and it
+   and models beside it. Local runtime (.fy-rt, turn 75) is the same rail at the same numbers, so
+   the two panes that carry one share these declarations rather than restating them — a settings
+   rail that drifted 2px between tabs would be visible on the switch between them. A flat list of every provider's every model was the alternative, and it
    put nine unrelated switches under one heading with nothing saying which key reached which. */
 /* overflow:hidden is load-bearing: without it a long model list grows the pane past max-height
    and the sections below are drawn over it. */
 .fy-prov { display: flex; min-height: 300px; max-height: 46vh; overflow: hidden; }
-.fy-prov__rail {
+/*
+ * Local runtime, master and detail (design turn 75). Unlike .fy-prov it is the whole pane, so it
+ * takes the settings body's full height instead of a 46vh cap, and the scroll lives in the detail.
+ * That is what stops the settings panel scrolling as a whole: the pane no longer grows.
+ */
+.fy-set--runtime { display: flex; flex-direction: column; min-height: 0; }
+.fy-rt { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+/* The detail scrolls, so the gutter belongs here — a status dot must not sit under the bar. */
+.fy-rt__pane { overflow-y: auto; padding-right: 14px; }
+.fy-rt__sechead { align-items: center; }
+.fy-rt__rowname { font: 400 12.5px var(--font-sans); color: var(--foreground); }
+/* A path is the one value allowed to elide: its tail is the part that identifies it, but a
+   wrapped location would push the control that changes it off the row. */
+.fy-rt__path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-rt__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin-top: 14px; }
+.fy-prov__rail,
+.fy-rt__rail {
   /* 211px = the canvas's 196px of row plus its 14px gutter and 1px rule (40a). The row is what
      the number is really about: a provider name beside its "4 on" tally, neither eliding. */
   width: 211px;
@@ -2448,7 +2477,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   gap: 1px;
   overflow-y: auto;
 }
-.fy-prov__railitem {
+.fy-prov__railitem,
+.fy-rt__railitem {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -2462,10 +2492,14 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   font: 400 12.5px var(--font-sans);
   color: var(--muted-foreground);
 }
-.fy-prov__railitem:hover { background: var(--accent); }
-.fy-prov__railitem.is-current { background: var(--secondary); color: var(--foreground); font-weight: 500; }
-.fy-prov__count { font: 400 9.5px var(--font-mono); color: var(--neutral-400); letter-spacing: 0.06em; }
-.fy-prov__pane {
+.fy-prov__railitem:hover,
+.fy-rt__railitem:hover { background: var(--accent); }
+.fy-prov__railitem.is-current,
+.fy-rt__railitem.is-current { background: var(--secondary); color: var(--foreground); font-weight: 500; }
+.fy-prov__count,
+.fy-rt__count { font: 400 9.5px var(--font-mono); color: var(--neutral-400); letter-spacing: 0.06em; }
+.fy-prov__pane,
+.fy-rt__pane {
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -2473,19 +2507,26 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   display: flex;
   flex-direction: column;
 }
-.fy-prov__head { display: flex; align-items: center; gap: 10px; padding-bottom: 13px; }
-.fy-prov__title { font: 650 17px var(--font-sans); letter-spacing: -0.02em; }
-.fy-prov__caps { font: 400 9px var(--font-mono); color: var(--neutral-400); letter-spacing: 0.1em; }
-.fy-prov__eyebrow { font: 500 10px var(--font-mono); letter-spacing: 0.14em; color: var(--neutral-400); }
-.fy-prov__keyline {
+.fy-prov__head,
+.fy-rt__head { display: flex; align-items: center; gap: 10px; padding-bottom: 13px; }
+.fy-prov__title,
+.fy-rt__title { font: 650 17px var(--font-sans); letter-spacing: -0.02em; }
+.fy-prov__caps,
+.fy-rt__caps { font: 400 9px var(--font-mono); color: var(--neutral-400); letter-spacing: 0.1em; }
+.fy-prov__eyebrow,
+.fy-rt__eyebrow { font: 500 10px var(--font-mono); letter-spacing: 0.14em; color: var(--neutral-400); }
+.fy-prov__keyline,
+.fy-rt__keyline {
   display: flex;
   align-items: center;
   gap: 12px;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--border);
 }
-.fy-prov__keyline .fy-set__field { flex: 1; min-width: 0; }
-.fy-prov__modelshead { display: flex; align-items: baseline; gap: 10px; margin-top: 15px; padding-bottom: 4px; }
+.fy-prov__keyline .fy-set__field,
+.fy-rt__keyline .fy-set__field { flex: 1; min-width: 0; }
+.fy-prov__modelshead,
+.fy-rt__sechead { display: flex; align-items: baseline; gap: 10px; margin-top: 15px; padding-bottom: 4px; }
 .fy-prov__models { flex: 1; min-height: 0; overflow-y: auto; }
 .fy-prov__model {
   display: flex;

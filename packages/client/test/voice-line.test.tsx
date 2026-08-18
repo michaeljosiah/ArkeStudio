@@ -136,13 +136,23 @@ describe("choosing a character's voice", () => {
 });
 
 describe("the narrator in Settings", () => {
+  // Local runtime became master and detail in design turn 75: the narrator lives in the Voice
+  // group, and the group is asked for in the address rather than clicked.
   it("names the shipped local voice, and says it is free, until one is chosen", () => {
-    const html = render("/settings/local-runtime");
+    const html = render("/settings/local-runtime?group=voice");
     assert.match(html, /data-testid="narrator-name"/);
-    assert.match(html, /George · on this machine/);
+    assert.match(html, /George/);
     assert.match(html, /reads on this machine · free/);
     // Nothing to reset when nothing was chosen.
     assert.doesNotMatch(html, /data-testid="narrator-reset"/);
+  });
+
+  it("opens on This machine, and reaches the narrator only when Voice is asked for", () => {
+    // The rail is the heading now, so a group nobody asked for is not in the document at all —
+    // which is the whole reason the flat pane's nine sections could be cut.
+    const landing = render("/settings/local-runtime");
+    assert.match(landing, /data-screen="settings-local-runtime"/);
+    assert.doesNotMatch(landing, /data-testid="narrator-name"/);
   });
 
   it("says plainly when the narrator will be billed", () => {
@@ -152,7 +162,7 @@ describe("the narrator in Settings", () => {
       ...FIXTURE_STATE,
       app: { ...FIXTURE_STATE.app, narrator: { provider: "elevenlabs", voiceId: "v_roger", label: "Roger" } },
     };
-    const html = render("/settings/local-runtime", chosen);
+    const html = render("/settings/local-runtime?group=voice", chosen);
     assert.match(html, /Roger · elevenlabs/);
     assert.match(html, /billed per character/);
     // And there is a way back to the free one.
