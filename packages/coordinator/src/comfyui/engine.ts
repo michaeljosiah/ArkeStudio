@@ -264,7 +264,10 @@ export class ComfyUiEngineService {
       if (!this.disposed) void this.publish();
     });
     this.supervisor = supervisor;
-    await supervisor.start();
+    // Fire and observe, never await: start() resolves only after the health probe settles, and
+    // a cold engine imports torch for a minute or two. Settings answers now with "starting",
+    // and the status subscription publishes every transition as it happens (R-6).
+    void supervisor.start().catch(() => {});
   }
 
   private async stopSupervision(): Promise<void> {
