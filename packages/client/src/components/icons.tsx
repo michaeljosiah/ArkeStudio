@@ -81,6 +81,21 @@ export const Plus = icon(
     <path d="M12 5v14" />
   </>,
 );
+/** A pane with a rail down its left: the control that shows and hides one (71a). */
+export const PanelLeft = icon(
+  <>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M9 3v18" />
+  </>,
+);
+/** Three dots: everything else this row can be told to do. */
+export const More = icon(
+  <>
+    <circle cx="12" cy="12" r="1" />
+    <circle cx="19" cy="12" r="1" />
+    <circle cx="5" cy="12" r="1" />
+  </>,
+);
 /** A box with a lid: put away, not thrown away. */
 export const Archive = icon(
   <>

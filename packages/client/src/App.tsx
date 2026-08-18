@@ -20,7 +20,7 @@ import { ArtDirectionProposalScreen, ArtDirectionScreen } from "./screens/art-di
 import { BenchScreen } from "./screens/bench.js";
 import { BibleScreen } from "./screens/bible.js";
 import { ProposalsScreen } from "./screens/proposals.js";
-import { WorldChatConversationScreen, WorldChatScreen } from "./screens/world-chat.js";
+import { WorldChatScreen } from "./screens/world-chat.js";
 import {
   CharacterLooksScreen,
   CharacterReferenceScreen,
@@ -156,7 +156,7 @@ export function App() {
           <Route path="canon/:entryId" element={<CanonEntryScreen />} />
           <Route path="canon/:entryId/thread" element={<CanonThreadScreen />} />
           <Route path="chat" element={<WorldChatScreen />} />
-          <Route path="chat/:conversationId" element={<WorldChatConversationScreen />} />
+          <Route path="chat/:conversationId" element={<WorldChatScreen />} />
           <Route path="artifacts" element={<ArtifactsScreen />} />
           <Route path="artifacts/bench" element={<BenchScreen />} />
           <Route path="artifacts/bench/:sessionId" element={<BenchScreen />} />

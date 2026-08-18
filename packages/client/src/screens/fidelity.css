@@ -3513,54 +3513,103 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
    what is genuinely new to this screen is here.
    --------------------------------------------------------------------------- */
 
-.fy-chatlist { padding: 30px 44px 40px; max-width: 860px; }
-.fy-chatlist__head { margin-bottom: 22px; }
-.fy-chatlist__items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.fy-chatlist__item {
-  display: flex; flex-direction: column; gap: 3px; padding: 13px 16px; border-radius: 8px;
-  text-decoration: none; color: inherit; border: 1px solid transparent; transition: background 0.14s var(--ease-out);
-}
-.fy-chatlist__item:hover { background: var(--muted); }
-.fy-chatlist__title { font: 550 14px/1.35 var(--font-sans); }
-.fy-chatlist__sub { font: 400 11.5px var(--font-mono); color: var(--muted-foreground); }
-/* A conversation owed a decision says so in the one place the eye already is. */
-.fy-chatlist__sub--waiting { color: var(--warning); }
-
 /*
- * The row and its two controls. The link stays a link — the buttons are its siblings, not its
- * children — so keyboard order is row, archive, delete and nothing has to swallow a click.
+ * The history rail (71a): 236px, a right border, no tint.
+ *
+ * That is the production rail's geometry, and the reason is what the column is for — navigation
+ * between conversations rather than the content of one. The tinted 470px rail on the other side
+ * stays the only column holding something to decide. What is left for the conversation is 654px
+ * at the 1360px frame, the width Story's conversation column already has (44a); a bubble is
+ * capped at 440px, so it gives up nothing.
  */
-.fy-chatlist__row { display: flex; align-items: center; gap: var(--space-2); border-radius: 8px; }
-.fy-chatlist__row .fy-chatlist__item { flex: 1; min-width: 0; }
-.fy-chatlist__acts { display: flex; align-items: center; gap: var(--space-1); flex: none; }
-/*
- * Quiet until the row is wanted, but never hidden: revealing controls on hover alone puts them
- * out of reach of touch and makes them undiscoverable, and this is where deleting lives.
- */
-.fy-chatlist__acts .ui-btn { opacity: 0.55; transition: opacity 0.14s var(--ease-out); }
-.fy-chatlist__row:hover .ui-btn,
-.fy-chatlist__row:focus-within .ui-btn { opacity: 1; }
-.fy-chatlist__acts .ui-btn:disabled { opacity: 0.35; }
-/* Said in text, not a tooltip: a reason only a mouse can reach is not a reason (R-47). */
-.fy-chatlist__blocked { font: 400 11px var(--font-mono); color: var(--muted-foreground); }
-.fy-chatlist__confirm {
-  flex: 1;
+.fy-chatnav {
+  width: 236px;
+  box-sizing: border-box;
+  flex: none;
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: 13px 16px;
-  border-radius: 8px;
-  background: var(--muted);
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  /* 52px, as the head and the far rail pad, so the three columns clear the nav band together. */
+  padding: 52px 14px 16px;
+  overflow: hidden;
+  animation: fy-fade-up 0.6s var(--ease-out) both;
 }
-.fy-chatlist__confirmsay { flex: 1; min-width: 0; font: 400 12.5px/1.45 var(--font-sans); }
-.fy-chatlist__grouphead {
-  margin: 26px 0 8px;
-  padding-inline: 16px;
-  font: 400 11px var(--font-mono);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted-foreground);
+/*
+ * Put away, and both controls survive: starting a conversation is what the screen is for and
+ * must not cost an expand first.
+ */
+.fy-chatnav--shut { width: 48px; padding-inline: 10px; align-items: center; }
+.fy-chatnav__head { display: flex; align-items: center; gap: 6px; flex: none; }
+.fy-chatnav--shut .fy-chatnav__head { flex-direction: column; gap: 8px; }
+.fy-chatnav__new { flex: 1; min-width: 0; }
+.fy-chatnav__list {
+  flex: 1; min-height: 0; overflow-y: auto; margin-top: 14px;
+  display: flex; flex-direction: column; gap: 1px;
 }
+/*
+ * The row and its menu. The link stays a link — the button is its sibling, not its child — so
+ * keyboard order is row then menu and nothing has to swallow a click.
+ */
+.fy-chatnav__row { display: flex; align-items: center; gap: 2px; border-radius: 8px; padding-right: 4px; }
+.fy-chatnav__row:hover { background: var(--accent); }
+.fy-chatnav__row--on,
+.fy-chatnav__row--on:hover { background: var(--secondary); }
+.fy-chatnav__item {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  padding: 7px 9px; text-decoration: none; color: inherit;
+}
+/* One line — its title — and a second only when the conversation is owed something. */
+.fy-chatnav__title {
+  font: 400 12.5px var(--font-sans);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fy-chatnav__row--on .fy-chatnav__title { font-weight: 500; }
+/* A conversation that has been wrapped up is still listed, and is no longer being written. */
+.fy-chatnav__title--closed { color: var(--muted-foreground); }
+.fy-chatnav__waiting { font: 400 10px var(--font-mono); color: var(--warning); }
+/*
+ * Quiet on every row rather than revealed by hover: a control only a mouse can find is out of
+ * reach of touch and undiscoverable, and this is where deleting lives.
+ */
+.fy-chatnav__more {
+  flex: none; width: 22px; height: 22px; color: var(--neutral-400);
+  opacity: 0.4; transition: opacity 0.14s var(--ease-out);
+}
+.fy-chatnav__row:hover .fy-chatnav__more,
+.fy-chatnav__row:focus-within .fy-chatnav__more,
+.fy-chatnav__more--on { opacity: 1; color: var(--foreground); }
+/*
+ * Drawn fixed, from the coordinates of the control that opened it: the list it belongs to
+ * scrolls, and a menu positioned inside it is clipped at the first row past the fold.
+ */
+.fy-chatnav__scrim { position: fixed; inset: 0; z-index: 39; }
+.fy-chatnav__menu {
+  position: fixed; z-index: 40; width: 190px; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 2px; padding: 5px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--card); box-shadow: var(--shadow-md);
+}
+.fy-chatnav__menuitem {
+  display: flex; flex-direction: column; gap: 3px; text-align: left;
+  padding: 7px 9px; border: 0; border-radius: 7px; background: transparent;
+  font: 400 12.5px var(--font-sans); color: var(--foreground); cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-chatnav__menuitem:hover:not(:disabled) { background: var(--accent); }
+.fy-chatnav__menuitem:disabled { color: var(--neutral-400); cursor: not-allowed; }
+/* Said in text on the item, not a tooltip: a reason only a mouse can reach is not a reason (R-47). */
+.fy-chatnav__menuwhy { font: 400 10px var(--font-mono); color: var(--neutral-400); }
+/* Deleting confirms in the menu it was asked from — two presses, no dialog. */
+.fy-chatnav__confirmsay { padding: 6px 8px 2px; font: 400 12px/1.45 var(--font-sans); }
+.fy-chatnav__confirmacts { display: flex; align-items: center; gap: var(--space-1); padding: 0 4px 2px; }
+/* Archived conversations stay behind a disclosure at the foot rather than sinking into the list. */
+.fy-chatnav__group {
+  flex: none; display: flex; align-items: center; gap: 6px;
+  margin-top: 10px; padding: 10px 9px 0; border: 0; border-top: 1px solid var(--border);
+  background: transparent; cursor: pointer; color: var(--muted-foreground);
+  font: 400 11.5px var(--font-mono); transition: var(--transition-control);
+}
+.fy-chatnav__group:hover { color: var(--foreground); }
 
 /*
  * Clearing the floating nav. On the design canvas the pill nav is absolutely placed at top:56px
@@ -3674,6 +3723,18 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   .fy-chat__wrap .fy-gate { flex-direction: column; }
   .fy-chat__wrap .fy-gate__main { border-right: none; border-bottom: 1px solid var(--border); }
   .fy-chat__wrap .fy-gate__side { width: auto; }
+  /* There is no column to give the history here, so it becomes a strip across the top — and its
+     list is capped, because a screen that opens on the history again is the screen 71 removed. */
+  .fy-chatnav,
+  .fy-chatnav--shut {
+    width: auto; flex-direction: row; flex-wrap: wrap; align-items: flex-start;
+    border-right: none; border-bottom: 1px solid var(--border); padding: 16px 20px;
+  }
+  .fy-chatnav__head,
+  .fy-chatnav--shut .fy-chatnav__head { flex-direction: row; }
+  .fy-chatnav__new { flex: none; }
+  .fy-chatnav__list { flex-basis: 100%; max-height: 168px; margin-top: 10px; }
+  .fy-chatnav__group { flex-basis: 100%; }
 }
 
 /* Stop, while a turn is running. Beside the composer rather than inside it: the composer is for
