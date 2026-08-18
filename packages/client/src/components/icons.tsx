@@ -285,7 +285,7 @@ export const SpeakerOff = icon(
 );
 
 /*
- * The launch screen's set (design master 75a). The two ways in, what each one costs you,
+ * The launch screen's set (design master 76a). The two ways in, what each one costs you,
  * and the four places to go that are not the app itself.
  */
 

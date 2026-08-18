@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { Cloud, GraduationCap, Monitor, PlaySolid, Shield, Users, Book, Cog, Message } from "../components/icons.js";
 
 /**
- * The launch screen (design master 75a).
+ * The launch screen (design master 76a).
  *
  * It sits ahead of everything — before the coordinator is waited on, before setup runs, before
  * any world is open. Two ways in, of which one is built. It is the only screen in the app that
@@ -21,7 +21,7 @@ const PLATE = "./launch-plate.webp";
 /**
  * Four destinations that do not exist yet. They are drawn because the screen is drawn, and
  * rendered as text rather than as buttons — a control that does nothing is worse than a label,
- * and the binding for 75a says so. They become buttons when they have somewhere to go.
+ * and the binding for 76a says so. They become buttons when they have somewhere to go.
  */
 const FOOTER = [
   { label: "Documentation", Icon: Book },

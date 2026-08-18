@@ -188,7 +188,7 @@ function showWindowWhenThemed(): void {
  * The launch screen is always the dark plate, whatever the appearance preference — so the
  * caption buttons have to be the dark ones over it. In light mode the host would otherwise
  * paint near-black symbols on a near-black sky and the window would lose its controls
- * (design master 75a, binding).
+ * (design master 76a, binding).
  */
 let chromeOverPlate = false;
 

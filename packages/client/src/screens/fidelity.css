@@ -2676,7 +2676,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-spendbar__fill { height: 100%; border-radius: 99px; background: var(--foreground); }
 .fy-spendbar__value { font: 400 10.5px var(--font-mono); color: var(--neutral-400); width: 56px; text-align: right; flex: none; }
 
-/* startup (15a) — the wait, not the choice ahead of it (75a) */
+/* startup (15a) — the wait, not the choice ahead of it (76a) */
 .fy-startup { flex: 1; display: flex; flex-direction: column; align-items: center; min-height: 0; padding: 0 28px 22px; }
 .fy-startup__reel {
   width: 100%;
@@ -2727,7 +2727,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 
 /* ------------------------------------------------------------------
-   launch (75a) — the choice ahead of the wait.
+   launch (76a) — the choice ahead of the wait.
 
    The one screen that does not theme. Every colour resolves through
    theme/tokens/launch.css, which is built on the neutral ramp precisely
@@ -2917,7 +2917,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 /*
  * No rule is drawn above this row: the plate's own lit horizon sits at 86% and separates the
- * cards from the links, and a hairline under it is swallowed by the glow (75a, binding).
+ * cards from the links, and a hairline under it is swallowed by the glow (76a, binding).
  */
 .fy-launch__foot {
   position: absolute;

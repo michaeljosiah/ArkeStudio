@@ -44,7 +44,7 @@ const WITHOUT_CONTROLS = new Set(["startup"]);
 /**
  * Full-frame compositions that draw themselves exactly as approved: the accept gates, and the
  * launch screen ahead of everything, which is a plate with its own lockup on it and no chrome
- * of any kind (design master 75a).
+ * of any kind (design master 76a).
  */
 const WITHOUT_CHROME = new Set([
   "launch",
