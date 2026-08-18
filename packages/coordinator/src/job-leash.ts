@@ -96,7 +96,8 @@ const HELPER_ENCODED = Buffer.from(HELPER_SOURCE, "utf16le").toString("base64");
  */
 const DEFAULT_HELPER_BUDGET_MS = 45_000;
 
-function helperBudgetMs(): number {
+/** Exported so a test's deadline can be derived from the budget rather than a stale copy. */
+export function helperBudgetMs(): number {
   const override = Number(process.env["ARKE_LEASH_TIMEOUT_MS"]);
   return Number.isFinite(override) && override > 0 ? override : DEFAULT_HELPER_BUDGET_MS;
 }
@@ -187,6 +188,11 @@ function runHelper(childPid: number, ownerPid: number): Promise<Attempt> {
       resolve({ result: { ok: false, reason: String(err) }, retryable: true });
       return;
     }
+    // Neither the helper nor its timer should keep the owner alive: the leash is best-effort
+    // and only matters while the owner is running, so a wedged PowerShell must not hold a
+    // shutdown open for the whole budget — with a retry behind it that is 90s of waiting for
+    // an answer nobody needs any more. The ledger sweep is the documented fallback.
+    helper.unref();
     let out = "";
     let errOut = "";
     helper.stdout?.on("data", (chunk: Buffer) => (out += chunk.toString()));
@@ -201,9 +207,14 @@ function runHelper(childPid: number, ownerPid: number): Promise<Attempt> {
         /* already gone */
       }
     }, budgetMs);
+    timer.unref();
     helper.once("error", (err) => {
       clearTimeout(timer);
-      resolve({ result: { ok: false, reason: String(err) }, retryable: true });
+      // A binary that is absent or blocked answers the same way however often it is asked;
+      // only a machine that was too busy to answer deserves a second attempt.
+      const code = (err as NodeJS.ErrnoException).code;
+      const permanent = code === "ENOENT" || code === "EACCES" || code === "EPERM";
+      resolve({ result: { ok: false, reason: String(err) }, retryable: !permanent });
     });
     helper.once("exit", (code) => {
       clearTimeout(timer);

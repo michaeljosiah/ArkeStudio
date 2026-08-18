@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { leashChildToParent, statedFailure } from "../src/job-leash.js";
+import { helperBudgetMs, leashChildToParent, statedFailure } from "../src/job-leash.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const HOST = join(here, "fixtures", "leash-host.ts");
@@ -14,7 +14,9 @@ const onWindows = process.platform === "win32";
 // The leash gives its helper a generous budget and retries once, so the worst legitimate wait
 // is two attempts plus the time tsx needs to boot the host. Deriving the deadlines from that
 // keeps a loaded machine slow rather than red — the failure this test used to produce itself.
-const LEASH_CEILING_MS = 2 * 45_000 + 30_000;
+// Read from the module rather than copied, so an ARKE_LEASH_TIMEOUT_MS override moves this
+// deadline with it instead of failing the test for outrunning a stale constant.
+const LEASH_CEILING_MS = 2 * helperBudgetMs() + 30_000;
 
 function processGone(pid: number): boolean {
   try {
@@ -80,6 +82,13 @@ describe("job leash", () => {
         // gap is why a failure here used to hang the run instead of reporting.
         if (childPid !== undefined && !processGone(childPid)) {
           spawn("taskkill", ["/pid", String(childPid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+        }
+        // Kill the tree, not just the host: when the host never reported a pid there is
+        // nothing for the branch above to target, and the child it had already spawned is
+        // unleashed by definition. SIGKILL alone would leave exactly the orphan this file
+        // exists to rule out.
+        if (host.pid !== undefined) {
+          spawn("taskkill", ["/pid", String(host.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
         }
         host.kill("SIGKILL");
       }
