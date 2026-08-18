@@ -22,6 +22,16 @@ import type { ChildSupervisor, SupervisedSpec } from "../../src/supervisor.js";
 
 const WORLD = "01J8F3K2QW9VZX4N7M0RTYB6HC";
 
+/** Poll a condition to a deadline. Returns whether it became true, so callers can assert it. */
+async function waitFor(condition: () => boolean, budgetMs: number): Promise<boolean> {
+  const deadline = Date.now() + budgetMs;
+  while (Date.now() < deadline) {
+    if (condition()) return true;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  return condition();
+}
+
 // ---------------------------------------------------------------------------
 // Sanitisation (§2.10, R-14)
 // ---------------------------------------------------------------------------
@@ -791,10 +801,15 @@ describe("every local outcome records local-zero, not just the successful one", 
     const { queue, ledger } = queueWith({ comfyui: provider }, join(dir, "jobs.jsonl"), dir);
     await queue.start();
     const job = await queue.enqueue(localInput());
-    // Wait for the submission to have happened, so the cancel has a remote id to target.
-    for (let i = 0; i < 200 && queue.listJobs().find((j) => j.id === job.id)?.status !== "running"; i++) {
-      await new Promise((r) => setTimeout(r, 5));
-    }
+    // Settle in `running` before cancelling, and ASSERT we got there rather than proceeding
+    // whatever happened. Cancelling mid-submit races the dispatcher's own transition to
+    // running, which would overwrite the cancellation — a real but separate window, and not
+    // what this test is about. A generous budget keeps it deterministic under load.
+    const settled = await waitFor(
+      () => queue.listJobs().find((j) => j.id === job.id)?.status === "running",
+      10_000,
+    );
+    assert.ok(settled, "the job reached running before the cancel");
     await queue.cancel(job.id);
     const cancelled = queue.listJobs().find((j) => j.id === job.id)!;
     assert.equal(cancelled.status, "cancelled");
