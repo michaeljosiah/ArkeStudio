@@ -95,11 +95,12 @@ export function redactComfyUiBody(direction: "request" | "response", endpoint: s
     const record = body as Record<string, unknown>;
     const errors = record["node_errors"];
     if (errors !== null && typeof errors === "object" && Object.keys(errors as object).length > 0) {
-      // node_errors carries the offending inputs back verbatim; the messages are the record.
-      const messages = Object.entries(errors as Record<string, unknown>).map(([node, detail]) => {
+      // node_errors carries the offending inputs back verbatim, keyed by node id — both are
+      // graph content (R-1). The messages alone are the record, without their node ids.
+      const messages = Object.values(errors as Record<string, unknown>).map((detail) => {
         const list = (detail as { errors?: Array<{ message?: unknown }> } | null)?.errors ?? [];
         const first = list.find((e) => typeof e?.message === "string")?.message;
-        return `${node}: ${typeof first === "string" ? first : "invalid"}`;
+        return typeof first === "string" ? first : "invalid";
       });
       return { ...record, node_errors: { comfyui: "node-errors-summarized", messages } };
     }

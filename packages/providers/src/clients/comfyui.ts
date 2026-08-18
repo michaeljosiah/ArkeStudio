@@ -241,7 +241,10 @@ export class ComfyUiClient implements ProviderClient {
     const promptId = (body as { prompt_id?: string } | null)?.prompt_id;
     if (status >= 400 || !promptId) {
       const errors = (body as { node_errors?: Record<string, unknown> } | null)?.node_errors;
-      const named = errors && Object.keys(errors).length > 0 ? ` (nodes: ${Object.keys(errors).join(", ")})` : "";
+      // A count, never node ids: this message becomes job.error and reaches the renderer, and
+      // R-1 says no node id is shown to a user.
+      const named =
+        errors && Object.keys(errors).length > 0 ? ` (${Object.keys(errors).length} node(s) reported invalid)` : "";
       // A 4xx from /prompt proves the engine rejected the graph before queueing anything.
       throw new ProviderRequestRejectedError(`comfyui: the engine rejected the prompt (HTTP ${status})${named}`);
     }
@@ -369,15 +372,18 @@ export class ComfyUiClient implements ProviderClient {
   }
 }
 
-/** The first human-readable execution error the history's message log carries, if any. */
+/**
+ * The first human-readable execution error the history's message log carries, if any. The
+ * engine's own message only — never the node type, which is graph content a job error would
+ * carry straight to the renderer (R-1).
+ */
 function historyError(messages: unknown[] | undefined): string | null {
   if (!Array.isArray(messages)) return null;
   for (const message of messages) {
     if (!Array.isArray(message) || message[0] !== "execution_error") continue;
-    const detail = message[1] as { exception_message?: unknown; node_type?: unknown } | undefined;
+    const detail = message[1] as { exception_message?: unknown } | undefined;
     if (detail && typeof detail.exception_message === "string") {
-      const node = typeof detail.node_type === "string" ? ` (${detail.node_type})` : "";
-      return `comfyui: ${detail.exception_message}${node}`;
+      return `comfyui: ${detail.exception_message}`;
     }
   }
   return null;

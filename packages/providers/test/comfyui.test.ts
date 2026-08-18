@@ -357,7 +357,9 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
       client.submit("", { model: "comfyui-draft-video", capability: "video", params: { prompt: "x" } }),
       (err: Error & { submissionRejected?: boolean }) => {
         assert.equal(err.submissionRejected, true);
-        assert.match(err.message, /nodes: 7/);
+        // A count, never node ids: this message becomes job.error and reaches the renderer (R-1).
+        assert.match(err.message, /1 node\(s\) reported invalid/);
+        assert.doesNotMatch(err.message, /nodes: 7/);
         return true;
       },
     );
