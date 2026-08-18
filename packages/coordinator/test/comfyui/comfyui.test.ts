@@ -174,6 +174,31 @@ describe("landed media loses its embedded workflow (§2.10)", () => {
     assert.equal(corrected, newMdatAt + 4);
   });
 
+  it("every track's chunk-offset table is corrected, not just the first", () => {
+    // Two traks, as a video file with an audio track has. A walk that stopped at the first
+    // stco would leave the second track's chunks pointing into the bytes that moved.
+    const udta = mp4Box("udta", new TextEncoder().encode("prompt-graph-bytes-here"));
+    const trak = (offset: number) => mp4Box("trak", mp4Box("mdia", mp4Box("minf", mp4Box("stbl", stcoBox(offset)))));
+    const ftyp = mp4Box("ftyp", new TextEncoder().encode("isom"));
+    // Sized in two passes: the offsets must point into the real mdat payload.
+    const draft = mp4Box("moov", concat(trak(0), trak(0), udta));
+    const mdatAt = ftyp.length + draft.length;
+    const moov = mp4Box("moov", concat(trak(mdatAt + 8), trak(mdatAt + 12), udta));
+    const mdat = mp4Box("mdat", new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
+    const result = sanitizeComfyUiMedia("clip.mp4", concat(ftyp, moov, mdat));
+    assert.ok(result.ok);
+    if (!result.ok) return;
+    const text = new TextDecoder("latin1").decode(result.data);
+    assert.equal(text.includes("prompt-graph"), false);
+    const newMdatPayload = text.indexOf("mdat") + 4;
+    // Both tables shifted by exactly the udta's size, keeping their 4-byte separation.
+    const first = text.indexOf("stco");
+    const second = text.indexOf("stco", first + 1);
+    assert.notEqual(second, -1, "both traks survived");
+    assert.equal(u32(result.data, first + 4 + 8), newMdatPayload);
+    assert.equal(u32(result.data, second + 4 + 8), newMdatPayload + 4);
+  });
+
   it("an unknown container is refused with the container named — never landed as-is", () => {
     const webm = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3]);
     const result = sanitizeComfyUiMedia("clip.webm", webm);
