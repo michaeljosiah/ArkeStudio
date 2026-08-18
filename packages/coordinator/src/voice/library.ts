@@ -1,5 +1,6 @@
+import { readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { CLONED_VOICES_PATH, newClonedVoice, parseVoiceLibrary, type ClonedVoice } from "@arke-studio/contracts";
+import { CLONED_VOICES_PATH, newClonedVoice, type ClonedVoice } from "@arke-studio/contracts";
 import { fileArtifact } from "../artifacts/filing.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -30,7 +31,34 @@ function clipPathFor(id: string, extension: string): string {
   return `voices/${id}.${extension}`;
 }
 
-const AUDIO_EXTENSIONS = new Set(["wav", "mp3", "m4a", "flac", "ogg", "webm"]);
+/**
+ * What the engine can actually speak from, and nothing wider. Accepting m4a — the iOS voice-memo
+ * default — meant capture succeeded and every dispatch against that voice failed at the engine,
+ * which is the mid-take failure §1.3 exists to prevent. Transcoding is the way to widen this;
+ * pretending is not.
+ */
+const AUDIO_EXTENSIONS = new Set(["wav", "mp3"]);
+
+/**
+ * The bytes, not the name. A file renamed to `.wav` passed the extension gate and became a voice
+ * nothing could speak — the same reason `imageFormatOf` reads magic numbers rather than trusting
+ * provider metadata (queue/verify.ts).
+ */
+function audioBytesLookRight(data: Uint8Array, extension: string): boolean {
+  if (extension === "wav") {
+    return (
+      data.length > 12 &&
+      data[0] === 0x52 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x46 &&
+      data[8] === 0x57 && data[9] === 0x41 && data[10] === 0x56 && data[11] === 0x45
+    );
+  }
+  // ID3 tag, or a bare MPEG frame sync.
+  return (
+    data.length > 3 &&
+    ((data[0] === 0x49 && data[1] === 0x44 && data[2] === 0x33) ||
+      (data[0] === 0xff && (data[1]! & 0xe0) === 0xe0))
+  );
+}
 
 export interface CloneVoiceInput {
   /** Absolute path to the recording the user chose or made. */
@@ -63,77 +91,101 @@ export async function cloneVoice(
     return { ok: false, reason: `a voice is cloned from a recording — ${extension || "that file"} is not audio` };
   }
 
+  // The library FIRST, and the ids come from it. Deriving `taken` from the caller's bundle let a
+  // stale snapshot mint an id that already existed — and since the clip path is the id, step 2
+  // then overwrote the earlier voice's recording before anything noticed.
+  const existingRaw = await readLibraryRaw(store);
+  const existingEntries = rawEntries(existingRaw);
+  const taken = [
+    ...existingEntries.map((e) => (typeof e?.id === "string" ? e.id : "")).filter(Boolean),
+    ...bundleVoices.map((v) => v.id),
+  ];
+
   const made = newClonedVoice({
     name: input.name,
     description: input.description,
     clip: "pending",
     consent: input.consent,
     created: store.now(),
-    taken: bundleVoices.map((v) => v.id),
+    taken,
   });
   if (!made.ok) return made;
 
   const clip = clipPathFor(made.voice.id, extension);
+  const clipAbsolute = toExtendedLength(join(store.dir, fromPortable(clip)));
+
+  const bytes = await readFile(toExtendedLength(input.sourcePath));
+  if (!audioBytesLookRight(bytes, extension)) {
+    return { ok: false, reason: `that file is named .${extension} but its contents are not ${extension} audio` };
+  }
 
   // 1 — the clip. Outside the commit machinery because that path carries text only
   // (`CommitFileInput.content` is a string); binaries land beside it, as takes already do.
-  const { readFile } = await import("node:fs/promises");
-  const bytes = await readFile(toExtendedLength(input.sourcePath));
-  await atomicWriteFile(toExtendedLength(join(store.dir, fromPortable(clip))), bytes);
+  await atomicWriteFile(clipAbsolute, bytes);
 
-  // 2 — the artifact, linked to the voice and to whoever it was cloned for. Provenance answers
-  // where a voice came from months later (SPEC-011 §2.7); it is not what dispatch reads.
+  // 2 — the artifact, filed FROM THE CLIP rather than the original source, so provenance and the
+  // voice are the same bytes by construction. Reading the source twice left a window where a file
+  // replaced in between gave the artifact different audio than the voice speaks with.
   let artifactId: string | undefined;
   try {
     const filed = await fileArtifact(store, {
-      sourcePath: input.sourcePath,
+      sourcePath: join(store.dir, fromPortable(clip)),
       links: [made.voice.id, ...(input.sheetId ? [input.sheetId] : [])],
       allowLarge: true,
     });
-    // "deduplicated" is as good as "filed" here: the same recording cloned twice should point at
-    // the one artifact rather than shelving a second copy of identical bytes.
+    // "deduplicated" is as good as "filed": the same recording cloned twice should point at the
+    // one artifact rather than shelving a second copy of identical bytes.
     if (filed.outcome === "filed" || filed.outcome === "deduplicated") artifactId = filed.artifact.id;
   } catch {
-    // A voice without provenance is a lesser voice, not a broken one. The clip is already
-    // written and the library entry below will still point at it.
+    // A voice without provenance is a lesser voice, not a broken one.
   }
 
-  // 3 — the library. Read-modify-write of the whole file, because it is small and because the
-  // committer wants full content; the base hash is what makes a concurrent edit fail loudly.
-  const existingRaw = await readLibraryRaw(store);
-  const voices = [...parseVoiceLibrary(existingRaw === null ? null : safeJson(existingRaw)), {
-    ...made.voice,
-    clip,
-    ...(artifactId !== undefined ? { artifactId } : {}),
-  }];
-  await store.commit({
-    kind: "voice-clone",
-    source: "form",
-    files: [
-      {
-        path: CLONED_VOICES_PATH,
-        action: existingRaw === null ? "create" : "replace",
-        content: JSON.stringify({ voices }, null, 2) + "\n",
-        baseHash: existingRaw === null ? null : sha256(existingRaw),
-      },
-    ],
-  });
+  const entry = { ...made.voice, clip, ...(artifactId !== undefined ? { artifactId } : {}) };
 
-  return { ok: true, voice: { ...made.voice, clip, ...(artifactId !== undefined ? { artifactId } : {}) } };
+  // 3 — the library, appended to the entries AS READ. Rebuilding it from `parseVoiceLibrary`
+  // dropped whatever failed to parse, so the next clone silently deleted a malformed line the
+  // read path had deliberately preserved by ignoring. Unknown entries pass through untouched.
+  try {
+    await store.commit({
+      kind: "voice-clone",
+      source: "form",
+      files: [
+        {
+          path: CLONED_VOICES_PATH,
+          action: existingRaw === null ? "create" : "replace",
+          content: JSON.stringify({ voices: [...existingEntries, entry] }, null, 2) + "\n",
+          baseHash: existingRaw === null ? null : sha256(existingRaw),
+        },
+      ],
+    });
+  } catch (err) {
+    // A refused commit is an outcome, not an exception: this function promises {ok, reason}. The
+    // clip is removed rather than left orphaned — nothing points at it, and a retry re-creates it.
+    await rm(clipAbsolute, { force: true }).catch(() => {});
+    return { ok: false, reason: err instanceof Error ? err.message : "the voice library could not be written" };
+  }
+
+  return { ok: true, voice: entry };
+}
+
+/**
+ * The library's entries exactly as written, unparsed. The append path uses these rather than
+ * `parseVoiceLibrary`'s output so an entry this build does not understand survives a clone
+ * instead of being quietly rewritten out of existence.
+ */
+function rawEntries(raw: string | null): Array<Record<string, unknown>> {
+  if (raw === null) return [];
+  try {
+    const list = (JSON.parse(raw) as { voices?: unknown }).voices;
+    return Array.isArray(list) ? (list as Array<Record<string, unknown>>) : [];
+  } catch {
+    return [];
+  }
 }
 
 async function readLibraryRaw(store: WorldStore): Promise<string | null> {
-  const { readFile } = await import("node:fs/promises");
   try {
     return await readFile(toExtendedLength(join(store.dir, fromPortable(CLONED_VOICES_PATH))), "utf8");
-  } catch {
-    return null;
-  }
-}
-
-function safeJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
   } catch {
     return null;
   }
@@ -146,7 +198,6 @@ function safeJson(raw: string): unknown {
  * itself unusable with the reason (§1.3), never dispatch and fail in the middle of a take.
  */
 export async function clipFor(store: WorldStore, voice: ClonedVoice): Promise<string | null> {
-  const { stat } = await import("node:fs/promises");
   const absolute = join(store.dir, fromPortable(voice.clip));
   try {
     await stat(toExtendedLength(absolute));

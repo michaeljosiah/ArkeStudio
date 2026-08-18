@@ -107,10 +107,12 @@ export function speechCacheFile(spec: SpeechSpec): string {
  * that was not Kokoro was filed as ElevenLabs, so a second *local* provider landed on the cloud
  * key and two providers' previews of the same voice id and line collided (SPEC-022 §2.7).
  */
+// No comfyui row: the voice recipe does not exist yet, and naming an id the manifest cannot
+// resolve mints cache keys against a model nothing can dispatch. Absent falls through to the
+// provider's own name, which is honest until the recipe lands with its real id.
 const PREVIEW_MODEL: Record<string, string> = {
   kokoro: "kokoro-82m",
   elevenlabs: "eleven_multilingual_v2",
-  comfyui: "comfyui-cloned-voice",
 };
 
 export function previewCacheFile(

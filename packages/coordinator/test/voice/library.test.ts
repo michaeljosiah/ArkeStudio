@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tempDir } from "../tmp.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -28,7 +28,7 @@ describe("cloning a voice into a world", () => {
     const store = await WorldStore.open(dir, { clock: CLOCK });
     const source = join(await tempDir(prefix), "recording.wav");
     // A RIFF header and a little payload: enough that filing measures something real.
-    await writeFile(toExtendedLength(source), Buffer.from([0x52, 0x49, 0x46, 0x46, ...Array.from({ length: 64 }, () => 7)]));
+    await writeFile(toExtendedLength(source), Buffer.from([0x52, 0x49, 0x46, 0x46, 8, 0, 0, 0, 0x57, 0x41, 0x56, 0x45, ...Array.from({ length: 64 }, () => 7)]));
     try {
       await body({ store, dir, source });
     } finally {
@@ -134,6 +134,58 @@ describe("cloning a voice into a world", () => {
       });
       assert.ok(!made.ok);
       assert.match(made.reason, /is not audio/);
+    });
+  });
+
+  it("mints against the library on disk, not the caller's list (review finding)", async () => {
+    await withWorld("arke-clone-stale-", async ({ store, dir, source }) => {
+      const first = await cloneVoice(store, [], {
+        sourcePath: source, name: "Harbour glass", description: "Low and dry.", consent: true,
+      });
+      assert.ok(first.ok);
+      const before = await readFile(toExtendedLength(join(dir, "voices", "harbour-glass.wav")));
+
+      // A caller holding a bundle snapshot from BEFORE the first clone. The id must still not
+      // collide — otherwise the clip path collides and the first voice's recording is overwritten.
+      const second = await cloneVoice(store, [], {
+        sourcePath: source, name: "Harbour glass", description: "Rougher, slower.", consent: true,
+      });
+      assert.ok(second.ok);
+      assert.notEqual(second.voice.id, first.voice.id, "a stale caller list must not mint a duplicate");
+      const after = await readFile(toExtendedLength(join(dir, "voices", "harbour-glass.wav")));
+      assert.deepEqual(after, before, "the first voice's clip is untouched");
+    });
+  });
+
+  it("keeps an entry it cannot parse instead of deleting it on the next clone (review finding)", async () => {
+    await withWorld("arke-clone-preserve-", async ({ store, dir, source }) => {
+      await mkdir(toExtendedLength(join(dir, "voices")), { recursive: true });
+      await writeFile(
+        toExtendedLength(join(dir, "voices", "voices.json")),
+        JSON.stringify({ voices: [{ id: "ok", name: "OK", clip: "voices/ok.wav" }, { nonsense: true }] }),
+        "utf8",
+      );
+      const made = await cloneVoice(store, [], {
+        sourcePath: source, name: "Harbour glass", description: "Low and dry.", consent: true,
+      });
+      assert.ok(made.ok);
+      const written = JSON.parse(
+        await readFile(toExtendedLength(join(dir, "voices", "voices.json")), "utf8"),
+      ) as { voices: Array<Record<string, unknown>> };
+      assert.equal(written.voices.length, 3, "the unreadable entry survives the append");
+      assert.ok(written.voices.some((v) => v["nonsense"] === true));
+    });
+  });
+
+  it("refuses bytes that are not the audio the name claims (review finding)", async () => {
+    await withWorld("arke-clone-liar-", async ({ store, dir }) => {
+      const liar = join(dir, "not-really.wav");
+      await writeFile(toExtendedLength(liar), "this is a text file wearing a wav extension");
+      const made = await cloneVoice(store, [], {
+        sourcePath: liar, name: "Harbour glass", description: "Low and dry.", consent: true,
+      });
+      assert.ok(!made.ok);
+      assert.match(made.reason, /contents are not wav audio/);
     });
   });
 

@@ -297,7 +297,16 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
   // with no file simply has none, and that is the normal state until somebody clones something.
   let clonedVoices: ClonedVoice[] = [];
   if (await exists(join(dir, CLONED_VOICES_PATH))) {
-    const parsed = await tryParse(CLONED_VOICES_PATH, (raw) => parseVoiceLibrary(JSON.parse(raw)));
+    const parsed = await tryParse(CLONED_VOICES_PATH, (raw) => {
+      const doc = JSON.parse(raw) as { voices?: unknown };
+      const voices = parseVoiceLibrary(doc);
+      // Valid JSON whose entries are all unreadable is not an empty library — it is a broken one,
+      // and reading it as "nothing was ever cloned" hides the failure SPEC-002 R-2 requires named.
+      if (voices.length === 0 && Array.isArray(doc.voices) && doc.voices.length > 0) {
+        throw new Error(`${doc.voices.length} voice entries could not be read`);
+      }
+      return voices;
+    });
     clonedVoices = parsed ?? [];
   }
 
