@@ -32,6 +32,14 @@ import {
   genesisDiscard,
   hostCanAttach,
   detectRuntimes,
+  chooseComfyUiPath,
+  chooseComfyUiModelsDir,
+  clearComfyUiModelsDir,
+  clearComfyUiEngine,
+  setComfyUiUrl,
+  useDetectedComfyUi,
+  refreshComfyUi,
+  verifyComfyUiRecipe,
   downloadUpdate,
   installUpdateAndRestart,
   installUpdateOnClose,
@@ -1861,6 +1869,146 @@ function SetupComponents() {
   );
 }
 
+/**
+ * The ComfyUI engine and its recipes (SPEC-021 §2.2, §2.12, design turn 71). The engine row
+ * states its source; detection offers are adopted, never typed; a disabled recipe carries its
+ * one measured clause; and the weight rows already live in SetupComponents above, because they
+ * are catalogue components like any other.
+ */
+function ComfyUiEngineSection() {
+  const { state } = useStore();
+  const comfyui = state?.app.comfyui ?? null;
+  const [urlDraft, setUrlDraft] = useState("");
+  const engine = comfyui?.engine ?? null;
+  const sourceLabel =
+    engine?.source === "user-path"
+      ? "Your install"
+      : engine?.source === "user-url"
+        ? "Your URL · never spawned"
+        : engine?.source === "managed"
+          ? "Arke-managed"
+          : "Not installed";
+  return (
+    <>
+      <div className="fy-set__eyebrow">COMFYUI ENGINE</div>
+      <div className="fy-set__row fy-set__row--stack" data-testid="comfyui-engine">
+        <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
+          <div className="fy-set__name fy-set__name--wide">
+            <div className="fy-set__title">
+              {sourceLabel}
+              {engine?.version ? ` · v${engine.version}` : ""}
+            </div>
+            <div className="fy-set__caps">{engine?.location ?? "image and video, generated on this machine"}</div>
+          </div>
+          <span className="fy-set__state">{engine?.state ?? "unknown"}</span>
+          <span
+            className={cx(
+              "fy-set__dot",
+              engine?.state === "ready" && "fy-set__dot--ok",
+              engine !== null && engine.state !== "ready" && engine.state !== "starting" && "fy-set__dot--warn",
+            )}
+          />
+        </div>
+        {engine?.detail && (
+          <div className="fy-set__why">
+            <span className="fy-set__dot fy-set__dot--warn" />
+            <span>{engine.detail}</span>
+          </div>
+        )}
+        {/* Installs detection found: adopted by selection among the host's own offers (D10). */}
+        {(engine?.detected ?? []).map((found) => (
+          <div key={found.location} className="fy-set__why" data-testid="comfyui-detected">
+            <span className="fy-set__dot" />
+            <span>
+              Found · {found.location}
+              {found.version ? ` · v${found.version}` : ""}
+            </span>
+            <button type="button" className="fy-set__link" onClick={() => useDetectedComfyUi(found.location)}>
+              Use this install
+            </button>
+          </div>
+        ))}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+          <Button onClick={() => chooseComfyUiPath()}>Choose install folder</Button>
+          <input
+            className="fy-set__input"
+            placeholder="http://127.0.0.1:8188"
+            value={urlDraft}
+            onChange={(e) => setUrlDraft(e.target.value)}
+            style={{ minWidth: 220 }}
+          />
+          <button
+            type="button"
+            className="fy-set__link"
+            disabled={urlDraft.trim().length === 0}
+            onClick={() => {
+              setComfyUiUrl(urlDraft.trim());
+              setUrlDraft("");
+            }}
+          >
+            Use this URL
+          </button>
+          {engine !== null && engine.source !== "absent" && engine.source !== "managed" && (
+            <button type="button" className="fy-set__link" onClick={() => clearComfyUiEngine()}>
+              Clear
+            </button>
+          )}
+          <button type="button" className="fy-set__link" onClick={() => refreshComfyUi()}>
+            Refresh
+          </button>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+          <button type="button" className="fy-set__link" onClick={() => chooseComfyUiModelsDir()}>
+            Map models folder
+          </button>
+          <button type="button" className="fy-set__link" onClick={() => clearComfyUiModelsDir()}>
+            Use the engine's own
+          </button>
+        </div>
+      </div>
+
+      <div className="fy-set__eyebrow">LOCAL RECIPES</div>
+      {(comfyui?.recipes ?? []).map((recipe) => (
+        <div
+          key={recipe.recipeId}
+          className={cx("fy-set__row--stack", "fy-set__row", recipe.state === "disabled" && "fy-set__row--off")}
+          data-testid="comfyui-recipe"
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div className="fy-set__name fy-set__name--wide">
+              <div className="fy-set__title">{recipe.displayName}</div>
+              <div className="fy-set__caps fy-set__caps--tokens">
+                {recipe.capability} · v{recipe.recipeVersion}
+              </div>
+            </div>
+            <button type="button" className="fy-set__link" onClick={() => verifyComfyUiRecipe(recipe.recipeId)}>
+              Re-verify
+            </button>
+            <span className="fy-set__state">{recipe.state}</span>
+            <span
+              className={cx(
+                "fy-set__dot",
+                recipe.state === "ready" && "fy-set__dot--ok",
+                recipe.state === "disabled" && "fy-set__dot--warn",
+              )}
+            />
+          </div>
+          {/* Kept visible, disabled, with the measured reason — never quietly absent (R-10). */}
+          {recipe.reason && (
+            <div className="fy-set__why">
+              <span className={cx("fy-set__dot", recipe.state === "disabled" && "fy-set__dot--warn")} />
+              <span>{recipe.reason}</span>
+            </div>
+          )}
+        </div>
+      ))}
+      {comfyui !== null && comfyui.recipes.length === 0 && (
+        <div className="fy-set__note">no recipes ship in this build</div>
+      )}
+    </>
+  );
+}
+
 export function SettingsLocalRuntimeScreen() {
   const { state } = useStore();
   const runtime = state?.app.runtime ?? null;
@@ -2016,6 +2164,8 @@ export function SettingsLocalRuntimeScreen() {
           </div>
         );
       })}
+
+      <ComfyUiEngineSection />
 
       <div className="fy-set__eyebrow">LOCAL MODELS</div>
       {(runtime?.models ?? []).map((m) => (

@@ -1481,6 +1481,40 @@ export function repairVoiceModels(): void {
   send({ kind: "repair-voice-models" });
 }
 
+// ---- SPEC-021: the ComfyUI engine ------------------------------------------
+
+export function chooseComfyUiPath(): void {
+  send({ kind: "choose-comfyui-path" });
+}
+
+export function chooseComfyUiModelsDir(): void {
+  send({ kind: "choose-comfyui-models-dir" });
+}
+
+export function clearComfyUiModelsDir(): void {
+  send({ kind: "clear-comfyui-models-dir" });
+}
+
+export function setComfyUiUrl(url: string): void {
+  send({ kind: "set-comfyui-url", url });
+}
+
+export function clearComfyUiEngine(): void {
+  send({ kind: "clear-comfyui-engine" });
+}
+
+export function useDetectedComfyUi(location: string): void {
+  send({ kind: "use-detected-comfyui", location });
+}
+
+export function refreshComfyUi(): void {
+  send({ kind: "comfyui-refresh" });
+}
+
+export function verifyComfyUiRecipe(recipeId: string): void {
+  send({ kind: "comfyui-verify-recipe", recipeId });
+}
+
 export function openModelFolder(): void {
   send({ kind: "open-model-folder" });
 }
