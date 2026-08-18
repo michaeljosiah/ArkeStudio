@@ -188,11 +188,12 @@ function runHelper(childPid: number, ownerPid: number): Promise<Attempt> {
       resolve({ result: { ok: false, reason: String(err) }, retryable: true });
       return;
     }
-    // Neither the helper nor its timer should keep the owner alive: the leash is best-effort
-    // and only matters while the owner is running, so a wedged PowerShell must not hold a
-    // shutdown open for the whole budget — with a retry behind it that is 90s of waiting for
-    // an answer nobody needs any more. The ledger sweep is the documented fallback.
-    helper.unref();
+    // The helper and its timer stay ref'd deliberately. Unref-ing them stops a wedged
+    // PowerShell from holding a shutdown open for the budget, but it also lets the event loop
+    // drain while this promise is still pending, and a caller that awaits the result then
+    // never gets one — node:test says so out loud: "Promise resolution is still pending but
+    // the event loop has already resolved". Keeping the owner alive until the leash answers
+    // is the lesser cost; a leash nobody can await is not a leash.
     let out = "";
     let errOut = "";
     helper.stdout?.on("data", (chunk: Buffer) => (out += chunk.toString()));
@@ -207,7 +208,6 @@ function runHelper(childPid: number, ownerPid: number): Promise<Attempt> {
         /* already gone */
       }
     }, budgetMs);
-    timer.unref();
     helper.once("error", (err) => {
       clearTimeout(timer);
       // A binary that is absent or blocked answers the same way however often it is asked;
