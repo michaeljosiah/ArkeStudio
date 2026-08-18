@@ -11,10 +11,13 @@ import {
   recipeDependencyDigest,
   recipeNodeClasses,
   recipeTemplateDigest,
+  SDXL_BUCKETS,
   substituteRecipeParams,
   wanFramesForSeconds,
 } from "../src/comfyui/recipes.js";
 import { redactComfyUiBody, scrubPaths } from "../src/comfyui/redact.js";
+import { captureProviderClient } from "../src/capture.js";
+import { FalClient } from "../src/clients/fal.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
 import type { FetchLike } from "../src/types.js";
 
@@ -292,6 +295,33 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
     assert.equal(posted.prompt["9"]!.class_type, "SaveImage");
     // The coordinator's own keys never reach the engine.
     assert.equal(JSON.stringify(posted).includes("provenance"), false);
+  });
+
+  it("snaps an off-bucket size onto a real SDXL bucket rather than passing it through", async () => {
+    // The previous test hands in dimensions that already ARE the 3:2 bucket, so it would pass
+    // with the snap deleted. This one cannot: 1500x1000 is not a bucket, and an off-bucket
+    // latent is exactly what makes SDXL generate badly.
+    const { fetch, calls } = engineFake([
+      { match: /\/prompt$/, status: 200, body: { prompt_id: "p-1", node_errors: {} } },
+    ]);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+      model: "comfyui-draft-image",
+      capability: "image",
+      params: { prompt: "x", output: { width: 1500, height: 1000 } },
+    });
+    const posted = calls.find((c) => /\/prompt$/.test(c.url))!.body as {
+      prompt: Record<string, { inputs: Record<string, unknown> }>;
+    };
+    const width = posted.prompt["5"]!.inputs["width"] as number;
+    const height = posted.prompt["5"]!.inputs["height"] as number;
+    assert.notEqual(width, 1500, "the requested size was not passed through");
+    const buckets = Object.values(SDXL_BUCKETS);
+    assert.ok(
+      buckets.some((b) => b.width === width && b.height === height),
+      `${width}x${height} is one of the training buckets`,
+    );
+    // 3:2 is the nearest shape to 1.5, so the snap is to the bucket, not merely to any bucket.
+    assert.deepEqual({ width, height }, SDXL_BUCKETS["3:2"]);
   });
 
   it("video: seconds become the legal 4k+1 frame count and the aspect picks the dimensions", async () => {
@@ -750,5 +780,59 @@ describe("no graph survives capture", () => {
   it("other providers' bodies pass through untouched elsewhere", () => {
     const body = { prompt: "a plain string prompt for a fal route" };
     assert.deepEqual(redactComfyUiBody("request", "https://queue.fal.run/x/prompt", body), body);
+  });
+
+  it("the capture WIRING redacts, not just the redactor in isolation", async () => {
+    // Every assertion above tests the pure function. None proved captureProviderClient actually
+    // calls it for comfyui — deleting that one line in capture.ts would have left them all
+    // green while every graph went to payload history verbatim.
+    const started: Array<{ provider: string; endpoint: string; body: unknown }> = [];
+    const capture = {
+      start: async (input: { provider: string; endpoint: string; body: unknown }) => {
+        started.push({ provider: input.provider, endpoint: input.endpoint, body: input.body });
+        return "pc_1";
+      },
+      finish: async () => {},
+      fail: async () => {},
+    };
+    const { fetch } = engineFake([{ match: /\/prompt$/, status: 200, body: { prompt_id: "p-1" } }]);
+    const wrapped = captureProviderClient(
+      "comfyui",
+      (f) => new ComfyUiClient(f, BASE, OK_PREFLIGHT),
+      fetch,
+      capture as never,
+    );
+    await wrapped.submit("", { model: "comfyui-draft-image", capability: "image", params: { prompt: "x" } });
+    const prompt = started.find((s) => s.endpoint.endsWith("/prompt"));
+    assert.ok(prompt, "the submission was captured");
+    const body = prompt!.body as { prompt: Record<string, unknown> };
+    assert.equal(body.prompt["comfyui"], "graph-redacted");
+    assert.equal(JSON.stringify(started).includes("class_type"), false);
+  });
+
+  it("a NON-comfyui provider's graph-shaped body is left alone by the same wiring", async () => {
+    // The redaction is provider-aware; wiring it for everyone would quietly rewrite other
+    // providers' payloads. This is the other half of that guarantee.
+    const started: unknown[] = [];
+    const capture = {
+      start: async (input: { body: unknown }) => {
+        started.push(input.body);
+        return "pc_1";
+      },
+      finish: async () => {},
+      fail: async () => {},
+    };
+    const echo: FetchLike = async () => new Response(JSON.stringify({ request_id: "r1" }), { status: 200 });
+    const wrapped = captureProviderClient(
+      "fal",
+      (f) => new FalClient(f),
+      echo,
+      capture as never,
+    );
+    await wrapped
+      .submit("k", { model: "seedance-2.0", capability: "video", params: { prompt: "x" } })
+      .catch(() => {});
+    assert.ok(started.length > 0);
+    assert.equal(JSON.stringify(started).includes("graph-redacted"), false);
   });
 });

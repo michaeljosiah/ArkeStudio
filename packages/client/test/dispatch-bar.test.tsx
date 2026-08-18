@@ -165,12 +165,18 @@ describe("local recipes read the same readiness the coordinator enforces (SPEC-0
     };
   };
 
-  it("a disabled recipe leaves the usable list and appears as a disabled row with its reason (R-10)", () => {
+  // What the picker DRAWS from these two functions is not asserted here: the model list is
+  // behind `pickerOpen`, which starts false, and this harness is renderToString with no way to
+  // click. So these cover the selection — which model is offered, which is listed disabled and
+  // with what words — and the rendering of that list is genuinely uncovered.
+  it("a disabled recipe leaves the usable list, and is offered separately with its measured reason (R-10)", () => {
     const state = withRecipe("disabled", "Needs 6 GB VRAM. This machine has 4 GB. Cloud image still works.");
     assert.ok(!usableModels(state, "image").some((m) => m.id === RECIPE.id));
     const rows = disabledRecipes(state, "image");
     assert.equal(rows.length, 1);
     assert.match(rows[0]!.reason, /Needs 6 GB VRAM\. This machine has 4 GB\./);
+    // Never a generic "unavailable" — the whole point of R-10.
+    assert.doesNotMatch(rows[0]!.reason, /^unavailable$/i);
   });
 
   it("ready and unknown both dispatch — the unchecked floor is not a refusal (D15)", () => {
