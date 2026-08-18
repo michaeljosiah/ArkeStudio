@@ -28,6 +28,12 @@ export interface SetupDeps {
   /** Does something answer here? Ollama's own API is the surest sign it is installed. */
   probeUrl(url: string): Promise<boolean>;
   diskFreeMb(dir: string): Promise<number | null>;
+  /**
+   * Whether this component already exists somewhere Arke does not manage (SPEC-021 D10) —
+   * a user-directed engine, a live default port, a well-known install. Consulted before the
+   * component's own files are even looked at, so detection always wins over installation.
+   */
+  externallyPresent?(entryId: string): Promise<boolean>;
 }
 
 export interface SetupOptions {
@@ -40,6 +46,12 @@ export interface SetupOptions {
   headroomMb?: number;
   /** Which architecture's archive to fetch. Injectable so a test needs no particular machine. */
   arch?: "x64" | "arm64";
+  /**
+   * Named external roots for `files` entries carrying `externalRoot` (SPEC-021 §2.4): the
+   * resolver answers with the user's folder, or null when nothing is mapped — the entry is
+   * then blocked with the reason rather than falling back to a folder the engine never reads.
+   */
+  externalDirs?: Record<string, () => string | null>;
 }
 
 interface Live extends SetupComponent {
@@ -120,6 +132,16 @@ export class LocalSetupService {
     return join(this.opts.appRoot, "models");
   }
 
+  /**
+   * Where a `files` entry's downloads live: the app's own models folder, or — for an entry
+   * naming an external root — the user's mapped folder. Null means the mapping does not
+   * resolve right now, which blocks the entry with the reason instead of guessing a folder.
+   */
+  private filesRoot(spec: { externalRoot?: string }): string | null {
+    if (spec.externalRoot === undefined) return this.modelsDir();
+    return this.opts.externalDirs?.[spec.externalRoot]?.() ?? null;
+  }
+
   /** Tools live beside the models, not among them: an executable is not a weight file. */
   private toolDir(spec: { dir: string }): string {
     return join(this.opts.appRoot, spec.dir);
@@ -166,6 +188,9 @@ export class LocalSetupService {
   }
 
   private async isPresent(entry: CatalogueEntry): Promise<boolean> {
+    // Detection always wins over installation (SPEC-021 D10): an install Arke does not manage
+    // is presence, and the managed copy is never fetched over it.
+    if (await this.deps.externallyPresent?.(entry.id).catch(() => false)) return true;
     const spec = entry.spec;
     if (spec.kind === "installer") {
       if (await this.deps.probeUrl("http://127.0.0.1:11434/api/version")) return true;
@@ -177,6 +202,13 @@ export class LocalSetupService {
       const info = await stat(toExtendedLength(join(this.toolDir(spec), spec.executable))).catch(() => null);
       return info !== null && info.size > 0;
     }
+    if (spec.kind === "tree") {
+      // The marker under the installed dir — possibly one level deep, because upstream
+      // archives wrap their tree in a single top folder that is installed as-is.
+      const root = join(this.opts.appRoot, spec.dir);
+      const marker = await this.treeMarkerPath(root, spec.rootMarker);
+      return marker !== null;
+    }
     if (spec.kind === "pull") {
       const listed = await this.deps.run(spec.command, ["list"], this.abort.signal).catch(() => null);
       if (!listed || listed.code !== 0) return false;
@@ -184,8 +216,10 @@ export class LocalSetupService {
       // The exact tag: gemma4:12b and gemma4:e2b are different models on the same shelf.
       return listed.output.split(/\r?\n/).some((line) => line.trim().split(/\s+/)[0] === wanted);
     }
+    const filesRoot = this.filesRoot(spec);
+    if (filesRoot === null) return false; // no mapped folder yet → not present, not an error
     for (const f of spec.files) {
-      const path = join(this.modelsDir(), spec.dir, f.file);
+      const path = join(filesRoot, spec.dir, f.file);
       const info = await stat(toExtendedLength(path)).catch(() => null);
       // Existence under the real name IS completion: a download writes to .partial and only a
       // whole file is ever renamed in (see fetchFile below).
@@ -223,7 +257,11 @@ export class LocalSetupService {
     if (outstanding.length === 0) return;
 
     // The guard: refuse to start a download this disk cannot hold, with both figures.
-    const neededMb = outstanding.reduce((sum, c) => sum + c.sizeMb, 0);
+    // What it costs on disk, not what it costs to fetch: an extracted component needs room for
+    // the archive and the tree at once. Guarding on the download alone let a disk with 5 GB
+    // free start a 2 GB download that dies part-way through unpacking — the silent mid-way
+    // failure this guard exists to replace with a refusal.
+    const neededMb = outstanding.reduce((sum, c) => sum + (c.entry.installedMb ?? c.sizeMb), 0);
     const headroom = this.opts.headroomMb ?? DEFAULT_HEADROOM_MB;
     if (this.diskFreeMb !== null && this.diskFreeMb < neededMb + headroom) {
       for (const c of outstanding) {
@@ -260,20 +298,90 @@ export class LocalSetupService {
     }
   }
 
+  /** The tree's marker file, at the root or one level deep, or null when neither exists. */
+  private async treeMarkerPath(root: string, marker: string): Promise<string | null> {
+    const direct = join(root, marker);
+    if ((await stat(toExtendedLength(direct)).catch(() => null)) !== null) return direct;
+    const entries = await readdir(toExtendedLength(root), { withFileTypes: true }).catch(() => []);
+    for (const item of entries) {
+      if (!item.isDirectory() || item.name === ".staging") continue;
+      const nested = join(root, item.name, marker);
+      if ((await stat(toExtendedLength(nested)).catch(() => null)) !== null) return nested;
+    }
+    return null;
+  }
+
   private async install(entry: CatalogueEntry): Promise<void> {
     const spec = entry.spec;
     try {
       if (spec.kind === "files") {
-        const dir = join(this.modelsDir(), spec.dir);
+        const filesRoot = this.filesRoot(spec);
+        if (filesRoot === null) {
+          this.set(entry.id, {
+            state: "blocked",
+            detail: "no models folder is mapped for this engine — set one in Settings",
+          });
+          this.publish();
+          return;
+        }
+        const dir = join(filesRoot, spec.dir);
         this.set(entry.id, { state: "downloading", bytesDone: 0, detail: undefined });
         this.publish();
         let done = 0;
         for (const f of spec.files) {
-          done += await this.download(entry.id, f, join(dir, f.file), done);
+          // A file already present in the folder is the user's, recognised rather than
+          // re-fetched (SPEC-021 R-8) — detection and download resolve the same path.
+          const target = join(dir, f.file);
+          const existing = await stat(toExtendedLength(target)).catch(() => null);
+          if (existing !== null && existing.size > 0) {
+            done += existing.size;
+            this.set(entry.id, { bytesDone: done });
+            this.publish();
+            continue;
+          }
+          done += await this.download(entry.id, f, target, done);
         }
         this.set(entry.id, {
           state: "ready",
           bytesDone: done,
+          bytesPerSecond: null,
+          ...(entry.caveat !== undefined ? { detail: entry.caveat } : { detail: undefined }),
+        });
+        this.publish();
+        return;
+      }
+
+      if (spec.kind === "tree") {
+        // The whole runtime directory, atomically (SPEC-021 §2.4): download, extract into
+        // staging, verify the marker, and only then rename the tree into place — presence is
+        // never half a runtime, exactly as a partial file is never a file.
+        const dir = join(this.opts.appRoot, spec.dir);
+        const staged = `${dir}.staging`;
+        await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
+        const archive = join(staged, spec.file.file);
+        this.set(entry.id, { state: "downloading", bytesDone: 0, detail: undefined });
+        this.publish();
+        const received = await this.download(entry.id, spec.file, archive, 0);
+
+        this.set(entry.id, { state: "installing", bytesPerSecond: null, detail: "unpacking" });
+        this.publish();
+        const unpacked = await this.deps.run(systemTar(), ["-xf", archive, "-C", staged], this.abort.signal);
+        await rm(toExtendedLength(archive), { force: true }).catch(() => {});
+        const marker = unpacked.code === 0 ? await this.treeMarkerPath(staged, spec.rootMarker) : null;
+        if (marker === null) {
+          await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
+          this.set(entry.id, {
+            state: "failed",
+            detail: firstLine(unpacked.output) || `the archive did not contain ${spec.rootMarker}`,
+          });
+          this.publish();
+          return;
+        }
+        await rm(toExtendedLength(dir), { recursive: true, force: true }).catch(() => {});
+        await rename(toExtendedLength(staged), toExtendedLength(dir));
+        this.set(entry.id, {
+          state: "ready",
+          bytesDone: received,
           bytesPerSecond: null,
           ...(entry.caveat !== undefined ? { detail: entry.caveat } : { detail: undefined }),
         });
@@ -400,7 +508,9 @@ export class LocalSetupService {
     try {
       for await (const chunk of res.body) {
         if (this.abort.signal.aborted) throw new Error("stopped");
-        if (head.length < 4) head = [...head, ...Array.from(chunk.subarray(0, 4 - head.length))];
+        // Eight bytes, not four: the 7z signature is six, and a head shorter than the declared
+        // magic can never match it — which read as "not the file we asked for" on a good file.
+        if (head.length < 8) head = [...head, ...Array.from(chunk.subarray(0, 8 - head.length))];
         received += chunk.byteLength;
         hash?.update(chunk);
         if (!sink.write(chunk)) await new Promise<void>((r) => sink.once("drain", () => r()));
@@ -463,7 +573,19 @@ export class LocalSetupService {
   async repair(componentId: string): Promise<void> {
     const c = this.components.get(componentId);
     if (!c || c.entry.spec.kind !== "files") return;
-    await rm(toExtendedLength(join(this.modelsDir(), c.entry.spec.dir)), { recursive: true, force: true });
+    const spec = c.entry.spec;
+    if (spec.externalRoot !== undefined) {
+      // A user-owned folder is never recursively deleted (SPEC-021 §2.4): repair removes
+      // exactly the files this entry names, one by one, and touches nothing beside them.
+      const root = this.filesRoot(spec);
+      if (root !== null) {
+        for (const f of spec.files) {
+          await rm(toExtendedLength(join(root, spec.dir, f.file)), { force: true }).catch(() => {});
+        }
+      }
+    } else {
+      await rm(toExtendedLength(join(this.modelsDir(), spec.dir)), { recursive: true, force: true });
+    }
     this.set(componentId, { state: "queued", bytesDone: 0, bytesPerSecond: null, detail: undefined });
     this.publish();
   }

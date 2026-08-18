@@ -48,8 +48,9 @@ export const ID_PREFIXES = {
   commit: "cm",
   session: "sess",
   providerCall: "pc",
-  /** A saved bench setup (issue 305 §3): model + params + optional brief scaffold. */
-  recipe: "rcp",
+  /** A saved bench setup (issue 305 §3): model + params + optional brief scaffold.
+   *  The stored prefix stays "rcp" — it is in every settings file already. */
+  preset: "rcp",
   // World Chat (#70 §5.1). Product identity is kept strictly separate from the harness's own
   // session ids: a provider session is an ephemeral implementation detail that may be replaced
   // between turns, and nothing durable is ever keyed on one.
@@ -91,7 +92,8 @@ export const ProviderCallIdSchema = prefixedIdSchema("pc");
  * that satisfies this schema can collide with one. This is the first durable record keyed on it.
  */
 export const SessionIdSchema = prefixedIdSchema("sess");
-export const RecipeIdSchema = prefixedIdSchema("rcp");
+/** Saved bench setups. The stored prefix stays "rcp": it is on disk in every settings file. */
+export const PresetIdSchema = prefixedIdSchema("rcp");
 
 export const ConversationIdSchema = prefixedIdSchema("cv");
 export const TurnIdSchema = prefixedIdSchema("turn");
@@ -107,7 +109,7 @@ export const ChatEventIdSchema = prefixedIdSchema("wce");
 export type ProposalId = z.infer<typeof ProposalIdSchema>;
 
 export type SessionId = z.infer<typeof SessionIdSchema>;
-export type RecipeId = z.infer<typeof RecipeIdSchema>;
+export type PresetId = z.infer<typeof PresetIdSchema>;
 export type ConversationId = z.infer<typeof ConversationIdSchema>;
 export type TurnId = z.infer<typeof TurnIdSchema>;
 export type MessageId = z.infer<typeof MessageIdSchema>;

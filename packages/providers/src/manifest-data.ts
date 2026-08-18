@@ -1,4 +1,5 @@
 import { ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts";
+import { COMFYUI_MANIFEST_MODELS } from "./comfyui/recipes.js";
 import { FAL_MODELS } from "./fal-catalogue.generated.js";
 
 /**
@@ -13,14 +14,18 @@ import { FAL_MODELS } from "./fal-catalogue.generated.js";
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 15,
-  generated: "2026-08-09",
+  manifestVersion: 16,
+  generated: "2026-08-18",
   models: [
     // ---- fal: generated from the live catalogue ---------------------------
     ...FAL_MODELS.map((model) => ({
       ...model,
       accepts: { ...model.accepts, referenceRoles: false },
     })),
+    // ---- comfyui: projected from the shipped recipe catalogue (SPEC-021 R-3) ----
+    // Rows like any other — capability copy, estimates and pass packing need no special case —
+    // and deliberately no graph: the projection in comfyui/recipes.ts is the whole boundary.
+    ...COMFYUI_MANIFEST_MODELS,
     // ---- image ------------------------------------------------------------
     // Higgsfield rows are keyed on the CLI's `job_type`, because that is the string
     // `generate create` dispatches to. `higgsfield model list --json` is the authority for

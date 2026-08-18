@@ -32,12 +32,13 @@ export class ReadModel {
         manifest: null,
         routing: { defaults: {}, faults: [] },
         models: { disabled: [] },
-        recipes: [],
+        presets: [],
         spend: null,
         backgroundNotifications: "issues-only",
         narrator: null,
         appearance: { theme: "system" },
         runtime: null,
+        comfyui: null,
         voiceRuntime: null,
         drift: [],
         agents: [],
@@ -66,7 +67,7 @@ export class ReadModel {
         | "providerTools"
         | "routing"
         | "models"
-        | "recipes"
+        | "presets"
         | "spend"
         | "backgroundNotifications"
         | "appearance"
@@ -224,8 +225,8 @@ export class ReadModel {
         };
         return;
       }
-      case "recipes.changed": {
-        this.state = { ...this.state, app: { ...this.state.app, recipes: event.recipes } };
+      case "presets.changed": {
+        this.state = { ...this.state, app: { ...this.state.app, presets: event.presets } };
         return;
       }
       case "spend.status": {
@@ -246,6 +247,10 @@ export class ReadModel {
       }
       case "runtime.status": {
         this.state = { ...this.state, app: { ...this.state.app, runtime: event.runtime } };
+        return;
+      }
+      case "comfyui.status": {
+        this.state = { ...this.state, app: { ...this.state.app, comfyui: event.comfyui } };
         return;
       }
       case "voice.sidecar": {

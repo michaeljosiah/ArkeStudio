@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   admitReference,
-  BenchRecipeSchema,
+  AppSettingsSchema,
+  BenchPresetSchema,
   BenchRequestSnapshotSchema,
   BenchSessionSchema,
   benchSessionSummary,
@@ -17,7 +18,7 @@ import {
   keyframePlan,
   multimediaCapacity,
   parseBenchToken,
-  recipeFault,
+  presetFault,
   validateReferences,
   type BenchEventEnvelope,
   type BenchReferenceToken,
@@ -495,9 +496,44 @@ describe("the Keyframe lane (issue 305 §3)", () => {
   });
 });
 
-describe("recipes (issue 305 §3)", () => {
-  it("a recipe's controls must match its mode, and a fault is stated rather than repaired", () => {
-    const bad = BenchRecipeSchema.safeParse({
+describe("presets (issue 305 §3)", () => {
+  it("a settings file written before the rename keeps its setups, and everything else", () => {
+    // The object is strict, so an untouched legacy key would throw — and AppSettingsFile
+    // catches that and hands back defaults, which would cost the user their routing, spend
+    // and appearance choices as a side effect of renaming a menu.
+    const legacy = {
+      routing: { image: "test-image" },
+      spend: { thresholdMicroUsd: 5000, periodDays: 30 },
+      recipes: [
+        {
+          id: "rcp_01J8F3K2QW9VZX4N7M0RTYB6HD",
+          name: "Tide studies",
+          mode: "image",
+          provider: "fal",
+          model: "test-image",
+          params: { kind: "image", count: 2 },
+          createdAt: "2026-08-16T10:00:00.000Z",
+        },
+      ],
+    };
+    const migrated = AppSettingsSchema.parse(legacy);
+    assert.equal(migrated.presets.length, 1, "the saved setup survived the rename");
+    assert.equal(migrated.presets[0]!.name, "Tide studies");
+    assert.equal(migrated.presets[0]!.id, "rcp_01J8F3K2QW9VZX4N7M0RTYB6HD", "and kept its stored id");
+    assert.equal(migrated.routing.image, "test-image", "and so did everything beside it");
+    assert.equal(migrated.spend.thresholdMicroUsd, 5000);
+    assert.equal("recipes" in migrated, false, "the old key does not linger");
+
+    // A file already written with the new key is untouched, and a file carrying both keeps
+    // the new one rather than letting a stale copy win.
+    const fresh = AppSettingsSchema.parse({ presets: [] });
+    assert.deepEqual(fresh.presets, []);
+    const both = AppSettingsSchema.parse({ recipes: legacy.recipes, presets: [] });
+    assert.deepEqual(both.presets, [], "presets wins when both are present");
+  });
+
+  it("a preset's controls must match its mode, and a fault is stated rather than repaired", () => {
+    const bad = BenchPresetSchema.safeParse({
       id: "rcp_01J8F3K2QW9VZX4N7M0RTYB6HD",
       name: "Tide studies",
       mode: "video",
@@ -508,7 +544,7 @@ describe("recipes (issue 305 §3)", () => {
     });
     assert.equal(bad.success, false);
 
-    const recipe = BenchRecipeSchema.parse({
+    const preset = BenchPresetSchema.parse({
       id: "rcp_01J8F3K2QW9VZX4N7M0RTYB6HD",
       name: "Tide studies",
       mode: "image",
@@ -517,10 +553,10 @@ describe("recipes (issue 305 §3)", () => {
       params: { kind: "image", count: 2 },
       createdAt: "2026-08-16T10:00:00.000Z",
     });
-    assert.deepEqual(recipeFault(recipe, { models: [MODEL] }, []), { ok: true });
-    const gone = recipeFault({ ...recipe, model: "left" }, { models: [MODEL] }, []);
+    assert.deepEqual(presetFault(preset, { models: [MODEL] }, []), { ok: true });
+    const gone = presetFault({ ...preset, model: "left" }, { models: [MODEL] }, []);
     assert.ok(!gone.ok && /no longer in the manifest/.test(gone.reason));
-    const off = recipeFault(recipe, { models: [MODEL] }, ["test-image"]);
+    const off = presetFault(preset, { models: [MODEL] }, ["test-image"]);
     assert.ok(!off.ok && /switched off in Providers/.test(off.reason));
   });
 });

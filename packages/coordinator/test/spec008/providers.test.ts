@@ -60,7 +60,11 @@ describe("provider statuses and availability (R-1..R-4, §3.2)", () => {
       ],
     );
 
-    const availability = deriveCapabilityAvailability(service.list());
+    // Derived over the cloud statuses alone: comfyui is a local video/image provider now
+    // (SPEC-021), and like kokoro it unlocks its capabilities by existing — its concrete
+    // recipes are gated by readiness and enqueue admission, not by this derivation. The point
+    // of THIS test is what fal's probes say, so the derivation is scoped to fal.
+    const availability = deriveCapabilityAvailability(service.list().filter((s) => s.id === "fal"));
     const video = availability.find((a) => a.capability === "video");
     assert.equal(video?.available, false);
     assert.match(video!.reason!, /no configured provider's key unlocks video/);
@@ -89,8 +93,10 @@ describe("provider statuses and availability (R-1..R-4, §3.2)", () => {
     await service.validate("fal");
     const faulted = service.markFault("fal", "FAL rejected the key mid-session (HTTP 401)");
     assert.equal(faulted.fault, "FAL rejected the key mid-session (HTTP 401)");
-    // The fault takes the capability out of the availability set immediately.
-    const availability = deriveCapabilityAvailability(service.list());
+    // The fault takes the capability out of the availability set immediately — scoped to fal
+    // for the same reason as above: comfyui also serves image, and its optimism is not what
+    // this test is about.
+    const availability = deriveCapabilityAvailability(service.list().filter((s) => s.id === "fal"));
     assert.equal(availability.find((a) => a.capability === "image")?.available, false);
   });
 

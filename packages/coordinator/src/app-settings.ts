@@ -4,8 +4,9 @@ import {
   newId,
   type AppSettings,
   type BackgroundNotificationPreference,
-  type BenchRecipe,
+  type BenchPreset,
   type Capability,
+  type ComfyUiSettings,
   type ModelManifest,
   type RoutingFault,
   type ThemePreference,
@@ -139,43 +140,52 @@ export class AppSettingsFile {
     return next;
   }
 
+  /** Where the ComfyUI engine is (SPEC-021 §2.2), patched the same way voxa's block is. */
+  async setComfyUi(patch: Partial<ComfyUiSettings>): Promise<AppSettings> {
+    const current = await this.load();
+    const next: AppSettings = { ...current, comfyui: { ...current.comfyui, ...patch } };
+    await this.persist(next);
+    return next;
+  }
+
   /**
    * Save a bench setup (issue 305 §3): validated against the manifest the way a routing
    * default is — the model must exist and match the mode. Saving under an existing name
-   * replaces that recipe: "update" and "save as" are one gesture with one spelling. App-level
+   * replaces that preset: "update" and "save as" are one gesture with one spelling. App-level
    * on purpose: what makes a good setup is the model's, not any one world's.
    */
-  async saveRecipe(
-    input: Omit<BenchRecipe, "id" | "createdAt">,
+  async savePreset(
+    input: Omit<BenchPreset, "id" | "createdAt">,
     manifest: ModelManifest,
     now: string,
-  ): Promise<{ ok: true; settings: AppSettings; recipe: BenchRecipe } | { ok: false; reason: string }> {
+  ): Promise<{ ok: true; settings: AppSettings; preset: BenchPreset } | { ok: false; reason: string }> {
     const model = manifest.models.find((m) => m.id === input.model && m.provider === input.provider);
     if (!model) return { ok: false, reason: `"${input.model}" is not in the model manifest` };
     if (model.capability !== input.mode) {
       return { ok: false, reason: `${model.displayName} is a ${model.capability} model, not ${input.mode}` };
     }
     if (input.params.kind !== input.mode) {
-      return { ok: false, reason: "the recipe's controls do not match its mode" };
+      return { ok: false, reason: "the preset's controls do not match its mode" };
     }
     const current = await this.load();
-    const existing = current.recipes.find((r) => r.name === input.name);
-    const recipe: BenchRecipe = {
-      id: (existing?.id ?? newId("rcp")) as BenchRecipe["id"],
+    const existing = current.presets.find((p) => p.name === input.name);
+    const preset: BenchPreset = {
+      // The stored id prefix stays "rcp" — it is on disk in every settings file already.
+      id: (existing?.id ?? newId("rcp")) as BenchPreset["id"],
       createdAt: existing?.createdAt ?? now,
       ...input,
     };
-    const recipes = existing
-      ? current.recipes.map((r) => (r.id === existing.id ? recipe : r))
-      : [...current.recipes, recipe];
-    const settings: AppSettings = { ...current, recipes };
+    const presets = existing
+      ? current.presets.map((p) => (p.id === existing.id ? preset : p))
+      : [...current.presets, preset];
+    const settings: AppSettings = { ...current, presets };
     await this.persist(settings);
-    return { ok: true, settings, recipe };
+    return { ok: true, settings, preset };
   }
 
-  async deleteRecipe(recipeId: string): Promise<AppSettings> {
+  async deletePreset(presetId: string): Promise<AppSettings> {
     const current = await this.load();
-    const settings: AppSettings = { ...current, recipes: current.recipes.filter((r) => r.id !== recipeId) };
+    const settings: AppSettings = { ...current, presets: current.presets.filter((p) => p.id !== presetId) };
     await this.persist(settings);
     return settings;
   }

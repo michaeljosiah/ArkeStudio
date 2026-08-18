@@ -69,6 +69,36 @@ const TIERS: SizeTier[] = ["1K", "2K", "4K"];
  * a plain `configured` filter offered every model behind a key the app already knows is dead,
  * and Settings said the capability was unavailable on the same screen.
  */
+/**
+ * The readiness result for a local recipe (SPEC-021 §2.12) — the same one coordinator enqueue
+ * admission reads, so the picker and the refusal can never disagree. Null means the model is
+ * not a recipe, or the combined status has not arrived yet.
+ */
+export function recipeReadinessFor(
+  state: ReturnType<typeof useStore>["state"],
+  modelId: string,
+): NonNullable<NonNullable<ReturnType<typeof useStore>["state"]>["app"]["comfyui"]>["recipes"][number] | null {
+  return state?.app.comfyui?.recipes.find((recipe) => recipe.recipeId === modelId) ?? null;
+}
+
+/** Local recipes of a capability that cannot run right now — listed disabled with the reason (R-10). */
+export function disabledRecipes(
+  state: ReturnType<typeof useStore>["state"],
+  capability: Capability,
+): Array<{ model: ManifestModel; reason: string }> {
+  const manifest = state?.app.manifest;
+  if (!manifest) return [];
+  const out: Array<{ model: ManifestModel; reason: string }> = [];
+  for (const model of manifest.models) {
+    if (model.capability !== capability || model.provider !== "comfyui") continue;
+    const readiness = recipeReadinessFor(state, model.id);
+    if (readiness?.state === "disabled") {
+      out.push({ model, reason: readiness.reason ?? "not ready on this machine" });
+    }
+  }
+  return out;
+}
+
 export function usableModels(
   state: ReturnType<typeof useStore>["state"],
   // A capability, not a bench mode: `voice` dispatches against `voice-tts`, so the caller maps
@@ -81,12 +111,18 @@ export function usableModels(
   const unlocked = new Set(
     deriveCapabilityAvailability(state?.app.providers ?? []).find((a) => a.capability === capability)?.via ?? [],
   );
-  return manifest.models.filter(
-    (model) =>
-      model.capability === capability &&
-      !disabled.has(model.id) &&
-      (unlocked.has(model.provider) || PROVIDERS[model.provider].local === true),
-  );
+  return manifest.models.filter((model) => {
+    if (model.capability !== capability || disabled.has(model.id)) return false;
+    if (!unlocked.has(model.provider) && PROVIDERS[model.provider].local !== true) return false;
+    // A local recipe below readiness is not usable — it stays visible in the picker as a
+    // disabled row with its measured reason (disabledRecipes), and coordinator admission
+    // refuses it regardless (SPEC-021 R-16). `unknown` runs: the floor was not checkable (D15).
+    if (model.provider === "comfyui") {
+      const readiness = recipeReadinessFor(state, model.id);
+      if (readiness?.state === "disabled") return false;
+    }
+    return true;
+  });
 }
 
 /**
@@ -130,6 +166,11 @@ export function resolveModel(
  */
 function strandReason(state: ReturnType<typeof useStore>["state"], model: ManifestModel): string {
   if ((state?.app.models.disabled ?? []).includes(model.id)) return "turned off in Providers";
+  // A stranded local recipe carries its readiness reason — the measured one, never key advice
+  // for a provider that takes no key (SPEC-021 R-10).
+  if (model.provider === "comfyui") {
+    return recipeReadinessFor(state, model.id)?.reason ?? "the local engine is not ready";
+  }
   const status = (state?.app.providers ?? []).find((p) => p.id === model.provider);
   const info = PROVIDERS[model.provider];
   // Not every provider takes a key, and telling someone to paste one they can never paste
@@ -360,6 +401,16 @@ export function DispatchBar({
               <span>{candidate.displayName}</span>
               {candidate.unverified === true && <em>UNVERIFIED</em>}
               {candidate.id === routedId && <strong>DEFAULT</strong>}
+            </button>
+          ))}
+          {/* Local recipes that cannot run stay visible, disabled, with the measured reason —
+              never quietly absent (SPEC-021 R-10). The same readiness result the coordinator's
+              enqueue admission enforces, so this list and a refusal can never disagree. */}
+          {disabledRecipes(state, capability).map(({ model: recipe, reason }) => (
+            <button type="button" key={recipe.id} role="option" aria-selected={false} disabled title={reason}>
+              <span className="fy-dispatchbar__provider">{PROVIDERS[recipe.provider].displayName}</span>
+              <span>{recipe.displayName}</span>
+              <em>{reason}</em>
             </button>
           ))}
           <div className="fy-dispatchbar__pickerfoot">

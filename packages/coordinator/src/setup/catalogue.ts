@@ -24,8 +24,14 @@ export interface DownloadFile {
 }
 
 export type ComponentKind =
-  /** Files fetched into the app root, used in place. */
-  | { kind: "files"; dir: string; files: readonly DownloadFile[] }
+  /**
+   * Files fetched into the app root, used in place. `externalRoot` names an injected resolver
+   * (SetupOptions.externalDirs) whose folder replaces `<appRoot>/models` — a user-directed
+   * model library (SPEC-021 §2.4). Entries landing there are the user's guests: detection and
+   * download resolve the same per-file paths, repair is file-specific, and nothing about the
+   * folder is ever recursively deleted.
+   */
+  | { kind: "files"; dir: string; files: readonly DownloadFile[]; externalRoot?: string }
   /** A third-party installer: fetched, then run. */
   | { kind: "installer"; file: DownloadFile; silentArgs: readonly string[] }
   /**
@@ -49,7 +55,15 @@ export type ComponentKind =
       /** What the archive must contain for the fetch to have worked. */
       executable: string;
       byArch: Partial<Record<"x64" | "arm64", DownloadFile>>;
-    };
+    }
+  /**
+   * A whole runtime directory in one pinned archive (SPEC-021 §2.4, D10). `archive` extracts
+   * one executable and discards the rest; a portable runtime IS its tree — an embedded Python
+   * beside the application — so the entire extraction is staged and renamed into place whole.
+   * Presence is `rootMarker` under the installed dir, and the marker may sit one level deep,
+   * because upstream archives wrap their content in a single top-level folder.
+   */
+  | { kind: "tree"; dir: string; rootMarker: string; file: DownloadFile };
 
 export interface CatalogueEntry {
   id: string;
@@ -59,6 +73,13 @@ export interface CatalogueEntry {
   spec: ComponentKind;
   /** Nothing is attempted until these are ready — a model needs its runtime. */
   requires?: readonly string[];
+  /**
+   * Peak disk this component needs, where that differs from what it downloads — an archive
+   * that is extracted holds both copies at once before the archive is deleted. The free-disk
+   * guard measures against this; progress still counts the download, so a bar that reaches
+   * 100% still means the download finished. Absent means the two are the same.
+   */
+  installedMb?: number;
   /** Shown on the row when the thing that would *use* this is not in the build yet. */
   caveat?: string;
   /**
@@ -82,6 +103,10 @@ const ONNX_MAGIC = [0x08] as const;
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const; // "lmgg" — ggml little-endian tag
 /** gzip's two-byte header, so an HTML error page never gets extracted as an archive. */
 const GZIP_MAGIC = [0x1f, 0x8b] as const;
+/** 7-Zip's signature — the System32 bsdtar this service already resolves reads the format. */
+const SEVENZ_MAGIC = [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c] as const;
+
+const COMFYUI_VERSION = "0.33.1";
 
 export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   {
@@ -165,6 +190,36 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
           magic: GZIP_MAGIC,
           sha256: "f74f71475c04913a74b5f21f7cb71284b6978e9949b2256d0aa5b51a306fb88b",
         },
+      },
+    },
+  },
+  // The ComfyUI engine (SPEC-021 §2.4, D10). Optional and detection-first: presence is
+  // answered by the engine service before this directory is even looked at, so an existing
+  // install — user-directed, answering on the default port, or at a well-known location — means
+  // this is NEVER fetched. Pinned to a release with the release's own published sha256; the
+  // NVIDIA build only, said on the row (§1.4). The archive is 7z, which the resolved System32
+  // bsdtar reads (verified on the supported platform — see systemTar in local-setup.ts).
+  {
+    id: "comfyui-runtime",
+    displayName: "ComfyUI",
+    purpose: "Runs the local image and video recipes — used, never fetched, when you already have one",
+    sizeMb: 2034,
+    // ~6 GB extracted, and the archive is still on disk while it extracts, so the peak is both
+    // at once. Almost none of it is ComfyUI: the tree is an embedded Python plus torch and the
+    // CUDA libraries, which is the cost §2.1 says every alternative runtime pays too.
+    installedMb: 8200,
+    optional: true,
+    caveat: `v${COMFYUI_VERSION} · NVIDIA build · about 6 GB on disk`,
+    spec: {
+      kind: "tree",
+      dir: "comfyui-runtime",
+      rootMarker: "ComfyUI/main.py",
+      file: {
+        url: `https://github.com/Comfy-Org/ComfyUI/releases/download/v${COMFYUI_VERSION}/ComfyUI_windows_portable_nvidia.7z`,
+        file: "ComfyUI_windows_portable_nvidia.7z",
+        sizeMb: 2034,
+        magic: SEVENZ_MAGIC,
+        sha256: "4a221588979b96b8244e0e50b2edca03af732acae1deba69d60aa3b4d60b9dba",
       },
     },
   },

@@ -399,6 +399,13 @@ export function planBenchDispatch(
     at: string;
     /** Re-run: dispatch this take's immutable snapshot instead of the live composer. */
     fromTake?: BenchTake | undefined;
+    /**
+     * The shipped version of a local recipe, when the chosen model is one (SPEC-021 R-13, R-15).
+     * Injected because the recipe catalogue lives in @arke-studio/providers, which this package
+     * does not depend on — the coordinator resolves it from the engine service and hands it in.
+     * A re-run keeps the version the take was made with rather than taking today's.
+     */
+    recipeVersionOf?: (modelId: string) => number | undefined;
   },
 ): BenchDispatchPlan {
   const composer = options.fromTake
@@ -499,6 +506,9 @@ export function planBenchDispatch(
     };
   }
 
+  // A re-run dispatches the take's own snapshot (R-15): the version it was made with is what
+  // that take means, so it is carried forward rather than re-resolved against today's catalogue.
+  const recipeVersion = options.fromTake?.request.recipeVersion ?? options.recipeVersionOf?.(model.id);
   const snapshotBase: Omit<BenchRequestSnapshot, "params"> = {
     mode: composer.mode,
     brief: composer.brief,
@@ -506,6 +516,7 @@ export function planBenchDispatch(
     keyframes,
     provider: model.provider,
     model: model.id,
+    ...(recipeVersion !== undefined ? { recipeVersion } : {}),
   };
 
   // A delivery this provider cannot express refuses here rather than being dropped on the way
@@ -611,7 +622,7 @@ export function planBenchDispatch(
                 ...(params.aspect !== undefined ? { aspect: params.aspect } : {}),
                 ...(referencePaths.length > 0 ? { references: referencePaths } : {}),
               }),
-          // Only where the route publishes the choice. A recipe carries the params it was saved
+          // Only where the route publishes the choice. A preset carries the params it was saved
           // with, so a silent shot saved against seedance can be applied to a model that has no
           // audio switch — and putting a field on the wire that the route never declared is how
           // a job gets accepted, billed, and refused on its result.

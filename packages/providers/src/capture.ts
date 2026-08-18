@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import type { ProviderId } from "@arke-studio/contracts";
+import { redactComfyUiBody } from "./comfyui/redact.js";
 import type {
   CommandResult,
   CommandRunner,
@@ -182,23 +183,34 @@ export function captureProviderClient(
 ): ProviderClient {
   if (!capture) return factory(fetchImpl, runImpl);
   const scope = new AsyncLocalStorage<Scope>();
+  // Graph confidentiality (SPEC-021 §2.10): a ComfyUI /prompt request IS the recipe's graph,
+  // and history/queue responses can carry it back. What persists is a summary — digest, node
+  // count, byte count — because payload history is displayed and copied in Activity, and R-1
+  // says no graph reaches a user or a stored file. Other providers pass through untouched.
+  const redact = (direction: "request" | "response", endpoint: string, body: unknown): unknown =>
+    provider === "comfyui" ? redactComfyUiBody(direction, endpoint, body) : body;
   const observedFetch: FetchLike = async (url, init) => {
     const current = scope.getStore() ?? { operation: "provider" };
+    const endpoint = endpointOf(url);
     const id = await capture.start({
       provider,
       operation: current.operation,
       context: current,
       method: init?.method?.toUpperCase() ?? "GET",
-      endpoint: endpointOf(url),
+      endpoint,
       headers: headersOf(init?.headers, true),
-      body: await requestBody(init?.body),
+      body: redact("request", endpoint, await requestBody(init?.body)),
     });
     try {
       const response = await fetchImpl(url, init);
       const clone = response.clone();
       void responseBody(clone)
         .then((body) =>
-          capture.finish(id, { status: response.status, headers: headersOf(response.headers), body }),
+          capture.finish(id, {
+            status: response.status,
+            headers: headersOf(response.headers),
+            body: redact("response", endpoint, body),
+          }),
         )
         .catch((error) => capture.fail(id, error));
       return response;

@@ -278,11 +278,11 @@ describe("the Keyframe tab (issue 305 §3)", () => {
   });
 });
 
-describe("recipes (issue 305 §3)", () => {
-  it("the dispatch row carries the Recipes trigger", () => {
+describe("presets (issue 305 §3)", () => {
+  it("the dispatch row carries the Presets trigger", () => {
     const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, stateWithBench());
-    assert.match(html, /data-testid="bench-recipes"/);
-    assert.match(html, /Recipes/);
+    assert.match(html, /data-testid="bench-presets"/);
+    assert.match(html, /Presets/);
   });
 });
 

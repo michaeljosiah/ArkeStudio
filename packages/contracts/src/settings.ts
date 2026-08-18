@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BenchRecipeSchema } from "./bench.js";
+import { BenchPresetSchema } from "./bench.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 
 /**
@@ -60,6 +60,28 @@ export const VoxaSettingsSchema = z
 export type VoxaSettings = z.infer<typeof VoxaSettingsSchema>;
 
 /**
+ * Where the ComfyUI engine is (SPEC-021 §2.2). Path and URL are both user direction, and both
+ * beat the managed install (D5); they are separate fields because they mean different things —
+ * a path is spawned and supervised, a URL is probed and never spawned (D13).
+ */
+export const ComfyUiSettingsSchema = z
+  .object({
+    /** An install Arke launches as its own supervised child. */
+    enginePath: z.string().min(1).nullable().default(null),
+    /** An already-running engine. Probed, never spawned; wins over `enginePath` when both are set. */
+    engineUrl: z.string().min(1).nullable().default(null),
+    /**
+     * The models folder presence detection, downloads and pre-flight verification all resolve
+     * against (§2.4). null → `<engineRoot>/models`. For a URL engine this is the explicit
+     * filesystem mapping D13 requires — the user's assertion that this folder is the one the
+     * engine reads — and without it recipes stay disabled with verification stated unavailable.
+     */
+    modelsDir: z.string().min(1).nullable().default(null),
+  })
+  .strict();
+export type ComfyUiSettings = z.infer<typeof ComfyUiSettingsSchema>;
+
+/**
  * What the user has changed about an agent. Absent fields mean "as shipped": no model pins the
  * agent to whatever the harness is configured with, and no brief leaves the shipped one alone.
  *
@@ -115,7 +137,7 @@ export const NarratorSettingsSchema = z
   .nullable();
 export type NarratorSettings = z.infer<typeof NarratorSettingsSchema>;
 
-export const AppSettingsSchema = z
+const AppSettingsObjectSchema = z
   .object({
     routing: RoutingDefaultsSchema.default({}),
     models: ModelAvailabilitySchema.default({ disabled: [] }),
@@ -133,6 +155,13 @@ export const AppSettingsSchema = z
         VoxaSettingsSchema,
       )
       .default({ executablePath: null, modelRoot: null, extraArgs: [] }),
+    /** Where the ComfyUI engine is (SPEC-021 §2.2); guarded the same way voxa is. */
+    comfyui: z
+      .preprocess(
+        (value) => (ComfyUiSettingsSchema.safeParse(value).success ? value : {}),
+        ComfyUiSettingsSchema,
+      )
+      .default({ enginePath: null, engineUrl: null, modelsDir: null }),
     /** The voice the app reads text aloud in. Null uses the local default (see the schema). */
     narrator: z
       .preprocess(
@@ -143,18 +172,36 @@ export const AppSettingsSchema = z
     /** Per-agent overrides, keyed by roster name. */
     agents: z.record(z.string().min(1), AgentSettingsSchema).default({}),
     /**
-     * Saved bench setups (issue 305 §3). Guarded per entry: one recipe a future build cannot
+     * Saved bench setups (issue 305 §3). Guarded per entry: one preset a future build cannot
      * read drops alone, because a corrupt row that takes the whole settings file down would
      * cost the user their routing and spend choices with it.
      */
-    recipes: z
+    presets: z
       .preprocess(
-        (value) => (Array.isArray(value) ? value.filter((r) => BenchRecipeSchema.safeParse(r).success) : []),
-        z.array(BenchRecipeSchema),
+        (value) => (Array.isArray(value) ? value.filter((r) => BenchPresetSchema.safeParse(r).success) : []),
+        z.array(BenchPresetSchema),
       )
       .default([]),
   })
   .strict();
+
+/**
+ * Saved bench setups were called `recipes` until SPEC-021 gave that word a precise and quite
+ * different meaning — a pinned, versioned local generation definition. The stored key is
+ * migrated on read rather than left to fail: the object above is `.strict()`, so an untouched
+ * settings file carrying the old key would throw, and the catch around it would hand the user
+ * back a default file — losing their routing, spend and appearance choices to a rename.
+ */
+export const AppSettingsSchema = z.preprocess((value) => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+  const raw = value as Record<string, unknown>;
+  if (!("recipes" in raw)) return value;
+  // The legacy key is ALWAYS removed, not only when it is the one being read: leaving it in
+  // place fails the strict parse below, and a thrown parse costs the whole settings file. A
+  // file carrying both keeps `presets` — the newer key is the one the app last wrote.
+  const { recipes, ...rest } = raw;
+  return "presets" in rest ? rest : { ...rest, presets: recipes };
+}, AppSettingsObjectSchema);
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 
 /** Rolling spend as evaluated on the last ledger append (R-19). */

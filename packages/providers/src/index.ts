@@ -4,6 +4,35 @@
  * declarations) lives in @arke-studio/contracts so the renderer shares it.
  */
 export { AnthropicClient } from "./clients/anthropic.js";
+export {
+  ComfyUiClient,
+  COMFYUI_VERSION_FLOOR,
+  meetsVersionFloor,
+  type ComfyUiPreflight,
+  type EngineBaseUrl,
+} from "./clients/comfyui.js";
+export {
+  callerParamNames,
+  canonicalJson,
+  COMFYUI_MANIFEST_MODELS,
+  COMFYUI_RECIPES,
+  comfyUiRecipeById,
+  comfyUiRecipeIdentity,
+  recipeDependencyDigest,
+  recipeNodeClasses,
+  recipeTemplateDigest,
+  SDXL_BUCKETS,
+  substituteRecipeParams,
+  WAN_DIMENSIONS,
+  wanFramesForSeconds,
+  type ComfyUiRecipe,
+  type RecipeCheckpoint,
+  type RecipeCustomNode,
+  type RecipeGraph,
+  type RecipeParamSpec,
+  type RecipeParamValues,
+} from "./comfyui/recipes.js";
+export { redactComfyUiBody } from "./comfyui/redact.js";
 export { ElevenLabsClient } from "./clients/elevenlabs.js";
 export { FalClient } from "./clients/fal.js";
 export { HiggsfieldClient } from "./clients/higgsfield.js";

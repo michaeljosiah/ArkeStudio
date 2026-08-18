@@ -654,9 +654,9 @@ describe("the Keyframe lane (issue 305 §3)", () => {
   });
 });
 
-describe("recipes (issue 305 §3)", () => {
+describe("presets (issue 305 §3)", () => {
   const settingsPath = async () => join(await makeTempWorld(), "settings.json");
-  const RECIPE_INPUT = {
+  const PRESET_INPUT = {
     name: "Tide studies",
     mode: "image" as const,
     provider: "fal" as const,
@@ -668,60 +668,60 @@ describe("recipes (issue 305 §3)", () => {
   it("saves validated against the manifest, persists, and the same name replaces", async () => {
     const path = await settingsPath();
     const file = new AppSettingsFile(path);
-    const saved = await file.saveRecipe(RECIPE_INPUT, MANIFEST, CLOCK());
+    const saved = await file.savePreset(PRESET_INPUT, MANIFEST, CLOCK());
     assert.ok(saved.ok);
     if (saved.ok) {
-      assert.equal(saved.recipe.name, "Tide studies");
-      assert.match(saved.recipe.id, /^rcp_/);
+      assert.equal(saved.preset.name, "Tide studies");
+      assert.match(saved.preset.id, /^rcp_/);
     }
 
-    // A fresh reader sees the same recipe: settings.json is the record, not the cache.
+    // A fresh reader sees the same preset: settings.json is the record, not the cache.
     const reread = await new AppSettingsFile(path).load();
-    assert.equal(reread.recipes.length, 1);
-    assert.equal(reread.recipes[0]!.params.kind === "image" && reread.recipes[0]!.params.count, 2);
+    assert.equal(reread.presets.length, 1);
+    assert.equal(reread.presets[0]!.params.kind === "image" && reread.presets[0]!.params.count, 2);
 
     // Saving under the same name replaces — one gesture, one spelling, same identity.
-    const replaced = await file.saveRecipe({ ...RECIPE_INPUT, params: { kind: "image", count: 4 } }, MANIFEST, CLOCK());
+    const replaced = await file.savePreset({ ...PRESET_INPUT, params: { kind: "image", count: 4 } }, MANIFEST, CLOCK());
     assert.ok(replaced.ok);
     const after = await new AppSettingsFile(path).load();
-    assert.equal(after.recipes.length, 1);
-    if (saved.ok && replaced.ok) assert.equal(replaced.recipe.id, saved.recipe.id);
-    assert.equal(after.recipes[0]!.params.kind === "image" && after.recipes[0]!.params.count, 4);
+    assert.equal(after.presets.length, 1);
+    if (saved.ok && replaced.ok) assert.equal(replaced.preset.id, saved.preset.id);
+    assert.equal(after.presets[0]!.params.kind === "image" && after.presets[0]!.params.count, 4);
   });
 
   it("a model the manifest does not carry, or of the wrong capability, refuses with words", async () => {
     const file = new AppSettingsFile(await settingsPath());
-    const unknown = await file.saveRecipe({ ...RECIPE_INPUT, model: "gone" }, MANIFEST, CLOCK());
+    const unknown = await file.savePreset({ ...PRESET_INPUT, model: "gone" }, MANIFEST, CLOCK());
     assert.ok(!unknown.ok && /not in the model manifest/.test(unknown.reason));
-    const wrongMode = await file.saveRecipe(
-      { ...RECIPE_INPUT, mode: "video", params: { kind: "video" } },
+    const wrongMode = await file.savePreset(
+      { ...PRESET_INPUT, mode: "video", params: { kind: "video" } },
       MANIFEST,
       CLOCK(),
     );
     assert.ok(!wrongMode.ok && /is a image model, not video/.test(wrongMode.reason));
   });
 
-  it("delete removes the one recipe and leaves the rest", async () => {
+  it("delete removes the one preset and leaves the rest", async () => {
     const path = await settingsPath();
     const file = new AppSettingsFile(path);
-    const a = await file.saveRecipe(RECIPE_INPUT, MANIFEST, CLOCK());
-    const b = await file.saveRecipe({ ...RECIPE_INPUT, name: "Night harbour" }, MANIFEST, CLOCK());
+    const a = await file.savePreset(PRESET_INPUT, MANIFEST, CLOCK());
+    const b = await file.savePreset({ ...PRESET_INPUT, name: "Night harbour" }, MANIFEST, CLOCK());
     assert.ok(a.ok && b.ok);
-    if (a.ok) await file.deleteRecipe(a.recipe.id);
+    if (a.ok) await file.deletePreset(a.preset.id);
     const after = await new AppSettingsFile(path).load();
-    assert.deepEqual(after.recipes.map((r) => r.name), ["Night harbour"]);
+    assert.deepEqual(after.presets.map((r) => r.name), ["Night harbour"]);
   });
 
-  it("one unreadable recipe drops alone rather than taking the settings file down", async () => {
+  it("one unreadable preset drops alone rather than taking the settings file down", async () => {
     const path = await settingsPath();
     const file = new AppSettingsFile(path);
-    await file.saveRecipe(RECIPE_INPUT, MANIFEST, CLOCK());
-    const raw = JSON.parse(await readFile(path, "utf8")) as { recipes: unknown[]; models: unknown };
-    raw.recipes.push({ this: "is not a recipe" });
+    await file.savePreset(PRESET_INPUT, MANIFEST, CLOCK());
+    const raw = JSON.parse(await readFile(path, "utf8")) as { presets: unknown[]; models: unknown };
+    raw.presets.push({ this: "is not a preset" });
     (raw as { models: { disabled: string[] } }).models = { disabled: ["something-off"] };
     await writeFile(path, JSON.stringify(raw));
     const reread = await new AppSettingsFile(path).load();
-    assert.equal(reread.recipes.length, 1, "the good recipe survives");
+    assert.equal(reread.presets.length, 1, "the good preset survives");
     assert.deepEqual(reread.models.disabled, ["something-off"], "the rest of settings survives too");
   });
 });
@@ -900,7 +900,7 @@ describe("what a video dispatch may say about sound and length (asked for 2026-0
     const sounded = await planWith(SOUNDED, { durationSec: 4, sound: false }, false);
     assert.ok(sounded.ok, sounded.ok ? undefined : sounded.reason);
     if (sounded.ok) assert.equal(sounded.inputs[0]!.params["sound"], false);
-    // A recipe saved against a model that has the switch, applied to one that does not: the
+    // A preset saved against a model that has the switch, applied to one that does not: the
     // field is dropped rather than put on a route that never declared it.
     const mute = await planWith(MUTE, { durationSec: 4, sound: false }, false);
     assert.ok(mute.ok, mute.ok ? undefined : mute.reason);

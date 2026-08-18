@@ -17,11 +17,16 @@ interface Provenance {
   canonRevision: number;
   sheets: Record<string, number>;
   artDirectionVersion?: number;
+  recipeVersion?: number;
 }
 
 function provenanceOf(job: Job): Provenance {
   const p = job.params["provenance"] as Provenance | undefined;
-  return p ?? { canonRevision: 0, sheets: {} };
+  const base = p ?? { canonRevision: 0, sheets: {} };
+  // The recipe version a local-recipe take was made with (SPEC-021 R-13), read from the
+  // identity frozen on the job at enqueue — never looked up at arrival, because a job that
+  // outlives an app update must land as what it was dispatched as.
+  return job.recipe !== undefined ? { ...base, recipeVersion: job.recipe.version } : base;
 }
 
 function takeKindFor(job: Job): Take["kind"] {
@@ -104,6 +109,13 @@ export async function recordTakesFromJob(
   job: Job,
   actualMicroUsd: number | null,
   options: TakeArrivalOptions = {},
+  /**
+   * Where the ledger said the actual figure came from (SPEC-021 §2.9): a local job's take must
+   * agree with its ledger row about `local-zero` rather than stamping every known actual as
+   * manifest-derived. Absent means the caller had no ledger entry to read, and the old label
+   * stands — a derived figure is still an honest description of a derived figure.
+   */
+  actualSource: Take["cost"]["actualSource"] = "manifest-derived",
 ): Promise<Take[]> {
   if (job.status !== "succeeded" || job.productionId === undefined) return [];
   const media = job.landedFiles?.[0];
@@ -170,7 +182,7 @@ export async function recordTakesFromJob(
       cost: {
         estimatedMicroUsd: job.estimatedMicroUsd,
         actualMicroUsd,
-        ...(actualMicroUsd !== null ? { actualSource: "manifest-derived" as const } : {}),
+        ...(actualMicroUsd !== null ? { actualSource } : {}),
       },
       media: mediaName,
       ...(qc !== null ? { qc } : {}),
@@ -199,7 +211,9 @@ export async function recordTakesFromJob(
           cost: {
             estimatedMicroUsd: share,
             actualMicroUsd: share,
-            actualSource: "manifest-derived",
+            // Pass segments carry the same source as the pass they divide (SPEC-021 §2.9):
+            // a local pass's segments are local-zero shares, not manifest-derived ones.
+            actualSource,
             allocated: true,
           },
           segment: { passTakeId: primaryId, inSec: entry.startSec, outSec: entry.endSec },

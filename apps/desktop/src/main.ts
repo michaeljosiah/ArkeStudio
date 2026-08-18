@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, createReadStream, existsSync } from "node:fs";
+import { readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, safeStorage, shell } from "electron";
@@ -9,6 +11,7 @@ import {
   assembleHarness,
   ChildLedger,
   ChildSupervisor,
+  ComfyUiEngineService,
   Coordinator,
   AppSettingsFile,
   defaultAppRoot,
@@ -20,14 +23,18 @@ import {
   spoolBytes,
   sweepSpool,
   registerExitBackstop,
+  type CatalogueEntry,
   type Cipher,
   type DatabaseCtor,
 } from "@arke-studio/coordinator";
 import { agentForPurpose, skillFor, ROSTER } from "@arke-studio/adapter-opencode";
 import {
+  COMFYUI_RECIPES,
+  comfyUiRecipeIdentity,
   createProviderClients,
   discoverHiggsfield,
   lazyHiggsfieldRunner,
+  recipeNodeClasses,
   higgsfieldSelectWorkspace,
   higgsfieldSignIn,
   higgsfieldWhoAmI,
@@ -447,10 +454,83 @@ async function initialize(): Promise<{ port: number }> {
     if (port === null || voxaSupervisorRef?.status !== "healthy") return null;
     return `http://127.0.0.1:${port}`;
   };
+  // The ComfyUI engine (SPEC-021): the coordinator's service, constructed here because the
+  // provider clients need its baseUrl and pre-flight before the coordinator exists — the same
+  // ordering Voxa's supervisor ref solves. Everything it knows about a recipe is facts —
+  // digests, node classes, file lists — never a graph.
+  const comfyUiEngine = new ComfyUiEngineService({
+    appRoot,
+    recipes: COMFYUI_RECIPES.map((recipe) => ({
+      id: recipe.id,
+      displayName: recipe.displayName,
+      capability: recipe.capability,
+      version: recipe.recipeVersion,
+      minVramMb: recipe.hardware.minVramMb,
+      recommendedVramMb: recipe.hardware.recommendedVramMb,
+      checkpoints: recipe.requires.checkpoints,
+      customNodes: recipe.requires.customNodes,
+      nodeClasses: recipeNodeClasses(recipe),
+      identity: comfyUiRecipeIdentity(recipe),
+    })),
+    fetch: (url, init) => fetch(url, init),
+    fileExists: async (path) => {
+      try {
+        await stat(path);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    listDirectories: async (path) => {
+      try {
+        const entries = await readdir(path, { withFileTypes: true });
+        return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+      } catch {
+        return [];
+      }
+    },
+    // The expensive pre-flight read (SPEC-021 §2.5): streamed, so a 10 GB checkpoint never
+    // lands in memory whole; null on any read failure, which refuses with the reason.
+    hashFile: (path) =>
+      new Promise<string | null>((resolveHash) => {
+        const hash = createHash("sha256");
+        const stream = createReadStream(path);
+        stream.on("data", (chunk) => hash.update(chunk));
+        stream.on("end", () => resolveHash(hash.digest("hex")));
+        stream.on("error", () => resolveHash(null));
+      }),
+    writeTextFile: (path, text) => writeFile(path, text, "utf8"),
+    createSupervisor: (spec) => {
+      const supervisor = new ChildSupervisor(spec, { ledger: childLedger });
+      registerExitBackstop(supervisor);
+      return supervisor;
+    },
+  });
+  // Per-recipe weight entries for setup (SPEC-021 §2.4): derived from the provider layer's
+  // recipe facts so the digests live in exactly one place, landing in the engine's own models
+  // folder through the coordinator's external-dir resolver.
+  const comfyUiWeightEntries: CatalogueEntry[] = COMFYUI_RECIPES.map((recipe) => ({
+    id: `comfyui-weights-${recipe.id}`,
+    displayName: `${recipe.displayName} · weights`,
+    purpose: `Model files for ${recipe.displayName} — landed in the engine's own models folder`,
+    sizeMb: recipe.requires.checkpoints.reduce((sum, c) => sum + c.sizeMb, 0),
+    optional: true,
+    requires: ["comfyui-runtime"],
+    spec: {
+      kind: "files",
+      dir: "",
+      externalRoot: "comfyui-models",
+      files: recipe.requires.checkpoints.map((c) => ({ url: c.url, file: c.file, sizeMb: c.sizeMb, sha256: c.sha256 })),
+    },
+  }));
   const providerClients = createProviderClients({
     fetch: (url, init) => fetch(url, init),
     higgsfield: lazyHiggsfieldRunner(findHiggsfield),
     voxa: voxaBaseUrl,
+    comfyui: {
+      baseUrl: () => comfyUiEngine.baseUrl(),
+      preflight: (recipeId) => comfyUiEngine.preflight(recipeId),
+    },
     capture: providerCalls,
   });
 
@@ -769,7 +849,38 @@ async function initialize(): Promise<{ port: number }> {
       return result.canceled ? [] : result.filePaths;
     },
     // Fetching the local runtimes at setup: the shared Node seams (streamed HTTP, subprocesses).
-    setup: nodeSetupDeps(),
+    // The ComfyUI runtime entry asks the engine service first (SPEC-021 D10): an install that
+    // already exists — configured, answering, or at a well-known location — is presence, and
+    // the managed copy is never fetched over it.
+    setup: {
+      ...nodeSetupDeps(),
+      externallyPresent: async (entryId) =>
+        entryId === "comfyui-runtime" ? comfyUiEngine.externallyPresent() : false,
+    },
+    comfyui: {
+      service: comfyUiEngine,
+      choosePath: async () => {
+        const parent = window;
+        if (!parent) return null;
+        const result = await dialog.showOpenDialog(parent, {
+          title: "Choose your ComfyUI install folder",
+          buttonLabel: "Use this install",
+          properties: ["openDirectory"],
+        });
+        return result.canceled ? null : (result.filePaths[0] ?? null);
+      },
+      chooseModelsDir: async () => {
+        const parent = window;
+        if (!parent) return null;
+        const result = await dialog.showOpenDialog(parent, {
+          title: "Choose the models folder this engine reads",
+          buttonLabel: "Map this folder",
+          properties: ["openDirectory"],
+        });
+        return result.canceled ? null : (result.filePaths[0] ?? null);
+      },
+    },
+    setupExtraEntries: comfyUiWeightEntries,
     openPath: (p) => void shell.openPath(p),
     nativeIndex: sqlite
       ? { ok: true }

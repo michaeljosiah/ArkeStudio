@@ -39,6 +39,7 @@ export const ProviderIdSchema = z.enum([
   "ollama",
   "kokoro",
   "whispercpp",
+  "comfyui",
 ]);
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
 
@@ -108,6 +109,12 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   ollama: { displayName: "Ollama", capabilities: ["llm"], local: true, credential: "none" },
   kokoro: { displayName: "Kokoro", capabilities: ["voice-tts"], local: true, credential: "none" },
   whispercpp: { displayName: "whisper.cpp", capabilities: ["voice-stt"], local: true, credential: "none" },
+  /**
+   * The engine behind the local recipe catalogue (SPEC-021). Never exposed as an interface —
+   * the dispatchable unit is an Arke-authored recipe, and this row is what puts those recipes
+   * in the same picker, queue and ledger as every cloud model.
+   */
+  comfyui: { displayName: "ComfyUI", capabilities: ["image", "video"], local: true, credential: "none" },
 };
 
 /**

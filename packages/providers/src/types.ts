@@ -1,4 +1,10 @@
-import type { Capability, CapabilityProbe, ClientDeclarations, ProviderId } from "@arke-studio/contracts";
+import type {
+  Capability,
+  CapabilityProbe,
+  ClientDeclarations,
+  ProviderId,
+  RecipeIdentity,
+} from "@arke-studio/contracts";
 
 /**
  * The provider client interface (SPEC-008 §2.9, R-23): submit, poll, fetch, cancel, plus the
@@ -15,6 +21,13 @@ export interface SubmitRequest {
   imageReferences?: PreparedImageReference[];
   /** Attached when the provider honours it (declared via supportsIdempotencyKey). */
   idempotencyKey?: string;
+  /**
+   * The recipe identity frozen onto the job at enqueue (SPEC-021 R-15). Carried to the wire
+   * because freezing it is only half the guarantee: the client must refuse when the shipped
+   * catalogue has moved past what this job was accepted as, rather than resolving the current
+   * graph under an old job's name.
+   */
+  recipe?: RecipeIdentity;
 }
 
 export interface PreparedImageReference {

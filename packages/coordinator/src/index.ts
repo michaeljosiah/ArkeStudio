@@ -226,8 +226,15 @@ export {
 } from "./sheets/authoring.js";
 export { AuthoringService, describeActionClass, settlePermission } from "./harness/authoring.js";
 export { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
-export { SETUP_CATALOGUE, catalogueTotalMb, type CatalogueEntry } from "./setup/catalogue.js";
+export { SETUP_CATALOGUE, catalogueTotalMb, type CatalogueEntry, type DownloadFile } from "./setup/catalogue.js";
 export { nodeSetupDeps } from "./setup/node-deps.js";
+export {
+  ComfyUiEngineService,
+  engineInstanceId,
+  type ComfyUiRecipeFacts,
+  type EngineServiceDeps,
+} from "./comfyui/engine.js";
+export { sanitizeComfyUiMedia, type SanitizeResult } from "./comfyui/sanitize.js";
 export { GrantStore, type RememberedGrant } from "./harness/grants.js";
 export { WorldQueryServer } from "./harness/world-query.js";
 export { harnessTrace } from "./harness/trace.js";

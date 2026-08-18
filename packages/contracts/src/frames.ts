@@ -2,7 +2,7 @@ import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, RecipeIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema } from "./ids.js";
+import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
@@ -759,6 +759,22 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("clear-voxa-executable") }).strict(),
   z.object({ kind: z.literal("use-bundled-voxa") }).strict(),
   z.object({ kind: z.literal("restart-voxa") }).strict(),
+  /**
+   * The ComfyUI engine (SPEC-021 §2.2). Filesystem paths never originate in the renderer:
+   * choosing a path or models folder goes through the host's own picker, and adopting a
+   * detected install names a location the host itself discovered and just published — the
+   * coordinator refuses one it did not.
+   */
+  z.object({ kind: z.literal("choose-comfyui-path") }).strict(),
+  z.object({ kind: z.literal("choose-comfyui-models-dir") }).strict(),
+  z.object({ kind: z.literal("clear-comfyui-models-dir") }).strict(),
+  z.object({ kind: z.literal("set-comfyui-url"), url: z.string().min(1).max(2000) }).strict(),
+  z.object({ kind: z.literal("clear-comfyui-engine") }).strict(),
+  z.object({ kind: z.literal("use-detected-comfyui"), location: z.string().min(1) }).strict(),
+  /** Re-run detection, probing and readiness on demand — the Settings refresh. */
+  z.object({ kind: z.literal("comfyui-refresh") }).strict(),
+  /** Re-hash one recipe's pinned files (§2.5): the "Re-verify" affordance. */
+  z.object({ kind: z.literal("comfyui-verify-recipe"), recipeId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("repair-voice-models") }).strict(),
   z.object({ kind: z.literal("open-model-folder") }).strict(),
   z.object({ kind: z.literal("test-local-voice"), requestId: UlidSchema }).strict(),
@@ -1488,12 +1504,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
-   * Save the composer's current setup as a recipe (issue 305 §3). Saving under an existing
-   * name replaces that recipe; the coordinator validates the model against the manifest.
+   * Save the composer's current setup as a preset (issue 305 §3). Saving under an existing
+   * name replaces that preset; the coordinator validates the model against the manifest.
    */
   z
     .object({
-      kind: z.literal("bench-recipe-save"),
+      kind: z.literal("bench-preset-save"),
       requestId: UlidSchema,
       name: z.string().min(1).max(80),
       mode: BenchModeSchema,
@@ -1505,9 +1521,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
-      kind: z.literal("bench-recipe-delete"),
+      kind: z.literal("bench-preset-delete"),
       requestId: UlidSchema,
-      recipeId: RecipeIdSchema,
+      presetId: PresetIdSchema,
     })
     .strict(),
   /** Dispatch the composer as written. Count N reserves N takes and enqueues N jobs. */

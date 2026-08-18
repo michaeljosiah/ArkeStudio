@@ -340,8 +340,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, providers: event.providers } };
     case "routing.changed":
       return { ...state, app: { ...state.app, routing: { defaults: event.routing, faults: event.faults } } };
-    case "recipes.changed":
-      return { ...state, app: { ...state.app, recipes: event.recipes } };
+    case "presets.changed":
+      return { ...state, app: { ...state.app, presets: event.presets } };
     case "models.changed":
       // Faults travel with availability because they are the same act: switching a model off can
       // strand the default that points at it, and the two arriving separately would show a
@@ -1481,6 +1481,40 @@ export function repairVoiceModels(): void {
   send({ kind: "repair-voice-models" });
 }
 
+// ---- SPEC-021: the ComfyUI engine ------------------------------------------
+
+export function chooseComfyUiPath(): void {
+  send({ kind: "choose-comfyui-path" });
+}
+
+export function chooseComfyUiModelsDir(): void {
+  send({ kind: "choose-comfyui-models-dir" });
+}
+
+export function clearComfyUiModelsDir(): void {
+  send({ kind: "clear-comfyui-models-dir" });
+}
+
+export function setComfyUiUrl(url: string): void {
+  send({ kind: "set-comfyui-url", url });
+}
+
+export function clearComfyUiEngine(): void {
+  send({ kind: "clear-comfyui-engine" });
+}
+
+export function useDetectedComfyUi(location: string): void {
+  send({ kind: "use-detected-comfyui", location });
+}
+
+export function refreshComfyUi(): void {
+  send({ kind: "comfyui-refresh" });
+}
+
+export function verifyComfyUiRecipe(recipeId: string): void {
+  send({ kind: "comfyui-verify-recipe", recipeId });
+}
+
 export function openModelFolder(): void {
   send({ kind: "open-model-folder" });
 }
@@ -2556,7 +2590,7 @@ export function sendBenchEnhanceBrief(input: {
   return sent ? requestId : null;
 }
 
-export function sendBenchRecipeSave(input: {
+export function sendBenchPresetSave(input: {
   name: string;
   mode: BenchMode;
   provider: string;
@@ -2565,7 +2599,7 @@ export function sendBenchRecipeSave(input: {
   brief?: string;
 }): void {
   send({
-    kind: "bench-recipe-save",
+    kind: "bench-preset-save",
     requestId: ulid(),
     name: input.name,
     mode: input.mode,
@@ -2576,8 +2610,8 @@ export function sendBenchRecipeSave(input: {
   } as ClientMessage);
 }
 
-export function sendBenchRecipeDelete(recipeId: string): void {
-  send({ kind: "bench-recipe-delete", requestId: ulid(), recipeId } as ClientMessage);
+export function sendBenchPresetDelete(presetId: string): void {
+  send({ kind: "bench-preset-delete", requestId: ulid(), presetId } as ClientMessage);
 }
 
 export function sendBenchRemoveReference(

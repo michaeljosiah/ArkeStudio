@@ -615,7 +615,7 @@ describe("the dispatch bar (design-system turn 39)", () => {
         ...FIXTURE_STATE.app,
         manifest: { ...FIXTURE_STATE.app.manifest!, models: models as never },
         models: { disabled },
-    recipes: [],
+    presets: [],
         routing: { ...FIXTURE_STATE.app.routing, defaults: { image: routed } },
       },
     });

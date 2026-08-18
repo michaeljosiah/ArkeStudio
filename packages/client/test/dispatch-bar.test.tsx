@@ -8,6 +8,7 @@ import { App } from "../src/App.js";
 import {
   choiceForModel,
   DispatchBar,
+  disabledRecipes,
   resolveModel,
   resolveOutputChoice,
   usableModels,
@@ -64,7 +65,7 @@ const stateWith = (patch: {
       models: [...FIXTURE_STATE.app.manifest!.models, FAL_IMAGE, OPENAI_IMAGE],
     },
     models: { disabled: patch.disabled ?? [] },
-    recipes: [],
+    presets: [],
     routing: {
       ...FIXTURE_STATE.app.routing,
       defaults: { ...FIXTURE_STATE.app.routing.defaults, image: patch.routedImage ?? FAL_IMAGE.id },
@@ -111,6 +112,88 @@ describe("what the picker may offer", () => {
     const ids = usableModels(stateWith({}), "image").map((m) => m.id);
     assert.ok(ids.includes(FAL_IMAGE.id));
     assert.ok(!ids.includes(OPENAI_IMAGE.id), "OpenAI has no key in this state");
+  });
+});
+
+describe("local recipes read the same readiness the coordinator enforces (SPEC-021 §2.12)", () => {
+  const RECIPE: ManifestModel = {
+    id: "comfyui-draft-image",
+    provider: "comfyui",
+    capability: "image",
+    displayName: "Local · Draft Image",
+    accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
+    limits: { tiers: { "1K": "1024" } },
+    pricing: { kind: "unmetered" },
+    requires: { vramMb: 6000 },
+  };
+  const withRecipe = (
+    readiness: "ready" | "disabled" | "unknown" | null,
+    reason?: string,
+  ): ClientState => {
+    const base = stateWith({});
+    return {
+      ...base,
+      app: {
+        ...base.app,
+        manifest: { ...base.app.manifest!, models: [...base.app.manifest!.models, RECIPE] },
+        comfyui:
+          readiness === null
+            ? null
+            : {
+                engine: {
+                  source: "user-path",
+                  state: readiness === "disabled" ? "ready" : "ready",
+                  location: "C:\\AI\\ComfyUI",
+                  version: "0.33.1",
+                  instanceId: "abc",
+                  detail: null,
+                  detected: [],
+                },
+                recipes: [
+                  {
+                    recipeId: RECIPE.id,
+                    recipeVersion: 1,
+                    displayName: RECIPE.displayName,
+                    capability: "image",
+                    state: readiness,
+                    ...(reason !== undefined ? { reason } : {}),
+                  },
+                ],
+                checkedAt: "2026-08-18T00:00:00.000Z",
+              },
+      },
+    };
+  };
+
+  // What the picker DRAWS from these two functions is not asserted here: the model list is
+  // behind `pickerOpen`, which starts false, and this harness is renderToString with no way to
+  // click. So these cover the selection — which model is offered, which is listed disabled and
+  // with what words — and the rendering of that list is genuinely uncovered.
+  it("a disabled recipe leaves the usable list, and is offered separately with its measured reason (R-10)", () => {
+    const state = withRecipe("disabled", "Needs 6 GB VRAM. This machine has 4 GB. Cloud image still works.");
+    assert.ok(!usableModels(state, "image").some((m) => m.id === RECIPE.id));
+    const rows = disabledRecipes(state, "image");
+    assert.equal(rows.length, 1);
+    assert.match(rows[0]!.reason, /Needs 6 GB VRAM\. This machine has 4 GB\./);
+    // Never a generic "unavailable" — the whole point of R-10.
+    assert.doesNotMatch(rows[0]!.reason, /^unavailable$/i);
+  });
+
+  it("ready and unknown both dispatch — the unchecked floor is not a refusal (D15)", () => {
+    assert.ok(usableModels(withRecipe("ready"), "image").some((m) => m.id === RECIPE.id));
+    assert.ok(usableModels(withRecipe("unknown"), "image").some((m) => m.id === RECIPE.id));
+    assert.equal(disabledRecipes(withRecipe("ready"), "image").length, 0);
+  });
+
+  it("a routed default that lost readiness is shown stranded with the measured reason, never key advice", () => {
+    const state = withRecipe("disabled", "2 of 3 model files missing from the models folder");
+    __setStateForTest({
+      ...state,
+      app: { ...state.app, routing: { ...state.app.routing, defaults: { image: RECIPE.id } } },
+    });
+    const html = bar();
+    assert.match(html, /2 of 3 model files missing/);
+    assert.doesNotMatch(html, /no ComfyUI key/);
   });
 });
 

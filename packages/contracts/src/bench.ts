@@ -3,7 +3,7 @@ import {
   ArtifactIdSchema,
   IsoDateTimeSchema,
   JobIdSchema,
-  RecipeIdSchema,
+  PresetIdSchema,
   SessionIdSchema,
   Sha256Schema,
   TakeIdSchema,
@@ -206,6 +206,12 @@ export const BenchRequestSnapshotSchema = z
     references: z.array(BenchReferenceTokenSchema),
     provider: z.string().min(1),
     model: z.string().min(1),
+    /**
+     * The recipe version, when the model is a local recipe (SPEC-021 R-13, R-15). The snapshot
+     * is what re-run reads, and a recipe re-run must mean "that version", not "whatever the
+     * catalogue holds now".
+     */
+    recipeVersion: z.number().int().min(1).optional(),
     params: BenchParamsSchema,
     /**
      * The keyframes that rode, in order, with their content hashes — the same self-contained
@@ -747,55 +753,55 @@ export function keyframeCapacity(model: ManifestModel): number {
 }
 
 // ---------------------------------------------------------------------------
-// Recipes (issue 305 §3): a saved dispatch setup — model, controls, and an
+// Presets (issue 305 §3): a saved dispatch setup — model, controls, and an
 // optional brief scaffold — app-level, because what makes a good setup is the
 // model's, not any one world's.
 // ---------------------------------------------------------------------------
 
-export const BenchRecipeSchema = z
+export const BenchPresetSchema = z
   .object({
-    id: RecipeIdSchema,
-    /** The name the menu shows. Saving under an existing name replaces that recipe. */
+    id: PresetIdSchema,
+    /** The name the menu shows. Saving under an existing name replaces that preset. */
     name: z.string().min(1).max(80),
     mode: BenchModeSchema,
     provider: z.string().min(1),
     model: z.string().min(1),
     params: BenchParamsSchema,
-    /** A brief to start from. Absent means the recipe sets controls and leaves the words alone. */
+    /** A brief to start from. Absent means the preset sets controls and leaves the words alone. */
     brief: z.string().max(100_000).optional(),
     createdAt: IsoDateTimeSchema,
   })
   .strict()
-  .superRefine((recipe, ctx) => {
-    if (recipe.params.kind !== recipe.mode) {
-      ctx.addIssue({ code: "custom", message: `recipe params are for "${recipe.params.kind}" but the mode is "${recipe.mode}"` });
+  .superRefine((preset, ctx) => {
+    if (preset.params.kind !== preset.mode) {
+      ctx.addIssue({ code: "custom", message: `preset params are for "${preset.params.kind}" but the mode is "${preset.mode}"` });
     }
   });
-export type BenchRecipe = z.infer<typeof BenchRecipeSchema>;
+export type BenchPreset = z.infer<typeof BenchPresetSchema>;
 
-export type RecipeFault = { ok: true } | { ok: false; reason: string };
+export type PresetFault = { ok: true } | { ok: false; reason: string };
 
 /**
- * Whether a recipe can be applied under this manifest — stated, never repaired. A recipe whose
+ * Whether a preset can be applied under this manifest — stated, never repaired. A preset whose
  * model left the manifest or is switched off shows its reason in the menu rather than vanishing:
  * hiding saved work reads as losing it (the routing-faults posture, SPEC-008 §2.7).
  */
-export function recipeFault(
-  recipe: BenchRecipe,
+export function presetFault(
+  preset: BenchPreset,
   manifest: { models: readonly ManifestModel[] } | null,
   disabled: readonly string[],
   /** Providers whose stored key unlocks this capability. Absent = do not judge credentials. */
   unlocked?: readonly string[],
-): RecipeFault {
-  const model = manifest?.models.find((m) => m.id === recipe.model && m.provider === recipe.provider);
-  if (!model) return { ok: false, reason: `"${recipe.model}" is no longer in the manifest` };
-  if (model.capability !== modeCapability(recipe.mode)) {
-    return { ok: false, reason: `${model.displayName} is a ${model.capability} model, not ${recipe.mode}` };
+): PresetFault {
+  const model = manifest?.models.find((m) => m.id === preset.model && m.provider === preset.provider);
+  if (!model) return { ok: false, reason: `"${preset.model}" is no longer in the manifest` };
+  if (model.capability !== modeCapability(preset.mode)) {
+    return { ok: false, reason: `${model.displayName} is a ${model.capability} model, not ${preset.mode}` };
   }
-  if (disabled.includes(recipe.model)) {
+  if (disabled.includes(preset.model)) {
     return { ok: false, reason: `${model.displayName} is switched off in Providers` };
   }
-  if (unlocked !== undefined && !unlocked.includes(recipe.provider) && PROVIDERS[model.provider]?.local !== true) {
+  if (unlocked !== undefined && !unlocked.includes(preset.provider) && PROVIDERS[model.provider]?.local !== true) {
     return { ok: false, reason: `no provider key unlocks ${model.displayName}` };
   }
   return { ok: true };

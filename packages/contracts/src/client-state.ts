@@ -5,10 +5,11 @@ import { TakeIdSchema } from "./ids.js";
 import { CutFileSchema } from "./cut.js";
 import { WorldChatSummarySchema, WorldChatWorkspaceSchema } from "./world-chat.js";
 import { ArtifactSidecarSchema } from "./artifact.js";
-import { BenchRecipeSchema, BenchSessionSummarySchema, BenchWorkspaceSchema } from "./bench.js";
+import { BenchPresetSchema, BenchSessionSummarySchema, BenchWorkspaceSchema } from "./bench.js";
 import { ArtDirectionRecordSchema, ResolvedArtDirectionSchema } from "./art-direction.js";
 import { EMPTY_BIBLE, WorldBibleSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
+import { ComfyUiStatusSchema } from "./comfyui.js";
 import { HealthStatusSchema } from "./events.js";
 import { IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema } from "./job.js";
@@ -298,7 +299,7 @@ export const ClientStateSchema = z
          */
         models: ModelAvailabilitySchema.default({ disabled: [] }),
         /** Saved bench setups (issue 305 §3), app-level — reusable across worlds. */
-        recipes: z.array(BenchRecipeSchema).default([]),
+        presets: z.array(BenchPresetSchema).default([]),
         /**
          * The agent roster as it will actually run: the shipped brief, the user's override if
          * there is one, and the model each will use. The screen never has to guess which of the
@@ -355,6 +356,8 @@ export const ClientStateSchema = z
         /** Who reads the app's prose aloud. Null is the shipped local voice, and free. */
         narrator: NarratorSettingsSchema.default(null),
         runtime: LocalRuntimeStatusSchema.nullable().default(null),
+        /** The ComfyUI engine and its recipes (SPEC-021 §2.12) — one result, read everywhere. */
+        comfyui: ComfyUiStatusSchema.nullable().default(null),
         voiceRuntime: VoiceRuntimeStatusSchema.nullable().default(null),
         drift: z.array(ManifestDriftSchema).default([]),
         /** Per-provider queue state: pauses with reasons, held counts (SPEC-009 R-8, R-11). */
