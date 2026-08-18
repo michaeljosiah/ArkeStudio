@@ -110,7 +110,7 @@ export function speechCacheFile(spec: SpeechSpec): string {
 const PREVIEW_MODEL: Record<string, string> = {
   kokoro: "kokoro-82m",
   elevenlabs: "eleven_multilingual_v2",
-  indextts: "indextts-2-5",
+  comfyui: "comfyui-cloned-voice",
 };
 
 export function previewCacheFile(

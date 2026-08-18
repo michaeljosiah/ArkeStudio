@@ -275,7 +275,7 @@ describe("the preview cache key", () => {
   it("separates providers over the same voice and line (SPEC-022 §2.7)", () => {
     // The branch this replaces was binary — anything not Kokoro keyed as ElevenLabs — so a second
     // local provider filed onto the cloud key and replayed the wrong audio for the same voice id.
-    const paths = ["elevenlabs", "kokoro", "indextts"].map((p) => previewCacheFile(p, "v1", "line one", "mp3"));
+    const paths = ["elevenlabs", "kokoro", "comfyui"].map((p) => previewCacheFile(p, "v1", "line one", "mp3"));
     assert.equal(new Set(paths).size, 3, "each provider must own its cache key");
   });
   it("keys an unknown provider under itself rather than a neighbour", () => {
@@ -286,8 +286,8 @@ describe("the preview cache key", () => {
   });
   it("takes the model from the caller when one is named", () => {
     assert.notEqual(
-      previewCacheFile("indextts", "v1", "line one", "wav"),
-      previewCacheFile("indextts", "v1", "line one", "wav", "indextts-3-0"),
+      previewCacheFile("comfyui", "v1", "line one", "wav"),
+      previewCacheFile("comfyui", "v1", "line one", "wav", "comfyui-other-recipe"),
     );
   });
   it("includes model, format, settings and normalized text", () => {
@@ -441,7 +441,7 @@ describe("cloned voices join the catalogue", () => {
     const catalogue = await service().catalogue(CLONED);
     const cloned = catalogue.find((c) => c.voiceId === "harbour-glass");
     assert.ok(cloned, "a cloned voice is a candidate like any other");
-    assert.equal(cloned.provider, "indextts");
+    assert.equal(cloned.provider, "comfyui");
     assert.equal(cloned.local, true);
     assert.equal(cloned.canClone, false);
     assert.ok(catalogue.some((c) => c.provider === "kokoro"), "the presets are still there");

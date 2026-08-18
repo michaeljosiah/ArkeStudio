@@ -568,38 +568,6 @@ describe("local runtime gating (R-22, D11, D12)", () => {
     assert.equal(llama8b?.state, "ready");
   });
 
-  it("gates the local cloned voice on its measured floor (SPEC-022 §2.6)", () => {
-    // 4 GB is under the 6 GB floor; the row states both figures and points at the cloud voice.
-    const thin = gateLocalRuntimes(
-      SHIPPED_MANIFEST,
-      { vramMb: 4 * 1024, memMb: 32 * 1024, diskFreeMb: 500 * 1024 },
-      detectedAt,
-    );
-    const disabled = thin.models.find((m) => m.modelId === "indextts-2-5");
-    assert.equal(disabled?.state, "disabled");
-    assert.match(disabled!.reason!, /Needs 6 GB VRAM\. This machine has 4 GB\./);
-    assert.match(disabled!.reason!, /Cloud voice-tts still works via ElevenLabs\./);
-
-    // The machine it was measured on: 10 GB against a 5.44 GB peak.
-    const measured = gateLocalRuntimes(
-      SHIPPED_MANIFEST,
-      { vramMb: 10 * 1024, memMb: 32 * 1024, diskFreeMb: 500 * 1024 },
-      detectedAt,
-    );
-    assert.equal(measured.models.find((m) => m.modelId === "indextts-2-5")?.state, "ready");
-  });
-
-  it("refuses the cloned voice when the disk cannot hold its weights", () => {
-    const status = gateLocalRuntimes(
-      SHIPPED_MANIFEST,
-      { vramMb: 10 * 1024, memMb: 32 * 1024, diskFreeMb: 4 * 1024 },
-      detectedAt,
-    );
-    const row = status.models.find((m) => m.modelId === "indextts-2-5");
-    assert.equal(row?.state, "disabled");
-    assert.match(row!.reason!, /free disk/);
-  });
-
   it("a failed probe yields unknown, never disabled (D12)", () => {
     const status = gateLocalRuntimes(
       SHIPPED_MANIFEST,

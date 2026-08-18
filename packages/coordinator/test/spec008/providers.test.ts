@@ -75,25 +75,10 @@ describe("provider statuses and availability (R-1..R-4, §3.2)", () => {
 
   it("a capability with nobody configured is present with its reason, never silently absent (R-2)", async () => {
     const service = await makeService([]);
-    // Scoped to ElevenLabs, which holds no key here — the same technique as the video case above,
-    // and for the same reason. This read `voice-clone` unscoped until SPEC-022 made cloning
-    // something a local engine does: indextts is `credential: "none"`, so like kokoro and comfyui
-    // it unlocks its capabilities by existing, and its concrete row is gated by hardware readiness
-    // rather than by a key. With every capability now claimed by some configured provider, an
-    // unscoped derivation has nothing left to be unavailable. The rule under test is unchanged —
-    // a capability nobody provides is present WITH ITS REASON, never missing from the list.
-    const availability = deriveCapabilityAvailability(service.list().filter((s) => s.id === "elevenlabs"));
+    const availability = deriveCapabilityAvailability(service.list());
     const clone = availability.find((a) => a.capability === "voice-clone");
     assert.equal(clone?.available, false);
     assert.match(clone!.reason!, /no provider is configured/);
-  });
-
-  it("local cloning needs no key, and says so by being available (SPEC-022)", async () => {
-    const service = await makeService([]);
-    const availability = deriveCapabilityAvailability(service.list());
-    const clone = availability.find((a) => a.capability === "voice-clone");
-    assert.equal(clone?.available, true, "voice-clone is unlocked by a local engine existing");
-    assert.ok(clone!.via.includes("indextts"), "and it is indextts that unlocks it");
   });
 
   it("a probe failure marks the provider invalid with the message, not a crash", async () => {

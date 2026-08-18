@@ -252,7 +252,10 @@ export function newClonedVoice(input: {
  */
 export function clonedVoiceCandidates(voices: readonly ClonedVoice[]): VoiceCandidate[] {
   return voices.map((v) => ({
-    provider: "indextts",
+    // The engine is ComfyUI, running a voice recipe (SPEC-022 §2.1). A cloned voice is addressed
+    // like every other candidate — provider plus id — and the recipe is the model behind it, so
+    // swapping the engine later is a recipe edit rather than a change to what a voice IS.
+    provider: "comfyui",
     voiceId: v.id,
     label: v.name,
     attributes: v.attributes,
