@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ProductionSpineSchema } from "./spine.js";
 import { TakeMediaInfoRecordSchema } from "./media.js";
-import { TakeIdSchema } from "./ids.js";
+import { ProposalIdSchema, TakeIdSchema } from "./ids.js";
 import { CutFileSchema } from "./cut.js";
 import { WorldChatSummarySchema, WorldChatWorkspaceSchema } from "./world-chat.js";
 import { ArtifactSidecarSchema } from "./artifact.js";
@@ -411,6 +411,19 @@ export const ClientStateSchema = z
     worldChat: WorldChatWorkspaceSchema.nullable().default(null),
     /** The open bench session, or null. One at a time, mirroring worldChat (issue 305 §5.3). */
     bench: BenchWorkspaceSchema.nullable().default(null),
+    /**
+     * Proposals an authoring turn is writing into *right now* (issue 239).
+     *
+     * Not on the bundle, because it is not on the disk: a scan can see the proposal directory and
+     * cannot see whether an agent is still filling it. It is asked of the running service every
+     * time the state is read, so a rescan mid-draft cannot answer stale, and it lives beside
+     * `worldChat` and `bench` because it is a live projection rather than world content.
+     *
+     * The client folds authoring activity from events, which a reload throws away while the run
+     * carries on. Without this a returning client cannot tell "still being written" from
+     * "finished", and offers Accept and Discard over a half-written proposal.
+     */
+    authoringRuns: z.array(ProposalIdSchema).default([]),
   })
   .strict();
 export type ClientState = z.infer<typeof ClientStateSchema>;

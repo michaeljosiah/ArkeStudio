@@ -41,6 +41,7 @@ const STATE: ClientState = {
   world: null,
   worldChat: null,
   bench: null,
+  authoringRuns: [],
 };
 
 const EVENT = {

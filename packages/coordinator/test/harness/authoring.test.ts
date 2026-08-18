@@ -184,8 +184,13 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
     });
     await new Promise((r) => setTimeout(r, 150));
     assert.equal(authoring.isRunning(proposal.id), true);
+    // The same fact by the name the snapshot asks for it under (issue 239): a client that
+    // reloads now has no event to learn this from, so the state it is handed has to carry it.
+    assert.deepEqual(authoring.liveRuns(), [proposal.id]);
     await authoring.cancel(proposal.id);
     await run;
+
+    assert.deepEqual(authoring.liveRuns(), [], "and the run is gone from it once it ends");
 
     assert.deepEqual(adapter.interrupted, ["ses_stuck"]);
     const final = events.findLast((e) => e.type === "authoring.status");

@@ -45,7 +45,9 @@ export interface GateNotice {
     | "target-retired"
     | "invalid"
     /** #70 SS11.4.1: an in-place edit whose outcome is unknown, so accepting is not offered. */
-    | "draft-unresolved";
+    | "draft-unresolved"
+    /** Issue 239: a turn is writing into the proposal, so it is not settled enough to act on. */
+    | "drafting";
   detail?: string;
   authoritativeSignature?: string;
 }
@@ -412,6 +414,33 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
   }
 }
 
+/**
+ * Fold the snapshot's live authoring runs into what this client has seen (issue 239).
+ *
+ * `authoring` is otherwise built only from events, so a client that reloads while the studio is
+ * drafting comes back with nothing for a run that is still going — and reads that absence as a
+ * settled proposal, offering Accept and Discard over files an agent is still writing.
+ *
+ * Seeding only, deliberately. A proposal the snapshot leaves out is one nothing is writing into
+ * now, but *how* an unseen run ended is not something a snapshot can say; inventing an ending
+ * would be the same false claim in the other direction. Entries already held keep their progress
+ * lines — it is the same run, joined further along — but never an earlier turn's `detail`, which
+ * described that turn and not this one.
+ */
+export function seedLiveRuns(
+  activity: Record<string, AuthoringActivity>,
+  runs: readonly string[],
+): Record<string, AuthoringActivity> {
+  if (runs.length === 0) return activity;
+  const next = { ...activity };
+  for (const proposalId of runs) {
+    const existing = next[proposalId];
+    if (existing?.status === "running") continue;
+    next[proposalId] = { status: "running", lines: existing?.lines ?? [] };
+  }
+  return next;
+}
+
 function handleFrame(json: string): void {
   let frame;
   try {
@@ -429,6 +458,7 @@ function handleFrame(json: string): void {
       Object.entries(current.gateNotices).filter(([id]) => openIds.has(id)),
     );
     const changedWorld = current.state?.world?.meta.worldId !== frame.state.world?.meta.worldId;
+    const authoring = seedLiveRuns(current.authoring, frame.state.authoringRuns);
     const durableVoiceAudio: StoreState["voiceAudio"] = {};
     for (const job of frame.state.app.jobs) {
       if (job.target.kind !== "voice-preview" || typeof job.params["requestId"] !== "string") continue;
@@ -462,6 +492,7 @@ function handleFrame(json: string): void {
       ...current,
       state: frame.state,
       gateNotices,
+      authoring,
       sheetRefs: changedWorld ? {} : current.sheetRefs,
       voiceCandidates: changedWorld ? {} : current.voiceCandidates,
       voiceCatalogue: changedWorld ? null : current.voiceCatalogue,

@@ -806,7 +806,33 @@ export class Coordinator {
   private readonly pendingVoiceReads = new Map<string, { token: string; input: EnqueueInput }>();
 
   getState(): ClientState {
-    return this.readModel.getState();
+    const state = this.readModel.getState();
+    // Asked of the service on the way out rather than folded in, because a run starts and ends
+    // without the world changing, and the world is re-scanned for reasons of its own — anything
+    // stored would be stale by the next rescan (issue 239). Allocation-free when nothing is
+    // running, which is nearly always.
+    const authoringRuns = this.authoring?.liveRuns() ?? [];
+    return authoringRuns.length === 0 ? state : { ...state, authoringRuns };
+  }
+
+  /**
+   * Refuse a settling action while an authoring turn is still writing (issue 239).
+   *
+   * Answers true when it has refused, so the caller returns. The refusal is a `proposal.blocked`
+   * rather than silence, because a client that got here believed the proposal was settled and
+   * needs to be told why nothing happened.
+   */
+  private refuseWhileDrafting(worldId: string, proposalId: string): boolean {
+    if (!this.authoring?.isRunning(proposalId)) return false;
+    this.emit({
+      at: new Date().toISOString(),
+      type: "proposal.blocked",
+      worldId,
+      proposalId,
+      reason: "drafting",
+      detail: "the studio is still writing into this proposal — cancel the run first",
+    });
+    return true;
   }
 
   private trackBackground<T>(work: Promise<T>): void {
@@ -1815,6 +1841,10 @@ export class Coordinator {
       case "proposal-accept": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
+        // A proposal being written into is not a proposal to commit (issue 239). The client hides
+        // Accept while a run is live, but it learns that from a snapshot it may have taken a
+        // moment ago, and the run is here — so the refusal is made where the answer is known.
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
         // Read before accepting: acceptance rewrites the manifest, and the origin is needed to
         // tell the conversation what became of its propositions.
         const acceptedFrom = await gate.readManifest(msg.proposalId).catch(() => null);
@@ -1885,6 +1915,9 @@ export class Coordinator {
       case "proposal-discard": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
+        // Discarding mid-run would delete the directory the agent is writing into (issue 239).
+        // Cancel is the way to stop a run, and it leaves the proposal to be discarded after.
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
         const discardedFrom = await gate.readManifest(msg.proposalId).catch(() => null);
         try {
           await gate.discard(msg.proposalId);
