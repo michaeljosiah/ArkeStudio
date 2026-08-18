@@ -14,7 +14,7 @@ import { FAL_MODELS } from "./fal-catalogue.generated.js";
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 16,
+  manifestVersion: 17,
   generated: "2026-08-18",
   models: [
     // ---- fal: generated from the live catalogue ---------------------------
@@ -168,6 +168,21 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       limits: {},
       pricing: { kind: "unmetered" },
       requires: { memMb: 4000, diskMb: 400 },
+    },
+    {
+      id: "indextts-2-5",
+      provider: "indextts",
+      capability: "voice-tts",
+      displayName: "IndexTTS 2.5",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: {},
+      pricing: { kind: "unmetered" },
+      // Measured on an RTX 3080, bf16, 2026-08-18: peak 5.44 GB against this stated 6 GB floor,
+      // and 10.2 GB on disk — 5.1 GB of weights plus 5.1 GB of auxiliaries the first run fetches.
+      // The floor sits above the measured peak deliberately; a row that just fits on the machine
+      // it was measured on leaves nothing for the display, and gateLocalRuntimes disables with
+      // both figures rather than failing mid-take (SPEC-022 §2.6).
+      requires: { vramMb: 6000, diskMb: 10500 },
     },
     {
       id: "whisper-large-v3",

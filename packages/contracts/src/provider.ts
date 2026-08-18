@@ -38,6 +38,7 @@ export const ProviderIdSchema = z.enum([
   "elevenlabs",
   "ollama",
   "kokoro",
+  "indextts",
   "whispercpp",
   "comfyui",
 ]);
@@ -108,6 +109,21 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   },
   ollama: { displayName: "Ollama", capabilities: ["llm"], local: true, credential: "none" },
   kokoro: { displayName: "Kokoro", capabilities: ["voice-tts"], local: true, credential: "none" },
+  /**
+   * The second local voice, and the first that clones (SPEC-022). It declares `voice-clone`
+   * where Kokoro cannot, which is why SPEC-011 §2.3's "local means presets, cloud means cloning"
+   * is retired: that line described the catalogue when Kokoro was the only local engine in it.
+   *
+   * A cloned voice's reference clip is deliberately NOT declared through `mapsReferenceKinds`.
+   * It is the voice's identity, fixed when the voice is made, not an asset a shot cites — so it
+   * is never budgeted and never reaches the reference gate (turn 74, SPEC-022 §2.5).
+   */
+  indextts: {
+    displayName: "IndexTTS",
+    capabilities: ["voice-tts", "voice-clone"],
+    local: true,
+    credential: "none",
+  },
   whispercpp: { displayName: "whisper.cpp", capabilities: ["voice-stt"], local: true, credential: "none" },
   /**
    * The engine behind the local recipe catalogue (SPEC-021). Never exposed as an interface —
