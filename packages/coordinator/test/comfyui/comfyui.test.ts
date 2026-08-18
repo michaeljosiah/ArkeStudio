@@ -255,6 +255,18 @@ function engineDeps(world: FakeEngineWorld, appRoot: string): EngineServiceDeps 
       throw new Error(`ECONNREFUSED ${url}`);
     },
     fileExists: async (path) => world.files.has(path.replaceAll("\\", "/")),
+    // Derived from the same file set, so a nested layout in the fake behaves like one on disk.
+    listDirectories: async (path) => {
+      const prefix = `${path.replaceAll("\\", "/").replace(/\/+$/, "")}/`;
+      const names = new Set<string>();
+      for (const file of world.files) {
+        if (!file.startsWith(prefix)) continue;
+        const rest = file.slice(prefix.length);
+        const head = rest.split("/")[0];
+        if (head !== undefined && rest.includes("/")) names.add(head);
+      }
+      return [...names];
+    },
     hashFile: async (path) => world.hashes.get(path.replaceAll("\\", "/")) ?? null,
     writeTextFile: async () => {},
     createSupervisor: (spec) => {
@@ -333,6 +345,40 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     assert.ok(spec.args!.includes("--listen"));
     assert.equal(service.engineStatus().state, "ready");
     assert.equal(service.baseUrl(), "http://127.0.0.1:51999");
+  });
+
+  it("finds the managed engine inside the archive's wrapper folder, where the installer put it", async () => {
+    // The bug this closes: the tree installer accepts its marker one level deep, because the
+    // upstream 7z wraps everything in ComfyUI_windows_portable/. Resolution only looked at the
+    // root, so a freshly installed managed engine resolved as absent — setup would offer the
+    // 2 GB download again on every launch and the engine could never start.
+    const world = fakeWorld();
+    world.files.add("C:/app/comfyui-runtime/ComfyUI_windows_portable/python_embeded/python.exe");
+    world.files.add("C:/app/comfyui-runtime/ComfyUI_windows_portable/ComfyUI/main.py");
+    const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
+    await service.applySettings(NO_SETTINGS);
+    const status = service.engineStatus();
+    assert.equal(status.source, "managed");
+    assert.equal(status.state, "ready");
+    assert.equal(world.spawned.length, 1, "and it is actually launched");
+    // The models folder must follow the real base, not the wrapper — one resolver, one answer.
+    assert.equal(
+      service.modelsDir()?.replaceAll("\\", "/"),
+      "C:/app/comfyui-runtime/ComfyUI_windows_portable/ComfyUI/models",
+    );
+  });
+
+  it("a user pointing at the wrapper folder gets the same answer as pointing inside it", async () => {
+    const world = fakeWorld();
+    world.files.add("C:/AI/portable/python_embeded/python.exe");
+    world.files.add("C:/AI/portable/ComfyUI/main.py");
+    const outer = new ComfyUiEngineService(engineDeps(world, "C:/app"));
+    await outer.applySettings({ enginePath: "C:/AI", engineUrl: null, modelsDir: null });
+    const inner = new ComfyUiEngineService(engineDeps(world, "C:/app"));
+    await inner.applySettings({ enginePath: "C:/AI/portable", engineUrl: null, modelsDir: null });
+    assert.equal(outer.engineStatus().state, "ready");
+    assert.equal(inner.engineStatus().state, "ready");
+    assert.equal(outer.modelsDir(), inner.modelsDir());
   });
 
   it("a bare install with no interpreter fails with the remedy, not a spawn error", async () => {
@@ -705,6 +751,34 @@ describe("the frozen identity reaches the wire, where it can be enforced (R-15)"
     // Freezing identity at enqueue is only half of R-15; this is the half that lets a client
     // refuse a catalogue that has moved past what the job was accepted as.
     assert.deepEqual(seen[0]!["recipe"], RECIPE_IDENTITY);
+    queue.dispose();
+  });
+});
+
+describe("retiring an engine mid-flight (§2.11)", () => {
+  it("fails the work that belonged to it, and leaves work that still matches alone", async () => {
+    // The bug this closes: changing the engine in Settings left running jobs polling — and the
+    // poll went to the NEW engine with an id only the OLD one ever issued, which reads as the
+    // engine having lost the job rather than the user having moved it.
+    const dir = await tempDir("arke-cq-");
+    const provider = new FakeProvider();
+    provider.pollState = "running";
+    const { queue, ledger } = queueWith({ comfyui: provider }, join(dir, "jobs.jsonl"), dir);
+    await queue.start();
+    const mine = await queue.enqueue(localInput());
+    const theirs = await queue.enqueue({ ...localInput(), engine: { source: "user-url", instanceId: "other" } });
+    const failed = await queue.failJobsForRetiredEngine(
+      "comfyui",
+      (job) => job.engine?.instanceId === "abc123",
+      "the engine this job ran on is no longer configured — it was not resumed against the new one",
+    );
+    assert.deepEqual(failed.map((j) => j.id), [theirs.id], "only the job whose engine retired");
+    const after = queue.listJobs();
+    assert.equal(after.find((j) => j.id === theirs.id)!.status, "failed");
+    assert.match(after.find((j) => j.id === theirs.id)!.error!, /no longer configured/);
+    assert.notEqual(after.find((j) => j.id === mine.id)!.status, "failed");
+    // Terminal local work still records its zero.
+    assert.equal(ledger.find((e) => e.jobId === theirs.id)!.actualSource, "local-zero");
     queue.dispose();
   });
 });

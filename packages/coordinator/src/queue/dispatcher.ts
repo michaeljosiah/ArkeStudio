@@ -821,7 +821,17 @@ export class JobQueue {
     if (job.providerJobId) {
       const client = this.opts.clients[job.provider];
       const key = await this.keyFor(job.provider);
-      if (client && key) await client.cancel(key, job.providerJobId, { jobId: job.id, attempt: job.attempt, model: job.model }).catch(() => {});
+      // `key !== null`, not a truthiness test: keyFor returns the EMPTY STRING for every
+      // provider whose credential is not ours to hold — every local runtime, and Higgsfield,
+      // whose credential lives in its own CLI. An empty string is falsy, so the truthiness
+      // test skipped the remote cancel for all of them: a Higgsfield job kept running after
+      // the user cancelled it, and SPEC-021 R-17's targeted cancellation was unreachable.
+      // Only a genuinely missing in-app credential (null) means there is nobody to ask.
+      if (client && key !== null) {
+        await client
+          .cancel(key, job.providerJobId, { jobId: job.id, attempt: job.attempt, model: job.model })
+          .catch(() => {});
+      }
     }
     // A cancelled job still writes a ledger entry (R-15, D10).
     await this.terminalize(job, "cancelled", null);
@@ -1119,6 +1129,34 @@ export class JobQueue {
         this.finalizationUnsettled(job),
     );
     for (const job of jobs) await this.retryFinalization(job.id);
+  }
+
+  /**
+   * Terminate non-terminal work that belonged to an engine that is no longer configured
+   * (SPEC-021 §2.11). Settings changing under running work is the same "different instance"
+   * case recovery handles at start-up, except nothing restarts — so it has to be handled the
+   * moment the location changes, or a poll loop keeps asking a *new* engine about an id only
+   * the old one ever knew.
+   *
+   * `stillOurs` answers whether a job's frozen engine identity matches what is configured now.
+   */
+  async failJobsForRetiredEngine(
+    provider: string,
+    stillOurs: (job: Job) => boolean,
+    reason: string,
+  ): Promise<Job[]> {
+    const orphans = [...this.jobs.values()].filter(
+      (job) => job.provider === provider && !TERMINAL.has(job.status) && job.status !== "needs-reconciliation" && !stillOurs(job),
+    );
+    for (const job of orphans) {
+      const lane = this.lane(job.provider);
+      lane.fifo = lane.fifo.filter((id) => id !== job.id);
+      // Deliberately no remote cancel: the engine that holds this work is the one we can no
+      // longer address, and the engine we CAN address never had it.
+      await this.terminalize(job, "failed", reason);
+    }
+    if (orphans.length > 0) this.emitQueueStatus(provider);
+    return orphans;
   }
 
   /** The user's answer to strategy C (D4): resubmit with eyes open, or abandon honestly. */

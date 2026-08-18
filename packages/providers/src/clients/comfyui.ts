@@ -6,6 +6,7 @@ import {
   SDXL_BUCKETS,
   substituteRecipeParams,
   WAN_DIMENSIONS,
+  WAN_FRAMES_BY_SECONDS,
   wanFramesForSeconds,
   type ComfyUiRecipe,
   type RecipeParamValues,
@@ -57,7 +58,17 @@ export function meetsVersionFloor(version: string, floor: string = COMFYUI_VERSI
   return true;
 }
 
-/** The neutral dispatch keys that are the coordinator's, not parameters of any recipe. */
+/**
+ * The dispatch keys that are the coordinator's, not parameters of any recipe.
+ *
+ * This is deliberately generous, because the surfaces that build a dispatch do not all speak
+ * one vocabulary. The bench pre-converts a length through `dispatchDuration` and sends the
+ * route's own word — `duration` — while the production planner sends the neutral `durationSec`;
+ * both also send `resolution`, which for a recipe is a fact of the row rather than a control.
+ * FAL never noticed because its client spreads unknown params straight onto the wire. This
+ * client is an allow-list, so anything a real dispatch can carry has to be named here or it
+ * becomes a terminal failure for work the picker openly offered.
+ */
 const INTERNAL_PARAMS = new Set([
   "references",
   "referenceRoles",
@@ -73,6 +84,10 @@ const INTERNAL_PARAMS = new Set([
   "output",
   "aspect_ratio",
   "durationSec",
+  /** The bench's pre-converted wire length; read alongside `durationSec` in valuesFor. */
+  "duration",
+  /** A recipe has exactly one output size, declared on its row — never a param of the graph. */
+  "resolution",
   "seed",
   "prompt",
   "text",
@@ -204,15 +219,23 @@ export class ComfyUiClient implements ProviderClient {
     // and the engine's frame count is derived — 4k+1, the latent's own arithmetic.
     const rawAspect = params["aspect"] ?? params["aspect_ratio"];
     const aspect = typeof rawAspect === "string" && rawAspect in WAN_DIMENSIONS ? rawAspect : "16:9";
-    const seconds = typeof params["durationSec"] === "number" ? params["durationSec"] : 5;
-    const frames = wanFramesForSeconds(seconds);
+    // Either vocabulary: `durationSec` from the production planner, `duration` from the bench,
+    // which has already snapped the request through dispatchDuration. Reading only one of them
+    // would leave the other silently defaulting — the estimate and the take would record the
+    // length the user picked while the engine rendered a different one.
+    const rawSeconds = params["durationSec"] ?? params["duration"];
+    const seconds = typeof rawSeconds === "number" ? rawSeconds : Number(rawSeconds);
+    if (rawSeconds !== undefined && !Number.isFinite(seconds)) {
+      throw new Error(`comfyui: ${recipe.displayName} was asked for a length that is not a number`);
+    }
+    const asked = rawSeconds === undefined ? 5 : seconds;
+    const frames = wanFramesForSeconds(asked);
     if (frames === null) {
-      throw new Error(
-        `comfyui: ${recipe.displayName} cannot be asked for ${seconds}s — it offers ${Object.keys(WAN_DIMENSIONS).length ? "2, 3, 5" : ""}s`,
-      );
+      const offered = Object.keys(WAN_FRAMES_BY_SECONDS).join(", ");
+      throw new Error(`comfyui: ${recipe.displayName} cannot be asked for ${asked}s — it offers ${offered}s`);
     }
     const size = WAN_DIMENSIONS[aspect]!;
-    values["durationSec"] = seconds;
+    values["durationSec"] = asked;
     values["aspect"] = aspect;
     values["length"] = frames;
     values["width"] = size.width;

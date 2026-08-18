@@ -927,6 +927,16 @@ export class Coordinator {
 
     await this.seed();
     await this.seedAppConfig();
+    // The engine must be resolved BEFORE queue recovery, not after (SPEC-021 §2.11). Recovery
+    // asks the service which engine is configured now, and a null answer means "no engine" —
+    // which, run too early, is indistinguishable from "not resolved yet" and fails every
+    // in-flight job against a surviving URL engine with "no longer configured". Awaited here
+    // and nowhere else: resolution is probing and detection, both bounded; the child process
+    // it may spawn is deliberately not awaited (R-6 keeps the app usable while it starts).
+    if (this.opts.comfyui && this.appSettings) {
+      const settings = await this.appSettings.load();
+      await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
+    }
     // Reconcile every non-terminal job before accepting new work (SPEC-009 R-18). The report
     // reaches clients as an event; the folded jobs seed the read model.
     if (this.jobQueue) {
@@ -990,21 +1000,14 @@ export class Coordinator {
     // every component can be skipped. Detection runs first, so a second launch fetches nothing.
     void this.setup?.run();
 
-    // The ComfyUI engine (SPEC-021): apply stored settings — which resolves, detects, and
-    // spawns supervision where it is Arke's to run — then publish the combined status. In the
-    // background, like setup: the app never waits on an engine (R-6).
-    if (this.opts.comfyui && this.appSettings) {
-      const service = this.opts.comfyui.service;
-      service.subscribe(() => {
+    // The engine itself resolved before queue recovery (above). What remains is publishing its
+    // combined readiness, and keeping it published as the supervised child moves through
+    // starting → healthy → failed. Both in the background: the app never waits on an engine.
+    if (this.opts.comfyui) {
+      this.opts.comfyui.service.subscribe(() => {
         this.trackBackground(this.refreshComfyUi().catch(() => {}));
       });
-      this.trackBackground(
-        (async () => {
-          const settings = await this.appSettings!.load();
-          await service.applySettings(settings.comfyui);
-          await this.refreshComfyUi();
-        })().catch(() => {}),
-      );
+      this.trackBackground(this.refreshComfyUi().catch(() => {}));
     }
 
     // The sidecar's four degradation states (SPEC-011 §2.10), polled gently; the app is fully
@@ -1495,6 +1498,18 @@ export class Coordinator {
     if (!this.appSettings || !this.opts.comfyui) return;
     const settings = await this.appSettings.setComfyUi(patch);
     await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
+    // Work in flight against the engine that just stopped being the configured one is failed
+    // here, with the reason (SPEC-021 §2.11). Without this the poll loop keeps asking the NEW
+    // engine about a prompt id only the OLD one ever issued — which reads as "the engine no
+    // longer knows this prompt" and looks like the engine lost the job.
+    const now = this.opts.comfyui.service.instanceId();
+    await this.jobQueue
+      ?.failJobsForRetiredEngine(
+        "comfyui",
+        (job) => job.engine === undefined || job.engine.instanceId === now,
+        "the engine this job ran on is no longer configured — it was not resumed against the new one",
+      )
+      .catch(() => []);
     await this.setup?.detect().catch(() => {});
     await this.refreshComfyUi();
   }

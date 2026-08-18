@@ -313,6 +313,45 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
     assert.equal(posted.prompt["10"]!.inputs["fps"], 24);
   });
 
+  it("accepts the params the real dispatch surfaces build, not only the neutral shape", async () => {
+    // The bug this closes: the bench pre-converts a length through dispatchDuration and sends
+    // `duration`, the production planner sends `durationSec`, and both send `resolution`. The
+    // client's allow-list knew only `durationSec`, so every local video generation at a length
+    // the picker openly offered failed terminally before reaching the engine. These are the
+    // exact param shapes bench/service.ts and productions/ops.ts construct.
+    const shapes: Array<{ label: string; params: Record<string, unknown>; frames: number }> = [
+      { label: "bench, 3s chosen", params: { prompt: "harbour", duration: 3, resolution: "704p" }, frames: 73 },
+      { label: "bench, 2s chosen", params: { prompt: "harbour", duration: 2 }, frames: 49 },
+      { label: "productions, neutral", params: { prompt: "harbour", durationSec: 5, resolution: "704p" }, frames: 121 },
+      { label: "nothing chosen", params: { prompt: "harbour" }, frames: 121 },
+    ];
+    for (const shape of shapes) {
+      const { fetch, calls } = engineFake([
+        { match: /\/prompt$/, status: 200, body: { prompt_id: "p-ok", node_errors: {} } },
+      ]);
+      const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT);
+      await client.submit("", { model: "comfyui-draft-video", capability: "video", params: shape.params });
+      const posted = calls.find((c) => /\/prompt$/.test(c.url))!.body as {
+        prompt: Record<string, { inputs: Record<string, unknown> }>;
+      };
+      // Not merely accepted — the chosen length actually reaches the latent, rather than
+      // silently defaulting while the estimate and the take record what the user picked.
+      assert.equal(posted.prompt["7"]!.inputs["length"], shape.frames, shape.label);
+    }
+  });
+
+  it("a length the recipe does not offer refuses, naming what it does offer", async () => {
+    const { fetch } = engineFake([{ match: /\/prompt$/, status: 200, body: { prompt_id: "p" } }]);
+    await assert.rejects(
+      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-draft-video",
+        capability: "video",
+        params: { prompt: "x", duration: 4 },
+      }),
+      /cannot be asked for 4s — it offers 2, 3, 5s/,
+    );
+  });
+
   it("a failed pre-flight refuses before any request reaches the engine (§2.5, R-9)", async () => {
     const { fetch, calls } = engineFake([{ match: /\/prompt$/, status: 200, body: { prompt_id: "px" } }]);
     const client = new ComfyUiClient(fetch, BASE, async () => ({
@@ -655,6 +694,25 @@ describe("no graph survives capture", () => {
     assert.equal(scrubPaths("a plain sentence with no path in it"), "a plain sentence with no path in it");
     // A ratio is not a path.
     assert.equal(scrubPaths("aspect 16/9 selected"), "aspect 16/9 selected");
+  });
+
+  it("leaves URLs intact — the drive-letter rule must not read the 'p' of 'http'", () => {
+    // The bug this closes: `[A-Za-z]:[\\/]` matched the "p://" of "http://", so the scrubber
+    // ate the whole URL and left the last segment glued to "http" — deleting exactly the
+    // detail a download or connection failure is about.
+    assert.equal(
+      scrubPaths("connect to http://127.0.0.1:8188/prompt refused"),
+      "connect to http://127.0.0.1:8188/prompt refused",
+    );
+    assert.equal(
+      scrubPaths("Failed to download https://huggingface.co/Comfy-Org/repo/resolve/main/wan.safetensors"),
+      "Failed to download https://huggingface.co/Comfy-Org/repo/resolve/main/wan.safetensors",
+    );
+    // And still scrubs a real path standing next to one.
+    assert.equal(
+      scrubPaths("from https://host/a/b into C:\\Users\\alice\\models\\wan.safetensors"),
+      "from https://host/a/b into wan.safetensors",
+    );
   });
 
   it("a history response's embedded prompt tuple is redacted; status and outputs survive", () => {

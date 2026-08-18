@@ -42,6 +42,8 @@ export interface EngineServiceDeps {
   recipes: readonly ComfyUiRecipeFacts[];
   fetch: (url: string, init?: RequestInit) => Promise<Response>;
   fileExists: (path: string) => Promise<boolean>;
+  /** Immediate subdirectory names, or empty when the path is not a readable directory. */
+  listDirectories: (path: string) => Promise<string[]>;
   /** sha256 hex of the file's bytes, or null when unreadable. The expensive pre-flight read. */
   hashFile: (path: string) => Promise<string | null>;
   /** For the extra-model-paths mapping a spawned engine needs when `modelsDir` is overridden. */
@@ -122,11 +124,32 @@ export class ComfyUiEngineService {
     return join(this.deps.appRoot, MANAGED_DIR);
   }
 
-  /** The portable build's shape: an embedded interpreter beside the application tree. */
-  private async portableLayout(root: string): Promise<{ python: string; main: string } | null> {
-    const python = join(root, "python_embeded", "python.exe");
-    const main = join(root, "ComfyUI", "main.py");
-    if ((await this.deps.fileExists(python)) && (await this.deps.fileExists(main))) return { python, main };
+  /**
+   * The portable build's shape: an embedded interpreter beside the application tree.
+   *
+   * Checked at the root AND one level inside it, because the upstream archive wraps everything
+   * in a single top folder (`ComfyUI_windows_portable/`) and the tree installer preserves that
+   * wrapper — it verifies its marker one level deep for exactly this reason. Without the same
+   * allowance here, the two halves of the managed install disagree: setup writes a runtime that
+   * resolution then reports as absent, so the engine can never start and the download is
+   * offered again on the next launch. It also lets a user point Settings at either the folder
+   * they extracted or the one inside it, which is a distinction nobody should have to know.
+   */
+  private async portableLayout(root: string): Promise<{ python: string; main: string; base: string } | null> {
+    const at = async (base: string): Promise<{ python: string; main: string; base: string } | null> => {
+      const python = join(base, "python_embeded", "python.exe");
+      const main = join(base, "ComfyUI", "main.py");
+      if ((await this.deps.fileExists(python)) && (await this.deps.fileExists(main))) {
+        return { python, main, base };
+      }
+      return null;
+    };
+    const direct = await at(root);
+    if (direct !== null) return direct;
+    for (const nested of await this.deps.listDirectories(root)) {
+      const inside = await at(join(root, nested));
+      if (inside !== null) return inside;
+    }
     return null;
   }
 
@@ -136,8 +159,12 @@ export class ComfyUiEngineService {
     // and it wins over a path: both set means the path is the install the URL is serving.
     if (engineUrl !== null) return { source: "user-url", root: null, url: engineUrl, problem: null };
     if (enginePath !== null) {
-      if (await this.portableLayout(enginePath)) {
-        return { source: "user-path", root: enginePath, url: null, problem: null };
+      const layout = await this.portableLayout(enginePath);
+      if (layout !== null) {
+        // The layout's own base, not what the user pointed at: with the archive's wrapper
+        // folder in play those differ, and `root` is what modelsDir() and custom-node
+        // verification build their paths from. One resolver, one answer (§2.4).
+        return { source: "user-path", root: layout.base, url: null, problem: null };
       }
       if (await this.deps.fileExists(join(enginePath, "main.py"))) {
         return {
@@ -155,8 +182,9 @@ export class ComfyUiEngineService {
         problem: "no ComfyUI was found at this path (no main.py or portable layout)",
       };
     }
-    if (await this.portableLayout(this.managedRoot())) {
-      return { source: "managed", root: this.managedRoot(), url: null, problem: null };
+    const managed = await this.portableLayout(this.managedRoot());
+    if (managed !== null) {
+      return { source: "managed", root: managed.base, url: null, problem: null };
     }
     return { source: "absent", root: null, url: null, problem: null };
   }
@@ -278,8 +306,27 @@ export class ComfyUiEngineService {
 
   // ---- the public surface --------------------------------------------------
 
-  /** Apply Settings (§2.2): re-resolve, restart supervision, re-probe, publish. */
-  async applySettings(settings: ComfyUiSettings): Promise<void> {
+  /**
+   * Apply Settings (§2.2): re-resolve, restart supervision, re-probe, publish.
+   *
+   * Serialized, because it awaits four times and re-reads its own state afterwards. Two calls
+   * interleaving — a user changing the path twice, or a Settings change racing start-up —
+   * would let the second stop the first's supervisor before it was assigned, and the first
+   * would then overwrite `this.supervisor` with a child nothing can reach: a leaked engine
+   * process holding a port, invisible to stop() and to dispose().
+   */
+  applySettings(settings: ComfyUiSettings): Promise<void> {
+    const next = this.settingsWork.then(
+      () => this.applySettingsOnce(settings),
+      () => this.applySettingsOnce(settings),
+    );
+    this.settingsWork = next.catch(() => {});
+    return next;
+  }
+
+  private settingsWork: Promise<void> = Promise.resolve();
+
+  private async applySettingsOnce(settings: ComfyUiSettings): Promise<void> {
     this.settings = settings;
     await this.stopSupervision();
     this.nodeClasses = null;

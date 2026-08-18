@@ -50,9 +50,16 @@ function summarizeQueueList(list: unknown): unknown {
  * and copied, so the name survives and the machine's shape does not.
  */
 export function scrubPaths(text: string): string {
-  return text
-    .replace(/[A-Za-z]:[\\/](?:[^\\/\r\n"']*[\\/])*([^\\/\r\n"']*)/g, "$1")
-    .replace(/(?:^|(?<=[\s"'(]))\/(?:[^/\s"']+\/)+([^/\s"']*)/g, "$1");
+  return (
+    text
+      // A Windows path, and NOT the tail of a URL scheme: without the lookbehind the `p` of
+      // "http" reads as a drive letter and `http://host/a/b` collapses to `httpb`, deleting
+      // the one detail a download failure is about. A drive letter never follows a letter or
+      // a digit.
+      .replace(/(?<![A-Za-z0-9])[A-Za-z]:[\\/](?:[^\\/\r\n"']*[\\/])*([^\\/\r\n"']*)/g, "$1")
+      // A POSIX path, similarly not the `//` of a scheme.
+      .replace(/(?:^|(?<=[\s"'(]))\/(?:[^/\s"']+\/)+([^/\s"']*)/g, "$1")
+  );
 }
 
 /**

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { appendFileSync, createReadStream, existsSync } from "node:fs";
-import { stat, writeFile } from "node:fs/promises";
+import { readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, safeStorage, shell } from "electron";
@@ -479,6 +479,14 @@ async function initialize(): Promise<{ port: number }> {
         return true;
       } catch {
         return false;
+      }
+    },
+    listDirectories: async (path) => {
+      try {
+        const entries = await readdir(path, { withFileTypes: true });
+        return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+      } catch {
+        return [];
       }
     },
     // The expensive pre-flight read (SPEC-021 §2.5): streamed, so a 10 GB checkpoint never

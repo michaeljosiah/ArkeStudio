@@ -149,7 +149,7 @@ const DRAFT_IMAGE: ComfyUiRecipe = {
 };
 
 /** 24 fps; a Wan latent length must be 4k+1 frames, so the offered seconds map to exactly these. */
-const WAN_FRAMES_BY_SECONDS: Record<string, number> = { "2": 49, "3": 73, "5": 121 };
+export const WAN_FRAMES_BY_SECONDS: Record<string, number> = { "2": 49, "3": 73, "5": 121 };
 
 /**
  * Local · Draft Video — Wan 2.2 5B (TI2V), the engine vendor's own repackaged files in their
