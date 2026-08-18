@@ -659,6 +659,79 @@ describe("sanitisation runs before landing, and a refusal fails the job (§2.10)
 // Arrival provenance agrees with the ledger (§2.9, R-13)
 // ---------------------------------------------------------------------------
 
+describe("nothing graph-shaped reaches renderer state (R-14, R-1)", () => {
+  it("every event a full local dispatch emits is free of graph content and host paths", async () => {
+    const dir = await tempDir("arke-cq-");
+    const provider = new FakeProvider();
+    provider.artifacts = [{ name: "arke_00001_.png", contentType: "image/png", data: pngWithText() }];
+    const { queue, events } = queueWith({ comfyui: provider }, join(dir, "jobs.jsonl"), dir, {
+      prepareArtifact: (job, artifact) => {
+        if (job.provider !== "comfyui") return { ok: true, artifact };
+        const result = sanitizeComfyUiMedia(artifact.name, artifact.data);
+        return result.ok ? { ok: true, artifact: { ...artifact, data: result.data } } : result;
+      },
+    });
+    await queue.start();
+    await queue.enqueue({ ...localInput(), landing: { dir: "incoming/x" } });
+    await queue.waitForIdle();
+    // Events ARE renderer state: job.updated carries the whole job row, and the read model
+    // folds these straight into ClientState.
+    const wire = JSON.stringify(events);
+    assert.ok(events.length > 0, "the dispatch emitted events");
+    for (const forbidden of ["class_type", "KSampler", "CheckpointLoaderSimple", "SaveImage", "ckpt_name", "latent_image"]) {
+      assert.equal(wire.includes(forbidden), false, `"${forbidden}" reached renderer state`);
+    }
+    // The digests that ARE allowed through are identity, not structure.
+    assert.match(wire, /templateDigest/);
+    queue.dispose();
+  });
+});
+
+describe("the frozen identity reaches the wire, where it can be enforced (R-15)", () => {
+  it("submit receives the job's recipe identity, not just its model id", async () => {
+    const dir = await tempDir("arke-cq-");
+    const seen: Array<Record<string, unknown>> = [];
+    const provider = new FakeProvider();
+    const original = provider.submit.bind(provider);
+    provider.submit = async (key, request) => {
+      seen.push(request as unknown as Record<string, unknown>);
+      return original(key, request);
+    };
+    const { queue } = queueWith({ comfyui: provider }, join(dir, "jobs.jsonl"), dir);
+    await queue.start();
+    await queue.enqueue(localInput());
+    await queue.waitForIdle();
+    assert.equal(seen.length, 1);
+    // Freezing identity at enqueue is only half of R-15; this is the half that lets a client
+    // refuse a catalogue that has moved past what the job was accepted as.
+    assert.deepEqual(seen[0]!["recipe"], RECIPE_IDENTITY);
+    queue.dispose();
+  });
+});
+
+describe("every local outcome records local-zero, not just the successful one", () => {
+  it("a cancelled local job still writes its ledger row at zero (R-12)", async () => {
+    const dir = await tempDir("arke-cq-");
+    const provider = new FakeProvider();
+    provider.pollState = "running"; // stays in flight so there is something to cancel
+    const { queue, ledger } = queueWith({ comfyui: provider }, join(dir, "jobs.jsonl"), dir);
+    await queue.start();
+    const job = await queue.enqueue(localInput());
+    // Wait for the submission to have happened, so the cancel has a remote id to target.
+    for (let i = 0; i < 200 && queue.listJobs().find((j) => j.id === job.id)?.status !== "running"; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    await queue.cancel(job.id);
+    const cancelled = queue.listJobs().find((j) => j.id === job.id)!;
+    assert.equal(cancelled.status, "cancelled");
+    const row = ledger.find((e) => e.jobId === job.id)!;
+    assert.equal(row.outcome, "cancelled");
+    assert.equal(row.actualMicroUsd, 0, "a cancelled local run cost nothing, and that is knowable");
+    assert.equal(row.actualSource, "local-zero");
+    queue.dispose();
+  });
+});
+
 describe("a local take carries local-zero and its recipe version (§2.9)", () => {
   it("actualSource rides through arrival, and provenance records the frozen version", async () => {
     const dir = await makeTempWorld();
@@ -693,6 +766,53 @@ describe("a local take carries local-zero and its recipe version (§2.9)", () =>
     assert.equal(takes[0]!.cost.actualSource, "local-zero");
     assert.equal(takes[0]!.provenance.recipeVersion, 1);
     assert.equal(takes[0]!.provenance.canonRevision, 7);
+    await store.close();
+  });
+
+  it("a pass's segments carry local-zero too — a divided zero is still local (§2.9)", async () => {
+    // The failure this closes: segments were stamped manifest-derived unconditionally, so a
+    // local pass produced takes that disagreed with their own ledger row about the zero.
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: () => "2026-08-18T12:00:00.000Z" });
+    const rel = "productions/saltlight/incoming/sc_01/out.mp4";
+    await mkdir(join(dir, "productions/saltlight/incoming/sc_01"), { recursive: true });
+    await writeFile(join(dir, rel), Buffer.from("mp4-ish"));
+    const job: Job = {
+      id: "jb_01J8E0000000000000000000L2",
+      idempotencyKey: "01J8E1000000000000000000L2",
+      worldId: WORLD,
+      productionId: "saltlight",
+      target: { kind: "scene-pass", id: "sc_01", coversShots: ["sh_01", "sh_02"] },
+      capability: "video",
+      provider: "comfyui",
+      model: "comfyui-draft-video",
+      params: {
+        prompt: "x",
+        provenance: { canonRevision: 7, sheets: {} },
+        shotPlan: [
+          { shotId: "sh_01", number: 1, startSec: 0, endSec: 2 },
+          { shotId: "sh_02", number: 2, startSec: 2, endSec: 5 },
+        ],
+      },
+      estimatedMicroUsd: 0,
+      recipe: { ...RECIPE_IDENTITY, id: "comfyui-draft-video" },
+      engine: { source: "managed", instanceId: "m1" },
+      status: "succeeded",
+      providerJobId: "p1",
+      attempt: 1,
+      landing: { dir: "productions/saltlight/incoming/sc_01" },
+      landedFiles: [rel],
+      error: null,
+      createdAt: "2026-08-18T11:00:00.000Z",
+      updatedAt: "2026-08-18T11:01:00.000Z",
+    };
+    const takes = await recordTakesFromJob(store, job, 0, {}, "local-zero");
+    assert.equal(takes.length, 3, "the pass plus two segments");
+    for (const take of takes) {
+      assert.equal(take.cost.actualSource, "local-zero", take.id);
+      assert.equal(take.provenance.recipeVersion, 1, take.id);
+    }
+    assert.ok(takes.slice(1).every((t) => t.cost.allocated === true), "segments are allocated shares");
     await store.close();
   });
 });

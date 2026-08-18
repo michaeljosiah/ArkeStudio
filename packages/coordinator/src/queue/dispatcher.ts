@@ -55,6 +55,8 @@ export interface DispatchClient {
       params: Record<string, unknown>;
       imageReferences?: DispatchImageReference[];
       idempotencyKey?: string;
+      /** The recipe identity frozen at enqueue, so the client can refuse a moved catalogue (R-15). */
+      recipe?: RecipeIdentity;
     },
     context?: { jobId?: string; attempt?: number; model?: string },
   ): Promise<{ remoteId: string; artifacts?: DispatchArtifact[] }>;
@@ -492,6 +494,10 @@ export class JobQueue {
           params: job.params,
           ...(imageReferences ? { imageReferences } : {}),
           ...(client.declarations.supportsIdempotencyKey ? { idempotencyKey: job.idempotencyKey } : {}),
+          // What this job IS, frozen before it was journalled (R-15). Carried unconditionally:
+          // a client that does not use it ignores it, and one that does can refuse a graph that
+          // is no longer the one the job was accepted as.
+          ...(job.recipe !== undefined ? { recipe: job.recipe } : {}),
         },
         { jobId: job.id, attempt: submitting.attempt, model: job.model },
       );

@@ -365,6 +365,60 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
     );
   });
 
+  it("a job whose catalogue has moved on refuses rather than running a different graph (R-15)", async () => {
+    // The failure this closes: a v1 job sits queued across an app update, and the build it
+    // wakes up in ships v2 under the same id. Freezing the identity at enqueue only helps if
+    // something reads it — this is that read.
+    const { fetch, calls } = engineFake([{ match: /\/prompt$/, status: 200, body: { prompt_id: "p-x" } }]);
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT);
+    const stale = { id: "comfyui-draft-image", version: 1, templateDigest: "0".repeat(64), dependencyDigest: "0".repeat(64) };
+    await assert.rejects(
+      client.submit("", {
+        model: "comfyui-draft-image",
+        capability: "image",
+        params: { prompt: "x" },
+        recipe: stale,
+      }),
+      (err: Error & { submissionRejected?: boolean }) => {
+        assert.match(err.message, /refused rather than run against a different graph/);
+        assert.match(err.message, /v1/);
+        assert.equal(err.submissionRejected, true, "a refusal is terminal, never an ambiguous submission");
+        return true;
+      },
+    );
+    assert.equal(calls.length, 0, "nothing reached the engine");
+  });
+
+  it("the identity this build actually ships passes through unchanged", async () => {
+    const { fetch } = engineFake([{ match: /\/prompt$/, status: 200, body: { prompt_id: "p-y" } }]);
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT);
+    const current = comfyUiRecipeIdentity(comfyUiRecipeById("comfyui-draft-image")!);
+    const result = await client.submit("", {
+      model: "comfyui-draft-image",
+      capability: "image",
+      params: { prompt: "x" },
+      recipe: current,
+    });
+    assert.equal(result.remoteId, "p-y");
+  });
+
+  it("a changed pin alone is enough to refuse — the version need not have moved", async () => {
+    // Recipes are versioned, not mutated (§2.3). If a build ever ships v1 with a different
+    // pinned checkpoint, the digests diverge even though the version reads the same, and the
+    // job is still not the job that was accepted.
+    const { fetch } = engineFake([{ match: /\/prompt$/, status: 200, body: { prompt_id: "p-z" } }]);
+    const current = comfyUiRecipeIdentity(comfyUiRecipeById("comfyui-draft-image")!);
+    await assert.rejects(
+      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-draft-image",
+        capability: "image",
+        params: { prompt: "x" },
+        recipe: { ...current, dependencyDigest: "f".repeat(64) },
+      }),
+      /refused rather than run against a different graph/,
+    );
+  });
+
   it("an unknown model refuses — the catalogue is the only source of dispatchable work (R-1)", async () => {
     const client = new ComfyUiClient(engineFake([]).fetch, BASE, OK_PREFLIGHT);
     await assert.rejects(

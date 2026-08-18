@@ -2,6 +2,7 @@ import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts
 import {
   callerParamNames,
   comfyUiRecipeById,
+  comfyUiRecipeIdentity,
   SDXL_BUCKETS,
   substituteRecipeParams,
   WAN_DIMENSIONS,
@@ -222,6 +223,24 @@ export class ComfyUiClient implements ProviderClient {
   async submit(_key: string, request: SubmitRequest, _context?: ProviderCallContext): Promise<SubmitResult> {
     const recipe = comfyUiRecipeById(request.model);
     if (!recipe) throw new Error(`comfyui: "${request.model}" is not a shipped recipe`);
+    // The freeze is only half the guarantee (R-15). A job journalled before an app update
+    // carries the identity it was planned, priced and accepted as; this build ships whatever
+    // the catalogue now holds. Running the current graph under the old job's name is exactly
+    // the silent substitution §2.11 exists to prevent — so a moved catalogue refuses, and
+    // says which version the job was made with.
+    const frozen = request.recipe;
+    if (frozen !== undefined) {
+      const current = comfyUiRecipeIdentity(recipe);
+      if (
+        frozen.version !== current.version ||
+        frozen.templateDigest !== current.templateDigest ||
+        frozen.dependencyDigest !== current.dependencyDigest
+      ) {
+        throw new ProviderRequestRejectedError(
+          `comfyui: this job was made with ${recipe.displayName} v${frozen.version}, and this build ships v${current.version} — it was refused rather than run against a different graph`,
+        );
+      }
+    }
     // R-10 said no references before commit; this is the backstop for a mis-planned dispatch.
     const durable = request.params["references"];
     if ((Array.isArray(durable) && durable.length > 0) || (request.imageReferences?.length ?? 0) > 0) {

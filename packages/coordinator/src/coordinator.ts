@@ -3678,6 +3678,9 @@ export class Coordinator {
           requestId: msg.requestId,
           at: this.nowIso(),
           fromTake,
+          // A bench take of a local recipe records which version made it (R-13), and the
+          // filed-artifact sidecar inherits it from this same snapshot.
+          recipeVersionOf: (modelId) => this.opts.comfyui?.service.identityFor(modelId)?.recipe.version,
         });
         if (!plan.ok) {
           this.rejectEnqueue(msg.requestId, msg.kind, plan.reason);
@@ -3740,6 +3743,8 @@ export class Coordinator {
           provider: take.request.provider,
           model: take.request.model,
           params: take.request.params,
+          // How the bytes were made includes which recipe version made them (SPEC-021 R-13).
+          ...(take.request.recipeVersion !== undefined ? { recipeVersion: take.request.recipeVersion } : {}),
           ...(take.request.requestedSeed !== undefined ? { requestedSeed: take.request.requestedSeed } : {}),
           costMicroUsd: take.cost?.actualMicroUsd ?? null,
         };
