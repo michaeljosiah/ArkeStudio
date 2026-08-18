@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { narratorFor, DEFAULT_NARRATOR } from "../src/voice.js";
+import {
+  clonedVoiceCandidates,
+  DEFAULT_NARRATOR,
+  extractVoiceAttributes,
+  mintVoiceId,
+  narratorFor,
+  newClonedVoice,
+  parseVoiceLibrary,
+  rankVoices,
+} from "../src/voice.js";
 import { ClientMessageSchema } from "../src/frames.js";
 
 /**
@@ -58,5 +67,89 @@ describe("the voice catalogue belongs to the app, not a world", () => {
       false,
       "an empty id is still a bad id — absent is the way to say 'no world'",
     );
+  });
+});
+
+/**
+ * The cloned-voice library (SPEC-022 §2.3). IndexTTS ships with no voices at all — a voice in its
+ * world is a wav file — so this is the adapter that makes a clip addressable as `{provider,
+ * voiceId}` the way every other surface already expects.
+ */
+describe("a clip becomes a voice", () => {
+  const base = {
+    name: "Harbour glass",
+    description: "Low, dry, unhurried. Coastal.",
+    clip: "voices/harbour-glass.wav",
+    consent: true,
+    created: "2026-08-18T10:00:00.000Z",
+    taken: [] as string[],
+  };
+
+  it("mints a readable id and extracts the description into matchable attributes", () => {
+    const made = newClonedVoice(base);
+    assert.equal(made.ok, true);
+    assert.ok(made.ok);
+    assert.equal(made.voice.id, "harbour-glass");
+    // The description is not decoration: these are what rankVoices matches a written voice on.
+    assert.deepEqual(made.voice.attributes, extractVoiceAttributes(base.description));
+    assert.ok(made.voice.attributes.includes("coastal"));
+  });
+
+  it("refuses a voice with no description, because the picker would bury it (D3)", () => {
+    const made = newClonedVoice({ ...base, description: "   " });
+    assert.equal(made.ok, false);
+    assert.ok(!made.ok);
+    assert.match(made.reason, /what the picker matches on/);
+  });
+
+  it("refuses a voice whose speaker never agreed", () => {
+    const made = newClonedVoice({ ...base, consent: false });
+    assert.ok(!made.ok);
+    assert.match(made.reason, /agreed to have their voice cloned/);
+  });
+
+  it("a cloned voice ranks against a written voice like any other candidate", () => {
+    const made = newClonedVoice(base);
+    assert.ok(made.ok);
+    const ranked = rankVoices(extractVoiceAttributes("A low, dry voice. Coastal, unhurried."), [
+      ...clonedVoiceCandidates([made.voice]),
+      { provider: "kokoro", voiceId: "af_bella", label: "Bella", attributes: [], local: true, canClone: false },
+    ]);
+    assert.equal(ranked[0]?.candidate.voiceId, "harbour-glass", "described beats undescribed");
+    assert.ok(ranked[0]!.overlap > 0);
+    // Local, and not itself cloneable — the original recording is already in the library.
+    assert.equal(ranked[0]?.candidate.local, true);
+    assert.equal(ranked[0]?.candidate.canClone, false);
+  });
+
+  it("names collide readably rather than clobbering", () => {
+    assert.equal(mintVoiceId("Harbour glass", ["harbour-glass"]), "harbour-glass-2");
+    assert.equal(mintVoiceId("Harbour glass", ["harbour-glass", "harbour-glass-2"]), "harbour-glass-3");
+    assert.equal(mintVoiceId("!!!", []), "voice", "a name with nothing to slug still gets an id");
+  });
+
+  it("keeps what parses and drops only the bad entry", () => {
+    // A hand-edited or older file must not delete every voice the world owns — the failure
+    // SheetSchema's leniency exists to avoid, applied to the read path for voices.
+    const voices = parseVoiceLibrary({
+      voices: [
+        { id: "a", name: "A", clip: "voices/a.wav" },
+        { id: "", name: "broken", clip: "voices/b.wav" },
+        { name: "no id either", clip: "voices/c.wav" },
+        { id: "d", name: "D", clip: "voices/d.wav", description: "warm", attributes: ["warm"] },
+      ],
+    });
+    assert.deepEqual(
+      voices.map((v) => v.id),
+      ["a", "d"],
+    );
+    // Defaults fill in rather than refusing: an entry written before consent was asked for reads.
+    assert.equal(voices[0]?.consent, false);
+    assert.deepEqual(voices[0]?.attributes, []);
+  });
+
+  it("a library that is not a library is empty, not a crash", () => {
+    assert.deepEqual(parseVoiceLibrary(null), []);
+    assert.deepEqual(parseVoiceLibrary({ voices: "nope" }), []);
   });
 });
