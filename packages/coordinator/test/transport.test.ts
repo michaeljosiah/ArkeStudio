@@ -19,7 +19,7 @@ const STATE: ClientState = {
     manifest: null,
     routing: { defaults: {}, faults: [] },
     models: { disabled: [] },
-    recipes: [],
+    presets: [],
     spend: null,
     backgroundNotifications: "issues-only",
   narrator: null,

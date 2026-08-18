@@ -1235,7 +1235,7 @@ export class Coordinator {
         ? { routing: { defaults: settings.routing, faults: routingFaults(settings, manifest) } }
         : {}),
       ...(settings ? { models: settings.models } : {}),
-      ...(settings ? { recipes: settings.recipes } : {}),
+      ...(settings ? { presets: settings.presets } : {}),
       ...(settings ? { spend: evaluateSpend(entries, settings.spend, new Date()) } : {}),
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
@@ -3839,9 +3839,9 @@ export class Coordinator {
         });
         return answer(prompt, prompt === null ? "the art director had no answer this time" : undefined);
       }
-      case "bench-recipe-save": {
+      case "bench-preset-save": {
         if (!this.appSettings || !this.opts.manifest) return;
-        const outcome = await this.appSettings.saveRecipe(
+        const outcome = await this.appSettings.savePreset(
           {
             name: msg.name,
             mode: msg.mode,
@@ -3856,16 +3856,16 @@ export class Coordinator {
         // The composer can only offer models the manifest carries, so landing here means a
         // racing manifest change — recorded, not silent.
         if (!outcome.ok) {
-          void this.appLog?.append({ kind: "bench.recipe-refused", reason: outcome.reason });
+          void this.appLog?.append({ kind: "bench.preset-refused", reason: outcome.reason });
           return;
         }
-        this.emit({ at: this.nowIso(), type: "recipes.changed", recipes: outcome.settings.recipes });
+        this.emit({ at: this.nowIso(), type: "presets.changed", presets: outcome.settings.presets });
         return;
       }
-      case "bench-recipe-delete": {
+      case "bench-preset-delete": {
         if (!this.appSettings) return;
-        const settings = await this.appSettings.deleteRecipe(msg.recipeId);
-        this.emit({ at: this.nowIso(), type: "recipes.changed", recipes: settings.recipes });
+        const settings = await this.appSettings.deletePreset(msg.presetId);
+        this.emit({ at: this.nowIso(), type: "presets.changed", presets: settings.presets });
         return;
       }
       case "bench-select-take": {

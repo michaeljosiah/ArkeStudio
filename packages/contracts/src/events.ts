@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ArtifactKindSchema } from "./artifact.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
-import { BenchRecipeSchema } from "./bench.js";
+import { BenchPresetSchema } from "./bench.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
 import {
@@ -691,7 +691,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   /** Saved bench setups changed (issue 305 §3): the whole list rides, it is small. */
-  z.object({ ...base, type: z.literal("recipes.changed"), recipes: z.array(BenchRecipeSchema) }).strict(),
+  z.object({ ...base, type: z.literal("presets.changed"), presets: z.array(BenchPresetSchema) }).strict(),
   /** Rolling spend re-evaluated on a ledger append or a settings change (SPEC-008 R-19, D10). */
   z.object({ ...base, type: z.literal("spend.status"), spend: SpendStatusSchema }).strict(),
   z

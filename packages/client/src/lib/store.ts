@@ -340,8 +340,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, providers: event.providers } };
     case "routing.changed":
       return { ...state, app: { ...state.app, routing: { defaults: event.routing, faults: event.faults } } };
-    case "recipes.changed":
-      return { ...state, app: { ...state.app, recipes: event.recipes } };
+    case "presets.changed":
+      return { ...state, app: { ...state.app, presets: event.presets } };
     case "models.changed":
       // Faults travel with availability because they are the same act: switching a model off can
       // strand the default that points at it, and the two arriving separately would show a
@@ -2590,7 +2590,7 @@ export function sendBenchEnhanceBrief(input: {
   return sent ? requestId : null;
 }
 
-export function sendBenchRecipeSave(input: {
+export function sendBenchPresetSave(input: {
   name: string;
   mode: BenchMode;
   provider: string;
@@ -2599,7 +2599,7 @@ export function sendBenchRecipeSave(input: {
   brief?: string;
 }): void {
   send({
-    kind: "bench-recipe-save",
+    kind: "bench-preset-save",
     requestId: ulid(),
     name: input.name,
     mode: input.mode,
@@ -2610,8 +2610,8 @@ export function sendBenchRecipeSave(input: {
   } as ClientMessage);
 }
 
-export function sendBenchRecipeDelete(recipeId: string): void {
-  send({ kind: "bench-recipe-delete", requestId: ulid(), recipeId } as ClientMessage);
+export function sendBenchPresetDelete(presetId: string): void {
+  send({ kind: "bench-preset-delete", requestId: ulid(), presetId } as ClientMessage);
 }
 
 export function sendBenchRemoveReference(

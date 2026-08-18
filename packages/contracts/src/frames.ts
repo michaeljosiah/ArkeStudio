@@ -2,7 +2,7 @@ import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, RecipeIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema } from "./ids.js";
+import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
@@ -1504,12 +1504,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
-   * Save the composer's current setup as a recipe (issue 305 §3). Saving under an existing
-   * name replaces that recipe; the coordinator validates the model against the manifest.
+   * Save the composer's current setup as a preset (issue 305 §3). Saving under an existing
+   * name replaces that preset; the coordinator validates the model against the manifest.
    */
   z
     .object({
-      kind: z.literal("bench-recipe-save"),
+      kind: z.literal("bench-preset-save"),
       requestId: UlidSchema,
       name: z.string().min(1).max(80),
       mode: BenchModeSchema,
@@ -1521,9 +1521,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
-      kind: z.literal("bench-recipe-delete"),
+      kind: z.literal("bench-preset-delete"),
       requestId: UlidSchema,
-      recipeId: RecipeIdSchema,
+      presetId: PresetIdSchema,
     })
     .strict(),
   /** Dispatch the composer as written. Count N reserves N takes and enqueues N jobs. */

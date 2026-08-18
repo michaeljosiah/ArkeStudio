@@ -65,7 +65,7 @@ const stateWith = (patch: {
       models: [...FIXTURE_STATE.app.manifest!.models, FAL_IMAGE, OPENAI_IMAGE],
     },
     models: { disabled: patch.disabled ?? [] },
-    recipes: [],
+    presets: [],
     routing: {
       ...FIXTURE_STATE.app.routing,
       defaults: { ...FIXTURE_STATE.app.routing.defaults, image: patch.routedImage ?? FAL_IMAGE.id },

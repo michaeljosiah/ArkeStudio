@@ -13,7 +13,7 @@ import {
   keyframePlan,
   modeCapability,
   pricedDuration,
-  recipeFault,
+  presetFault,
   tiersFor,
   type BenchMode,
   type BenchParams,
@@ -32,8 +32,8 @@ import {
   sendBenchKeep,
   sendBenchNewSession,
   sendBenchOpen,
-  sendBenchRecipeDelete,
-  sendBenchRecipeSave,
+  sendBenchPresetDelete,
+  sendBenchPresetSave,
   sendBenchRemoveReference,
   sendBenchRerun,
   sendBenchSelectTake,
@@ -236,11 +236,11 @@ function BenchWorkspace({
 
   // ---- the breadcrumb's session switcher + the brief's expanded editor ----
   const [sessionsOpen, setSessionsOpen] = useState(false);
-  const [recipesOpen, setRecipesOpen] = useState(false);
+  const [presetsOpen, setPresetsOpen] = useState(false);
   const [durationOpen, setDurationOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
-  const recipes = state?.app.recipes ?? [];
-  // Which providers a stored key actually unlocks, per capability - the recipes menu judges
+  const presets = state?.app.presets ?? [];
+  // Which providers a stored key actually unlocks, per capability - the presets menu judges
   // its rows with the same evidence the model dropdown does.
   const unlockedFor = useMemo(() => {
     const availability = deriveCapabilityAvailability(state?.app.providers ?? []);
@@ -1171,33 +1171,33 @@ function BenchWorkspace({
 
           {/* dispatch row */}
           <div className="fy-bench__dispatch">
-            {/* Recipes (issue 305 §3): saved setups, applied into the draft — the ghost
+            {/* Presets (issue 305 §3): saved setups, applied into the draft — the ghost
                 trigger the master puts left of the model select (68b). */}
             <span style={{ position: "relative", display: "inline-flex" }}>
               <button
                 type="button"
-                className="fy-bench__recipes"
-                aria-expanded={recipesOpen}
-                data-testid="bench-recipes"
-                onClick={() => setRecipesOpen((v) => !v)}
+                className="fy-bench__presets"
+                aria-expanded={presetsOpen}
+                data-testid="bench-presets"
+                onClick={() => setPresetsOpen((v) => !v)}
               >
-                Recipes
+                Presets
                 <ChevronDown size={11} />
               </button>
-              {recipesOpen && (
+              {presetsOpen && (
                 <>
-                  <div className="fy-bench__scrim" onClick={() => setRecipesOpen(false)} />
-                  <div className="fy-bench__recipemenu" role="menu" aria-label="Recipes">
-                    {recipes.length === 0 && <span className="fy-bench__recipenone">No recipes yet.</span>}
-                    {recipes.map((recipe) => {
-                      const fault = recipeFault(
-                        recipe,
+                  <div className="fy-bench__scrim" onClick={() => setPresetsOpen(false)} />
+                  <div className="fy-bench__presetmenu" role="menu" aria-label="Presets">
+                    {presets.length === 0 && <span className="fy-bench__presetnone">No presets yet.</span>}
+                    {presets.map((preset) => {
+                      const fault = presetFault(
+                        preset,
                         manifest,
                         state?.app.models.disabled ?? [],
-                        unlockedFor[recipe.mode],
+                        unlockedFor[preset.mode],
                       );
                       return (
-                        <div key={recipe.id} className="fy-bench__reciperow">
+                        <div key={preset.id} className="fy-bench__presetrow">
                           <button
                             type="button"
                             className="fy-bench__sessionrow"
@@ -1205,26 +1205,26 @@ function BenchWorkspace({
                             title={fault.ok ? undefined : fault.reason}
                             onClick={() => {
                               if (!fault.ok) return;
-                              setRecipesOpen(false);
+                              setPresetsOpen(false);
                               compose({
-                                mode: recipe.mode,
-                                provider: recipe.provider,
-                                model: recipe.model,
-                                params: recipe.params,
-                                brief: recipe.brief ?? draft.brief,
+                                mode: preset.mode,
+                                provider: preset.provider,
+                                model: preset.model,
+                                params: preset.params,
+                                brief: preset.brief ?? draft.brief,
                               });
                             }}
                           >
-                            <span className="fy-bench__sessionname">{recipe.name}</span>
+                            <span className="fy-bench__sessionname">{preset.name}</span>
                             <span className="fy-bench__sessionmeta">
-                              {fault.ok ? modelName(recipe.provider, recipe.model) : fault.reason}
+                              {fault.ok ? modelName(preset.provider, preset.model) : fault.reason}
                             </span>
                           </button>
                           <button
                             type="button"
-                            className="fy-bench__recipedelete"
-                            aria-label={`Delete the recipe ${recipe.name}`}
-                            onClick={() => sendBenchRecipeDelete(recipe.id)}
+                            className="fy-bench__presetdelete"
+                            aria-label={`Delete the preset ${preset.name}`}
+                            onClick={() => sendBenchPresetDelete(preset.id)}
                           >
                             <X size={11} />
                           </button>
@@ -1234,14 +1234,14 @@ function BenchWorkspace({
                     {/* Saving needs a model the manifest can honor — absent otherwise (§3). */}
                     {model !== null && (
                       <input
-                        aria-label="Save the current setup as a recipe"
+                        aria-label="Save the current setup as a preset"
                         className="fy-bench__rename"
                         placeholder="Save current setup as…"
                         onKeyDown={(e) => {
                           if (e.key !== "Enter") return;
                           const name = (e.target as HTMLInputElement).value.trim();
                           if (name.length === 0) return;
-                          sendBenchRecipeSave({
+                          sendBenchPresetSave({
                             name,
                             mode: draft.mode,
                             provider: model.provider,
@@ -1250,7 +1250,7 @@ function BenchWorkspace({
                             ...(draft.brief.trim().length > 0 ? { brief: draft.brief } : {}),
                           });
                           (e.target as HTMLInputElement).value = "";
-                          setRecipesOpen(false);
+                          setPresetsOpen(false);
                         }}
                       />
                     )}

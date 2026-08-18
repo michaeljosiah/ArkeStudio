@@ -32,7 +32,7 @@ export class ReadModel {
         manifest: null,
         routing: { defaults: {}, faults: [] },
         models: { disabled: [] },
-        recipes: [],
+        presets: [],
         spend: null,
         backgroundNotifications: "issues-only",
         narrator: null,
@@ -67,7 +67,7 @@ export class ReadModel {
         | "providerTools"
         | "routing"
         | "models"
-        | "recipes"
+        | "presets"
         | "spend"
         | "backgroundNotifications"
         | "appearance"
@@ -225,8 +225,8 @@ export class ReadModel {
         };
         return;
       }
-      case "recipes.changed": {
-        this.state = { ...this.state, app: { ...this.state.app, recipes: event.recipes } };
+      case "presets.changed": {
+        this.state = { ...this.state, app: { ...this.state.app, presets: event.presets } };
         return;
       }
       case "spend.status": {

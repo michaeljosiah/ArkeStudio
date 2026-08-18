@@ -622,7 +622,7 @@ export function planBenchDispatch(
                 ...(params.aspect !== undefined ? { aspect: params.aspect } : {}),
                 ...(referencePaths.length > 0 ? { references: referencePaths } : {}),
               }),
-          // Only where the route publishes the choice. A recipe carries the params it was saved
+          // Only where the route publishes the choice. A preset carries the params it was saved
           // with, so a silent shot saved against seedance can be applied to a model that has no
           // audio switch — and putting a field on the wire that the route never declared is how
           // a job gets accepted, billed, and refused on its result.
