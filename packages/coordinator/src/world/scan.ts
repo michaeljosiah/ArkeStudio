@@ -6,6 +6,9 @@ import { join } from "node:path";
 import { discoverConversations } from "../world-chat/discover.js";
 import { discoverBenchSessions } from "../bench/service.js";
 import {
+  CLONED_VOICES_PATH,
+  parseVoiceLibrary,
+  type ClonedVoice,
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
   ArtifactSidecarSchema,
@@ -286,6 +289,16 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     artDirectionRecord = await tryParse(artDirectionPath, (raw) =>
       ArtDirectionRecordSchema.parse(JSON.parse(raw)),
     );
+  }
+
+  // The world's cloned voices (SPEC-022 §2.3). `parseVoiceLibrary` keeps what parses rather than
+  // refusing the file, so a hand-edited line costs one voice instead of every voice the world
+  // owns — which is also why this does not go through `tryParse`'s all-or-nothing shape. A world
+  // with no file simply has none, and that is the normal state until somebody clones something.
+  let clonedVoices: ClonedVoice[] = [];
+  if (await exists(join(dir, CLONED_VOICES_PATH))) {
+    const parsed = await tryParse(CLONED_VOICES_PATH, (raw) => parseVoiceLibrary(JSON.parse(raw)));
+    clonedVoices = parsed ?? [];
   }
 
   const sheets: Sheet[] = [];
@@ -696,6 +709,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     referenceTakes,
     referenceReviews,
     artifacts,
+    clonedVoices,
     productions,
     proposals,
     // Rows only. discoverConversations reads summaries, never transcripts.

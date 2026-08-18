@@ -31,7 +31,7 @@ import { SetupStatusSchema } from "./setup.js";
 import { ReferenceKitSchema } from "./reference.js";
 import { SceneSchema, SelectionsSchema } from "./scene.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
-import { VoiceRuntimeStatusSchema } from "./voice.js";
+import { ClonedVoiceSchema, VoiceRuntimeStatusSchema } from "./voice.js";
 import { IDLE_UPDATE_STATE, UpdateStateSchema } from "./update.js";
 import { sheetDir } from "./sheet-shapes.js";
 import {
@@ -216,6 +216,14 @@ export const WorldBundleSchema = z
     /** Unaccepted main-photo candidates found on disk, grouped by sheet id. */
     referenceCandidates: z.record(SlugSchema, z.array(z.string())).default({}),
     artifacts: z.array(ArtifactSidecarSchema),
+    /**
+     * The world's cloned voices (SPEC-022 §2.3). Carried on the bundle because the picker ranks
+     * them against a sheet and a world is already sent whole — the same reason the bible is here.
+     *
+     * Defaulted: this schema is a read path, and every world created before voices existed must
+     * still parse. A world with no `voices/voices.json` simply has none.
+     */
+    clonedVoices: z.array(ClonedVoiceSchema).default([]),
     productions: z.array(ProductionBundleSchema),
     proposals: z.array(StagedProposalSchema),
     /**
