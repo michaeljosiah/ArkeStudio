@@ -12,6 +12,7 @@ import {
   DELIVERIES,
   keyframePlan,
   modeCapability,
+  MUSIC_DURATION_SEC,
   pricedDuration,
   presetFault,
   tiersFor,
@@ -37,9 +38,11 @@ import {
   sendBenchRemoveReference,
   sendBenchRerun,
   sendBenchSelectTake,
+  sendBenchDraftLyrics,
   sendBenchTitle,
   sendBenchUploadReferences,
   subscribeBriefEnhanced,
+  subscribeLyricsDrafted,
   subscribeQueueResults,
   useBench,
   useClientState,
@@ -61,6 +64,7 @@ import {
   Scroll,
   Speaker,
   Timer,
+  MusicMark,
   Waveform,
   SpeakerOff,
   Sparkle,
@@ -228,7 +232,15 @@ function BenchWorkspace({
   // The tab exists where the model verifies a frame mode OR frames already ride: what is
   // attached stays visible and removable even under a model that cannot honor it (§3).
   const speaking = draft.mode === "voice";
-  const laneTabs = !speaking && (frameModes.length > 0 || (draft.mode === "video" && frames.length > 0));
+  const singing = draft.mode === "music";
+  /**
+   * The two modes that make a sound. Everything about pictures — the reference lane, the size
+   * controls, the ways of laying results out — is absent for both, and saying so once is why
+   * music did not have to re-discover each of those gates one screenshot at a time.
+   */
+  const soundOnly = speaking || singing;
+  const musicParams = draft.params.kind === "music" ? draft.params : null;
+  const laneTabs = !soundOnly && (frameModes.length > 0 || (draft.mode === "video" && frames.length > 0));
   const [lane, setLane] = useState<"reference" | "keyframe">("reference");
   useEffect(() => {
     if (!laneTabs && lane === "keyframe") setLane("reference");
@@ -244,14 +256,27 @@ function BenchWorkspace({
   // its rows with the same evidence the model dropdown does.
   const unlockedFor = useMemo(() => {
     const availability = deriveCapabilityAvailability(state?.app.providers ?? []);
-    return {
-      image: availability.find((a) => a.capability === "image")?.via ?? [],
-      video: availability.find((a) => a.capability === "video")?.via ?? [],
-      voice: availability.find((a) => a.capability === "voice-tts")?.via ?? [],
-    } as const;
+    // Read through modeCapability rather than spelling each capability again here. Two of the
+    // four modes are named differently from the capability they dispatch against, and a second
+    // hand-written copy of that mapping is a second place for it to drift.
+    const via = (mode: BenchMode) => availability.find((a) => a.capability === modeCapability(mode))?.via ?? [];
+    return { image: via("image"), video: via("video"), voice: via("voice"), music: via("music") } as const;
   }, [state?.app.providers]);
   const [briefExpanded, setBriefExpanded] = useState(false);
   const briefUnder = useRef<HTMLDivElement>(null);
+
+  // ---- the lyrics helper's round trip (design turn 73) -------------------
+  // Deliberately unlike the enhancer's: that one may auto-apply into the composer when the
+  // words have not moved. This one never applies anything. The draft sits in its own dialog
+  // beside what the author already has, and only "Use these words" moves it.
+  const [lyricsOpen, setLyricsOpen] = useState(false);
+  const [lyricsAbout, setLyricsAbout] = useState("");
+  const [lyricsDraft, setLyricsDraft] = useState<string | null>(null);
+  const [lyricsNote, setLyricsNote] = useState<string | null>(null);
+  const [drafting, setDrafting] = useState(false);
+  /** Which model wrote the draft on offer, so the dialog can name it as the design asks. */
+  const [lyricsAuthor, setLyricsAuthor] = useState<string | null>(null);
+  const draftingRef = useRef<string | null>(null);
 
   // ---- the enhancer's round trip: request out, answer in, the author's hand between ----
   const [enhancing, setEnhancing] = useState(false);
@@ -304,6 +329,23 @@ function BenchWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+  useEffect(
+    () =>
+      subscribeLyricsDrafted((answer) => {
+        if (answer.requestId !== draftingRef.current) return;
+        draftingRef.current = null;
+        setDrafting(false);
+        if (answer.lyrics === null) {
+          setLyricsNote(answer.reason ?? "the lyricist had no answer this time");
+          return;
+        }
+        // Held, never applied. Even if the dialog has since been closed the draft is kept, so
+        // reopening shows the answer that was paid for rather than starting again.
+        setLyricsDraft(answer.lyrics);
+      }),
+    [],
+  );
+
   const tokens = useMemo(() => new Set(session.tokenRegistry.map((e) => e.token)), [session.tokenRegistry]);
 
   // ---- dispatch + its refusal ----
@@ -398,6 +440,11 @@ function BenchWorkspace({
     if (draft.params.kind === "voice") {
       // Exact, not a ceiling: speech bills per character and the characters are already typed.
       return estimateMicroUsd(model, { characters: draft.brief.length }) * draft.params.count;
+    }
+    if (draft.params.kind === "music") {
+      // A ceiling, and the only honest kind of number here: the route calls its length an upper
+      // bound and stops when the song is done, so this is what the take can cost at most.
+      return estimateMicroUsd(model, { durationSec: MUSIC_DURATION_SEC }) * draft.params.count;
     }
     const seconds = draft.params.durationSec ?? model.limits.maxDurationSec ?? 5;
     return estimateMicroUsd(model, {
@@ -562,9 +609,14 @@ function BenchWorkspace({
         </div>
       </div>
     );
-  const aspects = draft.params.kind === "voice" ? [] : (model?.limits.aspects ?? []);
-  /** Narrowed once: the size controls belong to the two modes that make a picture. */
-  const sizedParams = draft.params.kind === "voice" ? null : draft.params;
+  /**
+   * Narrowed once, and stated as what it IS rather than what it is not: the size controls
+   * belong to the two modes that make a picture. Written as `!== "voice"` it silently grew a
+   * third member the day music arrived, and a song would have been offered an aspect ratio.
+   */
+  const sizedParams =
+    draft.params.kind === "image" || draft.params.kind === "video" ? draft.params : null;
+  const aspects = sizedParams !== null ? (model?.limits.aspects ?? []) : [];
   const aspectSelect = (
     <select
       aria-label="Aspect"
@@ -702,15 +754,23 @@ function BenchWorkspace({
         <div className="fy-bench__composer">
           <div className="fy-bench__composerbar">
             <div className="fy-bench__mode" role="group" aria-label="What to make">
-              {(["image", "video", "voice"] as const).map((mode) => (
+              {(["image", "video", "voice", "music"] as const).map((mode) => (
                 <button
                   key={mode}
                   type="button"
                   aria-pressed={draft.mode === mode}
                   onClick={() => switchMode(mode)}
                 >
-                  {mode === "image" ? <ImageMark size={13} /> : mode === "video" ? <VideoMark size={13} /> : <Waveform size={13} />}
-                  {mode === "image" ? "Image" : mode === "video" ? "Video" : "Voice"}
+                  {mode === "image" ? (
+                    <ImageMark size={13} />
+                  ) : mode === "video" ? (
+                    <VideoMark size={13} />
+                  ) : mode === "voice" ? (
+                    <Waveform size={13} />
+                  ) : (
+                    <MusicMark size={13} />
+                  )}
+                  {MODE_LABELS[mode]}
                 </button>
               ))}
             </div>
@@ -748,7 +808,7 @@ function BenchWorkspace({
           )}
 
           {/* reference tiles */}
-          {lane === "reference" && !speaking && (
+          {lane === "reference" && !soundOnly && (
             <div className="fy-bench__refgrid">
               {session.composer.activeTokens.map((token) => {
                 const source = [...worldSources, ...sessionSources].find((s) => s.existingToken === token);
@@ -833,6 +893,9 @@ function BenchWorkspace({
             </>
           )}
 
+          {/* A song asks for two things and no more (design turn 73). This is the first: the
+              STYLE, which is a description, and so rides in the brief every other mode uses. */}
+          {singing && <div className="fy-bench__eyebrow">STYLE</div>}
           {/* brief — tokens the session knows render as chips inline (issue 305 §3) */}
           <div className="fy-bench__brief">
             <div className="fy-bench__briefstack">
@@ -841,14 +904,18 @@ function BenchWorkspace({
                 {"​"}
               </div>
               <textarea
-                aria-label="Brief"
+                aria-label={singing ? "Style" : "Brief"}
                 className="fy-bench__brieftext"
                 value={draft.brief}
                 onChange={(e) => compose({ ...draft, brief: e.target.value })}
                 onScroll={(e) => {
                   if (briefUnder.current) briefUnder.current.scrollTop = e.currentTarget.scrollTop;
                 }}
-                placeholder="Say what to make. Reference tokens — Image 1, Audio 2 — may be cited by name."
+                placeholder={
+                  singing
+                    ? "Instrumentation, mood, arrangement — what the song sounds like, not what it says."
+                    : "Say what to make. Reference tokens — Image 1, Audio 2 — may be cited by name."
+                }
               />
             </div>
             <div className="fy-bench__brieffoot">
@@ -860,15 +927,19 @@ function BenchWorkspace({
               >
                 <Expand size={13} />
               </button>
-              <ComposerMic
-                onText={(text) =>
-                  compose({ ...draft, brief: draft.brief.length > 0 ? `${draft.brief}\n${text}` : text })
-                }
-              />
+              {/* Dictation belongs to a brief. A style line is a few words of instrumentation
+                  and the lyrics have their own helper, so a song is not spoken into being. */}
+              {!singing && (
+                <ComposerMic
+                  onText={(text) =>
+                    compose({ ...draft, brief: draft.brief.length > 0 ? `${draft.brief}\n${text}` : text })
+                  }
+                />
+              )}
               {/* The enhancer (asked for 2026-08-16): the art director rewrites the ask for
                   the chosen model, grounded in the world's look and canon. Absent without a
                   model or words — a control that could do nothing does not exist (§3). */}
-              {model !== null && !speaking && draft.brief.trim().length > 0 && (
+              {model !== null && !soundOnly && draft.brief.trim().length > 0 && (
                 <button
                   type="button"
                   className={cx("fy-bench__footicon", enhancing && "fy-bench__footicon--busy")}
@@ -965,9 +1036,56 @@ function BenchWorkspace({
             </div>
           </div>
 
+          {/* The second of the two things a song asks for (design turn 73). Its own box, not a
+              heading inside the style: one of these is a sentence about instrumentation and the
+              other is the words that get sung, and they are not the same kind of writing. */}
+          {singing && musicParams !== null && (
+            <div className="fy-bench__lyrics">
+              <div className="fy-bench__lyricshead">
+                <span className="fy-bench__eyebrow">LYRICS</span>
+                <span style={{ flex: 1 }} />
+                {/* Absent without a harness to ask, the way every other model-backed control
+                    is absent without a model — a control that could do nothing does not exist. */}
+                <button
+                  type="button"
+                  className={cx("fy-bench__footicon", drafting && "fy-bench__footicon--busy")}
+                  data-testid="bench-write-lyrics"
+                  disabled={drafting}
+                  title="Write for me — describe what the song is about and read the draft before it goes anywhere near the song"
+                  onClick={() => {
+                    setLyricsNote(null);
+                    setLyricsDraft(null);
+                    setLyricsAbout("");
+                    setLyricsOpen(true);
+                  }}
+                >
+                  Write for me
+                </button>
+              </div>
+              <textarea
+                aria-label="Lyrics"
+                className="fy-bench__lyricstext"
+                value={musicParams.lyrics}
+                onChange={(e) =>
+                  compose({ ...draft, params: { ...musicParams, lyrics: e.target.value } })
+                }
+                placeholder="The words to be sung. Tags on their own lines — [verse], [chorus] — tell the model the shape."
+              />
+              <div className="fy-bench__lyricsfoot">
+                {lyricsNote !== null && <span className="fy-bench__enhnote">{lyricsNote}</span>}
+                <span style={{ flex: 1 }} />
+                {/* Characters, not words: the count is a fact about the box, and it is what the
+                    draft dialog states about its own answer too. */}
+                <span data-testid="lyrics-counter" className="fy-bench__counter">
+                  {`${musicParams.lyrics.length} characters`}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* the mode's settings row */}
           <div className="fy-bench__settings">
-            {!speaking && (
+            {!soundOnly && (
               <button
                 type="button"
                 className="fy-bench__chip fy-bench__chip--refs"
@@ -1289,7 +1407,14 @@ function BenchWorkspace({
             {models.length > 0 && <span style={{ flex: 1 }} />}
             {estimate !== null && (
               <span data-testid="bench-estimate" className="fy-bench__estimate">
-                {speaking ? formatMicroUsd(estimate) : `~${formatMicroUsd(estimate)}`}
+                {/* Exact for speech, because the characters are already typed. A ceiling for a
+                    song, because the route stops when the song is done — and a tilde would read
+                    as "about", when the truth is "at most". */}
+                {speaking
+                  ? formatMicroUsd(estimate)
+                  : singing
+                    ? `up to ${formatMicroUsd(estimate)}`
+                    : `~${formatMicroUsd(estimate)}`}
               </span>
             )}
             <Button
@@ -1298,6 +1423,10 @@ function BenchWorkspace({
               disabled={
                 model === null ||
                 draft.brief.trim().length === 0 ||
+                // A song needs both halves. The coordinator refuses this too — it is the
+                // authority — but a Generate that is pressable and always refuses is a lie the
+                // button tells, and the missing half is right there on screen.
+                (musicParams !== null && musicParams.lyrics.trim().length === 0) ||
                 overCap ||
                 pendingDispatch.current !== null
               }
@@ -1373,11 +1502,13 @@ function BenchWorkspace({
 
           {selected && selected.media ? (
             <div className="fy-bench__media">
-              {selected.request.mode === "voice" ? (
-                // A spoken take has nothing to look at. Read as "video or else a picture", this
-                // rendered a broken image (design 70).
+              {selected.request.mode === "voice" || selected.request.mode === "music" ? (
+                // A take that is a sound has nothing to look at. Read as "video or else a
+                // picture", this rendered a broken image (design 70) — and a song reaching that
+                // same branch would have been the identical bug a second time, which is why the
+                // condition names both modes that make a sound rather than the one that did.
                 worldSlug ? (
-                  <div className="fy-bench__voicetake" data-testid="voice-take">
+                  <div className="fy-bench__voicetake" data-testid={selected.request.mode === "music" ? "music-take" : "voice-take"}>
                     <div className="fy-bench__voicehead">
                       <span className="fy-bench__takestate">{`TAKE ${selected.n}`}</span>
                       {selected.request.params.kind === "voice" && selected.request.params.voiceLabel !== undefined && (
@@ -1385,6 +1516,19 @@ function BenchWorkspace({
                       )}
                       {selected.request.params.kind === "voice" && selected.request.params.delivery !== undefined && (
                         <span className="fy-bench__voicedelivery">{selected.request.params.delivery}</span>
+                      )}
+                      {/* The model, then the length that was actually made — never the ceiling
+                          it was asked at (design turn 73). */}
+                      {selected.request.params.kind === "music" && (
+                        <span className="fy-bench__voicename">
+                          {manifest?.models.find((m) => m.id === selected.request.model)?.displayName ??
+                            selected.request.model}
+                        </span>
+                      )}
+                      {selected.request.params.kind === "music" && selected.media?.info !== undefined && (
+                        <span className="fy-bench__voicedelivery">
+                          {`${Math.round(selected.media.info.durationSec)}s`}
+                        </span>
                       )}
                     </div>
                     <audio
@@ -1607,6 +1751,86 @@ function BenchWorkspace({
           />
         )}
 
+        {/* "Write for me" (design turn 73). A description in, a draft out, and nothing reaches
+            the song until Use these words is pressed — so a generation never carries words
+            nobody read. The draft is shown BESIDE what the author has, never over it. */}
+        {lyricsOpen && musicParams !== null && (
+          <div className="fy-bench__briefmodal" role="dialog" aria-label="Write lyrics">
+            <div className="fy-bench__briefmodalpanel" data-testid="lyrics-dialog">
+              <div className="fy-bench__eyebrow">WHAT THE SONG IS ABOUT</div>
+              <textarea
+                autoFocus
+                aria-label="What the song is about"
+                value={lyricsAbout}
+                onChange={(e) => setLyricsAbout(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setLyricsOpen(false);
+                }}
+                placeholder="A farewell sung on the harbour wall the night the tide-clock stopped."
+              />
+              {lyricsDraft !== null && (
+                <>
+                  <div className="fy-bench__eyebrow">
+                    DRAFT
+                    {/* Names who wrote it and how long it is, the way every other model-backed
+                        control states its model. */}
+                    <span className="fy-bench__lyricsauthor">
+                      {`${lyricsAuthor ?? "the lyricist"} · ${lyricsDraft.length} characters`}
+                    </span>
+                  </div>
+                  <pre className="fy-bench__lyricsdraft" data-testid="lyrics-draft">
+                    {lyricsDraft}
+                  </pre>
+                </>
+              )}
+              {lyricsNote !== null && <span className="fy-bench__enhnote">{lyricsNote}</span>}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <Button
+                  variant="ghost"
+                  data-testid="lyrics-ask"
+                  disabled={drafting || lyricsAbout.trim().length === 0 || model === null}
+                  onClick={() => {
+                    if (model === null) return;
+                    setLyricsNote(null);
+                    const requestId = sendBenchDraftLyrics({
+                      worldId,
+                      sessionId: session.id,
+                      description: lyricsAbout,
+                      ...(draft.brief.trim().length > 0 ? { style: draft.brief } : {}),
+                      provider: model.provider,
+                      model: model.id,
+                    });
+                    if (requestId === null) {
+                      setLyricsNote("not connected - try again");
+                      return;
+                    }
+                    draftingRef.current = requestId;
+                    setLyricsAuthor(model.displayName);
+                    setDrafting(true);
+                  }}
+                >
+                  {lyricsDraft === null ? "Write" : "Try again"}
+                </Button>
+                <Button variant="ghost" onClick={() => setLyricsOpen(false)}>
+                  Cancel
+                </Button>
+                {/* The only path from a draft into the song. */}
+                <Button
+                  variant="primary"
+                  data-testid="lyrics-accept"
+                  disabled={lyricsDraft === null}
+                  onClick={() => {
+                    if (lyricsDraft === null) return;
+                    compose({ ...draft, params: { ...musicParams, lyrics: lyricsDraft } });
+                    setLyricsOpen(false);
+                  }}
+                >
+                  Use these words
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
         {briefExpanded && (
           <div className="fy-bench__briefmodal" role="dialog" aria-label="The brief, large">
             <div className="fy-bench__briefmodalpanel">
@@ -1644,12 +1868,31 @@ function is4k(t: BenchTake): boolean {
   return t.request.params.kind === "video" && /4k|2160/i.test(t.request.params.resolution ?? "");
 }
 
+/** The word on each mode pill. One place, so the pills and anything naming a mode agree. */
+const MODE_LABELS: Record<BenchMode, string> = {
+  image: "Image",
+  video: "Video",
+  voice: "Voice",
+  music: "Music",
+};
+
 /** The selected take's viewer chip: the request's own facts, nothing invented. */
 function takeMeta(take: BenchTake): string {
   const p = take.request.params;
+  // A song states its length, and states the MEASURED one — the request only ever carried a
+  // ceiling, and a take that repeats the ceiling would be claiming a length nobody made.
+  const played = take.media?.info?.durationSec;
   return [
-    p.kind === "image" ? p.tier : p.kind === "video" ? p.resolution : p.voiceLabel,
-    p.kind === "voice" ? p.delivery : p.aspect,
+    p.kind === "image"
+      ? p.tier
+      : p.kind === "video"
+        ? p.resolution
+        : p.kind === "voice"
+          ? p.voiceLabel
+          : played !== undefined
+            ? `${Math.round(played)}s`
+            : undefined,
+    p.kind === "voice" ? p.delivery : p.kind === "music" ? undefined : p.aspect,
     take.request.requestedSeed !== undefined ? `seed ${take.request.requestedSeed}` : undefined,
     take.cost ? formatMicroUsd(take.cost.actualMicroUsd ?? take.cost.estimatedMicroUsd) : undefined,
   ]

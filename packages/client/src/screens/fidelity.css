@@ -4050,6 +4050,54 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-bench__counter { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
 .fy-bench__counter--over { color: var(--destructive); }
 
+/* Music (design turn 73): a style box and a lyrics box, two fields rather than one with a
+   heading in it. The style is a sentence about instrumentation; the lyrics are the words that
+   get sung, and they are not the same kind of writing. The style box keeps the brief's own
+   shell — it IS the brief — so only the label above it and this second box are new. */
+.fy-bench__eyebrow {
+  font: 500 10.5px var(--font-sans);
+  letter-spacing: 0.14em;
+  color: var(--muted-foreground);
+  margin: 11px 0 -4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fy-bench__lyrics {
+  flex: 1.4; min-height: 0; display: flex; flex-direction: column; margin-top: 4px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--background);
+  box-shadow: var(--shadow-xs); overflow: hidden;
+}
+.fy-bench__lyricshead {
+  display: flex; align-items: center; gap: 6px; padding: 5px 8px 0;
+}
+/* The eyebrow inside the lyrics head has the box's padding around it already. */
+.fy-bench__lyricshead .fy-bench__eyebrow { margin: 0; }
+.fy-bench__lyricstext {
+  flex: 1; min-height: 96px; width: 100%; padding: 8px 12px 11px;
+  font: 400 12px/1.65 var(--font-sans); resize: none; border: 0; outline: none;
+  background: transparent; color: var(--foreground); overflow-y: auto;
+  /* Newlines are the meter, so they are shown as written and never collapsed. */
+  white-space: pre-wrap; scrollbar-gutter: stable;
+}
+.fy-bench__lyricstext::placeholder { color: var(--muted-foreground); }
+.fy-bench__lyricsfoot {
+  display: flex; align-items: center; gap: 6px; padding: 5px 8px;
+  border-top: 1px solid var(--border); flex: none;
+}
+/* The draft, shown beside the words the author has rather than over them. Read-only on
+   purpose: it is an offer, and editing it here would blur which text is being accepted. */
+.fy-bench__lyricsdraft {
+  margin: 0; padding: 10px 12px; max-height: 34vh; overflow-y: auto;
+  font: 400 12px/1.7 var(--font-sans); white-space: pre-wrap; overflow-wrap: break-word;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--secondary);
+  color: var(--foreground);
+}
+.fy-bench__lyricsauthor {
+  font: 400 10.5px var(--font-mono); letter-spacing: 0; color: var(--muted-foreground);
+  text-transform: none;
+}
+
 /* The brief, large: its own layer, one textarea, nothing else asking for the room. */
 .fy-bench__briefmodal {
   position: fixed; inset: 0; z-index: 60; background: color-mix(in srgb, var(--neutral-950) 40%, transparent);
