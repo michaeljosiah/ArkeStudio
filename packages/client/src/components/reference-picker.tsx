@@ -12,6 +12,8 @@ import {
   type ManifestModel,
   type MultimediaReference,
   type ReferenceKind,
+  type ReferenceKit,
+  type Take,
 } from "@arke-studio/contracts";
 import { Button, cx } from "./ui.js";
 import { Portrait } from "./portrait.js";
@@ -41,7 +43,10 @@ export interface PickerSource {
   existingToken?: string;
   /** Active right now — offered as "already riding", not pickable again. */
   active?: boolean;
-  pick: { source: "artifact"; artifactId: string } | { source: "take"; takeId: string };
+  pick:
+    | { source: "artifact"; artifactId: string }
+    | { source: "take"; takeId: string }
+    | { source: "world-file"; path: string };
 }
 
 /**
@@ -77,6 +82,68 @@ export function worldPickerSources(
       pick: { source: "artifact", artifactId: a.id },
     };
   });
+}
+
+/**
+ * Every picture a character has, as picker rows (2026-08-18).
+ *
+ * The world holds far more pictures than the artifacts folder, and none of them could be picked:
+ * accepted identity, looks, the candidates still waiting on review, and every take ever
+ * generated. Aurora alone had nine against the world's two artifacts.
+ *
+ * Each row says what it is — accepted, look, candidate, take — because the whole set is offered
+ * and a picture that has not passed review is one press from a paid generation. The accept step
+ * exists to keep unreviewed pictures out of dispatches; this deliberately reaches past it, so
+ * the label is the only thing left telling you which is which.
+ */
+export function characterPickerSources(
+  world: {
+    sheets: readonly { id: string; name: string }[];
+    referenceKits: readonly ReferenceKit[];
+    referenceTakes: readonly Take[];
+    referenceCandidates: Readonly<Record<string, readonly string[]>>;
+  },
+  session: BenchSession | null,
+  activeIn: "reference" | "keyframe" = "reference",
+): PickerSource[] {
+  const registry = new Map((session?.tokenRegistry ?? []).map((e) => [benchSourceKey(e.source), e.token]));
+  const active = new Set(
+    (activeIn === "keyframe" ? session?.composer.keyframeTokens : session?.composer.activeTokens) ?? [],
+  );
+  const nameOf = new Map(world.sheets.map((sheet) => [sheet.id, sheet.name]));
+  const rows: PickerSource[] = [];
+  const add = (sheetId: string, file: string, what: string): void => {
+    if (!/\.(png|jpg|jpeg|webp)$/i.test(file)) return; // a path alone cannot price a clip
+    const path = `references/${sheetId}/${file}`;
+    if (rows.some((r) => r.key === `file:${path}`)) return; // a tile and a compilation can name one file
+    const token = registry.get(`file:${path}`);
+    rows.push({
+      key: `file:${path}`,
+      kind: "image",
+      name: `${nameOf.get(sheetId) ?? sheetId} · ${what}`,
+      imagePath: path,
+      meta: [what, file.split("/").pop()].filter(Boolean).join(" · "),
+      durationSec: 0,
+      ...(token !== undefined ? { existingToken: token, active: active.has(token) } : {}),
+      pick: { source: "world-file", path },
+    });
+  };
+
+  for (const kit of world.referenceKits) {
+    if (kit.mainPhoto?.file) add(kit.sheetId, kit.mainPhoto.file, "identity");
+    if (kit.anchor) add(kit.sheetId, kit.anchor, "identity");
+    if (kit.designatedCompilation) add(kit.sheetId, kit.designatedCompilation, "model sheet");
+    for (const tile of kit.tiles) if (tile.file) add(kit.sheetId, tile.file, tile.angle);
+    for (const look of kit.looks ?? []) if (look.file) add(kit.sheetId, look.file, `look · ${look.kind}`);
+  }
+  for (const take of world.referenceTakes) {
+    const sheetId = take.reference?.sheetId;
+    if (sheetId && take.media) add(sheetId, `takes/${take.id}/${take.media}`, "take");
+  }
+  for (const [sheetId, files] of Object.entries(world.referenceCandidates)) {
+    for (const file of files) add(sheetId, file, "candidate · not reviewed");
+  }
+  return rows;
 }
 
 /** The session's own takes as picker rows — picking an unkept one keeps its bytes riding. */
@@ -124,6 +191,7 @@ export function ReferencePickerBody({
   carried,
   world,
   session,
+  characters,
   onAdd,
   onChoose,
   onUpload,
@@ -149,6 +217,8 @@ export function ReferencePickerBody({
   carried: readonly MultimediaReference[];
   world: PickerSource[];
   session: PickerSource[];
+  /** Everything under the world's characters. Absent where the picker has no world to read. */
+  characters?: PickerSource[];
   /** Bench: the checked set, committed together and in order — one message, not N races. */
   onAdd?: (picks: ReadonlyArray<{ pick: PickerSource["pick"]; replace?: string }>) => void;
   /** Slot: the one choice. */
@@ -156,7 +226,7 @@ export function ReferencePickerBody({
   onUpload: () => void;
   onClose: () => void;
 }) {
-  const [lane, setLane] = useState<"world" | "session">("world");
+  const [lane, setLane] = useState<"world" | "characters" | "session">("world");
   const [kindFilter, setKindFilter] = useState<PickerSource["kind"] | null>(null);
   const [search, setSearch] = useState("");
   /** The checked set, in pick order — committed together by Add (design 69a). */
@@ -165,7 +235,7 @@ export function ReferencePickerBody({
   const [replacing, setReplacing] = useState<PickerSource | null>(null);
 
   const offered = (list: PickerSource[]): PickerSource[] => (only !== undefined ? list.filter((s) => s.kind === only) : list);
-  const sources = offered(lane === "world" ? world : session);
+  const sources = offered(lane === "world" ? world : lane === "characters" ? (characters ?? []) : session);
   const searched = search.trim().toLowerCase();
   const visible = sources.filter(
     (s) =>
@@ -305,6 +375,16 @@ export function ReferencePickerBody({
           <button type="button" aria-pressed={lane === "world"} onClick={() => setLane("world")}>
             {`World artifacts ${offered(world).length}`}
           </button>
+          {offered(characters ?? []).length > 0 && (
+            <button
+              type="button"
+              data-testid="picker-lane-characters"
+              aria-pressed={lane === "characters"}
+              onClick={() => setLane("characters")}
+            >
+              {`Characters ${offered(characters ?? []).length}`}
+            </button>
+          )}
           {offered(session).length > 0 && (
             <button type="button" aria-pressed={lane === "session"} onClick={() => setLane("session")}>
               {`This session ${offered(session).length}`}

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import {
   benchSourceKey,
   newId,
@@ -153,6 +154,85 @@ describe("reference allocation (issue 305 §4)", () => {
     if (!mine) throw new Error("the filed sidecar did not scan");
     return { dir, store, artifactId: mine.id };
   }
+
+  /**
+   * A character's pictures as reference sources (2026-08-18). The world holds far more pictures
+   * than the artifacts folder — accepted identity, looks, candidates awaiting review, every take
+   * ever generated — and none of them could be picked, because the source union was
+   * artifact|take with nothing that could name a plain world file.
+   */
+  describe("a world file", () => {
+    async function withPicture() {
+      const { dir, store } = await withArtifact("quarter.png");
+      await mkdir(join(dir, "references", "aurora-sabato", "candidates"), { recursive: true });
+      await writeFile(join(dir, "references", "aurora-sabato", "candidates", "candidate-1.png"), Buffer.from("fake-png-bytes"));
+      return { opened: await freshBench(dir), bundle: store.getBundle(), dir };
+    }
+    /** The host half, as coordinator.ts builds it: confine, then hash what was actually found. */
+    const reader = (dir: string) => ({
+      read: async (path: string) => {
+        const root = resolve(dir);
+        const target = resolve(root, path);
+        if (target !== root && !target.startsWith(root + sep)) return { refused: "that file is not in this world" };
+        try {
+          const bytes = await readFile(target);
+          return { hash: `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}` };
+        } catch {
+          return { refused: "that picture is no longer in the world" };
+        }
+      },
+    });
+
+    it("attaches a character's picture and keys it by path", async () => {
+      const { opened, bundle, dir } = await withPicture();
+      const path = "references/aurora-sabato/candidates/candidate-1.png";
+      const added = await addBenchReference(opened, bundle, IMAGE_MODEL, {
+        source: { source: "world-file", path },
+        worldFile: reader(dir),
+        requestId: "r1",
+        at: CLOCK(),
+      });
+      assert.deepEqual(added, { outcome: "added", token: "Image 1" });
+      // The hash recorded is of the bytes found, not anything the caller claimed.
+      const entry = (await refolded(opened))!.session.tokenRegistry.find((e) => e.token === "Image 1")!;
+      assert.equal(entry.source.source, "world-file");
+      assert.equal(
+        (entry.source as { hash: string }).hash,
+        `sha256:${createHash("sha256").update(Buffer.from("fake-png-bytes")).digest("hex").slice(0, 16)}`,
+      );
+    });
+
+    it("refuses a path that resolves outside the world, and one that is not a picture", async () => {
+      const { opened, bundle, dir } = await withPicture();
+      const escape = await addBenchReference(opened, bundle, IMAGE_MODEL, {
+        source: { source: "world-file", path: "../../secrets.png" },
+        worldFile: reader(dir),
+        requestId: "r2",
+        at: CLOCK(),
+      });
+      assert.equal(escape.outcome, "refused");
+
+      // A path alone cannot say how long a clip is, and the budget is spent in seconds.
+      const clip = await addBenchReference(opened, bundle, IMAGE_MODEL, {
+        source: { source: "world-file", path: "references/aurora-sabato/candidates/clip.mp4" },
+        worldFile: reader(dir),
+        requestId: "r3",
+        at: CLOCK(),
+      });
+      assert.equal(clip.outcome, "refused");
+      assert.match((clip as { reason: string }).reason, /only a picture/);
+    });
+
+    it("refuses when there is no reader at all rather than attaching an unread file", async () => {
+      const { opened, bundle } = await withPicture();
+      const outcome = await addBenchReference(opened, bundle, IMAGE_MODEL, {
+        source: { source: "world-file", path: "references/aurora-sabato/candidates/candidate-1.png" },
+        requestId: "r4",
+        at: CLOCK(),
+      });
+      assert.equal(outcome.outcome, "refused");
+    });
+  });
 
   it("allocates Image 1, restores the same token on re-add, and never reuses a number", async () => {
     const { dir, store, artifactId } = await withArtifact("quarter.png");

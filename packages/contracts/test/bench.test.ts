@@ -6,6 +6,7 @@ import {
   BenchRequestSnapshotSchema,
   BenchSessionSchema,
   benchSessionSummary,
+  BenchReferenceSourceSchema,
   benchSourceKey,
   benchTokenFor,
   foldBenchSession,
@@ -80,6 +81,50 @@ describe("bench tokens", () => {
       benchSourceKey({ source: "artifact", artifactId: AR as never, hash: "sha256:aa" as never }),
       `artifact:${AR}`,
     );
+  });
+});
+
+describe("a world file as a reference source", () => {
+  /**
+   * The world holds far more pictures than the artifacts folder — everything under a character:
+   * accepted identity, looks, candidates awaiting review, and every take generated for them.
+   * The source union was artifact|take, so none of them could be picked at all (2026-08-18).
+   */
+  const source = (path: string) => ({
+    source: "world-file" as const,
+    path,
+    hash: ("sha256:" + "a".repeat(16)) as never,
+  });
+
+  it("accepts a world-relative path", () => {
+    const parsed = BenchReferenceSourceSchema.safeParse(
+      source("references/aurora-sabato/candidates/candidate-1.png"),
+    );
+    assert.equal(parsed.success, true);
+  });
+
+  it("refuses a path that could reach outside the world", () => {
+    // A path arriving from a client is not permission to read the disk. The coordinator confines
+    // it besides; this is the gate that stops a malformed one ever reaching that code.
+    for (const bad of [
+      "../../.ssh/id_rsa",
+      "references/../../secrets.txt",
+      "/etc/passwd",
+      "C:/Windows/System32/config/SAM",
+      // Built from the character code so no escaping can quietly turn it into a harmless
+      // filename — the first version of this line did exactly that and passed for the wrong reason.
+      ["references", "..", "escape.png"].join(String.fromCharCode(92)),
+      "..",
+    ]) {
+      assert.equal(BenchReferenceSourceSchema.safeParse(source(bad)).success, false, bad);
+    }
+  });
+
+  it("keys on the path, so the same picture re-picked keeps its token", () => {
+    // "Image 2" must mean the same bytes for the session's whole life.
+    const key = benchSourceKey(source("references/aurora-sabato/candidates/candidate-1.png") as never);
+    assert.equal(key, "file:references/aurora-sabato/candidates/candidate-1.png");
+    assert.notEqual(key, benchSourceKey(source("references/aurora-sabato/candidates/candidate-2.png") as never));
   });
 });
 

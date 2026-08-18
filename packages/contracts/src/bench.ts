@@ -114,9 +114,37 @@ export type BenchParams = z.infer<typeof BenchParamsSchema>;
  * say exactly which bytes rode along even after the artifact is superseded or the take's file
  * is later filed under another name.
  */
+/**
+ * A world-relative path, constrained where it enters rather than where it is used.
+ *
+ * A path arriving from a client is not permission to read the disk. This is the first of two
+ * gates — the coordinator resolves against the world directory and re-checks besides — but the
+ * schema is where the shape is settled, so a malformed path never reaches code that assumes it
+ * is well formed. Forward slashes because a world moves across platforms (R-24).
+ */
+export const WorldFilePathSchema = z
+  .string()
+  .min(1)
+  .max(400)
+  .refine((value) => !value.startsWith("/"), "a world path is relative")
+  .refine((value) => !value.includes("\\"), "a world path uses forward slashes")
+  .refine((value) => !/^[a-zA-Z]:/.test(value), "a world path carries no drive letter")
+  .refine((value) => !value.split("/").includes(".."), "a world path cannot climb out of the world");
+
 export const BenchReferenceSourceSchema = z.discriminatedUnion("source", [
   z.object({ source: z.literal("artifact"), artifactId: ArtifactIdSchema, hash: Sha256Schema }).strict(),
   z.object({ source: z.literal("take"), takeId: TakeIdSchema, hash: Sha256Schema }).strict(),
+  /**
+   * A picture that lives in the world but is not an artifact — everything under a character:
+   * their accepted identity, their looks, the candidates still waiting on review, and every
+   * take ever generated for them. The world holds far more pictures than the artifacts folder,
+   * and until this variant existed none of them could be picked (reported 2026-08-18).
+   *
+   * The path is the identity, so the same file re-picked restores its old token. It is
+   * world-relative and the coordinator confines it to the world directory — a path arriving
+   * from a client is not permission to read the disk.
+   */
+  z.object({ source: z.literal("world-file"), path: WorldFilePathSchema, hash: Sha256Schema }).strict(),
 ]);
 export type BenchReferenceSource = z.infer<typeof BenchReferenceSourceSchema>;
 
@@ -155,7 +183,14 @@ export type BenchReferenceToken = z.infer<typeof BenchReferenceTokenSchema>;
 
 /** One stable identity per source, so the same artifact can never ride under two names. */
 export function benchSourceKey(source: BenchReferenceSource): string {
-  return source.source === "artifact" ? `artifact:${source.artifactId}` : `take:${source.takeId}`;
+  switch (source.source) {
+    case "artifact":
+      return `artifact:${source.artifactId}`;
+    case "take":
+      return `take:${source.takeId}`;
+    case "world-file":
+      return `file:${source.path}`;
+  }
 }
 
 // ---------------------------------------------------------------------------

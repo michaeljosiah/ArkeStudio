@@ -206,6 +206,37 @@ export function activeReferenceItems(
   return items;
 }
 
+/**
+ * What a bare path says about itself, which is only its extension.
+ *
+ * Pictures only. A character's references are pictures, and a path alone cannot tell you a
+ * clip's duration — the reference budget is spent in seconds, so admitting a video whose length
+ * is unknown would mean admitting it against a budget nobody can compute. Artifacts carry a
+ * measured `mediaInfo` and takes carry theirs; a loose file carries nothing.
+ */
+export function worldFileKind(path: string): ReferenceKind | null {
+  return /\.(png|jpg|jpeg|webp)$/i.test(path) ? "image" : null;
+}
+
+/**
+ * Reads the bytes a world-relative path names, having first confined it to the world.
+ *
+ * Injected because this file is otherwise pure and testable without a disk, and because
+ * confinement is the host's business: the schema settles the shape of a path
+ * (`WorldFilePathSchema`), and this settles that the resolved path is really inside the world.
+ * Two gates, because one of them is a regular expression and the other is the filesystem.
+ */
+export interface WorldFileReader {
+  read(path: string): Promise<{ hash: string } | BenchRefusal>;
+}
+
+/** A world file already attached: the path was checked when it was picked, and it is immutable. */
+export function resolveWorldFileSource(source: BenchReferenceSource & { source: "world-file" }): ResolvedSource | BenchRefusal {
+  const kind = worldFileKind(source.path);
+  if (kind === null) return { refused: "only a picture can be attached from the world" };
+  return { source, kind, durationSec: 0, path: source.path };
+}
+
 export function resolveTokenEntry(
   entry: BenchReferenceToken,
   session: BenchSession,
@@ -216,6 +247,7 @@ export function resolveTokenEntry(
     const artifact = bundle.artifacts.find((a) => a.id === source.artifactId);
     return artifact ? resolveArtifactSource(artifact) : { refused: "that artifact is no longer in the world" };
   }
+  if (source.source === "world-file") return resolveWorldFileSource(source);
   return resolveTakeSource(session, source.takeId);
 }
 
@@ -234,8 +266,13 @@ export async function addBenchReference(
   bundle: WorldBundle,
   model: ManifestModel | null,
   input: {
-    source: { source: "artifact"; artifactId: string } | { source: "take"; takeId: string };
+    source:
+      | { source: "artifact"; artifactId: string }
+      | { source: "take"; takeId: string }
+      | { source: "world-file"; path: string };
     replace?: string | undefined;
+    /** Present when the pick may name a world file; the host reads and confines it. */
+    worldFile?: WorldFileReader | undefined;
     /** Which lane the pick lands in. Absent is the reference lane (issue 305 §3). */
     lane?: "reference" | "keyframe" | undefined;
     requestId: string;
@@ -249,6 +286,20 @@ export async function addBenchReference(
   if (wanted.source === "artifact") {
     const artifact = bundle.artifacts.find((a) => a.id === wanted.artifactId);
     resolved = artifact ? resolveArtifactSource(artifact) : { refused: "that artifact is no longer in the world" };
+  } else if (wanted.source === "world-file") {
+    // The bytes decide the hash, not the client: the path is a request to read a file, and what
+    // is recorded is what was actually found there.
+    const kind = worldFileKind(wanted.path);
+    if (kind === null) {
+      resolved = { refused: "only a picture can be attached from the world" };
+    } else if (input.worldFile === undefined) {
+      resolved = { refused: "this world's files cannot be read just now" };
+    } else {
+      const read = await input.worldFile.read(wanted.path);
+      resolved = "refused" in read
+        ? read
+        : { source: { source: "world-file", path: wanted.path, hash: read.hash as never }, kind, durationSec: 0, path: wanted.path };
+    }
   } else {
     resolved = resolveTakeSource(session, wanted.takeId);
   }

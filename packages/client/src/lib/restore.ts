@@ -21,7 +21,10 @@ import type { BenchReferenceToken } from "@arke-studio/contracts";
  * passed through a variable. Narrowing here, inside the tested unit, is what stops the call
  * site from having to remember.
  */
-export type WirePick = { source: "artifact"; artifactId: string } | { source: "take"; takeId: string };
+export type WirePick =
+  | { source: "artifact"; artifactId: string }
+  | { source: "take"; takeId: string }
+  | { source: "world-file"; path: string };
 
 export interface LaneRestorePlan {
   /** Tokens active now that the snapshot does not name. */
@@ -31,9 +34,14 @@ export interface LaneRestorePlan {
 }
 
 function toPick(source: BenchReferenceToken["source"]): WirePick {
-  return source.source === "artifact"
-    ? { source: "artifact", artifactId: source.artifactId }
-    : { source: "take", takeId: source.takeId };
+  switch (source.source) {
+    case "artifact":
+      return { source: "artifact", artifactId: source.artifactId };
+    case "take":
+      return { source: "take", takeId: source.takeId };
+    case "world-file":
+      return { source: "world-file", path: source.path };
+  }
 }
 
 /**

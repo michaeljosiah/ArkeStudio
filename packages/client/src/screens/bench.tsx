@@ -79,6 +79,7 @@ import { VoicePickerDialog } from "../components/voice-picker.js";
 import { usableModels } from "../components/dispatch-bar.js";
 import {
   ReferencePickerDialog,
+  characterPickerSources,
   carriedForPicker,
   sessionPickerSources,
   worldPickerSources,
@@ -196,6 +197,16 @@ function BenchWorkspace({
     [world?.artifacts, session],
   );
   const sessionFrameSources = useMemo(() => sessionPickerSources(session, "keyframe"), [session]);
+  // Everything under the world's characters — identity, looks, candidates, every take. The
+  // artifacts folder is a small corner of the pictures a world actually holds.
+  const characterSources = useMemo(
+    () => (world ? characterPickerSources(world, session) : []),
+    [world, session],
+  );
+  const characterFrameSources = useMemo(
+    () => (world ? characterPickerSources(world, session, "keyframe") : []),
+    [world, session],
+  );
   const carried = useMemo(
     () => carriedForPicker(session, worldSources, sessionSources),
     [session, worldSources, sessionSources],
@@ -1555,6 +1566,7 @@ function BenchWorkspace({
             model={model}
             carried={carried}
             world={worldSources}
+            characters={characterSources}
             session={sessionSources}
             onAdd={(picks) => {
               sendBenchAddReference(worldId, session.id, picks);
@@ -1582,6 +1594,7 @@ function BenchWorkspace({
             model={model}
             carried={carried}
             world={worldFrameSources}
+            characters={characterFrameSources}
             session={sessionFrameSources}
             onChoose={(pick) => {
               sendBenchAddReference(worldId, session.id, [{ pick }], "keyframe");
