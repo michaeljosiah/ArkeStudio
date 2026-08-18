@@ -26,6 +26,23 @@ import { App } from "./App.js";
 import { initStore } from "./lib/store.js";
 import { initializeTheme } from "./lib/theme.js";
 
+/*
+ * Whether the first paint is the launch screen's dark plate, decided here rather than in the
+ * screen's own effect.
+ *
+ * `initializeTheme()` signals theme-ready synchronously, before React mounts, and the host shows
+ * the window on that signal — so a mount effect lands *after* the window is already up. On a
+ * light-theme machine that is a white titlebar with dark caption symbols flashing over the plate
+ * before flipping. Sending it from here puts it ahead of the show, and reading the route rather
+ * than assuming it keeps a reload onto any other screen honest. The launch screen keeps its own
+ * effect for the navigation that follows.
+ */
+const onLaunchRoute = (): boolean => {
+  const route = window.location.hash.replace(/^#/, "");
+  return route === "" || route === "/";
+};
+window.arke?.chromeOverPlate?.(onLaunchRoute());
+
 initializeTheme();
 initStore();
 
