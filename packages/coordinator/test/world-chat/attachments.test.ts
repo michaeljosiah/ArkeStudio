@@ -127,6 +127,34 @@ describe("readability", () => {
     assert.equal(detectReadability("audio", bytes("this is text")), "not-readable");
     assert.equal(detectReadability("video", bytes("this is text")), "not-readable");
   });
+
+  /**
+   * A manuscript is not unreadable because of where its 4096th byte falls.
+   *
+   * The sample is a fixed count of bytes, so it cuts wherever that lands, and prose out of a word
+   * processor is full of three-byte characters for it to land inside. Every one of these is plain
+   * text that a fatal non-streaming decoder called invalid UTF-8, refusing the whole document at
+   * the point of attaching it with a sentence about it not being readable as text.
+   */
+  it("calls prose readable when a character straddles the end of the sample", () => {
+    for (const ch of ["—", "’", "“", "…", "é"]) {
+      for (let pad = 4093; pad <= 4096; pad++) {
+        const text = "a".repeat(pad) + ch + " and the rest of an ordinary manuscript.";
+        assert.equal(
+          detectReadability("document", bytes(text)),
+          "text-readable",
+          `U+${ch.codePointAt(0)?.toString(16)} at pad ${pad}`,
+        );
+      }
+    }
+  });
+
+  /** Tolerating the cut is not tolerating rubbish: bad bytes anywhere else still fail. */
+  it("still refuses invalid UTF-8 that is not an artefact of the cut", () => {
+    // 0xC3 0x28 is a leading byte followed by a non-continuation - illegal, and nowhere near the end.
+    const bad = new Uint8Array([...bytes("a".repeat(100)), 0xc3, 0x28, ...bytes("b".repeat(100))]);
+    assert.equal(detectReadability("document", bad), "not-readable");
+  });
 });
 
 describe("ingesting an attachment", () => {
