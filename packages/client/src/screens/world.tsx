@@ -32,6 +32,7 @@ import { shortDateTime } from "../lib/format.js";
 import { mediaUrl } from "../lib/media.js";
 import { playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
+import { CloneVoiceDialog } from "../components/clone-voice-dialog.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import { useTalkItThrough } from "../lib/talk-it-through.js";
 import {
@@ -65,6 +66,7 @@ import {
   extractArtifact,
   fileArtifactMsg,
   importFolder,
+  providerIdOf,
   requestVoiceCandidates,
   requestVoicePreview,
   readSheetSection,
@@ -2155,6 +2157,7 @@ function VoiceCandidatesPanel({
   const [requests, setRequests] = useState<Record<string, string>>({});
   const [assigning, setAssigning] = useState<string | null>(null);
   const [where, setWhere] = useState<"all" | "cloud" | "local">("all");
+  const [cloning, setCloning] = useState(false);
   const autoPlayed = useRef(new Set<string>());
   // Assigning commits straight through (no gate), so the change lands in the next world snapshot:
   // the pressed row stays busy until this sheet's voice is the one we just assigned.
@@ -2227,7 +2230,27 @@ function VoiceCandidatesPanel({
               </button>
             );
           })}
+          <span style={{ flex: 1 }} />
+          {/* The only control on this row that adds to the catalogue rather than filtering it.
+              A voice cloned while casting this character is still the world's afterwards — the
+              sheet travels with it as provenance, never as ownership (74, binding). */}
+          <Button variant="ghost" data-testid="clone-open" onClick={() => setCloning(true)}>
+            Clone a voice
+          </Button>
         </div>
+      )}
+      {worldId && (
+        <CloneVoiceDialog
+          open={cloning}
+          worldId={worldId}
+          {...(sheetId !== undefined ? { sheetId } : {})}
+          onClose={() => setCloning(false)}
+          onCloned={() => {
+            // The new voice arrives in the next world snapshot; re-rank so it is placed against
+            // this character's written voice rather than appended after everything.
+            if (worldId && sheetId) requestVoiceCandidates(worldId, sheetId);
+          }}
+        />
       )}
       {/* The catalogue scrolls inside its own pane rather than growing the page: fifty voices
           otherwise push the assign controls, and the sheet under them, off the bottom. */}
@@ -2274,11 +2297,12 @@ function VoiceCandidatesPanel({
                     variant="ghost"
                     disabled={Boolean(requestId && !result)}
                     onClick={() => {
-                      if (!worldId || !sheetId) return;
-                      if (candidate.provider === "kokoro" || candidate.provider === "elevenlabs") {
-                        const supportedProvider = candidate.provider;
-                        setRequests((current) => ({ ...current, [key]: requestVoicePreview(worldId, sheetId, supportedProvider, candidate.voiceId) }));
-                      }
+                      // Whatever the catalogue offered can be asked for. The pair that used to be
+                      // named here was narrower than the wire's, so a cloned voice listed with a
+                      // Preview button that did nothing at all when pressed.
+                      const provider = providerIdOf(candidate.provider);
+                      if (!worldId || !sheetId || !provider) return;
+                      setRequests((current) => ({ ...current, [key]: requestVoicePreview(worldId, sheetId, provider, candidate.voiceId) }));
                     }}
                   >
                     {requestId && !result
@@ -2291,10 +2315,11 @@ function VoiceCandidatesPanel({
                 <Button
                   disabled={assigning === key || assigned}
                   onClick={() => {
-                    if (worldId && sheetPath && (candidate.provider === "kokoro" || candidate.provider === "elevenlabs")) {
+                    const provider = providerIdOf(candidate.provider);
+                    if (worldId && sheetPath && provider) {
                       setAssigning(key);
                       assignVoice(worldId, sheetPath, {
-                        provider: candidate.provider,
+                        provider,
                         voiceId: candidate.voiceId,
                         label: candidate.label,
                       });

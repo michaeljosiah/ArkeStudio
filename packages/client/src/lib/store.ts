@@ -11,6 +11,7 @@ import {
   type Frame,
   type Job,
   type ProviderCallRecord,
+  ProviderIdSchema,
   type ProviderId,
   type SizeTier,
   type QueueCommand,
@@ -141,6 +142,13 @@ interface StoreState {
   /** SPEC-011: dictation results by requestId — inserted as editable text, never submitted. */
   dictation: Record<string, { text: string | null; error: string | null }>;
   /**
+   * SPEC-022 T-10: clips staged for a clone, by requestId. A name and a length, never a path —
+   * the coordinator holds where it went, and hands back only what 74c draws.
+   */
+  voiceClips: Record<string, StagedClip>;
+  /** SPEC-022 T-10: the outcome of the last clone — the voice it made, or why it made none. */
+  voiceCloned: { voiceId: string | null; label: string | null; reason: string | null } | null;
+  /**
    * Files World Chat would not take, by conversation (#70 §13.2).
    *
    * Kept here rather than in the workspace because nothing was written: a refused file has no
@@ -235,6 +243,8 @@ let current: StoreState = {
   sheetRefs: {},
   reconcileReport: null,
   voiceCandidates: {},
+  voiceClips: {},
+  voiceCloned: null,
   voiceCatalogue: null,
   voicePreviews: {},
   voiceAudio: {},
@@ -512,6 +522,8 @@ function handleFrame(json: string): void {
       authoring,
       sheetRefs: changedWorld ? {} : current.sheetRefs,
       voiceCandidates: changedWorld ? {} : current.voiceCandidates,
+      voiceClips: changedWorld ? {} : current.voiceClips,
+      voiceCloned: changedWorld ? null : current.voiceCloned,
       voiceCatalogue: changedWorld ? null : current.voiceCatalogue,
       voicePreviews: changedWorld ? {} : current.voicePreviews,
       voiceAudio: { ...(changedWorld ? {} : current.voiceAudio), ...durableVoiceAudio },
@@ -693,6 +705,8 @@ function handleFrame(json: string): void {
       reconcileReport = event.report;
     }
     let voiceCandidates = current.voiceCandidates;
+    let voiceClips = current.voiceClips;
+    let voiceCloned = current.voiceCloned;
     let voiceCatalogue = current.voiceCatalogue;
     let voicePreviews = current.voicePreviews;
     let voiceAudio = current.voiceAudio;
@@ -707,6 +721,20 @@ function handleFrame(json: string): void {
     let locationViewUpload = current.locationViewUpload;
     if (event.type === "voice.catalogue") {
       voiceCatalogue = event.voices;
+    }
+    if (event.type === "voice.clip-staged") {
+      voiceClips = {
+        ...voiceClips,
+        [event.requestId]: {
+          clipId: event.clipId,
+          fileName: event.fileName,
+          seconds: event.seconds,
+          reason: event.reason,
+        },
+      };
+    }
+    if (event.type === "voice.cloned") {
+      voiceCloned = { voiceId: event.voiceId, label: event.label, reason: event.reason };
     }
     if (event.type === "voice.candidates") {
       voiceCandidates = {
@@ -886,6 +914,8 @@ function handleFrame(json: string): void {
       sheetRefs,
       reconcileReport,
       voiceCandidates,
+      voiceClips,
+      voiceCloned,
       voiceCatalogue,
       voicePreviews,
       voiceAudio,
@@ -1448,9 +1478,24 @@ export function renameSheet(worldId: string, path: string, name: string): void {
 export function assignVoice(
   worldId: string,
   path: string,
-  voice: { provider: "kokoro" | "elevenlabs"; voiceId: string; label?: string } | null,
+  // Any provider the catalogue can offer, which since SPEC-022 includes a cloned voice on
+  // `comfyui`. The wire takes a plain string; this stays a provider id so a typo cannot reach it.
+  voice: { provider: ProviderId; voiceId: string; label?: string } | null,
 ): void {
   send({ kind: "assign-voice", worldId, path, voice });
+}
+
+/**
+ * A catalogue provider as an id this build can actually spell.
+ *
+ * `VoiceCandidate.provider` is an open string on purpose — it is a read path, and a coordinator
+ * that learns a new provider should not have its events dropped by an older renderer. That makes
+ * narrowing the caller's job, and a candidate naming a provider this build has never heard of is
+ * a row that cannot be previewed or assigned rather than a crash.
+ */
+export function providerIdOf(provider: string): ProviderId | null {
+  const parsed = ProviderIdSchema.safeParse(provider);
+  return parsed.success ? parsed.data : null;
 }
 
 export function requestSheetRefs(worldId: string, sheetId: string): void {
@@ -1919,7 +1964,8 @@ export function requestVoiceCandidates(worldId: string, sheetId: string): void {
 export function requestVoicePreview(
   worldId: string,
   sheetId: string,
-  provider: "kokoro" | "elevenlabs",
+  /** A provider id. The closed pair here outlived the wire's, and hid cloned voices (SPEC-022). */
+  provider: ProviderId,
   voiceId: string,
 ): string {
   const requestId = queueRequest("voice-preview");
@@ -1948,6 +1994,73 @@ export function readSheetSection(
 
 export function transcribeDictation(requestId: string, audioBase64: string, contentType: string): void {
   send({ kind: "transcribe-dictation", requestId, audioBase64, contentType });
+}
+
+/** A clip staged for a clone: what 74c can draw about it, and nothing about where it lives. */
+export interface StagedClip {
+  /** Null when the clip was refused, or when the host's picker was simply cancelled. */
+  clipId: string | null;
+  fileName: string | null;
+  seconds: number | null;
+  reason: string | null;
+}
+
+/**
+ * Ask for a clip to clone from (SPEC-022 T-10).
+ *
+ * Passing no recording means the host opens its own file picker; the renderer never learns what
+ * was chosen beyond its name. A recording is sent as bytes because the renderer genuinely holds
+ * those — and as WAV, because that is what the library accepts and it refuses the rest by magic
+ * number rather than by extension.
+ */
+export function stageVoiceClip(
+  worldId: string,
+  recording?: { audioBase64: string; contentType: string },
+): string {
+  const requestId = `clip-${crypto.randomUUID()}`;
+  send({
+    kind: "stage-voice-clip",
+    worldId,
+    requestId,
+    source: recording ? { from: "recorded", ...recording } : { from: "chosen" },
+  });
+  return requestId;
+}
+
+/** Cancelling the dialog: the temp file should not outlive the screen that made it. */
+export function discardVoiceClip(clipId: string): void {
+  send({ kind: "discard-voice-clip", clipId });
+}
+
+/**
+ * Make the voice (SPEC-022 T-10). `consent` is not a parameter: the frame is `z.literal(true)`,
+ * so there is no shape of this call that carries an unconsented clone, and the tick on 74c gates
+ * the button rather than being passed along as data that could be forgotten.
+ */
+export function cloneVoice(input: {
+  worldId: string;
+  clipId: string;
+  name: string;
+  description: string;
+  sheetId?: string;
+}): void {
+  send({
+    kind: "clone-voice",
+    worldId: input.worldId,
+    clipId: input.clipId,
+    name: input.name,
+    description: input.description,
+    consent: true,
+    ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
+  });
+}
+
+export function useVoiceClips(): Record<string, StagedClip> {
+  return useStore().voiceClips;
+}
+
+export function useVoiceCloned(): { voiceId: string | null; label: string | null; reason: string | null } | null {
+  return useStore().voiceCloned;
 }
 
 export function useVoiceCandidates(): Record<string, VoiceCandidatesState> {
@@ -2322,6 +2435,8 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     sheetRefs: {},
     reconcileReport: null,
     voiceCandidates: {},
+    voiceClips: {},
+    voiceCloned: null,
     voiceCatalogue: null,
     voicePreviews: {},
     voiceAudio: {},
