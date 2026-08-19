@@ -1,0 +1,213 @@
+/*
+ * The rich markdown editor.
+ *
+ * Deliberately the same shape as the text area it replaces — same border, same radius, same
+ * measure, same 14.5px/1.75 setting — so the bible does not change how it feels to write in just
+ * because it gained blocks. What is new is only what blocks need: the block art inside lists and
+ * quotes, and the popover the slash key opens.
+ */
+
+.fy-rme {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--background);
+}
+
+.fy-rme__doc {
+  min-height: 62vh;
+  padding: 20px 22px;
+  color: var(--foreground);
+  font: 400 14.5px/1.75 var(--font-sans);
+  outline: none;
+  tab-size: 2;
+}
+
+.fy-rme:focus-within {
+  outline: 2px solid var(--ring);
+  outline-offset: -1px;
+}
+
+/* The empty document says what to do, once, and gets out of the way at the first character. */
+.fy-rme__doc p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--muted-foreground);
+}
+
+/* ── Blocks ──────────────────────────────────────────── */
+
+.fy-rme__doc > * + * {
+  margin-top: 0.9em;
+}
+
+.fy-rme__doc h1,
+.fy-rme__doc h2,
+.fy-rme__doc h3 {
+  margin: 1.5em 0 0;
+  font-weight: 500;
+  line-height: 1.3;
+}
+.fy-rme__doc h1 {
+  font-size: 26px;
+}
+.fy-rme__doc h2 {
+  font-size: 20px;
+}
+.fy-rme__doc h3 {
+  font-size: 16px;
+}
+.fy-rme__doc > :first-child {
+  margin-top: 0;
+}
+
+.fy-rme__doc ul,
+.fy-rme__doc ol {
+  padding-left: 1.4em;
+}
+.fy-rme__doc li > p {
+  margin: 0;
+}
+.fy-rme__doc li + li {
+  margin-top: 0.25em;
+}
+
+.fy-rme__doc blockquote {
+  margin-left: 0;
+  padding-left: 14px;
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.fy-rme__doc hr {
+  margin: 1.6em 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.fy-rme__doc code {
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+  background: var(--muted);
+  font: 400 0.9em var(--font-mono);
+}
+.fy-rme__doc pre {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--muted);
+  font: 400 12.5px/1.6 var(--font-mono);
+  overflow-x: auto;
+}
+.fy-rme__doc pre code {
+  padding: 0;
+  background: none;
+  font-size: inherit;
+}
+
+.fy-rme__doc a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.fy-rme__doc img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+/* Check lists: the marker is the control, so the native list marker has to go. */
+.fy-rme__doc ul[data-type="taskList"] {
+  padding-left: 0;
+  list-style: none;
+}
+.fy-rme__doc ul[data-type="taskList"] li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.fy-rme__doc ul[data-type="taskList"] li > label {
+  flex: 0 0 auto;
+}
+.fy-rme__doc ul[data-type="taskList"] li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fy-rme__doc table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.fy-rme__doc th,
+.fy-rme__doc td {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.fy-rme__doc th {
+  background: var(--muted);
+  font-weight: 500;
+}
+.fy-rme__doc .selectedCell {
+  background: var(--selection-bg);
+}
+
+/* ── The slash menu ──────────────────────────────────── */
+
+.fy-slash {
+  position: absolute;
+  z-index: 40;
+  width: 232px;
+  max-height: 300px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--shadow-pop);
+  overflow-y: auto;
+}
+
+.fy-slash__group {
+  padding: 8px 9px 4px;
+  font: 500 10px var(--font-sans);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.fy-slash__row {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  font: 400 13px var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+.fy-slash__row.is-active {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.fy-slash__icon {
+  display: inline-flex;
+  color: var(--muted-foreground);
+}
+.fy-slash__row.is-active .fy-slash__icon {
+  color: inherit;
+}
+
+.fy-slash__empty {
+  padding: 12px 10px;
+  font: 400 12px var(--font-sans);
+  color: var(--muted-foreground);
+}
