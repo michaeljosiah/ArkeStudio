@@ -54,6 +54,11 @@ export interface EngineServiceDeps {
   /** The pinned ref a custom-node checkout is at, or null when unknowable. Unused while D11 ships zero nodes. */
   readNodeRef?: (dir: string) => Promise<string | null>;
   createSupervisor: (spec: SupervisedSpec) => ChildSupervisor;
+  /**
+   * Free graphics memory right now, in MB, or null where the device cannot be asked
+   * (SPEC-022 §2.6). Optional: a build that cannot ask simply gates on total VRAM as before.
+   */
+  freeVramMb?: () => Promise<number | null>;
   /** Where well-known installs are looked for. Injectable so tests need no real home. */
   homeDir?: string;
   onStatus?: (status: ComfyUiEngineStatus) => void;
@@ -626,6 +631,31 @@ export class ComfyUiEngineService {
     if (vram < recipe.minVramMb) {
       return disabled(
         `Needs ${gb(recipe.minVramMb)} VRAM. This machine has ${gb(vram)}. Cloud ${recipe.capability} still works.`,
+        `Cloud ${recipe.capability} still works.`,
+      );
+    }
+    /*
+     * 7 · The card is big enough. Is any of it free?
+     *
+     * A card clears the floor and the recipe still cannot run, because a browser or another AI
+     * tool already holds a third of it. Checking only the total is what let a 10 GB machine read
+     * "ready" and then page to disk for half an hour (SPEC-022 §2.6).
+     *
+     * This is a DIFFERENT sentence from the one above, because it is a different problem with a
+     * different remedy: that card is too small and always will be, this one is busy and will not
+     * be in a minute. The state is the same because the consequence is — pressing Generate now
+     * buys a wait, not a take.
+     *
+     * Pessimistic by one case, deliberately: when the engine itself is holding a model it could
+     * release, dispatch frees it first and would have succeeded. Readiness will not call `/free`
+     * to answer a status poll — that throws away the model cache every twenty seconds — so it
+     * reads the card as it is and says the engine will try. Better a warning that resolves itself
+     * than a "ready" that does not.
+     */
+    const free = this.deps.freeVramMb ? await this.deps.freeVramMb().catch(() => null) : null;
+    if (free !== null && free < recipe.minVramMb) {
+      return disabled(
+        `Needs ${gb(recipe.minVramMb)} free. This machine has ${gb(free)} free of ${gb(vram)} — close other programs using the graphics card. Cloud ${recipe.capability} still works.`,
         `Cloud ${recipe.capability} still works.`,
       );
     }

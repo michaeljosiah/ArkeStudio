@@ -485,6 +485,48 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
     assert.match(unknown.recipes[0]!.reason!, /VRAM could not be measured\. The 6 GB floor was not checked\./);
   });
 
+  /**
+   * A card big enough and busy anyway (SPEC-022 §2.6).
+   *
+   * Checking only the total is what let a 10 GB machine read "ready" and then page to disk for
+   * half an hour. The two refusals are deliberately different sentences: one card will never be
+   * big enough, the other will be free again in a minute.
+   */
+  it("a card that clears the floor but has nothing free says so, differently", async () => {
+    const world = fakeWorld();
+    world.urls.set("http://10.0.0.4:8188", {});
+    const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app"), freeVramMb: async () => 2048 });
+    await service.applySettings({ enginePath: null, engineUrl: "http://10.0.0.4:8188", modelsDir: "C:/models" });
+    world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
+
+    const busy = await service.status({ vramMb: 10240, memMb: 32000, diskFreeMb: 1000 });
+    assert.equal(busy.recipes[0]!.state, "disabled");
+    assert.match(busy.recipes[0]!.reason!, /Needs 6 GB free\. This machine has 2 GB free of 10 GB/);
+    assert.match(busy.recipes[0]!.reason!, /close other programs using the graphics card/);
+    // Not the too-small sentence: that card is fine, it is the machine that is busy.
+    assert.equal(/This machine has 10 GB\./.test(busy.recipes[0]!.reason!), false);
+  });
+
+  it("stays ready when the card is big enough and free enough", async () => {
+    const world = fakeWorld();
+    world.urls.set("http://10.0.0.4:8188", {});
+    const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app"), freeVramMb: async () => 9000 });
+    await service.applySettings({ enginePath: null, engineUrl: "http://10.0.0.4:8188", modelsDir: "C:/models" });
+    world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
+    assert.equal((await service.status({ vramMb: 10240, memMb: 32000, diskFreeMb: 1000 })).recipes[0]!.state, "ready");
+  });
+
+  it("a card that cannot be asked how much is free is not refused for it", async () => {
+    // D15 again: unknown stays unknown. A build with no way to ask must not disable local work
+    // on every machine, so a null free reading falls back to the total the probe did measure.
+    const world = fakeWorld();
+    world.urls.set("http://10.0.0.4:8188", {});
+    const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app"), freeVramMb: async () => null });
+    await service.applySettings({ enginePath: null, engineUrl: "http://10.0.0.4:8188", modelsDir: "C:/models" });
+    world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
+    assert.equal((await service.status({ vramMb: 10240, memMb: 32000, diskFreeMb: 1000 })).recipes[0]!.state, "ready");
+  });
+
   it("missing weights: the count, not a generic unavailable", async () => {
     const world = fakeWorld();
     world.urls.set("http://10.0.0.4:8188", {});

@@ -488,7 +488,32 @@ async function initialize(): Promise<{ port: number }> {
   // provider clients need its baseUrl and pre-flight before the coordinator exists — the same
   // ordering Voxa's supervisor ref solves. Everything it knows about a recipe is facts —
   // digests, node classes, file lists — never a graph.
+  /*
+   * How much of the graphics card is free right now, in MB.
+   *
+   * The device's own answer, not the engine's: ComfyUI reports what torch allocated and cannot
+   * see the browser holding 3 GB of the same card (SPEC-022 §2.6). NVIDIA-only, and null
+   * everywhere else — an unmeasurable card dispatches rather than being refused (SPEC-021 D15).
+   *
+   * One implementation, two readers: readiness asks it so a busy machine says so before Generate
+   * is pressed, and the dispatch path asks it again after telling the engine to unload.
+   */
+  const freeVramMb = (): Promise<number | null> =>
+    new Promise((resolve) => {
+      execFile(
+        "nvidia-smi",
+        ["--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+        { timeout: 5_000, windowsHide: true },
+        (err, stdout) => {
+          if (err) return resolve(null);
+          const mb = Number.parseInt(String(stdout).trim().split(/\r?\n/)[0] ?? "", 10);
+          resolve(Number.isFinite(mb) && mb >= 0 ? mb : null);
+        },
+      );
+    });
+
   const comfyUiEngine = new ComfyUiEngineService({
+    freeVramMb,
     appRoot,
     recipes: COMFYUI_RECIPES.map((recipe) => ({
       id: recipe.id,
@@ -566,22 +591,7 @@ async function initialize(): Promise<{ port: number }> {
       // The engine says what it is doing only on its socket (SPEC-021 D16). Node's own
       // WebSocket, adapted to the two handlers the client needs — nothing here should hold a
       // dependency on a socket library for one optional figure.
-      // The device's own answer, not the engine's: ComfyUI reports what torch allocated and
-      // cannot see the browser holding 3 GB of the same card (SPEC-022 §2.6). NVIDIA-only, and
-      // null everywhere else — an unmeasurable card dispatches rather than being refused (D15).
-      freeVramMb: () =>
-        new Promise((resolve) => {
-          execFile(
-            "nvidia-smi",
-            ["--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-            { timeout: 5_000, windowsHide: true },
-            (err, stdout) => {
-              if (err) return resolve(null);
-              const mb = Number.parseInt(String(stdout).trim().split(/\r?\n/)[0] ?? "", 10);
-              resolve(Number.isFinite(mb) && mb >= 0 ? mb : null);
-            },
-          );
-        }),
+      freeVramMb,
       openSocket: (url) => {
         const socket = new WebSocket(url);
         const adapter = {
