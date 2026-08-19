@@ -153,3 +153,67 @@ describe("a clip becomes a voice", () => {
     assert.deepEqual(parseVoiceLibrary({ voices: "nope" }), []);
   });
 });
+
+/**
+ * The wire can name a third voice provider (SPEC-022 T-7). The preview frame typed `provider` as
+ * the two that existed when it was written, so a cloned voice could be offered by the catalogue
+ * and never asked for — the same assumption the cache key carried, one layer out.
+ */
+describe("a voice preview can name any provider the app knows", () => {
+  const frame = (provider: string) => ({
+    kind: "voice-preview" as const,
+    requestId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+    worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+    sheetId: "maren-kest",
+    provider,
+    voiceId: "harbour-glass",
+  });
+
+  it("accepts the local recipe engine, not only kokoro and elevenlabs", () => {
+    for (const provider of ["kokoro", "elevenlabs", "comfyui"]) {
+      assert.equal(ClientMessageSchema.safeParse(frame(provider)).success, true, provider);
+    }
+  });
+
+  it("still refuses a provider this app has never heard of", () => {
+    // A provider id, not a free string: a typo fails at the frame rather than reaching the
+    // coordinator's own check.
+    assert.equal(ClientMessageSchema.safeParse(frame("elevenlabz")).success, false);
+  });
+});
+
+/**
+ * Clone capture on the wire (SPEC-022 T-10). The frame is where consent is enforced, not the
+ * handler — the model cannot tell whether a speaker agreed, and neither can the app.
+ */
+describe("the clone-voice frame", () => {
+  const base = {
+    kind: "clone-voice" as const,
+    worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+    sourcePath: "C:/recordings/harbour.wav",
+    name: "Harbour glass",
+    description: "Low, dry, unhurried. Coastal.",
+    consent: true as const,
+  };
+
+  it("accepts a consented clone, with or without the sheet it was made for", () => {
+    assert.equal(ClientMessageSchema.safeParse(base).success, true);
+    assert.equal(ClientMessageSchema.safeParse({ ...base, sheetId: "maren-kest" }).success, true);
+  });
+
+  it("cannot be spelled without consent", () => {
+    // z.literal(true), not a boolean: there is no shape of this frame that carries false, so a
+    // handler cannot forget to check it.
+    assert.equal(ClientMessageSchema.safeParse({ ...base, consent: false }).success, false);
+    // Built without the field rather than destructured out of it: an unused binding is a lint
+    // error, and the point here is the SHAPE that omits consent, not a variable holding it.
+    const noConsent = { ...base, consent: undefined };
+    assert.equal(ClientMessageSchema.safeParse(noConsent).success, false);
+  });
+
+  it("cannot be spelled without a description", () => {
+    // rankVoices buries an attribute-less candidate, so a voice cloned FOR a character would sink
+    // below every preset when ranked against her. Refused at the wire as well as at creation.
+    assert.equal(ClientMessageSchema.safeParse({ ...base, description: "" }).success, false);
+  });
+});

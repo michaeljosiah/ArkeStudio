@@ -1103,7 +1103,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
-      provider: z.enum(["kokoro", "elevenlabs"]),
+      /**
+       * A provider id, not the two voice providers that existed when this was written (SPEC-022).
+       * The closed pair meant a cloned voice could be OFFERED by the catalogue and never ASKED FOR
+       * — the wire had no way to name it — which is the same assumption the preview cache key and
+       * `SpeechSpec.provider` carried, one layer further out.
+       *
+       * `ProviderIdSchema` rather than a free string: the coordinator still refuses a provider that
+       * cannot preview, and a typo should fail at the frame rather than reach that check.
+       */
+      provider: ProviderIdSchema,
       voiceId: z.string().min(1),
     })
     .strict(),
@@ -1356,6 +1365,30 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   z.object({ kind: z.literal("genesis-attach-files"), genesisId: GenesisIdSchema }).strict(),
   /** SPEC-015 R-9..R-11: stage one — file everything, exclude system files, report all of it. */
+  /**
+   * SPEC-022 T-10: make a voice from a recording.
+   *
+   * `consent` is `z.literal(true)`, not a boolean. The model cannot tell whether the speaker in a
+   * clip agreed to be cloned and neither can the app, so the wire refuses an unconsented clone
+   * rather than leaving it to a handler that might forget — there is no way to spell the frame
+   * that would carry `false`.
+   *
+   * `description` is required for the same reason `newClonedVoice` refuses without one:
+   * `rankVoices` buries a candidate with no attributes, so a voice cloned FOR a character would
+   * sink below every preset when ranked against her.
+   */
+  z
+    .object({
+      kind: z.literal("clone-voice"),
+      worldId: UlidSchema,
+      sourcePath: z.string().min(1),
+      name: z.string().min(1),
+      description: z.string().min(1),
+      consent: z.literal(true),
+      /** The sheet this was cloned while casting — a link for provenance, never ownership. */
+      sheetId: SlugSchema.optional(),
+    })
+    .strict(),
   z.object({ kind: z.literal("import-folder"), worldId: UlidSchema, sourcePath: z.string().min(1) }).strict(),
   /** SPEC-015 R-12..R-14: stage two — grounded extraction into a pending batch. */
   z

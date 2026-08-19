@@ -88,7 +88,11 @@ export interface SpeechSpec {
   model: string;
   voiceId: string;
   text: string;
-  format: "wav" | "mp3";
+  /**
+   * flac joins wav and mp3 (SPEC-022): ComfyUI's SaveAudio writes it, and a cache key that could
+   * not spell the format a provider actually returns would point at a file that never exists.
+   */
+  format: "wav" | "mp3" | "flac";
   language?: string;
   params?: Record<string, number>;
 }
@@ -110,6 +114,13 @@ export function speechCacheFile(spec: SpeechSpec): string {
 // No comfyui row: the voice recipe does not exist yet, and naming an id the manifest cannot
 // resolve mints cache keys against a model nothing can dispatch. Absent falls through to the
 // provider's own name, which is honest until the recipe lands with its real id.
+/** What a provider's preview lands as. ComfyUI's SaveAudio writes FLAC; the cloud rows write mp3. */
+const PREVIEW_FORMAT: Record<string, "wav" | "mp3" | "flac"> = {
+  kokoro: "wav",
+  comfyui: "flac",
+  elevenlabs: "mp3",
+};
+
 const PREVIEW_MODEL: Record<string, string> = {
   kokoro: "kokoro-82m",
   elevenlabs: "eleven_multilingual_v2",
@@ -129,7 +140,7 @@ export function previewCacheFile(
     model: model ?? PREVIEW_MODEL[provider] ?? provider,
     voiceId,
     text: line,
-    format: ext === "wav" ? "wav" : "mp3",
+    format: ext === "wav" ? "wav" : ext === "flac" ? "flac" : "mp3",
   });
 }
 
@@ -234,20 +245,36 @@ export class VoiceService {
     return (await this.localSpeech(store, voiceId, line.text)).file;
   }
 
-  /** The cloud-preview dispatch (R-2): through the queue, idempotency-protected, ledgered. */
-  cloudPreviewRequest(
-    worldId: string,
-    sheet: Sheet,
-    provider: string,
-    voiceId: string,
-    line: PreviewLine,
-    model: ManifestModel,
-  ): { input: EnqueueInput; cacheFile: string } {
+  /**
+   * A preview that goes through the queue (R-2): idempotency-protected, ledgered, cached.
+   *
+   * Named for the queue rather than for the cloud, because it is no longer only the cloud's. A
+   * cloned voice runs on this machine and still comes through here — being local changes what a
+   * take costs, not how it is made (SPEC-022 §2.1). Only Kokoro bypasses the queue, and that is
+   * because the Voxa sidecar answers synchronously with no job to track.
+   */
+  queuedPreviewRequest(input: {
+    worldId: string;
+    sheet: Sheet;
+    provider: string;
+    voiceId: string;
+    line: PreviewLine;
+    model: ManifestModel;
+    /**
+     * The reference clip, already resolved and uploaded to the engine, for a voice whose identity
+     * IS a clip. Absent for a catalogue voice, where the id alone names it.
+     */
+    speakerFile?: string;
+  }): { input: EnqueueInput; cacheFile: string } {
+    const { worldId, sheet, provider, voiceId, line, model, speakerFile } = input;
     const normalized = normalizeSpeechText(line.text);
-    // The caller's provider, not a hardcoded one: this function already takes `provider` and used
-    // to key the cache under "elevenlabs" regardless, so a second cloud provider's preview of the
-    // same voice id and line would have replayed ElevenLabs' audio (SPEC-022 §2.7).
-    const cacheFile = speechCacheFile({ provider, voiceId, text: normalized, model: model.id, format: "mp3" });
+    // The format the provider actually returns, not a guess: ComfyUI's SaveAudio writes FLAC, and
+    // keying an mp3 path for it would cache a hit that never matches the bytes on disk.
+    const format = PREVIEW_FORMAT[provider] ?? "mp3";
+    // The caller's provider, not a hardcoded one: this used to key the cache under "elevenlabs"
+    // regardless, so a second provider's preview of the same voice id and line would have replayed
+    // ElevenLabs' audio (SPEC-022 §2.7).
+    const cacheFile = speechCacheFile({ provider, voiceId, text: normalized, model: model.id, format });
     const name = cacheFile.slice(PREVIEW_CACHE_DIR.length + 1);
     return {
       cacheFile,
@@ -257,7 +284,13 @@ export class VoiceService {
         capability: "voice-tts",
         provider,
         model: model.id,
-        params: { voiceId, text: normalized },
+        params: {
+          voiceId,
+          text: normalized,
+          ...(speakerFile !== undefined ? { speakerFile } : {}),
+        },
+        // Unmetered rows estimate at zero, so a local preview states no price where a cloud one
+        // states an exact figure (turn 70). No branch needed — the manifest already says which.
         estimatedMicroUsd: estimateMicroUsd(model, { characters: normalized.length }),
         // Landed under its cache key, so reopening the picker replays without a call (R-10).
         landing: { dir: PREVIEW_CACHE_DIR, name },

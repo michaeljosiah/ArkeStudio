@@ -62,7 +62,13 @@ export interface RecipeCustomNode {
 
 export interface ComfyUiRecipe {
   id: string;
-  capability: "image" | "video";
+  /**
+   * `voice-tts` joins image and video (SPEC-021, amended 2026-08-19). Voxa covers preset speech and
+   * cannot clone, so a voice whose identity is a reference clip needs a model an ONNX sidecar cannot
+   * host — and everything else a recipe already gets (discovery, weights, gating, pinned nodes)
+   * applies to it unchanged.
+   */
+  capability: "image" | "video" | "voice-tts";
   displayName: string;
   recipeVersion: number;
   params: Record<string, RecipeParamSpec>;
@@ -237,7 +243,125 @@ const DRAFT_VIDEO: ComfyUiRecipe = {
   },
 };
 
-export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([DRAFT_IMAGE, DRAFT_VIDEO]);
+
+/**
+ * Local · Cloned Voice — IndexTTS 2.5 through TTS-Audio-Suite (SPEC-022).
+ *
+ * The first recipe that needs a custom node, and the first whose input is **a file the app owns**
+ * rather than a prompt. Both facts are load-bearing, and both were read off a running engine
+ * (`/object_info`, 2026-08-19) rather than from documentation, because the documented shape and the
+ * real one differ in three ways that would each have produced a recipe that validates and fails:
+ *
+ *   1. `UnifiedTTSTextNode.narrator_voice` is an enum scanned from the suite's own
+ *      `voices_examples/`. A cloned clip cannot be named there. It arrives instead through
+ *      `CharacterVoicesNode.opt_audio_input`, whose `NARRATOR_VOICE` feeds the wildcard
+ *      `opt_narrator` — and `narrator_voice` stays `"none"` while the connection wins.
+ *   2. `UnifiedTTSTextNode` emits an AUDIO tensor, not a file. Without `SaveAudio` after it there is
+ *      nothing on disk for `fetchArtifacts` to fetch.
+ *   3. `IndexTTSEngineNode` requires sixteen inputs. A dispatch missing three of them is refused by
+ *      the engine's own validation, which is how the first attempt at this graph was caught.
+ *
+ * The clip reaches `LoadAudio` by **filename**, because that input is a combo over the engine's
+ * `input/` directory — so a cloned voice's recording is uploaded to the engine (`POST /upload/image`
+ * takes audio) and the returned name bound here. No other recipe needs this; see SPEC-022 §2.11.
+ *
+ * Verified end to end on 2026-08-19: this graph produced 4.59s of cloned speech on an RTX 3080 and
+ * the output was fetched back through the same `/view` path the client uses.
+ */
+const CLONED_VOICE: ComfyUiRecipe = {
+  id: "comfyui-cloned-voice",
+  capability: "voice-tts",
+  displayName: "Local · Cloned Voice",
+  recipeVersion: 1,
+  params: {
+    // The words, verbatim — a line to speak, never a prompt describing a performance
+    // (SPEC-011 turn 70). The cap is ours: the node chunks longer text, and a scene line that
+    // needs chunking is a line that should have been two.
+    text: { kind: "string", required: true, maxChars: 2000, bind: [["4", "text"]] },
+    // The uploaded clip's filename on the engine, resolved from the voice library before dispatch.
+    // Internal because the user picks a VOICE, never a filename.
+    speakerFile: { kind: "string", internal: true, required: true, maxChars: 260, bind: [["1", "audio"]] },
+    seed: { kind: "int", min: 0, max: 2 ** 31 - 1, bind: [["4", "seed"]] },
+    // The delivery lever (SPEC-022 §2.5): emo_alpha under the node's own name. The eight-float
+    // vector needs IndexTTSEmotionOptionsNode, a fifth node this recipe deliberately does not wire
+    // in v1 — one honest control beats five that were never measured.
+    emotionAlpha: { kind: "int", internal: true, min: 0, max: 100, bind: [["3", "emotion_alpha"]] },
+  },
+  graph: {
+    "1": { class_type: "LoadAudio", inputs: { audio: "" } },
+    "2": {
+      class_type: "CharacterVoicesNode",
+      // `customized: true` with `voice_name: "none"` is what makes the connected audio the voice
+      // rather than a preset. reference_text stays empty: IndexTTS does not need the clip
+      // transcribed, and inventing one would put words in the reference it never said.
+      inputs: {
+        voice_name: "none",
+        reference_text: "",
+        trim_start: 0.0,
+        trim_end: 0.0,
+        customized: true,
+        opt_audio_input: ["1", 0],
+      },
+    },
+    "3": {
+      class_type: "IndexTTSEngineNode",
+      // All sixteen, at the node's own defaults except model_path. `use_deepspeed: false` matches
+      // SPEC-022 §2.6's constraint; `use_cuda_kernel` is absent from this node entirely, so the
+      // trap measured at 2x slower cannot be set here at all.
+      inputs: {
+        model_path: "IndexTTS-2.5",
+        device: "auto",
+        emotion_alpha: 1.0,
+        use_random: false,
+        max_text_tokens_per_segment: 120,
+        interval_silence: 200,
+        temperature: 0.8,
+        top_p: 0.8,
+        top_k: 30,
+        do_sample: true,
+        length_penalty: 0.0,
+        num_beams: 3,
+        repetition_penalty: 10.0,
+        max_mel_tokens: 1500,
+        use_fp16: true,
+        use_deepspeed: false,
+      },
+    },
+    "4": {
+      class_type: "UnifiedTTSTextNode",
+      inputs: {
+        TTS_engine: ["3", 0],
+        text: "",
+        // Stays "none". The clip arrives on opt_narrator, and a preset named here would compete
+        // with the voice the user actually chose.
+        narrator_voice: "none",
+        seed: 0,
+        opt_narrator: ["2", 0],
+      },
+    },
+    // SaveAudio writes FLAC. Named rather than defaulted-into: a take's format is the recipe's
+    // decision, and `verifyArtifact` checks the container it is told to expect.
+    "5": { class_type: "SaveAudio", inputs: { audio: ["4", 0], filename_prefix: "arke_voice" } },
+  },
+  outputNode: "5",
+  requires: {
+    // No checkpoints entry: the engine node fetches IndexTTS 2.5 from Hugging Face on first use
+    // into the engine's own cache, which is the one weight path Arke does not resolve. ~10.2 GB.
+    // SPEC-022 §2.11 records why this differs from every other recipe.
+    checkpoints: [],
+    customNodes: [
+      { id: "TTS-Audio-Suite", pinnedRef: "dedd982ab999633d5296c3e5a152ef772941fb82" },
+    ],
+  },
+  hardware: {
+    minVramMb: 6000,
+    recommendedVramMb: 10000,
+    floorSource:
+      "measured on Arke reference hardware 2026-08-18: RTX 3080, bf16, peak 5.44 GB across four line lengths; floor set above the measured peak so the display is not squeezed",
+  },
+};
+
+export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([DRAFT_IMAGE, DRAFT_VIDEO, CLONED_VOICE]);
 
 export function comfyUiRecipeById(modelId: string): ComfyUiRecipe | null {
   return COMFYUI_RECIPES.find((recipe) => recipe.id === modelId) ?? null;
@@ -404,6 +528,19 @@ export const WAN_DIMENSIONS: Record<string, { width: number; height: number }> =
 };
 
 export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
+  {
+    id: CLONED_VOICE.id,
+    provider: "comfyui",
+    capability: "voice-tts",
+    displayName: CLONED_VOICE.displayName,
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    // maxPromptChars is the LINE's cap, not a prompt's — the words are the content (turn 70).
+    limits: { maxPromptChars: 2000 },
+    // Unmetered, and therefore no per-character figure: a local read costs nothing, where an
+    // ElevenLabs row states an exact price (SPEC-022 §1.3, turn 70's no-tilde rule).
+    pricing: { kind: "unmetered" },
+    requires: { vramMb: CLONED_VOICE.hardware.minVramMb, diskMb: 10500 },
+  },
   {
     id: DRAFT_IMAGE.id,
     provider: "comfyui",

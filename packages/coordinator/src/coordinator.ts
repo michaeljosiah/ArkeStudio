@@ -115,6 +115,7 @@ import {
   type SidecarLike,
   voiceLineRequest,
 } from "./voice/service.js";
+import { clipFor, cloneVoice } from "./voice/library.js";
 import { atomicWriteFile } from "./world/atomic.js";
 import { applyTurnBibleEdits, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
@@ -4078,6 +4079,41 @@ export class Coordinator {
         if (this.opts.appRoot) this.opts.openPath?.(this.opts.appRoot);
         return;
       }
+      case "clone-voice": {
+        // The clip becomes a voice, or the reason it did not. Both are events rather than a
+        // throw: the clone dialog states the refusal in the words newClonedVoice chose, and the
+        // rules live in one place rather than being re-stated here (SPEC-022 §2.3, D3).
+        const store = this.opts.provider.openStore?.();
+        if (!store) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.cloned",
+            worldId: msg.worldId,
+            voiceId: null,
+            label: null,
+            reason: "Open the world first.",
+          });
+          return;
+        }
+        const made = await cloneVoice(store, store.getBundle().clonedVoices, {
+          sourcePath: msg.sourcePath,
+          name: msg.name,
+          description: msg.description,
+          consent: msg.consent,
+          ...(msg.sheetId !== undefined ? { sheetId: msg.sheetId } : {}),
+        });
+        this.emit({
+          at: new Date().toISOString(),
+          type: "voice.cloned",
+          worldId: msg.worldId,
+          voiceId: made.ok ? made.voice.id : null,
+          label: made.ok ? made.voice.name : null,
+          reason: made.ok ? null : made.reason,
+        });
+        // The library is in the bundle, so the picker sees the new voice on the next snapshot.
+        if (made.ok) await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "file-artifact": {
         await this.fileOne(msg.worldId, msg.sourcePath, {
           ...(msg.links !== undefined ? { links: msg.links } : {}),
@@ -4397,7 +4433,13 @@ export class Coordinator {
         const candidate = (await this.voiceService.catalogue(bundle.clonedVoices)).find(
           (entry) => entry.provider === msg.provider && entry.voiceId === msg.voiceId,
         );
-        if (!candidate || (msg.provider !== "kokoro" && msg.provider !== "elevenlabs")) {
+        if (!candidate) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Choose an available voice again.");
+          return;
+        }
+        // kokoro answers synchronously off the sidecar; everything else — cloud or a local recipe —
+        // goes through the queue below.
+        if (msg.provider !== "kokoro" && msg.provider !== "elevenlabs" && msg.provider !== "comfyui") {
           this.rejectEnqueue(msg.requestId, msg.kind, "Choose an available voice again.");
           return;
         }
@@ -4481,14 +4523,32 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "No cloud voice model is available for this provider.");
           return;
         }
-        const request = this.voiceService.cloudPreviewRequest(
-          msg.worldId,
+        // A cloned voice speaks from a clip, so the clip has to exist before a job is enqueued.
+        // Missing means the recording was deleted from under the library: reported with the reason
+        // rather than dispatched into a take that cannot finish (SPEC-022 §1.3).
+        let speakerFile: string | undefined;
+        if (msg.provider === "comfyui") {
+          const voice = bundle.clonedVoices.find((v) => v.id === msg.voiceId);
+          const clip = voice ? await clipFor(store, voice) : null;
+          if (clip === null) {
+            this.rejectEnqueue(
+              msg.requestId,
+              msg.kind,
+              "That voice's recording is missing — re-clone it, or choose another voice.",
+            );
+            return;
+          }
+          speakerFile = clip;
+        }
+        const request = this.voiceService.queuedPreviewRequest({
+          worldId: msg.worldId,
           sheet,
-          msg.provider,
-          msg.voiceId,
+          provider: msg.provider,
+          voiceId: msg.voiceId,
           line,
           model,
-        );
+          ...(speakerFile !== undefined ? { speakerFile } : {}),
+        });
         request.input.params = {
           ...request.input.params,
           requestId: msg.requestId,

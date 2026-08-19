@@ -98,16 +98,40 @@ describe("the recipe catalogue projects into the manifest like any other model",
     assert.equal(dispatchDuration(row, 8).kind, "over-cap");
   });
 
-  it("zero custom nodes ship (D11), while every checkpoint pin is a real digest", () => {
+  it("every dependency a recipe declares is pinned to something verifiable", () => {
+    // D11 said v1 ships zero custom nodes and any future node is vendored. The cloned-voice recipe
+    // (SPEC-022) is that future node arriving: an engine of this class cannot run on core nodes.
+    // So the invariant under test is the one D11 was protecting — nothing unpinned — rather than
+    // the count it happened to state while the count was zero.
     for (const recipe of COMFYUI_RECIPES) {
-      assert.equal(recipe.requires.customNodes.length, 0, recipe.id);
-      assert.ok(recipe.requires.checkpoints.length > 0, recipe.id);
+      for (const node of recipe.requires.customNodes) {
+        assert.match(node.pinnedRef, /^[0-9a-f]{40}$/, `${recipe.id}: ${node.id} needs a commit pin`);
+      }
       for (const checkpoint of recipe.requires.checkpoints) {
         assert.match(checkpoint.sha256, /^[0-9a-f]{64}$/, checkpoint.file);
         assert.ok(checkpoint.sizeMb > 0);
         assert.match(checkpoint.url, /^https:\/\/huggingface\.co\//);
       }
     }
+  });
+
+  it("the image and video recipes still need no custom node (D11 holds where it was written)", () => {
+    for (const id of ["comfyui-draft-image", "comfyui-draft-video"]) {
+      const recipe = comfyUiRecipeById(id)!;
+      assert.equal(recipe.requires.customNodes.length, 0, id);
+      assert.ok(recipe.requires.checkpoints.length > 0, id);
+    }
+  });
+
+  it("the cloned voice declares its node and fetches its own weights (SPEC-022)", () => {
+    const voice = comfyUiRecipeById("comfyui-cloned-voice")!;
+    assert.equal(voice.capability, "voice-tts");
+    assert.equal(voice.requires.customNodes[0]?.id, "TTS-Audio-Suite");
+    // No checkpoint entries: the engine node fetches IndexTTS 2.5 itself on first use. That is a
+    // real difference from every other recipe and is why it is asserted rather than assumed.
+    assert.deepEqual(voice.requires.checkpoints, []);
+    assert.equal(voice.hardware.minVramMb, 6000);
+    assert.match(voice.hardware.floorSource, /measured on Arke reference hardware/);
   });
 });
 

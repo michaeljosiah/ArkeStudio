@@ -23,11 +23,14 @@ import {
 const DIGEST = "a".repeat(64);
 
 describe("the comfyui provider row", () => {
-  it("is local, keyless, and serves image and video", () => {
+  it("is local, keyless, and serves image, video and local cloned voice", () => {
     assert.equal(ProviderIdSchema.safeParse("comfyui").success, true);
     assert.deepEqual(PROVIDERS.comfyui, {
       displayName: "ComfyUI",
-      capabilities: ["image", "video"],
+      // voice-tts since SPEC-022: a cloned voice runs here as a recipe. Deliberately NOT
+      // voice-clone — cloning is what the app does to a recording, not something it asks an
+      // engine for, and a capability probe claiming otherwise is what sank the indextts row.
+      capabilities: ["image", "video", "voice-tts"],
       local: true,
       credential: "none",
     });

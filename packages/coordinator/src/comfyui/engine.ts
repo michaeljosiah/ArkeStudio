@@ -27,7 +27,10 @@ import type { ChildSupervisor, SupervisedSpec } from "../supervisor.js";
 export interface ComfyUiRecipeFacts {
   id: string;
   displayName: string;
-  capability: "image" | "video";
+  // Mirrors ComfyUiRecipe.capability, which admits voice-tts since SPEC-022. These facts are a
+  // projection of the recipe, so a narrower type here silently excludes a recipe the catalogue
+  // ships.
+  capability: "image" | "video" | "voice-tts";
   version: number;
   minVramMb: number;
   recommendedVramMb: number;
