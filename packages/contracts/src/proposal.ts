@@ -20,6 +20,10 @@ export const ProposalKindSchema = z.enum([
   "story-overview",
   "scene-draft",
   "scene-edit",
+  /** SPEC-023 R-17: the narrative-domain JSON entities, each staged whole through the gate. */
+  "series-edit",
+  "season-edit",
+  "episode-edit",
   "extraction",
     "restore",
     "art-direction",

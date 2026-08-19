@@ -7,9 +7,12 @@ import {
   DEFAULT_AUDIO_POLICY,
   type AudioPolicy,
   CHARACTER_ROLE_MAX,
+  EpisodeSchema,
   newId,
   ProposalSchema,
   RipplePreviewSchema,
+  SeasonSchema,
+  SeriesSchema,
   StoryOverviewSchema,
   type Proposal,
   type ProposalConflict,
@@ -35,6 +38,28 @@ import {
 } from "./draft-journal.js";
 import { applyFieldEdit, safeFieldEditMessage } from "./field-edit.js";
 import { applyJsonResolution, applyResolution, mergeJson, mergeMarkdown } from "./merge.js";
+
+/**
+ * The schema each JSON track's whole file must satisfy (SPEC-023 R-17): checked at staging so a
+ * malformed record never reaches review, and again at accept so review edits and conflict
+ * resolutions cannot smuggle one out. Scenes are validated by their own staging paths and are
+ * deliberately absent here — SceneSchema is the read path, and the gate refusing a legacy shape
+ * the scanner tolerates would strand an old scene behind its own Accept button.
+ */
+const JSON_TRACK_SCHEMAS: Partial<Record<ReturnType<typeof classify>["track"], { parse: (v: unknown) => unknown }>> = {
+  story: StoryOverviewSchema,
+  season: SeasonSchema,
+  episode: EpisodeSchema,
+  series: SeriesSchema,
+};
+
+/** The refusal names the record in a person's words, not the commit track's. */
+const JSON_TRACK_LABELS: Partial<Record<ReturnType<typeof classify>["track"], string>> = {
+  story: "story overview",
+  season: "season",
+  episode: "episode",
+  series: "series record",
+};
 
 /**
  * The accept gate (SPEC-004): one path into the world. A proposal is materialised with its
@@ -257,18 +282,19 @@ export class ProposalManager {
           throw new LookAlreadyProposedError(open.proposal.id);
         }
       }
-      if (input.kind === "story-overview") {
-        // Malformed structured JSON is refused before a proposal directory exists (issue #385):
-        // nothing should reach review that the scanner would then drop from the bundle.
-        for (const target of input.targets) {
-          if (classify(target.path).track !== "story" || target.content === undefined) continue;
-          try {
-            StoryOverviewSchema.parse(JSON.parse(target.content));
-          } catch (err) {
-            throw new Error(
-              `${target.path} is not a story overview: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`,
-            );
-          }
+      // Malformed structured JSON is refused before a proposal directory exists (issues #385,
+      // #400): nothing should reach review that the scanner would then drop from the bundle.
+      for (const target of input.targets) {
+        if (target.content === undefined) continue;
+        const track = classify(target.path).track;
+        const schema = JSON_TRACK_SCHEMAS[track];
+        if (!schema) continue;
+        try {
+          schema.parse(JSON.parse(target.content));
+        } catch (err) {
+          throw new Error(
+            `${target.path} is not a ${JSON_TRACK_LABELS[track] ?? track}: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`,
+          );
         }
       }
       const id = newId("pr");
@@ -664,15 +690,16 @@ export class ProposalManager {
     const problems: Array<{ path: string; message: string }> = [];
     for (const file of files) {
       // A delete carries no content and cannot introduce a role.
-      if (file.content !== undefined && classify(file.path).track === "story") {
-        // The structured overview is refused before acceptance when it is malformed or out of
-        // scope (issue #385): a reviewer cannot be handed JSON the scanner would then drop.
+      const jsonSchema = file.content !== undefined ? JSON_TRACK_SCHEMAS[classify(file.path).track] : undefined;
+      if (file.content !== undefined && jsonSchema) {
+        // Structured JSON is refused before acceptance when it is malformed or out of scope
+        // (issues #385, #400): a reviewer cannot be handed JSON the scanner would then drop.
         try {
-          StoryOverviewSchema.parse(JSON.parse(file.content));
+          jsonSchema.parse(JSON.parse(file.content));
         } catch (err) {
           problems.push({
             path: file.path,
-            message: `not a story overview: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`,
+            message: `not a ${JSON_TRACK_LABELS[classify(file.path).track] ?? "valid record"}: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`,
           });
         }
         continue;
@@ -792,7 +819,7 @@ export class ProposalManager {
         // JSON tracks merge in the JSON lane (SPEC-023 R-18): mergeMarkdown would re-serialise
         // them with frontmatter fences, leaving files that no longer parse.
         const track = classify(target.path).track;
-        const jsonTrack = track === "scene" || track === "story" || track === "season" || track === "series";
+        const jsonTrack = track === "scene" || track === "story" || track === "season" || track === "episode" || track === "series";
         const merge = jsonTrack
           ? mergeJson(target.path, base, mine, live)
           : mergeMarkdown(target.path, base, mine, live);
@@ -877,7 +904,7 @@ export class ProposalManager {
       } else {
         const track = classify(path).track;
         resolved =
-          track === "scene" || track === "story" || track === "season" || track === "series"
+          track === "scene" || track === "story" || track === "season" || track === "episode" || track === "series"
             ? applyJsonResolution(current, conflict, choice)
             : applyResolution(path, current, conflict, choice);
       }
@@ -1081,7 +1108,7 @@ function readVersion(path: string, raw: string): number | null {
         (data["amendedAt"] as number | undefined) ?? 0,
       );
     }
-    if (kind.track === "scene" || kind.track === "story" || kind.track === "season" || kind.track === "series") {
+    if (kind.track === "scene" || kind.track === "story" || kind.track === "season" || kind.track === "episode" || kind.track === "series") {
       return ((JSON.parse(raw) as { version?: number }).version ?? 1);
     }
     if (kind.track === "art-direction") return ArtDirectionRecordSchema.parse(JSON.parse(raw)).version;

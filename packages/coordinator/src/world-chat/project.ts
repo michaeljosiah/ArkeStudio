@@ -26,6 +26,15 @@ function subjectKindOf(candidate: WorldChangeCandidate, sheetVersion?: (slug: st
   // The world look is not one of the world's entities, so no subject ref describes it: whatever
   // the model names, "This world · world" is true and says nothing about what is changing.
   if (candidate.classification === "art-direction.change") return "world look";
+  // Production records name themselves (SPEC-023 R-20): the target says exactly which file the
+  // proposition would rewrite, and the panel should say the same.
+  if (candidate.classification === "development.overview") return "story overview";
+  if (candidate.classification === "development.season") return "season";
+  if (candidate.classification === "development.episode") {
+    return candidate.target.episodeId === undefined ? "new episode" : `episode · ${candidate.target.episodeId}`;
+  }
+  if (candidate.classification === "development.scene-script") return `scene script · ${candidate.target.sceneId}`;
+  if (candidate.classification === "development.series") return `series · ${candidate.target.seriesId}`;
   const subject = candidate.subject;
   if (subject.kind === "new") {
     switch (candidate.classification) {
@@ -49,6 +58,15 @@ function subjectKindOf(candidate: WorldChangeCandidate, sheetVersion?: (slug: st
 
 function subjectLabelOf(candidate: WorldChangeCandidate, sheetName?: (slug: string) => string | null): string {
   if (candidate.classification === "art-direction.change") return "Art direction";
+  if (
+    candidate.classification === "development.overview" ||
+    candidate.classification === "development.season" ||
+    candidate.classification === "development.episode"
+  ) {
+    return candidate.target.productionId;
+  }
+  if (candidate.classification === "development.scene-script") return candidate.target.sceneId;
+  if (candidate.classification === "development.series") return candidate.target.seriesId;
   const subject = candidate.subject;
   if (subject.kind === "new") return subject.label;
   if (subject.kind === "canon") return subject.entryId;
@@ -257,6 +275,8 @@ export function projectWorkspace(
   return {
     conversationId: loaded.id,
     status: loaded.status,
+    // The mode changes initiative, never acceptance authority (SPEC-023 R-21).
+    initiative: loaded.initiative ?? "collaborate",
     messages: loaded.messages.map((m) => ({
       id: m.id,
       role: m.role,

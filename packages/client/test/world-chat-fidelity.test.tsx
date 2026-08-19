@@ -61,6 +61,7 @@ function stateWithConversation(): ClientState {
     worldChat: {
       conversationId: CONVERSATION_ID as never,
       status: "open",
+      initiative: "collaborate",
       hasMore: false,
       runStatus: null,
       runStartedAt: null,

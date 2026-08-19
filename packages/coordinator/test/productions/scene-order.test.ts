@@ -86,14 +86,17 @@ describe("scene identity and explicit order (issue 387)", () => {
     const before = await scanWorld(dir);
     const saltlight = before.bundle.productions.find((p) => p.meta.id === "saltlight")!;
     const spine: ProductionSpine = {
-      version: 1,
-      track: { artifactId: "art_track", durationSec: 30 },
+      schemaVersion: 1,
+      revision: 1,
+      trackArtifactId: "art_track",
+      markers: [],
       anchors: {
-        sh_20: { startSec: 0 },
-        sh_12: { startSec: 10 },
-        sh_04: { startSec: 20 },
+        sh_20: { startSec: 0, endSec: 8, clipAudio: { mode: "mute" } },
+        sh_12: { startSec: 10, endSec: 18, clipAudio: { mode: "mute" } },
+        sh_04: { startSec: 20, endSec: 28, clipAudio: { mode: "mute" } },
       },
-    } as ProductionSpine;
+      updatedAt: "2026-08-19T12:00:00.000Z",
+    };
     const cutBefore = deriveSpineCut(saltlight, spine, 30);
 
     await reorderScenes(store, "saltlight", ["sc_06", "sc_02", "sc_04"]);

@@ -331,6 +331,8 @@ const state: ClientState = {
         story: null,
         season: null,
         sceneFiles: { sc_04: "04-the-verse-rises" },
+        episodes: [],
+        episodeFiles: {},
         treatment: "A short film. One night's watch on the Vigil, told at the pace of the water.",
         chapters: [],
         scenes: [

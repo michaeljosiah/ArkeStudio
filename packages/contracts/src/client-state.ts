@@ -31,7 +31,7 @@ import {
 import { SetupStatusSchema } from "./setup.js";
 import { ReferenceKitSchema } from "./reference.js";
 import { SceneSchema, SelectionsSchema } from "./scene.js";
-import { SceneIdSchema } from "./ids.js";
+import { EpisodeIdSchema, SceneIdSchema } from "./ids.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
 import { ClonedVoiceSchema, VoiceRuntimeStatusSchema } from "./voice.js";
 import { IDLE_UPDATE_STATE, UpdateStateSchema } from "./update.js";
@@ -39,6 +39,7 @@ import { sheetDir } from "./sheet-shapes.js";
 import {
   CanonEntrySchema,
   ChapterSummarySchema,
+  EpisodeSchema,
   ProductionSchema,
   SeasonSchema,
   SeriesSchema,
@@ -130,6 +131,10 @@ export const ProductionBundleSchema = z
      * Defaulted: a read path, and bundles from before it existed must still parse.
      */
     sceneFiles: z.record(SceneIdSchema, z.string().min(1)).default({}),
+    /** Episodes in explicit order (SPEC-023 R-12); empty for non-episodic productions. */
+    episodes: z.array(EpisodeSchema).default([]),
+    /** Episode id → on-disk file stem, captured at scan like sceneFiles. */
+    episodeFiles: z.record(EpisodeIdSchema, z.string().min(1)).default({}),
     takes: z.array(TakeSchema),
     reviews: z.array(ReviewDecisionSchema),
     selections: SelectionsSchema,

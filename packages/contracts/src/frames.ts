@@ -10,7 +10,7 @@ import { HarnessEngineSchema } from "./harness.js";
 import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
 import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
 import { CHARACTER_ROLE_MAX, ProductionFormatSchema, ProductionMediumSchema } from "./world.js";
-import { WorldChatContextSchema } from "./world-chat.js";
+import { WorldChatContextSchema, WorldChatInitiativeSchema } from "./world-chat.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then `event` frames, sequence
@@ -461,6 +461,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * anything: proposals from its wrap-up outlive it and hold deletion open until they are
    * decided. No `requestId` — appending the same lifecycle event twice folds to the same status.
    */
+  z
+    .object({
+      kind: z.literal("world-chat-set-initiative"),
+      worldId: UlidSchema,
+      conversationId: ConversationIdSchema,
+      initiative: WorldChatInitiativeSchema,
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("world-chat-archive"),

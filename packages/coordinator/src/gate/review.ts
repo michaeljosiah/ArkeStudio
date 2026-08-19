@@ -2,6 +2,9 @@ import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
   CanonEntrySchema,
+  EpisodeSchema,
+  SeasonSchema,
+  SeriesSchema,
   SheetSchema,
   StoryOverviewSchema,
   type Proposal,
@@ -83,6 +86,52 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
       }
       if (overview.targetLength !== undefined) fields.set("Target length", overview.targetLength);
       return { label: `Story overview v${overview.version}`, kind: "story overview", fields };
+    } catch {
+      return null;
+    }
+  }
+
+  // The remaining narrative-domain JSON tracks (SPEC-023 R-18, issue #400): every field a
+  // reviewer would otherwise accept unseen.
+  if (/^productions\/[a-z0-9-]+\/season\.json$/.test(path)) {
+    try {
+      const season = SeasonSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>();
+      if (season.question !== undefined) fields.set("Question", season.question);
+      if (season.ending !== undefined) fields.set("Ending", season.ending);
+      if (season.direction !== undefined) fields.set("Direction", season.direction);
+      for (const arc of season.arcs ?? []) fields.set(`Arc · ${arc.title}`, arc.note ?? "—");
+      if (season.defaults !== undefined) fields.set("Defaults", JSON.stringify(season.defaults));
+      return { label: `Season v${season.version}`, kind: "season", fields };
+    } catch {
+      return null;
+    }
+  }
+  if (/^productions\/[a-z0-9-]+\/episodes\/[^/]+\.json$/.test(path)) {
+    try {
+      const episode = EpisodeSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>();
+      fields.set("Title", episode.title);
+      fields.set("Order", String(episode.order));
+      if (episode.promise?.opens !== undefined) fields.set("Opens", episode.promise.opens);
+      if (episode.promise?.turn !== undefined) fields.set("Turn", episode.promise.turn);
+      if (episode.promise?.closes !== undefined) fields.set("Closes", episode.promise.closes);
+      fields.set("Scenes", episode.scenes.length > 0 ? episode.scenes.join(", ") : "none yet");
+      if (episode.release !== undefined) fields.set("Release", JSON.stringify(episode.release));
+      return { label: `${episode.title} (${episode.id})`, kind: `episode · v${episode.version}`, fields };
+    } catch {
+      return null;
+    }
+  }
+  if (/^series\/[a-z0-9-]+\.json$/.test(path)) {
+    try {
+      const series = SeriesSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>();
+      fields.set("Title", series.title);
+      if (series.engine !== undefined) fields.set("Engine", series.engine);
+      if (series.continuity !== undefined) fields.set("Continuity", series.continuity);
+      fields.set("Seasons", series.seasons.join(", ") || "none yet");
+      return { label: `${series.title} (series)`, kind: `series · v${series.version}`, fields };
     } catch {
       return null;
     }

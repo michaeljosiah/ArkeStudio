@@ -16,6 +16,8 @@ import {
   ChangeRecordSchema,
   ChapterFrontmatterSchema,
   type ChapterFrontmatter,
+  EpisodeSchema,
+  type Episode,
   ProductionSchema,
   ProposalSchema,
   ReferenceKitSchema,
@@ -460,6 +462,26 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     }
     const scenes = sortScenes(sceneEntries.map((e) => e.scene));
 
+    // Episodes (SPEC-023 R-12): explicit order with stem tie-break; stems captured like scenes'.
+    const episodeEntries: Array<{ file: string; episode: Episode }> = [];
+    const episodeFiles: Record<string, string> = {};
+    for (const file of (await listDir(join(pdir, "episodes"))).filter((f) => f.endsWith(".json")).sort()) {
+      const episode = await tryParse(`productions/${id}/episodes/${file}`, (raw) => EpisodeSchema.parse(JSON.parse(raw)));
+      if (!episode) continue;
+      const stem = file.slice(0, -".json".length);
+      if (episodeFiles[episode.id] !== undefined) {
+        problems.push({
+          path: toPortable(`productions/${id}/episodes/${file}`),
+          message: `duplicate episode id ${episode.id} — already carried by ${episodeFiles[episode.id]}.json`,
+        });
+        continue;
+      }
+      episodeFiles[episode.id] = stem;
+      episodeEntries.push({ file: stem, episode });
+    }
+    episodeEntries.sort((a, b) => a.episode.order - b.episode.order || (a.file < b.file ? -1 : 1));
+    const episodes = episodeEntries.map((e) => e.episode);
+
     const takes = [];
     const takeMediaInfo: ProductionBundle["takeMediaInfo"] = {};
     for (const takeDir of await listDir(join(pdir, "takes"))) {
@@ -587,6 +609,8 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       chapters,
       scenes,
       sceneFiles,
+      episodes,
+      episodeFiles,
       takes,
       reviews,
       selections,

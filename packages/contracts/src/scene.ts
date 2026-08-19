@@ -1,5 +1,21 @@
 import { z } from "zod";
-import { IsoDateTimeSchema, SceneIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { IsoDateTimeSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+
+/**
+ * A scene-script block (SPEC-023 R-13): the smallest stable thing a shot can cite. Block ids
+ * survive edits and reorders; a shot cites the digest of the text it covered, so staleness is a
+ * pure derivation and no stored flag can lie.
+ */
+export const ScriptBlockSchema = z
+  .object({
+    id: z.string().regex(/^blk_[a-z0-9-]+$/, "expected blk_<slug>"),
+    kind: z.enum(["action", "dialogue"]),
+    /** Dialogue names its speaker by sheet slug; action has none. */
+    speaker: SlugSchema.optional(),
+    text: z.string().min(1),
+  })
+  .strict();
+export type ScriptBlock = z.infer<typeof ScriptBlockSchema>;
 
 /**
  * Scenes and shots (master spec §2.3.4, §9).
@@ -30,6 +46,14 @@ export const ShotSchema = z
     camera: z.string().optional(),
     audio: ShotAudioSchema.optional(),
     durationSec: z.number().positive().optional(),
+    /**
+     * Script coverage (SPEC-023 R-13): the block ids this shot covers, each with the sha256 of
+     * the block text at citation time. A digest mismatch derives "covers text that changed"; a
+     * missing block derives "covers nothing" — derived, never stored as status.
+     */
+    covers: z
+      .array(z.object({ blockId: z.string().min(1), textDigest: Sha256Schema }).strict())
+      .optional(),
     /**
      * An edited prompt, stored as an override, never a replacement (SPEC-012 R-15, D6): the
      * assembled form stays derivable, Reset stays possible, and the recorded sheet versions
@@ -137,6 +161,16 @@ export const SceneSchema = z
         skillId: z.string().min(1),
         version: z.number().int().min(1),
         family: z.string().min(1),
+      })
+      .strict()
+      .optional(),
+    /**
+     * The scene script (SPEC-023 R-13): ordered blocks with stable ids that shots cite by
+     * digest. Optional — a script-less scene is an ordinary scene, and the board still works.
+     */
+    script: z
+      .object({
+        blocks: z.array(ScriptBlockSchema),
       })
       .strict()
       .optional(),

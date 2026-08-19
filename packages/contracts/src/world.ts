@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CanonIdSchema, IsoDateSchema, IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
+import { CanonIdSchema, EpisodeIdSchema, IsoDateSchema, IsoDateTimeSchema, SceneIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 // The same bound the world's list uses, shared rather than restated: two copies of one
 // constraint is how a list and its copy come to disagree (issue 243's finalization bug).
 import { FailureModesSchema } from "./art-direction.js";
@@ -306,6 +306,54 @@ export const SeasonSchema = z
   })
   .strict();
 export type Season = z.infer<typeof SeasonSchema>;
+
+/**
+ * productions/<p>/episodes/<stem>.json — one file per episode (SPEC-023 R-12). The stem and id
+ * are stable at creation; `order` alone places the episode, and the ordered `scenes` array is
+ * the single membership and within-episode order authority — scene files carry no episode
+ * field, so membership can never disagree with itself. Versioned on the `episode` track.
+ */
+export const EpisodeSchema = z
+  .object({
+    id: EpisodeIdSchema,
+    version: z.number().int().min(1),
+    order: z.number().int().min(1),
+    title: z.string().min(1),
+    /** Turn 53: an episode is its promise and its scenes — how it opens, where it turns, how it closes. */
+    promise: z
+      .object({
+        opens: z.string().optional(),
+        turn: z.string().optional(),
+        closes: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+    scenes: z.array(SceneIdSchema),
+    /** A boundary-crossing moment is two linked scenes; this records the pairing (SPEC-023 R-12). */
+    linked: z
+      .object({
+        closesInto: EpisodeIdSchema.optional(),
+        opensFrom: EpisodeIdSchema.optional(),
+      })
+      .strict()
+      .optional(),
+    /** The release record an episode deliverable owns (SPEC-023 R-15); export work is #396. */
+    release: z
+      .object({
+        title: z.string().optional(),
+        description: z.string().optional(),
+        thumbnailTakeId: z.string().optional(),
+        tags: z.array(z.string().min(1)).optional(),
+        recap: z.string().optional(),
+        teaser: z.string().optional(),
+        crops: z.array(z.object({ label: z.string().min(1), aspect: z.string().min(1) }).strict()).optional(),
+        metadata: z.record(z.string(), z.string()).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type Episode = z.infer<typeof EpisodeSchema>;
 
 /** story.json — the authored overview a story production drafts against (§8.3). Versioned. */
 export const StoryOverviewSchema = z

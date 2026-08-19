@@ -36,6 +36,15 @@ const REQUIRED_BY_CLASSIFICATION: Record<WorldChangeClassification, readonly Che
   // answer "does this already exist, and what does it touch?", and here both answers are known.
   "art-direction.change": [],
   "media.image-opportunity": ["target-read"],
+  // The production entities are not reachable through the world-query tools — the entry context
+  // carries the production, and the coordinator narrates the current overview, season, episode
+  // and script into the turn itself. The same reasoning as the world look: both answers the
+  // checks exist to give are already in the room (SPEC-023 R-20).
+  "development.overview": [],
+  "development.season": [],
+  "development.episode": [],
+  "development.scene-script": [],
+  "development.series": [],
   // Undecided needs whatever each plausible action would need, and stays partial until it is
   // decided — which is why it can never become a proposal.
   undecided: [],

@@ -4,6 +4,7 @@ import {
   newId,
   type ConversationId,
   type WorldChatContext,
+  type WorldChatInitiative,
   type WorldChatDeletionBlock,
   type WorldChatLoaded,
   type WorldChatSummary,
@@ -120,6 +121,14 @@ export class WorldChatService {
 
   async setContext(id: ConversationId, entryContext: WorldChatContext): Promise<void> {
     await this.store(id).append({ type: "conversation.metadata-updated", entryContext }, { at: this.now() });
+  }
+
+  /** The mode changes initiative, never acceptance authority (SPEC-023 R-21). */
+  async setInitiative(id: ConversationId, initiative: WorldChatInitiative, requestId?: string): Promise<void> {
+    await this.store(id).append(
+      { type: "conversation.metadata-updated", initiative },
+      { at: this.now(), ...(requestId ? { requestId } : {}) },
+    );
   }
 
   /** Archiving is reversible and loses nothing; it is the safe alternative to deleting. */

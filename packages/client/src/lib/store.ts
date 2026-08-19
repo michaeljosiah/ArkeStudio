@@ -2796,6 +2796,15 @@ export function useWorldChatProgress(
 }
 
 /** Shelve a conversation. Reversible, and loses nothing. */
+/** The mode changes initiative, never acceptance authority (SPEC-023 R-21). */
+export function setWorldChatInitiative(
+  worldId: string,
+  conversationId: string,
+  initiative: "assist" | "collaborate" | "develop",
+): void {
+  send({ kind: "world-chat-set-initiative", worldId, conversationId, initiative });
+}
+
 export function archiveWorldChat(worldId: string, conversationId: string): void {
   send({ kind: "world-chat-archive", worldId, conversationId });
 }

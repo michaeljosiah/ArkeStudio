@@ -52,6 +52,7 @@ import { mediaUrl } from "../lib/media.js";
 import { CanonEntryRow } from "../domain/domain.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
+import { useTalkItThrough } from "../lib/talk-it-through.js";
 import { posterize, posterNameFor } from "../lib/poster.js";
 import { useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
@@ -733,6 +734,7 @@ export function StoryScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
+  const { talk, starting: talkStarting } = useTalkItThrough(worldId);
   const story = production?.story ?? null;
   // The direct overview editor (issue 385): fields staged through the gate, never written live.
   const [editing, setEditing] = useState(false);
@@ -771,10 +773,15 @@ export function StoryScreen() {
           )}
         </div>
         <div style={{ flex: "none", padding: "14px 36px 22px" }}>
-          <div className="fy-composer">
-            <span className="fy-composer__hint">Keep shaping the story… · authored through the gate</span>
-            <span className="fy-mono">↵ send</span>
-          </div>
+          {/* The durable Development thread (SPEC-023 R-20, issue 400): one continuous
+              conversation over the production, with the same wrap-up gate as world chat. */}
+          <Button
+            variant="primary"
+            disabled={talkStarting || !prodId}
+            onClick={() => prodId && talk(`Development · ${production?.meta.title ?? prodId}`, { kind: "production", productionId: prodId })}
+          >
+            {talkStarting ? "Opening the thread…" : "Talk it through · the Development thread"}
+          </Button>
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
             <span className="fy-mono">in context:</span>
             <span className="fy-pill">
@@ -1006,6 +1013,7 @@ export function SceneDetailScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const { state } = useStore();
   const navigate = useNavigate();
+  const { talk, starting: talkStarting } = useTalkItThrough(worldId);
   const [tab, setTab] = useState<"shots" | "board">("shots");
   const scene = production?.scenes.find((s) => s.id === sceneId);
   if (!production || !scene) {
@@ -1032,6 +1040,15 @@ export function SceneDetailScreen() {
             {scene.shots.length} shots · {seconds(totalSec)}
           </span>
           <span className="fy-h1row__push" />
+          {/* The durable scene thread (SPEC-023 R-20, issue 400): script blocks are proposed
+              here and land through the same gate as everything else. */}
+          <Button
+            variant="ghost"
+            disabled={talkStarting || !prodId}
+            onClick={() => prodId && talk(`Scene · ${scene.title}`, { kind: "scene", productionId: prodId, sceneId: scene.id })}
+          >
+            {talkStarting ? "Opening…" : "Talk it through"}
+          </Button>
           <span className="fy-seg">
             <button type="button" className={cx("fy-seg__item", tab === "shots" && "fy-seg__item--active")} onClick={() => setTab("shots")}>
               Shots

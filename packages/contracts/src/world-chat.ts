@@ -7,10 +7,12 @@ import {
   ChatEventIdSchema,
   CheckReceiptIdSchema,
   ConversationIdSchema,
+  EpisodeIdSchema,
   IsoDateTimeSchema,
   MessageIdSchema,
   ProposalIdSchema,
   RunIdSchema,
+  SceneIdSchema,
   Sha256Schema,
   SlugSchema,
   TurnIdSchema,
@@ -92,8 +94,27 @@ export const WorldChatContextSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("attachment"), attachmentId: ChatAttachmentIdSchema }).strict(),
+  /**
+   * Production scopes (SPEC-023 R-20, issue #400): the Development thread enters at the
+   * production, an episode thread at one episode, a scene thread at one scene. Same store, same
+   * events, same wrap-up — only the entry context and the candidates differ.
+   */
+  z.object({ kind: z.literal("production"), productionId: SlugSchema }).strict(),
+  z
+    .object({ kind: z.literal("episode"), productionId: SlugSchema, episodeId: EpisodeIdSchema })
+    .strict(),
+  z.object({ kind: z.literal("scene"), productionId: SlugSchema, sceneId: SceneIdSchema }).strict(),
 ]);
 export type WorldChatContext = z.infer<typeof WorldChatContextSchema>;
+
+/**
+ * The conversation's initiative mode (Scope §04; SPEC-023 R-21): how eagerly the studio
+ * proposes. Assist waits to be asked, Collaborate offers as it goes, Develop drives. The mode
+ * changes initiative, never acceptance authority — wrap-up and the gate are identical in all
+ * three.
+ */
+export const WorldChatInitiativeSchema = z.enum(["assist", "collaborate", "develop"]);
+export type WorldChatInitiative = z.infer<typeof WorldChatInitiativeSchema>;
 
 // ---------------------------------------------------------------------------
 // References into the world
@@ -333,6 +354,12 @@ export const WorldChangeClassificationSchema = z.enum([
   "relationship.change",
   "art-direction.change",
   "media.image-opportunity",
+  /** SPEC-023 R-20 (issue #400): production-scoped propositions for the Development layer. */
+  "development.overview",
+  "development.season",
+  "development.episode",
+  "development.scene-script",
+  "development.series",
   "undecided",
 ]);
 export type WorldChangeClassification = z.infer<typeof WorldChangeClassificationSchema>;
@@ -546,6 +573,112 @@ const ImageOpportunityPayload = {
     .strict(),
 } as const;
 
+/**
+ * The Development payloads (SPEC-023 R-20, issue #400). Each draft is the record as it should
+ * now read — never an instruction to adjust the old one — because the JSON gate lane merges and
+ * conflicts at field level, and an instruction has nothing to merge. Season defaults are absent
+ * on purpose: they are creation-time values a form owns, and a conversation must not be able to
+ * retune an episode envelope by describing it.
+ */
+const DevelopmentOverviewPayload = {
+  classification: z.literal("development.overview"),
+  target: z.object({ kind: z.literal("production"), productionId: SlugSchema }).strict(),
+  draft: z
+    .object({
+      logline: z.string().min(1).max(500).optional(),
+      spine: z.string().min(1).max(4000).optional(),
+      acts: z
+        .array(z.object({ title: z.string().min(1).max(200), summary: z.string().max(1000).optional() }).strict())
+        .max(12)
+        .optional(),
+      targetLength: z.string().min(1).max(120).optional(),
+    })
+    .strict()
+    .refine((d) => Object.keys(d).length > 0, "an overview draft must carry at least one field"),
+} as const;
+
+const DevelopmentSeasonPayload = {
+  classification: z.literal("development.season"),
+  target: z.object({ kind: z.literal("production"), productionId: SlugSchema }).strict(),
+  draft: z
+    .object({
+      question: z.string().min(1).max(500).optional(),
+      ending: z.string().min(1).max(1000).optional(),
+      direction: z.string().min(1).max(2000).optional(),
+      arcs: z
+        .array(
+          z
+            .object({ id: SlugSchema, title: z.string().min(1).max(200), note: z.string().max(500).optional() })
+            .strict(),
+        )
+        .max(20)
+        .optional(),
+    })
+    .strict()
+    .refine((d) => Object.keys(d).length > 0, "a season draft must carry at least one field"),
+} as const;
+
+const DevelopmentEpisodePayload = {
+  classification: z.literal("development.episode"),
+  target: z
+    .object({
+      kind: z.literal("episode"),
+      productionId: SlugSchema,
+      /** Absent to create a new episode; present to amend the one named. */
+      episodeId: EpisodeIdSchema.optional(),
+    })
+    .strict(),
+  draft: z
+    .object({
+      title: z.string().min(1).max(200).optional(),
+      order: z.number().int().min(1).optional(),
+      promise: z
+        .object({
+          opens: z.string().max(500).optional(),
+          turn: z.string().max(500).optional(),
+          closes: z.string().max(500).optional(),
+        })
+        .strict()
+        .optional(),
+      scenes: z.array(SceneIdSchema).optional(),
+    })
+    .strict()
+    .refine((d) => Object.keys(d).length > 0, "an episode draft must carry at least one field"),
+} as const;
+
+const ScriptBlockDraftSchema = z
+  .object({
+    id: z.string().regex(/^blk_[a-z0-9-]+$/, "expected blk_<slug>"),
+    kind: z.enum(["action", "dialogue"]),
+    speaker: SlugSchema.optional(),
+    text: z.string().min(1).max(2000),
+  })
+  .strict();
+
+const DevelopmentSceneScriptPayload = {
+  classification: z.literal("development.scene-script"),
+  target: z.object({ kind: z.literal("scene"), productionId: SlugSchema, sceneId: SceneIdSchema }).strict(),
+  draft: z
+    .object({
+      /** The whole ordered block list as it should now read (SPEC-023 R-13). */
+      blocks: z.array(ScriptBlockDraftSchema).min(1).max(200),
+    })
+    .strict(),
+} as const;
+
+const DevelopmentSeriesPayload = {
+  classification: z.literal("development.series"),
+  target: z.object({ kind: z.literal("series"), seriesId: SlugSchema }).strict(),
+  draft: z
+    .object({
+      title: z.string().min(1).max(200).optional(),
+      engine: z.string().min(1).max(2000).optional(),
+      continuity: z.string().min(1).max(4000).optional(),
+    })
+    .strict()
+    .refine((d) => Object.keys(d).length > 0, "a series draft must carry at least one field"),
+} as const;
+
 const UndecidedPayload = {
   classification: z.literal("undecided"),
   draft: z
@@ -557,7 +690,7 @@ const UndecidedPayload = {
     .strict(),
 } as const;
 
-/** The nine things a proposition can be, as the coordinator stores them. */
+/** The fourteen things a proposition can be, as the coordinator stores them. */
 export const WorldChangeCandidateSchema = z.discriminatedUnion("classification", [
   CandidateBaseSchema.extend(CanonCreatePayload).strict(),
   CandidateBaseSchema.extend(CanonAmendPayload).strict(),
@@ -567,6 +700,11 @@ export const WorldChangeCandidateSchema = z.discriminatedUnion("classification",
   CandidateBaseSchema.extend(RelationshipChangePayload).strict(),
   CandidateBaseSchema.extend(ArtDirectionChangePayload).strict(),
   CandidateBaseSchema.extend(ImageOpportunityPayload).strict(),
+  CandidateBaseSchema.extend(DevelopmentOverviewPayload).strict(),
+  CandidateBaseSchema.extend(DevelopmentSeasonPayload).strict(),
+  CandidateBaseSchema.extend(DevelopmentEpisodePayload).strict(),
+  CandidateBaseSchema.extend(DevelopmentSceneScriptPayload).strict(),
+  CandidateBaseSchema.extend(DevelopmentSeriesPayload).strict(),
   CandidateBaseSchema.extend(UndecidedPayload).strict(),
 ]);
 
@@ -672,6 +810,7 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
       type: z.literal("conversation.metadata-updated"),
       title: z.string().min(1).max(200).optional(),
       entryContext: WorldChatContextSchema.optional(),
+      initiative: WorldChatInitiativeSchema.optional(),
     })
     .strict(),
   z.object({ type: z.literal("conversation.archived") }).strict(),
@@ -879,6 +1018,7 @@ export const WorldChatSummarySchema = z
     status: WorldChatStatusSchema,
     updatedAt: IsoDateTimeSchema,
     entryContext: WorldChatContextSchema.optional(),
+    initiative: WorldChatInitiativeSchema.optional(),
     /** Live propositions. Zero for a conversation that produced nothing. */
     pointCount: z.number().int().min(0),
     /** Proposals from its wrap-up that are still awaiting a decision. */
@@ -912,6 +1052,7 @@ export const WorldChatLoadedSchema = z
     createdAt: IsoDateTimeSchema,
     updatedAt: IsoDateTimeSchema,
     entryContext: WorldChatContextSchema.optional(),
+    initiative: WorldChatInitiativeSchema.optional(),
     seq: z.number().int().min(0),
     /** Set when a sent-back proposal reopened this conversation. Survives checkpointing. */
     reopened: z.boolean().optional(),
@@ -1006,6 +1147,11 @@ export const ModelCandidateDraftSchema = z.discriminatedUnion("classification", 
   ModelCandidateCommonSchema.extend(RelationshipChangePayload).strict(),
   ModelCandidateCommonSchema.extend(ArtDirectionChangePayload).strict(),
   ModelCandidateCommonSchema.extend(ImageOpportunityPayload).strict(),
+  ModelCandidateCommonSchema.extend(DevelopmentOverviewPayload).strict(),
+  ModelCandidateCommonSchema.extend(DevelopmentSeasonPayload).strict(),
+  ModelCandidateCommonSchema.extend(DevelopmentEpisodePayload).strict(),
+  ModelCandidateCommonSchema.extend(DevelopmentSceneScriptPayload).strict(),
+  ModelCandidateCommonSchema.extend(DevelopmentSeriesPayload).strict(),
   ModelCandidateCommonSchema.extend(UndecidedPayload).strict(),
 ]);
 export type ModelCandidateDraft = z.infer<typeof ModelCandidateDraftSchema>;
@@ -1191,6 +1337,7 @@ export const WorldChatWorkspaceSchema = z
   .object({
     conversationId: ConversationIdSchema,
     status: WorldChatStatusSchema,
+    initiative: WorldChatInitiativeSchema.default("collaborate"),
     messages: z.array(WorldChatTranscriptMessageSchema),
     /** True when older messages exist before the first one here. */
     hasMore: z.boolean().default(false),
@@ -1417,6 +1564,71 @@ const exampleDrafts = {
       dependencies: [],
     },
   },
+  "development.overview": {
+    classification: "development.overview",
+    target: { kind: "production", productionId: "saltlight" },
+    title: "The overview finds its spine",
+    rationale: "The logline and spine were settled in this thread.",
+    settledness: "settled",
+    evidence: [exampleMessageEvidence],
+    checkReceiptIds: [],
+    draft: {
+      logline: "One night on the Vigil, the verse rises early.",
+      spine: "The watch answers the water, and the water answers back.",
+    },
+  },
+  "development.season": {
+    classification: "development.season",
+    target: { kind: "production", productionId: "bell-watch-season-1" },
+    title: "The season question is who answers",
+    rationale: "The question and ending separated from the Series engine.",
+    settledness: "settled",
+    evidence: [exampleMessageEvidence],
+    checkReceiptIds: [],
+    draft: {
+      question: "Who is ringing the drowned bell?",
+      ending: "Maren answers the bell herself, from under the water.",
+    },
+  },
+  "development.episode": {
+    classification: "development.episode",
+    target: { kind: "episode", productionId: "bell-watch-season-1" },
+    title: "Episode three: the missing night",
+    rationale: "The promise was agreed; the scenes come from this thread.",
+    settledness: "settled",
+    evidence: [exampleMessageEvidence],
+    checkReceiptIds: [],
+    draft: {
+      title: "The missing night",
+      order: 3,
+      promise: { opens: "The ledger page for the 14th is gone.", closes: "The bell rings once, from under the water." },
+    },
+  },
+  "development.scene-script": {
+    classification: "development.scene-script",
+    target: { kind: "scene", productionId: "saltlight", sceneId: "sc_04" },
+    title: "The verse rises gets its blocks",
+    rationale: "The action and the one line were settled here.",
+    settledness: "settled",
+    evidence: [exampleMessageEvidence],
+    checkReceiptIds: [],
+    draft: {
+      blocks: [
+        { id: "blk_the-empty-page", kind: "action", text: "Maren opens the ledger to the 14th." },
+        { id: "blk_at-bells", kind: "dialogue", speaker: "maren-kest", text: "That page was here at bells." },
+      ],
+    },
+  },
+  "development.series": {
+    classification: "development.series",
+    target: { kind: "series", seriesId: "bell-watch" },
+    title: "The engine is the nightly answer",
+    rationale: "Season two needs it stated once, on the Series.",
+    settledness: "settled",
+    evidence: [exampleMessageEvidence],
+    checkReceiptIds: [],
+    draft: { engine: "Every episode, the night watch answers one bell it should not have heard." },
+  },
   undecided: {
     classification: "undecided",
     title: "The drowning year needs a home",
@@ -1521,6 +1733,11 @@ const DRAFT_PAYLOADS = {
   "relationship.change": RelationshipChangePayload,
   "art-direction.change": ArtDirectionChangePayload,
   "media.image-opportunity": ImageOpportunityPayload,
+  "development.overview": DevelopmentOverviewPayload,
+  "development.season": DevelopmentSeasonPayload,
+  "development.episode": DevelopmentEpisodePayload,
+  "development.scene-script": DevelopmentSceneScriptPayload,
+  "development.series": DevelopmentSeriesPayload,
   undecided: UndecidedPayload,
 } as const satisfies Record<WorldChangeClassification, { draft: z.ZodTypeAny }>;
 
@@ -1663,6 +1880,21 @@ Each classification below shows one complete example, then every field its draft
   fields: ${draftFieldCatalogue("art-direction.change")}
 - ${draftPayloadLine("media.image-opportunity")}
   fields: ${draftFieldCatalogue("media.image-opportunity")}
+- ${draftPayloadLine("development.overview")}
+  The production's structured overview as it should now read. Only in a production, episode or scene conversation.
+  fields: ${draftFieldCatalogue("development.overview")}
+- ${draftPayloadLine("development.season")}
+  The season's question, ending, direction and arcs. The episode envelope's defaults are a form's to change, never a conversation's.
+  fields: ${draftFieldCatalogue("development.season")}
+- ${draftPayloadLine("development.episode")}
+  target.episodeId absent creates a new episode; present amends the one named. scenes is the whole ordered membership when carried.
+  fields: ${draftFieldCatalogue("development.episode")}
+- ${draftPayloadLine("development.scene-script")}
+  blocks is the whole ordered script as it should now read; block ids are stable and shots cite them, so keep an existing block's id when only its text changes.
+  fields: ${draftFieldCatalogue("development.scene-script")}
+- ${draftPayloadLine("development.series")}
+  The thin Series record: engine and continuity only. Recurring cast stays in world sheets — a Series that describes characters is a second world.
+  fields: ${draftFieldCatalogue("development.series")}
 - ${draftPayloadLine("undecided")}
   fields: ${draftFieldCatalogue("undecided")}
 

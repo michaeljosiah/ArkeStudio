@@ -394,10 +394,24 @@ export class WorldChatRunner {
      * honest budget is the one the harness can name. Absent — a fresh install with no session to
      * learn from — `budgetFor` returns the floor.
      */
+    /**
+     * The initiative mode's one sentence (SPEC-023 R-21): it changes how eagerly the studio
+     * proposes, and nothing else — wrap-up, readiness, and the gate are identical in all three.
+     */
+    const INITIATIVE_NARRATION: Record<string, string> = {
+      assist:
+        " The creator has set this conversation to Assist: answer what is asked, and propose a candidate only when they ask for one or state a decision outright.",
+      collaborate:
+        " The creator has set this conversation to Collaborate: offer candidates as decisions settle, at the pace of the conversation.",
+      develop:
+        " The creator has set this conversation to Develop: drive the work forward — surface gaps, propose next candidates unprompted, and keep momentum. Proposing is still all this changes; nothing lands without their explicit acceptance.",
+    };
     const assembled = assembleContext({
       budgetChars: budgetFor(adapter.knownInputTokenLimit?.() ?? undefined),
       ...(view.entryContext && this.deps.describeEntry
-        ? { entryContext: this.deps.describeEntry(view.entryContext) }
+        ? {
+            entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}`,
+          }
         : {}),
       ...(view.summary !== undefined ? { summary: view.summary } : {}),
       candidates: view.candidates,

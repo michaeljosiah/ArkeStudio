@@ -2466,6 +2466,18 @@ export class Coordinator {
         await this.openWorldChat(store, msg.conversationId);
         return;
       }
+      case "world-chat-set-initiative": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await new WorldChatService(store.dir).setInitiative(msg.conversationId, msg.initiative);
+        await this.refreshConversations(store);
+        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
+          await this.openWorldChat(store, msg.conversationId);
+        } else {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
       case "world-chat-archive":
       case "world-chat-unarchive": {
         const store = this.opts.provider.openStore?.();
