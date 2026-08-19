@@ -1649,6 +1649,7 @@ export function DispatchDialogScreen() {
   // and finding that out after pressing a priced button is the failure this dialog exists to
   // prevent. Named per shot, with the length that would fit.
   const overlong = plans?.perShot.warnings.overlongShots ?? [];
+  const overlongPasses = plans?.wholeScene.warnings.overlongPasses ?? [];
   const warningRows: Array<{ key: string; text: string }> = [];
   if (warnings) {
     for (const s of warnings.shotsWithoutFrame) warningRows.push({ key: `nf-${s.shotId}`, text: `shot ${s.number} has no accepted frame` });
@@ -1764,13 +1765,22 @@ export function DispatchDialogScreen() {
           choice={choice}
           onChoice={setChoice}
         />
-        {overlong.length > 0 && (
+        {(overlong.length > 0 || overlongPasses.length > 0) && (
           <Callout tone="warning" title="Too long for this model">
             <ul style={{ margin: 0, paddingLeft: "1.2em" }}>
               {overlong.map((shot) => (
                 <li key={shot.shotId}>
                   shot {shot.number} runs {seconds(shot.durationSec)} — {model?.displayName ?? "this model"} makes at
-                  most {seconds(shot.longestSec)}. Shorten the shot, split it, or pick another model.
+                  most {seconds(shot.longestSec)}
+                  {shot.becauseReferences ? " on the reference route this shot will take" : ""}. Shorten the shot,
+                  split it, or pick another model.
+                </li>
+              ))}
+              {overlongPasses.map((pass) => (
+                <li key={`pass-${pass.passIndex}`}>
+                  scene pass {pass.passIndex} runs {seconds(pass.durationSec)} — the longest this route makes is{" "}
+                  {seconds(pass.longestSec)}
+                  {pass.becauseReferences ? ", because the pass carries references" : ""}.
                 </li>
               ))}
             </ul>
@@ -1820,7 +1830,14 @@ export function DispatchDialogScreen() {
             <div className="fy-boardcard" style={{ flex: 1 }}>
               <div className="fy-boardcard__head">Whole scene</div>
               <div className="fy-boardcard__body">Best motion continuity — but a retry re-runs its whole pass.</div>
-              {plans.wholeScene.pack.ok ? (
+              {plans.wholeScene.pack.ok && overlongPasses.length > 0 ? (
+                <div className="fy-boardcard__body" style={{ color: "var(--destructive)" }}>
+                  pass {overlongPasses[0]!.passIndex} runs {seconds(overlongPasses[0]!.durationSec)} — the longest this
+                  route makes is {seconds(overlongPasses[0]!.longestSec)}
+                  {overlongPasses[0]!.becauseReferences ? ", because the pass carries references" : ""}. Shorten a
+                  shot or pick another model.
+                </div>
+              ) : plans.wholeScene.pack.ok ? (
                 <>
                   <div className="fy-boardcard__mono">
                     {plans.wholeScene.pack.passes.length} pass{plans.wholeScene.pack.passes.length === 1 ? "" : "es"} under the{" "}

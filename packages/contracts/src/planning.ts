@@ -15,6 +15,7 @@ import {
 } from "./reference-budget.js";
 import {
   dispatchDuration,
+  durationOptions,
   estimateMicroUsd,
   pricedDuration,
   sceneImageOutput,
@@ -426,30 +427,52 @@ export type PackResult =
 
 const DEFAULT_SHOT_SEC = 4;
 
-/** Greedy, order-preserving; a shot is never split (D9). Oversize disables whole-scene (D10). */
-export function packScene(shots: Shot[], capSec: number): PackResult {
+/**
+ * Greedy, order-preserving; a shot is never split (D9). Oversize disables whole-scene (D10).
+ *
+ * Route-aware (issue #390): a pass that carries references dispatches on the reference route,
+ * whose ceiling can be shorter — Wan 2.7 makes 15 seconds from text and 10 from references. The
+ * pack must respect the ceiling of the route each pass will actually take, so the cap is
+ * dynamic: the moment a pass contains one reference-carrying shot, the whole pass is held to
+ * `referenceCapSec`, retroactively — a pass already past that line closes before the shot that
+ * would shorten it joins. One deterministic forward walk; no pack-then-discover-failure.
+ */
+export function packScene(
+  shots: Shot[],
+  capSec: number,
+  opts?: { referenceCapSec?: number; shotCarriesReferences?: (shotId: string) => boolean },
+): PackResult {
+  const referenceCap = opts?.referenceCapSec ?? capSec;
+  const carries = opts?.shotCarriesReferences ?? (() => false);
   const passes: Pass[] = [];
   let current: ShotPlanEntry[] = [];
   let cursor = 0;
   let total = 0;
+  let currentHasReferences = false;
   const close = () => {
     if (current.length === 0) return;
     passes.push({ index: passes.length + 1, durationSec: cursor, plan: current });
     current = [];
     cursor = 0;
+    currentHasReferences = false;
   };
   for (const shot of shots) {
     const duration = shot.durationSec ?? DEFAULT_SHOT_SEC;
-    if (duration > capSec) {
+    const shotRefs = carries(shot.id);
+    const shotCap = shotRefs ? referenceCap : capSec;
+    if (duration > shotCap) {
       return {
         ok: false,
-        oversizeShot: { shotId: shot.id, number: shot.number, durationSec: duration, capSec },
+        oversizeShot: { shotId: shot.id, number: shot.number, durationSec: duration, capSec: shotCap },
       };
     }
-    if (cursor + duration > capSec) close();
+    // The cap the pass would live under if this shot joined it.
+    const effectiveCap = currentHasReferences || shotRefs ? referenceCap : capSec;
+    if (cursor + duration > effectiveCap) close();
     current.push({ shotId: shot.id, number: shot.number, startSec: cursor, endSec: cursor + duration });
     cursor += duration;
     total += duration;
+    currentHasReferences = currentHasReferences || shotRefs;
   }
   close();
   return { ok: true, passes, totalSec: total };
@@ -935,8 +958,18 @@ export interface DispatchWarnings {
   /**
    * Shots longer than the longest clip this model can be asked for. Named rather than clamped:
    * a 22s shot quietly dispatched as a 15s clip is paid-for footage that cannot cover it.
+   * `becauseReferences` says which route set the ceiling (issue #390): a 12s shot fits the text
+   * route and not the reference route, and the words have to say so or the fix looks arbitrary.
    */
-  overlongShots: Array<{ shotId: string; number: number; durationSec: number; longestSec: number }>;
+  overlongShots: Array<{
+    shotId: string;
+    number: number;
+    durationSec: number;
+    longestSec: number;
+    becauseReferences: boolean;
+  }>;
+  /** Whole-scene passes over their selected route's ceiling (issue #390), named before commit. */
+  overlongPasses: Array<{ passIndex: number; durationSec: number; longestSec: number; becauseReferences: boolean }>;
   /**
    * The scene was drafted under one model family's guidance and is being dispatched to another
    * (SPEC-019 R-21, D26). Null when they agree, when the scene records no skill, or when there
@@ -1111,7 +1144,6 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const { world, sheets, kits, scene, selections, model } = input;
   const { resolved, perShot } = sceneCast(scene, sheets);
   const capSec = model.limits.maxDurationSec ?? Number.POSITIVE_INFINITY;
-  const pack = packScene(scene.shots, capSec);
 
   // Merged once for the whole plan (#244). Both dispatch shapes are the same clip's constraints,
   // and computing it twice is how the per-shot and whole-scene paths come to disagree about what
@@ -1129,11 +1161,16 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
         { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id },
       ),
     );
+    // Bound before the duration is priced (issue #390): what actually travels decides which
+    // route the provider takes, and the reference route's ceiling can be shorter.
+    const bound = bindReferences(references, sheets);
     // The length that will actually be asked for. A route takes one of a fixed few lengths, so
     // a 6.5s shot becomes a 7s dispatch — and the estimate has to be the 7, or the figure shown
     // and the figure billed are for two different requests. A shot longer than anything the
     // route offers keeps its own seconds here and is refused by name in the warnings.
-    const duration = pricedDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC);
+    const duration = pricedDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC, {
+      withReferences: bound.length > 0,
+    });
     const estimate =
       model.capability === "video"
         ? estimateMicroUsd(model, {
@@ -1151,9 +1188,8 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
               ...(output.resolution !== undefined ? { resolution: output.resolution } : {}),
             });
           })();
-    // Bound first, because what travels decides what the prose still has to say: a subject whose
-    // image is carried loses its appearance clause (R-8), and only carried assets get numbered.
-    const bound = bindReferences(references, sheets);
+    // What travels also decides what the prose still has to say: a subject whose image is
+    // carried loses its appearance clause (R-8), and only carried assets get numbered.
     const prompt = promptFor(
       world,
       sheets,
@@ -1185,6 +1221,20 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   });
 
   const perShotTotal = shots.reduce((a, s) => a + s.estimatedMicroUsd, 0);
+
+  // Packing happens with the reference presence already known (issue #390): a pass that will
+  // dispatch on the reference route is packed against that route's ceiling, so a plan cannot
+  // price 15 seconds and fail when the provider takes the 10-second route.
+  const boundByShot = new Map(shots.map((s) => [s.shot.id, s.bound.length > 0]));
+  const referenceCapCandidates = durationOptions(model, { withReferences: true });
+  const referenceCapSec =
+    model.limits.maxReferenceDurationSec ??
+    (referenceCapCandidates.length > 0 ? referenceCapCandidates[referenceCapCandidates.length - 1]! : capSec);
+  const pack = packScene(scene.shots, capSec, {
+    referenceCapSec,
+    shotCarriesReferences: (shotId) => boundByShot.get(shotId) ?? false,
+  });
+
   const passReferences = pack.ok
     ? pack.passes.map((pass) => {
         const seen = new Map<string, ResolvedCast["cast"][number]>();
@@ -1220,13 +1270,20 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
         };
       })
     : [];
+  // Whether each pass will take the reference route — priced and warned with the same answer
+  // the transport will give (issue #390).
+  const passCarriesReferences = new Map(
+    passReferences.map((pass) => [pass.passIndex, pass.bound.length > 0]),
+  );
   const wholeSceneTotal =
     pack.ok && model.capability === "video"
       ? pack.passes.reduce(
           (a, p) =>
             a +
             estimateMicroUsd(model, {
-              durationSec: pricedDuration(model, p.durationSec),
+              durationSec: pricedDuration(model, p.durationSec, {
+                withReferences: passCarriesReferences.get(p.index) ?? false,
+              }),
               ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
             }),
           0,
@@ -1247,7 +1304,15 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           )
       : sceneBudget.dropped;
   const overlongShots = scene.shots
-    .map((shot) => ({ shot, choice: dispatchDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC) }))
+    .map((shot) => ({
+      shot,
+      choice: dispatchDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC, {
+        // The route the shot will actually take (issue #390): a 12-second shot with references
+        // is over-cap on a 15s-text/10s-reference model, and saying so here is the difference
+        // between a refusal before commit and a provider failure after it.
+        withReferences: boundByShot.get(shot.id) ?? false,
+      }),
+    }))
     // Extracted from the union rather than restated: a hand-written copy of the variant's shape
     // stops compiling the day the variant gains a field, which is how this line broke once.
     .filter((entry): entry is { shot: Shot; choice: Extract<DurationChoice, { kind: "over-cap" }> } =>
@@ -1258,7 +1323,27 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       number: entry.shot.number,
       durationSec: entry.shot.durationSec ?? DEFAULT_SHOT_SEC,
       longestSec: entry.choice.longest,
+      becauseReferences: entry.choice.becauseReferences,
     }));
+  // A pass the pack could not keep under its route's ceiling — only reachable when a single
+  // shot exceeds the reference route alone, since the pack itself is route-aware now — plus any
+  // pass whose priced route disagrees, named before commit rather than discovered after.
+  const overlongPasses = pack.ok
+    ? pack.passes.flatMap((pass) => {
+        const withReferences = passCarriesReferences.get(pass.index) ?? false;
+        const choice = dispatchDuration(model, pass.durationSec, { withReferences });
+        return choice.kind === "over-cap"
+          ? [
+              {
+                passIndex: pass.index,
+                durationSec: pass.durationSec,
+                longestSec: choice.longest,
+                becauseReferences: choice.becauseReferences,
+              },
+            ]
+          : [];
+      })
+    : [];
   const warnings: DispatchWarnings = {
     // Only where a frame would actually travel. Warning that a shot has no accepted frame, on a
     // model that cannot take one, tells the user to go and fix something that would change
@@ -1296,6 +1381,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       });
     })(),
     overlongShots,
+    overlongPasses,
     skillFamilyMismatch: skillFamilyMismatch(scene, model),
     subjectsOverRange: sceneBudget.subjectsOverRange,
     payloadOverflow: (() => {

@@ -885,6 +885,22 @@ describe("the reference route's own ceiling (probed 2026-08-16)", () => {
       assert.ok(longest !== undefined && ceiling < longest, `${m.id}'s reference ceiling is the shorter of the two`);
     }
   });
+
+  it("every declared reference ceiling leaves a non-empty, valid subset of askable lengths (issue 390)", () => {
+    // A ceiling that excludes every offered length would make every reference dispatch
+    // unplannable; a subset member above the ceiling would plan a length the route refuses.
+    for (const m of FAL_MODELS) {
+      const ceiling = m.limits.maxReferenceDurationSec;
+      if (ceiling === undefined) continue;
+      const offered = durationOptions(m, { withReferences: true });
+      assert.ok(offered.length > 0, `${m.id}'s reference route still offers something to ask for`);
+      for (const seconds of offered) {
+        assert.ok(seconds <= ceiling, `${m.id} offers ${seconds}s over its ${ceiling}s reference ceiling`);
+      }
+      const base = m.limits.maxDurationSec;
+      assert.ok(base === undefined || ceiling <= base, `${m.id}'s reference ceiling never exceeds the base cap`);
+    }
+  });
 });
 
 describe("a direct provider's row IS its own id (ElevenLabs 400, 2026-08-17)", () => {

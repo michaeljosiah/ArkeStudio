@@ -785,11 +785,20 @@ function passEstimate(
  * than anything the route offers: a 22s shot dispatched as a 15s clip is paid-for footage that
  * cannot cover what was asked for, and the dialog already names the shot before anyone presses.
  */
-function askedSeconds(model: ManifestModel, requestedSec: number, what: string): number {
-  const choice = dispatchDuration(model, requestedSec);
+function askedSeconds(
+  model: ManifestModel,
+  requestedSec: number,
+  what: string,
+  opts?: { withReferences?: boolean },
+): number {
+  // The route the dispatch will actually take (issue #390): references can shorten the ceiling,
+  // and asking with the text route's numbers is how a plan succeeds and the provider refuses.
+  const choice = dispatchDuration(model, requestedSec, opts);
   if (choice.kind === "over-cap") {
     throw new Error(
-      `${what} runs ${requestedSec}s — longer than the ${choice.longest}s ${model.displayName} can make`,
+      `${what} runs ${requestedSec}s — longer than the ${choice.longest}s ${model.displayName} can make${
+        choice.becauseReferences ? " on the reference route it will take" : ""
+      }`,
     );
   }
   return choice.kind === "asked" ? choice.seconds : requestedSec;
@@ -845,7 +854,11 @@ export function composeDispatches(
         // Sending the raw shot seconds meant the job asked for something no route accepts, and
         // the client then had nothing to translate.
         ...(entry.shot.durationSec !== undefined
-          ? { durationSec: askedSeconds(model, entry.shot.durationSec, `shot ${entry.shot.number}`) }
+          ? {
+              durationSec: askedSeconds(model, entry.shot.durationSec, `shot ${entry.shot.number}`, {
+                withReferences: entry.bound.length > 0,
+              }),
+            }
           : {}),
         ...sizeParams(model, plan),
         provenance: provenanceFor(entry.budget.carried.map((c) => c.sheetId)),
@@ -859,7 +872,9 @@ export function composeDispatches(
     const shotsInPass = pass.plan.map((p) => plan.shots.find((s) => s.shot.id === p.shotId)!);
     const passReferencePlan = plan.passReferences.find((candidate) => candidate.passIndex === pass.index)!;
     const references = boundFiles(passReferencePlan.bound);
-    const passSeconds = askedSeconds(model, pass.durationSec, `scene pass ${pass.index}`);
+    const passSeconds = askedSeconds(model, pass.durationSec, `scene pass ${pass.index}`, {
+      withReferences: references.length > 0,
+    });
     if (references.length > model.accepts.referenceImages) {
       throw new Error(`scene pass ${pass.index} exceeds ${model.displayName}'s reference limit`);
     }
