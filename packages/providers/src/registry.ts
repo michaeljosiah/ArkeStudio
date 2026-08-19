@@ -29,7 +29,12 @@ export interface ProviderClientDeps {
    * every submit re-runs before touching the wire (§2.5). Omitted where no engine service is
    * wired — the client is then absent rather than present and dispatching unverified.
    */
-  comfyui?: { baseUrl: EngineBaseUrl; preflight: ComfyUiPreflight };
+  comfyui?: {
+    baseUrl: EngineBaseUrl;
+    preflight: ComfyUiPreflight;
+    /** Reads a cloned voice's clip so it can be uploaded to the engine (SPEC-022 §2.8). */
+    readClip?: (path: string) => Promise<Uint8Array>;
+  };
   capture?: ProviderCallCapture;
 }
 
@@ -80,7 +85,8 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
       : {
           comfyui: captureProviderClient(
             "comfyui",
-            (fetch) => new ComfyUiClient(fetch, deps.comfyui!.baseUrl, deps.comfyui!.preflight),
+            (fetch) =>
+              new ComfyUiClient(fetch, deps.comfyui!.baseUrl, deps.comfyui!.preflight, deps.comfyui!.readClip),
             fetchImpl,
             capture,
           ),

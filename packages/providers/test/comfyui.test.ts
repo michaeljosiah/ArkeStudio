@@ -33,6 +33,8 @@ interface Recorded {
   url: string;
   method: string;
   body: unknown;
+  /** The upload's filename, when the request carried a form rather than JSON. */
+  filename?: string;
 }
 
 /** A fetch fake that records what was sent: route → {status, body}, matched in order. */
@@ -42,10 +44,15 @@ function engineFake(routes: Array<{ match: RegExp; status: number; body?: unknow
 } {
   const calls: Recorded[] = [];
   const fetch: FetchLike = async (url, init) => {
+    // A voice dispatch uploads its clip as multipart, so the recorded call keeps the filename
+    // the engine was given — the value LoadAudio will later be asked for by name.
+    const form = init?.body instanceof FormData ? init.body : null;
+    const uploaded = form?.get("image");
     calls.push({
       url,
       method: init?.method ?? "GET",
       body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+      ...(uploaded instanceof File ? { filename: uploaded.name } : {}),
     });
     const hit = routes.find((r) => r.match.test(url));
     if (!hit) throw new Error(`ECONNREFUSED ${url}`);
@@ -886,5 +893,133 @@ describe("no graph survives capture", () => {
       .catch(() => {});
     assert.ok(started.length > 0);
     assert.equal(JSON.stringify(started).includes("graph-redacted"), false);
+  });
+});
+
+/**
+ * Speaking a line in a cloned voice (SPEC-022 T-10).
+ *
+ * Every one of these failed against the shipped client before the voice path existed, and none
+ * of the 2,400 tests noticed: the recipe had only ever been proven by a graph posted by hand,
+ * which is precisely the path that skips this file.
+ */
+describe("the cloned-voice recipe on the wire", () => {
+  const VOICE_PARAMS = {
+    voiceId: "harbour-glass",
+    text: "The tide turns when it turns.",
+    speakerFile: "C:/worlds/embers/voices/harbour-glass.wav",
+  };
+  const CLIP = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45]);
+  const readClip = async (): Promise<Uint8Array> => CLIP;
+  const ROUTES = [
+    { match: /\/upload\/image$/, status: 200, body: { name: "harbour-glass.wav", subfolder: "" } },
+    { match: /\/prompt$/, status: 200, body: { prompt_id: "p-v1", node_errors: {} } },
+  ];
+
+  it("uploads the clip and gives LoadAudio the engine's own name for it", async () => {
+    // `LoadAudio.audio` is a dropdown over the engine's input directory, so a path from this
+    // machine means nothing there. Passing one through produced a graph the engine rejected.
+    const { fetch, calls } = engineFake(ROUTES);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+      model: "comfyui-cloned-voice",
+      capability: "voice-tts",
+      params: VOICE_PARAMS,
+    });
+    assert.equal(calls.some((c) => c.url.endsWith("/upload/image") && c.method === "POST"), true, "clip was never uploaded");
+    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
+      prompt: Record<string, { inputs: Record<string, unknown> }>;
+    };
+    assert.equal(posted.prompt["1"]!.inputs["audio"], "harbour-glass.wav");
+    assert.equal(posted.prompt["4"]!.inputs["text"], VOICE_PARAMS.text);
+  });
+
+  it("uploads before it submits, never after", async () => {
+    // The name has to exist on the engine before the graph naming it is queued.
+    const { fetch, calls } = engineFake(ROUTES);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+      model: "comfyui-cloned-voice",
+      capability: "voice-tts",
+      params: VOICE_PARAMS,
+    });
+    const order = calls.map((c) => c.url);
+    assert.equal(
+      order.findIndex((u) => u.endsWith("/upload/image")) < order.findIndex((u) => u.endsWith("/prompt")),
+      true,
+    );
+  });
+
+  it("keeps a subfolder, because that is part of the name the dropdown shows", async () => {
+    const { fetch, calls } = engineFake([
+      { match: /\/upload\/image$/, status: 200, body: { name: "clip.wav", subfolder: "arke" } },
+      { match: /\/prompt$/, status: 200, body: { prompt_id: "p-v2", node_errors: {} } },
+    ]);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+      model: "comfyui-cloned-voice",
+      capability: "voice-tts",
+      params: VOICE_PARAMS,
+    });
+    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
+      prompt: Record<string, { inputs: Record<string, unknown> }>;
+    };
+    assert.equal(posted.prompt["1"]!.inputs["audio"], "arke/clip.wav");
+  });
+
+  it("names the clip by its basename on a Windows path too", async () => {
+    // The clip path is this machine's, and on Windows that is backslashes. Splitting on "/"
+    // alone sent the whole path as the upload filename — and every test here used a
+    // forward-slash path, so the suite stayed green while the shipped platform broke.
+    const { fetch, calls } = engineFake(ROUTES);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+      model: "comfyui-cloned-voice",
+      capability: "voice-tts",
+      params: { ...VOICE_PARAMS, speakerFile: String.raw`C:\worlds\embers\voices\harbour-glass.wav` },
+    });
+    const upload = calls.find((c) => c.url.endsWith("/upload/image"))!;
+    assert.equal(upload.filename, "harbour-glass.wav");
+  });
+
+  it("takes the keys a real voice dispatch carries", async () => {
+    // `voiceId` is the job's subject and `speakerFile` is a path, and the allow-list named
+    // neither — so the very first preview died with `"voiceId" is not a parameter`.
+    const { fetch } = engineFake(ROUTES);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+      model: "comfyui-cloned-voice",
+      capability: "voice-tts",
+      params: { ...VOICE_PARAMS, seed: 42 },
+    });
+  });
+
+  it("asks for a line to speak, not a prompt", async () => {
+    // This recipe has no `prompt` param at all: a line is spoken verbatim, never described.
+    const { fetch } = engineFake(ROUTES);
+    await assert.rejects(
+      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+        model: "comfyui-cloned-voice",
+        capability: "voice-tts",
+        params: { voiceId: "v", speakerFile: "c.wav" },
+      }),
+      /needs a line to speak/,
+    );
+  });
+
+  it("does not put a file on the engine for a job pre-flight refuses", async () => {
+    const { fetch, calls } = engineFake(ROUTES);
+    await assert.rejects(
+      new ComfyUiClient(fetch, BASE, async () => ({ ok: false as const, reason: "pinned node drifted" }), readClip).submit(
+        "",
+        { model: "comfyui-cloned-voice", capability: "voice-tts", params: VOICE_PARAMS },
+      ),
+    );
+    assert.equal(calls.some((c) => c.url.endsWith("/upload/image")), false);
+  });
+
+  it("says so when the clip cannot be read, rather than uploading nothing", async () => {
+    const { fetch } = engineFake(ROUTES);
+    await assert.rejects(
+      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, async () => {
+        throw new Error("ENOENT");
+      }).submit("", { model: "comfyui-cloned-voice", capability: "voice-tts", params: VOICE_PARAMS }),
+      /recording could not be read/,
+    );
   });
 });

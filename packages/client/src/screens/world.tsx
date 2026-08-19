@@ -2285,7 +2285,16 @@ function VoiceCandidatesPanel({
                   <div className="fy-voicerow__name">{candidate.label}</div>
                   <div className="fy-voicerow__sub">
                     {candidate.provider}
-                    {candidate.local ? " · local — fixed catalogue, cannot be cloned" : candidate.canClone ? " · cloning available" : ""}
+                    {/* A cloned voice is local AND was itself cloned, so the preset's line —
+                        "fixed catalogue, cannot be cloned" — read as a flat contradiction on the
+                        one row it was never written for. Kokoro's catalogue is what is fixed. */}
+                    {candidate.provider === "comfyui"
+                      ? " · cloned — on this machine"
+                      : candidate.local
+                        ? " · local — fixed catalogue, cannot be cloned"
+                        : candidate.canClone
+                          ? " · cloning available"
+                          : ""}
                     {candidate.attributes.length > 0 ? ` · ${candidate.attributes.join(", ")}` : ""}
                   </div>
                 </div>

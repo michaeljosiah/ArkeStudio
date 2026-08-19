@@ -70,6 +70,12 @@ export function meetsVersionFloor(version: string, floor: string = COMFYUI_VERSI
  * becomes a terminal failure for work the picker openly offered.
  */
 const INTERNAL_PARAMS = new Set([
+  // A voice dispatch carries the voice it was made from and the clip that is its identity.
+  // Neither is a control the recipe exposes: `voiceId` is the job's own subject, and
+  // `speakerFile` arrives as a path on THIS machine that only becomes a graph value once it has
+  // been uploaded to the engine. Both were missing, so every cloned-voice preview died here.
+  "voiceId",
+  "speakerFile",
   "references",
   "referenceRoles",
   "artDirection",
@@ -119,6 +125,12 @@ export class ComfyUiClient implements ProviderClient {
     private readonly fetchImpl: FetchLike,
     private readonly baseUrl: EngineBaseUrl,
     private readonly preflight: ComfyUiPreflight,
+    /**
+     * Reads a speaker clip off this machine, for the one recipe whose input is a file the app
+     * owns. Optional because every other recipe is text-to-something and never touches the disk;
+     * a voice dispatch without it refuses by name rather than uploading nothing.
+     */
+    private readonly readClip?: (path: string) => Promise<Uint8Array>,
   ) {}
 
   private require(): string {
@@ -190,15 +202,31 @@ export class ComfyUiClient implements ProviderClient {
         throw new Error(`comfyui: "${key}" is not a parameter of ${recipe.displayName}`);
       }
     }
+    const seedParam = params["seed"];
+    const seedValue: RecipeParamValues =
+      typeof seedParam === "number" && Number.isInteger(seedParam) ? { seed: seedParam } : {};
+    if (recipe.capability === "voice-tts") {
+      // A line to speak, never a prompt describing a performance (SPEC-011 turn 70) — so this
+      // recipe has no `prompt` at all, and asking it for one refused every dispatch before the
+      // words were even looked at.
+      const text = typeof params["text"] === "string" ? params["text"] : undefined;
+      if (text === undefined || text.length === 0) {
+        throw new Error(`comfyui: ${recipe.displayName} needs a line to speak`);
+      }
+      const clip = params["speakerFile"];
+      if (typeof clip !== "string" || clip.length === 0) {
+        throw new Error(`comfyui: ${recipe.displayName} needs the voice's own recording`);
+      }
+      // Still the path on this machine. `submit` uploads it and swaps in the engine's own
+      // filename, because `LoadAudio.audio` is a dropdown over the engine's input directory and
+      // a path from here means nothing on the other side of the wire.
+      return { ...seedValue, text, speakerFile: clip };
+    }
     const prompt = typeof params["prompt"] === "string" ? params["prompt"] : undefined;
     if (prompt === undefined || prompt.length === 0) {
       throw new Error(`comfyui: ${recipe.displayName} needs a prompt`);
     }
-    const seed = params["seed"];
-    const values: RecipeParamValues = {
-      prompt,
-      ...(typeof seed === "number" && Number.isInteger(seed) ? { seed } : {}),
-    };
+    const values: RecipeParamValues = { prompt, ...seedValue };
     if (recipe.capability === "image") {
       // The output spec's shape decides the bucket; the bucket decides the pixels. Snapping,
       // not scaling: an off-bucket SDXL size generates worse, and the tier already priced at 1K.
@@ -243,6 +271,52 @@ export class ComfyUiClient implements ProviderClient {
     return values;
   }
 
+  /**
+   * Put a speaker clip where the engine can name it, and answer with that name.
+   *
+   * `LoadAudio.audio` is a COMBO over the engine's own `input/` directory, not a path input, so
+   * a clip this machine owns has to cross the wire before the graph can reference it. ComfyUI's
+   * upload endpoint is `/upload/image` for audio too — the name is the engine's, not a mistake.
+   *
+   * `overwrite` keeps the directory from filling with `harbour-glass (1).wav` on every preview:
+   * the clip is content the app owns and a re-upload of the same voice is the same bytes.
+   */
+  private async uploadClip(base: string, clipPath: string): Promise<string> {
+    if (!this.readClip) {
+      throw new Error("comfyui: this build cannot read a voice recording from disk");
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = await this.readClip(clipPath);
+    } catch {
+      // The path is the app's own and R-1 keeps node ids out of user-facing errors; a path is
+      // the same kind of detail, so this names the clip rather than where it lives.
+      throw new ProviderRequestRejectedError("comfyui: that voice's recording could not be read");
+    }
+    // Both separators: the clip path is this machine's, and on Windows that is backslashes —
+    // splitting on "/" alone uploads the whole path as the filename.
+    const name = clipPath.split(/[\\/]/).pop() ?? "voice.wav";
+    const form = new FormData();
+    // Copied into a plain ArrayBuffer: a Uint8Array view can sit on a larger pooled buffer, and
+    // handing Blob the view's buffer would upload whatever else is in it.
+    const body = bytes.slice().buffer as ArrayBuffer;
+    form.append("image", new Blob([body], { type: "audio/wav" }), name);
+    form.append("overwrite", "true");
+    const response = await this.fetchImpl(`${base}/upload/image`, { method: "POST", body: form });
+    if (!response.ok) {
+      throw new ProviderRequestRejectedError(
+        `comfyui: the engine would not accept the voice recording (HTTP ${response.status})`,
+      );
+    }
+    const answered = (await response.json()) as { name?: string; subfolder?: string } | null;
+    const uploaded = answered?.name;
+    if (typeof uploaded !== "string" || uploaded.length === 0) {
+      throw new ProviderRequestRejectedError("comfyui: the engine did not say where it put the voice recording");
+    }
+    // A subfolder is part of the name the dropdown shows, so it is part of what LoadAudio takes.
+    return answered?.subfolder ? `${answered.subfolder}/${uploaded}` : uploaded;
+  }
+
   async submit(_key: string, request: SubmitRequest, _context?: ProviderCallContext): Promise<SubmitResult> {
     const recipe = comfyUiRecipeById(request.model);
     if (!recipe) throw new Error(`comfyui: "${request.model}" is not a shipped recipe`);
@@ -274,8 +348,14 @@ export class ComfyUiClient implements ProviderClient {
     // rendered is refused here, before any request reaches the engine.
     const verified = await this.preflight(recipe.id);
     if (!verified.ok) throw new ProviderRequestRejectedError(verified.reason);
-    const graph = substituteRecipeParams(recipe, values);
     const base = this.require();
+    // The clip becomes a name the engine knows. Done after preflight so a job that was going to
+    // be refused never puts a file on the engine, and before the graph is built because the
+    // uploaded name IS the graph value.
+    if (recipe.capability === "voice-tts") {
+      values["speakerFile"] = await this.uploadClip(base, String(values["speakerFile"]));
+    }
+    const graph = substituteRecipeParams(recipe, values);
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

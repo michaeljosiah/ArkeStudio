@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { appendFileSync, createReadStream, existsSync } from "node:fs";
-import { readdir, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, safeStorage, shell } from "electron";
@@ -552,6 +552,9 @@ async function initialize(): Promise<{ port: number }> {
     comfyui: {
       baseUrl: () => comfyUiEngine.baseUrl(),
       preflight: (recipeId) => comfyUiEngine.preflight(recipeId),
+      // The one recipe input that is a file this machine owns. Reading it is the host's business
+      // for the same reason opening a dialog is: the renderer never handles a path (SPEC-001 R-9).
+      readClip: async (path) => new Uint8Array(await readFile(path)),
     },
     capture: providerCalls,
   });
