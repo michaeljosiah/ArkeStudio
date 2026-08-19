@@ -69,6 +69,12 @@ export interface CommitInput {
    * is a no-op.
    */
   raiseSchemaVersion?: number;
+  /**
+   * The client request this commit answers (issue #384). Stamped on the change lines so a
+   * redelivered request can find the commit that already served it and return the same result
+   * instead of creating a second entity.
+   */
+  requestId?: string;
 }
 
 export interface CommitResult {
@@ -369,6 +375,7 @@ export class Committer {
         source: input.source,
         canonRevisionAfter: revisionTo,
         ...(input.proposalId ? { proposalId: input.proposalId } : {}),
+        ...(input.requestId ? { requestId: input.requestId } : {}),
       });
 
       files.push({

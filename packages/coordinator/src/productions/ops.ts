@@ -34,10 +34,11 @@ import {
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
 import { atomicWriteFile } from "../world/atomic.js";
+import { readChanges } from "../world/change-writer.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { JsonFile, MarkdownFile, sha256 } from "../world/text-files.js";
-import type { CommitFileInput } from "../world/commit.js";
+import { CommitStaleError, type CommitFileInput } from "../world/commit.js";
 import type { WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 
@@ -63,9 +64,26 @@ export interface CreateProductionInput {
   aspect?: string;
   defaults?: Season["defaults"];
   logline?: string;
+  /** Stamped on the commit's change lines so a redelivered request finds its commit (#384). */
+  requestId?: string;
 }
 
 export async function createProduction(store: WorldStore, input: CreateProductionInput): Promise<string> {
+  // Concurrent creates race between reading the bundle and committing: two requests can pick
+  // the same slug, and the loser's `create` refuses as stale. The commit itself is the arbiter
+  // (never merged, R-27) — the loser recomputes against the fresh bundle and takes the next
+  // slug, so distinct requests always get distinct productions (#384).
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await createProductionOnce(store, input);
+    } catch (err) {
+      if (err instanceof CommitStaleError && attempt < 3) continue;
+      throw err;
+    }
+  }
+}
+
+async function createProductionOnce(store: WorldStore, input: CreateProductionInput): Promise<string> {
   const bundle = store.getBundle();
   const taken = bundle.productions.map((p) => p.meta.id);
   const slug = uniqueSlug(input.title, "production", taken);
@@ -146,8 +164,25 @@ export async function createProduction(store: WorldStore, input: CreateProductio
     // Any new-model write crosses the schema boundary (SPEC-023 R-23) so older builds refuse
     // this world by name instead of silently dropping the production from the bundle.
     ...(carriesNewModel || shape.isEpisodic ? { raiseSchemaVersion: 2 } : {}),
+    ...(input.requestId ? { requestId: input.requestId } : {}),
   });
   return slug;
+}
+
+/**
+ * The production a request id already created, or null (#384). Reads the whole change log
+ * rather than the bundle's windowed tail, so redelivery stays idempotent however much has
+ * happened since the first commit landed.
+ */
+export async function productionCreatedBy(worldDir: string, requestId: string): Promise<string | null> {
+  const lines = await readChanges(join(worldDir, "changes.jsonl"));
+  for (const line of lines) {
+    const c = line as { requestId?: string; entity?: string };
+    if (c.requestId !== requestId || typeof c.entity !== "string") continue;
+    const m = /^productions\/([a-z0-9-]+)\/production$/.exec(c.entity);
+    if (m) return m[1]!;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

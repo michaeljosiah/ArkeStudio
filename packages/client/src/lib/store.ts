@@ -301,6 +301,14 @@ export function subscribeQueueResults(listener: (result: QueueEnqueueResult) => 
   return () => queueResultListeners.delete(listener);
 }
 
+/** The correlated answer to one create-production request (issue 384), by requestId. */
+export type ProductionCreateResult = Extract<DomainEvent, { type: "production.create-result" }>;
+const productionCreateListeners = new Set<(result: ProductionCreateResult) => void>();
+export function subscribeProductionCreateResults(listener: (result: ProductionCreateResult) => void): () => void {
+  productionCreateListeners.add(listener);
+  return () => productionCreateListeners.delete(listener);
+}
+
 export function subscribeJobReady(listener: (job: Job) => void): () => void {
   jobReadyListeners.add(listener);
   return () => jobReadyListeners.delete(listener);
@@ -559,6 +567,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
+    }
+    if (event.type === "production.create-result") {
+      for (const listener of productionCreateListeners) listener(event);
     }
     if (event.type === "bench.brief-enhanced") {
       for (const listener of briefEnhancedListeners) listener(event);
@@ -2127,8 +2138,12 @@ export function createProduction(
     };
     logline?: string;
   },
-): void {
-  send({ kind: "create-production", worldId, ...input });
+): string {
+  // Returns the requestId so the dialog can correlate the production.create-result: pending
+  // until it arrives, navigating only on success, showing the named failure in place (issue 384).
+  const requestId = ulid();
+  send({ kind: "create-production", worldId, requestId, ...input });
+  return requestId;
 }
 
 export function draftScene(worldId: string, productionId: string, brief: string): void {

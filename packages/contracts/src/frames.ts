@@ -1150,6 +1150,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("create-production"),
       worldId: UlidSchema,
+      /** Correlates the production.create-result event; redelivery is idempotent (#384). */
+      requestId: UlidSchema.optional(),
       title: z.string().min(1).max(200),
       format: ProductionFormatSchema.optional(),
       medium: ProductionMediumSchema.optional(),

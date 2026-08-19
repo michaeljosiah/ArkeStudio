@@ -114,6 +114,23 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .object({ ...base, type: z.literal("entity.changed"), worldId: UlidSchema, change: ChangeRecordSchema })
     .strict(),
 
+  /**
+   * The correlated answer to one create-production request (issue #384): success carries the
+   * actual slug only after the commit is durable; failure names its reason and navigates
+   * nowhere. A redelivered request id receives the same slug it got the first time.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("production.create-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      disposition: z.enum(["created", "failed"]),
+      slug: SlugSchema.optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+
   /** The world canon revision advanced (accepting any canon change increments once, §2.4). */
   z
     .object({

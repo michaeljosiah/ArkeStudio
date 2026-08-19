@@ -78,6 +78,7 @@ import {
   draftSceneSkeleton,
   exportBoard,
   landBoard,
+  productionCreatedBy,
   reorderChapters,
   saveChapter,
   setPromptOverride,
@@ -654,6 +655,8 @@ export class Coordinator {
   private started = false;
   private stopping = false;
   private stopPromise: Promise<void> | null = null;
+  /** Request ids whose create-production is still running — redelivery waits, never doubles (#384). */
+  private readonly creatingProductions = new Set<string>();
   private readonly activeMessages = new Set<Promise<void>>();
   private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
@@ -3156,8 +3159,34 @@ export class Coordinator {
         // The frame names a medium or the legacy format (SPEC-023 R-1); one that names
         // neither is malformed and creates nothing.
         if (msg.medium === undefined && msg.format === undefined) return;
+        const requestId = msg.requestId;
+        const answer = (result: { disposition: "created"; slug: string } | { disposition: "failed"; reason: string }) => {
+          // Only a correlated request gets a correlated answer; a legacy frame keeps the old
+          // snapshot-only contract.
+          if (!requestId) return;
+          this.emit({
+            at: new Date().toISOString(),
+            type: "production.create-result",
+            requestId,
+            worldId: msg.worldId,
+            ...result,
+          });
+        };
+        if (requestId) {
+          // Redelivery of a request that is still running: its result will broadcast once.
+          if (this.creatingProductions.has(requestId)) return;
+          // Redelivery of a request whose commit already landed: same slug, no second
+          // production, no title-2 (#384). The whole change log is consulted, not the
+          // bundle's windowed tail, so the answer survives restart and later work.
+          const prior = await productionCreatedBy(store.dir, requestId);
+          if (prior) {
+            answer({ disposition: "created", slug: prior });
+            return;
+          }
+          this.creatingProductions.add(requestId);
+        }
         try {
-          await createProduction(store, {
+          const slug = await createProduction(store, {
             title: msg.title,
             ...(msg.format !== undefined ? { format: msg.format } : {}),
             ...(msg.medium !== undefined ? { medium: msg.medium } : {}),
@@ -3166,10 +3195,19 @@ export class Coordinator {
             ...(msg.aspect !== undefined ? { aspect: msg.aspect } : {}),
             ...(msg.defaults !== undefined ? { defaults: msg.defaults } : {}),
             ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
+            ...(requestId !== undefined ? { requestId } : {}),
           });
           await this.refreshWorldSnapshot(msg.worldId);
-        } catch {
+          // Acknowledged only after the commit is durable and the snapshot carries it.
+          answer({ disposition: "created", slug });
+        } catch (err) {
           this.transport.broadcastSnapshot();
+          answer({
+            disposition: "failed",
+            reason: err instanceof Error ? err.message.slice(0, 300) : "the production could not be created",
+          });
+        } finally {
+          if (requestId) this.creatingProductions.delete(requestId);
         }
         return;
       }

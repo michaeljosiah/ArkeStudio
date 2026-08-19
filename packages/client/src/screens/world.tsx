@@ -41,6 +41,7 @@ import {
   askCanon,
   assignVoice,
   createProduction,
+  subscribeProductionCreateResults,
   createSheetFromSentence,
   attachFiles,
   stopExtraction,
@@ -3743,6 +3744,23 @@ export function NewProductionScreen() {
   const [aspect, setAspect] = useState("9:16");
   const [episodeCount, setEpisodeCount] = useState(MICRODRAMA_DEFAULTS.episodeCount);
   const [episodeEnding, setEpisodeEnding] = useState(MICRODRAMA_DEFAULTS.episodeEnding);
+  // Pending until the correlated result arrives (issue 384): success opens the created production
+  // at its own workspace — never back to the list — and failure names itself in place, with
+  // everything entered still here.
+  const [pendingRequest, setPendingRequest] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pendingRequest) return;
+    return subscribeProductionCreateResults((result) => {
+      if (result.requestId !== pendingRequest) return;
+      if (result.disposition === "created" && result.slug) {
+        navigate(`/w/${worldId}/p/${result.slug}`);
+      } else {
+        setPendingRequest(null);
+        setFailure(result.reason ?? "The production could not be created.");
+      }
+    });
+  }, [pendingRequest, worldId, navigate]);
   const characters = world?.sheets.filter((s) => s.type === "character").length ?? 0;
   const isMicrodrama = medium === "video" && videoKind === "microdrama";
   return (
@@ -3833,6 +3851,11 @@ export function NewProductionScreen() {
             <span className="fy-mono">defaults · change them here or later</span>
           </div>
         )}
+        {failure && (
+          <Callout tone="danger" title="Not created">
+            {failure}
+          </Callout>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <span className="fy-mono">
             joins {world?.meta.name ?? "the world"} · shares all {characters} characters, every location and the whole
@@ -3844,26 +3867,28 @@ export function NewProductionScreen() {
           </Button>
           <Button
             variant="primary"
-            disabled={title.trim().length === 0}
+            disabled={title.trim().length === 0 || pendingRequest !== null}
             onClick={() => {
-              if (worldId) {
-                createProduction(worldId, {
-                  title: title.trim(),
-                  medium,
-                  ...(medium === "video" && videoKind !== "film" ? { productionKind: videoKind } : {}),
-                  ...(isMicrodrama
-                    ? {
-                        seriesTitle: seriesTitle.trim() || title.trim(),
-                        aspect,
-                        defaults: { ...MICRODRAMA_DEFAULTS, episodeCount, episodeEnding },
-                      }
-                    : {}),
-                });
-                navigate(`/w/${worldId}/productions`);
+              if (worldId && !pendingRequest) {
+                setFailure(null);
+                setPendingRequest(
+                  createProduction(worldId, {
+                    title: title.trim(),
+                    medium,
+                    ...(medium === "video" && videoKind !== "film" ? { productionKind: videoKind } : {}),
+                    ...(isMicrodrama
+                      ? {
+                          seriesTitle: seriesTitle.trim() || title.trim(),
+                          aspect,
+                          defaults: { ...MICRODRAMA_DEFAULTS, episodeCount, episodeEnding },
+                        }
+                      : {}),
+                  }),
+                );
               }
             }}
           >
-            {isMicrodrama ? "Create Series and Season 1" : "Create production"}
+            {pendingRequest ? "Creating…" : isMicrodrama ? "Create Series and Season 1" : "Create production"}
           </Button>
         </div>
       </div>
