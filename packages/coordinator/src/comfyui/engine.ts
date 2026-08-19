@@ -54,6 +54,11 @@ export interface EngineServiceDeps {
   /** The pinned ref a custom-node checkout is at, or null when unknowable. Unused while D11 ships zero nodes. */
   readNodeRef?: (dir: string) => Promise<string | null>;
   createSupervisor: (spec: SupervisedSpec) => ChildSupervisor;
+  /**
+   * Free graphics memory right now, in MB, or null where the device cannot be asked
+   * (SPEC-022 §2.6). Optional: a build that cannot ask simply gates on total VRAM as before.
+   */
+  freeVramMb?: () => Promise<number | null>;
   /** Where well-known installs are looked for. Injectable so tests need no real home. */
   homeDir?: string;
   onStatus?: (status: ComfyUiEngineStatus) => void;
@@ -94,6 +99,16 @@ export function engineInstanceId(source: string, location: string): string {
 }
 
 const gb = (mb: number): string => `${Math.round(mb / 1024)} GB`;
+
+/**
+ * What readiness assumes dispatch can hand back by unloading the engine (SPEC-022 §2.6).
+ *
+ * A loaded IndexTTS measured ~6 GB resident on the reference machine, and `POST /free` returns
+ * all of it. This allowance is set below that on purpose: high enough that a machine merely
+ * hosting a warm model is not refused work it would do, low enough that a card with almost
+ * nothing free is still told so rather than left to find out.
+ */
+const RECLAIMABLE_VRAM_MB = 4096;
 
 export class ComfyUiEngineService {
   private settings: ComfyUiSettings = { enginePath: null, engineUrl: null, modelsDir: null };
@@ -626,6 +641,32 @@ export class ComfyUiEngineService {
     if (vram < recipe.minVramMb) {
       return disabled(
         `Needs ${gb(recipe.minVramMb)} VRAM. This machine has ${gb(vram)}. Cloud ${recipe.capability} still works.`,
+        `Cloud ${recipe.capability} still works.`,
+      );
+    }
+    /*
+     * 7 · The card is big enough. Could it be free enough?
+     *
+     * A card clears the floor and the recipe still cannot run, because a browser or another AI
+     * tool already holds a third of it. Checking only the total is what let a 10 GB machine read
+     * "ready" and then page to disk for half an hour (SPEC-022 §2.6).
+     *
+     * But raw free memory is the wrong number to refuse on, because it counts the engine's own
+     * resident model against us — and dispatch unloads that before it gives up (`POST /free`).
+     * Readiness will not call `/free` itself: that discards the model cache every twenty seconds
+     * to answer a status poll. So it assumes the reclaim instead, and refuses only what no amount
+     * of unloading could rescue.
+     *
+     * The result is deliberately optimistic. Readiness is advisory and dispatch is authoritative:
+     * a "ready" that later refuses in a quarter of a second costs a click, while a "disabled" on
+     * a machine that would have worked costs the feature. The sentence is also a different one
+     * from the too-small case above — that card will never be big enough, this one is busy —
+     * even though both disable, because both mean pressing Generate buys a wait, not a take.
+     */
+    const free = this.deps.freeVramMb ? await this.deps.freeVramMb().catch(() => null) : null;
+    if (free !== null && free + RECLAIMABLE_VRAM_MB < recipe.minVramMb) {
+      return disabled(
+        `Needs ${gb(recipe.minVramMb)} free. This machine has ${gb(free)} free of ${gb(vram)} — close other programs using the graphics card. Cloud ${recipe.capability} still works.`,
         `Cloud ${recipe.capability} still works.`,
       );
     }
