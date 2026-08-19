@@ -1,3 +1,153 @@
+/*
+ * The queue notification (design turn 79) — the Activity row arriving early. Two lines: the
+ * target named target-then-kind, and `model · cost`. Bands, not a total: the height follows the
+ * reason line when there is one, and a reason is the only third band.
+ */
+
+/*
+ * The queue notification draws its own box, so sonner's wrapper must contribute none of one.
+ * Dropping the wrapper class altogether is worse than this: it also drops the layout and opacity
+ * rules sonner keys off that element, and a lone notification then renders at ~54% and drifts.
+ * Measured on a real dispatch: with the wrapper's 16px padding and 1px border still in place the
+ * notification sat 17px down and right of its column.
+ */
+.fy-toast:has(.fy-note) {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  width: 100%;
+}
+
+.fy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: min(390px, calc(100vw - var(--space-6)));
+  box-sizing: border-box;
+  padding: 14px var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  color: var(--foreground);
+  /* It floats over a working screen, so it needs more separation than a pill. */
+  box-shadow: var(--shadow-lg);
+}
+
+/* Queued is not success: accepted work is plain, and the green belongs to work that came back. */
+.fy-note__dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  margin-top: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--foreground);
+}
+.fy-note__dot--live {
+  animation: fy-note-pulse 1.6s ease-in-out infinite;
+}
+@keyframes fy-note-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-note__dot--live { animation: none; }
+}
+
+/* What came back, where the dot would be. */
+.fy-note__thumb {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  object-fit: cover;
+  display: block;
+}
+
+.fy-note--warning {
+  border-color: color-mix(in srgb, var(--warning) 32%, var(--border));
+  background: color-mix(in srgb, var(--warning) 7%, var(--card));
+}
+.fy-note--warning .fy-note__dot { background: var(--warning); }
+
+.fy-note--refused {
+  border-color: color-mix(in srgb, var(--destructive) 32%, var(--border));
+  background: color-mix(in srgb, var(--destructive) 5%, var(--card));
+}
+.fy-note--refused .fy-note__dot { background: var(--destructive); }
+
+.fy-note--back {
+  border-color: color-mix(in srgb, var(--success) 34%, var(--border));
+}
+.fy-note--back .fy-note__dot { background: var(--success); }
+
+.fy-note__body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Both lines are clipped with an ellipsis, never wrapped — only a reason may run to two lines. */
+.fy-note__title {
+  font: 600 13px var(--font-sans);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fy-note__meta {
+  margin-top: 3px;
+  font: 400 10.5px/1.45 var(--font-mono);
+  color: var(--neutral-400);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fy-note__reason {
+  margin-top: var(--space-2);
+  font: 400 11px/1.5 var(--font-sans);
+  color: var(--muted-foreground);
+}
+
+.fy-note__end {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 2px;
+}
+.fy-note__end .ui-btn {
+  height: 30px;
+  min-height: 30px;
+}
+.fy-note__close {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--neutral-400);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-note__close:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.fy-note__close:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/*
+ * The update notice still comes through sonner's own title/description shape — it is a fact about
+ * the app rather than a job, so it has no row in Activity to match.
+ */
 .fy-toast {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
