@@ -4397,8 +4397,21 @@ export class Coordinator {
         const candidate = (await this.voiceService.catalogue(bundle.clonedVoices)).find(
           (entry) => entry.provider === msg.provider && entry.voiceId === msg.voiceId,
         );
-        if (!candidate || (msg.provider !== "kokoro" && msg.provider !== "elevenlabs")) {
+        if (!candidate) {
           this.rejectEnqueue(msg.requestId, msg.kind, "Choose an available voice again.");
+          return;
+        }
+        // A cloned voice IS in the catalogue — saying "choose an available voice" about one would
+        // be a lie about a voice the picker just offered. The reason it cannot be auditioned yet is
+        // that its preview has to resolve the clip and dispatch the recipe (SPEC-022 T-9b).
+        if (msg.provider !== "kokoro" && msg.provider !== "elevenlabs") {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            msg.provider === "comfyui"
+              ? "Previewing a cloned voice is not wired up yet."
+              : "Choose an available voice again.",
+          );
           return;
         }
         if (msg.provider === "kokoro") {

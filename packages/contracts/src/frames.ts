@@ -1103,7 +1103,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
-      provider: z.enum(["kokoro", "elevenlabs"]),
+      /**
+       * A provider id, not the two voice providers that existed when this was written (SPEC-022).
+       * The closed pair meant a cloned voice could be OFFERED by the catalogue and never ASKED FOR
+       * — the wire had no way to name it — which is the same assumption the preview cache key and
+       * `SpeechSpec.provider` carried, one layer further out.
+       *
+       * `ProviderIdSchema` rather than a free string: the coordinator still refuses a provider that
+       * cannot preview, and a typo should fail at the frame rather than reach that check.
+       */
+      provider: ProviderIdSchema,
       voiceId: z.string().min(1),
     })
     .strict(),

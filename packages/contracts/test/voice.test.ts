@@ -153,3 +153,31 @@ describe("a clip becomes a voice", () => {
     assert.deepEqual(parseVoiceLibrary({ voices: "nope" }), []);
   });
 });
+
+/**
+ * The wire can name a third voice provider (SPEC-022 T-7). The preview frame typed `provider` as
+ * the two that existed when it was written, so a cloned voice could be offered by the catalogue
+ * and never asked for — the same assumption the cache key carried, one layer out.
+ */
+describe("a voice preview can name any provider the app knows", () => {
+  const frame = (provider: string) => ({
+    kind: "voice-preview" as const,
+    requestId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+    worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+    sheetId: "maren-kest",
+    provider,
+    voiceId: "harbour-glass",
+  });
+
+  it("accepts the local recipe engine, not only kokoro and elevenlabs", () => {
+    for (const provider of ["kokoro", "elevenlabs", "comfyui"]) {
+      assert.equal(ClientMessageSchema.safeParse(frame(provider)).success, true, provider);
+    }
+  });
+
+  it("still refuses a provider this app has never heard of", () => {
+    // A provider id, not a free string: a typo fails at the frame rather than reaching the
+    // coordinator's own check.
+    assert.equal(ClientMessageSchema.safeParse(frame("elevenlabz")).success, false);
+  });
+});

@@ -62,7 +62,13 @@ export interface RecipeCustomNode {
 
 export interface ComfyUiRecipe {
   id: string;
-  capability: "image" | "video";
+  /**
+   * `voice-tts` joins image and video (SPEC-021, amended 2026-08-19). Voxa covers preset speech and
+   * cannot clone, so a voice whose identity is a reference clip needs a model an ONNX sidecar cannot
+   * host — and everything else a recipe already gets (discovery, weights, gating, pinned nodes)
+   * applies to it unchanged.
+   */
+  capability: "image" | "video" | "voice-tts";
   displayName: string;
   recipeVersion: number;
   params: Record<string, RecipeParamSpec>;

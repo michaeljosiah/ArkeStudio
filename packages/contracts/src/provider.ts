@@ -114,7 +114,16 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
    * the dispatchable unit is an Arke-authored recipe, and this row is what puts those recipes
    * in the same picker, queue and ledger as every cloud model.
    */
-  comfyui: { displayName: "ComfyUI", capabilities: ["image", "video"], local: true, credential: "none" },
+  comfyui: {
+    displayName: "ComfyUI",
+    // voice-tts from SPEC-022: a cloned voice runs as a recipe here rather than in a runtime of our
+    // own. Deliberately NOT voice-clone — cloning is something the app does to a recording (minting
+    // a library entry), not something it asks an engine for, so no capability probe should imply an
+    // engine can perform it.
+    capabilities: ["image", "video", "voice-tts"],
+    local: true,
+    credential: "none",
+  },
 };
 
 /**
