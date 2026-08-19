@@ -88,6 +88,23 @@ export default async function verifyPackagedRuntimes(context) {
     throw new Error(`resources/opencode2 was staged for a different architecture than ${arch}`);
   }
 
+  assertNothingForbidden(resources);
+
+  if (readdirSync(voxa).some((name) => name === "x64" || name === "arm64")) {
+    throw new Error("packaged Voxa contains architecture staging directories");
+  }
+  const nativeIndex = join(resources, "app.asar.unpacked", "node_modules", "better-sqlite3-electron", "build", "Release", "better_sqlite3.node");
+  if (existsSync(nativeIndex)) assertPeArchitecture(nativeIndex, arch);
+}
+
+/**
+ * What must never be in an installer, whatever else is right about it.
+ *
+ * Exported so it can be exercised without a twenty-minute package run. These guard failures that
+ * otherwise produce a build looking completely normal, and a guard for a silent failure that has
+ * never itself been fired is not much of a guard.
+ */
+export function assertNothingForbidden(resources) {
   /*
    * `claude.exe` joins the model weights for a different reason: not size, licence.
    *
@@ -135,9 +152,4 @@ export default async function verifyPackagedRuntimes(context) {
       );
     }
   }
-  if (readdirSync(voxa).some((name) => name === "x64" || name === "arm64")) {
-    throw new Error("packaged Voxa contains architecture staging directories");
-  }
-  const nativeIndex = join(resources, "app.asar.unpacked", "node_modules", "better-sqlite3-electron", "build", "Release", "better_sqlite3.node");
-  if (existsSync(nativeIndex)) assertPeArchitecture(nativeIndex, arch);
 }
