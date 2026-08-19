@@ -3,16 +3,18 @@
 `cursor:pointer` elements: **1408**
 
 - **1033 wired**
-- **69 state variants** — the *selected* half of an exclusive pair. Clicking the row
-  you are already on is a no-op, so no handler is correct. NOTE: this does not apply to a
-  TOGGLE — a picked reference still needs a handler, because unpicking it is a real action.
-- **11 leave the application** — a file or folder picker, an external link.
-- **158 icon-only** — no text, no `title`; the markup does not say what they do.
-- **137 labelled and unwired**
+- **23 state variants** — the selected half of an EXCLUSIVE pair, proven by its twin
+  block holding the same row WITH a handler. Clicking the row you are on is a no-op.
+  This does not apply to a toggle: a picked reference still needs a handler, because
+  unpicking is a real action.
+- **14 leave the application** — a file or folder picker, an external link.
+- **178 icon-only** — no text, no `title`; the markup does not say what they do.
+- **160 labelled and unwired**
 
 | screen | unwired | the affordances |
 |---|---:|---|
-| 68b Generate · the bench | 9 | Image 1 x2, Harbour night studies, Image 2, Audio 1 0:12, Image 3 |
+| 68b Generate · the bench | 18 | Image 1 x2, Harbour night studies, Voice, Image 2, Audio 1 0:12 |
+| 22a Settings | 12 | Replace x2, OpenAI · GPT Image 2 x2, Claude 1 on, ElevenLabs 1 on, Higgsfield — |
 | 62b Generate · the standard dialog | 8 | Remove, higgsfield Soul 2.0 DEFAULT 4 models ▾, 1K, 4K, 16:9 |
 | 28a New canon entry | 6 | Rule, Location, Faction, Timeline, Tone |
 | 5b New character | 6 | Bray Half-Hitch sheet v3 · approved, Maren Kest sheet v4 · locked, Sereth Anwe sheet v2 · approved, Ilo Venn sheet v2 · approved, Odile Marrow sheet v1 · accepted |
@@ -37,6 +39,7 @@
 | 71b World Chat · a conversation | 3 | The bells and the lock, Archived · 2, about Maren Kest ⌄ |
 | 1c World hub minimal | 2 | Continue Saltlight Shot 15 of 15 · the board, Grow the canon The Drowned Quarter has three |
 | 57a Location · Reference | 2 | Replace, history |
+| 5a First run | 2 | Your first world A name and a sentence are e, Import a folder |
 | 54a Story production dashboard | 2 | Dashboard, All 24 chapters |
 | 45b Episode board · as the surface | 2 | Story v1, Add an episode |
 | 48b Arcs · lanes across the season | 2 | Story v1, Add a lane |
