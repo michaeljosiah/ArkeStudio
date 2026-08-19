@@ -489,42 +489,42 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
    * A card big enough and busy anyway (SPEC-022 §2.6).
    *
    * Checking only the total is what let a 10 GB machine read "ready" and then page to disk for
-   * half an hour. The two refusals are deliberately different sentences: one card will never be
-   * big enough, the other will be free again in a minute.
+   * half an hour. But raw free memory counts the engine's own resident model against us, and
+   * dispatch unloads that before giving up — so readiness assumes the reclaim and refuses only
+   * what no amount of unloading could rescue.
    */
-  it("a card that clears the floor but has nothing free says so, differently", async () => {
+  async function readiness(freeMb: number | null): Promise<string> {
     const world = fakeWorld();
     world.urls.set("http://10.0.0.4:8188", {});
-    const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app"), freeVramMb: async () => 2048 });
+    const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app"), freeVramMb: async () => freeMb });
     await service.applySettings({ enginePath: null, engineUrl: "http://10.0.0.4:8188", modelsDir: "C:/models" });
     world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
+    const status = await service.status({ vramMb: 10240, memMb: 32000, diskFreeMb: 1000 });
+    return `${status.recipes[0]!.state}|${status.recipes[0]!.reason ?? ""}`;
+  }
 
-    const busy = await service.status({ vramMb: 10240, memMb: 32000, diskFreeMb: 1000 });
-    assert.equal(busy.recipes[0]!.state, "disabled");
-    assert.match(busy.recipes[0]!.reason!, /Needs 6 GB free\. This machine has 2 GB free of 10 GB/);
-    assert.match(busy.recipes[0]!.reason!, /close other programs using the graphics card/);
+  it("refuses only a card no amount of unloading could rescue", async () => {
+    // The 6 GB floor with a 4 GB reclaim allowance: under 2 GB free is hopeless, over it is not.
+    const hopeless = await readiness(1024);
+    assert.equal(hopeless.startsWith("disabled|"), true);
+    assert.match(hopeless, /Needs 6 GB free\. This machine has 1 GB free of 10 GB/);
+    assert.match(hopeless, /close other programs using the graphics card/);
     // Not the too-small sentence: that card is fine, it is the machine that is busy.
-    assert.equal(/This machine has 10 GB\./.test(busy.recipes[0]!.reason!), false);
+    assert.equal(/This machine has 10 GB\./.test(hopeless), false);
   });
 
-  it("stays ready when the card is big enough and free enough", async () => {
-    const world = fakeWorld();
-    world.urls.set("http://10.0.0.4:8188", {});
-    const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app"), freeVramMb: async () => 9000 });
-    await service.applySettings({ enginePath: null, engineUrl: "http://10.0.0.4:8188", modelsDir: "C:/models" });
-    world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
-    assert.equal((await service.status({ vramMb: 10240, memMb: 32000, diskFreeMb: 1000 })).recipes[0]!.state, "ready");
+  it("stays ready where unloading the engine would plausibly be enough", async () => {
+    // 2 GB free against a 6 GB floor used to disable. Dispatch would have unloaded a resident
+    // model and succeeded, so readiness no longer takes the feature away on a guess — it defers
+    // to the dispatch check, which frees first and refuses in a quarter of a second if it must.
+    assert.equal((await readiness(2048)).startsWith("ready|"), true);
+    assert.equal((await readiness(9000)).startsWith("ready|"), true);
   });
 
   it("a card that cannot be asked how much is free is not refused for it", async () => {
     // D15 again: unknown stays unknown. A build with no way to ask must not disable local work
     // on every machine, so a null free reading falls back to the total the probe did measure.
-    const world = fakeWorld();
-    world.urls.set("http://10.0.0.4:8188", {});
-    const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app"), freeVramMb: async () => null });
-    await service.applySettings({ enginePath: null, engineUrl: "http://10.0.0.4:8188", modelsDir: "C:/models" });
-    world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
-    assert.equal((await service.status({ vramMb: 10240, memMb: 32000, diskFreeMb: 1000 })).recipes[0]!.state, "ready");
+    assert.equal((await readiness(null)).startsWith("ready|"), true);
   });
 
   it("missing weights: the count, not a generic unavailable", async () => {

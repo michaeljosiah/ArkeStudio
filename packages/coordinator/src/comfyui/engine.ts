@@ -100,6 +100,16 @@ export function engineInstanceId(source: string, location: string): string {
 
 const gb = (mb: number): string => `${Math.round(mb / 1024)} GB`;
 
+/**
+ * What readiness assumes dispatch can hand back by unloading the engine (SPEC-022 §2.6).
+ *
+ * A loaded IndexTTS measured ~6 GB resident on the reference machine, and `POST /free` returns
+ * all of it. This allowance is set below that on purpose: high enough that a machine merely
+ * hosting a warm model is not refused work it would do, low enough that a card with almost
+ * nothing free is still told so rather than left to find out.
+ */
+const RECLAIMABLE_VRAM_MB = 4096;
+
 export class ComfyUiEngineService {
   private settings: ComfyUiSettings = { enginePath: null, engineUrl: null, modelsDir: null };
   private resolved: ResolvedEngine = { source: "absent", root: null, url: null, problem: null };
@@ -635,25 +645,26 @@ export class ComfyUiEngineService {
       );
     }
     /*
-     * 7 · The card is big enough. Is any of it free?
+     * 7 · The card is big enough. Could it be free enough?
      *
      * A card clears the floor and the recipe still cannot run, because a browser or another AI
      * tool already holds a third of it. Checking only the total is what let a 10 GB machine read
      * "ready" and then page to disk for half an hour (SPEC-022 §2.6).
      *
-     * This is a DIFFERENT sentence from the one above, because it is a different problem with a
-     * different remedy: that card is too small and always will be, this one is busy and will not
-     * be in a minute. The state is the same because the consequence is — pressing Generate now
-     * buys a wait, not a take.
+     * But raw free memory is the wrong number to refuse on, because it counts the engine's own
+     * resident model against us — and dispatch unloads that before it gives up (`POST /free`).
+     * Readiness will not call `/free` itself: that discards the model cache every twenty seconds
+     * to answer a status poll. So it assumes the reclaim instead, and refuses only what no amount
+     * of unloading could rescue.
      *
-     * Pessimistic by one case, deliberately: when the engine itself is holding a model it could
-     * release, dispatch frees it first and would have succeeded. Readiness will not call `/free`
-     * to answer a status poll — that throws away the model cache every twenty seconds — so it
-     * reads the card as it is and says the engine will try. Better a warning that resolves itself
-     * than a "ready" that does not.
+     * The result is deliberately optimistic. Readiness is advisory and dispatch is authoritative:
+     * a "ready" that later refuses in a quarter of a second costs a click, while a "disabled" on
+     * a machine that would have worked costs the feature. The sentence is also a different one
+     * from the too-small case above — that card will never be big enough, this one is busy —
+     * even though both disable, because both mean pressing Generate buys a wait, not a take.
      */
     const free = this.deps.freeVramMb ? await this.deps.freeVramMb().catch(() => null) : null;
-    if (free !== null && free < recipe.minVramMb) {
+    if (free !== null && free + RECLAIMABLE_VRAM_MB < recipe.minVramMb) {
       return disabled(
         `Needs ${gb(recipe.minVramMb)} free. This machine has ${gb(free)} free of ${gb(vram)} — close other programs using the graphics card. Cloud ${recipe.capability} still works.`,
         `Cloud ${recipe.capability} still works.`,
