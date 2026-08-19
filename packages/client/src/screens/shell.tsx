@@ -31,6 +31,8 @@ import {
   genesisChat,
   genesisDiscard,
   hostCanAttach,
+  chooseClaudeExecutable,
+  clearClaudeExecutable,
   detectHarnesses,
   detectRuntimes,
   chooseComfyUiPath,
@@ -2448,7 +2450,7 @@ export function SettingsHarnessScreen() {
           ))}
         </div>
         <div className="fy-rt__pane">
-          <HarnessPane harness={chosen} engine={engine} detected={harness !== null} />
+          <HarnessPane harness={chosen} engine={engine} detected={harness !== null} claudePath={harness?.claudePath ?? null} />
         </div>
       </div>
     </div>
@@ -2459,10 +2461,12 @@ function HarnessPane({
   harness,
   engine,
   detected,
+  claudePath,
 }: {
   harness: HarnessAvailability;
   engine: HarnessEngine;
   detected: boolean;
+  claudePath: string | null;
 }) {
   const inUse = harness.id === engine;
   return (
@@ -2488,6 +2492,33 @@ function HarnessPane({
           </Button>
         )}
       </div>
+      {!harness.bundled && (
+        <>
+          <RuntimeSection label="WHERE IT IS" />
+          <div className="fy-set__row">
+            <div className="fy-set__name fy-set__name--wide">
+              <div className="fy-set__title">
+                {claudePath ?? (harness.source === "path" ? "Found on the system path" : "No file chosen")}
+              </div>
+              <div className="fy-set__caps">
+                {claudePath
+                  ? harness.installed
+                    ? "this file is what Arke Studio runs"
+                    : "this file did not answer"
+                  : "choose a file if Arke Studio cannot find yours"}
+              </div>
+            </div>
+            {claudePath && (
+              <Button variant="ghost" onClick={() => clearClaudeExecutable()}>
+                Clear
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => chooseClaudeExecutable()}>
+              Choose…
+            </Button>
+          </div>
+        </>
+      )}
       <RuntimeSection label="USE FOR AUTHORING" />
       <div className="fy-set__row">
         <div className="fy-set__name fy-set__name--wide">

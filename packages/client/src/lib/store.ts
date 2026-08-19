@@ -1585,6 +1585,16 @@ export function setHarnessEngine(engine: HarnessEngine): void {
   send({ kind: "set-harness-engine", engine });
 }
 
+/** Point Arke at a Claude Code the PATH does not carry. The host owns the file dialog. */
+export function chooseClaudeExecutable(): void {
+  send({ kind: "choose-claude-executable" });
+}
+
+/** Forget the chosen path and go back to whatever PATH offers. */
+export function clearClaudeExecutable(): void {
+  send({ kind: "clear-claude-executable" });
+}
+
 export function chooseVoxaExecutable(): void {
   send({ kind: "choose-voxa-executable" });
 }

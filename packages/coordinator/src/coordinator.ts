@@ -419,7 +419,9 @@ export interface CoordinatorOptions {
    * subscription, which is fine at launch when they have asked for the harness and wrong when
    * they have merely opened Settings.
    */
-  detectHarnesses?: () => Promise<HarnessAvailability[]>;
+  detectHarnesses?: (configuredPath: string | null) => Promise<HarnessAvailability[]>;
+  /** The host's native file dialog for pointing at a Claude Code PATH does not carry. */
+  chooseClaudeExecutable?: () => Promise<string | null>;
   /**
    * The ComfyUI engine (SPEC-021): the service that discovers, supervises and verifies it,
    * plus the host's own directory pickers — selected paths go straight to settings and never
@@ -6145,6 +6147,21 @@ export class Coordinator {
         await this.emitHarnessStatus(harnesses);
         return;
       }
+      case "choose-claude-executable": {
+        if (!this.appSettings || !this.opts.chooseClaudeExecutable) return;
+        const chosen = await this.opts.chooseClaudeExecutable().catch(() => null);
+        // Cancelling a file dialog is not a decision — it must not clear an existing choice.
+        if (chosen === null) return;
+        await this.appSettings.setClaudePath(chosen);
+        await this.emitHarnessStatus();
+        return;
+      }
+      case "clear-claude-executable": {
+        if (!this.appSettings) return;
+        await this.appSettings.setClaudePath(null);
+        await this.emitHarnessStatus();
+        return;
+      }
       case "detect-runtimes": {
         if (!this.opts.manifest || !this.opts.probeRuntime) return;
         try {
@@ -6811,8 +6828,9 @@ export class Coordinator {
    * harness, always available — rather than an empty list a screen would have to explain.
    */
   private async harnessAvailability(): Promise<HarnessAvailability[]> {
+    const claudePath = (await this.appSettings?.load())?.harness.claudePath ?? null;
     const detected = this.opts.detectHarnesses
-      ? await this.opts.detectHarnesses().catch(() => [])
+      ? await this.opts.detectHarnesses(claudePath).catch(() => [])
       : [];
     return [OPENCODE_AVAILABILITY, ...detected];
   }
@@ -6828,9 +6846,15 @@ export class Coordinator {
    */
   private async emitHarnessStatus(known?: HarnessAvailability[]): Promise<void> {
     const harnesses = known ?? (await this.harnessAvailability());
-    const stored = (await this.appSettings?.load())?.harness.engine ?? "opencode";
+    const settings = await this.appSettings?.load();
+    const stored = settings?.harness.engine ?? "opencode";
+    const claudePath = settings?.harness.claudePath ?? null;
     const engine = harnesses.find((h) => h.id === stored)?.installed ? stored : "opencode";
-    this.emit({ at: new Date().toISOString(), type: "harness.status", harness: { engine, harnesses } });
+    this.emit({
+      at: new Date().toISOString(),
+      type: "harness.status",
+      harness: { engine, harnesses, claudePath },
+    });
   }
 
   private async refreshWorldList(): Promise<void> {

@@ -125,7 +125,15 @@ export class AppSettingsFile {
    */
   async setHarnessEngine(engine: HarnessEngine): Promise<AppSettings> {
     const current = await this.load();
-    const next: AppSettings = { ...current, harness: { engine } };
+    const next: AppSettings = { ...current, harness: { ...current.harness, engine } };
+    await this.persist(next);
+    return next;
+  }
+
+  /** The chosen Claude Code executable, or null to go back to whatever PATH offers. */
+  async setClaudePath(claudePath: string | null): Promise<AppSettings> {
+    const current = await this.load();
+    const next: AppSettings = { ...current, harness: { ...current.harness, claudePath } };
     await this.persist(next);
     return next;
   }

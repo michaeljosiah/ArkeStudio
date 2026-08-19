@@ -50,6 +50,15 @@ export type ThemePreference = z.infer<typeof ThemePreferenceSchema>;
 export const HarnessSettingsSchema = z
   .object({
     engine: HarnessEngineSchema.default("opencode"),
+    /**
+     * An explicit path to Claude Code, for when PATH does not carry it.
+     *
+     * Not a convenience. A GUI app inherits whatever environment launched it, and an install
+     * living somewhere like `~/.local/bin` can be perfectly present and still invisible to the
+     * app — leaving a screen that says "not here" about something the user can see on disk,
+     * with nothing to do about it. This is the something.
+     */
+    claudePath: z.string().min(1).nullable().default(null),
   })
   .strict();
 export type HarnessSettings = z.infer<typeof HarnessSettingsSchema>;

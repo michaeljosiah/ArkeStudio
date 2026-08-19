@@ -289,7 +289,7 @@
           <tbody>
             <tr>
               <td><b>Claude Code installed</b></td>
-              <td>The <code>claude</code> command, installed the normal way and findable on your system PATH.</td>
+              <td>The <code>claude</code> command, installed the normal way. The Studio looks on your system PATH, and you can point it at the file yourself if that does not find it.</td>
               <td>The Studio says <b>Claude Code is not installed</b> and uses OpenCode. This is a normal state, not an error.</td>
             </tr>
             <tr>
@@ -346,6 +346,21 @@
               Each row says what it is: <b>in use</b>, <b>available</b>, or <b>not here</b>. Open a
               row and press <b>Use this</b>. There is also <b>Check again</b>, for when you have just
               installed or updated Claude Code and do not want to restart to be seen.
+            </p>
+          </div>
+          <div class="step">
+            <div class="step__time">If it cannot find it</div>
+            <h4>Point it at the file yourself</h4>
+            <p>
+              <b>Where it is</b> shows how the Studio found Claude Code, and offers <b>Choose…</b> if it
+              did not. This matters more than it sounds: an app started from the desktop only sees the
+              folders Windows hands it, so a perfectly good Claude Code — often under a folder like
+              <code>.localin</code> — can be sitting right there and still be invisible.
+            </p>
+            <p class="step__see">
+              A file you choose is checked exactly like one found automatically: same version floor,
+              same test turn. Choosing one grants nothing that finding one would not have. <b>Clear</b>
+              goes back to whatever the PATH offers.
             </p>
           </div>
           <div class="step">
@@ -515,7 +530,7 @@
           <tbody>
             <tr><td>You never switched it on</td><td>Uses OpenCode without mentioning Claude Code at all. Not switching it on is the normal case, not a problem to report.</td></tr>
             <tr><td>You chose it, then removed it</td><td>Runs on OpenCode and says so. Your choice stays saved, so reinstalling restores it.</td></tr>
-            <tr><td>Not installed</td><td>Says so plainly, and uses OpenCode.</td></tr>
+            <tr><td>Not installed</td><td>Says so plainly, and uses OpenCode. If it IS installed and the Studio cannot see it, <b>Choose…</b> under Where it is points at the file directly.</td></tr>
             <tr><td>Installed but too old</td><td>Names the version you have and the version needed, so the message is something you can act on.</td></tr>
             <tr><td>Fails the test turn</td><td>Not used. A version that cannot be verified is treated as unusable rather than given the benefit of the doubt.</td></tr>
             <tr><td>Not signed in</td><td>The test turn fails, so this lands in the row above.</td></tr>

@@ -94,12 +94,13 @@ export async function describeClaudeAvailability(
 ): Promise<HarnessAvailability> {
   const { found, rejected } = await discoverClaudeCode(discovery);
   const base = { id: "claude" as const, label: "Claude Code", bundled: false };
-  if (found) return { ...base, installed: true, version: found.version, blocked: null };
+  if (found) return { ...base, installed: true, version: found.version, source: found.source, blocked: null };
   if (rejected) {
     const min = discovery.minVersion ?? CLAUDE_MIN_VERSION;
     return {
       ...base,
       installed: false,
+      source: null,
       version: rejected.version,
       // Both numbers, because "unavailable" is not something a reader can act on and this is.
       blocked: `Claude Code ${rejected.version} is installed, but ${min} or newer is needed.`,
@@ -108,6 +109,7 @@ export async function describeClaudeAvailability(
   return {
     ...base,
     installed: false,
+    source: null,
     version: null,
     // Not a failure — most machines will never have it, and the wording should not imply fault.
     blocked: "Claude Code was not found on this machine.",

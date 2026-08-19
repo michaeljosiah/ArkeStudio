@@ -766,6 +766,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * rather than an instruction — the screen disabling the control is a courtesy, not the rule.
    */
   z.object({ kind: z.literal("set-harness-engine"), engine: HarnessEngineSchema }).strict(),
+  /** Point Arke at a Claude Code the PATH does not carry. The host owns the file dialog. */
+  z.object({ kind: z.literal("choose-claude-executable") }).strict(),
+  z.object({ kind: z.literal("clear-claude-executable") }).strict(),
   /** Voxa configuration stays host-owned: none of these messages contains a filesystem path. */
   z.object({ kind: z.literal("choose-voxa-executable") }).strict(),
   z.object({ kind: z.literal("clear-voxa-executable") }).strict(),

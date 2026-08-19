@@ -26,6 +26,13 @@ export const HarnessAvailabilitySchema = z
     installed: z.boolean(),
     version: z.string().nullable(),
     /**
+     * How it was found: on PATH, or at a path the user pointed us at. Null when absent.
+     *
+     * Worth carrying because "found" is not the whole answer — somebody who chose a file wants
+     * to see that their choice is what answered, not wonder whether it was quietly ignored.
+     */
+    source: z.enum(["path", "configured"]).nullable(),
+    /**
      * Why it cannot be chosen, written to be read rather than logged. Null when it can be.
      *
      * Carried rather than derived because only the detector knows which case this is. A screen
@@ -49,6 +56,8 @@ export const HarnessStatusSchema = z
   .object({
     engine: HarnessEngineSchema,
     harnesses: z.array(HarnessAvailabilitySchema),
+    /** The executable chosen for Claude Code, if any — echoed so it can be shown and cleared. */
+    claudePath: z.string().nullable(),
   })
   .strict();
 export type HarnessStatus = z.infer<typeof HarnessStatusSchema>;
@@ -62,6 +71,7 @@ export const OPENCODE_AVAILABILITY: HarnessAvailability = {
   label: "OpenCode",
   installed: true,
   version: null,
+  source: null,
   blocked: null,
   bundled: true,
 };

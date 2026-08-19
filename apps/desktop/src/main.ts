@@ -436,7 +436,8 @@ async function initialize(): Promise<{ port: number }> {
    * The same file the coordinator writes through, so Settings and launch cannot disagree.
    */
   const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
-  const chosenHarness = (await hostSettings.load().catch(() => null))?.harness.engine ?? "opencode";
+  const storedHarness = (await hostSettings.load().catch(() => null))?.harness ?? null;
+  const chosenHarness = storedHarness?.engine ?? "opencode";
 
   const wiring = await assembleHarness({
     appRoot,
@@ -456,7 +457,13 @@ async function initialize(): Promise<{ port: number }> {
       // Settings is the way in. ARKE_HARNESS stays as a developer override so a branch can be
       // tried without writing to somebody's real settings file, and it wins where both are set.
       enabled: process.env["ARKE_HARNESS"] === "claude" || chosenHarness === "claude",
-      ...(process.env["ARKE_CLAUDE_CMD"] ? { configuredPath: process.env["ARKE_CLAUDE_CMD"] } : {}),
+      // The chosen path is used at launch too, or Settings verifies one binary and the
+      // lane runs another — the confinement probe would then have proved nothing.
+      ...(process.env["ARKE_CLAUDE_CMD"]
+        ? { configuredPath: process.env["ARKE_CLAUDE_CMD"] }
+        : storedHarness?.claudePath
+          ? { configuredPath: storedHarness.claudePath }
+          : {}),
     },
     onTrace: harnessTrace(appRoot),
   });
@@ -824,10 +831,38 @@ async function initialize(): Promise<{ port: number }> {
     },
     manifest: SHIPPED_MANIFEST,
     probeRuntime: () => probeRuntime(appRoot),
+    /**
+     * Point Arke at a Claude Code the PATH does not carry.
+     *
+     * A GUI app inherits the environment that launched it, and a perfectly good install under
+     * something like `~/.local/bin` can be invisible to it — a screen saying "not here" about a
+     * file the user can see on disk. Verified nowhere but discovery: the chosen path goes
+     * through the same version floor and the same confinement probe as one found on PATH, so
+     * choosing a file grants nothing that finding one would not have.
+     */
+    chooseClaudeExecutable: async () => {
+      const parent = window;
+      if (!parent) return null;
+      const result = await dialog.showOpenDialog(parent, {
+        title: "Choose the Claude Code executable",
+        buttonLabel: "Use this Claude Code",
+        properties: ["openFile"],
+        filters: [
+          { name: "Claude Code", extensions: ["exe", "cmd", "bat"] },
+          { name: "All files", extensions: ["*"] },
+        ],
+      });
+      return result.canceled ? null : (result.filePaths[0] ?? null);
+    },
     // Only the harnesses that can be absent — OpenCode is in the installer beside this process.
-    detectHarnesses: async () => [
+    detectHarnesses: async (configuredPath) => [
       await describeClaudeAvailability(
-        process.env["ARKE_CLAUDE_CMD"] ? { configuredPath: process.env["ARKE_CLAUDE_CMD"] } : {},
+        // The user's choice first; the developer override still wins where it is set.
+        process.env["ARKE_CLAUDE_CMD"]
+          ? { configuredPath: process.env["ARKE_CLAUDE_CMD"] }
+          : configuredPath
+            ? { configuredPath }
+            : {},
       ),
     ],
     dispatchClients: providerClients,
