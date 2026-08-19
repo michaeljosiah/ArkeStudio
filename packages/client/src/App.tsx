@@ -50,6 +50,7 @@ import {
   WorldLayout,
   WorldOverviewScreen,
 } from "./screens/world.js";
+import { EpisodeDetailScreen } from "./screens/development.js";
 import {
   AudioScreen,
   ChapterTreeScreen,
@@ -172,6 +173,7 @@ export function App() {
           <Route index element={<ProductionDashboardScreen />} />
           <Route path="cast" element={<ProductionCastScreen />} />
           <Route path="story" element={<StoryScreen />} />
+          <Route path="story/episodes/:episodeId" element={<EpisodeDetailScreen />} />
           <Route path="story/chapters" element={<ChapterTreeScreen />} />
           <Route path="scenes" element={<ScenesScreen />} />
           <Route path="scenes/new" element={<NewSceneScreen />} />

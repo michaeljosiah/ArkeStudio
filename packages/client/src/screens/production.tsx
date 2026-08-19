@@ -53,6 +53,7 @@ import { CanonEntryRow } from "../domain/domain.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
 import { useTalkItThrough } from "../lib/talk-it-through.js";
+import { DevelopmentWorkspace } from "./development.js";
 import { posterize, posterNameFor } from "../lib/poster.js";
 import { useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
@@ -735,6 +736,9 @@ export function StoryScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const { talk, starting: talkStarting } = useTalkItThrough(worldId);
+  // An episodic production's Development is the four-view workspace (turn 48; issue 397); a
+  // non-episodic one keeps the single overview — no fake episode or season controls.
+  if (production && productionShape(production.meta).isEpisodic) return <DevelopmentWorkspace />;
   const story = production?.story ?? null;
   // The direct overview editor (issue 385): fields staged through the gate, never written live.
   const [editing, setEditing] = useState(false);

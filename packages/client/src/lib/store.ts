@@ -2165,6 +2165,40 @@ export function draftStoryOverview(worldId: string, productionId: string, instru
   send({ kind: "draft-story-overview", worldId, productionId, instruction });
 }
 
+/** Stage the season record through the gate — nothing is written live (issue 397). */
+export function proposeSeason(
+  worldId: string,
+  productionId: string,
+  season: {
+    question?: string;
+    ending?: string;
+    direction?: string;
+    arcs?: Array<{ id: string; title: string; note?: string; setup?: string; turn?: string; payoff?: string }>;
+  },
+): void {
+  send({ kind: "propose-season", worldId, productionId, ...season });
+}
+
+/** Stage one episode — a create mints identity from the title; an amend names its id (issue 397). */
+export function proposeEpisode(
+  worldId: string,
+  productionId: string,
+  episode: {
+    episodeId?: string;
+    title?: string;
+    order?: number;
+    promise?: { opens?: string; turn?: string; closes?: string };
+    scenes?: string[];
+  },
+): void {
+  send({ kind: "propose-episode", worldId, productionId, ...episode });
+}
+
+/** Reorder episodes by stable id — order fields rewrite, nothing renames (issue 397). */
+export function reorderEpisodes(worldId: string, productionId: string, orderedIds: string[]): void {
+  send({ kind: "reorder-episodes", worldId, productionId, orderedIds });
+}
+
 export function draftScene(worldId: string, productionId: string, brief: string): void {
   send({ kind: "draft-scene", worldId, productionId, brief });
 }

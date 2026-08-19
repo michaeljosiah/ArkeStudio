@@ -1207,6 +1207,61 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       instruction: z.string().min(1).max(2000),
     })
     .strict(),
+  /** issue #397: the season record, staged through the gate from named fields. */
+  z
+    .object({
+      kind: z.literal("propose-season"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      question: z.string().min(1).max(500).optional(),
+      ending: z.string().min(1).max(1000).optional(),
+      direction: z.string().min(1).max(2000).optional(),
+      arcs: z
+        .array(
+          z
+            .object({
+              id: SlugSchema,
+              title: z.string().min(1).max(200),
+              note: z.string().max(500).optional(),
+              setup: z.string().optional(),
+              turn: z.string().optional(),
+              payoff: z.string().optional(),
+            })
+            .strict(),
+        )
+        .max(20)
+        .optional(),
+    })
+    .strict(),
+  /** issue #397: one episode — a create mints identity from the title; an amend names its id. */
+  z
+    .object({
+      kind: z.literal("propose-episode"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      episodeId: z.string().optional(),
+      title: z.string().min(1).max(200).optional(),
+      order: z.number().int().min(1).optional(),
+      promise: z
+        .object({
+          opens: z.string().max(500).optional(),
+          turn: z.string().max(500).optional(),
+          closes: z.string().max(500).optional(),
+        })
+        .strict()
+        .optional(),
+      scenes: z.array(SceneIdSchema).optional(),
+    })
+    .strict(),
+  /** issue #397: reorder episodes by stable id — order fields rewrite, nothing renames. */
+  z
+    .object({
+      kind: z.literal("reorder-episodes"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      orderedIds: z.array(z.string().min(1)).min(1),
+    })
+    .strict(),
   /** SPEC-012 R-7: draft a scene in conversation; accepting creates shots, dispatches nothing. */
   z
     .object({

@@ -80,8 +80,11 @@ import {
   landBoard,
   overviewSteer,
   productionCreatedBy,
+  proposeEpisode,
+  proposeSeason,
   proposeStoryOverview,
   reorderChapters,
+  reorderEpisodes,
   reorderScenes,
   saveChapter,
   setPromptOverride,
@@ -3348,6 +3351,58 @@ export class Coordinator {
         } catch {
           this.transport.broadcastSnapshot();
         }
+        return;
+      }
+      case "propose-season": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        try {
+          const { proposalId } = await proposeSeason(store, gate, {
+            productionId: msg.productionId,
+            source: "form",
+            season: {
+              ...(msg.question !== undefined ? { question: msg.question } : {}),
+              ...(msg.ending !== undefined ? { ending: msg.ending } : {}),
+              ...(msg.direction !== undefined ? { direction: msg.direction } : {}),
+              ...(msg.arcs !== undefined ? { arcs: msg.arcs } : {}),
+            },
+          });
+          this.emit({ at: new Date().toISOString(), type: "proposal.staged", worldId: msg.worldId, proposalId });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "propose-episode": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        try {
+          const { proposalId } = await proposeEpisode(store, gate, {
+            productionId: msg.productionId,
+            source: "form",
+            ...(msg.episodeId !== undefined ? { episodeId: msg.episodeId } : {}),
+            episode: {
+              ...(msg.title !== undefined ? { title: msg.title } : {}),
+              ...(msg.order !== undefined ? { order: msg.order } : {}),
+              ...(msg.promise !== undefined ? { promise: msg.promise } : {}),
+              ...(msg.scenes !== undefined ? { scenes: msg.scenes } : {}),
+            },
+          });
+          this.emit({ at: new Date().toISOString(), type: "proposal.staged", worldId: msg.worldId, proposalId });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "reorder-episodes": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await reorderEpisodes(store, msg.productionId, msg.orderedIds).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "draft-story-overview": {

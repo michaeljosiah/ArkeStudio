@@ -24,7 +24,10 @@ import {
   type ProductionFormat,
   type ProductionMedium,
   type ProposalSkill,
+  EpisodeSchema,
+  SeasonSchema,
   StoryOverviewSchema,
+  type Episode,
   type Scene,
   type ScenePlan,
   type Season,
@@ -244,6 +247,127 @@ export async function proposeStoryOverview(
     targets: [{ path, content }],
   });
   return { proposalId: proposal.id, path };
+}
+
+/**
+ * Stage the season record as a season-edit proposal (SPEC-023 R-10, issue #397). The draft is
+ * merged onto what is live; the gate validates, reviews field by field, and versions on accept.
+ */
+export async function proposeSeason(
+  store: WorldStore,
+  gate: {
+    stage(input: {
+      kind: "season-edit";
+      summary: string;
+      source: string;
+      targets: Array<{ path: string; content: string }>;
+    }): Promise<{ id: string }>;
+  },
+  input: { productionId: string; source: string; season: Omit<Season, "version"> },
+): Promise<{ proposalId: string; path: string }> {
+  const path = `productions/${input.productionId}/season.json`;
+  const live = store.getBundle().productions.find((p) => p.meta.id === input.productionId)?.season ?? null;
+  const content =
+    JSON.stringify(SeasonSchema.parse({ ...live, ...input.season, version: live?.version ?? 1 }), null, 2) + "\n";
+  const proposal = await gate.stage({
+    kind: "season-edit",
+    summary: `Season · ${input.productionId}`,
+    source: input.source,
+    targets: [{ path, content }],
+  });
+  return { proposalId: proposal.id, path };
+}
+
+/**
+ * Stage one episode as an episode-edit proposal (SPEC-023 R-12, issue #397): a create mints a
+ * stem-stable identity from the title; an amend merges onto the live record at its stored stem.
+ */
+export async function proposeEpisode(
+  store: WorldStore,
+  gate: {
+    stage(input: {
+      kind: "episode-edit";
+      summary: string;
+      source: string;
+      targets: Array<{ path: string; content: string }>;
+    }): Promise<{ id: string }>;
+  },
+  input: {
+    productionId: string;
+    source: string;
+    episodeId?: string;
+    episode: Partial<Omit<Episode, "id" | "version">> & { title?: string };
+  },
+): Promise<{ proposalId: string; path: string }> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === input.productionId);
+  if (!production) throw new Error(`production ${input.productionId} is not in this world`);
+  if (input.episodeId !== undefined) {
+    const live = production.episodes.find((e) => e.id === input.episodeId);
+    const stem = production.episodeFiles[input.episodeId];
+    if (!live || stem === undefined) throw new Error(`episode ${input.episodeId} is not in ${input.productionId}`);
+    const path = `productions/${input.productionId}/episodes/${stem}.json`;
+    const content = JSON.stringify(EpisodeSchema.parse({ ...live, ...input.episode }), null, 2) + "\n";
+    const proposal = await gate.stage({
+      kind: "episode-edit",
+      summary: `Episode · ${live.title}`,
+      source: input.source,
+      targets: [{ path, content }],
+    });
+    return { proposalId: proposal.id, path };
+  }
+  const title = input.episode.title;
+  if (title === undefined) throw new Error("a new episode needs a title");
+  const slug = slugify(title).slice(0, 60) || "episode";
+  const takenIds = new Set(production.episodes.map((e) => e.id));
+  const takenStems = new Set(Object.values(production.episodeFiles));
+  let id = `ep_${slug}`;
+  let stem = slug;
+  for (let n = 2; takenIds.has(id) || takenStems.has(stem); n++) {
+    id = `ep_${slug}-${n}`;
+    stem = `${slug}-${n}`;
+  }
+  const path = `productions/${input.productionId}/episodes/${stem}.json`;
+  const content =
+    JSON.stringify(
+      EpisodeSchema.parse({
+        id,
+        version: 1,
+        order: input.episode.order ?? production.episodes.length + 1,
+        title,
+        ...(input.episode.promise !== undefined ? { promise: input.episode.promise } : {}),
+        scenes: input.episode.scenes ?? [],
+        ...(input.episode.linked !== undefined ? { linked: input.episode.linked } : {}),
+        ...(input.episode.release !== undefined ? { release: input.episode.release } : {}),
+      }),
+      null,
+      2,
+    ) + "\n";
+  const proposal = await gate.stage({
+    kind: "episode-edit",
+    summary: `New episode · ${title}`,
+    source: input.source,
+    targets: [{ path, content }],
+  });
+  return { proposalId: proposal.id, path };
+}
+
+/** Reorder episodes: order fields only — no rename, no version cut (SPEC-023 R-12). */
+export async function reorderEpisodes(store: WorldStore, productionId: string, orderedIds: string[]): Promise<void> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+  if (!production) return;
+  const files: CommitFileInput[] = [];
+  for (const [index, episodeId] of orderedIds.entries()) {
+    const stem = production.episodeFiles[episodeId];
+    if (stem === undefined) continue;
+    const path = `productions/${productionId}/episodes/${stem}.json`;
+    const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+    const doc = JsonFile.parse(live);
+    if ((doc.value["order"] as number | undefined) === index + 1) continue;
+    doc.set({ order: index + 1 });
+    files.push({ path, action: "replace", content: doc.serialize(), baseHash: sha256(live), preserveVersion: true });
+  }
+  if (files.length === 0) return;
+  await store.commit({ kind: "episode-reorder", source: "form", files });
 }
 
 // ---------------------------------------------------------------------------

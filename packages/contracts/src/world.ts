@@ -289,7 +289,23 @@ export const SeasonSchema = z
     ending: z.string().optional(),
     direction: z.string().optional(),
     arcs: z
-      .array(z.object({ id: SlugSchema, title: z.string().min(1), note: z.string().optional() }).strict())
+      .array(
+        z
+          .object({
+            id: SlugSchema,
+            title: z.string().min(1),
+            note: z.string().optional(),
+            /**
+             * The three cells an arc lane marks (turn 48: SETUP, TURN, PAYOFF — in words as
+             * well as colour). Each names the episode where it lands; a lane with no payoff is
+             * called out at render, worked out rather than stored.
+             */
+            setup: EpisodeIdSchema.optional(),
+            turn: EpisodeIdSchema.optional(),
+            payoff: EpisodeIdSchema.optional(),
+          })
+          .strict(),
+      )
       .optional(),
     /** Editable defaults, never invariants (SPEC-023 R-16). */
     defaults: z
