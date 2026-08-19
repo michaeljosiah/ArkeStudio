@@ -36,13 +36,22 @@ function count(haystack: string, needle: string): number {
 }
 
 /**
- * Launch is the single exception, and it is written down here rather than merely being true:
+ * Startup is the single exception, and it is written down here rather than merely being true:
  * nothing is configured yet and the only thing that has happened is the download the screen is
  * already showing, so it carries the wordmark and no controls.
  */
-const WITHOUT_CONTROLS = new Set(["launch"]);
-/** Full-frame accept gates draw their own composition exactly as approved. */
-const WITHOUT_CHROME = new Set(["art-direction-proposal", "replace-main-photo", "model-sheet-generate"]);
+const WITHOUT_CONTROLS = new Set(["startup"]);
+/**
+ * Full-frame compositions that draw themselves exactly as approved: the accept gates, and the
+ * launch screen ahead of everything, which is a plate with its own lockup on it and no chrome
+ * of any kind (design master 76a).
+ */
+const WITHOUT_CHROME = new Set([
+  "launch",
+  "art-direction-proposal",
+  "replace-main-photo",
+  "model-sheet-generate",
+]);
 
 describe("app chrome", () => {
   it("mounts one app-level queue toaster", () => {

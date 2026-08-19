@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import {
   ActivityScreen,
   FirstRunScreen,
-  LaunchScreen,
+  StartupScreen,
   NewWorldScreen,
   SettingsAboutScreen,
   SettingsAppearanceScreen,
@@ -16,6 +16,7 @@ import {
   ShellChrome,
   WorldPickerScreen,
 } from "./screens/shell.js";
+import { LaunchScreen } from "./screens/launch.js";
 import { ArtDirectionProposalScreen, ArtDirectionScreen } from "./screens/art-direction.js";
 import { BenchScreen } from "./screens/bench.js";
 import { BibleScreen } from "./screens/bible.js";
@@ -110,6 +111,7 @@ export function App() {
       <UpdateTransition />
       <Routes>
         <Route path="/" element={<LaunchScreen />} />
+        <Route path="/starting" element={<StartupScreen />} />
 
         <Route element={<ShellChrome />}>
           <Route path="/first-run" element={<FirstRunScreen />} />

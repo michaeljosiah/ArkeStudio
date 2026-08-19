@@ -141,6 +141,14 @@ const bridge = {
     ipcRenderer.send("arke:set-host-theme", preference);
   },
 
+  /**
+   * The launch screen is the dark plate in every theme, so it asks the host for the dark
+   * caption buttons while it is up. Light symbols on a light overlay would vanish into the sky.
+   */
+  chromeOverPlate(over: boolean): void {
+    ipcRenderer.send("arke:chrome-over-plate", over);
+  },
+
   onThemeChange(
     listener: (theme: { preference: ThemePreference; resolved: ResolvedTheme }) => void,
   ): () => void {

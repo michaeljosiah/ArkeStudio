@@ -54,7 +54,7 @@ import {
 import { BackgroundNotificationController } from "./background-notifications.js";
 import { launchDesktop, StartupController, type StartupState } from "./startup.js";
 import { takePosterOptions, takeQcOptions } from "./take-qc.js";
-import { resolveTheme, themePalette, type ResolvedTheme } from "./theme.js";
+import { resolveTheme, themePalette, type ResolvedTheme, type ThemePalette } from "./theme.js";
 import { fileUpdateMarker, UpdateController } from "./updates.js";
 import {
   environmentVoxaArgs,
@@ -184,14 +184,31 @@ function showWindowWhenThemed(): void {
   window.show();
 }
 
+/*
+ * The launch screen is always the dark plate, whatever the appearance preference — so the
+ * caption buttons have to be the dark ones over it. In light mode the host would otherwise
+ * paint near-black symbols on a near-black sky and the window would lose its controls
+ * (design master 76a, binding).
+ */
+let chromeOverPlate = false;
+
+function chromePalette(): ThemePalette {
+  return themePalette(chromeOverPlate ? "dark" : resolvedTheme);
+}
+
+function paintChrome(): void {
+  if (!window || window.isDestroyed()) return;
+  const palette = chromePalette();
+  window.setBackgroundColor(palette.background);
+  window.setTitleBarOverlay({ color: palette.overlay, symbolColor: palette.symbols, height: 44 });
+}
+
 function applyHostTheme(preference: ThemePreference, notifyRenderer = true): void {
   themePreference = preference;
   nativeTheme.themeSource = preference;
   resolvedTheme = resolveTheme(preference, nativeTheme.shouldUseDarkColors);
-  const palette = themePalette(resolvedTheme);
   if (window && !window.isDestroyed()) {
-    window.setBackgroundColor(palette.background);
-    window.setTitleBarOverlay({ color: palette.overlay, symbolColor: palette.symbols, height: 44 });
+    paintChrome();
     if (notifyRenderer)
       window.webContents.send("arke:theme-changed", { preference, resolved: resolvedTheme });
   }
@@ -272,6 +289,11 @@ function registerHostIpc(): void {
     if (preference === "system" || preference === "light" || preference === "dark") {
       applyHostTheme(preference);
     }
+  });
+  ipcMain.on("arke:chrome-over-plate", (event, over: unknown) => {
+    if (!window || event.sender !== window.webContents) return;
+    chromeOverPlate = over === true;
+    paintChrome();
   });
   ipcMain.on("arke:theme-ready", (event) => {
     if (!window || event.sender !== window.webContents) return;
