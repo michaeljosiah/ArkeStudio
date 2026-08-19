@@ -4726,6 +4726,43 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 /* What this model stops short of: visible, struck, and not clickable. */
 .fy-bench__durationover { color: var(--neutral-400); text-decoration-thickness: 1px; }
 
+/* Making a voice from a clip (design 74c, 74d). Shares the voice dialog's shell and footer —
+   this is the same surface at a different moment, not a second kind of dialog. */
+.fy-clone {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 40;
+  width: 520px; max-width: calc(100% - 48px); display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: 15px; background: var(--background);
+  box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.fy-clone__body { display: flex; flex-direction: column; gap: 11px; padding: 2px 16px 0; }
+.fy-clone__sources { display: flex; align-items: center; gap: 9px; }
+.fy-clone__source {
+  display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--background);
+  font: 500 12px var(--font-sans); color: var(--foreground); cursor: pointer;
+}
+.fy-clone__source:hover:not(:disabled) { background: var(--muted); }
+.fy-clone__source:disabled { opacity: 0.45; cursor: not-allowed; }
+/* Recording: the one control that is doing something rather than offering to. */
+.fy-clone__source--on,
+.fy-clone__source--on:hover:not(:disabled) { background: var(--foreground); color: var(--background); }
+.fy-clone__elapsed { margin-left: auto; font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+.fy-clone__clip { display: flex; align-items: center; gap: 8px; font: 500 12px var(--font-sans); }
+.fy-clone__hint { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
+.fy-clone__note { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
+.fy-clone__trouble { font: 400 11.5px var(--font-sans); color: var(--destructive); }
+.fy-clone__consent {
+  display: flex; align-items: flex-start; gap: 9px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 9px;
+  font: 400 12px/1.45 var(--font-sans); cursor: pointer;
+}
+.fy-clone__field { display: flex; flex-direction: column; gap: 6px; }
+.fy-clone__label { display: flex; align-items: baseline; gap: 9px; font: 500 10.5px var(--font-mono); text-transform: uppercase; letter-spacing: 0.04em; }
+/* What the description is FOR, as data on the label rather than as an explaining sentence. */
+.fy-clone__labelnote { font: 400 10px var(--font-mono); text-transform: none; letter-spacing: 0; color: var(--muted-foreground); font-style: normal; }
+.fy-clone__attrs { display: flex; flex-wrap: wrap; gap: 6px; }
+.fy-clone .fy-voices__foot { margin: 0 -16px; }
+
 /* Choosing a voice to read with (design 70). Not the character-voice picker: nothing here is
    ranked against anybody, and nothing here assigns. */
 .fy-voices {

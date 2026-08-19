@@ -354,6 +354,27 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   /** A large file awaiting stated-size consent, or a filing refusal (SPEC-015 R-6). */
+  /**
+   * SPEC-022 T-10: a clip is staged and waiting to be named — or was refused before it could be.
+   *
+   * `fileName` and `seconds` are what 74c draws. Neither is a path: a staged clip lives in a temp
+   * file the coordinator holds by `clipId`, and the renderer never learns where. A refusal names
+   * the clip that failed so the dialog can say which one, and leaves `clipId` null.
+   */
+  z
+    .object({
+      at: IsoDateTimeSchema,
+      type: z.literal("voice.clip-staged"),
+      worldId: UlidSchema,
+      requestId: z.string(),
+      clipId: z.string().nullable(),
+      fileName: z.string().nullable(),
+      /** Length of the clip, when it could be read from the bytes; null when it could not. */
+      seconds: z.number().nullable(),
+      /** Why not — stated in the words the check refused with, never a generic failure. */
+      reason: z.string().nullable(),
+    })
+    .strict(),
   /** SPEC-022 T-10: the outcome of making a voice from a recording. */
   z
     .object({

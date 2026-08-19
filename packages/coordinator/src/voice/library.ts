@@ -37,14 +37,14 @@ function clipPathFor(id: string, extension: string): string {
  * which is the mid-take failure §1.3 exists to prevent. Transcoding is the way to widen this;
  * pretending is not.
  */
-const AUDIO_EXTENSIONS = new Set(["wav", "mp3"]);
+export const AUDIO_EXTENSIONS = new Set(["wav", "mp3"]);
 
 /**
  * The bytes, not the name. A file renamed to `.wav` passed the extension gate and became a voice
  * nothing could speak — the same reason `imageFormatOf` reads magic numbers rather than trusting
  * provider metadata (queue/verify.ts).
  */
-function audioBytesLookRight(data: Uint8Array, extension: string): boolean {
+export function audioBytesLookRight(data: Uint8Array, extension: string): boolean {
   if (extension === "wav") {
     return (
       data.length > 12 &&
@@ -58,6 +58,36 @@ function audioBytesLookRight(data: Uint8Array, extension: string): boolean {
     ((data[0] === 0x49 && data[1] === 0x44 && data[2] === 0x33) ||
       (data[0] === 0xff && (data[1]! & 0xe0) === 0xe0))
   );
+}
+
+/** A clip shorter than this is not enough voice to clone from, and 74c says so as a hint. */
+export const MIN_CLONE_SECONDS = 3;
+
+/**
+ * How long a WAV runs, read from its own header.
+ *
+ * WAV alone among the two states its length arithmetically — data chunk over byte rate. MP3 does
+ * not without decoding frames, so this returns null there and callers treat unknown as unknown
+ * rather than refusing a clip they could not measure.
+ */
+export function wavSeconds(data: Uint8Array): number | null {
+  if (!audioBytesLookRight(data, "wav")) return null;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  // Walk the chunks: `fmt ` carries the byte rate and `data` carries the length, and neither is
+  // at a fixed offset once a file has a LIST or fact chunk in front of them.
+  let offset = 12;
+  let byteRate = 0;
+  while (offset + 8 <= data.byteLength) {
+    const id = String.fromCharCode(data[offset]!, data[offset + 1]!, data[offset + 2]!, data[offset + 3]!);
+    const size = view.getUint32(offset + 4, true);
+    // Byte rate sits at +16 into the chunk body, four past the sample rate. Reading the sample
+    // rate instead yields a plausible-looking duration that is wrong by the frame size.
+    if (id === "fmt " && offset + 20 <= data.byteLength) byteRate = view.getUint32(offset + 16, true);
+    if (id === "data") return byteRate > 0 ? size / byteRate : null;
+    // Chunks are word-aligned: an odd size is followed by a pad byte that is not part of it.
+    offset += 8 + size + (size % 2);
+  }
+  return null;
 }
 
 export interface CloneVoiceInput {
