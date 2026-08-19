@@ -147,6 +147,16 @@ function chatKind(fileName: string): WorldChatAttachment["kind"] {
  * Decided from the bytes, not the extension. A `.txt` holding a binary blob is not text, and a
  * PDF is a document that this version cannot read without an extraction step — saying otherwise
  * would let the Studio imply it had read something it never opened.
+ *
+ * The sample is decoded as a *stream*, and that is the whole of the difference between this
+ * working and this rejecting ordinary prose. Cutting at a fixed 4096 bytes cuts wherever 4096
+ * bytes happens to land, which for anything typographic — a curly quote, an em-dash, an ellipsis,
+ * an accented name — is one byte inside a character about two times in three that a multi-byte
+ * character straddles the line. A non-streaming fatal decoder calls that truncation invalid UTF-8
+ * and the document is refused as unreadable, so whether a manuscript can be attached at all comes
+ * down to where its four-thousand-and-ninety-sixth byte falls. Streaming holds an incomplete
+ * trailing sequence back instead of throwing, which is the question actually being asked: is what
+ * we have seen so far text. Invalid bytes anywhere but the cut still fail, and so does a NUL.
  */
 export function detectReadability(
   kind: WorldChatAttachment["kind"],
@@ -156,7 +166,7 @@ export function detectReadability(
   const sample = bytes.subarray(0, 4096);
   if (sample.includes(0)) return "not-readable";
   try {
-    new TextDecoder("utf-8", { fatal: true }).decode(sample);
+    new TextDecoder("utf-8", { fatal: true }).decode(sample, { stream: true });
     return "text-readable";
   } catch {
     return "not-readable";

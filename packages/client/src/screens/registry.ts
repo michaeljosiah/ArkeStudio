@@ -17,6 +17,7 @@ export interface ScreenEntry {
 export const SCREENS: ScreenEntry[] = [
   // Shell
   { id: "launch", samplePath: "/" },
+  { id: "startup", samplePath: "/starting" },
   { id: "first-run", samplePath: "/first-run" },
   { id: "world-picker", samplePath: "/worlds" },
   { id: "new-world", samplePath: "/worlds/new" },

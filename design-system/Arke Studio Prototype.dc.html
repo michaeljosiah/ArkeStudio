@@ -1811,6 +1811,63 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
   </div>
 </div>
 </sc-if>
+<sc-if value="{{ s.launch }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="76a Launch &middot; at rest" style="width:1360px;height:850px;box-sizing:border-box;font-family:var(--font-sans);position:relative;overflow:hidden;background:#07090B">
+  <img src="assets/launch-plate.webp" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:100% 50%">
+
+  <!-- Wordmark: the bar and the flare are drawn here, not baked into the plate. -->
+  <div style="position:absolute;left:0;right:0;top:118px;display:flex;flex-direction:column;align-items:center;animation:fadeUp .9s var(--ease-out) both">
+    <div style="position:relative;width:940px;height:74px;display:flex;align-items:center;justify-content:center">
+      <div style="position:absolute;left:0;right:0;bottom:6px;height:1px;background:linear-gradient(90deg,rgba(250,250,250,0) 0%,rgba(250,250,250,.16) 14%,rgba(250,250,250,.42) 46%,rgba(255,201,142,.95) 79%,rgba(250,250,250,.28) 92%,rgba(250,250,250,0) 100%)"></div>
+      <div style="position:absolute;left:81.4%;bottom:6px;width:300px;height:16px;transform:translate(-50%,50%);background:radial-gradient(closest-side,rgba(255,222,180,.75),rgba(255,196,140,0) 100%);pointer-events:none"></div><div style="position:absolute;left:81.4%;bottom:6px;width:96px;height:96px;transform:translate(-50%,50%);background:radial-gradient(closest-side,rgba(255,240,215,.95),rgba(255,205,150,.4) 18%,rgba(255,190,130,.1) 44%,rgba(255,180,120,0) 72%);pointer-events:none"></div>
+      <div style="position:relative;font:200 58px/1 Jost,var(--font-sans),sans-serif;letter-spacing:.55em;text-indent:.55em;color:var(--neutral-50);white-space:nowrap">ARKE STUDIO</div>
+    </div>
+    <div style="margin-top:20px;font:300 16px/1 Jost,var(--font-sans),sans-serif;letter-spacing:.83em;text-indent:.83em;color:rgba(250,250,250,.5);white-space:nowrap">BUILD WORLDS. TELL ANY STORY.</div>
+  </div>
+
+  <!-- The two ways in. -->
+  <div style="position:absolute;left:0;right:0;top:270px;display:flex;justify-content:center;gap:52px">
+
+    <div style="width:400px;height:382px;box-sizing:border-box;padding:46px 30px 26px;border:1px solid rgba(250,250,250,.13);border-radius:16px;background:rgba(10,13,16,.5);backdrop-filter:blur(14px);display:flex;flex-direction:column;align-items:center;animation:fadeUp .8s var(--ease-out) .12s both">
+      <span style="color:var(--neutral-50);opacity:.92"><svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"></rect><path d="M8 21h8"></path><path d="M12 17v4"></path></svg></span>
+      <div style="margin-top:30px;font:600 23px/1.2 var(--font-sans);letter-spacing:-0.01em;color:var(--neutral-50)">Launch Locally</div>
+      <div style="margin-top:14px;text-align:center;font:400 13.5px/1.65 var(--font-sans);color:rgba(250,250,250,.62)">Work on your worlds offline with<br>full power and privacy.</div>
+      <div style="flex:1"></div>
+      <div onClick="{{ go.launchlocal }}" style="width:100%;height:52px;border-radius:9px;background:var(--neutral-50);color:var(--neutral-900);display:flex;align-items:center;justify-content:center;gap:11px;font:600 14.5px var(--font-sans);cursor:pointer;transition:var(--transition-control)" style-hover="box-shadow:0 0 0 4px rgba(250,250,250,.14)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5l12 7-12 7z"></path></svg>Launch Arke Studio
+      </div>
+      <div style="margin-top:22px;display:flex;align-items:center;gap:9px;font:400 12.5px var(--font-sans);color:rgba(250,250,250,.5)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="m9 12 2 2 4-4"></path></svg>Runs on this device
+      </div>
+    </div>
+
+    <div style="width:400px;height:382px;box-sizing:border-box;padding:46px 30px 26px;border:1px solid rgba(250,250,250,.12);border-radius:16px;background:rgba(10,13,16,.4);backdrop-filter:blur(14px);display:flex;flex-direction:column;align-items:center;animation:fadeUp .8s var(--ease-out) .2s both">
+      <span style="color:var(--neutral-50);opacity:.45"><svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path></svg></span>
+      <div style="margin-top:30px;font:600 23px/1.2 var(--font-sans);letter-spacing:-0.01em;color:rgba(250,250,250,.72)">Arke Studio Cloud</div>
+      <div style="margin-top:14px;text-align:center;font:400 13.5px/1.65 var(--font-sans);color:rgba(250,250,250,.44)">Access your worlds anywhere.<br>Sync, collaborate, create.</div>
+      <div style="flex:1"></div>
+      <div aria-disabled="true" style="width:100%;height:52px;border-radius:9px;border:1px solid rgba(250,250,250,.12);background:rgba(250,250,250,.03);color:rgba(250,250,250,.4);display:flex;align-items:center;justify-content:center;gap:11px;font:500 14.5px var(--font-sans);cursor:not-allowed">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path></svg>Coming soon
+      </div>
+      <div style="margin-top:22px;display:flex;align-items:center;gap:9px;font:400 12.5px var(--font-sans);color:rgba(250,250,250,.34)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>Sync across devices
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Four destinations that do not exist yet; drawn, inert, and said so in the rule. -->
+  <div style="position:absolute;left:0;right:0;top:770px;display:flex;align-items:center;justify-content:center;animation:fadeUp .8s var(--ease-out) .3s both">
+    <span style="display:flex;align-items:center;gap:10px;padding:0 26px;font:400 13.5px var(--font-sans);color:rgba(250,250,250,.62);cursor:pointer;transition:var(--transition-control)" style-hover="color:var(--neutral-50)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>Documentation</span>
+    <span style="width:1px;height:16px;background:rgba(250,250,250,.16)"></span>
+    <span style="display:flex;align-items:center;gap:10px;padding:0 26px;font:400 13.5px var(--font-sans);color:rgba(250,250,250,.62);cursor:pointer;transition:var(--transition-control)" style-hover="color:var(--neutral-50)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.42 10.92a1 1 0 0 0-.02-1.84L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.83l8.57 3.91a2 2 0 0 0 1.66 0z"></path><path d="M22 10v6"></path><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"></path></svg>Learn</span>
+    <span style="width:1px;height:16px;background:rgba(250,250,250,.16)"></span>
+    <span style="display:flex;align-items:center;gap:10px;padding:0 26px;font:400 13.5px var(--font-sans);color:rgba(250,250,250,.62);cursor:pointer;transition:var(--transition-control)" style-hover="color:var(--neutral-50)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>Community</span>
+    <span style="width:1px;height:16px;background:rgba(250,250,250,.16)"></span>
+    <span style="display:flex;align-items:center;gap:10px;padding:0 26px;font:400 13.5px var(--font-sans);color:rgba(250,250,250,.62);cursor:pointer;transition:var(--transition-control)" style-hover="color:var(--neutral-50)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>Settings</span>
+  </div>
+</div>
+</sc-if>
 <sc-if value="{{ s.setup }}" hint-placeholder-val="{{ false }}">
 <div data-screen-label="15a First launch setup" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
   <div style="display:flex;align-items:center;height:44px;padding:0 16px;flex:none;position:relative">
@@ -6032,15 +6089,17 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props="{&quot;firstRun&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;State&quot;}}">
 class Component extends DCLogic {
-  state = { screen: 'home', audioOn: false, audioPlaying: false, audioClip: 'sereth', setupDone: false, canonAsk: false, photoOpen: false, graphSel: 'scene', playStep: 0, playEnd: 'song', fixed: false, played: false, xpView: 'exp', xpStep: 0, ncMode: 'sentence', naMode: 'write', naKind: 'image', locMode: 'chat', genModel: 'seedance', sheetMode: 'chat', canonNewMode: 'chat', sceneTab: 'shots', sheetStyle: 'board', genMode: 'chat', settingsTab: 'providers', whoAdvanced: false, sheetGenerated: false, mainPhotoPromoted: false, mainPhotoPromptExpanded: false, mainPhotoUploadRef: false, mainPhotoWorldRef: false, mainPhotoCount: 4, mainPhotoCandidatesGenerated: false, mainPhotoCandidate: 1, mainPhotoPromotedCandidate: 1, lookType: 'costume', lookMode: 'close', lookPromptExpanded: false, looksGenerated: false, worldLookVersion: 3, artStyle: 'painterly', propStyle: 'editorial', imgModel: 'gpt-image-2', imgSize: '2K', imgPicker: false, availNb2: true, availNbPro: true, availFlux: true, availSeed: false, discovery: false, availGpt2: true, availGpt52: true, provSel: 'fal', themePref: 'system', voiceRecipe: 'ready', runtimePane: 'comfyui', voiceTesting: false, whisperState: 'failed', downloadsRunning: true, voiceRuntime: 'ready', recipeCheck: 'verified', engineSource: 'path', modelsFolder: 'mapped', gemma: 'offer', briefOpen: 0, composerOpen: true, benchLane: 'reference', benchAspect: '16:9', benchRes: '720p', benchDur: '15s', wallCleared: false, takeRejected: false, benchMore: false, whatWasSent: false, sceneSel: 4, rewriting: 0, canonKind: 1, artifactKind: 1, artifactSel: 1, refSource: 1, refKind: 1, refPicked: '1', modelsOff: '', chatMore: false, rewritePanel: false, copied: false, benchFilter: false, oneAtATime: false, benchSeed: 42, playing: 0, voiceSrc: 'uploads', voiceSel: 'harbour', vCloned: false, ttsWarm: false, cloneSrc: 'record', cloneConsent: false };
+  state = { screen: 'home', launched: false, audioOn: false, audioPlaying: false, audioClip: 'sereth', setupDone: false, canonAsk: false, photoOpen: false, graphSel: 'scene', playStep: 0, playEnd: 'song', fixed: false, played: false, xpView: 'exp', xpStep: 0, ncMode: 'sentence', naMode: 'write', naKind: 'image', locMode: 'chat', genModel: 'seedance', sheetMode: 'chat', canonNewMode: 'chat', sceneTab: 'shots', sheetStyle: 'board', genMode: 'chat', settingsTab: 'providers', whoAdvanced: false, sheetGenerated: false, mainPhotoPromoted: false, mainPhotoPromptExpanded: false, mainPhotoUploadRef: false, mainPhotoWorldRef: false, mainPhotoCount: 4, mainPhotoCandidatesGenerated: false, mainPhotoCandidate: 1, mainPhotoPromotedCandidate: 1, lookType: 'costume', lookMode: 'close', lookPromptExpanded: false, looksGenerated: false, worldLookVersion: 3, artStyle: 'painterly', propStyle: 'editorial', imgModel: 'gpt-image-2', imgSize: '2K', imgPicker: false, availNb2: true, availNbPro: true, availFlux: true, availSeed: false, discovery: false, availGpt2: true, availGpt52: true, provSel: 'fal', themePref: 'system', voiceRecipe: 'ready', runtimePane: 'comfyui', voiceTesting: false, whisperState: 'failed', downloadsRunning: true, voiceRuntime: 'ready', recipeCheck: 'verified', engineSource: 'path', modelsFolder: 'mapped', gemma: 'offer', briefOpen: 0, composerOpen: true, benchLane: 'reference', benchAspect: '16:9', benchRes: '720p', benchDur: '15s', wallCleared: false, takeRejected: false, benchMore: false, whatWasSent: false, sceneSel: 4, rewriting: 0, canonKind: 1, artifactKind: 1, artifactSel: 1, refSource: 1, refKind: 1, refPicked: '1', modelsOff: '', chatMore: false, rewritePanel: false, copied: false, benchFilter: false, oneAtATime: false, benchSeed: 42, playing: 0, voiceSrc: 'uploads', voiceSel: 'harbour', vCloned: false, ttsWarm: false, cloneSrc: 'record', cloneConsent: false };
   renderVals() {
     const names = ['home','artdirection','artdirectionedit','artstyle','artstylewords','settings','activity','factions','sheetedit','world','locations','location','locationref','cut','audio','exports','roster','sheet','reference','mainphotogen','morelooks','voicepicker','voiceclone','voiceclonename','voicemode','canon','artifacts','productions','newchar','sketch','newprod','dashboard','prodcast','scenes','newscene','generate','newlocation','canondraft','canonnew','canonentry','story','genesis','sheetgen','voiceline','dayone','gametype','gamedayone','gamestory','gamedash','graph','gamestate','gamehealth','repair','promote','playtest','moviesub','xpdash','xpgraph','clip','ixedit','budget','player','publish','worldnew','newartifact','artgen','refpicker','refslot','worldchat','worldchatnew','proposals','storynew','episodeboard','episode','scenescript','scenecoverage','scenecoverageafter','sceneboard','sceneboardstale','videoprofile','season','seasonarcs','direction','sceneboardshot','storydash','gencontact','gendialog'];
     const s = {}, go = {};
     for (const n of names) { s[n] = this.state.screen === n; go[n] = () => this.setState({ screen: n, canonAsk: false, photoOpen: false }); }
     go.mainphotogen = () => this.setState({ screen: 'mainphotogen', canonAsk: false, mainPhotoPromptExpanded: false, mainPhotoUploadRef: false, mainPhotoWorldRef: false, mainPhotoCount: 4, mainPhotoCandidatesGenerated: false, mainPhotoCandidate: this.state.mainPhotoPromotedCandidate, looksGenerated: false });
     const firstRun = (this.props.firstRun ?? false) && this.state.screen === 'home';
-    s.setup = firstRun && !this.state.setupDone;
-    s.firstrun = firstRun && this.state.setupDone;
+    s.launch = firstRun && !this.state.launched;
+    s.setup = firstRun && this.state.launched && !this.state.setupDone;
+    s.firstrun = firstRun && this.state.launched && this.state.setupDone;
+    go.launchlocal = () => this.setState({ launched: true });
     go.finishsetup = () => this.setState({ setupDone: true });
     s.home = this.state.screen === 'home' && !firstRun;
     const gsel = v => () => this.setState({ screen: 'graph', graphSel: v });

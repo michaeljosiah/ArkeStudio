@@ -21,8 +21,14 @@ bundling; `scripts/verify-licenses.mjs` gates packaging on this file staying com
 | Kokoro TTS models | Apache-2.0 | **Not installer contents** (R-8) — downloaded on first use; notice recorded here for the downloaded artefact. |
 | whisper.cpp models | MIT | **Not installer contents** — downloaded on first use. |
 
-Renderer/runtime npm dependencies (React, zod, ws, yaml, and transitive) are MIT/ISC/BSD;
-their licence texts are included in the application bundle by the build.
+Renderer/runtime npm dependencies (React, zod, ws, yaml, Tiptap/ProseMirror, and transitive) are
+MIT/ISC/BSD; their licence texts are included in the application bundle by the build.
+
+One renderer dependency is **Apache-2.0** rather than MIT and so carries its own obligations:
+`@sanity/diff-match-patch`, the fuzzy patcher behind the bible editor's source-preserving save. It
+is a pure-JavaScript library bundled into the renderer, not a separate process. Apache-2.0 §4
+requires the licence text and any NOTICE to travel with it, both of which the build includes from
+the package; the code is unmodified, so §4(b)'s change notices do not arise.
 
 A component appearing in the installer without a row in this table fails
 `npm run verify:licenses`, which runs before every `package` (D5: a licence question found here
