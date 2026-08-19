@@ -2,23 +2,22 @@
 
 `cursor:pointer` elements: **1408**
 
-- **972 wired**
-- **69 state variants** — the *selected* half of a pair. Clicking the row you are on
+- **988 wired**
+- **69 state variants** — the *selected* half of a pair; clicking the row you are on
   is a no-op, so no handler is correct. Not a defect.
 - **6 leave the application** — Open folder, GitHub, a path picker. A prototype cannot
-  perform these, and removing their pointer would misrepresent a control that is real in the
-  app. Not a defect.
-- **361 genuinely unwired**
+  perform these. Not a defect.
+- **345 genuinely unwired**
 
 The test: *an affordance either does something, or stops looking pressable.*
 
 | screen | unwired | the affordances |
 |---|---:|---|
-| 68b Generate · the bench | 30 | (icon only) x15, Image 1 x2, Harbour night studies, Keyframe, Image 2, Audio 1 0:12 |
 | 14a Scene shots | 20 | (icon only) x12, Saltlight short film · scene 4, Scenes 5, 1 · Lowtide market, 2 · The dive, 3 · Council chamber |
 | 2b Canon browser | 17 | (icon only) x3, CANON-002 · Tide-calling, CANON-031 · The night the bells sank, Maren · sheet v4, What does the Chorister want?, CANON-021 · The Drowned Quarter |
 | 3c Artifacts | 14 | (icon only) x3, Audio 6, Documents 9, Images 12, Video 3, Made here 4 |
 | 69a Reference picker · world artifacts | 14 | This session 16, Upload, Images 12, Video 3, Audio 6, Documents 9 |
+| 68b Generate · the bench | 14 | (icon only) x5, Image 1 x2, Harbour night studies, Image 2, Audio 1 0:12, Image 3 |
 | 10a New location | 13 | (icon only) x7, Harbourside, The Vigil headland, + new region, Bray Half-Hitch, The Ebb Council |
 | 11b Generate workspace | 12 | (icon only) x6, Scene, END · OPTIONAL, Reset, 3, 2 |
 | 28a New canon entry | 11 | (icon only) x5, Rule, Location, Faction, Timeline, Tone |
