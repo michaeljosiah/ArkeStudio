@@ -631,6 +631,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("export.progress"),
       worldId: UlidSchema,
       productionId: SlugSchema,
+      /** Set when this export is one episode's deliverable (SPEC-023 R-24, issue #396). */
+      episodeId: z.string().optional(),
       exportId: z.string().min(1),
       status: z.enum(["running", "done", "cancelled", "failed"]),
       percent: z.number().min(0).max(100),

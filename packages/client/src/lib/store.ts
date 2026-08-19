@@ -878,6 +878,7 @@ function handleFrame(json: string): void {
         ...exportsState,
         [event.exportId]: {
           productionId: event.productionId,
+          ...(event.episodeId !== undefined ? { episodeId: event.episodeId } : {}),
           status: event.status,
           percent: event.percent,
           output: event.output,
@@ -2357,8 +2358,9 @@ export function exportCut(
   worldId: string,
   productionId: string,
   preset: "review-cut" | "master" | "social-excerpt",
+  episodeId?: string,
 ): void {
-  send({ kind: "export-cut", worldId, productionId, preset });
+  send({ kind: "export-cut", worldId, productionId, preset, ...(episodeId !== undefined ? { episodeId } : {}) });
 }
 
 export function cancelExport(worldId: string, exportId: string): void {
@@ -2371,6 +2373,8 @@ export function exportWorld(worldId: string): void {
 
 export interface ExportState {
   productionId: string;
+  /** Set when the export is one episode's deliverable (issue 396). */
+  episodeId?: string;
   status: "running" | "done" | "cancelled" | "failed";
   percent: number;
   output: string | null;

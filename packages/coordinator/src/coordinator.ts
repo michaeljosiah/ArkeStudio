@@ -20,6 +20,8 @@ import {
   type HealthComponent,
   buildExportPlan,
   exportOverlays,
+  deriveEpisodeCut,
+  episodeExportRefusals,
   buildFfmpegArgs,
   buildSpineExportPlan,
   buildSpineFfmpegArgs,
@@ -3765,8 +3767,10 @@ export class Coordinator {
          */
         // Keyed by world too: a production id is a slug inside its world, not a global name, so
         // two worlds with the same directory slug would have shared one lock and the second
-        // world's export would have been dropped as a duplicate (Codex round 4).
-        const exportKey = `${msg.worldId}:${msg.productionId}`;
+        // world's export would have been dropped as a duplicate (Codex round 4). Keyed by
+        // episode as well (issue #396): seven episodes are seven deliverables, and a season
+        // batch encodes them side by side — one episode's claim must not drop its neighbour's.
+        const exportKey = `${msg.worldId}:${msg.productionId}:${msg.episodeId ?? "production"}`;
         if (this.exportsInFlight.has(exportKey)) return;
         this.exportsInFlight.add(exportKey);
         let started = false;
@@ -3784,6 +3788,7 @@ export class Coordinator {
             type: "export.progress",
             worldId: msg.worldId,
             productionId: msg.productionId,
+            ...(msg.episodeId !== undefined ? { episodeId: msg.episodeId } : {}),
             exportId,
             status,
             percent,
@@ -3860,6 +3865,50 @@ export class Coordinator {
         }
         if (spine && trackInfo !== null && !trackInfo.hasAudio) {
           emitProgress(attemptId, "failed", 0, null, "the master track has no audio stream — assign a track that does");
+          return;
+        }
+
+        /*
+         * One episode's deliverable (SPEC-023 R-24, issue #396): the refusal is said before the
+         * encode, by name — an empty episode, a contradictory membership, or a spine production
+         * (which is cut against its track, and no episode-to-spine range authority exists yet).
+         * Gaps do not refuse: they become labelled slates, exactly as the production-wide cut
+         * treats them, so one episode's gaps never misreport another's.
+         */
+        if (msg.episodeId !== undefined) {
+          const refusal = episodeExportRefusals(production, msg.episodeId);
+          if (refusal) {
+            emitProgress(attemptId, "failed", 0, null, `episode export refused: ${refusal.detail}`);
+            return;
+          }
+          const episode = production.episodes.find((e) => e.id === msg.episodeId)!;
+          const plan = buildExportPlan(deriveEpisodeCut(production, msg.episodeId), msg.preset);
+          const stamp = new Date()
+            .toISOString()
+            .replace(/[-:TZ.]/g, "")
+            .slice(0, 14);
+          const stem = production.episodeFiles[episode.id] ?? episode.id;
+          const handle = runExport(
+            store.dir,
+            (stage) => buildFfmpegArgs(plan, store.dir, stage),
+            // The episode stem keeps filenames collision-free across episodes; the stamp keeps
+            // retries from overwriting what a person may already have sent on.
+            `${msg.productionId}-${stem}-${msg.preset}-${stamp}.mp4`,
+            runner,
+            (percent) => emitProgress(handle.id, "running", percent, null, null),
+          );
+          this.exports.set(handle.id, handle);
+          emitProgress(handle.id, "running", 0, null, null);
+          started = true;
+          this.trackBackground(
+            handle.done.then((result) => {
+              this.exports.delete(handle.id);
+              this.exportsInFlight.delete(exportKey);
+              if (result.status === "done") emitProgress(handle.id, "done", 100, result.output, null);
+              else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
+              else emitProgress(handle.id, "failed", 0, null, result.error);
+            }),
+          );
           return;
         }
 

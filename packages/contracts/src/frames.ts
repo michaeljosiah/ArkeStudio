@@ -1510,6 +1510,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("export-cut"),
       worldId: UlidSchema,
       productionId: SlugSchema,
+      /** One episode's deliverable (issue #396); absent exports the production-wide cut. */
+      episodeId: z.string().optional(),
       preset: z.enum(["review-cut", "master", "social-excerpt"]),
     })
     .strict(),

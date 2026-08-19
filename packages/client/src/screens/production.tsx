@@ -3,7 +3,9 @@ import { NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams }
 import {
   assemblePrompt,
   deriveCut,
+  deriveEpisodeCut,
   deriveSpineCut,
+  episodeExportRefusals,
   spineExportRefusals,
   trimCeilingSec,
   guestsOf,
@@ -2946,6 +2948,57 @@ export function ExportsScreen() {
             : "renders of the cut · the cut itself stays the source"}
         </span>
       </div>
+      {!isStory && production && productionShape(production.meta).isEpisodic && (
+        <div>
+          <div className="fy-listhead">
+            Episodes · each its own deliverable
+            <Button
+              variant="secondary"
+              onClick={() => {
+                // The season batch is one send per episode (issue 396): each encode is its own
+                // export with its own progress and retry, so one failure never re-encodes the
+                // rest. Refused episodes are skipped here and say why on their row.
+                if (!worldId || !prodId) return;
+                for (const episode of production.episodes) {
+                  if (episodeExportRefusals(production, episode.id) === null) {
+                    exportCut(worldId, prodId, preset, episode.id);
+                  }
+                }
+              }}
+            >
+              Export the season · {preset}
+            </Button>
+          </div>
+          {production.episodes.map((episode) => {
+            const episodeCut = deriveEpisodeCut(production, episode.id);
+            const episodeRefusal = episodeExportRefusals(production, episode.id);
+            return (
+              <div key={episode.id} className="fy-listrow">
+                <span className="fy-mono">{String(episode.order).padStart(2, "0")}</span>
+                <span className="fy-listrow__text" style={{ font: "600 13px var(--font-sans)" }}>
+                  {episode.release?.title ?? episode.title}
+                </span>
+                <span className="fy-mono">
+                  {seconds(episodeCut.totalSec)} · {episodeCut.covered} of {episodeCut.entries.length} covered
+                  {episodeCut.gaps > 0 ? ` · ${episodeCut.gaps} gap${episodeCut.gaps === 1 ? "" : "s"} as slates` : ""}
+                </span>
+                {episodeRefusal ? (
+                  <span className="fy-mono" style={{ color: "var(--destructive)" }}>
+                    {episodeRefusal.detail}
+                  </span>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    onClick={() => worldId && prodId && exportCut(worldId, prodId, preset, episode.id)}
+                  >
+                    Export episode
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
       {!isStory && (
       <>
       <div>
@@ -2965,7 +3018,11 @@ export function ExportsScreen() {
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-exportrow__title">
-                {production?.meta.title} · render {id.slice(0, 8)}
+                {production?.meta.title}
+                {e.episodeId !== undefined
+                  ? ` · ${production?.episodes.find((ep) => ep.id === e.episodeId)?.title ?? e.episodeId}`
+                  : ""}{" "}
+                · render {id.slice(0, 8)}
               </div>
               <div className="fy-exportrow__sub">
                 {e.status}
