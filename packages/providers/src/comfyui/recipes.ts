@@ -371,10 +371,15 @@ const CLONED_VOICE: ComfyUiRecipe = {
     ],
   },
   hardware: {
-    minVramMb: 6000,
-    recommendedVramMb: 10000,
+    // Raised from 6000 after the first end-to-end dispatch through ComfyUI failed to finish on a
+    // card that cleared the old floor twice over (SPEC-022 §2.6). 5.44 GB was a true measurement
+    // of the model on the Python harness and a false statement of what this recipe needs: the
+    // engine hosting it costs more, and the machine it runs on already had 3.36 GB of its card
+    // spoken for. The gate reads TOTAL VRAM, so the headroom has to live in the floor.
+    minVramMb: 8000,
+    recommendedVramMb: 12000,
     floorSource:
-      "measured on Arke reference hardware 2026-08-18: RTX 3080, bf16, peak 5.44 GB across four line lengths; floor set above the measured peak so the display is not squeezed",
+      "measured through ComfyUI on Arke reference hardware 2026-08-19: RTX 3080, 3.36 GB already in use by other applications, peak 9.35 GB and still climbing when the run was killed. A lower bound, not a peak — the true peak could not be measured on a card that could not hold it",
   },
 };
 

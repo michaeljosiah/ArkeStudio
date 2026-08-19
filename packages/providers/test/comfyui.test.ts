@@ -137,8 +137,12 @@ describe("the recipe catalogue projects into the manifest like any other model",
     // No checkpoint entries: the engine node fetches IndexTTS 2.5 itself on first use. That is a
     // real difference from every other recipe and is why it is asserted rather than assumed.
     assert.deepEqual(voice.requires.checkpoints, []);
-    assert.equal(voice.hardware.minVramMb, 6000);
-    assert.match(voice.hardware.floorSource, /measured on Arke reference hardware/);
+    // 8 GB, not the 6 GB first shipped: the model measured 5.44 GB on a Python harness and the
+    // recipe still could not finish on a 10 GB card, because the engine hosting it costs more and
+    // the machine had 3.36 GB already spoken for. The floor carries that headroom because the
+    // gate compares against TOTAL VRAM (SPEC-022 §2.6).
+    assert.equal(voice.hardware.minVramMb, 8000);
+    assert.match(voice.hardware.floorSource, /measured through ComfyUI/);
   });
 });
 
