@@ -21,6 +21,20 @@ bundling; `scripts/verify-licenses.mjs` gates packaging on this file staying com
 | Kokoro TTS models | Apache-2.0 | **Not installer contents** (R-8) — downloaded on first use; notice recorded here for the downloaded artefact. |
 | whisper.cpp models | MIT | **Not installer contents** — downloaded on first use. |
 
+One component is **source we carry rather than a package we depend on**. Two renderer files are
+derived from **LTX-Desktop** (https://github.com/Lightricks/LTX-Desktop, commit `7ec86f3`),
+Copyright (c) Lightricks Ltd., **Apache-2.0**:
+
+| Our file | Derived from | What was taken |
+|---|---|---|
+| `packages/client/src/lib/timeline-drag.ts` | `frontend/views/editor/video-editor-utils.ts`, `frontend/views/editor/useTimelineDrag.ts` | Timecode format/parse and the cut-point tolerance; the trim gesture — pointer capture, pixels-to-seconds, the snap threshold, and commit-once-on-release. |
+| `packages/client/src/lib/playback-engine.ts` | `frontend/views/editor/usePlaybackEngine.ts`, `frontend/views/editor/usePlaybackAudioSync.ts` | The rAF transport, its 250ms state throttle and the layout-effect flush on stop; the media-element rules — activation seek tolerance, drift correction, throttled `play()` retry, the `readyState` gate and the intended-source guard. |
+
+Apache-2.0 §4(a) is satisfied by `licenses/LICENSE.LTX-Desktop.txt`; §4(b) by the change list each
+file carries in its own header, which records every departure from upstream. Upstream ships no
+`NOTICE` file, so §4(d) does not arise. No LTX model weights, no LTX inference code and no part of
+the LTX Desktop application are bundled; this is a source-level port of editor mechanics only.
+
 Renderer/runtime npm dependencies (React, zod, ws, yaml, Tiptap/ProseMirror, and transitive) are
 MIT/ISC/BSD; their licence texts are included in the application bundle by the build.
 

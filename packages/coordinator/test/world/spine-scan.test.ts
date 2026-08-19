@@ -23,7 +23,9 @@ describe("the spine is loaded, and its absence is not a fault (#253)", () => {
   it("a production with no spine.json reads as legacy, with no problem reported", async () => {
     const { store, production } = await open();
     assert.equal(production.spine, null, "no spine means the scene-order cut, not a broken one");
-    assert.deepEqual(production.cut, { audio: [] });
+    // cut.json carries overlays as well as audio since 82a; a legacy production answers both
+    // with an empty list rather than undefined, which is what every reader depends on.
+    assert.deepEqual(production.cut, { audio: [], overlays: [] });
     assert.deepEqual(production.takeMediaInfo, {});
     assert.equal(
       store.getBundle().problems?.some((p) => /spine/i.test(JSON.stringify(p))) ?? false,

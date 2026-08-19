@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ArtifactIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { ArtifactIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, prefixedIdSchema } from "./ids.js";
 import type { ProductionBundle } from "./client-state.js";
 import type { Shot } from "./scene.js";
 import type { Take } from "./take.js";
@@ -43,10 +43,44 @@ export const AudioTrackSchema = z
   .strict();
 export type AudioTrack = z.infer<typeof AudioTrackSchema>;
 
-/** cut.json: audio only (R-16). The picture sequence is derived, deliberately absent. */
+// ---------------------------------------------------------------------------
+// Overlays (82a) — the one thing on the cut whose position a person chooses
+// ---------------------------------------------------------------------------
+
+/**
+ * An artifact laid over the picture for a window you placed it in (82a).
+ *
+ * It is deliberately four fields. An overlay cites an artifact and says when; it carries no
+ * provenance, no canon revision, no cost and no review, because nothing about it was dispatched
+ * or judged — it is not a take and never becomes one. Deleting it removes the placement and
+ * never the artifact.
+ *
+ * This is the only stored *position* on the cut, and it is why it lives on its own lane: the
+ * picture stays derived (R-14), so there is still exactly one answer to where a shot sits.
+ */
+export const CutOverlaySchema = z
+  .object({
+    id: prefixedIdSchema("ov"),
+    artifactId: ArtifactIdSchema,
+    startSec: z.number().min(0),
+    endSec: z.number().positive(),
+  })
+  .strict()
+  .refine((v) => v.endSec > v.startSec, { message: "endSec must be greater than startSec", path: ["endSec"] });
+export type CutOverlay = z.infer<typeof CutOverlaySchema>;
+
+/**
+ * cut.json: audio placement (R-16) and overlays (82a). The picture sequence is still derived and
+ * still deliberately absent — an overlay is laid *over* the film, never a statement of what it is.
+ */
 export const CutFileSchema = z
   .object({
     audio: z.array(AudioTrackSchema).default([]),
+    /**
+     * Defaulted, never required: this file is the read path for every production written before
+     * overlays existed, and a cut.json that fails to parse is a production that loses its audio.
+     */
+    overlays: z.array(CutOverlaySchema).default([]),
   })
   .strict();
 export type CutFile = z.infer<typeof CutFileSchema>;
@@ -84,19 +118,46 @@ export function deriveCut(production: ProductionBundle): DerivedCut {
     for (const shot of scene.shots) {
       const takeId = production.selections[shot.id]?.acceptedTakeId ?? null;
       const take = takeId !== null ? (takesById.get(takeId) ?? null) : null;
+      /*
+       * The in-point, on the story clock (R-8, #253).
+       *
+       * The shot's slot is still its authored duration -- the story orders the picture here, and
+       * trim does not move a boundary. What it changes is which part of the take fills the slot,
+       * so it only ever moves the window's start.
+       *
+       * `-to` is an absolute position in the source, verified against ffmpeg 8.1 rather than
+       * assumed: `-ss 2 -to 6` yields exactly 4.0s, so advancing `inSec` past a segment's fixed
+       * `outSec` shortens the window from the front instead of dragging it into the next shot.
+       */
+      const trim = production.selections[shot.id]?.trimInSec ?? 0;
       let media: CutEntry["media"] = null;
       if (take) {
         if (take.segment) {
           const pass = takesById.get(take.segment.passTakeId);
-          media = pass?.media
-            ? {
-                path: `productions/${production.meta.id}/takes/${pass.id}/${pass.media}`,
-                inSec: take.segment.inSec,
-                outSec: take.segment.outSec,
-              }
-            : null;
+          const inSec = take.segment.inSec + trim;
+          // A trim past the segment's own end leaves nothing to play, and an inverted window is
+          // not something to hand an encoder. It becomes a gap, which R-15 already draws and
+          // R-20 already slates -- the same answer the song clock gives.
+          media =
+            pass?.media && inSec < take.segment.outSec
+              ? {
+                  path: `productions/${production.meta.id}/takes/${pass.id}/${pass.media}`,
+                  inSec,
+                  outSec: take.segment.outSec,
+                }
+              : null;
         } else if (take.media) {
-          media = { path: `productions/${production.meta.id}/takes/${take.id}/${take.media}` };
+          // Unmeasured material bounds nothing (R-5a): absent is "not measured", never "zero".
+          const measured = production.takeMediaInfo[take.id]?.mediaInfo.durationSec;
+          const consumed = measured !== undefined && trim >= measured;
+          // No `inSec` at all when nothing is trimmed, so an untrimmed export is byte-identical
+          // to the one this repo has always produced.
+          media = consumed
+            ? null
+            : {
+                path: `productions/${production.meta.id}/takes/${take.id}/${take.media}`,
+                ...(trim > 0 ? { inSec: trim } : {}),
+              };
         }
       }
       const durationSec = shot.durationSec ?? DEFAULT_SHOT_SEC;
@@ -138,14 +199,56 @@ export type ExportItem =
   | { type: "clip"; path: string; inSec?: number; outSec?: number; durationSec: number; label: string }
   | { type: "slate"; label: string; durationSec: number };
 
+/**
+ * One overlay, in the exporter's terms (82a): a file, a window, and whether it is a still.
+ *
+ * The distinction is the whole of it. A still has one frame and must be held for the film's
+ * length so the window has something to show; a clip has its own timeline and must be *shifted*
+ * to where it was placed, or it plays from the top of the film instead of from its own start.
+ */
+export interface ExportOverlay {
+  path: string;
+  startSec: number;
+  endSec: number;
+  still: boolean;
+}
+
 export interface ExportPlan {
   preset: ExportPreset;
   items: ExportItem[];
+  /** Laid over the assembled picture, in order; each covers only its own window. */
+  overlays: ExportOverlay[];
   totalSec: number;
 }
 
+/** Which artifact kinds are picture. Audio belongs on its own track; a document is not a frame. */
+const OVERLAY_STILL_KINDS: ReadonlySet<string> = new Set(["image", "board"]);
+
+/**
+ * Resolve filed overlays against the world's artifacts (82a).
+ *
+ * An overlay citing an artifact this world does not have is dropped rather than guessed at, and
+ * one citing something that is not picture — an audio file, a document — is dropped too: the OV
+ * lane accepts anything draggable, and the exporter is where "over the picture" has to mean
+ * something. Both are silent here and counted by the caller, never rendered as an absence.
+ */
+export function exportOverlays(
+  overlays: readonly CutOverlay[],
+  artifacts: readonly { id: string; file: string; kind: string }[],
+): ExportOverlay[] {
+  const resolved: ExportOverlay[] = [];
+  for (const overlay of [...overlays].sort((a, b) => a.startSec - b.startSec)) {
+    const artifact = artifacts.find((a) => a.id === overlay.artifactId);
+    if (artifact === undefined) continue;
+    const still = OVERLAY_STILL_KINDS.has(artifact.kind);
+    if (!still && artifact.kind !== "video") continue;
+    resolved.push({ path: artifact.file, startSec: overlay.startSec, endSec: overlay.endSec, still });
+  }
+  return resolved;
+}
+
 /** Assemble from the derived cut: accepted material as clips, gaps as slates (D10, D11). */
-export function buildExportPlan(cut: DerivedCut, preset: ExportPreset): ExportPlan {
+export function buildExportPlan(cut: DerivedCut, preset: ExportPreset, overlays: readonly ExportOverlay[] = []): ExportPlan {
   const items: ExportItem[] = cut.entries.map((entry) => {
     if (entry.media) {
       return {
@@ -160,7 +263,7 @@ export function buildExportPlan(cut: DerivedCut, preset: ExportPreset): ExportPl
     // A black slate reading "SHOT 15 · 6.0s" beats a silent omission (R-20, D10).
     return { type: "slate" as const, label: `${entry.label} · ${entry.durationSec.toFixed(1)}s`, durationSec: entry.durationSec };
   });
-  return { preset, items, totalSec: cut.totalSec };
+  return { preset, items, overlays: [...overlays], totalSec: cut.totalSec };
 }
 
 /**
@@ -189,6 +292,33 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
   }
   const concatInputs = plan.items.map((_, i) => `[v${i}]`).join("");
   filters.push(`${concatInputs}concat=n=${plan.items.length}:v=1:a=0[out]`);
-  args.push("-filter_complex", filters.join(";"), "-map", "[out]", "-crf", String(PRESETS[plan.preset].crf), outFile);
+
+  /*
+   * Overlays, laid over the assembled picture (82a binding 4: one that does not reach the export
+   * is decoration). Verified against ffmpeg 8.1 rather than assumed — a blue film with a red
+   * plate placed 2s→4s reads blue, red, blue at 1s, 3s and 5s.
+   *
+   * `enable` is what confines each to its window; `eof_action=pass` is what stops a clip overlay
+   * ending the whole film when it runs out. Untouched when there are none, so an export with no
+   * overlays emits exactly the arguments it always did.
+   */
+  let last = "out";
+  plan.overlays.forEach((overlay, i) => {
+    const index = plan.items.length + i;
+    // A still has one frame: held for the film's length, so its window has something to show.
+    if (overlay.still) args.push("-loop", "1", "-t", String(plan.totalSec));
+    args.push("-i", `${worldDir}/${overlay.path}`);
+    // A clip carries its own timeline and must be moved to where it was placed, or it plays from
+    // the top of the film and the window shows the wrong seconds of it.
+    const shift = overlay.still ? "" : `,setpts=PTS-STARTPTS+${overlay.startSec}/TB`;
+    filters.push(`[${index}:v]scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease${shift}[o${i}]`);
+    const next = `ov${i}`;
+    filters.push(
+      `[${last}][o${i}]overlay=(W-w)/2:(H-h)/2:eof_action=pass:enable='between(t,${overlay.startSec},${overlay.endSec})'[${next}]`,
+    );
+    last = next;
+  });
+
+  args.push("-filter_complex", filters.join(";"), "-map", `[${last}]`, "-crf", String(PRESETS[plan.preset].crf), outFile);
   return args;
 }

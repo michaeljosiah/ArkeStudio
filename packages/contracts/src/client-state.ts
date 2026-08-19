@@ -124,7 +124,7 @@ export const ProductionBundleSchema = z
     /** `spine.json`, or null for every production that is not cut to a track (#253). */
     spine: ProductionSpineSchema.nullable().default(null),
     /** `cut.json` — dialogue/score/ambience placement, which the spine does not own. */
-    cut: CutFileSchema.default({ audio: [] }),
+    cut: CutFileSchema.default({ audio: [], overlays: [] }),
     /**
      * Measured media per take, read from the sidecars beside them (#253). Carried on the bundle
      * rather than on `TakeSchema` so the client and the pure cut helpers can see a duration

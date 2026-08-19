@@ -415,7 +415,7 @@ const state: ClientState = {
         // The fixture production is a short film, not a music video: no spine, which is exactly
         // the legacy path #253 must leave untouched.
         spine: null,
-        cut: { audio: [] },
+        cut: { audio: [], overlays: [] },
         takeMediaInfo: {},
       },
     ],

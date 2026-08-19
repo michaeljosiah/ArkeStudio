@@ -13,7 +13,7 @@ import { tempDir } from "../tmp.js";
 import { readChanges } from "../../src/world/change-writer.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { exportWorld, runExport, type FfmpegRunner } from "../../src/takes/export.js";
-import { acceptTake, rejectTake } from "../../src/takes/review.js";
+import { acceptTake, rejectTake, setTrim } from "../../src/takes/review.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 
@@ -176,6 +176,110 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
     await store.close();
   });
 
+  it("set-trim writes the in-point on the selection and leaves the take alone (R-8, #253)", async () => {
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    // takes[0] is the backing pass; the shot's material is its own segment (see materialFor).
+    const [, seg12] = await recordTakesFromJob(store, passJob(landed), null);
+    let production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await acceptTake(store, production, { takeId: seg12!.id, shotId: "sh_12", by: "user" });
+
+    const takeBefore = await readFile(join(dir, `productions/saltlight/takes/${seg12!.id}/take.json`), "utf8");
+    production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    const selection = await setTrim(store, production, { shotId: "sh_12", trimInSec: 2.5 });
+
+    assert.equal(selection.trimInSec, 2.5);
+    assert.equal(selection.acceptedTakeId, seg12!.id, "the selection it trims is otherwise untouched");
+    assert.equal(
+      store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.selections["sh_12"]?.trimInSec,
+      2.5,
+      "and it survives the reload",
+    );
+    assert.equal(
+      await readFile(join(dir, `productions/saltlight/takes/${seg12!.id}/take.json`), "utf8"),
+      takeBefore,
+      "a take is immutable (R-1): a trim says which part of it is used, it does not edit it",
+    );
+    await store.close();
+  });
+
+  it("set-trim refuses a shot with no accepted take", async () => {
+    // A number stored against no footage is one waiting to apply itself to whatever gets
+    // selected next — the very bug acceptTake's reset exists to prevent.
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    await recordTakesFromJob(store, passJob(landed), null);
+    const production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await assert.rejects(
+      () => setTrim(store, production, { shotId: "sh_13", trimInSec: 1 }),
+      /no accepted take/,
+    );
+    assert.equal(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.selections["sh_13"], undefined);
+    await store.close();
+  });
+
+  it("set-trim refuses material the cut refuses, with the cut's own reason", async () => {
+    // Accepting the backing pass for one shot is possible; trimming into it is not, and the
+    // refusal is the same one deriveSpineCut gives rather than a second opinion.
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const [pass] = await recordTakesFromJob(store, passJob(landed), null);
+    let production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await acceptTake(store, production, { takeId: pass!.id, shotId: "sh_12", by: "user" });
+
+    production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await assert.rejects(() => setTrim(store, production, { shotId: "sh_12", trimInSec: 1 }), /backing-pass/);
+    await store.close();
+  });
+
+  it("set-trim refuses a trim that would leave nothing of the material", async () => {
+    // sh_12's segment is planned 0→6 (passJob's shotPlan), so the planned boundary bounds the
+    // trim at 6s even though nothing has probed the file.
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const [, seg12] = await recordTakesFromJob(store, passJob(landed), null);
+    let production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await acceptTake(store, production, { takeId: seg12!.id, shotId: "sh_12", by: "user" });
+
+    production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await assert.rejects(() => setTrim(store, production, { shotId: "sh_12", trimInSec: 6 }), /leaves nothing/);
+    await assert.rejects(() => setTrim(store, production, { shotId: "sh_12", trimInSec: 9 }), /leaves nothing/);
+    assert.equal(
+      store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.selections["sh_12"]?.trimInSec,
+      0,
+      "a refused trim writes nothing",
+    );
+
+    // Right up to the boundary is still material.
+    production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await setTrim(store, production, { shotId: "sh_12", trimInSec: 5.9 });
+    assert.equal(
+      store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.selections["sh_12"]?.trimInSec,
+      5.9,
+    );
+    await store.close();
+  });
+
+  it("a trim set through the real writer still resets when the take changes (#253)", async () => {
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const [pass, seg12] = await recordTakesFromJob(store, passJob(landed), null);
+    let production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await acceptTake(store, production, { takeId: seg12!.id, shotId: "sh_12", by: "user" });
+
+    production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await setTrim(store, production, { shotId: "sh_12", trimInSec: 4.25 });
+
+    production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await acceptTake(store, production, { takeId: pass!.id, shotId: "sh_12", by: "user" });
+    assert.equal(
+      store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.selections["sh_12"]?.trimInSec,
+      0,
+      "4.25s into one clip is not 4.25s into another",
+    );
+    await store.close();
+  });
+
   it("rejecting requires a cited sheet and field, and touches no selection (R-10)", async () => {
     const { dir, store } = await open();
     const production = store.getBundle().productions[0]!;
@@ -280,6 +384,74 @@ describe("the derived cut (R-14..R-16, D9, §3.2)", () => {
     assert.equal(entry.media!.outSec, 12);
     await store.close();
   });
+
+  it("the story clock honours the in-point, moving the window's start and not its end (#253)", async () => {
+    // `-to` is an absolute position in the source -- verified against ffmpeg 8.1, where
+    // `-ss 2 -to 6` yields exactly 4.0s -- so advancing `inSec` past a fixed `outSec` shortens
+    // this segment from the front rather than dragging it into the next shot's footage.
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const takes = await recordTakesFromJob(store, passJob(landed), null);
+    let production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await acceptTake(store, production, { takeId: takes[2]!.id, shotId: "sh_13", by: "user" });
+
+    production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await setTrim(store, production, { shotId: "sh_13", trimInSec: 2 });
+
+    const entry = deriveCut(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!)
+      .entries.find((e) => e.shot.id === "sh_13")!;
+    assert.equal(entry.media!.inSec, 8, "6s segment start plus a 2s trim");
+    assert.equal(entry.media!.outSec, 12, "the end is the plan's, and the plan did not move");
+    assert.equal(entry.durationSec, 6, "the slot is still the authored duration: trim is not a boundary");
+
+    // What the encoder is actually told, which is the half that can silently export the wrong shot.
+    const args = buildFfmpegArgs(buildExportPlan(deriveCut(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!), "review-cut"), "/w", "/out.mp4");
+    const ss = args.indexOf("-ss");
+    assert.equal(args[ss + 1], "8");
+    assert.equal(args[args.indexOf("-to") + 1], "12");
+    await store.close();
+  });
+
+  it("an untrimmed cut names no in-point at all, so an untrimmed export is unchanged (#253)", async () => {
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    // One shot, no shot plan: a take that owns its media outright rather than a range within one.
+    const takes = await recordTakesFromJob(
+      store,
+      { ...passJob(landed), target: { kind: "shot", id: "sh_12", coversShots: ["sh_12"] }, params: { ...passJob(landed).params, shotPlan: undefined } },
+      null,
+    );
+    const production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await acceptTake(store, production, { takeId: takes[0]!.id, shotId: "sh_12", by: "user" });
+    const entry = deriveCut(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!)
+      .entries.find((e) => e.shot.id === "sh_12")!;
+    assert.equal(entry.media!.inSec, undefined, "no -ss where nothing was trimmed");
+    await store.close();
+  });
+
+  it("a trim past a segment's own end is a gap, not an inverted window (#253)", async () => {
+    // setTrim refuses this, so it can only arrive by hand — but an inverted window is not
+    // something to hand an encoder, and R-15 already draws a gap for material that is not there.
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const takes = await recordTakesFromJob(store, passJob(landed), null);
+    const production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await acceptTake(store, production, { takeId: takes[2]!.id, shotId: "sh_13", by: "user" });
+
+    const path = join(dir, "productions/saltlight/selections.json");
+    const map = JSON.parse(await readFile(path, "utf8")) as Record<string, { trimInSec?: number }>;
+    map["sh_13"] = { ...map["sh_13"], trimInSec: 99 };
+    await writeFile(path, JSON.stringify(map, null, 2), "utf8");
+    await store.reload();
+
+    const entry = deriveCut(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!)
+      .entries.find((e) => e.shot.id === "sh_13")!;
+    assert.equal(entry.media, null, "nothing left to play reads as a gap");
+    const slates = buildExportPlan(deriveCut(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!), "review-cut")
+      .items.filter((i) => i.type === "slate");
+    assert.ok(slates.some((sl) => (sl as { label: string }).label.includes("SHOT 13")), "and the export slates it");
+    await store.close();
+  });
 });
 
 describe("exports (R-19..R-22, D10..D12, §3.2)", () => {
@@ -300,7 +472,12 @@ describe("exports (R-19..R-22, D10..D12, §3.2)", () => {
 
   it("a finished export appears whole; a cancelled one leaves no partial file (R-21)", async () => {
     const worldDir = await tempDir("arke-export-");
-    const plan: ExportPlan = { preset: "review-cut", items: [{ type: "slate", label: "SHOT 1 · 4.0s", durationSec: 4 }], totalSec: 4 };
+    const plan: ExportPlan = {
+      preset: "review-cut",
+      items: [{ type: "slate", label: "SHOT 1 · 4.0s", durationSec: 4 }],
+      overlays: [],
+      totalSec: 4,
+    };
     const okRunner: FfmpegRunner = {
       run: async (args) => {
         await writeFile(args[args.length - 1]!, "rendered");

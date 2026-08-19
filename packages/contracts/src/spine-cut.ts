@@ -167,6 +167,31 @@ function materialFor(
   };
 }
 
+export type TrimCeiling =
+  | { ok: true; ceilingSec: number | undefined }
+  | { ok: false; reason: MaterialRefusal };
+
+/**
+ * How far into a shot's selected media a trim may reach, in the source file's own time.
+ *
+ * `set-trim` refuses against this rather than against its own reading of the take, because the
+ * question "how much material does this shot have" already has an answer here and two answers
+ * would let the refusal and the picture disagree.
+ *
+ * `ceilingSec` is `undefined` when nothing bounds the material: absent means *not measured*,
+ * never "measured zero" (SPEC-013 R-5a). A planned segment boundary bounds it even when the file
+ * was never probed, which is why both are consulted and the tighter one wins.
+ */
+export function trimCeilingSec(production: ProductionBundle, shotId: string, takeId: string): TrimCeiling {
+  const takesById = new Map(production.takes.map((t) => [t.id, t]));
+  const take = takesById.get(takeId);
+  if (!take) return { ok: false, reason: "no-media" };
+  const result = materialFor(take, shotId, production, takesById);
+  if (!result.ok) return result;
+  const bounds = [result.material.availableSec, result.material.limitSec].filter((v): v is number => v !== undefined);
+  return { ok: true, ceilingSec: bounds.length === 0 ? undefined : Math.min(...bounds) };
+}
+
 const REFUSAL_DETAIL: Record<MaterialRefusal, string> = {
   "not-picture": "accepted take is not moving picture",
   static: "accepted take is a single image, which has no duration to fill the window",
