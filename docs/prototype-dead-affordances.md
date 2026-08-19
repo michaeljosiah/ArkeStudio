@@ -2,14 +2,14 @@
 
 `cursor:pointer` elements: **1408**
 
-- **1033 wired**
+- **1070 wired**
 - **23 state variants** — the selected half of an EXCLUSIVE pair, proven by its twin
-  block holding the same row WITH a handler. Clicking the row you are on is a no-op.
-  This does not apply to a toggle: a picked reference still needs a handler, because
-  unpicking is a real action.
-- **14 leave the application** — a file or folder picker, an external link.
-- **178 icon-only** — no text, no `title`; the markup does not say what they do.
-- **160 labelled and unwired**
+  block holding the same row with a handler. Not true of a toggle: a picked item still
+  needs one, because unpicking is a real action.
+- **15 leave the application** — a picker, a download, an external link.
+- **140 unnamed** — no text AND no `title`. The markup genuinely does not say what these
+  do; naming them needs someone who knows the icon.
+- **160 named and unwired** — text OR a `title`, so the intent is on the page.
 
 | screen | unwired | the affordances |
 |---|---:|---|
