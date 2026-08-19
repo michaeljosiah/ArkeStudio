@@ -277,7 +277,16 @@ const CLONED_VOICE: ComfyUiRecipe = {
     // The words, verbatim — a line to speak, never a prompt describing a performance
     // (SPEC-011 turn 70). The cap is ours: the node chunks longer text, and a scene line that
     // needs chunking is a line that should have been two.
-    text: { kind: "string", required: true, maxChars: 2000, bind: [["4", "text"]] },
+    /*
+     * One segment's worth, and no more.
+     *
+     * 2000 was this recipe's own guess at "long enough to be someone else's problem", and it was
+     * wrong in the direction that matters: at 300 tokens a segment the engine takes roughly 400
+     * characters, and anything past that is a second full pass over the model rather than a
+     * little more audio. The recipe already held that a line needing chunking is a line that
+     * should have been two; this is that belief with the arithmetic done.
+     */
+    text: { kind: "string", required: true, maxChars: 400, bind: [["4", "text"]] },
     // The uploaded clip's filename on the engine, resolved from the voice library before dispatch.
     // Internal because the user picks a VOICE, never a filename.
     speakerFile: { kind: "string", internal: true, required: true, maxChars: 260, bind: [["1", "audio"]] },
@@ -313,16 +322,42 @@ const CLONED_VOICE: ComfyUiRecipe = {
         device: "auto",
         emotion_alpha: 1.0,
         use_random: false,
-        max_text_tokens_per_segment: 120,
+        // The node's ceiling, not its default of 120 (SPEC-022 §2.6).
+        //
+        // Chunking is not a cost that scales: each segment is a full pass over the model, and on
+        // a 10 GB card the second one thrashes. Measured on the reference machine, a 174-character
+        // line split at 120 and the passes ran 25 steps in 7m49s and then 678s PER STEP — the card
+        // 92% full and ~9 GB of the process paged to disk. One pass is the difference between a
+        // preview that lands and one that never does, so the segment is as large as the node
+        // allows and `text` is capped to fit inside it.
+        max_text_tokens_per_segment: 300,
         interval_silence: 200,
         temperature: 0.8,
         top_p: 0.8,
         top_k: 30,
         do_sample: true,
         length_penalty: 0.0,
-        num_beams: 3,
+        /*
+         * One beam, not the node's default of three.
+         *
+         * Beam search keeps every candidate sequence alive through decoding, so three beams is
+         * roughly three times the decoder's memory — spent during exactly the stage that ran the
+         * reference machine out of card. It is also the slowest of the decoding strategies the
+         * engine offers. With `do_sample` on, beams were doing very little for a single spoken
+         * line anyway: sampling is what gives the delivery its variation, and the seed is what
+         * makes it repeatable.
+         */
+        num_beams: 1,
         repetition_penalty: 10.0,
-        max_mel_tokens: 1500,
+        /*
+         * 1000, not the node's default of 1500. This is the ceiling on how much audio one pass
+         * may generate, and it costs memory and time in proportion. The published guidance for
+         * cards at or below 10 GB is 1000, and 1000 mel tokens is far more speech than the 400
+         * characters `text` now admits.
+         */
+        max_mel_tokens: 1000,
+        // Half precision on CUDA: about half the memory of fp32 for a very small quality cost,
+        // and the engine's own default on this hardware.
         use_fp16: true,
         use_deepspeed: false,
       },
@@ -354,10 +389,15 @@ const CLONED_VOICE: ComfyUiRecipe = {
     ],
   },
   hardware: {
-    minVramMb: 6000,
-    recommendedVramMb: 10000,
+    // Raised from 6000 after the first end-to-end dispatch through ComfyUI failed to finish on a
+    // card that cleared the old floor twice over (SPEC-022 §2.6). 5.44 GB was a true measurement
+    // of the model on the Python harness and a false statement of what this recipe needs: the
+    // engine hosting it costs more, and the machine it runs on already had 3.36 GB of its card
+    // spoken for. The gate reads TOTAL VRAM, so the headroom has to live in the floor.
+    minVramMb: 8000,
+    recommendedVramMb: 12000,
     floorSource:
-      "measured on Arke reference hardware 2026-08-18: RTX 3080, bf16, peak 5.44 GB across four line lengths; floor set above the measured peak so the display is not squeezed",
+      "measured through ComfyUI on Arke reference hardware 2026-08-19: RTX 3080, 3.36 GB already in use by other applications, peak 9.35 GB and still climbing when the run was killed. A lower bound, not a peak — the true peak could not be measured on a card that could not hold it",
   },
 };
 

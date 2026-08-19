@@ -1,6 +1,6 @@
 import type { ClientDeclarations, ProviderId } from "@arke-studio/contracts";
 import { AnthropicClient } from "./clients/anthropic.js";
-import { ComfyUiClient, type ComfyUiPreflight, type EngineBaseUrl } from "./clients/comfyui.js";
+import { ComfyUiClient, type ComfyUiPreflight, type EngineBaseUrl, type ProgressSocket } from "./clients/comfyui.js";
 import { ElevenLabsClient } from "./clients/elevenlabs.js";
 import { FalClient } from "./clients/fal.js";
 import { HiggsfieldClient } from "./clients/higgsfield.js";
@@ -29,7 +29,16 @@ export interface ProviderClientDeps {
    * every submit re-runs before touching the wire (§2.5). Omitted where no engine service is
    * wired — the client is then absent rather than present and dispatching unverified.
    */
-  comfyui?: { baseUrl: EngineBaseUrl; preflight: ComfyUiPreflight };
+  comfyui?: {
+    baseUrl: EngineBaseUrl;
+    preflight: ComfyUiPreflight;
+    /** Reads a cloned voice's clip so it can be uploaded to the engine (SPEC-022 §2.8). */
+    readClip?: (path: string) => Promise<Uint8Array>;
+    /** Opens the engine's progress socket (SPEC-021 D16); omitted, jobs simply report no figure. */
+    openSocket?: (url: string) => ProgressSocket;
+    /** Free graphics memory right now, in MB, or null where the device cannot be asked. */
+    freeVramMb?: () => Promise<number | null>;
+  };
   capture?: ProviderCallCapture;
 }
 
@@ -80,7 +89,15 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
       : {
           comfyui: captureProviderClient(
             "comfyui",
-            (fetch) => new ComfyUiClient(fetch, deps.comfyui!.baseUrl, deps.comfyui!.preflight),
+            (fetch) =>
+              new ComfyUiClient(
+                fetch,
+                deps.comfyui!.baseUrl,
+                deps.comfyui!.preflight,
+                deps.comfyui!.readClip,
+                deps.comfyui!.openSocket,
+                deps.comfyui!.freeVramMb,
+              ),
             fetchImpl,
             capture,
           ),

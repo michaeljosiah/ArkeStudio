@@ -47,6 +47,15 @@ export interface PollResult {
   state: "queued" | "running" | "succeeded" | "failed" | "cancelled";
   /** 0..1 where the provider reports one. */
   progress?: number;
+  /**
+   * What the engine is counting right now, when it counts anything (SPEC-021 D16).
+   *
+   * A number on its own is the thing that exclusion was written against: a graph is not a step,
+   * so a bare fraction sits at nothing through a model load, sweeps to full while one node
+   * samples, then waits on the rest. Carrying the stage with the count is what lets a surface
+   * say `speaking · step 20 of 25` instead of implying the job is 80 per cent done.
+   */
+  step?: { stage: string; done: number; total: number };
   /** Actual charge in micro-USD, only when the provider reports real cost (reportsCost). */
   costMicroUsd?: number;
   error?: string;

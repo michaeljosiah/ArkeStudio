@@ -1,8 +1,8 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { appendFileSync, createReadStream, existsSync } from "node:fs";
-import { readdir, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, safeStorage, shell } from "electron";
@@ -560,6 +560,42 @@ async function initialize(): Promise<{ port: number }> {
     comfyui: {
       baseUrl: () => comfyUiEngine.baseUrl(),
       preflight: (recipeId) => comfyUiEngine.preflight(recipeId),
+      // The one recipe input that is a file this machine owns. Reading it is the host's business
+      // for the same reason opening a dialog is: the renderer never handles a path (SPEC-001 R-9).
+      readClip: async (path) => new Uint8Array(await readFile(path)),
+      // The engine says what it is doing only on its socket (SPEC-021 D16). Node's own
+      // WebSocket, adapted to the two handlers the client needs — nothing here should hold a
+      // dependency on a socket library for one optional figure.
+      // The device's own answer, not the engine's: ComfyUI reports what torch allocated and
+      // cannot see the browser holding 3 GB of the same card (SPEC-022 §2.6). NVIDIA-only, and
+      // null everywhere else — an unmeasurable card dispatches rather than being refused (D15).
+      freeVramMb: () =>
+        new Promise((resolve) => {
+          execFile(
+            "nvidia-smi",
+            ["--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            { timeout: 5_000, windowsHide: true },
+            (err, stdout) => {
+              if (err) return resolve(null);
+              const mb = Number.parseInt(String(stdout).trim().split(/\r?\n/)[0] ?? "", 10);
+              resolve(Number.isFinite(mb) && mb >= 0 ? mb : null);
+            },
+          );
+        }),
+      openSocket: (url) => {
+        const socket = new WebSocket(url);
+        const adapter = {
+          onMessage: null as ((data: string) => void) | null,
+          onClose: null as (() => void) | null,
+          close: () => socket.close(),
+        };
+        socket.addEventListener("message", (event) => {
+          if (typeof event.data === "string") adapter.onMessage?.(event.data);
+        });
+        socket.addEventListener("close", () => adapter.onClose?.());
+        socket.addEventListener("error", () => adapter.onClose?.());
+        return adapter;
+      },
     },
     capture: providerCalls,
   });

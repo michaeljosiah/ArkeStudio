@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { dispatchDuration, durationOptions, estimateMicroUsd } from "@arke-studio/contracts";
-import { ComfyUiClient, COMFYUI_VERSION_FLOOR, meetsVersionFloor } from "../src/clients/comfyui.js";
+import { ComfyUiClient, COMFYUI_VERSION_FLOOR, meetsVersionFloor, type ProgressSocket } from "../src/clients/comfyui.js";
 import {
   callerParamNames,
   COMFYUI_MANIFEST_MODELS,
@@ -33,6 +33,8 @@ interface Recorded {
   url: string;
   method: string;
   body: unknown;
+  /** The upload's filename, when the request carried a form rather than JSON. */
+  filename?: string;
 }
 
 /** A fetch fake that records what was sent: route → {status, body}, matched in order. */
@@ -42,10 +44,15 @@ function engineFake(routes: Array<{ match: RegExp; status: number; body?: unknow
 } {
   const calls: Recorded[] = [];
   const fetch: FetchLike = async (url, init) => {
+    // A voice dispatch uploads its clip as multipart, so the recorded call keeps the filename
+    // the engine was given — the value LoadAudio will later be asked for by name.
+    const form = init?.body instanceof FormData ? init.body : null;
+    const uploaded = form?.get("image");
     calls.push({
       url,
       method: init?.method ?? "GET",
       body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+      ...(uploaded instanceof File ? { filename: uploaded.name } : {}),
     });
     const hit = routes.find((r) => r.match.test(url));
     if (!hit) throw new Error(`ECONNREFUSED ${url}`);
@@ -130,8 +137,12 @@ describe("the recipe catalogue projects into the manifest like any other model",
     // No checkpoint entries: the engine node fetches IndexTTS 2.5 itself on first use. That is a
     // real difference from every other recipe and is why it is asserted rather than assumed.
     assert.deepEqual(voice.requires.checkpoints, []);
-    assert.equal(voice.hardware.minVramMb, 6000);
-    assert.match(voice.hardware.floorSource, /measured on Arke reference hardware/);
+    // 8 GB, not the 6 GB first shipped: the model measured 5.44 GB on a Python harness and the
+    // recipe still could not finish on a 10 GB card, because the engine hosting it costs more and
+    // the machine had 3.36 GB already spoken for. The floor carries that headroom because the
+    // gate compares against TOTAL VRAM (SPEC-022 §2.6).
+    assert.equal(voice.hardware.minVramMb, 8000);
+    assert.match(voice.hardware.floorSource, /measured through ComfyUI/);
   });
 });
 
@@ -886,5 +897,309 @@ describe("no graph survives capture", () => {
       .catch(() => {});
     assert.ok(started.length > 0);
     assert.equal(JSON.stringify(started).includes("graph-redacted"), false);
+  });
+});
+
+/**
+ * Speaking a line in a cloned voice (SPEC-022 T-10).
+ *
+ * Every one of these failed against the shipped client before the voice path existed, and none
+ * of the 2,400 tests noticed: the recipe had only ever been proven by a graph posted by hand,
+ * which is precisely the path that skips this file.
+ */
+describe("the cloned-voice recipe on the wire", () => {
+  const VOICE_PARAMS = {
+    voiceId: "harbour-glass",
+    text: "The tide turns when it turns.",
+    speakerFile: "C:/worlds/embers/voices/harbour-glass.wav",
+  };
+  const CLIP = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45]);
+  const readClip = async (): Promise<Uint8Array> => CLIP;
+  const ROUTES = [
+    { match: /\/upload\/image$/, status: 200, body: { name: "harbour-glass.wav", subfolder: "" } },
+    { match: /\/prompt$/, status: 200, body: { prompt_id: "p-v1", node_errors: {} } },
+  ];
+
+  it("uploads the clip and gives LoadAudio the engine's own name for it", async () => {
+    // `LoadAudio.audio` is a dropdown over the engine's input directory, so a path from this
+    // machine means nothing there. Passing one through produced a graph the engine rejected.
+    const { fetch, calls } = engineFake(ROUTES);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+      model: "comfyui-cloned-voice",
+      capability: "voice-tts",
+      params: VOICE_PARAMS,
+    });
+    assert.equal(calls.some((c) => c.url.endsWith("/upload/image") && c.method === "POST"), true, "clip was never uploaded");
+    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
+      prompt: Record<string, { inputs: Record<string, unknown> }>;
+    };
+    assert.equal(posted.prompt["1"]!.inputs["audio"], "harbour-glass.wav");
+    assert.equal(posted.prompt["4"]!.inputs["text"], VOICE_PARAMS.text);
+  });
+
+  it("uploads before it submits, never after", async () => {
+    // The name has to exist on the engine before the graph naming it is queued.
+    const { fetch, calls } = engineFake(ROUTES);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+      model: "comfyui-cloned-voice",
+      capability: "voice-tts",
+      params: VOICE_PARAMS,
+    });
+    const order = calls.map((c) => c.url);
+    assert.equal(
+      order.findIndex((u) => u.endsWith("/upload/image")) < order.findIndex((u) => u.endsWith("/prompt")),
+      true,
+    );
+  });
+
+  it("keeps a subfolder, because that is part of the name the dropdown shows", async () => {
+    const { fetch, calls } = engineFake([
+      { match: /\/upload\/image$/, status: 200, body: { name: "clip.wav", subfolder: "arke" } },
+      { match: /\/prompt$/, status: 200, body: { prompt_id: "p-v2", node_errors: {} } },
+    ]);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+      model: "comfyui-cloned-voice",
+      capability: "voice-tts",
+      params: VOICE_PARAMS,
+    });
+    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
+      prompt: Record<string, { inputs: Record<string, unknown> }>;
+    };
+    assert.equal(posted.prompt["1"]!.inputs["audio"], "arke/clip.wav");
+  });
+
+  it("names the clip by its basename on a Windows path too", async () => {
+    // The clip path is this machine's, and on Windows that is backslashes. Splitting on "/"
+    // alone sent the whole path as the upload filename — and every test here used a
+    // forward-slash path, so the suite stayed green while the shipped platform broke.
+    const { fetch, calls } = engineFake(ROUTES);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+      model: "comfyui-cloned-voice",
+      capability: "voice-tts",
+      params: { ...VOICE_PARAMS, speakerFile: String.raw`C:\worlds\embers\voices\harbour-glass.wav` },
+    });
+    const upload = calls.find((c) => c.url.endsWith("/upload/image"))!;
+    assert.equal(upload.filename, "harbour-glass.wav");
+  });
+
+  it("takes every key a real voice dispatch carries", async () => {
+    /*
+     * Copied verbatim from a job the installed app actually built, not invented here. The
+     * allow-list named none of them, and because it refuses one key at a time each rebuild
+     * surfaced exactly one more: `voiceId`, then `requestId`, then whatever came next. The
+     * whole envelope belongs in one test so the next addition fails here and not on a machine.
+     */
+    const { fetch } = engineFake(ROUTES);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+      model: "comfyui-cloned-voice",
+      capability: "voice-tts",
+      params: {
+        ...VOICE_PARAMS,
+        seed: 42,
+        requestId: "01M0D1RN20G5MVYTEKNM0Q51GV",
+        purpose: "candidate-preview",
+        sheetId: "aurora-sabato",
+        sheetVersion: 5,
+        characterCount: 174,
+      },
+    });
+  });
+
+  it("asks for a line to speak, not a prompt", async () => {
+    // This recipe has no `prompt` param at all: a line is spoken verbatim, never described.
+    const { fetch } = engineFake(ROUTES);
+    await assert.rejects(
+      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+        model: "comfyui-cloned-voice",
+        capability: "voice-tts",
+        params: { voiceId: "v", speakerFile: "c.wav" },
+      }),
+      /needs a line to speak/,
+    );
+  });
+
+  it("does not put a file on the engine for a job pre-flight refuses", async () => {
+    const { fetch, calls } = engineFake(ROUTES);
+    await assert.rejects(
+      new ComfyUiClient(fetch, BASE, async () => ({ ok: false as const, reason: "pinned node drifted" }), readClip).submit(
+        "",
+        { model: "comfyui-cloned-voice", capability: "voice-tts", params: VOICE_PARAMS },
+      ),
+    );
+    assert.equal(calls.some((c) => c.url.endsWith("/upload/image")), false);
+  });
+
+  it("says so when the clip cannot be read, rather than uploading nothing", async () => {
+    const { fetch } = engineFake(ROUTES);
+    await assert.rejects(
+      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, async () => {
+        throw new Error("ENOENT");
+      }).submit("", { model: "comfyui-cloned-voice", capability: "voice-tts", params: VOICE_PARAMS }),
+      /recording could not be read/,
+    );
+  });
+});
+
+/**
+ * What the engine says it is doing (SPEC-021 D16).
+ *
+ * The exclusion this amends was written against queue position, which is not a fraction of the
+ * work done. These assert the two things that make the step counter different: it comes from the
+ * node's own count, and it never carries the node's id.
+ */
+describe("progress from the engine's socket", () => {
+  function socketFake(): { open: (url: string) => ProgressSocket; send: (msg: unknown) => void; urls: string[] } {
+    const urls: string[] = [];
+    let live: ProgressSocket | null = null;
+    return {
+      urls,
+      open: (url) => {
+        urls.push(url);
+        live = { onMessage: null, onClose: null, close: () => {} };
+        return live;
+      },
+      send: (msg) => live?.onMessage?.(JSON.stringify(msg)),
+    };
+  }
+
+  const RUNNING = [{ match: /\/queue$/, status: 200, body: { queue_running: [[0, "p-1"]], queue_pending: [] } }];
+
+  it("reports the node's own count, named by what the recipe is doing", async () => {
+    // Through a real submit: what a prompt is DOING is recorded there, because the socket only
+    // ever says which node is stepping and that is a node id (R-1).
+    const { fetch } = engineFake([
+      { match: /\/upload\/image$/, status: 200, body: { name: "c.wav", subfolder: "" } },
+      { match: /\/prompt$/, status: 200, body: { prompt_id: "p-1", node_errors: {} } },
+      ...RUNNING,
+    ]);
+    const sock = socketFake();
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, async () => new Uint8Array([1]), sock.open);
+    await client.submit("", {
+      model: "comfyui-cloned-voice",
+      capability: "voice-tts",
+      params: { voiceId: "v", text: "A line.", speakerFile: "c.wav" },
+    });
+    await client.poll("", "p-1");
+    assert.equal(sock.urls[0], "ws://127.0.0.1:8188/ws?clientId=arke-studio");
+    sock.send({ type: "progress", data: { prompt_id: "p-1", value: 20, max: 25, node: "4" } });
+    const result = await client.poll("", "p-1");
+    assert.deepEqual(result.step, { stage: "speaking", done: 20, total: 25 });
+    assert.equal(result.progress, 0.8);
+  });
+
+  it("says nothing for a prompt it did not dispatch", async () => {
+    // After a restart the app is polling a prompt it has no record of. A count with no idea what
+    // is being counted is the unlabelled bar D16 refuses, so it reports state only.
+    const { fetch } = engineFake(RUNNING);
+    const sock = socketFake();
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, sock.open);
+    await client.poll("", "p-1");
+    sock.send({ type: "progress", data: { prompt_id: "p-1", value: 20, max: 25 } });
+    assert.equal((await client.poll("", "p-1")).step, undefined);
+  });
+
+  it("never carries the engine's node id", async () => {
+    // R-1: no node id reaches a user, and `step.stage` is rendered verbatim on a row.
+    const { fetch } = engineFake(RUNNING);
+    const sock = socketFake();
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, sock.open);
+    await client.poll("", "p-1");
+    sock.send({ type: "progress", data: { prompt_id: "p-1", value: 3, max: 10, node: "4" } });
+    const result = await client.poll("", "p-1");
+    assert.equal(JSON.stringify(result).includes('"4"'), false);
+  });
+
+  it("says nothing rather than guessing when the engine has not counted yet", async () => {
+    // Between accept and the first step there is no figure, and inventing one — from queue
+    // position or elapsed time — is exactly what the original exclusion refused.
+    const { fetch } = engineFake(RUNNING);
+    const sock = socketFake();
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, sock.open);
+    const result = await client.poll("", "p-1");
+    assert.equal(result.state, "running");
+    assert.equal(result.step, undefined);
+    assert.equal(result.progress, undefined);
+  });
+
+  it("forgets a prompt's count when it finishes", async () => {
+    const { fetch } = engineFake(RUNNING);
+    const sock = socketFake();
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, sock.open);
+    await client.poll("", "p-1");
+    sock.send({ type: "progress", data: { prompt_id: "p-1", value: 9, max: 10 } });
+    sock.send({ type: "execution_success", data: { prompt_id: "p-1" } });
+    assert.equal((await client.poll("", "p-1")).step, undefined);
+  });
+
+  it("keeps dispatching when the socket cannot be opened", async () => {
+    // Progress is the one thing a dispatch works perfectly well without.
+    const { fetch } = engineFake(RUNNING);
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, () => {
+      throw new Error("no socket here");
+    });
+    assert.equal((await client.poll("", "p-1")).state, "running");
+  });
+});
+
+/**
+ * Room on the card, asked at the moment it matters (SPEC-022 §2.6).
+ *
+ * The start-up probe reads the card's TOTAL size, so a machine clears the floor and then runs out
+ * because something else already had the card. These cover the question being asked again at
+ * dispatch, the engine being told to put things down, and the refusal naming both figures.
+ */
+describe("making room on the graphics card", () => {
+  const VOICE = {
+    model: "comfyui-cloned-voice" as const,
+    capability: "voice-tts" as const,
+    params: { voiceId: "v", text: "A line.", speakerFile: "c.wav" },
+  };
+  const ROUTES = [
+    { match: /\/free$/, status: 200, body: {} },
+    { match: /\/upload\/image$/, status: 200, body: { name: "c.wav", subfolder: "" } },
+    { match: /\/prompt$/, status: 200, body: { prompt_id: "p-1", node_errors: {} } },
+  ];
+  const clip = async (): Promise<Uint8Array> => new Uint8Array([1]);
+  const client = (free: () => Promise<number | null>, fetch: FetchLike) =>
+    new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, clip, undefined, free);
+
+  it("dispatches when the card cannot be measured", async () => {
+    // D15: unknown stays unknown and dispatches. A card this build cannot read is not a card it
+    // may refuse — that would disable local voice forever on any machine without nvidia-smi.
+    const { fetch, calls } = engineFake(ROUTES);
+    await client(async () => null, fetch).submit("", VOICE);
+    assert.equal(calls.some((c) => c.url.endsWith("/free")), false, "nothing to free when nothing is known");
+  });
+
+  it("leaves the engine's model cache alone when there is already room", async () => {
+    // `/free` throws away the loaded models, so calling it before every dispatch buys a cold
+    // start on every line. It is worth doing only when the card is actually short.
+    const { fetch, calls } = engineFake(ROUTES);
+    await client(async () => 12_000, fetch).submit("", VOICE);
+    assert.equal(calls.some((c) => c.url.endsWith("/free")), false);
+  });
+
+  it("asks the engine to put things down when the card is short, then goes ahead", async () => {
+    const { fetch, calls } = engineFake(ROUTES);
+    let asked = 0;
+    await client(async () => (++asked === 1 ? 3000 : 9000), fetch).submit("", VOICE);
+    assert.equal(calls.some((c) => c.url.endsWith("/free") && c.method === "POST"), true);
+    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true, "it should proceed once there is room");
+  });
+
+  it("names both figures when there is still not enough, and does not dispatch", async () => {
+    // The whole point: say so before the wait, not after half an hour of paging to disk.
+    const { fetch, calls } = engineFake(ROUTES);
+    await assert.rejects(
+      client(async () => 3072, fetch).submit("", VOICE),
+      (err: Error) => {
+        assert.match(err.message, /needs 7\.8 GB of free graphics memory/);
+        assert.match(err.message, /this machine has 3\.0 GB free/);
+        assert.match(err.message, /close other programs/);
+        return true;
+      },
+    );
+    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
+    assert.equal(calls.some((c) => c.url.endsWith("/upload/image")), false, "no clip left on the engine");
   });
 });

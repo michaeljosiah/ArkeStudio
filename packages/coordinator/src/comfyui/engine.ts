@@ -463,7 +463,11 @@ export class ComfyUiEngineService {
     const recipe = this.deps.recipes.find((r) => r.id === recipeId);
     if (!recipe) return { ok: false, reason: `"${recipeId}" is not a shipped recipe` };
     const dir = this.modelsDir();
-    if (dir === null) {
+    // A recipe that pins no checkpoints has nothing in that folder to verify. The cloned-voice
+    // recipe is the first of these: its weights are fetched by the custom node into the engine's
+    // own cache, never into `models/`, so demanding the mapping refused it for the absence of
+    // files it does not use.
+    if (dir === null && recipe.checkpoints.length > 0) {
       const verdict = {
         ok: false as const,
         reason: "Arke cannot verify this engine's files — map its models folder in Settings to enable local recipes",
@@ -471,8 +475,8 @@ export class ComfyUiEngineService {
       this.verification.set(recipeId, verdict);
       return verdict;
     }
-    for (const checkpoint of recipe.checkpoints) {
-      const path = join(dir, checkpoint.file);
+    for (const checkpoint of dir === null ? [] : recipe.checkpoints) {
+      const path = join(dir!, checkpoint.file);
       if (!(await this.deps.fileExists(path))) {
         const verdict = { ok: false as const, reason: `${checkpoint.file} is missing from the models folder` };
         this.verification.set(recipeId, verdict);
@@ -496,16 +500,27 @@ export class ComfyUiEngineService {
       }
     }
     const engineRoot = this.resolved.root;
+    /*
+     * Where this engine keeps its custom nodes.
+     *
+     * A managed install has a root and they sit under it. A URL engine has no root — but D13
+     * says the models-dir mapping IS the user's assertion that this engine's files are on this
+     * machine, and that it is the only unlock. `custom_nodes` is the sibling of `models` in
+     * every ComfyUI layout, so the same assertion locates them. Without it there is still
+     * nothing to check and the refusal stands.
+     */
+    const customNodesDir =
+      engineRoot !== null ? join(engineRoot, "ComfyUI", "custom_nodes") : dir !== null ? join(dir, "..", "custom_nodes") : null;
     for (const node of recipe.customNodes) {
-      if (engineRoot === null) {
+      if (customNodesDir === null) {
         const verdict = {
           ok: false as const,
-          reason: `custom node ${node.id} cannot be verified on a URL engine (SPEC-021 D13)`,
+          reason: `custom node ${node.id} cannot be verified on a URL engine — map its models folder in Settings (SPEC-021 D13)`,
         };
         this.verification.set(recipeId, verdict);
         return verdict;
       }
-      const nodeDir = join(engineRoot, "ComfyUI", "custom_nodes", node.id);
+      const nodeDir = join(customNodesDir, node.id);
       if (!(await this.deps.fileExists(nodeDir))) {
         const verdict = { ok: false as const, reason: `custom node ${node.id} is missing from the engine` };
         this.verification.set(recipeId, verdict);
@@ -566,8 +581,11 @@ export class ComfyUiEngineService {
     if (engine.state === "failed") return disabled(engine.detail ?? "the engine did not start");
     if (engine.state === "starting") return disabled("the engine is starting");
 
-    // 2 · A URL engine's files are unverifiable without the explicit mapping (D13).
-    if (engine.source === "user-url" && this.modelsDir() === null) {
+    // 2 · A URL engine's files are unverifiable without the explicit mapping (D13) — but only
+    // where there are files to verify. Step 4 is the only one that reads the folder and it
+    // already skips when there is none, so a checkpoint-less recipe was being refused here for
+    // want of something it never asks for, and could not be enabled on a URL engine at all.
+    if (engine.source === "user-url" && this.modelsDir() === null && recipe.checkpoints.length > 0) {
       return disabled("Arke cannot verify this engine's files — map its models folder to enable");
     }
 

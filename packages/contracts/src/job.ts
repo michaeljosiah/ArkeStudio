@@ -98,6 +98,18 @@ export const JobSchema = z
      */
     engine: JobEngineIdentitySchema.optional(),
     status: JobStatusSchema,
+    /**
+     * What the engine is counting right now (SPEC-021 D16), or null when it counts nothing.
+     *
+     * Carried with its stage rather than as a bare fraction: a recipe is a graph, and one node's
+     * steps are not the job's own percentage. Transient — it is whatever the last poll saw, and
+     * it goes back to null the moment the job stops running.
+     */
+    step: z
+      .object({ stage: z.string().min(1), done: z.number().int().min(0), total: z.number().int().min(1) })
+      .strict()
+      .nullable()
+      .optional(),
     /** The provider's own job id, recorded before the state moves to running. */
     providerJobId: z.string().nullable().default(null),
     /** Physical submission calls authorized, persisted before provider I/O (SPEC-009 R-9). */
