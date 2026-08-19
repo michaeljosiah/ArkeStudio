@@ -7,6 +7,10 @@ import "@fontsource/geist-sans/600.css";
 import "@fontsource/geist-sans/700.css";
 import "@fontsource/geist-mono/400.css";
 import "@fontsource/geist-mono/500.css";
+// The launch screen wordmark only (--font-wordmark). Two weights, because the lockup is two
+// lines: the mark at 200 and the tagline at 300. Nothing else in the app uses this face.
+import "@fontsource/jost/200.css";
+import "@fontsource/jost/300.css";
 import "./theme/tokens/colors.css";
 import "./theme/tokens/typography.css";
 import "./theme/tokens/spacing.css";

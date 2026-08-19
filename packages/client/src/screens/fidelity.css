@@ -2810,16 +2810,18 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 940px;
+  /* Hugs the wordmark so the flare can be expressed as a share of the run, not of a fixed box. */
+  width: max-content;
   max-width: 92vw;
   height: 74px;
 }
 /* The bar crosses the wordmark on its baseline and warms into the final O. */
 .fy-launch__bar {
   position: absolute;
-  left: 0;
-  right: 0;
+  left: -2.28em;
+  right: -2.28em;
   bottom: 6px;
+  font-size: 58px;
   height: 1px;
   background: linear-gradient(
     90deg,
@@ -2834,7 +2836,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-launch__streak,
 .fy-launch__flare {
   position: absolute;
-  left: 81.4%;
+  left: 91.4%;
   bottom: 6px;
   transform: translate(-50%, 50%);
   pointer-events: none;
@@ -2986,6 +2988,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 @media (max-height: 780px) {
   .fy-launch { padding-bottom: 72px; }
   .fy-launch__mark { height: 56px; }
+  .fy-launch__bar { font-size: 42px; }
   .fy-launch__wordmark { font-size: 42px; letter-spacing: 0.44em; text-indent: 0.44em; }
   .fy-launch__tagline { margin-top: 14px; font-size: 13px; letter-spacing: 0.6em; text-indent: 0.6em; }
   .fy-launch__ways { margin-top: 32px; }

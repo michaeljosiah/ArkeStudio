@@ -62,9 +62,10 @@
   --launch-streak-edge: rgba(255, 196, 140, 0);
 
   /*
-   * The wordmark's face. Jost is the geometric the lockup was drawn in; it is not
-   * bundled, so this falls through to the house sans until `@fontsource/jost` is
-   * added. Adopting it is then a dependency and an import — no rule below changes.
+   * The wordmark's face, and the only thing in the app that uses it: Jost is the geometric
+   * the lockup was drawn in, and Geist — a neo-grotesque — visibly is not it. Bundled at
+   * the two weights the lockup needs (200 for the mark, 300 for the tagline); the fallback
+   * stays so a failed font load degrades to the house sans rather than to a serif.
    */
   --font-wordmark: "Jost", var(--font-sans);
 }
