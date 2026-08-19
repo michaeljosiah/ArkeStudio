@@ -181,3 +181,37 @@ describe("a voice preview can name any provider the app knows", () => {
     assert.equal(ClientMessageSchema.safeParse(frame("elevenlabz")).success, false);
   });
 });
+
+/**
+ * Clone capture on the wire (SPEC-022 T-10). The frame is where consent is enforced, not the
+ * handler — the model cannot tell whether a speaker agreed, and neither can the app.
+ */
+describe("the clone-voice frame", () => {
+  const base = {
+    kind: "clone-voice" as const,
+    worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+    sourcePath: "C:/recordings/harbour.wav",
+    name: "Harbour glass",
+    description: "Low, dry, unhurried. Coastal.",
+    consent: true as const,
+  };
+
+  it("accepts a consented clone, with or without the sheet it was made for", () => {
+    assert.equal(ClientMessageSchema.safeParse(base).success, true);
+    assert.equal(ClientMessageSchema.safeParse({ ...base, sheetId: "maren-kest" }).success, true);
+  });
+
+  it("cannot be spelled without consent", () => {
+    // z.literal(true), not a boolean: there is no shape of this frame that carries false, so a
+    // handler cannot forget to check it.
+    assert.equal(ClientMessageSchema.safeParse({ ...base, consent: false }).success, false);
+    const { consent, ...noConsent } = base;
+    assert.equal(ClientMessageSchema.safeParse(noConsent).success, false);
+  });
+
+  it("cannot be spelled without a description", () => {
+    // rankVoices buries an attribute-less candidate, so a voice cloned FOR a character would sink
+    // below every preset when ranked against her. Refused at the wire as well as at creation.
+    assert.equal(ClientMessageSchema.safeParse({ ...base, description: "" }).success, false);
+  });
+});

@@ -456,3 +456,62 @@ describe("cloned voices join the catalogue", () => {
     );
   });
 });
+
+/**
+ * A cloned voice previews through the queue (SPEC-022 T-9b). Being local changes what it costs,
+ * not how it is made — only Kokoro bypasses the queue, because the sidecar answers synchronously.
+ */
+describe("a cloned voice previews like any other queued voice", () => {
+  const RECIPE: ManifestModel = {
+    id: "comfyui-cloned-voice",
+    provider: "comfyui",
+    capability: "voice-tts",
+    displayName: "Local · Cloned Voice",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: { maxPromptChars: 2000 },
+    pricing: { kind: "unmetered" },
+  };
+  const svc = () =>
+    new VoiceService({ sidecar: null, localPresets: [], cloudSources: [], getKey: async () => null, emit: () => {} });
+  const line = { text: "the tide turns", source: "own-line" as const };
+
+  it("carries the resolved clip and costs nothing", () => {
+    const { input, cacheFile } = svc().queuedPreviewRequest({
+      worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+      sheet: SHEET,
+      provider: "comfyui",
+      voiceId: "harbour-glass",
+      line,
+      model: RECIPE,
+      speakerFile: "C:/worlds/undersong/voices/harbour-glass.wav",
+    });
+    assert.equal(input.provider, "comfyui");
+    assert.equal(input.params["speakerFile"], "C:/worlds/undersong/voices/harbour-glass.wav");
+    // Unmetered: a local read states no price where an ElevenLabs row states an exact figure.
+    assert.equal(input.estimatedMicroUsd, 0);
+    // FLAC, because that is what SaveAudio writes — an mp3 key would cache a hit that never
+    // matches the bytes on disk.
+    assert.match(cacheFile, /\.flac$/);
+  });
+
+  it("keys its cache apart from a cloud voice of the same id and line", () => {
+    const s = svc();
+    const local = s.queuedPreviewRequest({
+      worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", sheet: SHEET, provider: "comfyui",
+      voiceId: "v1", line, model: RECIPE, speakerFile: "clip.wav",
+    });
+    const cloud = s.queuedPreviewRequest({
+      worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", sheet: SHEET, provider: "elevenlabs",
+      voiceId: "v1", line, model: ELEVEN_MODEL,
+    });
+    assert.notEqual(local.cacheFile, cloud.cacheFile);
+  });
+
+  it("a catalogue voice carries no clip at all", () => {
+    const { input } = svc().queuedPreviewRequest({
+      worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", sheet: SHEET, provider: "elevenlabs",
+      voiceId: "v1", line, model: ELEVEN_MODEL,
+    });
+    assert.ok(!("speakerFile" in input.params), "an id names a catalogue voice; a clip would be noise");
+  });
+});

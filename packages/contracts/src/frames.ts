@@ -1365,6 +1365,30 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   z.object({ kind: z.literal("genesis-attach-files"), genesisId: GenesisIdSchema }).strict(),
   /** SPEC-015 R-9..R-11: stage one — file everything, exclude system files, report all of it. */
+  /**
+   * SPEC-022 T-10: make a voice from a recording.
+   *
+   * `consent` is `z.literal(true)`, not a boolean. The model cannot tell whether the speaker in a
+   * clip agreed to be cloned and neither can the app, so the wire refuses an unconsented clone
+   * rather than leaving it to a handler that might forget — there is no way to spell the frame
+   * that would carry `false`.
+   *
+   * `description` is required for the same reason `newClonedVoice` refuses without one:
+   * `rankVoices` buries a candidate with no attributes, so a voice cloned FOR a character would
+   * sink below every preset when ranked against her.
+   */
+  z
+    .object({
+      kind: z.literal("clone-voice"),
+      worldId: UlidSchema,
+      sourcePath: z.string().min(1),
+      name: z.string().min(1),
+      description: z.string().min(1),
+      consent: z.literal(true),
+      /** The sheet this was cloned while casting — a link for provenance, never ownership. */
+      sheetId: SlugSchema.optional(),
+    })
+    .strict(),
   z.object({ kind: z.literal("import-folder"), worldId: UlidSchema, sourcePath: z.string().min(1) }).strict(),
   /** SPEC-015 R-12..R-14: stage two — grounded extraction into a pending batch. */
   z

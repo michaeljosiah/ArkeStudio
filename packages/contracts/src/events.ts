@@ -354,6 +354,19 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   /** A large file awaiting stated-size consent, or a filing refusal (SPEC-015 R-6). */
+  /** SPEC-022 T-10: the outcome of making a voice from a recording. */
+  z
+    .object({
+      at: IsoDateTimeSchema,
+      type: z.literal("voice.cloned"),
+      worldId: UlidSchema,
+      /** The voice that now exists, or null when the clone was refused. */
+      voiceId: z.string().nullable(),
+      label: z.string().nullable(),
+      /** Why not — the same words `newClonedVoice` refuses with, never a generic failure. */
+      reason: z.string().nullable(),
+    })
+    .strict(),
   z
     .object({
       ...base,
