@@ -86,17 +86,20 @@ describe("episode cuts and refusals (issue 396)", () => {
         {
           id: "tk_01J8E0000000000000000000T1",
           jobId: "jb_01J8E0000000000000000000J1",
-          target: { kind: "shot", id: "sh_1", coversShots: ["sh_1"] },
+          coversShots: ["sh_1"],
           kind: "clip",
           provider: "fal",
           model: "seedance-2.0",
+          provenance: { canonRevision: 1, sheets: {} },
           prompt: "a shot",
+          references: [],
           params: {},
+          cost: { estimatedMicroUsd: 1000, actualMicroUsd: null },
+          dispatchedAt: AT,
           media: "clip.mp4",
-          createdAt: AT,
         },
       ],
-      selections: { sh_1: { acceptedTakeId: "tk_01J8E0000000000000000000T1" } },
+      selections: { sh_1: { acceptedTakeId: "tk_01J8E0000000000000000000T1", trimInSec: 0 } },
     });
     const one = deriveEpisodeCut(p, "ep_one");
     const two = deriveEpisodeCut(p, "ep_two");
