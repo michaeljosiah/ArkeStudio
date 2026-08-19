@@ -12,6 +12,7 @@ import {
   type Readiness,
   type SendMessageInput,
   type SendReceipt,
+  type SessionConfigInput,
   type SessionRef,
 } from "@arke-studio/contracts";
 import { createNormalizeState, normalizeClaude, type NormalizeState } from "./normalize.js";
@@ -67,6 +68,8 @@ interface ClaudeSession {
   agentName: string;
   confinement: AgentConfinement;
   systemPrompt: string;
+  /** The world-query MCP for THIS session, as prepareSession supplied it. */
+  worldQueryUrl: string | undefined;
   inbox: AsyncQueue<unknown>;
   abort: AbortController;
   normalize: NormalizeState;
@@ -119,6 +122,11 @@ export class ClaudeAdapter implements HarnessAdapter {
   private readonly sessions = new Map<string, ClaudeSession>();
   private readonly subscribers = new Set<AsyncQueue<HarnessEvent>>();
   private ready: Readiness = { ready: false, reason: "not initialised" };
+  /**
+   * What the next session is configured with. Written by `prepareSession`, taken by the
+   * `createSession` that follows it — the same order the file-writing harnesses rely on.
+   */
+  private pending: SessionConfigInput = {};
 
   constructor(private readonly opts: ClaudeAdapterOptions) {}
 
@@ -130,6 +138,18 @@ export class ClaudeAdapter implements HarnessAdapter {
    */
   capabilities(): ReadonlySet<HarnessCapability> {
     return new Set<HarnessCapability>(["events"]);
+  }
+
+  /**
+   * Session settings that arrive as call options rather than as a file (SPEC-005 R-5).
+   *
+   * The world-query MCP is the one that matters: without it the agent has no way to read the
+   * world at all, and — because a missing tool is not an error — it answers perfectly politely
+   * that it has nothing on the subject. That reads like a model being careful, not like a
+   * misconfiguration, which is what let it go unnoticed.
+   */
+  prepareSession(input: SessionConfigInput): void {
+    this.pending = input;
   }
 
   async init(): Promise<void> {
@@ -173,6 +193,7 @@ export class ClaudeAdapter implements HarnessAdapter {
       cwd: input.cwd,
       agentName,
       confinement: confinementFor(member),
+      worldQueryUrl: this.opts.worldQueryUrl ?? this.pending.worldQueryUrl,
       systemPrompt: agentPromptFor({
         ...member,
         ...(override?.brief !== undefined ? { brief: override.brief } : {}),
@@ -266,8 +287,8 @@ export class ClaudeAdapter implements HarnessAdapter {
           // No `allowedTools`: a bare entry there auto-approves the tool before canUseTool is
           // consulted, which would disarm the gate below rather than configure it.
           canUseTool: this.gateFor(session),
-          ...(this.opts.worldQueryUrl
-            ? { mcpServers: { "arke-world": { type: "http", url: this.opts.worldQueryUrl } } }
+          ...(session.worldQueryUrl
+            ? { mcpServers: { "arke-world": { type: "http", url: session.worldQueryUrl } } }
             : {}),
         },
       });

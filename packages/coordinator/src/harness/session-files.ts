@@ -15,10 +15,13 @@ import { atomicWriteFile } from "../world/atomic.js";
  * solve them differently.
  */
 export async function writeSessionFiles(
-  adapter: Pick<HarnessAdapter, "sessionFiles">,
+  adapter: Pick<HarnessAdapter, "sessionFiles" | "prepareSession">,
   dir: string,
   input: SessionConfigInput = {},
 ): Promise<void> {
+  // Both seams, always. A harness takes its settings as files or as call options, and a
+  // caller offering only one silently configures nothing for the harnesses using the other.
+  adapter.prepareSession?.(input);
   for (const file of adapter.sessionFiles?.(input) ?? []) {
     await atomicWriteFile(join(dir, file.name), file.contents);
   }
