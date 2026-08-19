@@ -34,35 +34,57 @@ export const FALLBACK_BUDGET_CHARS = 120_000;
 /**
  * Characters per token, for turning a model's token window into a character budget.
  *
- * Four is what English prose actually runs at, so the budget is now the window rather than a
- * cautious fraction of it. Nothing else is holding anything back either: `WINDOW_SHARE` is 1,
- * and the provider's `input` limit already excludes the reply.
+ * Three and a half, not four. Four is what clean English prose runs at, and very little of this
+ * prompt is clean English prose: the registry is ids and hashes, evidence is JSON, and an
+ * author's manuscript is full of typographic characters that tokenise worse than the ASCII they
+ * replaced — a 731,000-character book measured 10,730 bytes over its own character count.
  *
- * What that spends is the margin that used to absorb two things — prose that tokenises worse
- * than prose (ids, hashes, JSON), and whatever a turn reads through its tools after the prompt
- * is sent. Both come out of the same window. In practice a conversation is nowhere near it: the
- * reducer only ever engages when the total would not fit, and until it does this number changes
- * nothing at all.
+ * Estimating high is the dangerous direction. Too low and a document arrives trimmed, which is
+ * visible and recoverable; too high and the prompt is over the window before the provider sees
+ * it, and the turn does not arrive at all.
  */
-const CHARS_PER_TOKEN = 4;
+const CHARS_PER_TOKEN = 3.5;
 
 /**
- * How much of the input window this prompt may fill: all of it.
+ * What else is in the window, which this budget never sees and must not spend.
  *
- * The window a provider states as `input` is already the room a prompt has — `input` plus
- * `output` is the whole context, so the reply is accounted for before this arithmetic starts.
- * Holding back a further half was reserving space that had already been reserved.
+ * `assembleContext` measures its own sections and nothing else. The window also has to hold the
+ * world-builder agent's prompt and the result-shape guide appended to it — about 18,400
+ * characters together, near 5,300 tokens, measured rather than guessed — plus the tool schemas
+ * the harness injects, whatever the turn reads back through its tools while it runs, and the
+ * reply, which for this agent is a JSON result carrying candidates and their evidence.
  *
- * What a turn reads afterwards through its tools comes out of the same window, and the slack for
- * that is in `CHARS_PER_TOKEN` above: assuming three characters a token against prose that runs
- * nearer four leaves roughly a quarter of the window unspent by the arithmetic itself.
+ * Budgeting the whole window and hoping is what this replaces, and it did not fail quietly. A
+ * 731,541-character manuscript against a 200,000-token model came in *under* budget, so nothing
+ * was trimmed at all, and the prompt alone reached about 192,000 tokens. The same conversation
+ * died two ways within half an hour: an upstream idle timeout while the model chewed it, and a
+ * reply truncated into invalid JSON because there was no room left to write one. Both are the
+ * same overflow wearing different clothes, and the perverse part is that the smaller model
+ * survived it — at 128,000 tokens the document was cut to 70% and the turn completed.
+ *
+ * A floor plus a share, because the two costs behave differently. The scaffolding is fixed and
+ * has to be covered even on a small model; tool reads scale with what a big window invites the
+ * turn to go and fetch.
  */
-const WINDOW_SHARE = 1;
+const RESERVED_TOKENS_FLOOR = 12_000;
+const RESERVED_WINDOW_SHARE = 0.15;
 
-/** A character budget from a model's input-token limit, or the floor when there is none. */
+function reservedTokens(inputTokenLimit: number): number {
+  return Math.max(RESERVED_TOKENS_FLOOR, Math.round(inputTokenLimit * RESERVED_WINDOW_SHARE));
+}
+
+/**
+ * A character budget from a model's input-token limit, or the floor when there is none.
+ *
+ * The fallback is what to do when nobody could name a window. It is deliberately *not* imposed
+ * as a minimum on a window that was named and is simply small: `max(FALLBACK, …)` handed a
+ * 32,000-token model 120,000 characters, which is over its limit before a single section is
+ * measured — the overflow above, arriving by way of the safety net.
+ */
 export function budgetFor(inputTokenLimit: number | undefined): number {
   if (!inputTokenLimit || inputTokenLimit <= 0) return FALLBACK_BUDGET_CHARS;
-  return Math.max(FALLBACK_BUDGET_CHARS, Math.floor(inputTokenLimit * WINDOW_SHARE * CHARS_PER_TOKEN));
+  const spendable = Math.max(0, inputTokenLimit - reservedTokens(inputTokenLimit));
+  return Math.floor(spendable * CHARS_PER_TOKEN);
 }
 
 /**

@@ -165,6 +165,42 @@ describe("context assembly", () => {
   });
 
   /**
+   * The budget is not the window; it is the window less what the window must also hold.
+   *
+   * Reported from the packaged build: a 731,541-character manuscript against a 200,000-token
+   * model. It came in *under* a budget of 800,000 characters, so nothing was trimmed, and the
+   * prompt alone reached about 192,000 tokens. The conversation died twice in half an hour — an
+   * upstream idle timeout, then a reply truncated into invalid JSON — because the agent prompt,
+   * the result-shape guide, the tool schemas and the answer itself had nowhere to go.
+   *
+   * The scaffolding measured about 5,300 tokens on its own, so that is the figure a fitting
+   * budget has to leave behind, and more once the turn starts reading through its tools.
+   */
+  it("leaves the window room for the scaffolding and the reply", () => {
+    const SCAFFOLD_TOKENS = 5_300; // agent prompt + result-shape guide, measured
+    for (const window of [32_000, 128_000, 200_000, 1_000_000]) {
+      // The budget is characters; compare like for like at the same rate it was derived from.
+      const promptTokens = budgetFor(window) / 3.5 + SCAFFOLD_TOKENS;
+      assert.ok(
+        promptTokens < window,
+        `a full budget at ${window} tok is ${Math.round(promptTokens)} tok of prompt — over the window`,
+      );
+      // Not merely fitting: enough left to write a JSON result carrying evidence.
+      assert.ok(window - promptTokens > window * 0.1, `too little headroom at ${window} tok`);
+    }
+  });
+
+  /**
+   * The fallback is for a window nobody could name, not a minimum to impose on a small one.
+   *
+   * `max(FALLBACK, …)` handed a 32,000-token model 120,000 characters — over its limit before a
+   * single section was measured, which is the same overflow arriving by way of the safety net.
+   */
+  it("does not force the fallback onto a window that is simply small", () => {
+    assert.ok(budgetFor(32_000) < FALLBACK_BUDGET_CHARS, "a small window gets a small budget");
+  });
+
+  /**
    * Reported from the packaged build: a document was pasted, the chip appeared on the composer,
    * and the Studio answered "I can't see an attached document" — twice. It was telling the truth.
    * Nothing about the attachment ever reached the prompt, so the model had no way to know one
