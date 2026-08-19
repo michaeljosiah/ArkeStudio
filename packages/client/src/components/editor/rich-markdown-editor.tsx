@@ -173,9 +173,21 @@ export function RichMarkdownEditor({
     onCreate: ({ editor: instance }) => {
       editorRef.current = instance;
       normalizeSoftBreaks(instance);
-      originalSource.current = value;
+      /*
+       * Seeded from `mountContent`, not `value`, and the difference is load-bearing. The editor is
+       * built in an effect, so `content` is read on the render that mounted it while this callback
+       * closes over whichever render was current when it ran — and `value` can move between the two
+       * if a snapshot lands in that window. Seeding from the live value would describe a document
+       * the editor is not holding: `baseCanonical` would belong to one text and `originalSource` to
+       * another, and the first commit would fail its proof and canonicalise the whole file.
+       *
+       * Taking what the editor actually mounted with keeps the three consistent. If `value` has
+       * indeed moved on, `lastCommitted` no longer matches it and the adoption effect below picks
+       * the newer document up on the next pass.
+       */
+      originalSource.current = mountContent;
       baseCanonical.current = documentMarkdown(instance);
-      lastCommitted.current = value;
+      lastCommitted.current = mountContent;
       ready.current = true;
     },
     onUpdate: ({ editor: instance }) => {

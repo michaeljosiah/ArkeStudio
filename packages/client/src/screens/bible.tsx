@@ -90,12 +90,22 @@ export function BibleScreen() {
    * source editor, which is a text area somebody can put HTML into. `richWrite` is what carries
    * that distinction: it holds the last text only while the rich editor was the one that produced
    * it, and is cleared the moment the source editor writes.
+   *
+   * It judges `text` and not `live`, which is the whole difference between catching that and not.
+   * The two are the same until somebody types, and then `text` is the draft — the document the rich
+   * editor would actually be handed. Judging `live` meant HTML typed in the source editor and still
+   * inside the 1200ms before it saved was invisible here, so the toggle could hand the rich editor
+   * exactly the document this gate exists to keep away from it.
+   *
+   * Skipped entirely while the source editor is up: there is no question to answer, the text area
+   * is showing either way, and asking would put a parse on every keystroke. The verdict is taken
+   * again on the way back, against whatever was typed in the meantime.
    */
+  const [preferSource, setPreferSource] = useState(false);
   const richWrite = useRef<string | null>(null);
   const gate = useRef<RichModeGate | null>(null);
-  gate.current = updateRichModeGate(gate.current, live, richWrite.current);
-  const richRefusal = gate.current.verdict;
-  const [preferSource, setPreferSource] = useState(false);
+  if (!preferSource) gate.current = updateRichModeGate(gate.current, text, richWrite.current);
+  const richRefusal = gate.current?.verdict ?? null;
   const richMode = richRefusal === null && !preferSource;
 
   const onChange = (value: string) => {
