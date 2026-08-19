@@ -62,7 +62,7 @@ class TestClient {
   }
 }
 
-const CHOSEN = "C:\Users\someone\.local\bin\claude.exe";
+const CHOSEN = String.raw`C:\Users\someone\.local\bin\claude.exe`;
 
 const CLAUDE_PRESENT: HarnessAvailability = {
   id: "claude",
