@@ -194,11 +194,32 @@ export type CanonEntry = z.infer<typeof CanonEntrySchema>;
 export const ProductionFormatSchema = z.enum(["story", "video", "stills"]);
 export type ProductionFormat = z.infer<typeof ProductionFormatSchema>;
 
+/** The audience-facing classification (SPEC-023 R-1): what the audience receives. */
+export const ProductionMediumSchema = z.enum(["story", "video", "interactive-video"]);
+export type ProductionMedium = z.infer<typeof ProductionMediumSchema>;
+
 export const ProductionSchema = z
   .object({
     /** The production's directory slug within the world. */
     id: SlugSchema,
+    /**
+     * The legacy discriminator, frozen (SPEC-023 R-1): always written, set to the value the
+     * medium maps back to, so a reader that predates `medium` is never lied to. It is only
+     * consulted when `medium` is absent.
+     */
     format: ProductionFormatSchema,
+    /**
+     * Optional on read and resolved from `format` when absent (`story → story`,
+     * `video → video`, `stills → video`); written only when it differs from that resolve, so
+     * a plain creation keeps the world openable by older builds (SPEC-023 R-1/R-23).
+     */
+    medium: ProductionMediumSchema.optional(),
+    /**
+     * The named format beneath the medium (SPEC-023 R-2), e.g. `microdrama`. Free on read —
+     * an unknown kind resolves to the medium's default behaviour rather than deleting the
+     * production; the create dialog is where the vocabulary is enforced.
+     */
+    kind: z.string().min(1).optional(),
     title: z.string().min(1),
     logline: z.string().optional(),
     /** Display vocabulary ("in-progress", "cutting", …) — unversioned, change-logged only (§2.4.1). */
@@ -231,6 +252,60 @@ export const ProductionSchema = z
   })
   .strict();
 export type Production = z.infer<typeof ProductionSchema>;
+
+/**
+ * series/<slug>.json — the thin Series record (SPEC-023 R-9). Thin means thin: a Series that
+ * describes characters becomes a second place a character exists, which is the drift SPEC-012
+ * D1 exists to prevent. Living inside the world folder is the world reference. Versioned on
+ * the `series` track.
+ */
+export const SeriesSchema = z
+  .object({
+    id: SlugSchema,
+    version: z.number().int().min(1),
+    title: z.string().min(1),
+    /** The repeatable premise or story engine — prose, authored later if not at creation. */
+    engine: z.string().optional(),
+    /** Ordered season production slugs; a dangling slug is a named world problem. */
+    seasons: z.array(SlugSchema),
+    /** Only continuity that is genuinely not world canon. */
+    continuity: z.string().optional(),
+    created: IsoDateTimeSchema,
+    updated: IsoDateTimeSchema,
+  })
+  .strict();
+export type Series = z.infer<typeof SeriesSchema>;
+
+/**
+ * productions/<p>/season.json — the season beside its production (SPEC-023 R-10). Top-level
+ * `ending` is the season's own authored resolution; `defaults.episodeEnding` is the
+ * per-episode ending policy — two facts, two fields. Arc lanes live here; a missing payoff is
+ * worked out at render, not stored. Versioned on the `season` track.
+ */
+export const SeasonSchema = z
+  .object({
+    version: z.number().int().min(1),
+    question: z.string().optional(),
+    ending: z.string().optional(),
+    direction: z.string().optional(),
+    arcs: z
+      .array(z.object({ id: SlugSchema, title: z.string().min(1), note: z.string().optional() }).strict())
+      .optional(),
+    /** Editable defaults, never invariants (SPEC-023 R-16). */
+    defaults: z
+      .object({
+        episodeCount: z.number().int().min(1).optional(),
+        episodeSecondsMin: z.number().positive().optional(),
+        episodeSecondsMax: z.number().positive().optional(),
+        hookWindowSec: z.number().positive().optional(),
+        episodeEnding: z.string().min(1).optional(),
+        exportPreset: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type Season = z.infer<typeof SeasonSchema>;
 
 /** story.json — the authored overview a story production drafts against (§8.3). Versioned. */
 export const StoryOverviewSchema = z

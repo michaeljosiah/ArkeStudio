@@ -10,17 +10,24 @@ import {
   estimateMicroUsd,
   parseMentions,
   passStructure,
+  legacyFormatFor,
   planScene,
   pickableSheets,
+  productionShape,
+  resolveMedium,
   sceneImageOutput,
   SceneSchema,
   ulid,
   type ArtifactSidecar,
   type ManifestModel,
   type ProductionBundle,
+  type ProductionFormat,
+  type ProductionMedium,
   type ProposalSkill,
   type Scene,
   type ScenePlan,
+  type Season,
+  type Series,
   type Shot,
   type ShotPlanEntry,
   type WorldBundle,
@@ -30,6 +37,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { JsonFile, MarkdownFile, sha256 } from "../world/text-files.js";
+import type { CommitFileInput } from "../world/commit.js";
 import type { WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 
@@ -42,32 +50,102 @@ import type { EnqueueInput } from "../queue/dispatcher.js";
 // Creation (R-1, R-2)
 // ---------------------------------------------------------------------------
 
-export async function createProduction(
-  store: WorldStore,
-  input: { title: string; format: "story" | "video" | "stills"; logline?: string },
-): Promise<string> {
-  const taken = store.getBundle().productions.map((p) => p.meta.id);
+export interface CreateProductionInput {
+  title: string;
+  /** Legacy discriminator; consulted only when `medium` is absent (SPEC-023 R-1). */
+  format?: ProductionFormat;
+  medium?: ProductionMedium;
+  /** The named format beneath the medium (SPEC-023 R-2), e.g. "microdrama". */
+  productionKind?: string;
+  /** The Series the first episodic season creates or joins (SPEC-023 R-9). */
+  seriesTitle?: string;
+  /** Delivery-profile values — concrete fields, never a discriminator (SPEC-023 R-3). */
+  aspect?: string;
+  defaults?: Season["defaults"];
+  logline?: string;
+}
+
+export async function createProduction(store: WorldStore, input: CreateProductionInput): Promise<string> {
+  const bundle = store.getBundle();
+  const taken = bundle.productions.map((p) => p.meta.id);
   const slug = uniqueSlug(input.title, "production", taken);
+  const medium: ProductionMedium =
+    input.medium ?? resolveMedium({ format: input.format ?? "video" });
+  const legacyFormat: ProductionFormat = input.medium === undefined ? (input.format ?? "video") : legacyFormatFor(medium);
+  // Write the new-model fields only where they say something the legacy field cannot
+  // (SPEC-023 R-1): a plain creation keeps the world openable by builds that predate them.
+  const plainShape = productionShape({ format: legacyFormat });
+  const kind = input.productionKind;
+  const carriesNewModel =
+    medium !== plainShape.medium || (kind !== undefined && kind !== plainShape.kind);
+  const shape = productionShape({ format: legacyFormat, ...(carriesNewModel ? { medium, kind } : {}) });
   const meta = {
     id: slug,
-    format: input.format,
+    format: legacyFormat,
+    ...(carriesNewModel ? { medium } : {}),
+    ...(carriesNewModel && kind !== undefined ? { kind } : {}),
     title: input.title,
     ...(input.logline !== undefined ? { logline: input.logline } : {}),
     status: "in-progress",
+    ...(input.aspect !== undefined ? { aspect: input.aspect } : {}),
     created: store.now(),
     updated: store.now(),
   };
+  const files: CommitFileInput[] = [
+    {
+      path: `productions/${slug}/production.json`,
+      action: "create",
+      content: JSON.stringify(meta, null, 2) + "\n",
+      baseHash: null,
+    },
+  ];
+  // An episodic creation makes its season — and, the first time, its Series — in the same
+  // commit (turn 47: "Create Series and open day one" names both things it makes).
+  if (shape.isEpisodic) {
+    const season: Season = { version: 1, ...(input.defaults ? { defaults: input.defaults } : {}) };
+    files.push({
+      path: `productions/${slug}/season.json`,
+      action: "create" as const,
+      content: JSON.stringify(season, null, 2) + "\n",
+      baseHash: null,
+    });
+    const seriesTitle = input.seriesTitle ?? input.title;
+    const existing = bundle.series.find((s) => s.title === seriesTitle || s.id === slugify(seriesTitle));
+    if (existing) {
+      const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(`series/${existing.id}.json`))), "utf8");
+      const doc = JsonFile.parse(raw);
+      doc.set({ seasons: [...existing.seasons, slug] });
+      files.push({
+        path: `series/${existing.id}.json`,
+        action: "replace" as const,
+        content: doc.serialize(),
+        baseHash: sha256(raw),
+      });
+    } else {
+      const seriesId = uniqueSlug(seriesTitle, "series", bundle.series.map((s) => s.id));
+      const series: Series = {
+        id: seriesId,
+        version: 1,
+        title: seriesTitle,
+        seasons: [slug],
+        created: store.now(),
+        updated: store.now(),
+      };
+      files.push({
+        path: `series/${seriesId}.json`,
+        action: "create" as const,
+        content: JSON.stringify(series, null, 2) + "\n",
+        baseHash: null,
+      });
+    }
+  }
   await store.commit({
     kind: "production-create",
     source: "form",
-    files: [
-      {
-        path: `productions/${slug}/production.json`,
-        action: "create",
-        content: JSON.stringify(meta, null, 2) + "\n",
-        baseHash: null,
-      },
-    ],
+    files,
+    // Any new-model write crosses the schema boundary (SPEC-023 R-23) so older builds refuse
+    // this world by name instead of silently dropping the production from the bundle.
+    ...(carriesNewModel || shape.isEpisodic ? { raiseSchemaVersion: 2 } : {}),
   });
   return slug;
 }

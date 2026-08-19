@@ -9,7 +9,7 @@ import { ReferenceAngleSchema } from "./reference.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
 import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
-import { CHARACTER_ROLE_MAX } from "./world.js";
+import { CHARACTER_ROLE_MAX, ProductionFormatSchema, ProductionMediumSchema } from "./world.js";
 import { WorldChatContextSchema } from "./world-chat.js";
 
 /**
@@ -1140,13 +1140,33 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       contentType: z.string().min(1),
     })
     .strict(),
-  /** SPEC-012 R-1/R-2: a production is a lens over the world — nothing is copied. */
+  /**
+   * SPEC-012 R-1/R-2: a production is a lens over the world — nothing is copied.
+   * SPEC-023 R-1/R-2/R-5: `medium` is step one of the dialog; `productionKind` the named
+   * format beneath it; the Microdrama path also names its Series and its editable defaults.
+   * `format` stays for compatibility and is only consulted when `medium` is absent.
+   */
   z
     .object({
       kind: z.literal("create-production"),
       worldId: UlidSchema,
       title: z.string().min(1).max(200),
-      format: z.enum(["story", "video", "stills"]),
+      format: ProductionFormatSchema.optional(),
+      medium: ProductionMediumSchema.optional(),
+      productionKind: z.string().min(1).max(80).optional(),
+      seriesTitle: z.string().min(1).max(200).optional(),
+      aspect: z.string().min(1).max(20).optional(),
+      defaults: z
+        .object({
+          episodeCount: z.number().int().min(1).optional(),
+          episodeSecondsMin: z.number().positive().optional(),
+          episodeSecondsMax: z.number().positive().optional(),
+          hookWindowSec: z.number().positive().optional(),
+          episodeEnding: z.string().min(1).optional(),
+          exportPreset: z.string().min(1).optional(),
+        })
+        .strict()
+        .optional(),
       logline: z.string().max(500).optional(),
     })
     .strict(),

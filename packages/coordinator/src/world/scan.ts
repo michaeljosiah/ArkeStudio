@@ -22,6 +22,8 @@ import {
   ReviewDecisionSchema,
   RipplePreviewSchema,
   SceneSchema,
+  SeasonSchema,
+  SeriesSchema,
   SelectionsSchema,
   ProductionSpineSchema,
   CutFileSchema,
@@ -555,9 +557,15 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
         })
       : { audio: [], overlays: [] };
 
+    // season.json — the season beside its production (SPEC-023 R-10); null when none.
+    const season = (await exists(join(pdir, "season.json")))
+      ? await tryParse(`productions/${id}/season.json`, (raw) => SeasonSchema.parse(JSON.parse(raw)))
+      : null;
+
     productions.push({
       meta: metaDoc,
       story,
+      season,
       treatment,
       chapters,
       scenes,
@@ -568,6 +576,19 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       cut,
       takeMediaInfo,
     });
+  }
+
+  // series/<slug>.json — thin Series records (SPEC-023 R-9). A file that fails to parse is a
+  // named problem and the row is dropped; the seasons it referenced remain ordinary productions.
+  const series = [];
+  for (const file of (await listDir(join(dir, "series"))).filter((f) => f.endsWith(".json")).sort()) {
+    const record = await tryParse(`series/${file}`, (raw) => {
+      const value = SeriesSchema.parse(JSON.parse(raw));
+      const stem = file.slice(0, -".json".length);
+      if (value.id !== stem) throw new Error(`series id "${value.id}" does not match file "${stem}"`);
+      return value;
+    });
+    if (record) series.push(record);
   }
 
   let referenceReviews: WorldBundle["referenceReviews"] = [];
@@ -753,6 +774,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     artifacts,
     clonedVoices,
     productions,
+    series,
     proposals,
     // Rows only. discoverConversations reads summaries, never transcripts.
     conversations: (await discoverConversations(dir)).summaries,

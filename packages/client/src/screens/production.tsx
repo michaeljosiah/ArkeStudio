@@ -15,6 +15,7 @@ import {
   pickableSheets,
   planScene,
   PRESETS,
+  productionShape,
   promptFor,
   worldSheets,
   type Scene,
@@ -153,7 +154,8 @@ export function ProductionLayout() {
   const exportsState = useExports();
   // The rail is the format's (design 54a): a surface the format cannot use is not present,
   // not greyed. A story production has nothing to dispatch, so its rail never says so.
-  const isStory = production?.meta.format === "story";
+  const shape = production ? productionShape(production.meta) : null;
+  const isStory = shape?.hasChapters === true;
   const cut = production ? deriveCut(production) : null;
   const audioCount =
     (artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio").length ?? 0) +
@@ -201,15 +203,15 @@ export function ProductionLayout() {
   // The switch card counts what the format counts: seconds of cut for video, chapters for story.
   const switchSub = production
     ? isStory
-      ? `story · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
-      : `${production.meta.format}${cut ? ` · ${seconds(cut.totalSec - cut.uncoveredSec)} cut` : ""}`
+      ? `${shape!.displayLabel.toLowerCase()} · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
+      : `${shape!.displayLabel.toLowerCase()}${cut ? ` · ${seconds(cut.totalSec - cut.uncoveredSec)} cut` : ""}`
     : "";
   return (
     <div className="fy-app">
       <AppChrome
         back={{ label: "World", to: `/w/${worldId}` }}
         context={{
-          label: production ? `${production.meta.title} · ${production.meta.format}` : "…",
+          label: production && shape ? `${production.meta.title} · ${shape.displayLabel.toLowerCase()}` : "…",
           to: `/w/${worldId}/productions`,
         }}
       />
@@ -229,15 +231,17 @@ export function ProductionLayout() {
           {item("cast", "Cast", String(guestCount))}
           {isStory ? (
             <>
-              {/* Story ends where Chapters begins, so the two never light together. */}
-              {item("story", "Story", production?.story ? `v${production.story.version}` : "—", true)}
+              {/* Development ends where Chapters begins, so the two never light together. */}
+              {item("story", "Development", production?.story ? `v${production.story.version}` : "—", true)}
               {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
               {item("audio", "Audio", String(audioCount))}
               {item("exports", "Exports", String(exportCount))}
             </>
           ) : (
             <>
-              {item("story", "Story", production?.story ? `v${production.story.version}` : "—")}
+              {/* The rail item reads Development; Story stays a family in the picker (turn 78).
+                  The route keeps its name — the rename is display text, never wiring. */}
+              {item("story", "Development", production?.story ? `v${production.story.version}` : "—")}
               {item("scenes", "Scenes", String(production?.scenes.length ?? 0))}
               <NavLink to={`${base}/scenes/new`} className="fy-prodrail__sub">
                 <Plus size={12} />
@@ -493,7 +497,7 @@ export function ProductionDashboardScreen() {
   }
   // The dashboard resumes the format's unit of work (design 54a). For story that is the
   // chapter, and nothing here mentions shots, takes, clips or dispatch.
-  if (production.meta.format === "story") {
+  if (productionShape(production.meta).hasChapters) {
     const chapters = production.chapters;
     const drafted = chapters.filter((c) => (c.words ?? 0) > 0);
     const totalWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
@@ -538,7 +542,7 @@ export function ProductionDashboardScreen() {
           </div>
           <div className="fy-threadcard__actions">
             <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story`)}>
-              {chapters.length === 0 ? "Open Story" : "Continue in Story"}
+              {chapters.length === 0 ? "Open Development" : "Continue in Development"}
             </Button>
           </div>
         </div>
@@ -732,7 +736,9 @@ export function StoryScreen() {
     <div className="fy-story" data-screen="story-overview">
       <div className="fy-story__chat">
         <div className="fy-story__chathead">
-          <div className="fy-eyebrow-sm">STORY OVERVIEW · {production?.meta.format ?? ""}</div>
+          <div className="fy-eyebrow-sm">
+            DEVELOPMENT · {production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}
+          </div>
           <h1 className="fy-story__h1">Find the spine together.</h1>
         </div>
         <div className="fy-story__log">
@@ -791,7 +797,7 @@ export function StoryScreen() {
         )}
         <div style={{ flex: 1 }} />
         <div style={{ display: "grid", gap: 8 }}>
-          {production?.meta.format === "story" && (
+          {production && productionShape(production.meta).hasChapters && (
             <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)}>
               Chapter tree · {production.chapters.length}
             </Button>
@@ -829,11 +835,15 @@ export function ChapterTreeScreen() {
         </div>
       ) : (
         <EmptyState
-          title={production?.meta.format === "story" ? "No chapters yet" : "Chapters belong to story productions"}
+          title={
+            production && productionShape(production.meta).hasChapters
+              ? "No chapters yet"
+              : "Chapters belong to Story productions"
+          }
           hint={
-            production?.meta.format === "story"
+            production && productionShape(production.meta).hasChapters
               ? "Chapters hang beneath the overview and are drafted through the gate."
-              : "This is a video production — its structure lives in Scenes."
+              : "This production's structure lives in Scenes."
           }
         />
       )}
@@ -1475,7 +1485,7 @@ export function DispatchDialogScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const { state } = useStore();
   const navigate = useNavigate();
-  const capability = production?.meta.format === "stills" ? "image" : "video";
+  const capability = production ? productionShape(production.meta).dispatchCapability : "video";
   const [sceneIdx, setSceneIdx] = useState(0);
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier; resolution?: string }>({});
   const scene = production?.scenes[sceneIdx] ?? null;
@@ -2585,7 +2595,7 @@ export function AudioScreen() {
   // Spoken lines live on shots and their Generate is the voice-line dispatch — a video affair.
   // A story production keeps this pane for its audio artifacts alone (design 54a: nothing on a
   // story screen mentions shots or dispatch); narration comes later, as its own design.
-  const isStory = production?.meta.format === "story";
+  const isStory = production ? productionShape(production.meta).hasChapters : false;
   const linked = artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio");
   const voLines = isStory
     ? []
@@ -2781,7 +2791,7 @@ export function ExportsScreen() {
   // A story has no cut to render, and a manuscript exporter does not exist yet — so this pane
   // offers neither rather than a zero-length video (design 54a). It stays on the story rail
   // because the world folder export lives here, and the chapters travel whole inside it.
-  const isStory = production?.meta.format === "story";
+  const isStory = production ? productionShape(production.meta).hasChapters : false;
   const cut = production ? deriveCut(production) : null;
   const view = exportViewFor(world, production);
   const mine = Object.entries(exportsState).filter(([, e]) => e.productionId === prodId);

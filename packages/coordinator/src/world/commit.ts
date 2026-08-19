@@ -126,6 +126,8 @@ type Classified =
   | { track: "scene"; production: string; file: string }
   | { track: "chapter"; production: string; file: string }
   | { track: "story"; production: string }
+  | { track: "season"; production: string }
+  | { track: "series"; id: string }
   | { track: "production-meta"; production: string }
   | { track: "art-direction" }
   | { track: "bible" }
@@ -143,6 +145,10 @@ export function classify(path: string): Classified {
   if (m) return { track: "chapter", production: m[1]!, file: m[2]! };
   m = /^productions\/([a-z0-9-]+)\/story\.json$/.exec(path);
   if (m) return { track: "story", production: m[1]! };
+  m = /^productions\/([a-z0-9-]+)\/season\.json$/.exec(path);
+  if (m) return { track: "season", production: m[1]! };
+  m = /^series\/([a-z0-9-]+)\.json$/.exec(path);
+  if (m) return { track: "series", id: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/production\.json$/.exec(path);
   if (m) return { track: "production-meta", production: m[1]! };
   if (path === ART_DIRECTION_PATH) return { track: "art-direction" };
@@ -272,9 +278,20 @@ export class Committer {
           fieldsChanged = baseDoc ? diffMarkdown(baseDoc, doc) : undefined;
         }
         if (baseDoc) historyPrev = `${dirPath}/v${canonStamp(baseDoc.data)}.md`;
-      } else if (kind.track === "scene" || kind.track === "story") {
-        const idPart = kind.track === "scene" ? `scenes/${kind.file}` : "story";
-        const dirPath = `.history/productions/${kind.production}/${idPart}`;
+      } else if (
+        kind.track === "scene" ||
+        kind.track === "story" ||
+        kind.track === "season" ||
+        kind.track === "series"
+      ) {
+        // Season and series ride the same JSON version/history machinery the story track
+        // proved (SPEC-023 R-17): the committer stamps `version`, snapshots whole files.
+        const dirPath =
+          kind.track === "series"
+            ? `.history/series/${kind.id}`
+            : `.history/productions/${kind.production}/${
+                kind.track === "scene" ? `scenes/${kind.file}` : kind.track
+              }`;
         const baseDoc = live !== null ? JsonFile.parse(live) : null;
         fromVersion = baseDoc ? ((baseDoc.value["version"] as number) ?? 1) : null;
         if (f.action !== "delete") {

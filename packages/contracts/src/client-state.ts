@@ -39,6 +39,8 @@ import {
   CanonEntrySchema,
   ChapterSummarySchema,
   ProductionSchema,
+  SeasonSchema,
+  SeriesSchema,
   SheetSchema,
   StoryOverviewSchema,
   WorldMetaSchema,
@@ -114,6 +116,8 @@ export const ProductionBundleSchema = z
   .object({
     meta: ProductionSchema,
     story: StoryOverviewSchema.nullable(),
+    /** season.json — the season beside its production, or null when none (SPEC-023 R-10). */
+    season: SeasonSchema.nullable().default(null),
     /** story.md — freeform treatment / script prose, per format (§2.2). */
     treatment: z.string().nullable(),
     chapters: z.array(ChapterSummarySchema),
@@ -226,6 +230,11 @@ export const WorldBundleSchema = z
      */
     clonedVoices: z.array(ClonedVoiceSchema).default([]),
     productions: z.array(ProductionBundleSchema),
+    /**
+     * series/<slug>.json records (SPEC-023 R-9). Defaulted: this schema is a read path, and
+     * every world created before Series existed must still parse.
+     */
+    series: z.array(SeriesSchema).default([]),
     proposals: z.array(StagedProposalSchema),
     /**
      * Conversation rows only — never transcripts. Opening a world must not cost every

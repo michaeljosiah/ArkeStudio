@@ -3153,10 +3153,18 @@ export class Coordinator {
       case "create-production": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
+        // The frame names a medium or the legacy format (SPEC-023 R-1); one that names
+        // neither is malformed and creates nothing.
+        if (msg.medium === undefined && msg.format === undefined) return;
         try {
           await createProduction(store, {
             title: msg.title,
-            format: msg.format,
+            ...(msg.format !== undefined ? { format: msg.format } : {}),
+            ...(msg.medium !== undefined ? { medium: msg.medium } : {}),
+            ...(msg.productionKind !== undefined ? { productionKind: msg.productionKind } : {}),
+            ...(msg.seriesTitle !== undefined ? { seriesTitle: msg.seriesTitle } : {}),
+            ...(msg.aspect !== undefined ? { aspect: msg.aspect } : {}),
+            ...(msg.defaults !== undefined ? { defaults: msg.defaults } : {}),
             ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
           });
           await this.refreshWorldSnapshot(msg.worldId);

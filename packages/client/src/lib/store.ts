@@ -2109,11 +2109,26 @@ export function useDictation(): Record<string, { text: string | null; error: str
 
 export function createProduction(
   worldId: string,
-  title: string,
-  format: "story" | "video" | "stills",
-  logline?: string,
+  input: {
+    title: string;
+    /** The audience-facing medium (SPEC-023 R-1) — step one of the dialog. */
+    medium: "story" | "video" | "interactive-video";
+    /** The named format beneath it (SPEC-023 R-2), sent only when it says something. */
+    productionKind?: string;
+    seriesTitle?: string;
+    aspect?: string;
+    defaults?: {
+      episodeCount?: number;
+      episodeSecondsMin?: number;
+      episodeSecondsMax?: number;
+      hookWindowSec?: number;
+      episodeEnding?: string;
+      exportPreset?: string;
+    };
+    logline?: string;
+  },
 ): void {
-  send({ kind: "create-production", worldId, title, format, ...(logline !== undefined ? { logline } : {}) });
+  send({ kind: "create-production", worldId, ...input });
 }
 
 export function draftScene(worldId: string, productionId: string, brief: string): void {

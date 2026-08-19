@@ -1,5 +1,6 @@
 export * from "./ids.js";
 export * from "./world.js";
+export * from "./production-shape.js";
 export * from "./bible.js";
 export * from "./scene.js";
 export * from "./take.js";

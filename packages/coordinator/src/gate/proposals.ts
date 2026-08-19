@@ -1043,7 +1043,7 @@ function readVersion(path: string, raw: string): number | null {
         (data["amendedAt"] as number | undefined) ?? 0,
       );
     }
-    if (kind.track === "scene" || kind.track === "story") {
+    if (kind.track === "scene" || kind.track === "story" || kind.track === "season" || kind.track === "series") {
       return ((JSON.parse(raw) as { version?: number }).version ?? 1);
     }
     if (kind.track === "art-direction") return ArtDirectionRecordSchema.parse(JSON.parse(raw)).version;

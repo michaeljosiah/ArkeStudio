@@ -329,6 +329,7 @@ const state: ClientState = {
           updated: AT,
         },
         story: null,
+        season: null,
         treatment: "A short film. One night's watch on the Vigil, told at the pace of the water.",
         chapters: [],
         scenes: [
@@ -419,6 +420,7 @@ const state: ClientState = {
         takeMediaInfo: {},
       },
     ],
+    series: [],
     proposals: [
       {
         proposal: {
