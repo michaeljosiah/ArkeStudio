@@ -244,11 +244,48 @@ export const StoryOverviewSchema = z
   .strict();
 export type StoryOverview = z.infer<typeof StoryOverviewSchema>;
 
-/** A chapter's frontmatter (§8.3); prose is the body and is not carried on the summary. */
+/**
+ * A chapter's frontmatter as read off disk (§8.3; SPEC-012 R-4/D3). `order` is the one order
+ * authority; `number` is the legacy shipped shape, read only when `order` is absent. Neither is
+ * required — a chapter whose order cannot be resolved still parses and falls back to filename
+ * order at scan, deterministically, rather than vanishing from the bundle. The committer stamps
+ * `version` and `updated` on every chapter write, and creation stamps `created`, so all three are
+ * legal keys here even though only `version` is required.
+ */
+export const ChapterFrontmatterSchema = z
+  .object({
+    id: SlugSchema,
+    order: z.number().optional(),
+    number: z.number().optional(),
+    title: z.string().min(1),
+    status: z.string().min(1).optional(),
+    version: z.number().int().min(1),
+    words: z.number().int().min(0).optional(),
+    draws: z
+      .object({
+        sheets: z.array(SlugSchema),
+        canon: z.array(CanonIdSchema),
+      })
+      .strict()
+      .optional(),
+    created: z.string().optional(),
+    updated: z.string().optional(),
+  })
+  .strict();
+export type ChapterFrontmatter = z.infer<typeof ChapterFrontmatterSchema>;
+
+/**
+ * What the bundle carries per chapter. `order` is the resolved dense sequence (1..n) after the
+ * scan sort — display surfaces read it and nothing else. `file` is the filename stem the
+ * save/draft/reorder commands address the chapter file by; `id` is authored frontmatter and does
+ * not have to match it (fixture chapters are `01-neap.md` with `id: neap`). Prose is the body and
+ * is not carried on the summary.
+ */
 export const ChapterSummarySchema = z
   .object({
     id: SlugSchema,
-    number: z.number().int().min(1),
+    file: z.string().min(1),
+    order: z.number().int().min(1),
     title: z.string().min(1),
     status: z.string().min(1),
     version: z.number().int().min(1),

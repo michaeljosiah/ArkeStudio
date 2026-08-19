@@ -512,7 +512,7 @@ export function ProductionDashboardScreen() {
             {chapters.length === 0
               ? "the spine comes first"
               : `${drafted.length} chapter${drafted.length === 1 ? "" : "s"} drafted${
-                  inHand ? ` · chapter ${String(inHand.number).padStart(2, "0")} in hand` : ""
+                  inHand ? ` · chapter ${String(inHand.order).padStart(2, "0")} in hand` : ""
                 } · ${totalWords.toLocaleString()} words`}
           </span>
         </div>
@@ -522,7 +522,7 @@ export function ProductionDashboardScreen() {
               {chapters.length === 0
                 ? "THE SPINE COMES FIRST"
                 : inHand
-                  ? `IN HAND · CHAPTER ${inHand.number} OF ${chapters.length}`
+                  ? `IN HAND · CHAPTER ${inHand.order} OF ${chapters.length}`
                   : `ALL ${chapters.length} CHAPTERS DRAFTED`}
             </span>
           </div>
@@ -556,7 +556,7 @@ export function ProductionDashboardScreen() {
             </div>
             {nearby.map((c) => (
               <div key={c.id} className="fy-listrow">
-                <span className="fy-mono">{String(c.number).padStart(2, "0")}</span>
+                <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
                 <span className="fy-listrow__text" style={{ font: "600 13px var(--font-sans)" }}>
                   {c.title}
                 </span>
@@ -818,7 +818,7 @@ export function ChapterTreeScreen() {
         <div>
           {production.chapters.map((c) => (
             <div key={c.id} className="fy-listrow">
-              <span className="fy-mono">{String(c.number).padStart(2, "0")}</span>
+              <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
               <span className="fy-listrow__text" style={{ font: "600 13px var(--font-sans)" }}>
                 {c.title}
               </span>

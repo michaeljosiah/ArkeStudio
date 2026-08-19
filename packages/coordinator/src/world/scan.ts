@@ -14,7 +14,8 @@ import {
   ArtifactSidecarSchema,
   CanonEntrySchema,
   ChangeRecordSchema,
-  ChapterSummarySchema,
+  ChapterFrontmatterSchema,
+  type ChapterFrontmatter,
   ProductionSchema,
   ProposalSchema,
   ReferenceKitSchema,
@@ -398,13 +399,32 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       ? (await read(join(pdir, "story.md"))).replace(/\r\n/g, "\n")
       : null;
 
-    const chapters = [];
+    // Chapter order (SPEC-012 D3): `order` is the authority, legacy `number` is read when it is
+    // absent, and anything unresolvable — a tie, a missing value, a value that is not a positive
+    // integer — falls back to filename order. The summary carries the resolved dense sequence, so
+    // no display surface has to reapply this rule.
+    const chapterEntries: Array<{ file: string; fm: ChapterFrontmatter }> = [];
     for (const file of (await listDir(join(pdir, "chapters"))).filter((f) => f.endsWith(".md")).sort()) {
-      const chapter = await tryParse(`productions/${id}/chapters/${file}`, (raw) =>
-        ChapterSummarySchema.parse(MarkdownFile.parse(raw).data),
+      const fm = await tryParse(`productions/${id}/chapters/${file}`, (raw) =>
+        ChapterFrontmatterSchema.parse(MarkdownFile.parse(raw).data),
       );
-      if (chapter) chapters.push(chapter);
+      if (fm) chapterEntries.push({ file: file.slice(0, -".md".length), fm });
     }
+    const chapterRank = (fm: ChapterFrontmatter): number => {
+      const v = fm.order ?? fm.number;
+      return typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : Infinity;
+    };
+    chapterEntries.sort((a, b) => chapterRank(a.fm) - chapterRank(b.fm) || (a.file < b.file ? -1 : 1));
+    const chapters = chapterEntries.map(({ file, fm }, i) => ({
+      id: fm.id,
+      file,
+      order: i + 1,
+      title: fm.title,
+      status: fm.status ?? "planned",
+      version: fm.version,
+      ...(fm.words !== undefined ? { words: fm.words } : {}),
+      ...(fm.draws !== undefined ? { draws: fm.draws } : {}),
+    }));
 
     const scenes = [];
     for (const file of (await listDir(join(pdir, "scenes"))).filter((f) => f.endsWith(".json")).sort()) {

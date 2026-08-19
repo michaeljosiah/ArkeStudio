@@ -87,6 +87,7 @@ export async function createChapter(
       id: slug,
       title: input.title,
       order: input.order,
+      status: "planned",
       version: 1,
       created: store.now().slice(0, 10),
       updated: store.now().slice(0, 10),
