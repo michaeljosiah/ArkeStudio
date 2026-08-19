@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -474,22 +474,19 @@ describe("the per-run scratch directory", () => {
     return mkdtemp(join(tmpdir(), "arke-scratch-"));
   }
 
-  it("writes session configuration outside the world", async () => {
+  it("makes a run its own directory outside the world, and puts nothing in it", async () => {
+    // It used to write the session configuration too. That moved to the caller when a second
+    // harness arrived wanting none: what belongs beside a run is the wired adapter's business,
+    // and this owns the directory and its lifetime (#70 §8.2).
     const root = await appRoot();
     const conversationId = newId("cv") as ConversationId;
     const runId = newId("run") as RunId;
 
-    const dir = await createRunScratch({
-      appRoot: root,
-      conversationId,
-      runId,
-      config: { mcp: { arke: { url: "http://127.0.0.1:1/mcp/abc" } } },
-    });
+    const dir = await createRunScratch({ appRoot: root, conversationId, runId });
 
     assert.equal(dir, runScratchDir(root, conversationId, runId));
-    const config = JSON.parse(await readFile(join(dir, "opencode.json"), "utf8"));
-    assert.equal(config.mcp.arke.url, "http://127.0.0.1:1/mcp/abc");
-    assert.deepEqual(await readdir(dir), ["opencode.json"], "and nothing else is in there");
+    assert.ok(!dir.includes("worlds"), "a run's scratch is never inside a world");
+    assert.deepEqual(await readdir(dir), [], "empty until the harness says what it needs");
   });
 
   it("removes one run without disturbing another", async () => {
@@ -497,8 +494,8 @@ describe("the per-run scratch directory", () => {
     const conversationId = newId("cv") as ConversationId;
     const keep = newId("run") as RunId;
     const drop = newId("run") as RunId;
-    await createRunScratch({ appRoot: root, conversationId, runId: keep, config: {} });
-    await createRunScratch({ appRoot: root, conversationId, runId: drop, config: {} });
+    await createRunScratch({ appRoot: root, conversationId, runId: keep });
+    await createRunScratch({ appRoot: root, conversationId, runId: drop });
 
     await removeRunScratch(root, conversationId, drop);
 
@@ -518,7 +515,7 @@ describe("the per-run scratch directory", () => {
     const root = await appRoot();
     const conversationId = newId("cv") as ConversationId;
     const runId = newId("run") as RunId;
-    await createRunScratch({ appRoot: root, conversationId, runId, config: {} });
+    await createRunScratch({ appRoot: root, conversationId, runId });
 
     const swept = await sweepRunScratch(root);
     assert.deepEqual(swept, [`${conversationId}/${runId}`]);

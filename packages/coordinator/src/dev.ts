@@ -127,7 +127,7 @@ const coordinator = new Coordinator({
   // Settings · Sample world is a working surface here and not a dead one (SPEC-016 R-6).
   sampleWorldPath: join(fixturesRoot, "worlds", "the-undersong"),
   setup: nodeSetupDeps(),
-  authoring: { buildConfig: wiring.buildConfig, agentForPurpose, roster: ROSTER, skillFor },
+  authoring: { agentForPurpose, roster: ROSTER, skillFor },
   ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
   relaunchHarness: wiring.relaunchHarness,
   // The dev coordinator carries the app's own preset speakers so the voice picker has a

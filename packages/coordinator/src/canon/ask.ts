@@ -1,4 +1,5 @@
 import { mkdir, rm } from "node:fs/promises";
+import { writeSessionFiles, type SessionInput } from "../harness/session-files.js";
 import { join } from "node:path";
 import {
   AskModelResponseSchema,
@@ -7,7 +8,6 @@ import {
   type HarnessAdapter,
 } from "@arke-studio/contracts";
 import { searchCanon, type CanonSearchResult } from "../index-db/queries.js";
-import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 
@@ -22,8 +22,8 @@ import type { WorldStore } from "../world/store.js";
  */
 
 export interface AskOptions {
-  /** Builds the opencode.json for the ask sandbox (roster + world-query registration). */
-  buildConfig: (input: { worldQueryUrl?: string }) => Record<string, unknown>;
+  /** Studio's session input, enriched with live Settings; the adapter decides what lands on disk. */
+  sessionInput: SessionInput;
   /** Where ephemeral ask sandboxes live (an empty cwd per ask — never a world). */
   scratchRoot: string;
   wallClockMs?: number;
@@ -155,10 +155,7 @@ export class AskService {
     // The ask sandbox: an empty directory holding only the session config — never a world.
     const sandbox = join(this.opts.scratchRoot, `ask-${Date.now().toString(36)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
-    await atomicWriteFile(
-      join(sandbox, "opencode.json"),
-      JSON.stringify(this.opts.buildConfig(worldQueryUrl ? { worldQueryUrl } : {}), null, 2) + "\n",
-    );
+    await writeSessionFiles(this.adapter, sandbox, this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}));
 
     try {
       const session = await this.adapter.createSession({ purpose: "ask", cwd: sandbox, agent: "canon-qa" });

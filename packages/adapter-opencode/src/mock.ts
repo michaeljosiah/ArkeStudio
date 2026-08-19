@@ -11,7 +11,10 @@ import {
   type SendMessageInput,
   type SendReceipt,
   type SessionRef,
+  type SessionConfigInput,
+  type SessionFile,
 } from "@arke-studio/contracts";
+import { buildSessionConfig } from "./config.js";
 
 /**
  * Scripted mock behind the adapter interface (SPEC-001 T-6). The coordinator is written
@@ -28,6 +31,16 @@ export class MockHarnessAdapter implements HarnessAdapter {
 
   capabilities(): ReadonlySet<HarnessCapability> {
     return this.caps;
+  }
+
+  /**
+   * The same file the live OpenCode adapters lay down. The mock exists so that SPEC-001's
+   * scripted backing and SPEC-005's live one are indistinguishable to the coordinator, and a
+   * mock that quietly wrote nothing would make every confinement assertion pass by absence.
+   */
+  sessionFiles(input: SessionConfigInput): ReadonlyArray<SessionFile> {
+    return [{ name: "opencode.json", contents: `${JSON.stringify(buildSessionConfig(input), null, 2)}
+` }];
   }
 
   readiness(): Readiness {

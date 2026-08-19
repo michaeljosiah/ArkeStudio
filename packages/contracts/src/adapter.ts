@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SessionConfigInput } from "./agent-session.js";
 
 /**
  * The harness adapter interface, adopted from Arke (master spec §1.4, §17).
@@ -164,6 +165,12 @@ export const HarnessEventSchema = z.discriminatedUnion("type", [
 ]);
 export type HarnessEvent = z.infer<typeof HarnessEventSchema>;
 
+/** One file a harness wants beside the work, named relative to the session directory. */
+export interface SessionFile {
+  name: string;
+  contents: string;
+}
+
 /**
  * One interface, mock or live. Methods beyond the core set are gated by the capabilities the
  * adapter reports.
@@ -180,6 +187,19 @@ export interface HarnessAdapter {
   readiness(): Readiness;
   /** Stop anything the adapter started. SHALL NOT stop a server it did not start. */
   dispose?(): Promise<void>;
+
+  /**
+   * What this harness needs on disk in a session's working directory, before the session opens.
+   *
+   * OpenCode reads its roster, tool limits and MCP registration from an `opencode.json` written
+   * beside the work; Claude Code takes all of that as `query()` options and needs nothing, which
+   * it says by returning nothing rather than by leaving an empty file in somebody's proposal.
+   *
+   * The adapter says WHAT to write and the caller does the writing, deliberately: extended-length
+   * paths and atomic replacement are solved once in the coordinator, and an adapter that had to
+   * solve them again would solve them differently.
+   */
+  sessionFiles?(input: SessionConfigInput): ReadonlyArray<SessionFile>;
 
   // ---- core ----
   createSession(input: CreateSessionInput): Promise<SessionRef>;

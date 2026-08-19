@@ -258,6 +258,14 @@ describe("the session lifecycle", () => {
     assert.equal(adapter.knownInputTokenLimit(), null, "the model is the user's, and unknown until a turn reports it");
   });
 
+  it("wants nothing on disk, and says so by offering nothing", () => {
+    // The reason `sessionFiles` exists at all. OpenCode reads its confinement from a config file
+    // beside the work; this takes the same confinement as query options, so a proposal directory
+    // it ran in is indistinguishable from one it never touched.
+    const adapter = new ClaudeAdapter({ command: "claude" });
+    assert.equal(adapter.sessionFiles, undefined);
+  });
+
   it("reports a turn that threw as an ended session rather than hanging the caller", async () => {
     // An iterator that rejects rather than a generator that throws — the same failure, and
     // closer to what a vanished binary actually does to the stream.

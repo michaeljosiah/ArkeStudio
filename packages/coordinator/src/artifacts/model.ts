@@ -1,9 +1,9 @@
 import { mkdir } from "node:fs/promises";
+import { writeSessionFiles, type SessionInput } from "../harness/session-files.js";
 import { join } from "node:path";
 import { z } from "zod";
 import type { HarnessAdapter } from "@arke-studio/contracts";
 import { extractJson } from "../canon/ask.js";
-import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { RawCandidate } from "./extraction.js";
 
@@ -48,7 +48,7 @@ const WALL_CLOCK_MS = 120_000;
 
 export function makeAdapterExtractor(
   adapter: HarnessAdapter,
-  buildConfig: (input: { worldQueryUrl?: string }) => Record<string, unknown>,
+  sessionInput: SessionInput,
   scratchRoot: string,
 ): (text: string, artifactFile: string, signal?: AbortSignal) => Promise<RawCandidate[]> {
   return async (text, artifactFile, signal) => {
@@ -56,7 +56,7 @@ export function makeAdapterExtractor(
     if (signal?.aborted) throw stopped();
     const sandbox = join(scratchRoot, `extract-${Date.now().toString(36)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
-    await atomicWriteFile(join(sandbox, "opencode.json"), JSON.stringify(buildConfig({}), null, 2) + "\n");
+    await writeSessionFiles(adapter, sandbox, sessionInput({}));
     const session = await adapter.createSession({ purpose: "extraction", cwd: sandbox, agent: "extraction" });
     // Making the sandbox and opening the session takes long enough to be stopped inside — on a
     // slow machine, easily. Checked here so a stop during setup ends it before a turn is ever

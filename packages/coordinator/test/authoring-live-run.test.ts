@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { join } from "node:path";
 import WebSocket from "ws";
-import { buildSessionConfig } from "@arke-studio/adapter-opencode";
 import {
   agentForPurpose,
   FrameSchema,
@@ -157,7 +156,7 @@ describe("a proposal being written into, seen from a client that reloaded (issue
     const coordinator = new Coordinator({
       provider,
       adapter: neverendingAdapter(),
-      authoring: { buildConfig: buildSessionConfig, agentForPurpose },
+      authoring: { agentForPurpose },
       changeLogPath: join(root, "logs", "changes.jsonl"),
       appVersion: "test",
       manifest: SHIPPED_MANIFEST,

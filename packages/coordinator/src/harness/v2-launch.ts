@@ -1,8 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  buildSessionConfig,
-  buildSessionConfigV2,
   credentialEnvPatch,
   discoverPreferredHarness,
   meetsV2Gate,
@@ -156,20 +154,6 @@ export interface AssembledHarness {
   isV2: boolean;
   supervisor: ChildSupervisor;
   adapter: OpenCodeAdapter | OpenCodeV2Adapter | ClaudeAdapter | null;
-  /**
-   * Writes the session's `opencode.json`. On the Claude lane this returns an empty object:
-   * Claude Code takes its confinement, prompt and MCP registration as `query()` options, so
-   * there is nothing for a config file to say.
-   *
-   * KNOWN WART. The authoring seam still threads a config WRITER through six call sites
-   * (harness/authoring, harness/genesis, canon/ask, artifacts/model, references/art-director,
-   * and the coordinator's own read-model), each of which writes the file unconditionally — so a
-   * Claude session leaves an empty `opencode.json` in its proposal directory. It is inert and it
-   * never reaches the world, because commit selects by explicit path patterns rather than
-   * copying the directory. The fix is to move the writing behind the adapter, which is a change
-   * to the seam rather than to this lane, and is deliberately not smuggled in here.
-   */
-  buildConfig: typeof buildSessionConfig;
   harnessInfo?: AssembledHarnessInfo;
   relaunchHarness: (credentials: Record<string, string | undefined>) => Promise<void>;
   /**
@@ -232,9 +216,6 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
           runQuery: sdkQuery,
           ...(opts.onTrace ? { onTrace: opts.onTrace } : {}),
         }),
-        // See the field's note: inert on this lane, and the seam that makes it necessary is
-        // named there rather than worked around here.
-        buildConfig: () => ({}),
         harnessInfo: {
           generation: "claude",
           source: availability.source,
@@ -299,7 +280,6 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     isV2,
     supervisor,
     adapter,
-    buildConfig: isV2 ? buildSessionConfigV2 : buildSessionConfig,
     ...(harness ? { harnessInfo: harnessInfoFrom(harness) } : {}),
     // The PATCH form, deliberately: it names every managed variable, so a cleared key is a
     // deletion the merge honours rather than an omission it preserves.

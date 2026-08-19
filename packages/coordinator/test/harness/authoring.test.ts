@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { MockHarnessAdapter, buildSessionConfig } from "@arke-studio/adapter-opencode";
+import { MockHarnessAdapter } from "@arke-studio/adapter-opencode";
 import {
   agentForPurpose,
   type DomainEvent,
@@ -36,7 +36,7 @@ async function setup() {
 
 function service(adapter: HarnessAdapter, events: DomainEvent[], opts: { wallClockMs?: number; tokenBudget?: number } = {}) {
   return new AuthoringService(adapter, (e) => events.push(e), {
-    buildConfig: buildSessionConfig,
+    sessionInput: (input) => input,
     agentForPurpose,
     ...opts,
   });

@@ -793,7 +793,7 @@ async function initialize(): Promise<{ port: number }> {
     // this build honestly has none; the dev coordinator points at the repo fixture instead, and
     // that is where the feature is exercised from source.
     sampleWorldPath: app.isPackaged ? join(process.resourcesPath, "sample-world") : null,
-    authoring: { buildConfig: wiring.buildConfig, agentForPurpose, roster: ROSTER, skillFor },
+    authoring: { agentForPurpose, roster: ROSTER, skillFor },
     ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
     // Stored LLM keys reach the harness as spawn environment (SPEC-005 D5) — under v2's
     // redirected profile this is the only credential path there is (issue 327 §2).
