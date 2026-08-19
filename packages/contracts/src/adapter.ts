@@ -200,6 +200,19 @@ export interface HarnessAdapter {
    * solve them again would solve them differently.
    */
   sessionFiles?(input: SessionConfigInput): ReadonlyArray<SessionFile>;
+  /**
+   * The same settings, for a harness that takes them as call options rather than as a file.
+   *
+   * Both hooks exist because `sessionFiles` alone silently excluded one of them. Claude Code
+   * registers its MCP servers through `query()` options, so it has nothing to write — and the
+   * reading of that was that it "needs nothing", when what it needed was a seam that was not
+   * file-shaped. The result was a lane that started, authenticated, ran turns, and answered
+   * every question about the world with "I have nothing on that in front of me", because the
+   * world-query tool had never been registered. Nothing failed; the agent was simply blind.
+   *
+   * Called with the same input, immediately before that session's `createSession`.
+   */
+  prepareSession?(input: SessionConfigInput): void;
 
   // ---- core ----
   createSession(input: CreateSessionInput): Promise<SessionRef>;

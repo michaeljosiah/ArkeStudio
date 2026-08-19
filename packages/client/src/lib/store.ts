@@ -9,6 +9,7 @@ import {
   type ClientState,
   type DomainEvent,
   type Frame,
+  type HarnessEngine,
   type Job,
   type ProviderCallRecord,
   ProviderIdSchema,
@@ -384,6 +385,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, narrator: event.voice } };
     case "runtime.status":
       return { ...state, app: { ...state.app, runtime: event.runtime } };
+    case "harness.status":
+      return { ...state, app: { ...state.app, harness: event.harness } };
     case "voice.sidecar":
       return event.runtime === undefined
         ? state
@@ -1567,6 +1570,29 @@ export function setSpendThreshold(thresholdMicroUsd: number, periodDays: number)
 
 export function detectRuntimes(): void {
   send({ kind: "detect-runtimes" });
+}
+
+/** Look for the harnesses this machine has. Cheap — discovery only, never a live turn. */
+export function detectHarnesses(): void {
+  send({ kind: "detect-harnesses" });
+}
+
+/**
+ * Ask for an engine. The coordinator refuses one it cannot find and answers with the current
+ * truth either way, so the screen never has to guess whether the choice took.
+ */
+export function setHarnessEngine(engine: HarnessEngine): void {
+  send({ kind: "set-harness-engine", engine });
+}
+
+/** Point Arke at a Claude Code the PATH does not carry. The host owns the file dialog. */
+export function chooseClaudeExecutable(): void {
+  send({ kind: "choose-claude-executable" });
+}
+
+/** Forget the chosen path and go back to whatever PATH offers. */
+export function clearClaudeExecutable(): void {
+  send({ kind: "clear-claude-executable" });
 }
 
 export function chooseVoxaExecutable(): void {

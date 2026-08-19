@@ -1,3 +1,4 @@
+import type { HarnessAvailability } from "@arke-studio/contracts";
 import {
   CLAUDE_MIN_VERSION,
   discoverClaudeCode,
@@ -71,5 +72,46 @@ export async function resolveClaudeHarness(opts: ResolveClaudeOptions): Promise<
     source: found.source,
     version: verdict.version ?? found.version,
     apiKeySource: verdict.apiKeySource,
+  };
+}
+
+/**
+ * What Settings needs to know, without spending a turn to find out (SPEC-005 R-1).
+ *
+ * Deliberately stops short of {@link resolveClaudeHarness}: that runs the confinement probe,
+ * which is a real request against the user's own subscription. Opening a settings screen must
+ * not cost anybody anything, so this answers only the question the screen actually asks — is it
+ * here, and may it be switched on — and the probe stays where it belongs, at launch, once
+ * somebody has asked for the harness.
+ *
+ * The consequence is worth stating: a build that passes here can still fail its probe later.
+ * That is the right way round. Offering a harness that turns out not to hold its confinement
+ * fails loudly at launch and falls back; refusing to offer it until we have spent a turn would
+ * make an empty settings screen the normal first impression.
+ */
+export async function describeClaudeAvailability(
+  discovery: ClaudeDiscoveryOptions = {},
+): Promise<HarnessAvailability> {
+  const { found, rejected } = await discoverClaudeCode(discovery);
+  const base = { id: "claude" as const, label: "Claude Code", bundled: false };
+  if (found) return { ...base, installed: true, version: found.version, source: found.source, blocked: null };
+  if (rejected) {
+    const min = discovery.minVersion ?? CLAUDE_MIN_VERSION;
+    return {
+      ...base,
+      installed: false,
+      source: null,
+      version: rejected.version,
+      // Both numbers, because "unavailable" is not something a reader can act on and this is.
+      blocked: `Claude Code ${rejected.version} is installed, but ${min} or newer is needed.`,
+    };
+  }
+  return {
+    ...base,
+    installed: false,
+    source: null,
+    version: null,
+    // Not a failure — most machines will never have it, and the wording should not imply fault.
+    blocked: "Claude Code was not found on this machine.",
   };
 }

@@ -4,6 +4,7 @@ import { AskCandidateSchema, AskResultSchema } from "./ask.js";
 import { BenchPresetSchema } from "./bench.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
+import { HarnessStatusSchema } from "./harness.js";
 import {
   IsoDateTimeSchema,
   JobIdSchema,
@@ -767,6 +768,12 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
   /** Local runtime detection completed (SPEC-008 R-22, D12). */
   z.object({ ...base, type: z.literal("runtime.status"), runtime: LocalRuntimeStatusSchema }).strict(),
+  /**
+   * What harnesses exist here and which one is chosen, together in one message. Sending them
+   * separately would let a screen hold a choice the availability no longer supports — exactly
+   * the state this feature exists to prevent.
+   */
+  z.object({ ...base, type: z.literal("harness.status"), harness: HarnessStatusSchema }).strict(),
   /** The ComfyUI engine and its recipes, whole each time (SPEC-021 §2.12). */
   z.object({ ...base, type: z.literal("comfyui.status"), comfyui: ComfyUiStatusSchema }).strict(),
   /** Estimate-versus-actual divergence crossed the drift threshold (SPEC-008 R-13, §2.11). */

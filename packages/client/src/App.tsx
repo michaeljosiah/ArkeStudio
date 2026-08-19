@@ -8,6 +8,7 @@ import {
   SettingsAboutScreen,
   SettingsAppearanceScreen,
   SettingsLayout,
+  SettingsHarnessScreen,
   SettingsLocalRuntimeScreen,
   SettingsNotificationsScreen,
   SettingsProvidersScreen,
@@ -123,6 +124,7 @@ export function App() {
             <Route path="appearance" element={<SettingsAppearanceScreen />} />
             <Route path="notifications" element={<SettingsNotificationsScreen />} />
             <Route path="local-runtime" element={<SettingsLocalRuntimeScreen />} />
+            <Route path="harness" element={<SettingsHarnessScreen />} />
             {/* Settings › Agents folded into Who does what (design 54b); the old address keeps working. */}
             <Route path="agents" element={<Navigate to="/settings/who-does-what" replace />} />
             <Route path="who-does-what" element={<SettingsWhoDoesWhatScreen />} />

@@ -25,6 +25,7 @@ const STATE: ClientState = {
   narrator: null,
     appearance: { theme: "system" },
     runtime: null,
+    harness: null,
     comfyui: null,
     voiceRuntime: null,
     drift: [],

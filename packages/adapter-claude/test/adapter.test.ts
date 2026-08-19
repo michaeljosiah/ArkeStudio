@@ -308,4 +308,33 @@ describe("the session lifecycle", () => {
     );
     await adapter.dispose();
   });
+
+  it("registers the world tool from prepareSession, not only from construction", async () => {
+    /*
+     * The regression this exists for: worldQueryUrl reached adapters only through `sessionFiles`,
+     * a seam that writes a config file. Claude Code takes MCP servers as call options and so
+     * returned nothing to write, which was read as "needs nothing" — and the lane ran every turn
+     * with no world tool at all. It did not fail. It answered every question about the world by
+     * saying it had nothing on the subject, which reads like care rather than a broken wiring.
+     */
+    const fake = fakeQuery([result()]);
+    const adapter: HarnessAdapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
+    adapter.prepareSession?.({ worldQueryUrl: "http://127.0.0.1:9/mcp" });
+    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
+    await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
+
+    const servers = fake.options()["mcpServers"] as Record<string, { url?: string }> | undefined;
+    assert.equal(servers?.["arke-world"]?.url, "http://127.0.0.1:9/mcp", "the world tool is registered");
+    await adapter.dispose?.();
+  });
+
+  it("leaves the world tool off when no world is open", async () => {
+    const fake = fakeQuery([result()]);
+    const adapter: HarnessAdapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
+    adapter.prepareSession?.({});
+    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
+    await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
+    assert.equal(fake.options()["mcpServers"], undefined, "no empty server registration");
+    await adapter.dispose?.();
+  });
 });

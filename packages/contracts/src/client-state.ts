@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HarnessStatusSchema } from "./harness.js";
 import { ProductionSpineSchema } from "./spine.js";
 import { TakeMediaInfoRecordSchema } from "./media.js";
 import { ProposalIdSchema, TakeIdSchema } from "./ids.js";
@@ -368,6 +369,15 @@ export const ClientStateSchema = z
         /** Who reads the app's prose aloud. Null is the shipped local voice, and free. */
         narrator: NarratorSettingsSchema.default(null),
         runtime: LocalRuntimeStatusSchema.nullable().default(null),
+        /**
+         * Which engines this machine has, and which is chosen (SPEC-005 R-1). Null until the
+         * screen asks — detection costs a subprocess, so it is not done on every boot for a
+         * screen most sessions never open.
+         *
+         * Distinct from `harnessInfo` above, which says what is wired RIGHT NOW and only
+         * changes on restart. This is what could be wired, and is what Settings offers.
+         */
+        harness: HarnessStatusSchema.nullable().default(null),
         /** The ComfyUI engine and its recipes (SPEC-021 §2.12) — one result, read everywhere. */
         comfyui: ComfyUiStatusSchema.nullable().default(null),
         voiceRuntime: VoiceRuntimeStatusSchema.nullable().default(null),

@@ -14,6 +14,7 @@ export {
   type RunProbeTurn,
 } from "./confinement-probe.js";
 export {
+  describeClaudeAvailability,
   resolveClaudeHarness,
   type ClaudeAvailability,
   type ResolveClaudeOptions,

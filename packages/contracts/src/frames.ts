@@ -6,6 +6,7 @@ import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, Ses
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
+import { HarnessEngineSchema } from "./harness.js";
 import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
 import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
 import { CHARACTER_ROLE_MAX } from "./world.js";
@@ -754,6 +755,20 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** SPEC-008 R-22: re-run local runtime detection on demand. */
   z.object({ kind: z.literal("detect-runtimes") }).strict(),
+  /**
+   * Look for the harnesses this machine has. Discovery only — finding a binary and reading its
+   * version — and deliberately NOT the confinement probe, which spends a real turn against the
+   * user's subscription. Opening a settings screen must not cost anybody a request.
+   */
+  z.object({ kind: z.literal("detect-harnesses") }).strict(),
+  /**
+   * Choose the engine. The coordinator refuses a harness it has not found, so this is a request
+   * rather than an instruction — the screen disabling the control is a courtesy, not the rule.
+   */
+  z.object({ kind: z.literal("set-harness-engine"), engine: HarnessEngineSchema }).strict(),
+  /** Point Arke at a Claude Code the PATH does not carry. The host owns the file dialog. */
+  z.object({ kind: z.literal("choose-claude-executable") }).strict(),
+  z.object({ kind: z.literal("clear-claude-executable") }).strict(),
   /** Voxa configuration stays host-owned: none of these messages contains a filesystem path. */
   z.object({ kind: z.literal("choose-voxa-executable") }).strict(),
   z.object({ kind: z.literal("clear-voxa-executable") }).strict(),

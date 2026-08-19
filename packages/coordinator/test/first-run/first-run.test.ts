@@ -120,6 +120,7 @@ describe("diagnostics are safe to paste publicly (R-15, D9, §3.2)", () => {
         routing: { defaults: {}, faults: [] },
         spend: null,
         runtime: null,
+        harness: null,
         drift: [],
         queues: [],
       },
