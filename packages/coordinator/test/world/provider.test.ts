@@ -71,6 +71,55 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     await provider.close();
   });
 
+  it("reads the world's cloned voices, keeping what parses (SPEC-022 §2.3)", async () => {
+    const root = await tempDir("arke-cloned-voices-");
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+    const { worldId, slug } = await provider.createWorld({ name: "The Undersong" });
+    const dir = join(root, "worlds", slug);
+    await mkdir(toExtendedLength(join(dir, "voices")), { recursive: true });
+    await writeFile(
+      toExtendedLength(join(dir, "voices", "voices.json")),
+      JSON.stringify({
+        voices: [
+          {
+            id: "harbour-glass",
+            name: "Harbour glass",
+            clip: "voices/harbour-glass.wav",
+            description: "Low, dry, unhurried. Coastal.",
+            attributes: ["low", "dry", "unhurried", "coastal"],
+            consent: true,
+            created: "2026-08-18T10:00:00.000Z",
+          },
+          // Malformed: no id. It costs itself, never the voice beside it — the same posture the
+          // sheet scan takes, and the reason a hand-edit cannot empty a world's library.
+          { name: "broken", clip: "voices/broken.wav" },
+        ],
+      }),
+      "utf8",
+    );
+    const bundle = await provider.loadWorld(worldId);
+    assert.deepEqual(
+      bundle.clonedVoices.map((v) => v.id),
+      ["harbour-glass"],
+    );
+    assert.equal(bundle.clonedVoices[0]?.clip, "voices/harbour-glass.wav");
+    await provider.close();
+  });
+
+  it("a world with no voices file has no cloned voices, which is not a problem", async () => {
+    const root = await tempDir("arke-no-voices-");
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+    const { worldId } = await provider.createWorld({ name: "The Undersong" });
+    const bundle = await provider.loadWorld(worldId);
+    assert.deepEqual(bundle.clonedVoices, []);
+    assert.deepEqual(
+      bundle.problems.filter((p) => p.path.includes("voices")),
+      [],
+      "an absent library is the normal state, never a reported failure",
+    );
+    await provider.close();
+  });
+
   it("leaves no record when the look was deferred, so it still resolves from tone and genre", async () => {
     const root = await tempDir("arke-create-nolook-");
     const provider = new FsWorldProvider(root, { clock: CLOCK });
