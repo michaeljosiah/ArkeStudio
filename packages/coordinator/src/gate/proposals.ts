@@ -10,6 +10,7 @@ import {
   newId,
   ProposalSchema,
   RipplePreviewSchema,
+  StoryOverviewSchema,
   type Proposal,
   type ProposalConflict,
   type ProposalOpenChoice,
@@ -33,7 +34,7 @@ import {
   type DraftOperation,
 } from "./draft-journal.js";
 import { applyFieldEdit, safeFieldEditMessage } from "./field-edit.js";
-import { applyResolution, mergeMarkdown } from "./merge.js";
+import { applyJsonResolution, applyResolution, mergeJson, mergeMarkdown } from "./merge.js";
 
 /**
  * The accept gate (SPEC-004): one path into the world. A proposal is materialised with its
@@ -254,6 +255,20 @@ export class ProposalManager {
         const open = this.store.getBundle().proposals.find((p) => p.proposal.kind === "art-direction");
         if (open) {
           throw new LookAlreadyProposedError(open.proposal.id);
+        }
+      }
+      if (input.kind === "story-overview") {
+        // Malformed structured JSON is refused before a proposal directory exists (issue #385):
+        // nothing should reach review that the scanner would then drop from the bundle.
+        for (const target of input.targets) {
+          if (classify(target.path).track !== "story" || target.content === undefined) continue;
+          try {
+            StoryOverviewSchema.parse(JSON.parse(target.content));
+          } catch (err) {
+            throw new Error(
+              `${target.path} is not a story overview: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`,
+            );
+          }
         }
       }
       const id = newId("pr");
@@ -649,6 +664,19 @@ export class ProposalManager {
     const problems: Array<{ path: string; message: string }> = [];
     for (const file of files) {
       // A delete carries no content and cannot introduce a role.
+      if (file.content !== undefined && classify(file.path).track === "story") {
+        // The structured overview is refused before acceptance when it is malformed or out of
+        // scope (issue #385): a reviewer cannot be handed JSON the scanner would then drop.
+        try {
+          StoryOverviewSchema.parse(JSON.parse(file.content));
+        } catch (err) {
+          problems.push({
+            path: file.path,
+            message: `not a story overview: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`,
+          });
+        }
+        continue;
+      }
       if (!file.path.startsWith("characters/") || file.content === undefined) continue;
       const role = roleOf(file.content);
       if (role === null || role.length <= CHARACTER_ROLE_MAX) continue;
@@ -761,7 +789,13 @@ export class ProposalManager {
           continue;
         }
 
-        const merge = mergeMarkdown(target.path, base, mine, live);
+        // JSON tracks merge in the JSON lane (SPEC-023 R-18): mergeMarkdown would re-serialise
+        // them with frontmatter fences, leaving files that no longer parse.
+        const track = classify(target.path).track;
+        const jsonTrack = track === "scene" || track === "story" || track === "season" || track === "series";
+        const merge = jsonTrack
+          ? mergeJson(target.path, base, mine, live)
+          : mergeMarkdown(target.path, base, mine, live);
         conflicts.push(...merge.conflicts);
         await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(target.path)), merge.merged);
         await atomicWriteFile(join(this.proposalDir(proposalId), "_base", fromPortable(target.path)), live);
@@ -841,7 +875,11 @@ export class ProposalManager {
         }
         resolved = chosen;
       } else {
-        resolved = applyResolution(path, current, conflict, choice);
+        const track = classify(path).track;
+        resolved =
+          track === "scene" || track === "story" || track === "season" || track === "series"
+            ? applyJsonResolution(current, conflict, choice)
+            : applyResolution(path, current, conflict, choice);
       }
       await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(path)), resolved);
       const conflicts = (proposal.conflicts ?? []).map((c) =>

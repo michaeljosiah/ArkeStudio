@@ -78,7 +78,9 @@ import {
   draftSceneSkeleton,
   exportBoard,
   landBoard,
+  overviewSteer,
   productionCreatedBy,
+  proposeStoryOverview,
   reorderChapters,
   saveChapter,
   setPromptOverride,
@@ -3308,6 +3310,73 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "propose-story-overview": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        try {
+          const { proposalId } = await proposeStoryOverview(store, gate, {
+            productionId: msg.productionId,
+            source: "form",
+            overview: {
+              ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
+              ...(msg.spine !== undefined ? { spine: msg.spine } : {}),
+              ...(msg.targetLength !== undefined ? { targetLength: msg.targetLength } : {}),
+              ...(msg.acts !== undefined ? { acts: msg.acts } : {}),
+            },
+          });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.staged",
+            worldId: msg.worldId,
+            proposalId,
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "draft-story-overview": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store || !this.authoring || !this.opts.adapter?.readiness().ready) return;
+        try {
+          const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+          const { proposalId, path } = await proposeStoryOverview(store, gate, {
+            productionId: msg.productionId,
+            source: "chat:studio",
+            // The agent drafts over the live overview (or a bare one); nothing writes live.
+            overview: production?.story ? { ...production.story } : {},
+          });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.staged",
+            worldId: msg.worldId,
+            proposalId,
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+          const worldQueryUrl = await this.worldQuery.start();
+          this.trackBackground(
+            this.authoring
+              .run(
+                store,
+                gate,
+                {
+                  worldId: msg.worldId,
+                  proposalId,
+                  purpose: "drafting",
+                  instruction: `Write the story overview in ${path}. ${msg.instruction}. The file is one JSON document: keep the version field untouched and fill logline (one sentence), spine (the shape of the whole story), acts (an array of { title, summary }), and targetLength. Anything the overview implies about the world — a new name, a rule, a place — must NOT be written into world files; note such facts in the spine text as open questions for separate proposal. Do not touch any other file.`,
+                },
+                worldQueryUrl,
+              )
+              .then(() => this.refreshWorldSnapshot(msg.worldId)),
+          );
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
       case "draft-chapter": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
@@ -3335,7 +3404,9 @@ export class Coordinator {
                 worldId: msg.worldId,
                 proposalId: staged.id,
                 purpose: "drafting",
-                instruction: `Draft the chapter prose in ${path}. ${msg.instruction}. Anything the prose implies about the world — a new name, a rule, a place — must NOT be written into world files; list such facts at the end of the chapter under a "## Surfaced facts" heading for separate proposal.`,
+                instruction: `Draft the chapter prose in ${path}. ${msg.instruction}.${overviewSteer(
+                  store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.story,
+                )} Anything the prose implies about the world — a new name, a rule, a place — must NOT be written into world files; list such facts at the end of the chapter under a "## Surfaced facts" heading for separate proposal.`,
               },
               worldQueryUrl,
             )

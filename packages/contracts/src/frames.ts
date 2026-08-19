@@ -1172,6 +1172,33 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       logline: z.string().max(500).optional(),
     })
     .strict(),
+  /**
+   * issue #385: the structured overview is authored through the gate. Direct editing stages a
+   * story-overview proposal from named fields; nothing is written live before acceptance.
+   */
+  z
+    .object({
+      kind: z.literal("propose-story-overview"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      logline: z.string().min(1).max(500).optional(),
+      spine: z.string().min(1).max(4000).optional(),
+      targetLength: z.string().min(1).max(120).optional(),
+      acts: z
+        .array(z.object({ title: z.string().min(1).max(200), summary: z.string().max(1000).optional() }).strict())
+        .max(12)
+        .optional(),
+    })
+    .strict(),
+  /** issue #385: AI drafting of the overview — stages the same proposal kind, writes nothing live. */
+  z
+    .object({
+      kind: z.literal("draft-story-overview"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      instruction: z.string().min(1).max(2000),
+    })
+    .strict(),
   /** SPEC-012 R-7: draft a scene in conversation; accepting creates shots, dispatches nothing. */
   z
     .object({

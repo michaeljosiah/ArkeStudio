@@ -3,6 +3,7 @@ import {
   ArtDirectionRecordSchema,
   CanonEntrySchema,
   SheetSchema,
+  StoryOverviewSchema,
   type Proposal,
 } from "@arke-studio/contracts";
 import { MarkdownFile } from "../world/text-files.js";
@@ -59,6 +60,29 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
       if (record.masterLook) fields.set("Master look", record.masterLook);
       policyFields(fields, record);
       return { label: `World look v${record.version}`, kind: "art direction", fields };
+    } catch {
+      return null;
+    }
+  }
+
+  /*
+   * The structured overview is JSON too (issue #385): without this branch a reviewer would be
+   * asked to accept a story overview shown as a bare path — not one field of the thing that
+   * steers drafting. Every schema field is projected; a malformed file returns null and the
+   * accept gate refuses it separately.
+   */
+  const storyMatch = /^productions\/[a-z0-9-]+\/story\.json$/.exec(path);
+  if (storyMatch) {
+    try {
+      const overview = StoryOverviewSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>();
+      if (overview.logline !== undefined) fields.set("Logline", overview.logline);
+      if (overview.spine !== undefined) fields.set("Spine", overview.spine);
+      for (const [i, act] of (overview.acts ?? []).entries()) {
+        fields.set(`Act ${i + 1} · ${act.title}`, act.summary ?? "—");
+      }
+      if (overview.targetLength !== undefined) fields.set("Target length", overview.targetLength);
+      return { label: `Story overview v${overview.version}`, kind: "story overview", fields };
     } catch {
       return null;
     }

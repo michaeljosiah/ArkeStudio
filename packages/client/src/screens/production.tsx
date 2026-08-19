@@ -66,6 +66,7 @@ import {
   exportCut,
   exportSceneBoard,
   exportWorld,
+  proposeStoryOverview,
   rejectTake,
   placeOverlay,
   removeOverlay,
@@ -728,6 +729,12 @@ export function StoryScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const story = production?.story ?? null;
+  // The direct overview editor (issue 385): fields staged through the gate, never written live.
+  const [editing, setEditing] = useState(false);
+  const [logline, setLogline] = useState("");
+  const [spine, setSpine] = useState("");
+  const [targetLength, setTargetLength] = useState("");
+  const [actsText, setActsText] = useState("");
   const spineLines = (story?.spine ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
   // What drafting can actually reach: the world's cast plus this production's guests, and not
   // another production's one-offs (SPEC-020 R-7).
@@ -749,7 +756,7 @@ export function StoryScreen() {
           ) : story ? (
             <div className="fy-bubble--gate">
               {story.logline}
-              <div className="fy-bubble__note">the overview steers scene drafting and packing — it never overwrites a scene you've locked</div>
+              <div className="fy-bubble__note">the overview steers scene and chapter drafting — it never overwrites a scene you've locked</div>
             </div>
           ) : (
             <div className="fy-bubble--gate">
@@ -780,30 +787,99 @@ export function StoryScreen() {
             {story ? `v${story.version}` : "not started"}
           </span>
         </div>
-        {story && (
-          <div className="fy-draftcard">
-            <div className="fy-draftcard__logline">“{story.logline}”</div>
-            {spineLines.length > 0 && (
-              <div style={{ marginTop: 14 }}>
-                {spineLines.map((line, i) => (
-                  <div key={i} className="fy-actrow">
-                    <span className="fy-actrow__label">{spineLines.length > 1 ? `ACT ${"I".repeat(Math.min(i + 1, 3))}` : "SPINE"}</span>
-                    <span className="fy-actrow__text">{line}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+        {editing ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            <Input placeholder="Logline · one sentence" value={logline} onChange={(e) => setLogline(e.target.value)} />
+            <Textarea
+              placeholder="Spine · the shape of the whole story"
+              value={spine}
+              onChange={(e) => setSpine(e.target.value)}
+              rows={4}
+            />
+            <Textarea
+              placeholder={"Acts · one per line, as Title: summary"}
+              value={actsText}
+              onChange={(e) => setActsText(e.target.value)}
+              rows={3}
+            />
+            <Input
+              placeholder="Target length · e.g. 90k words, 7 episodes"
+              value={targetLength}
+              onChange={(e) => setTargetLength(e.target.value)}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button variant="ghost" onClick={() => setEditing(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                disabled={!logline.trim() && !spine.trim() && !actsText.trim() && !targetLength.trim()}
+                onClick={() => {
+                  if (!worldId || !prodId) return;
+                  const acts = actsText
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .filter((line) => line.length > 0)
+                    .map((line) => {
+                      const split = line.indexOf(":");
+                      const title = (split >= 0 ? line.slice(0, split) : line).trim();
+                      const summary = split >= 0 ? line.slice(split + 1).trim() : "";
+                      return { title: title || line, ...(summary ? { summary } : {}) };
+                    });
+                  proposeStoryOverview(worldId, prodId, {
+                    ...(logline.trim() ? { logline: logline.trim() } : {}),
+                    ...(spine.trim() ? { spine: spine.trim() } : {}),
+                    ...(targetLength.trim() ? { targetLength: targetLength.trim() } : {}),
+                    ...(acts.length > 0 ? { acts } : {}),
+                  });
+                  setEditing(false);
+                }}
+              >
+                Propose overview
+              </Button>
+            </div>
+            <div className="fy-mono">stages a proposal · nothing is written until you accept</div>
           </div>
+        ) : (
+          story && (
+            <div className="fy-draftcard">
+              <div className="fy-draftcard__logline">“{story.logline}”</div>
+              {spineLines.length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  {spineLines.map((line, i) => (
+                    <div key={i} className="fy-actrow">
+                      <span className="fy-actrow__label">{spineLines.length > 1 ? `ACT ${"I".repeat(Math.min(i + 1, 3))}` : "SPINE"}</span>
+                      <span className="fy-actrow__text">{line}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
         )}
         <div style={{ flex: 1 }} />
         <div style={{ display: "grid", gap: 8 }}>
+          {!editing && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setLogline(story?.logline ?? "");
+                setSpine(story?.spine ?? "");
+                setTargetLength(story?.targetLength ?? "");
+                setActsText((story?.acts ?? []).map((a) => `${a.title}${a.summary ? `: ${a.summary}` : ""}`).join("\n"));
+                setEditing(true);
+              }}
+            >
+              {story ? "Edit the overview" : "Start the overview"}
+            </Button>
+          )}
           {production && productionShape(production.meta).hasChapters && (
             <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)}>
               Chapter tree · {production.chapters.length}
             </Button>
           )}
           <div style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center" }}>
-            The overview steers scene drafting and packing. It never overwrites a scene you've locked.
+            The overview steers scene and chapter drafting. It never overwrites a scene you've locked.
           </div>
         </div>
       </div>

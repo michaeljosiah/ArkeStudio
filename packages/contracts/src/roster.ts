@@ -50,8 +50,9 @@ directory are the complete scope of what you may change. Rules that are not your
   list_entities, related) — never by filesystem path.
 - Canon is owned by canon entries: a sheet references rules by id in its canonRules
   frontmatter and NEVER restates their text.
-- Keep the exact file format you were given: YAML frontmatter between --- fences, prose under
-  ## section headings. Do not add, rename or remove frontmatter keys unless asked.
+- Keep the exact file format you were given. A Markdown file keeps its YAML frontmatter between
+  --- fences and its prose under ## section headings; a JSON file stays one valid JSON document
+  with the same top-level shape. Do not add, rename or remove keys unless asked.
 - Every character sheet carries a role, and it is at most ${CHARACTER_ROLE_MAX} characters — a label,
   not a sentence. "Tide-caller", "Salvage diver", "Keeper of the drowned verse". If what you want
   to say does not fit, it belongs in Essence instead. The accept gate refuses a longer one, and a

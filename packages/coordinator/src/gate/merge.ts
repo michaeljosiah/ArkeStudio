@@ -154,6 +154,74 @@ export function mergeMarkdown(path: string, baseRaw: string, mineRaw: string, th
   return { merged: doc.serialize(), conflicts, tookTheirs };
 }
 
+/**
+ * The JSON lane of the same merge (SPEC-023 R-18, issue #385): three-way at top-level-field
+ * granularity, arrays and nested objects atomic. JSON never passes through the Markdown merge —
+ * mergeMarkdown re-serialises with frontmatter fences and destroys a JSON document, which is
+ * the exact failure the art-direction restatement branch was built to avoid; this lane is the
+ * general answer for every JSON track (story, scene, season, series).
+ *
+ * Conflict values are carried as JSON text (`JSON.stringify`), so resolution can round-trip a
+ * chosen value without guessing whether "1747" was a number or a title.
+ */
+const JSON_MACHINE_FIELDS = new Set(["version"]);
+
+export function mergeJson(path: string, baseRaw: string, mineRaw: string, theirsRaw: string): MergeResult {
+  const base = JSON.parse(baseRaw) as Record<string, unknown>;
+  const mine = JSON.parse(mineRaw) as Record<string, unknown>;
+  const theirs = JSON.parse(theirsRaw) as Record<string, unknown>;
+  const conflicts: ProposalConflict[] = [];
+  const tookTheirs: string[] = [];
+  const out: Record<string, unknown> = {};
+  const keys: string[] = [];
+  for (const source of [mine, theirs, base]) {
+    for (const key of Object.keys(source)) if (!keys.includes(key)) keys.push(key);
+  }
+  for (const key of keys) {
+    const b = base[key];
+    const m = mine[key];
+    const t = theirs[key];
+    if (JSON_MACHINE_FIELDS.has(key)) {
+      // The committer stamps these; carry the live value so the plan verifies cleanly.
+      if (t !== undefined) out[key] = t;
+      else if (m !== undefined) out[key] = m;
+      continue;
+    }
+    const bs = asComparable(b);
+    const ms = asComparable(m);
+    const ts = asComparable(t);
+    if (ms === bs) {
+      if (t !== undefined) out[key] = t;
+      if (ts !== bs && t !== undefined) tookTheirs.push(key);
+    } else if (ts === bs || ts === ms) {
+      if (m !== undefined) out[key] = m;
+    } else {
+      conflicts.push({
+        path,
+        field: key,
+        base: b === undefined ? null : JSON.stringify(b),
+        mine: m === undefined ? null : JSON.stringify(m),
+        theirs: t === undefined ? null : JSON.stringify(t),
+      });
+      if (m !== undefined) out[key] = m; // provisional until the human chooses
+    }
+  }
+  return { merged: JSON.stringify(out, null, 2) + "\n", conflicts, tookTheirs };
+}
+
+/** Apply a human's per-field choice to a previously merged JSON document (R-6). */
+export function applyJsonResolution(
+  mergedRaw: string,
+  conflict: ProposalConflict,
+  choice: "mine" | "theirs",
+): string {
+  const doc = JSON.parse(mergedRaw) as Record<string, unknown>;
+  const value = choice === "mine" ? conflict.mine : conflict.theirs;
+  if (value === null) delete doc[conflict.field];
+  else doc[conflict.field] = JSON.parse(value) as unknown;
+  return JSON.stringify(doc, null, 2) + "\n";
+}
+
 /** Apply a human's per-field choice to a previously merged document (R-6). */
 export function applyResolution(
   path: string,

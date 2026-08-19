@@ -2146,6 +2146,25 @@ export function createProduction(
   return requestId;
 }
 
+/** Stage the structured overview through the gate — nothing is written live (issue 385). */
+export function proposeStoryOverview(
+  worldId: string,
+  productionId: string,
+  overview: {
+    logline?: string;
+    spine?: string;
+    targetLength?: string;
+    acts?: Array<{ title: string; summary?: string }>;
+  },
+): void {
+  send({ kind: "propose-story-overview", worldId, productionId, ...overview });
+}
+
+/** Have the studio draft the overview into a staged proposal (issue 385). */
+export function draftStoryOverview(worldId: string, productionId: string, instruction: string): void {
+  send({ kind: "draft-story-overview", worldId, productionId, instruction });
+}
+
 export function draftScene(worldId: string, productionId: string, brief: string): void {
   send({ kind: "draft-scene", worldId, productionId, brief });
 }

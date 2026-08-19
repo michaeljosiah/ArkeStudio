@@ -253,7 +253,8 @@ directories and temporary files.
       productions\
         saltlight\
           production.json         format, title, status, timestamps
-          story.md                overview / script / prose, per format
+          story.json              the structured overview: logline, spine, acts, target length (§8.3)
+          story.md                optional treatment prose, per format
           scenes\
             04-the-verse-rises.json
           takes\
@@ -1188,8 +1189,10 @@ productions' loose ends. This is the thesis made visible at the moment it matter
 
 ## 8.3 Story
 
-A story production is a **chapter tree**, not one document. The overview (spine, acts, gaps) is
-authored through the chat gate and steers drafting; chapters hang beneath it.
+A story production is a **chapter tree**, not one document. The overview — `story.json`, the
+structured record of logline, spine, acts, and target length — is authored through the gate,
+directly or by a drafting agent, and steers drafting; chapters hang beneath it. `story.md`
+remains optional treatment prose beside it, never the structured authority.
 
 ```
 productions/undersong/

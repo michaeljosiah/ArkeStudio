@@ -24,10 +24,12 @@ import {
   type ProductionFormat,
   type ProductionMedium,
   type ProposalSkill,
+  StoryOverviewSchema,
   type Scene,
   type ScenePlan,
   type Season,
   type Series,
+  type StoryOverview,
   type Shot,
   type ShotPlanEntry,
   type WorldBundle,
@@ -183,6 +185,65 @@ export async function productionCreatedBy(worldDir: string, requestId: string): 
     if (m) return m[1]!;
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// The story overview (issue #385): authored through the gate, steering drafting
+// ---------------------------------------------------------------------------
+
+/**
+ * The accepted overview's contribution to a drafting instruction, or "" when none exists. One
+ * helper so scene drafting and chapter drafting steer from the same accepted facts — the UI
+ * says the overview steers drafting, and this is where that claim is made true.
+ */
+export function overviewSteer(story: StoryOverview | null | undefined): string {
+  if (!story) return "";
+  const lines = [
+    ...(story.logline !== undefined ? [`- logline: ${story.logline}`] : []),
+    ...(story.spine !== undefined ? [`- spine: ${story.spine}`] : []),
+    ...(story.acts ?? []).map(
+      (act, i) => `- act ${i + 1} · ${act.title}${act.summary !== undefined ? `: ${act.summary}` : ""}`,
+    ),
+    ...(story.targetLength !== undefined ? [`- target length: ${story.targetLength}`] : []),
+  ];
+  if (lines.length === 0) return "";
+  return `\n\nThe accepted story overview (v${story.version}) steers this draft — keep it consistent:\n${lines.join("\n")}`;
+}
+
+/**
+ * Stage the structured overview as a story-overview proposal (issue #385). Nothing is written
+ * live: the gate validates the shape before a proposal directory exists, review projects every
+ * field, and acceptance versions story.json with its history snapshot like any other accept.
+ */
+export async function proposeStoryOverview(
+  store: WorldStore,
+  gate: {
+    stage(input: {
+      kind: "story-overview";
+      summary: string;
+      source: string;
+      targets: Array<{ path: string; content: string }>;
+    }): Promise<{ id: string }>;
+  },
+  input: {
+    productionId: string;
+    source: string;
+    overview: Omit<StoryOverview, "version">;
+  },
+): Promise<{ proposalId: string; path: string }> {
+  const path = `productions/${input.productionId}/story.json`;
+  const live = store.getBundle().productions.find((p) => p.meta.id === input.productionId)?.story ?? null;
+  // The committer stamps the accepted version; the staged one carries the live version so the
+  // review reads honestly ("against vN") and the plan verifies cleanly.
+  const content =
+    JSON.stringify(StoryOverviewSchema.parse({ ...input.overview, version: live?.version ?? 1 }), null, 2) + "\n";
+  const proposal = await gate.stage({
+    kind: "story-overview",
+    summary: `Story overview · ${input.productionId}`,
+    source: input.source,
+    targets: [{ path, content }],
+  });
+  return { proposalId: proposal.id, path };
 }
 
 // ---------------------------------------------------------------------------
@@ -345,7 +406,7 @@ export async function draftSceneSkeleton(
   const scope = `drafts with: ${bundle.meta.name} · canon v${bundle.meta.canonRevision}${
     bundle.meta.tone ? ` · tone: ${bundle.meta.tone}` : ""
   } · ${characters} character${characters === 1 ? "" : "s"} available${guidance}`;
-  const instruction = `${scope}\n\nDraft scene ${number} in ${path} from this brief: "${input.brief}". Fill the shots array: each shot needs id ("sh_" + number), number, title, description with @mentions for every character and the location, camera, audio, durationSec. Write camera as a complete value: name a fixture the location or the brief already supports and what the camera faces, then the shot size and movement — "at the kettle beside the fridge, facing the hallway; medium close-up, slow push-in". Never invent a fixture, and never write a relative correction such as "closer". Propose an inherits block (location, timeOfDay, tone). Check canon for anything the brief touches and keep every line consistent with it. Do not touch any other file.`;
+  const instruction = `${scope}${overviewSteer(production?.story)}\n\nDraft scene ${number} in ${path} from this brief: "${input.brief}". Fill the shots array: each shot needs id ("sh_" + number), number, title, description with @mentions for every character and the location, camera, audio, durationSec. Write camera as a complete value: name a fixture the location or the brief already supports and what the camera faces, then the shot size and movement — "at the kettle beside the fridge, facing the hallway; medium close-up, slow push-in". Never invent a fixture, and never write a relative correction such as "closer". Propose an inherits block (location, timeOfDay, tone). Check canon for anything the brief touches and keep every line consistent with it. Do not touch any other file.`;
   return { proposalId: proposal.id, path, scope, instruction, skill };
 }
 
