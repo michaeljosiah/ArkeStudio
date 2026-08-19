@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { ConversationId, RunId } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
@@ -31,18 +31,13 @@ export interface ScratchOptions {
   appRoot: string;
   conversationId: ConversationId;
   runId: RunId;
-  /** Session configuration, including the leased query URL whose token dies with the run. */
-  config: Record<string, unknown>;
 }
 
 export async function createRunScratch(options: ScratchOptions): Promise<string> {
   const dir = runScratchDir(options.appRoot, options.conversationId, options.runId);
   await mkdir(toExtendedLength(dir), { recursive: true });
-  await writeFile(
-    toExtendedLength(join(dir, "opencode.json")),
-    `${JSON.stringify(options.config, null, 2)}\n`,
-    "utf8",
-  );
+  // Whatever the harness wants beside the run is written by the caller, which is the half that
+  // knows which harness is wired. This owns the directory and its lifetime (#70 §8.2).
   return dir;
 }
 

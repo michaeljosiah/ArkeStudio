@@ -27,7 +27,6 @@ import {
   type Cipher,
   type DatabaseCtor,
 } from "@arke-studio/coordinator";
-import { agentForPurpose, skillFor, ROSTER } from "@arke-studio/adapter-opencode";
 import {
   COMFYUI_RECIPES,
   comfyUiRecipeIdentity,
@@ -63,11 +62,14 @@ import {
   validateVoxaExecutable,
   type VoxaSelection,
 } from "./voxa-runtime.js";
-import type {
-  ThemePreference,
-  VoiceRuntimeFailure,
-  VoiceRuntimeStatus,
-  VoxaSettings,
+import {
+  agentForPurpose,
+  ROSTER,
+  skillFor,
+  type ThemePreference,
+  type VoiceRuntimeFailure,
+  type VoiceRuntimeStatus,
+  type VoxaSettings,
 } from "@arke-studio/contracts";
 
 /**
@@ -440,6 +442,12 @@ async function initialize(): Promise<{ port: number }> {
       ...(process.env["ARKE_OPENCODE2_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE2_CMD"] } : {}),
       ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode2", "opencode2.exe") } : {}),
     },
+    // Bring-your-own, opt-in: OpenCode ships in the installer and stays the default. Selecting
+    // Claude Code is what pays for its confinement probe, which spends a live turn.
+    claude: {
+      enabled: process.env["ARKE_HARNESS"] === "claude",
+      ...(process.env["ARKE_CLAUDE_CMD"] ? { configuredPath: process.env["ARKE_CLAUDE_CMD"] } : {}),
+    },
     onTrace: harnessTrace(appRoot),
   });
   const opencodeSupervisor = wiring.supervisor;
@@ -785,7 +793,7 @@ async function initialize(): Promise<{ port: number }> {
     // this build honestly has none; the dev coordinator points at the repo fixture instead, and
     // that is where the feature is exercised from source.
     sampleWorldPath: app.isPackaged ? join(process.resourcesPath, "sample-world") : null,
-    authoring: { buildConfig: wiring.buildConfig, agentForPurpose, roster: ROSTER, skillFor },
+    authoring: { agentForPurpose, roster: ROSTER, skillFor },
     ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
     // Stored LLM keys reach the harness as spawn environment (SPEC-005 D5) — under v2's
     // redirected profile this is the only credential path there is (issue 327 §2).

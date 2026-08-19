@@ -37,6 +37,15 @@ directories:
 files:
   - dist/**
   - package.json
+  # The Claude Agent SDK declares per-platform optionalDependencies that each carry a ~312MB
+  # `claude.exe` — the whole Claude Code runtime — under "© Anthropic PBC. All rights reserved".
+  # electron-builder copies production dependencies automatically, so the moment anything in the
+  # app depends on the SDK that binary is inside the installer, and we would be redistributing
+  # something that is not ours to redistribute. Claude Code is the bring-your-own harness: we
+  # drive the copy the USER installed, via pathToClaudeCodeExecutable. The SDK's own copy is
+  # never wanted here, on any platform — hence the wildcard rather than the win32 entry alone.
+  # verify-packaged-runtimes.mjs asserts the exclusion actually held.
+  - "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**"
 # Native modules cannot load from inside the asar archive (SPEC-003 §2.9).
 asarUnpack:
   - "**/*.node"

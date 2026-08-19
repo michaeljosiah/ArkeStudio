@@ -11,7 +11,10 @@ import {
   type SendMessageInput,
   type SendReceipt,
   type SessionRef,
+  type SessionConfigInput,
+  type SessionFile,
 } from "@arke-studio/contracts";
+import { buildSessionConfigV2 } from "./config.js";
 import { parseSse } from "../sse.js";
 import { OpenCodeV2Http, sameDirectory, wireDirectory } from "./http.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
@@ -175,6 +178,15 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   }
 
   // ---- sessions ------------------------------------------------------------
+
+  /**
+   * OpenCode reads Studio's roster, tool limits and MCP registration from a config file beside
+   * the work — so this is where the session's confinement actually reaches the harness (R-5).
+   */
+  sessionFiles(input: SessionConfigInput): ReadonlyArray<SessionFile> {
+    return [{ name: "opencode.json", contents: `${JSON.stringify(buildSessionConfigV2(input), null, 2)}
+` }];
+  }
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
     const location = input.cwd;

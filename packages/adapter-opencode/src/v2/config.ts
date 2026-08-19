@@ -1,5 +1,13 @@
-import { promptFor, ROSTER } from "../roster.js";
-import { skillForAgent, type SessionConfigInput } from "../config.js";
+import {
+  agentPromptFor,
+  confinementFor,
+  permits,
+  ROSTER,
+  skillForAgent,
+  ToolIntent,
+  type AgentConfinement,
+  type SessionConfigInput,
+} from "@arke-studio/contracts";
 
 /**
  * Session configuration in OpenCode v2's shapes (issue 327 §7). The POLICY is the v1
@@ -32,40 +40,44 @@ const CONFINEMENT_RULES: readonly PermissionRule[] = [
   { action: "external_directory", resource: "~/AppData/Local/Temp/opencode/*", effect: "allow" },
 ];
 
-/** The working set an authoring agent needs inside its proposal directory (R-17). */
-const AUTHORING_RULES: readonly PermissionRule[] = [
-  { action: "read", resource: "*", effect: "allow" },
-  { action: "edit", resource: "*", effect: "allow" }, // v2's `edit` covers edit, write, and patch
-  { action: "glob", resource: "*", effect: "allow" },
-  { action: "grep", resource: "*", effect: "allow" },
-  { action: "arke-world_*", resource: "*", effect: "allow" },
-  { action: "skill", resource: "*", effect: "allow" },
-  // Shell and network stay off — risk reduction, not a boundary (R-10, D10); the accept
-  // gate's detection remains the layer that holds.
-  { action: "shell", resource: "*", effect: "deny" },
-  { action: "webfetch", resource: "*", effect: "deny" },
-  { action: "websearch", resource: "*", effect: "deny" },
-  ...CONFINEMENT_RULES,
-];
+/**
+ * v2's vocabulary for each intent. The policy is {@link confinementFor}'s; this only says how v2
+ * spells it. `list` and `todo` have no entry because v2's rules never carried one — they fall to
+ * the session floor, as they always have, and inventing a rule here would be a change of
+ * behaviour wearing a refactor's clothes.
+ */
+const V2_ACTIONS: Partial<Record<ToolIntent, readonly string[]>> = {
+  read: ["read"],
+  edit: ["edit"], // v2's `edit` covers edit, write, and patch
+  search: ["glob", "grep"],
+  "world-query": ["arke-world_*"],
+  skill: ["skill"],
+  delegate: ["subagent"],
+};
+
+/** Never an intent — risk reduction, not a boundary (R-10, D10); the accept gate still holds. */
+const V2_NEVER = ["shell", "webfetch", "websearch"] as const;
 
 /**
- * An agent that answers rather than authors writes nothing and delegates to nobody
- * (#70 §8.1): its propositions become proposals at wrap-up, and only the accept gate touches
- * the world. `subagent` is denied because a child session escapes the session's agent
- * pinning, and was observed (on v1) to burn a live turn's budget producing nothing.
+ * One confinement, in v2's grammar — and the grammar IS the policy here, because rules are an
+ * ordered array where the last match wins. Allows first, then the refusals, then the confinement
+ * block last so its blanket external-directory deny lands after OpenCode's managed-directory
+ * allows. Reordering this is a behaviour change, not a tidy-up.
  */
-const READ_ONLY_RULES: readonly PermissionRule[] = [
-  { action: "read", resource: "*", effect: "allow" },
-  { action: "glob", resource: "*", effect: "allow" },
-  { action: "grep", resource: "*", effect: "allow" },
-  { action: "arke-world_*", resource: "*", effect: "allow" },
-  { action: "edit", resource: "*", effect: "deny" },
-  { action: "shell", resource: "*", effect: "deny" },
-  { action: "webfetch", resource: "*", effect: "deny" },
-  { action: "websearch", resource: "*", effect: "deny" },
-  { action: "subagent", resource: "*", effect: "deny" },
-  ...CONFINEMENT_RULES,
-];
+function renderV2(confinement: AgentConfinement): PermissionRule[] {
+  const allows: PermissionRule[] = [];
+  const denies: PermissionRule[] = [];
+  for (const intent of ToolIntent.options) {
+    const actions = V2_ACTIONS[intent];
+    if (!actions) continue;
+    const allowed = permits(confinement, intent);
+    for (const action of actions) {
+      (allowed ? allows : denies).push({ action, resource: "*", effect: allowed ? "allow" : "deny" });
+    }
+  }
+  for (const action of V2_NEVER) denies.push({ action, resource: "*", effect: "deny" });
+  return [...allows, ...denies, ...CONFINEMENT_RULES];
+}
 
 export interface SessionConfigV2Input extends SessionConfigInput {
   /**
@@ -85,12 +97,12 @@ export function buildSessionConfigV2(input: SessionConfigV2Input): Record<string
     const skill = skillForAgent(member.name, input.skillFamily);
     agents[member.name] = {
       description: member.description,
-      system: promptFor({
+      system: agentPromptFor({
         ...member,
         ...(override?.brief !== undefined ? { brief: override.brief } : {}),
         ...(skill !== null ? { skill } : {}),
       }),
-      permissions: member.readOnly ? [...READ_ONLY_RULES] : [...AUTHORING_RULES],
+      permissions: renderV2(confinementFor(member)),
       // Config files keep the string form; the API's ModelRef object is the adapter's business.
       ...(override?.model ?? input.model ? { model: override?.model ?? input.model } : {}),
     };

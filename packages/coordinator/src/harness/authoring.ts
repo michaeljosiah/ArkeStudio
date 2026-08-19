@@ -1,6 +1,6 @@
 import { join } from "node:path";
+import { writeSessionFiles, type SessionInput } from "./session-files.js";
 import type { DomainEvent, HarnessAdapter } from "@arke-studio/contracts";
-import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable } from "../world/paths.js";
 import type { ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "../world/store.js";
@@ -14,8 +14,8 @@ import { sessionTokenBudget } from "./token-budget.js";
  */
 
 export interface AuthoringOptions {
-  /** Builds the opencode.json object written into the session's working directory. */
-  buildConfig: (input: { worldQueryUrl?: string }) => Record<string, unknown>;
+  /** Studio's session input, enriched with live Settings; the adapter decides what lands on disk. */
+  sessionInput: SessionInput;
   agentForPurpose: (purpose: "authoring" | "drafting" | "extraction" | "ask") => string;
   wallClockMs?: number;
   tokenBudget?: number;
@@ -140,10 +140,7 @@ export class AuthoringService {
     if (sessionId === undefined) {
       // Studio writes the session's configuration — roster, tool denials, the world-query MCP
       // registration — into the working directory (R-5). Never a credential (R-6).
-      await atomicWriteFile(
-        join(proposalDir, "opencode.json"),
-        JSON.stringify(this.opts.buildConfig(worldQueryUrl ? { worldQueryUrl } : {}), null, 2) + "\n",
-      );
+      await writeSessionFiles(this.adapter, proposalDir, this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}));
       try {
         const session = await this.adapter.createSession({
           purpose: input.purpose,

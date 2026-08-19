@@ -1,4 +1,5 @@
 import { tmpdir } from "node:os";
+import { writeSessionFiles, type SessionInput } from "./harness/session-files.js";
 import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { basename, extname, join, resolve, sep } from "node:path";
@@ -342,12 +343,6 @@ export interface CoordinatorOptions {
   appRoot?: string;
   /** Session-config builders from the adapter package, injected to keep dependencies one-way. */
   authoring?: {
-    buildConfig: (input: {
-      worldQueryUrl?: string;
-      agents?: Record<string, { model?: string; brief?: string }>;
-      /** SPEC-019 R-16: selects the authoring skill the session's agents run with. */
-      skillFamily?: string;
-    }) => Record<string, unknown>;
     agentForPurpose: (purpose: "authoring" | "drafting" | "extraction" | "ask" | "art-prompt") => string;
     /**
      * The shipped roster, injected like everything else from the adapter package. The
@@ -386,7 +381,7 @@ export interface CoordinatorOptions {
    * into app state so Settings can name it (issue 327 §9, SPEC-005 R-1).
    */
   harnessInfo?: {
-    generation: "v2" | "v1";
+    generation: "v2" | "v1" | "claude";
     source: "configured" | "path" | "bundled";
     version: string | null;
     beta: boolean;
@@ -553,7 +548,8 @@ export class Coordinator {
   /** How many staged clips a dialog may leave behind before the oldest is dropped. */
   private static readonly MAX_STAGED_CLIPS = 8;
   /** Session config builder with the user's agent settings folded in. */
-  private readonly buildConfig: ((input: { worldQueryUrl?: string }) => Record<string, unknown>) | undefined;
+  /** Session input plus whatever Settings currently says — read per call, never captured. */
+  private readonly sessionInput: SessionInput;
 
   /**
    * Put a clip somewhere the clone can read it, and say what is wrong with it if anything is.
@@ -806,27 +802,23 @@ export class Coordinator {
     // Every session config goes through here, so a per-agent override reaches genesis,
     // authoring, extraction and ask alike — or none of them. Read at build time rather than
     // captured, so changing a model in Settings applies to the next session, not the next run.
-    const configure = opts.authoring?.buildConfig;
-    this.buildConfig = configure
-      ? (input) =>
-          configure({
-            ...input,
-            ...(this.agentOverrides ? { agents: this.agentOverrides } : {}),
-            ...(this.skillFamily !== undefined ? { skillFamily: this.skillFamily } : {}),
-          })
-      : undefined;
+    this.sessionInput = (input) => ({
+      ...input,
+      ...(this.agentOverrides ? { agents: this.agentOverrides } : {}),
+      ...(this.skillFamily !== undefined ? { skillFamily: this.skillFamily } : {}),
+    });
     this.grants = opts.appRoot ? new GrantStore(opts.appRoot) : null;
     this.authoring =
       opts.adapter && opts.authoring
         ? new AuthoringService(opts.adapter, (event) => this.emit(event), {
-            buildConfig: this.buildConfig!,
+            sessionInput: this.sessionInput,
             agentForPurpose: opts.authoring.agentForPurpose,
           })
         : null;
     this.genesis =
       opts.adapter && opts.authoring
         ? new GenesisService(opts.adapter, (event) => this.emit(event), {
-            buildConfig: this.buildConfig!,
+            sessionInput: this.sessionInput,
           })
         : null;
     this.setup =
@@ -864,7 +856,7 @@ export class Coordinator {
         : null;
     this.askService = opts.authoring
       ? new AskService(opts.adapter, {
-          buildConfig: this.buildConfig!,
+          sessionInput: this.sessionInput,
           scratchRoot: opts.appRoot ? `${opts.appRoot}/.ask` : `${opts.changeLogPath}.ask`,
         })
       : null;
@@ -3941,12 +3933,12 @@ export class Coordinator {
         const model =
           this.opts.manifest?.models.find((m) => m.id === msg.model && m.provider === msg.provider) ?? null;
         if (!model) return answer(null, "that model is no longer offered");
-        if (!this.opts.adapter?.readiness().ready || !this.buildConfig) {
+        if (!this.opts.adapter?.readiness().ready) {
           return answer(null, "the writing harness is not running");
         }
         const director = makeArtDirector(
           this.opts.adapter,
-          this.buildConfig,
+          this.sessionInput,
           this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
           { agent: "prompt-enhancer", maxChars: model.limits.maxPromptChars ?? 4000 },
         );
@@ -3973,12 +3965,12 @@ export class Coordinator {
           });
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
-        if (!this.opts.adapter?.readiness().ready || !this.buildConfig) {
+        if (!this.opts.adapter?.readiness().ready) {
           return answer(null, "the writing harness is not running");
         }
         const lyricist = makeArtDirector(
           this.opts.adapter,
-          this.buildConfig,
+          this.sessionInput,
           this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
           { agent: "lyricist", answerKey: "lyrics", maxChars: LYRICS_MAX_CHARS },
         );
@@ -4390,7 +4382,7 @@ export class Coordinator {
           if (!extractor && this.opts.adapter?.readiness().ready && this.opts.authoring) {
             extractor = makeAdapterExtractor(
               this.opts.adapter,
-              this.buildConfig!,
+              this.sessionInput,
               this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`,
             );
           }
@@ -4842,10 +4834,10 @@ export class Coordinator {
         // to it is a decision about this picture, and rewriting it would discard that decision.
         const authored = "prompt" in msg ? msg.prompt?.trim() : undefined;
         let prompt: string | null = null;
-        if (authored === undefined && this.opts.adapter?.readiness().ready && this.buildConfig) {
+        if (authored === undefined && this.opts.adapter?.readiness().ready) {
           const director = makeArtDirector(
             this.opts.adapter,
-            this.buildConfig,
+            this.sessionInput,
             this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
           );
           // The most-cited canon first: what the world has settled about itself is what an
@@ -6564,12 +6556,10 @@ export class Coordinator {
         const url = this.worldQuery.leasedUrl(lease.token) ?? undefined;
         // Without a configured app root — a dev or test coordinator — the OS temp directory
         // still satisfies what §8.2 actually requires: somewhere outside the world.
-        const cwd = await createRunScratch({
-          appRoot: this.opts.appRoot ?? tmpdir(),
-          conversationId,
-          runId,
-          config: this.buildConfig ? this.buildConfig(url ? { worldQueryUrl: url } : {}) : {},
-        });
+        const cwd = await createRunScratch({ appRoot: this.opts.appRoot ?? tmpdir(), conversationId, runId });
+        if (this.opts.adapter) {
+          await writeSessionFiles(this.opts.adapter, cwd, this.sessionInput(url ? { worldQueryUrl: url } : {}));
+        }
         return { cwd, leaseToken: lease.token };
       },
       release: async ({ conversationId, runId }) => {

@@ -342,14 +342,18 @@ export const ClientStateSchema = z
           )
           .default([]),
         /**
-         * Which OpenCode generation is wired, from launch-time discovery (issue 327 §9):
-         * name, source, version, and — when a v2 binary was found but failed the build
-         * gate — the rejected version, so Settings can say "found but too old" instead of
-         * "not installed" (SPEC-005 R-1). Null until a host supplies it.
+         * Which harness is wired, from launch-time discovery (issue 327 §9): name, source,
+         * version, and — when a v2 binary was found but failed the build gate — the rejected
+         * version, so Settings can say "found but too old" instead of "not installed"
+         * (SPEC-005 R-1). Null until a host supplies it.
+         *
+         * `claude` is the bring-your-own lane: the user's own Claude Code, opted into rather
+         * than discovered, and never a fallback. It carries `beta: false` and no rejected
+         * version, both of which are v2-generation concepts.
          */
         harnessInfo: z
           .object({
-            generation: z.enum(["v2", "v1"]),
+            generation: z.enum(["v2", "v1", "claude"]),
             source: z.enum(["configured", "path", "bundled"]),
             version: z.string().nullable(),
             beta: z.boolean(),

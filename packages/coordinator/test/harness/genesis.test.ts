@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { buildSessionConfig } from "@arke-studio/adapter-opencode";
 import type { DomainEvent, HarnessAdapter, HarnessEvent } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { attachToSandbox } from "../../src/artifacts/genesis-attachments.js";
@@ -11,6 +10,10 @@ import { sessionTokenBudget } from "../../src/harness/token-budget.js";
 
 /** An adapter that behaves like a world-author: writes draft.json into its cwd, then replies. */
 function draftingAdapter(): HarnessAdapter & { created: string[] } {
+  // Declares what the live OpenCode adapters declare: the confinement has to reach the sandbox
+  // through the adapter now, and a stub that offered nothing would let this pass by absence.
+  const sessionFiles = () => [{ name: "opencode.json", contents: `${JSON.stringify({ agent: {} }, null, 2)}
+` }];
   const subscribers = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null }>();
   const push = (event: HarnessEvent) => {
     for (const sub of subscribers) {
@@ -24,6 +27,7 @@ function draftingAdapter(): HarnessAdapter & { created: string[] } {
   const adapter: HarnessAdapter & { created: string[] } = {
     created: [] as string[],
     id: "mock",
+    sessionFiles,
     capabilities: () => new Set([]),
     readiness: () => ({ ready: true }),
     async createSession(input) {
@@ -202,7 +206,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     const events: DomainEvent[] = [];
     const adapter = draftingAdapter();
     const genesis = new GenesisService(adapter, (e) => events.push(e), {
-      buildConfig: () => buildSessionConfig({}),
+      sessionInput: (input) => input,
     });
 
     await genesis.run(dir, "gen-abc", "A coastal city where a drowned god still sings.");
@@ -292,7 +296,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
       },
     };
     const genesis = new GenesisService(adapter, (e) => events.push(e), {
-      buildConfig: () => buildSessionConfig({}),
+      sessionInput: (input) => input,
     });
     await genesis.run(dir, "gen-prog", "A coastal city.");
     const labels = events.filter((e) => e.type === "genesis.progress").map((e) => (e.type === "genesis.progress" ? e.label : ""));
@@ -308,7 +312,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     const events: DomainEvent[] = [];
     const adapter = talkingAdapter();
     const genesis = new GenesisService(adapter, (e) => events.push(e), {
-      buildConfig: () => buildSessionConfig({}),
+      sessionInput: (input) => input,
     });
 
     await genesis.run(dir, "gen-talk", "A lighthouse that only appears in fog.");
@@ -330,7 +334,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     // once. Named every turn it reads as an instruction to keep re-reading it.
     const dir = await tempDir("arke-genesis-attach-");
     const adapter = talkingAdapter();
-    const genesis = new GenesisService(adapter, () => {}, { buildConfig: () => buildSessionConfig({}) });
+    const genesis = new GenesisService(adapter, () => {}, { sessionInput: (input) => input });
     await attachToSandbox(dir, await (async () => {
       const src = join(await tempDir("arke-genesis-src-"), "Series Bible.md");
       await writeFile(src, "# The Undersong\n");
@@ -352,7 +356,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     const dir = await tempDir("arke-genesis-mute-");
     const events: DomainEvent[] = [];
     const genesis = new GenesisService(muteAdapter(), (e) => events.push(e), {
-      buildConfig: () => buildSessionConfig({}),
+      sessionInput: (input) => input,
       wallClockMs: 120,
     });
 
@@ -368,7 +372,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     const dir = await tempDir("arke-genesis-empty-");
     const events: DomainEvent[] = [];
     const genesis = new GenesisService(talkingAdapter("{}"), (e) => events.push(e), {
-      buildConfig: () => buildSessionConfig({}),
+      sessionInput: (input) => input,
     });
 
     await genesis.run(dir, "gen-empty", "Tell me about fog.");

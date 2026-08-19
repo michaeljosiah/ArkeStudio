@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { writeSessionFiles, type SessionInput } from "./session-files.js";
 import { basename, join } from "node:path";
 import {
   GenesisDraftSchema,
@@ -20,7 +21,8 @@ import { THINKING_LABEL, WRITING_LABEL, workingLabel } from "../world-chat/proje
  */
 
 export interface GenesisOptions {
-  buildConfig: (input: { worldQueryUrl?: string }) => Record<string, unknown>;
+  /** Studio's session input, enriched with live Settings; the adapter decides what lands on disk. */
+  sessionInput: SessionInput;
   wallClockMs?: number;
   tokenBudget?: number;
 }
@@ -146,7 +148,7 @@ export class GenesisService {
     const firstTurn = sessionId === undefined;
     if (sessionId === undefined) {
       // Same confinement config as authoring sessions — no world, so no world-query MCP.
-      await atomicWriteFile(join(dir, "opencode.json"), JSON.stringify(this.opts.buildConfig({}), null, 2) + "\n");
+      await writeSessionFiles(this.adapter, dir, this.opts.sessionInput({}));
       try {
         const session = await this.adapter.createSession({ purpose: "drafting", cwd: dir, agent: "world-author" });
         sessionId = session.sessionId;

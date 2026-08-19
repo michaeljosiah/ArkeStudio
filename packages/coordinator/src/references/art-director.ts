@@ -1,9 +1,9 @@
 import { mkdir } from "node:fs/promises";
+import { writeSessionFiles, type SessionInput } from "../harness/session-files.js";
 import { join } from "node:path";
 import { z } from "zod";
 import type { HarnessAdapter, WorldMeta } from "@arke-studio/contracts";
 import { extractJson } from "../canon/ask.js";
-import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 
 /**
@@ -41,7 +41,7 @@ export function worldBrief(meta: WorldMeta, canonLines: readonly string[]): stri
 
 export function makeArtDirector(
   adapter: HarnessAdapter,
-  buildConfig: (input: { worldQueryUrl?: string }) => Record<string, unknown>,
+  sessionInput: SessionInput,
   scratchRoot: string,
   options: {
     /** Which roster agent answers. The default is the key-art writer this file was born for. */
@@ -63,7 +63,7 @@ export function makeArtDirector(
   return async (brief) => {
     const sandbox = join(scratchRoot, `art-${Date.now().toString(36)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
-    await atomicWriteFile(join(sandbox, "opencode.json"), JSON.stringify(buildConfig({}), null, 2) + "\n");
+    await writeSessionFiles(adapter, sandbox, sessionInput({}));
     const session = await adapter.createSession({ purpose: "art-prompt", cwd: sandbox, agent: options.agent ?? "art-director" });
 
     let finalText = "";

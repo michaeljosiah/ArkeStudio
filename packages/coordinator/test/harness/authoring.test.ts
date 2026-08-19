@@ -2,8 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { MockHarnessAdapter, agentForPurpose, buildSessionConfig } from "@arke-studio/adapter-opencode";
-import type { DomainEvent, HarnessAdapter, HarnessEvent } from "@arke-studio/contracts";
+import { MockHarnessAdapter } from "@arke-studio/adapter-opencode";
+import {
+  agentForPurpose,
+  type DomainEvent,
+  type HarnessAdapter,
+  type HarnessEvent,
+} from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { AuthoringService } from "../../src/harness/authoring.js";
 import { GrantStore } from "../../src/harness/grants.js";
@@ -31,7 +36,7 @@ async function setup() {
 
 function service(adapter: HarnessAdapter, events: DomainEvent[], opts: { wallClockMs?: number; tokenBudget?: number } = {}) {
   return new AuthoringService(adapter, (e) => events.push(e), {
-    buildConfig: buildSessionConfig,
+    sessionInput: (input) => input,
     agentForPurpose,
     ...opts,
   });

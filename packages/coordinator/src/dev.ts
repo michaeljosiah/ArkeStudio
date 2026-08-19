@@ -1,7 +1,7 @@
 import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentForPurpose, skillFor, ROSTER } from "@arke-studio/adapter-opencode";
+import { agentForPurpose, skillFor, ROSTER } from "@arke-studio/contracts";
 import { createProviderClients, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { KOKORO_PRESETS, localCandidates } from "@arke-studio/voice";
 import { ChildLedger } from "./child-ledger.js";
@@ -73,6 +73,10 @@ const wiring = await assembleHarness({
   appRoot: devRoot,
   deps: { ledger },
   preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
+  claude: {
+    enabled: process.env["ARKE_HARNESS"] === "claude",
+    ...(process.env["ARKE_CLAUDE_CMD"] ? { configuredPath: process.env["ARKE_CLAUDE_CMD"] } : {}),
+  },
   onTrace: harnessTrace(devRoot),
 });
 const opencodeSupervisor = wiring.supervisor;
@@ -123,7 +127,7 @@ const coordinator = new Coordinator({
   // Settings · Sample world is a working surface here and not a dead one (SPEC-016 R-6).
   sampleWorldPath: join(fixturesRoot, "worlds", "the-undersong"),
   setup: nodeSetupDeps(),
-  authoring: { buildConfig: wiring.buildConfig, agentForPurpose, roster: ROSTER, skillFor },
+  authoring: { agentForPurpose, roster: ROSTER, skillFor },
   ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
   relaunchHarness: wiring.relaunchHarness,
   // The dev coordinator carries the app's own preset speakers so the voice picker has a

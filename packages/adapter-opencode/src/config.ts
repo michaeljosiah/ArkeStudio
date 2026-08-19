@@ -1,5 +1,13 @@
-import { promptFor, ROSTER } from "./roster.js";
-import { skillFor, type Skill } from "./skills.js";
+import {
+  agentPromptFor,
+  confinementFor,
+  permits,
+  ROSTER,
+  skillForAgent,
+  ToolIntent,
+  type AgentConfinement,
+  type SessionConfigInput,
+} from "@arke-studio/contracts";
 
 /**
  * Session configuration written by Studio (SPEC-005 R-5, R-6, R-10, D5).
@@ -10,83 +18,55 @@ import { skillFor, type Skill } from "./skills.js";
  * by environment variable at spawn (D5), and this module builds that env map.
  */
 
-/** Tools denied in authoring sessions — risk reduction, not a boundary (R-10, D10). */
-const DENIED_TOOLS: Record<string, boolean> = {
-  bash: false,
-  webfetch: false,
-  websearch: false,
-};
-
 /**
- * Additionally denied to an agent that answers rather than authors (#70 §8.1).
+ * v1's vocabulary for each intent (SPEC-005 R-10, R-17). The policy is
+ * {@link confinementFor}'s; this table only says how v1 spells it.
  *
- * The authoring agents edit inside a proposal directory, which is the whole point of giving them
- * one. World Chat has no proposal directory and writes nothing: its propositions become proposals
- * at wrap-up, and only the accept gate touches the world. An agent that could edit would have a
- * path into the world that bypasses the gate entirely — so the file tools are off, not merely
- * unused.
+ * `skill` has no entry because v1's config has no permission name for one — a skill reaches
+ * the agent through its prompt, not through a tool it asks for.
  */
-const READ_ONLY_TOOLS: Record<string, boolean> = {
-  ...DENIED_TOOLS,
-  edit: false,
-  write: false,
-  patch: false,
-  // No delegating either. A read-only agent answers in its own turn; handing the question to a
-  // subagent was observed to spend thirty seconds of a live turn's budget producing nothing the
-  // validator could accept, and a child session escapes the per-prompt agent pinning below.
-  task: false,
+const V1_TOOLS: Partial<Record<ToolIntent, readonly string[]>> = {
+  read: ["read"],
+  edit: ["edit", "write", "patch"],
+  search: ["glob", "grep"],
+  list: ["list"],
+  todo: ["todowrite", "todoread"],
+  "world-query": ["arke-world*", "arke-world_*"],
+  delegate: ["task"],
 };
 
-const READ_ONLY_PERMISSION: Record<string, string> = {
-  read: "allow",
-  glob: "allow",
-  grep: "allow",
-  list: "allow",
-  todowrite: "allow",
-  todoread: "allow",
-  "arke-world*": "allow",
-  "arke-world_*": "allow",
-  edit: "deny",
-  write: "deny",
-  patch: "deny",
-  task: "deny",
-  bash: "deny",
-  webfetch: "deny",
-  websearch: "deny",
-};
-
-export interface SessionConfigInput {
-  /** The world-query MCP server URL (loopback), when a world is open. */
-  worldQueryUrl?: string;
-  /** Concrete model for authoring, e.g. "anthropic/claude-sonnet-5" or "ollama/llama3.3". */
-  model?: string;
-  /**
-   * Per-agent overrides from Settings. A brief replaces what the agent is for; it can never
-   * replace the confinement preamble or the tool denials below — those are what the accept
-   * gate assumes, and an agent talked out of them fails in ways that look like our bugs.
-   */
-  agents?: Record<string, { model?: string; brief?: string }>;
-  /**
-   * The target model family for this session, which selects the authoring skill (SPEC-019 R-16).
-   * Absent, or a family with no skill, means the agents draft under general guidance — a stated
-   * fallback rather than a failure (R-20), stated by the caller that knows it happened.
-   */
-  skillFamily?: string;
-}
+/** Never an intent, never available: risk reduction, not a boundary (R-10, D10). */
+const V1_NEVER = ["bash", "webfetch", "websearch"] as const;
 
 /**
- * Which roster agents take which skill. An agent that answers rather than authors takes none:
- * a skill shapes what is drafted, and there is nothing drafted here to shape (R-17).
+ * One confinement, rendered into v1's two parallel surfaces: `tools` decides what exists at all,
+ * `permission` decides what it may do. A wildcard allow is NOT used — it was observed to override
+ * the specific denies. Anything unlisted falls to the harness's ask default, which surfaces
+ * through the permission backstop (R-16) and stays rare (D9).
  */
-const SKILLED_AGENTS: Record<string, Parameters<typeof skillFor>[0]> = {
-  "scene-writer": "scene-drafting",
-  "art-director": "storyboard",
-};
-
-/** The skill a given agent runs with in this session, or null. Exported for the record (R-19). */
-export function skillForAgent(agentName: string, family: string | undefined): Skill | null {
-  const purpose = SKILLED_AGENTS[agentName];
-  return purpose === undefined ? null : skillFor(purpose, family);
+function renderV1(confinement: AgentConfinement): {
+  tools: Record<string, boolean>;
+  permission: Record<string, string>;
+} {
+  const tools: Record<string, boolean> = {};
+  const permission: Record<string, string> = {};
+  for (const name of V1_NEVER) {
+    tools[name] = false;
+    permission[name] = "deny";
+  }
+  for (const intent of ToolIntent.options) {
+    const names = V1_TOOLS[intent];
+    if (!names) continue;
+    const allowed = permits(confinement, intent);
+    for (const name of names) {
+      permission[name] = allowed ? "allow" : "deny";
+      // Custom agents default every tool to "ask", which stalls a headless session on an
+      // invisible prompt (verified against OpenCode 1.18.10). A refused tool is taken away
+      // rather than left to prompt for something that will never be granted.
+      if (!allowed) tools[name] = false;
+    }
+  }
+  return { tools, permission };
 }
 
 /** The opencode.json object written into a session's working directory. */
@@ -100,38 +80,13 @@ export function buildSessionConfig(input: SessionConfigInput): Record<string, un
     const skill = skillForAgent(member.name, input.skillFamily);
     agent[member.name] = {
       description: member.description,
-      prompt: promptFor({
+      prompt: agentPromptFor({
         ...member,
         ...(override?.brief !== undefined ? { brief: override.brief } : {}),
         ...(skill !== null ? { skill } : {}),
       }),
-      // Deny shell/network tools per agent; documented as risk reduction (R-10). The harness
-      // honouring its own config is assumed; detection at accept is the layer that holds.
-      tools: member.readOnly ? { ...READ_ONLY_TOOLS } : { ...DENIED_TOOLS },
-      // Custom agents default every tool to "ask", which stalls a headless session on an
-      // invisible prompt (verified against OpenCode 1.18.10). Editing inside the proposal is
-      // exactly what the user asked for (R-17), so the file/editing toolset is allowed
-      // explicitly and shell/network are denied. A wildcard allow is NOT used — it was
-      // observed to override the specific denies. Unlisted tools fall to the harness's ask
-      // default, which surfaces through the permission backstop (R-16) and stays rare (D9).
-      permission: member.readOnly
-        ? { ...READ_ONLY_PERMISSION }
-        : {
-            edit: "allow",
-            write: "allow",
-            read: "allow",
-            glob: "allow",
-            grep: "allow",
-            list: "allow",
-            patch: "allow",
-            todowrite: "allow",
-            todoread: "allow",
-            "arke-world*": "allow",
-            "arke-world_*": "allow",
-            bash: "deny",
-            webfetch: "deny",
-            websearch: "deny",
-          },
+      // The confinement is decided once, in contracts, and only spelled here (R-10, R-17).
+      ...renderV1(confinementFor(member)),
       // The agent's own choice wins over the session-wide one; absent, OpenCode keeps using
       // whatever it is configured with, which is the only safe default — pinning a model the
       // user's OpenCode has no auth for would break every session.

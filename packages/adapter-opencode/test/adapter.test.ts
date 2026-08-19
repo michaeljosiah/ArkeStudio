@@ -3,12 +3,18 @@ import { after, before, describe, it, type TestContext } from "node:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CHARACTER_ROLE_MAX, worldChatResultShapeGuide, type HarnessEvent } from "@arke-studio/contracts";
+import {
+  CHARACTER_ROLE_MAX,
+  skillFor,
+  skillForAgent,
+  SKILLS,
+  worldChatResultShapeGuide,
+  type HarnessEvent,
+} from "@arke-studio/contracts";
 import { OpenCodeAdapter } from "../src/opencode-adapter.js";
 import { probeCapabilities } from "../src/capabilities.js";
 import { createNormalizeState, normalizeOpenCode, toolSummary } from "../src/normalize.js";
-import { buildSessionConfig, skillForAgent } from "../src/config.js";
-import { skillFor, SKILLS } from "../src/skills.js";
+import { buildSessionConfig } from "../src/config.js";
 import { discoverOpenCode } from "../src/discovery.js";
 import { StubOpenCode } from "./helpers/stub-server.js";
 

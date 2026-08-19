@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildSessionConfig } from "@arke-studio/adapter-opencode";
 import type { HarnessAdapter, HarnessEvent } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { AskService, excerptAppears, extractJson, verifyClaims } from "../../src/canon/ask.js";
@@ -71,7 +70,7 @@ async function askWith(replies: string[], question: string) {
   const store = await WorldStore.open(await makeTempWorld(), { clock: CLOCK });
   const adapter = scriptedAdapter(replies);
   const service = new AskService(adapter, {
-    buildConfig: buildSessionConfig,
+    sessionInput: (input) => input,
     scratchRoot: await tempDir("arke-ask-"),
     wallClockMs: 10_000,
   });
@@ -203,7 +202,7 @@ describe("the grounded pipeline, adversarially (§3.2)", () => {
   it("degrades honestly when the harness is absent but candidates exist (R-4 of SPEC-005)", async () => {
     const store = await WorldStore.open(await makeTempWorld(), { clock: CLOCK });
     const service = new AskService(null, {
-      buildConfig: buildSessionConfig,
+      sessionInput: (input) => input,
       scratchRoot: await tempDir("arke-ask-"),
     });
     const result = await service.ask(store, "what does tide calling cost?");
