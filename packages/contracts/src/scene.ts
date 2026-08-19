@@ -92,7 +92,18 @@ export type SceneStoryboard = z.infer<typeof SceneStoryboardSchema>;
 export const SceneSchema = z
   .object({
     id: SceneIdSchema,
+    /**
+     * The scene's stable birth number — identity, not position (issue #387). It names the scene
+     * ("Scene 4"), keys its board image, and joins cut entries to lanes; it is never rewritten,
+     * so nothing that embeds it ever moves. Display and cut sequence come from `order`.
+     */
     number: z.number().int().min(1),
+    /**
+     * Explicit display order (issue #387; SPEC-012 D3's rule applied to scenes): mutable,
+     * rewritten by reorder alone. Read through `sceneOrderValue` — absent falls back to the
+     * birth number, so legacy scenes sort exactly as they always did.
+     */
+    order: z.number().int().min(1).optional(),
     slug: SlugSchema,
     title: z.string().min(1),
     /** Scene lifecycle vocabulary is owned by SPEC-012; the shape validates, the value displays. */
@@ -133,6 +144,22 @@ export const SceneSchema = z
   })
   .strict();
 export type Scene = z.infer<typeof SceneSchema>;
+
+/**
+ * The one place a scene's effective order is read (issue #387): explicit `order` wins, the
+ * stable birth `number` is the legacy fallback, and ties break by id so the sort is total and
+ * deterministic everywhere it runs.
+ */
+export function sceneOrderValue(scene: Pick<Scene, "number" | "order">): number {
+  return scene.order ?? scene.number;
+}
+
+/** Scenes in display/cut order — never by filename, never by mutating the input. */
+export function sortScenes<T extends Pick<Scene, "number" | "order" | "id">>(scenes: readonly T[]): T[] {
+  return [...scenes].sort(
+    (a, b) => sceneOrderValue(a) - sceneOrderValue(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Shot selection — productions/<p>/selections.json (§2.3.7). Operational, mutable.

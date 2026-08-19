@@ -82,6 +82,7 @@ import {
   productionCreatedBy,
   proposeStoryOverview,
   reorderChapters,
+  reorderScenes,
   saveChapter,
   setPromptOverride,
 } from "./productions/ops.js";
@@ -3423,6 +3424,13 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "reorder-scenes": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await reorderScenes(store, msg.productionId, msg.orderedIds).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "set-prompt-override": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -3441,9 +3449,9 @@ export class Coordinator {
         if (!store) return;
         const bundle = store.getBundle();
         const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
-        const scene = production?.scenes.find(
-          (s) => `${String(s.number).padStart(2, "0")}-${s.slug}` === msg.sceneFile,
-        );
+        // The stem captured at scan is the address (issue #387) — never a reconstruction, so a
+        // file named off-pattern stays reachable.
+        const scene = production?.scenes.find((s) => production.sceneFiles[s.id] === msg.sceneFile);
         if (!production || !scene) return;
         try {
           const png = await compileBoard(store, production, scene);
@@ -3470,9 +3478,7 @@ export class Coordinator {
         }
         const bundle = store.getBundle();
         const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
-        const scene = production?.scenes.find(
-          (s) => `${String(s.number).padStart(2, "0")}-${s.slug}` === msg.sceneFile,
-        );
+        const scene = production?.scenes.find((s) => production.sceneFiles[s.id] === msg.sceneFile);
         const model = this.opts.manifest.models.find((m) => m.id === msg.modelId);
         if (!production || !scene || !model) {
           this.rejectEnqueue(msg.requestId, msg.kind, "The scene or selected model is no longer available.");

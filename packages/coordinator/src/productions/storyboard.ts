@@ -40,8 +40,11 @@ async function readSceneById(
 ): Promise<{ scene: Scene; raw: string; path: string } | null> {
   const production = store.getBundle().productions.find((entry) => entry.meta.id === productionId);
   const known = production?.scenes.find((entry) => entry.id === sceneId);
-  if (!known) return null;
-  const path = `productions/${productionId}/scenes/${String(known.number).padStart(2, "0")}-${known.slug}.json`;
+  // The stem captured at scan is the address (issue #387) — a reconstruction would go blind the
+  // moment a file's name stopped matching its number and slug.
+  const stem = known ? production?.sceneFiles[known.id] : undefined;
+  if (!known || stem === undefined) return null;
+  const path = `productions/${productionId}/scenes/${stem}.json`;
   try {
     const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
     return { scene: SceneSchema.parse(JSON.parse(raw)), raw, path };

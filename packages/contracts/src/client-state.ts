@@ -31,6 +31,7 @@ import {
 import { SetupStatusSchema } from "./setup.js";
 import { ReferenceKitSchema } from "./reference.js";
 import { SceneSchema, SelectionsSchema } from "./scene.js";
+import { SceneIdSchema } from "./ids.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
 import { ClonedVoiceSchema, VoiceRuntimeStatusSchema } from "./voice.js";
 import { IDLE_UPDATE_STATE, UpdateStateSchema } from "./update.js";
@@ -122,6 +123,13 @@ export const ProductionBundleSchema = z
     treatment: z.string().nullable(),
     chapters: z.array(ChapterSummarySchema),
     scenes: z.array(SceneSchema),
+    /**
+     * Scene id → the actual on-disk file stem (issue #387). Captured at scan so no consumer
+     * ever reconstructs a path from number and slug — the stem is the address the save, board,
+     * override, and dispatch commands use, and a file named off-pattern stays reachable.
+     * Defaulted: a read path, and bundles from before it existed must still parse.
+     */
+    sceneFiles: z.record(SceneIdSchema, z.string().min(1)).default({}),
     takes: z.array(TakeSchema),
     reviews: z.array(ReviewDecisionSchema),
     selections: SelectionsSchema,

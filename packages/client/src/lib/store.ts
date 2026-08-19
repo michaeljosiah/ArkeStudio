@@ -2216,6 +2216,11 @@ export function reorderChapters(worldId: string, productionId: string, orderedFi
   send({ kind: "reorder-chapters", worldId, productionId, orderedFiles });
 }
 
+/** Reorder scenes by stable id — order fields rewrite, nothing renames (issue 387). */
+export function reorderScenes(worldId: string, productionId: string, orderedIds: string[]): void {
+  send({ kind: "reorder-scenes", worldId, productionId, orderedIds });
+}
+
 export function setPromptOverride(
   worldId: string,
   productionId: string,

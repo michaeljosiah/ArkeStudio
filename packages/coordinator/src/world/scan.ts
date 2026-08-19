@@ -24,6 +24,8 @@ import {
   SceneSchema,
   SeasonSchema,
   SeriesSchema,
+  sortScenes,
+  type Scene,
   SelectionsSchema,
   ProductionSpineSchema,
   CutFileSchema,
@@ -437,11 +439,26 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       ...(fm.draws !== undefined ? { draws: fm.draws } : {}),
     }));
 
-    const scenes = [];
+    // Scene order (issue #387): explicit `order` wins, the birth number is the fallback, ties
+    // break by id — never by filename. The actual on-disk stem is captured beside each scene so
+    // no consumer ever reconstructs a path from number and slug.
+    const sceneEntries: Array<{ file: string; scene: Scene }> = [];
+    const sceneFiles: Record<string, string> = {};
     for (const file of (await listDir(join(pdir, "scenes"))).filter((f) => f.endsWith(".json")).sort()) {
       const scene = await tryParse(`productions/${id}/scenes/${file}`, (raw) => SceneSchema.parse(JSON.parse(raw)));
-      if (scene) scenes.push(scene);
+      if (!scene) continue;
+      const stem = file.slice(0, -".json".length);
+      if (sceneFiles[scene.id] !== undefined) {
+        problems.push({
+          path: toPortable(`productions/${id}/scenes/${file}`),
+          message: `duplicate scene id ${scene.id} — already carried by ${sceneFiles[scene.id]}.json`,
+        });
+        continue;
+      }
+      sceneFiles[scene.id] = stem;
+      sceneEntries.push({ file: stem, scene });
     }
+    const scenes = sortScenes(sceneEntries.map((e) => e.scene));
 
     const takes = [];
     const takeMediaInfo: ProductionBundle["takeMediaInfo"] = {};
@@ -569,6 +586,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       treatment,
       chapters,
       scenes,
+      sceneFiles,
       takes,
       reviews,
       selections,

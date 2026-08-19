@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ArtifactIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, prefixedIdSchema } from "./ids.js";
 import type { ProductionBundle } from "./client-state.js";
+import { sortScenes } from "./scene.js";
 import type { Shot } from "./scene.js";
 import type { Take } from "./take.js";
 
@@ -114,7 +115,9 @@ const DEFAULT_SHOT_SEC = 4;
 export function deriveCut(production: ProductionBundle): DerivedCut {
   const takesById = new Map(production.takes.map((t) => [t.id, t]));
   const entries: CutEntry[] = [];
-  for (const scene of [...production.scenes].sort((a, b) => a.number - b.number)) {
+  // Explicit scene order, with the birth number as the legacy fallback (issue #387): the
+  // ordinary cut follows the same sequence every display shows.
+  for (const scene of sortScenes(production.scenes)) {
     for (const shot of scene.shots) {
       const takeId = production.selections[shot.id]?.acceptedTakeId ?? null;
       const take = takeId !== null ? (takesById.get(takeId) ?? null) : null;

@@ -4,6 +4,7 @@ import {
   CutFileSchema,
   CutOverlaySchema,
   newId,
+  sortScenes,
   trimCeilingSec,
   type AudioDesign,
   type ProductionBundle,
@@ -92,7 +93,7 @@ export async function acceptTake(
   // Continuity (R-12, D8): the accepted take's final frame seeds the FOLLOWING shot. For a
   // pass segment the frame source is the pass, not the segment — a coinciding boundary must
   // not chain the same frame twice.
-  const ordered = [...production.scenes].sort((a, b) => a.number - b.number).flatMap((s) => s.shots);
+  const ordered = sortScenes(production.scenes).flatMap((s) => s.shots);
   const index = ordered.findIndex((s) => s.id === input.shotId);
   const following = index >= 0 ? ordered[index + 1] : undefined;
   if (following) {

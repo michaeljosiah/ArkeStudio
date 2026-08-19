@@ -319,6 +319,30 @@ export async function reorderChapters(
   await store.commit({ kind: "chapter-reorder", source: "form", files });
 }
 
+/**
+ * Reorder scenes: order fields only — no file renamed, no version cut, no history path moved
+ * (issue #387, the SPEC-012 D3 rule applied to scenes). Ids the production does not know are
+ * skipped rather than failing the rest; the spine is untouched because it never reads scene
+ * order (anchors order the spine).
+ */
+export async function reorderScenes(store: WorldStore, productionId: string, orderedIds: string[]): Promise<void> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+  if (!production) return;
+  const files: CommitFileInput[] = [];
+  for (const [index, sceneId] of orderedIds.entries()) {
+    const stem = production.sceneFiles[sceneId];
+    if (stem === undefined) continue;
+    const path = `productions/${productionId}/scenes/${stem}.json`;
+    const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+    const doc = JsonFile.parse(live);
+    if ((doc.value["order"] as number | undefined) === index + 1) continue;
+    doc.set({ order: index + 1 });
+    files.push({ path, action: "replace", content: doc.serialize(), baseHash: sha256(live), preserveVersion: true });
+  }
+  if (files.length === 0) return;
+  await store.commit({ kind: "scene-reorder", source: "form", files });
+}
+
 // ---------------------------------------------------------------------------
 // Scene drafting (R-7, D4): a proposal skeleton the agent fills; accepting
 // creates shots and dispatches nothing
@@ -364,12 +388,32 @@ export async function draftSceneSkeleton(
   const production = bundle.productions.find((p) => p.meta.id === input.productionId);
   const number = (production?.scenes.reduce((a, s) => Math.max(a, s.number), 0) ?? 0) + 1;
   const slug = slugify(input.brief.split(/[.!?\n]/)[0] ?? "scene").slice(0, 40) || `scene-${number}`;
-  const file = `${String(number).padStart(2, "0")}-${slug}`;
+  // Identity is stable at creation and independent of position (issue #387): the id comes from
+  // the slug, the file stem IS the slug — no ordering prefix, ever — and both are deduplicated
+  // against what exists rather than derived from a count. `number` stays as the scene's stable
+  // birth name; explicit `order` places it.
+  const takenIds = new Set(production?.scenes.map((s) => s.id) ?? []);
+  const takenStems = new Set(Object.values(production?.sceneFiles ?? {}));
+  // A staged-but-unaccepted draft occupies its stem too: two identical briefs in a row must
+  // not race to one file, with the second accept silently colliding into the first.
+  for (const staged of bundle.proposals) {
+    for (const target of staged.proposal.targets) {
+      const m = new RegExp(`^productions/${input.productionId}/scenes/(.+)\\.json$`).exec(target.path);
+      if (m) takenStems.add(m[1]!);
+    }
+  }
+  let id = `sc_${slug}`;
+  let file = slug;
+  for (let n = 2; takenIds.has(id) || takenStems.has(file); n++) {
+    id = `sc_${slug}-${n}`;
+    file = `${slug}-${n}`;
+  }
   const path = `productions/${input.productionId}/scenes/${file}.json`;
   const skill = input.skill ?? null;
   const skeleton: Scene = {
-    id: `sc_${String(number).padStart(2, "0")}`,
+    id,
     number,
+    order: number,
     slug,
     title: input.brief.split(/[.!?\n]/)[0]?.trim() ?? `Scene ${number}`,
     status: "draft",

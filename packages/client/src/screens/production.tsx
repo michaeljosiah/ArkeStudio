@@ -135,8 +135,13 @@ function takeMediaPath(prodId: string, take: { id: string; media?: string }): st
   return `productions/${prodId}/takes/${take.id}/${posterNameFor(take.media)}`;
 }
 
-function sceneFileOf(scene: Scene): string {
-  return `${String(scene.number).padStart(2, "0")}-${scene.slug}`;
+/**
+ * The scene's on-disk stem, from the bundle's scan-captured record (issue 387) — never a
+ * reconstruction from number and slug, which goes blind the moment a file's name stops
+ * matching. Null means the bundle predates the record; the senders skip rather than guess.
+ */
+function sceneFileOf(production: { sceneFiles: Record<string, string> } | null | undefined, scene: Scene): string | null {
+  return production?.sceneFiles[scene.id] ?? null;
 }
 
 function decisionTone(decision: string | undefined): "ok" | "warn" | "sketch" {
@@ -1155,13 +1160,21 @@ export function SceneDetailScreen() {
               </div>
             </div>
             <div style={{ display: "grid", gap: 8 }}>
-              <Button onClick={() => worldId && prodId && compileSceneBoard(worldId, prodId, sceneFileOf(scene))}>
+              <Button
+                onClick={() => {
+                  const stem = sceneFileOf(production, scene);
+                  if (worldId && prodId && stem) compileSceneBoard(worldId, prodId, stem);
+                }}
+              >
                 Recompile · free, local
               </Button>
               <Button
                 variant="ghost"
                 disabled={!scene.board}
-                onClick={() => worldId && prodId && exportSceneBoard(worldId, prodId, sceneFileOf(scene))}
+                onClick={() => {
+                  const stem = sceneFileOf(production, scene);
+                  if (worldId && prodId && stem) exportSceneBoard(worldId, prodId, stem);
+                }}
               >
                 Export sheet · PNG
               </Button>
@@ -1461,6 +1474,7 @@ export function GenerateScreen() {
 
 function GeneratePromptEditor({
   world,
+  production,
   scene,
   shot,
   worldId,
@@ -1486,7 +1500,9 @@ function GeneratePromptEditor({
         <span
           style={{ marginLeft: "auto", font: "400 11px var(--font-sans)", color: "var(--muted-foreground)", cursor: "pointer" }}
           onClick={() => {
-            setPromptOverride(worldId, prodId, sceneFileOf(scene), shot.id, null);
+            const stem = sceneFileOf(production, scene);
+            if (!stem) return;
+            setPromptOverride(worldId, prodId, stem, shot.id, null);
             setDraft(null);
           }}
         >
@@ -1543,7 +1559,9 @@ function GeneratePromptEditor({
         <Button
           disabled={value.trim() === assembled || value.trim().length === 0}
           onClick={() => {
-            setPromptOverride(worldId, prodId, sceneFileOf(scene), shot.id, value.trim());
+            const stem = sceneFileOf(production, scene);
+            if (!stem) return;
+            setPromptOverride(worldId, prodId, stem, shot.id, value.trim());
             setDraft(null);
           }}
         >
@@ -1602,7 +1620,7 @@ export function DispatchDialogScreen() {
     return { perShot: planScene(input, "per-shot"), wholeScene: planScene(input, "whole-scene") };
   }, [world, production, scene, model, resolution, choice.tier]);
 
-  const sceneFile = scene ? sceneFileOf(scene) : null;
+  const sceneFile = scene ? sceneFileOf(production, scene) : null;
   const warnings = plans?.perShot.warnings ?? null;
   // A shot no route can cover blocks rather than warns: the dispatch would be refused anyway,
   // and finding that out after pressing a priced button is the failure this dialog exists to

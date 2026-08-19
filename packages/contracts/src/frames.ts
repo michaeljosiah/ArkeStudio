@@ -2,7 +2,7 @@ import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { ArtifactIdSchema, ConversationIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
+import { ArtifactIdSchema, ConversationIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
@@ -1279,6 +1279,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       orderedFiles: z.array(z.string().min(1)).min(1),
+    })
+    .strict(),
+  /** issue #387: reorder scenes by stable id — order fields rewrite, nothing renames. */
+  z
+    .object({
+      kind: z.literal("reorder-scenes"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      orderedIds: z.array(SceneIdSchema).min(1),
     })
     .strict(),
   /** SPEC-012 R-15/R-16: an edited prompt is an override on the shot; null resets. */
