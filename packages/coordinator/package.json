@@ -12,6 +12,7 @@
     "test": "node --import tsx --test \"test/**/*.test.ts\""
   },
   "dependencies": {
+    "@arke-studio/adapter-claude": "*",
     "@arke-studio/adapter-opencode": "*",
     "@arke-studio/contracts": "*",
     "better-sqlite3": "^12.11.1",

@@ -12,7 +12,23 @@ import {
   type DiscoveredHarness,
   type DiscoveryOptions,
 } from "@arke-studio/adapter-opencode";
+import {
+  ClaudeAdapter,
+  ConfinementCache,
+  makeSdkProbe,
+  resolveClaudeHarness,
+  sdkQuery,
+  type ClaudeDiscoveryOptions,
+  type RunProbeTurn,
+} from "@arke-studio/adapter-claude";
 import { ChildSupervisor, type SupervisorDeps } from "../supervisor.js";
+
+/**
+ * Confinement verdicts survive across assemblies, keyed on binary and version, so a user who
+ * opens and closes the app pays for one probe rather than one per launch. An auto-update
+ * invalidates the entry by construction.
+ */
+const claudeVerdicts = new ConfinementCache();
 
 /**
  * The opencode2 launch protocol, shared by the desktop and dev hosts (issue 327 §2, §4).
@@ -88,7 +104,7 @@ export function harnessProfileDir(appRoot: string): string {
 
 /** What Settings names about the wired harness (issue 327 §9, SPEC-005 R-1). */
 export interface AssembledHarnessInfo {
-  generation: "v2" | "v1";
+  generation: "v2" | "v1" | "claude";
   source: "configured" | "path" | "bundled";
   version: string | null;
   beta: boolean;
@@ -113,6 +129,24 @@ export interface AssembleHarnessOptions {
   preferV1?: boolean;
   v1?: DiscoveryOptions;
   v2?: DiscoveryOptions & { minBuild?: number };
+  /**
+   * The bring-your-own harness, off unless asked for, and never a fallback: OpenCode is the
+   * default and ships in the installer; Claude Code is a convenience for people already running
+   * it. Opting in is also what pays for the confinement probe, which costs a live turn and has
+   * no business running on every boot of a machine that never wanted it.
+   */
+  claude?: ClaudeDiscoveryOptions & {
+    enabled?: boolean;
+    /** Seam: the confinement probe. Defaults to the SDK-backed one, which spends a live turn. */
+    runTurn?: RunProbeTurn;
+    /**
+     * Where verdicts live. Defaults to a module-level cache so a host that never thinks about
+     * it still probes once per binary and version rather than once per assembly — but it is an
+     * argument, because "how long a verification lasts" is the host's business, and a shared
+     * singleton is a surprise waiting for whoever assembles twice.
+     */
+    cache?: ConfinementCache;
+  };
   /** The adapter's trace sink — logs/harness.jsonl at the host's root. */
   onTrace?: (line: Record<string, unknown>) => void;
 }
@@ -121,7 +155,20 @@ export interface AssembledHarness {
   harness: DiscoveredHarness | null;
   isV2: boolean;
   supervisor: ChildSupervisor;
-  adapter: OpenCodeAdapter | OpenCodeV2Adapter | null;
+  adapter: OpenCodeAdapter | OpenCodeV2Adapter | ClaudeAdapter | null;
+  /**
+   * Writes the session's `opencode.json`. On the Claude lane this returns an empty object:
+   * Claude Code takes its confinement, prompt and MCP registration as `query()` options, so
+   * there is nothing for a config file to say.
+   *
+   * KNOWN WART. The authoring seam still threads a config WRITER through six call sites
+   * (harness/authoring, harness/genesis, canon/ask, artifacts/model, references/art-director,
+   * and the coordinator's own read-model), each of which writes the file unconditionally — so a
+   * Claude session leaves an empty `opencode.json` in its proposal directory. It is inert and it
+   * never reaches the world, because commit selects by explicit path patterns rather than
+   * copying the directory. The fix is to move the writing behind the adapter, which is a change
+   * to the seam rather than to this lane, and is deliberately not smuggled in here.
+   */
   buildConfig: typeof buildSessionConfig;
   harnessInfo?: AssembledHarnessInfo;
   relaunchHarness: (credentials: Record<string, string | undefined>) => Promise<void>;
@@ -141,6 +188,7 @@ export interface AssembledHarness {
  * after review found the two copies already drifting in their first week.
  */
 export async function assembleHarness(opts: AssembleHarnessOptions): Promise<AssembledHarness> {
+  let claudeRefusal: string | null = null;
   const harness = await discoverPreferredHarness({
     ...(opts.preferV1 !== undefined ? { preferV1: opts.preferV1 } : {}),
     ...(opts.v1 ? { v1: opts.v1 } : {}),
@@ -166,6 +214,44 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     opts.deps ?? {},
   );
 
+  // The bring-your-own lane, taken only when asked for. Discovery above has already run and is
+  // cheap; the supervisor exists but has not spawned, and on this path it never will.
+  if (opts.claude?.enabled) {
+    const availability = await resolveClaudeHarness({
+      discovery: opts.claude,
+      cache: opts.claude.cache ?? claudeVerdicts,
+      runTurn: opts.claude.runTurn ?? makeSdkProbe(),
+    });
+    if (availability.available) {
+      return {
+        harness,
+        isV2,
+        supervisor,
+        adapter: new ClaudeAdapter({
+          command: availability.command,
+          runQuery: sdkQuery,
+          ...(opts.onTrace ? { onTrace: opts.onTrace } : {}),
+        }),
+        // See the field's note: inert on this lane, and the seam that makes it necessary is
+        // named there rather than worked around here.
+        buildConfig: () => ({}),
+        harnessInfo: {
+          generation: "claude",
+          source: availability.source,
+          version: availability.version,
+          beta: false,
+        },
+        // Nothing to relaunch and no key to deliver: Claude Code authenticates from the user's
+        // own login, which is the whole reason this lane carries no credential path at all.
+        relaunchHarness: async () => {},
+        logLines: [`Claude Code ${availability.version ?? "(unknown version)"}: ${availability.source}, confinement verified`],
+      };
+    }
+    // Asked for and not usable is a statement, not a silence (SPEC-005 R-4). OpenCode continues
+    // below, because falling back to the harness that ships is better than authoring nothing.
+    claudeRefusal = availability.reason;
+  }
+
   const baseUrl = () => `http://127.0.0.1:${supervisor.port ?? 0}`;
   const adapter = harness
     ? isV2
@@ -178,6 +264,7 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     : null;
 
   const logLines: string[] = [];
+  if (claudeRefusal) logLines.push(`Claude Code asked for but not used — ${claudeRefusal}`);
   if (harness) {
     logLines.push(
       `OpenCode ${harness.generation}: ${harness.discovery.source} (${harness.discovery.version ?? "unknown version"})${isV2 ? " [beta]" : ""}`,

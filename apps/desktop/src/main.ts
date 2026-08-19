@@ -442,6 +442,12 @@ async function initialize(): Promise<{ port: number }> {
       ...(process.env["ARKE_OPENCODE2_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE2_CMD"] } : {}),
       ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode2", "opencode2.exe") } : {}),
     },
+    // Bring-your-own, opt-in: OpenCode ships in the installer and stays the default. Selecting
+    // Claude Code is what pays for its confinement probe, which spends a live turn.
+    claude: {
+      enabled: process.env["ARKE_HARNESS"] === "claude",
+      ...(process.env["ARKE_CLAUDE_CMD"] ? { configuredPath: process.env["ARKE_CLAUDE_CMD"] } : {}),
+    },
     onTrace: harnessTrace(appRoot),
   });
   const opencodeSupervisor = wiring.supervisor;

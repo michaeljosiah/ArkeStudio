@@ -73,6 +73,10 @@ const wiring = await assembleHarness({
   appRoot: devRoot,
   deps: { ledger },
   preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
+  claude: {
+    enabled: process.env["ARKE_HARNESS"] === "claude",
+    ...(process.env["ARKE_CLAUDE_CMD"] ? { configuredPath: process.env["ARKE_CLAUDE_CMD"] } : {}),
+  },
   onTrace: harnessTrace(devRoot),
 });
 const opencodeSupervisor = wiring.supervisor;

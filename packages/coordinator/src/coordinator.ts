@@ -378,7 +378,7 @@ export interface CoordinatorOptions {
    * into app state so Settings can name it (issue 327 §9, SPEC-005 R-1).
    */
   harnessInfo?: {
-    generation: "v2" | "v1";
+    generation: "v2" | "v1" | "claude";
     source: "configured" | "path" | "bundled";
     version: string | null;
     beta: boolean;
