@@ -5,13 +5,23 @@ import { existsSync } from "node:fs";
  * Claude Code discovery for the bring-your-own harness.
  *
  * Deliberately unlike {@link @arke-studio/adapter-opencode}'s discovery in one respect: there
- * is no bundled candidate and there never will be. OpenCode is MIT and ships inside the
- * installer; Claude Code is a ~326MB proprietary binary that is not ours to redistribute, and
- * the Agent SDK is a ~1.3MB client that spawns whatever the user already installed. Absent
- * means the harness is not offered — not that something failed.
+ * is no bundled candidate. OpenCode is MIT and ships inside the installer; Claude Code is
+ * ~326MB under "© Anthropic PBC. All rights reserved", which is not ours to redistribute.
+ * Absent means the harness is not offered — not that something failed.
  *
- * The version here is a PRE-FILTER, not the decision. A build that clears the floor may still
- * have no working confinement, so `confinement-probe.ts` is what actually decides. See
+ * Two facts about the Agent SDK make that a decision we have to actively enforce, rather than
+ * one we get for free:
+ *
+ * - The SDK DOES ship the binary, as per-platform `optionalDependencies`
+ *   (`@anthropic-ai/claude-agent-sdk-win32-x64` and friends, ~312MB each). Depending on the SDK
+ *   pulls one into `node_modules`, so packaging must exclude it explicitly or the installer
+ *   quietly grows by 312MB and redistributes a proprietary binary.
+ * - Left to itself the SDK runs THAT bundled copy and never falls back to PATH — hiding the
+ *   platform package makes it throw "Native CLI binary for win32-x64 not found" rather than
+ *   using the `claude` sitting on PATH. So driving the user's own installation means passing
+ *   `pathToClaudeCodeExecutable` on every call. It is mandatory here, not a refinement.
+ *
+ * The version below is a PRE-FILTER, not the decision. `confinement-probe.ts` decides, per
  * SPEC-005 R-2: capabilities are probed, never assumed from a version number.
  */
 
@@ -89,14 +99,20 @@ async function resolveOnPath(command: string, run: CommandRunner): Promise<strin
 }
 
 /**
- * The measured-good floor, NOT the true minimum.
+ * The oldest build the confinement probe has actually been exercised against — NOT a version
+ * known to be broken.
  *
- * On Claude Code 2.1.177 the `canUseTool` callback was never invoked and shell commands ran
- * unblocked — no error, no warning, confinement simply absent. On 2.1.227, 2.1.229 and 2.1.235
- * the gate fires and holds. The real boundary is somewhere in 2.1.178–2.1.227 and was not
- * bisected, so this pins the oldest build actually observed working rather than a guess.
+ * An earlier reading of the spike data claimed 2.1.177 silently lacked the tool gate. That was
+ * a measurement error: the probe prompt of the day ("run `echo hello` and tell me its output")
+ * is answerable without calling any tool, so the callback never fired because nothing ever
+ * asked for a tool, and prose-based detection then read the model's own echo of "hello" as
+ * proof the shell had run. Against a prompt that demands a real side effect, every build tried
+ * — 2.1.227, 2.1.229, 2.1.235 — consults the gate and honours the denial.
  *
- * Raising this is safe. Lowering it needs a measurement, not an assumption.
+ * So this floor buys very little, and is kept deliberately narrow: it skips a probe against
+ * something older than anything we have ever verified, and nothing more. The probe is the
+ * decision. If a user reports a build below this that works, lower it — there is no evidence
+ * on the other side to weigh against them.
  */
 export const CLAUDE_MIN_VERSION = "2.1.227";
 

@@ -56,8 +56,8 @@ describe("the version floor is a pre-filter, not the decision", () => {
     assert.equal(meetsClaudeFloor("3.0.0"), true, "a newer major is newer, not unrecognised");
   });
 
-  it("rejects anything older, including the build measured to have no gate at all", () => {
-    assert.equal(meetsClaudeFloor("2.1.177"), false, "canUseTool was never invoked on this build");
+  it("rejects anything older than the oldest build the probe has been exercised against", () => {
+    assert.equal(meetsClaudeFloor("2.1.177"), false, "untested, not known-broken — the probe is what decides");
     assert.equal(meetsClaudeFloor("2.1.226"), false);
     assert.equal(meetsClaudeFloor("2.0.999"), false);
     assert.equal(meetsClaudeFloor("1.9.9"), false);

@@ -18,3 +18,4 @@ export {
   type ClaudeAvailability,
   type ResolveClaudeOptions,
 } from "./availability.js";
+export { makeSdkProbe, type SdkProbeOptions } from "./sdk-probe.js";
