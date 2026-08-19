@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { dispatchDuration, durationOptions, estimateMicroUsd } from "@arke-studio/contracts";
-import { ComfyUiClient, COMFYUI_VERSION_FLOOR, meetsVersionFloor } from "../src/clients/comfyui.js";
+import { ComfyUiClient, COMFYUI_VERSION_FLOOR, meetsVersionFloor, type ProgressSocket } from "../src/clients/comfyui.js";
 import {
   callerParamNames,
   COMFYUI_MANIFEST_MODELS,
@@ -1033,5 +1033,106 @@ describe("the cloned-voice recipe on the wire", () => {
       }).submit("", { model: "comfyui-cloned-voice", capability: "voice-tts", params: VOICE_PARAMS }),
       /recording could not be read/,
     );
+  });
+});
+
+/**
+ * What the engine says it is doing (SPEC-021 D16).
+ *
+ * The exclusion this amends was written against queue position, which is not a fraction of the
+ * work done. These assert the two things that make the step counter different: it comes from the
+ * node's own count, and it never carries the node's id.
+ */
+describe("progress from the engine's socket", () => {
+  function socketFake(): { open: (url: string) => ProgressSocket; send: (msg: unknown) => void; urls: string[] } {
+    const urls: string[] = [];
+    let live: ProgressSocket | null = null;
+    return {
+      urls,
+      open: (url) => {
+        urls.push(url);
+        live = { onMessage: null, onClose: null, close: () => {} };
+        return live;
+      },
+      send: (msg) => live?.onMessage?.(JSON.stringify(msg)),
+    };
+  }
+
+  const RUNNING = [{ match: /\/queue$/, status: 200, body: { queue_running: [[0, "p-1"]], queue_pending: [] } }];
+
+  it("reports the node's own count, named by what the recipe is doing", async () => {
+    // Through a real submit: what a prompt is DOING is recorded there, because the socket only
+    // ever says which node is stepping and that is a node id (R-1).
+    const { fetch } = engineFake([
+      { match: /\/upload\/image$/, status: 200, body: { name: "c.wav", subfolder: "" } },
+      { match: /\/prompt$/, status: 200, body: { prompt_id: "p-1", node_errors: {} } },
+      ...RUNNING,
+    ]);
+    const sock = socketFake();
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, async () => new Uint8Array([1]), sock.open);
+    await client.submit("", {
+      model: "comfyui-cloned-voice",
+      capability: "voice-tts",
+      params: { voiceId: "v", text: "A line.", speakerFile: "c.wav" },
+    });
+    await client.poll("", "p-1");
+    assert.equal(sock.urls[0], "ws://127.0.0.1:8188/ws?clientId=arke-studio");
+    sock.send({ type: "progress", data: { prompt_id: "p-1", value: 20, max: 25, node: "4" } });
+    const result = await client.poll("", "p-1");
+    assert.deepEqual(result.step, { stage: "speaking", done: 20, total: 25 });
+    assert.equal(result.progress, 0.8);
+  });
+
+  it("says nothing for a prompt it did not dispatch", async () => {
+    // After a restart the app is polling a prompt it has no record of. A count with no idea what
+    // is being counted is the unlabelled bar D16 refuses, so it reports state only.
+    const { fetch } = engineFake(RUNNING);
+    const sock = socketFake();
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, sock.open);
+    await client.poll("", "p-1");
+    sock.send({ type: "progress", data: { prompt_id: "p-1", value: 20, max: 25 } });
+    assert.equal((await client.poll("", "p-1")).step, undefined);
+  });
+
+  it("never carries the engine's node id", async () => {
+    // R-1: no node id reaches a user, and `step.stage` is rendered verbatim on a row.
+    const { fetch } = engineFake(RUNNING);
+    const sock = socketFake();
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, sock.open);
+    await client.poll("", "p-1");
+    sock.send({ type: "progress", data: { prompt_id: "p-1", value: 3, max: 10, node: "4" } });
+    const result = await client.poll("", "p-1");
+    assert.equal(JSON.stringify(result).includes('"4"'), false);
+  });
+
+  it("says nothing rather than guessing when the engine has not counted yet", async () => {
+    // Between accept and the first step there is no figure, and inventing one — from queue
+    // position or elapsed time — is exactly what the original exclusion refused.
+    const { fetch } = engineFake(RUNNING);
+    const sock = socketFake();
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, sock.open);
+    const result = await client.poll("", "p-1");
+    assert.equal(result.state, "running");
+    assert.equal(result.step, undefined);
+    assert.equal(result.progress, undefined);
+  });
+
+  it("forgets a prompt's count when it finishes", async () => {
+    const { fetch } = engineFake(RUNNING);
+    const sock = socketFake();
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, sock.open);
+    await client.poll("", "p-1");
+    sock.send({ type: "progress", data: { prompt_id: "p-1", value: 9, max: 10 } });
+    sock.send({ type: "execution_success", data: { prompt_id: "p-1" } });
+    assert.equal((await client.poll("", "p-1")).step, undefined);
+  });
+
+  it("keeps dispatching when the socket cannot be opened", async () => {
+    // Progress is the one thing a dispatch works perfectly well without.
+    const { fetch } = engineFake(RUNNING);
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, () => {
+      throw new Error("no socket here");
+    });
+    assert.equal((await client.poll("", "p-1")).state, "running");
   });
 });

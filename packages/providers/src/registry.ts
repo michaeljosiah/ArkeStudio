@@ -1,6 +1,6 @@
 import type { ClientDeclarations, ProviderId } from "@arke-studio/contracts";
 import { AnthropicClient } from "./clients/anthropic.js";
-import { ComfyUiClient, type ComfyUiPreflight, type EngineBaseUrl } from "./clients/comfyui.js";
+import { ComfyUiClient, type ComfyUiPreflight, type EngineBaseUrl, type ProgressSocket } from "./clients/comfyui.js";
 import { ElevenLabsClient } from "./clients/elevenlabs.js";
 import { FalClient } from "./clients/fal.js";
 import { HiggsfieldClient } from "./clients/higgsfield.js";
@@ -34,6 +34,8 @@ export interface ProviderClientDeps {
     preflight: ComfyUiPreflight;
     /** Reads a cloned voice's clip so it can be uploaded to the engine (SPEC-022 §2.8). */
     readClip?: (path: string) => Promise<Uint8Array>;
+    /** Opens the engine's progress socket (SPEC-021 D16); omitted, jobs simply report no figure. */
+    openSocket?: (url: string) => ProgressSocket;
   };
   capture?: ProviderCallCapture;
 }
@@ -86,7 +88,13 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
           comfyui: captureProviderClient(
             "comfyui",
             (fetch) =>
-              new ComfyUiClient(fetch, deps.comfyui!.baseUrl, deps.comfyui!.preflight, deps.comfyui!.readClip),
+              new ComfyUiClient(
+                fetch,
+                deps.comfyui!.baseUrl,
+                deps.comfyui!.preflight,
+                deps.comfyui!.readClip,
+                deps.comfyui!.openSocket,
+              ),
             fetchImpl,
             capture,
           ),

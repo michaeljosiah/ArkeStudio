@@ -555,6 +555,23 @@ async function initialize(): Promise<{ port: number }> {
       // The one recipe input that is a file this machine owns. Reading it is the host's business
       // for the same reason opening a dialog is: the renderer never handles a path (SPEC-001 R-9).
       readClip: async (path) => new Uint8Array(await readFile(path)),
+      // The engine says what it is doing only on its socket (SPEC-021 D16). Node's own
+      // WebSocket, adapted to the two handlers the client needs — nothing here should hold a
+      // dependency on a socket library for one optional figure.
+      openSocket: (url) => {
+        const socket = new WebSocket(url);
+        const adapter = {
+          onMessage: null as ((data: string) => void) | null,
+          onClose: null as (() => void) | null,
+          close: () => socket.close(),
+        };
+        socket.addEventListener("message", (event) => {
+          if (typeof event.data === "string") adapter.onMessage?.(event.data);
+        });
+        socket.addEventListener("close", () => adapter.onClose?.());
+        socket.addEventListener("error", () => adapter.onClose?.());
+        return adapter;
+      },
     },
     capture: providerCalls,
   });

@@ -28,6 +28,26 @@ import { ProviderRequestRejectedError } from "../types.js";
 export type EngineBaseUrl = () => string | null;
 
 /**
+ * What a recipe is doing while it counts, by capability.
+ *
+ * The engine only ever says which node is stepping, and a node id is both meaningless to a
+ * reader and forbidden to show (R-1). The capability is the honest, stable answer: it is what
+ * the user asked for.
+ */
+const STAGE_WORDS: Record<ComfyUiRecipe["capability"], string> = {
+  image: "drawing",
+  video: "rendering",
+  "voice-tts": "speaking",
+};
+
+/** The little of a WebSocket this needs: frames in, and a close to reopen on. */
+export interface ProgressSocket {
+  onMessage: ((data: string) => void) | null;
+  onClose: (() => void) | null;
+  close(): void;
+}
+
+/**
  * The last check before the wire (§2.5): pinned checkpoints and nodes verified against the
  * resolved location, immediately before submission. Injected — hashing files is the engine
  * service's business, and the client refuses to dispatch without an answer.
@@ -140,7 +160,60 @@ export class ComfyUiClient implements ProviderClient {
      * a voice dispatch without it refuses by name rather than uploading nothing.
      */
     private readonly readClip?: (path: string) => Promise<Uint8Array>,
+    /**
+     * Opens the engine's progress socket (SPEC-021 D16). Injected so the tests can drive it, and
+     * optional because progress is the one thing a dispatch works perfectly well without.
+     */
+    private readonly openSocket?: (url: string) => ProgressSocket,
   ) {}
+
+  /** Latest step count per prompt, fed by the engine's socket and read by `poll`. */
+  private readonly steps = new Map<string, { done: number; total: number }>();
+  /** What each live prompt is doing, so a count can be named without naming a node (R-1). */
+  private readonly stages = new Map<string, string>();
+  private socket: ProgressSocket | null = null;
+
+  /**
+   * Listen to the engine say what it is doing.
+   *
+   * ComfyUI reports progress only on its WebSocket — there is no HTTP equivalent — and it
+   * broadcasts to every client, tagging each message with the prompt it belongs to. So one
+   * socket serves every job, opened the first time anything is polled and reopened if it drops.
+   * Failing to open it is not a dispatch failure: the job runs, and `poll` simply has no figure.
+   */
+  private listen(base: string): void {
+    if (this.socket || !this.openSocket) return;
+    try {
+      const socket = this.openSocket(`${base.replace(/^http/, "ws")}/ws?clientId=arke-studio`);
+      this.socket = socket;
+      socket.onClose = () => {
+        this.socket = null;
+      };
+      socket.onMessage = (raw: string) => {
+        try {
+          const msg = JSON.parse(raw) as { type?: string; data?: Record<string, unknown> };
+          const data = msg.data ?? {};
+          const promptId = typeof data["prompt_id"] === "string" ? data["prompt_id"] : null;
+          if (!promptId) return;
+          if (msg.type === "progress") {
+            const done = Number(data["value"]);
+            const total = Number(data["max"]);
+            if (!Number.isFinite(done) || !Number.isFinite(total) || total <= 0) return;
+            // `data.node` is deliberately ignored: it is a node id, and R-1 keeps node ids away
+            // from anything a user reads. What the prompt is doing was recorded at submit.
+            this.steps.set(promptId, { done, total });
+          } else if (msg.type === "execution_success" || msg.type === "execution_error") {
+            this.steps.delete(promptId);
+            this.stages.delete(promptId);
+          }
+        } catch {
+          /* a frame we do not understand is not a reason to stop listening */
+        }
+      };
+    } catch {
+      this.socket = null;
+    }
+  }
 
   private require(): string {
     const base = this.baseUrl();
@@ -380,6 +453,10 @@ export class ComfyUiClient implements ProviderClient {
       // A 4xx from /prompt proves the engine rejected the graph before queueing anything.
       throw new ProviderRequestRejectedError(`comfyui: the engine rejected the prompt (HTTP ${status})${named}`);
     }
+    // What this prompt is doing, in the recipe's own words. Recorded here because `poll` knows
+    // only a prompt id, and the alternative — the node id the socket sends — is exactly what R-1
+    // keeps away from a user.
+    this.stages.set(promptId, STAGE_WORDS[recipe.capability]);
     return { remoteId: promptId, acceptedAt: new Date().toISOString() };
   }
 
@@ -391,12 +468,21 @@ export class ComfyUiClient implements ProviderClient {
    */
   async poll(_key: string, remoteId: string, _context?: ProviderCallContext): Promise<PollResult> {
     const base = this.require();
+    this.listen(base);
     const queue = await jsonRequest(this.fetchImpl, this.id, `${base}/queue`, {});
     if (queue.status < 400) {
       const body = queue.body as { queue_running?: QueueEntryish[]; queue_pending?: QueueEntryish[] } | null;
       const inList = (list: QueueEntryish[] | undefined): boolean =>
         Array.isArray(list) && list.some((entry) => Array.isArray(entry) && entry[1] === remoteId);
-      if (inList(body?.queue_running)) return { state: "running" };
+      if (inList(body?.queue_running)) {
+        const counted = this.steps.get(remoteId);
+        const stage = this.stages.get(remoteId);
+        // A fraction as well as the count: `progress` is the field the contract already had, and
+        // it is finally true here because it is a node's own steps rather than queue position.
+        return counted && stage
+          ? { state: "running", step: { stage, ...counted }, progress: counted.done / counted.total }
+          : { state: "running" };
+      }
       if (inList(body?.queue_pending)) return { state: "queued" };
     }
     const history = await jsonRequest(this.fetchImpl, this.id, `${base}/history/${remoteId}`, {});

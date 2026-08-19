@@ -11,6 +11,7 @@ import {
   pendingWorldSheets,
   worldSheets,
   type CanonEntry,
+  type Job,
   type PendingSheet,
   type Sheet,
   type WorldBundle,
@@ -2139,6 +2140,13 @@ export function VoicePickerScreen() {
   );
 }
 
+/** `speaking · step 20 of 25`, or nothing when the engine is not counting (SPEC-021 D16). */
+function stepOf(jobs: readonly Job[], requestId: string): string | null {
+  const job = jobs.find((j) => j.params["requestId"] === requestId);
+  const step = job?.step;
+  return step ? `${step.stage} · step ${step.done} of ${step.total}` : null;
+}
+
 function VoiceCandidatesPanel({
   worldId,
   sheetId,
@@ -2158,6 +2166,8 @@ function VoiceCandidatesPanel({
   const [assigning, setAssigning] = useState<string | null>(null);
   const [where, setWhere] = useState<"all" | "cloud" | "local">("all");
   const [cloning, setCloning] = useState(false);
+  // Job rows carry what the engine is counting; the row below reads its own by requestId.
+  const jobs = useStore().state?.app.jobs ?? [];
   const autoPlayed = useRef(new Set<string>());
   // Assigning commits straight through (no gate), so the change lands in the next world snapshot:
   // the pressed row stays busy until this sheet's voice is the one we just assigned.
@@ -2315,7 +2325,10 @@ function VoiceCandidatesPanel({
                     }}
                   >
                     {requestId && !result
-                      ? "Preparing…"
+                      ? // What the engine says it is doing, when it says anything (SPEC-021 D16).
+                        // Named rather than shown as a percentage: these are one node's steps, so
+                        // a bare bar would sweep to full and then sit through the rest of the graph.
+                        (stepOf(jobs, requestId) ?? "Preparing…")
                       : candidate.local
                         ? "Preview · free"
                         : `Preview${candidates.cloudPreviewMicroUsd !== null ? ` · ${formatMicroUsd(candidates.cloudPreviewMicroUsd)}` : ""}`}

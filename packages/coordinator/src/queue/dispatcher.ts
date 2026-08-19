@@ -64,7 +64,13 @@ export interface DispatchClient {
     key: string,
     remoteId: string,
     context?: { jobId?: string; attempt?: number; model?: string },
-  ): Promise<{ state: "queued" | "running" | "succeeded" | "failed" | "cancelled"; costMicroUsd?: number; error?: string }>;
+  ): Promise<{
+    state: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+    costMicroUsd?: number;
+    error?: string;
+    /** What the engine is counting, where it counts anything (SPEC-021 D16). */
+    step?: { stage: string; done: number; total: number };
+  }>;
   fetchArtifacts(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<DispatchArtifact[]>;
   cancel(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<void>;
   /** Reconciliation strategy A (SPEC-008 declarations): found → adopt; null → provably absent. */
@@ -273,6 +279,20 @@ export class JobQueue {
     if (this.disposed) return; // killed mid-write: the journal decides on recovery
     this.jobs.set(job.id, job);
     this.opts.emit({ at: this.clock(), type: "job.updated", job });
+  }
+
+  /**
+   * A step count from the engine (SPEC-021 D16). Memory and the event, never the journal.
+   *
+   * `transition` exists to make a state change durable, and this is not one: progress is
+   * whatever the last poll saw, it is meaningless after a restart, and journalling twenty-five
+   * of them per line would write a file per step to record something already stale.
+   */
+  private progressed(job: Job, step: Job["step"]): void {
+    if (this.disposed) return;
+    const updated = { ...job, step };
+    this.jobs.set(job.id, updated);
+    this.opts.emit({ at: this.clock(), type: "job.updated", job: updated });
   }
 
   private emitQueueStatus(provider: string): void {
@@ -612,6 +632,13 @@ export class JobQueue {
       if (poll.state === "cancelled") {
         await this.terminalize(current, "cancelled", null, poll.costMicroUsd);
         return;
+      }
+      // Only when it actually moved: a poll that sees the same step as the last one is not news,
+      // and re-emitting it would put a frame on the wire per poll rather than per step.
+      const step = poll.step ?? null;
+      const held = this.jobs.get(job.id)?.step ?? null;
+      if (JSON.stringify(step) !== JSON.stringify(held)) {
+        this.progressed(this.jobs.get(job.id) ?? current, step);
       }
       await this.sleep(this.pollIntervalMs);
     }
