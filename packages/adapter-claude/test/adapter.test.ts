@@ -118,7 +118,12 @@ describe("the options a session is opened with", () => {
     const a = new ClaudeAdapter({ command: "claude", runQuery: withWorld.run, worldQueryUrl: "http://127.0.0.1:9/mcp" });
     const s1 = await a.createSession({ purpose: "authoring", agent: "sheet-editor" });
     await a.sendMessage({ sessionId: s1.sessionId, parts: [{ type: "text", text: "go" }] });
-    assert.ok(withWorld.options()["mcpServers"], "the only way the wider world is legible");
+    // The shape is measured, not guessed: against the real WorldQueryServer, `http` connects and
+    // exposes the tools as mcp__arke-world__*, `sse` reports failed, and a bare url is not
+    // listed at all. Changing this silently loses the only way the world is legible.
+    assert.deepEqual(withWorld.options()["mcpServers"], {
+      "arke-world": { type: "http", url: "http://127.0.0.1:9/mcp" },
+    });
     await a.dispose();
 
     const without = fakeQuery([result()]);
