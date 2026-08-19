@@ -15,16 +15,7 @@ export {
   type DiscoveredOpenCode,
   type DiscoveryOptions,
 } from "./discovery.js";
-export {
-  buildSessionConfig,
-  credentialEnv,
-  credentialEnvPatch,
-  LLM_ENV_PROVIDERS,
-  skillForAgent,
-  type SessionConfigInput,
-} from "./config.js";
-export { skillFor, skillLabel, SKILLS, type Skill, type SkillPurpose } from "./skills.js";
-export { agentForPurpose, promptFor, ROSTER, type RosterAgent } from "./roster.js";
+export { buildSessionConfig, credentialEnv, credentialEnvPatch, LLM_ENV_PROVIDERS } from "./config.js";
 export { createNormalizeState, normalizeOpenCode, toolSummary, type NormalizeOutcome } from "./normalize.js";
 export { OpenCodeError, OpenCodeHttp } from "./http.js";
 export { parseSse } from "./sse.js";

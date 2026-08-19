@@ -7,8 +7,8 @@ import { CHARACTER_ROLE_MAX, worldChatResultShapeGuide, type HarnessEvent } from
 import { OpenCodeAdapter } from "../src/opencode-adapter.js";
 import { probeCapabilities } from "../src/capabilities.js";
 import { createNormalizeState, normalizeOpenCode, toolSummary } from "../src/normalize.js";
-import { buildSessionConfig, skillForAgent } from "../src/config.js";
-import { skillFor, SKILLS } from "../src/skills.js";
+import { skillFor, skillForAgent, SKILLS } from "@arke-studio/contracts";
+import { buildSessionConfig } from "../src/config.js";
 import { discoverOpenCode } from "../src/discovery.js";
 import { StubOpenCode } from "./helpers/stub-server.js";
 

@@ -1,5 +1,4 @@
-import { promptFor, ROSTER } from "./roster.js";
-import { skillFor, type Skill } from "./skills.js";
+import { agentPromptFor, ROSTER, skillForAgent, type SessionConfigInput } from "@arke-studio/contracts";
 
 /**
  * Session configuration written by Studio (SPEC-005 R-5, R-6, R-10, D5).
@@ -55,40 +54,6 @@ const READ_ONLY_PERMISSION: Record<string, string> = {
   websearch: "deny",
 };
 
-export interface SessionConfigInput {
-  /** The world-query MCP server URL (loopback), when a world is open. */
-  worldQueryUrl?: string;
-  /** Concrete model for authoring, e.g. "anthropic/claude-sonnet-5" or "ollama/llama3.3". */
-  model?: string;
-  /**
-   * Per-agent overrides from Settings. A brief replaces what the agent is for; it can never
-   * replace the confinement preamble or the tool denials below — those are what the accept
-   * gate assumes, and an agent talked out of them fails in ways that look like our bugs.
-   */
-  agents?: Record<string, { model?: string; brief?: string }>;
-  /**
-   * The target model family for this session, which selects the authoring skill (SPEC-019 R-16).
-   * Absent, or a family with no skill, means the agents draft under general guidance — a stated
-   * fallback rather than a failure (R-20), stated by the caller that knows it happened.
-   */
-  skillFamily?: string;
-}
-
-/**
- * Which roster agents take which skill. An agent that answers rather than authors takes none:
- * a skill shapes what is drafted, and there is nothing drafted here to shape (R-17).
- */
-const SKILLED_AGENTS: Record<string, Parameters<typeof skillFor>[0]> = {
-  "scene-writer": "scene-drafting",
-  "art-director": "storyboard",
-};
-
-/** The skill a given agent runs with in this session, or null. Exported for the record (R-19). */
-export function skillForAgent(agentName: string, family: string | undefined): Skill | null {
-  const purpose = SKILLED_AGENTS[agentName];
-  return purpose === undefined ? null : skillFor(purpose, family);
-}
-
 /** The opencode.json object written into a session's working directory. */
 export function buildSessionConfig(input: SessionConfigInput): Record<string, unknown> {
   const agent: Record<string, unknown> = {};
@@ -100,7 +65,7 @@ export function buildSessionConfig(input: SessionConfigInput): Record<string, un
     const skill = skillForAgent(member.name, input.skillFamily);
     agent[member.name] = {
       description: member.description,
-      prompt: promptFor({
+      prompt: agentPromptFor({
         ...member,
         ...(override?.brief !== undefined ? { brief: override.brief } : {}),
         ...(skill !== null ? { skill } : {}),

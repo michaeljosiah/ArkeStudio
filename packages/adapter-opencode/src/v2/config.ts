@@ -1,5 +1,4 @@
-import { promptFor, ROSTER } from "../roster.js";
-import { skillForAgent, type SessionConfigInput } from "../config.js";
+import { agentPromptFor, ROSTER, skillForAgent, type SessionConfigInput } from "@arke-studio/contracts";
 
 /**
  * Session configuration in OpenCode v2's shapes (issue 327 §7). The POLICY is the v1
@@ -85,7 +84,7 @@ export function buildSessionConfigV2(input: SessionConfigV2Input): Record<string
     const skill = skillForAgent(member.name, input.skillFamily);
     agents[member.name] = {
       description: member.description,
-      system: promptFor({
+      system: agentPromptFor({
         ...member,
         ...(override?.brief !== undefined ? { brief: override.brief } : {}),
         ...(skill !== null ? { skill } : {}),

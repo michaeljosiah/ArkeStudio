@@ -2,8 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { join } from "node:path";
 import WebSocket from "ws";
-import { agentForPurpose, buildSessionConfig } from "@arke-studio/adapter-opencode";
-import { FrameSchema, type Frame, type HarnessAdapter, type HarnessEvent } from "@arke-studio/contracts";
+import { buildSessionConfig } from "@arke-studio/adapter-opencode";
+import {
+  agentForPurpose,
+  FrameSchema,
+  type Frame,
+  type HarnessAdapter,
+  type HarnessEvent,
+} from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { Coordinator } from "../src/coordinator.js";
 import { FsWorldProvider } from "../src/world/provider.js";

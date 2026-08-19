@@ -27,7 +27,6 @@ import {
   type Cipher,
   type DatabaseCtor,
 } from "@arke-studio/coordinator";
-import { agentForPurpose, skillFor, ROSTER } from "@arke-studio/adapter-opencode";
 import {
   COMFYUI_RECIPES,
   comfyUiRecipeIdentity,
@@ -63,11 +62,14 @@ import {
   validateVoxaExecutable,
   type VoxaSelection,
 } from "./voxa-runtime.js";
-import type {
-  ThemePreference,
-  VoiceRuntimeFailure,
-  VoiceRuntimeStatus,
-  VoxaSettings,
+import {
+  agentForPurpose,
+  ROSTER,
+  skillFor,
+  type ThemePreference,
+  type VoiceRuntimeFailure,
+  type VoiceRuntimeStatus,
+  type VoxaSettings,
 } from "@arke-studio/contracts";
 
 /**

@@ -1,7 +1,7 @@
 import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentForPurpose, skillFor, ROSTER } from "@arke-studio/adapter-opencode";
+import { agentForPurpose, skillFor, ROSTER } from "@arke-studio/contracts";
 import { createProviderClients, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { KOKORO_PRESETS, localCandidates } from "@arke-studio/voice";
 import { ChildLedger } from "./child-ledger.js";

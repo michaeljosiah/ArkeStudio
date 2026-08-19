@@ -1,4 +1,5 @@
-import { CHARACTER_ROLE_MAX, worldChatResultShapeGuide } from "@arke-studio/contracts";
+import { CHARACTER_ROLE_MAX } from "./world.js";
+import { worldChatResultShapeGuide } from "./world-chat.js";
 
 /**
  * The application-owned agent roster (SPEC-005 §2.3, R-8, D4). Agents are product behaviour,
@@ -68,7 +69,7 @@ directory are the complete scope of what you may change. Rules that are not your
  * guidance and has no way to reach the confinement, the tool denials, the proposal directory or
  * the result shape.
  */
-export function promptFor(agent: {
+export function agentPromptFor(agent: {
   brief: string;
   needsProposal: boolean;
   skill?: { id: string; version: number; body: string } | undefined;
@@ -267,4 +268,4 @@ export function agentForPurpose(
   }
 }
 
-export const ROSTER: readonly RosterAgent[] = BRIEFS.map((a) => ({ ...a, prompt: promptFor(a) }));
+export const ROSTER: readonly RosterAgent[] = BRIEFS.map((a) => ({ ...a, prompt: agentPromptFor(a) }));
