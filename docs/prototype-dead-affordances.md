@@ -2,39 +2,37 @@
 
 `cursor:pointer` elements: **1408**
 
-- **1000 wired**
+- **1014 wired**
 - **69 state variants** — the *selected* half of a pair; no handler is correct.
-- **9 leave the application** — Open folder, GitHub, a path picker, Upload a frame.
-  A prototype cannot perform these; removing their pointer would misrepresent a real control.
-- **330 genuinely unwired**
+- **11 leave the application** — a file or folder picker, an external link.
+- **314 genuinely unwired**
 
 The test: *an affordance either does something, or stops looking pressable.*
 
 | screen | unwired | the affordances |
 |---|---:|---|
-| 2b Canon browser | 17 | (icon only) x3, CANON-002 · Tide-calling, CANON-031 · The night the bells sank, Maren · sheet v4, What does the Chorister want?, CANON-021 · The Drowned Quarter |
-| 3c Artifacts | 14 | (icon only) x3, Audio 6, Documents 9, Images 12, Video 3, Made here 4 |
-| 69a Reference picker · world artifacts | 14 | This session 16, Upload, Images 12, Video 3, Audio 6, Documents 9 |
-| 68b Generate · the bench | 14 | (icon only) x5, Image 1 x2, Harbour night studies, Image 2, Audio 1 0:12, Image 3 |
-| 10a New location | 13 | (icon only) x7, Harbourside, The Vigil headland, + new region, Bray Half-Hitch, The Ebb Council |
-| 11b Generate workspace | 12 | (icon only) x6, Scene, END · OPTIONAL, Reset, 3, 2 |
-| 28a New canon entry | 11 | (icon only) x5, Rule, Location, Faction, Timeline, Tone |
+| 3c Artifacts | 14 | (icon only) x3, Audio 6, Documents 9, Images 12, Video 3 |
+| 68b Generate · the bench | 14 | (icon only) x5, Image 1 x2, Harbour night studies, Image 2, Audio 1 0:12 |
+| 10a New location | 13 | (icon only) x7, Harbourside, The Vigil headland, + new region, Bray Half-Hitch |
+| 11b Generate workspace | 12 | (icon only) x6, Scene, END · OPTIONAL, Reset, 3 |
+| 69a Reference picker · world artifacts | 12 | This session 16, Images 12, Video 3, Audio 6, Documents 9 |
+| 28a New canon entry | 11 | (icon only) x5, Rule, Location, Faction, Timeline |
 | 25b Exports | 9 | (icon only) x5, Exports 2, Review cut mp4 1080p · timecode · fastest, Master ProRes · 4K upscale · clean, Social excerpt 9:16 · pick a scene · caption |
 | 71b World Chat · a conversation | 9 | (icon only) x6, The bells and the lock, Archived · 2, about Maren Kest ⌄ |
-| 62b Generate · the standard dialog | 8 | Remove, higgsfield Soul 2.0 DEFAULT 4 models ▾, 1K, 4K, 16:9, 9:16 |
+| 62b Generate · the standard dialog | 8 | Remove, higgsfield Soul 2.0 DEFAULT 4 models ▾, 1K, 4K, 16:9 |
 | 27a Edit sheet | 8 | (icon only) x8 |
 | 25a Audio | 7 | (icon only) x6, Audio 3 |
-| 53d The board · one shot selected, and everything about it editable | 7 | (icon only) x2, Reset to assembled, seedance 2.0, 720p · 9:16, 6s, 3 of 4 carried |
+| 53d The board · one shot selected, and everything about it editable | 7 | (icon only) x2, Reset to assembled, seedance 2.0, 720p · 9:16, 6s |
 | 12a World genesis | 7 | (icon only) x4, Wonder, Grim, Playful |
 | 71a World Chat · a new conversation | 7 | (icon only) x6, Archived · 2 |
 | 3a Character sheet + voice | 6 | (icon only) x6 |
 | 23a Locations | 6 | (icon only) x3, The Vigil The lighthouse that listens back. , The Bell Market A church that forgot it was , Harbourside What stayed dry, and pretends no |
 | 26b Factions | 6 | (icon only) x3, The Ebb Council Governs what the water leave, The Bellkeepers Collect the drowned rent und, The Salvage Guild Divers who sell what the d |
 | 2c Productions | 6 | (icon only) x3, novel chapter 7 of 24 Undersong Maren's book, short film shot 15 of 15 Saltlight One shot , stills 24 of 24 rendered Hymnal A visual alb |
-| 5b New character | 6 | Bray Half-Hitch sheet v3 · approved, Maren Kest sheet v4 · locked, Sereth Anwe sheet v2 · approved, Ilo Venn sheet v2 · approved, Odile Marrow sheet v1 · accepted, The Chorister sheet v2 · locked |
+| 5b New character | 6 | Bray Half-Hitch sheet v3 · approved, Maren Kest sheet v4 · locked, Sereth Anwe sheet v2 · approved, Ilo Venn sheet v2 · approved, Odile Marrow sheet v1 · accepted |
 | 11a Production dashboard | 6 | (icon only) x3, Dashboard, Artifacts 8, All 42 takes |
-| 58a Production · cast | 6 | Cast 3, no reference yet The barman Two lines and a , no reference yet The room above the chandler, no reference yet The night crew Six of them,, Bray Half-hitch Ropewright · support charact, The Chorister Keeper of the drowned verse ch |
-| 37a New artifact | 6 | B, I, H, (icon only), The Drowned Quarter, + link |
+| 58a Production · cast | 6 | Cast 3, no reference yet The barman Two lines and a , no reference yet The room above the chandler, no reference yet The night crew Six of them,, Bray Half-hitch Ropewright · support charact |
+| 37a New artifact | 6 | B, I, H, (icon only), The Drowned Quarter |
 | 69c Reference picker · inside the standard dialog | 6 | (icon only) x3, ×, World artifacts 30, Remove |
 | 1c World hub minimal | 5 | (icon only) x3, Continue Saltlight Shot 15 of 15 · the board, Grow the canon The Drowned Quarter has three |
 | 57a Location · Reference | 5 | (icon only) x3, Replace, history |
@@ -51,6 +49,7 @@ The test: *an affordance either does something, or stops looking pressable.*
 | 48b Arcs · lanes across the season | 4 | (icon only) x2, Story v1, Add a lane |
 | 1d Cast ledger | 3 | (icon only) x3 |
 | 4a Main photo + character sheet | 3 | (icon only) x3 |
+| 2b Canon browser | 3 | (icon only) x3 |
 | 23b Location detail | 3 | (icon only) x3 |
 | 5c Sketch sheet | 3 | (icon only) x3 |
 | 53b The production, empty · a place to start writing | 3 | (icon only) x2, Dashboard |
