@@ -66,3 +66,20 @@
 | 35b Experience dashboard | 1 | Dashboard |
 | 35c Dual-layer graph | 1 | Add |
 | 71a World Chat · a new conversation | 1 | Archived · 2 |
+
+## The unnamed bucket, probed by glyph
+
+An icon carries no text, but its SVG path is reused. Matching each unnamed icon's glyph
+against every icon that DOES carry a `title` gives this:
+
+- **101** — (glyph seen nowhere named)
+- **29** — Close
+- **3** — New conversation
+
+The probe identifies the SHAPE, not the target. `Close` is the clearest case: the titled
+instance dismisses a modal, while the unnamed copies sit in the app's top bar beside the
+settings gear — a window control, which a prototype should not simulate. Same glyph, different
+meaning, so glyph-matching alone is not a licence to wire.
+
+`Play or pause` was the exception and is now wired: its target is the audio beside it, and
+playback is exclusive — starting one stops the last.
