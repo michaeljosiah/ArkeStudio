@@ -1971,7 +1971,7 @@
         <a href="#graph">Branch map</a>
         <a href="#architecture">Architecture</a>
       </nav>
-      <div class="topmeta">feature brief / production development workspace / rev 5 / 2026-08-19</div>
+      <div class="topmeta">feature brief / production development workspace / rev 6 / 2026-08-19</div>
     </header>
 
     <main class="shell">
@@ -2195,8 +2195,8 @@
               </tr>
               <tr>
                 <td>Day One seeds include other productions' uncovered work (SPEC-012 R-3)</td>
-                <td><span class="chip chip--partial">partial</span></td>
-                <td>The dashboard renders open canon threads only. The second seed source is specified and unimplemented.</td>
+                <td><span class="chip chip--partial">superseded</span></td>
+                <td>Turn 53 cut the seed rails: an empty production is a place to start writing. Issue 386 closed; seeds return only if the plain path is found wanting.</td>
               </tr>
               <tr>
                 <td>Episode-aware cuts and exports</td>
@@ -2315,14 +2315,14 @@
           </div>
           <div class="flowstep flowstep--accent">
             <span class="number">DAY ONE</span><b>Inherit the world</b
-            ><span>Seeds, cast, tone, first move</span>
+            ><span>Cast, tone, first move &middot; no briefing (turn 53)</span>
           </div>
           <div class="flowstep flowstep--accent">
             <span class="number">DEVELOP</span><b>Shape the season</b><span>Engine, arcs, episode cards</span>
           </div>
           <div class="flowstep">
             <span class="number">EPISODE</span><b>Break the episode</b
-            ><span>Hook, turn, cliffhanger, beats</span>
+            ><span>Hook, turn, cliffhanger</span>
           </div>
           <div class="flowstep">
             <span class="number">SCENE</span><b>Script and cover</b
@@ -2363,7 +2363,7 @@
             <h3>Episode / Scene thread</h3>
             <p>Explores and proposes:</p>
             <ul>
-              <li>Episode cards, beats, outline, scene script</li>
+              <li>Episode cards, promises, scene scripts</li>
               <li>Shot coverage and editorial storyboard</li>
               <li>Camera and audio direction</li>
               <li>Dialogue and timing</li>
@@ -2425,10 +2425,12 @@
         <div class="superseded">
           <span class="eyebrow">Superseded &middot; now drawn in the design master</span>
           <p>
-            The concept screen that stood here has been replaced by turn <b>43</b>, which draws
-            day one and its two seed sources in the application&#8217;s own tokens and records the numbers it binds. A sketch in this
-            document&#8217;s visual language argued the shape; the turn decides it, and two drawings of one screen
-            is how a design drifts. See <code>design-system/Arke Studio.dc.html</code><a href="#t43"></a>.
+            The concept screen that stood here was replaced by turn <b>43</b>, which drew
+            day one with two seed sources &#8212; and turn <b>53</b> then cut the seed rails: an empty
+            production is a place to start writing, not a briefing, and turn <b>79</b> records the seed rule
+            as superseded in whole. A sketch in this
+            document&#8217;s visual language argued the shape; the turns decide it, and two drawings of one screen
+            is how a design drifts. See <code>design-system/Arke Studio.dc.html</code><a href="#t53"></a>.
           </p>
         </div>
       </section>
@@ -2503,10 +2505,11 @@
         <div class="callout">
           <strong>The hierarchy is not a folder tree.</strong>
           <p>
-            Character arcs, storylines, setups, and payoffs cross episode boundaries. Beats may be realized by
-            several scenes. A scene, though, belongs to exactly one episode: when a continuous dramatic moment
+            Character arcs, storylines, setups, and payoffs cross episode boundaries. On an episodic
+            production, a scene belongs to exactly one episode: when a continuous dramatic moment
             crosses a release boundary, it is written as two linked scenes — a closing and an opening — never
-            as an episode cutting through a scene. Arke stores stable links and derives views instead of
+            as an episode cutting through a scene. A non-episodic film has no episodes at all, and no
+            surface pretends otherwise (SPEC-023 R-11). Arke stores stable links and derives views instead of
             forcing every creative idea into one parent-child container.
           </p>
         </div>
@@ -2538,8 +2541,9 @@
             <span class="number">DECIDED / EPISODES OWN COMPLETE SCENES</span>
             <h3>Seven episodes are seven deliverables.</h3>
             <p>
-              Every scene belongs to one episode; a dramatic moment continues across episodes through linked
-              closing and opening scenes. That keeps authoring, validation, and export simple — no
+              On an episodic production, every scene belongs to exactly one episode; a dramatic moment
+              continues across episodes through linked closing and opening scenes, and a non-episodic film
+              simply has no episodes (SPEC-023 R-11). That keeps authoring, validation, and export simple — no
               editorial-segment model and no timeline in/out points in the domain. The cut still derives one
               timeline from every scene, so episode membership needs an episode cut and an episode export —
               one per release unit. The presets themselves are fine: a vertical social preset already exists.
@@ -2620,7 +2624,9 @@
             <h2>Script, shots, board, then model-aware passes.</h2>
           </div>
           <p>
-            The episode workspace first breaks story into beats and an outline. The Scene workspace then owns
+            The episode workspace was first specified to break story into beats and an outline — a layer
+            turn 53 later removed: an episode is its promise and its ordered scenes, and a script belongs
+            to a scene and to nothing above it. The Scene workspace owns
             the script. Only after the script settles does Arke create shot coverage. The editorial scene
             board is a free local view of those shots. At dispatch, the selected model's capabilities
             determine how those same accepted shots are packed into one or more provider-ready generation
@@ -2634,8 +2640,8 @@
             ><span>opening, turn, cliffhanger, arcs</span>
           </div>
           <div class="flowstep">
-            <span class="number">BEAT / OUTLINE</span><b>What changes</b
-            ><span>ordered dramatic events and scene intent</span>
+            <span class="number">EPISODE PROMISE</span><b>What changes</b
+            ><span>opens, turn, closes &mdash; then scenes in order (turn 53)</span>
           </div>
           <div class="flowstep flowstep--accent">
             <span class="number">SCENE SCRIPT</span><b>What happens</b
@@ -3087,8 +3093,9 @@
                 <tr>
                   <td>What is each audience release unit?</td>
                   <td>
-                    Proposed Episode cards — decided: every scene belongs to exactly one episode, and a
-                    moment that crosses a release boundary is two linked scenes. Arcs, setups, and payoffs
+                    Proposed Episode cards — decided: on an episodic production every scene belongs to exactly
+                    one episode, a boundary-crossing moment is two linked scenes, and a non-episodic film
+                    has no episodes (SPEC-023 R-11). Arcs, setups, and payoffs
                     still cross episodes as links.
                   </td>
                 </tr>
@@ -3135,7 +3142,7 @@
             <p style="margin: -6px 0 16px; color: var(--ink-soft); font-size: 12px">
               <b>Designed</b> is a third state, and the ledgers above do not show it &#8212; they record only
               what the code does. A1&ndash;A3, the format step of B, and the boards of C are drawn in the
-              design master as turns 43&ndash;48 and clickable in the Prototype; A4 is a file-layout fix
+              design master as turns 43&ndash;53 (with turn 53 superseding 43b, 46a, 46b, and 47a, and turns 78&ndash;79 refining the words) and clickable in the Prototype; A4 is a file-layout fix
               nothing draws. They are unbuilt, but nobody
               has to invent them: the frames, the numbers and the reasoning already exist. Read
               <code>not built</code> above as <em>not built yet</em>, not as <em>not decided</em>.
@@ -3160,10 +3167,11 @@
                 >
               </li>
               <li>
-                <b>Finish SPEC-012 R-3's second seed source.</b
+                <b>Superseded: the second seed source is not built, by decision.</b
                 ><span
-                  >Uncovered work from other productions, which Day One and this brief both lean on and which
-                  no code produces.</span
+                  >Turn 53 cut the day-one seed rails — an empty production is a place to start writing —
+                  and issue 386 closed as superseded. Seeds return only if the plain path is used and found
+                  wanting, as a new design turn.</span
                 >
               </li>
               <li>
@@ -3182,7 +3190,8 @@
                 ><span
                   >Define the thin Series foundation, Season production direction, Episode cards, and the
                   Scene extensions, carrying the two decisions this brief records: a Series is created with
-                  Season 1, and every scene belongs to exactly one episode. Define proposal materialization,
+                  Season 1, and on an episodic production every scene belongs to exactly one episode
+                  (non-episodic films have none — SPEC-023 R-11). Define proposal materialization,
                   rebase, and ripples before building candidate types, and settle where a Series lives on
                   disk.</span
                 >
@@ -3362,7 +3371,11 @@
       one episode &#8212; are recorded as decided; branching narrows to direct-choice Interactive video with
       named findings and no variables, conditions, unlocks, state, or score, and no graph migration of a
       linear season; the platform audit moves to <code>readiness.html</code>; the roadmap regroups into four
-      programmes; and the imagery now travels with the document under <code>assets/</code>. This document argues
+      programmes; and the imagery now travels with the document under <code>assets/</code>. Revision 6 reconciles the text with turns 53 and 79 and the accepted SPEC-023: the day-one
+      seed sources are recorded as superseded (issue 386), the Beat layer no longer appears as a domain
+      artifact anywhere in the flow, the scene-per-episode rule is qualified to episodic productions, and
+      the create flow is stated from both sides &#8212; a multi-kind family cannot bypass step two, a
+      single-kind family never sees it. This document argues
       and audits; <code>production-story-workspace-guide.html</code> is the companion that explains how the feature works, what
       it writes to disk, and what a morning of using it looks like.
     </footer>
