@@ -52,6 +52,20 @@ export type ToolDecision =
  *
  * The cost is a real capability difference from OpenCode, and it is declared rather than hidden:
  * the adapter does not advertise `permissions`, so a host knows not to expect a prompt here.
+ *
+ * KNOWN LIMIT, measured against 2.1.235: this function does not see every tool call. Claude Code
+ * auto-approves side-effect-free work inside the working directory without consulting
+ * `canUseTool` — `Glob` was never offered to the gate, and a read-only `Bash` invocation was not
+ * either. Audited with the gate denying everything: the sheet was unchanged, the shell file was
+ * never created, and a `Read` aimed OUTSIDE the working directory did reach the gate and was
+ * refused. So the boundary holds for anything that changes state or leaves the directory, and
+ * what slips past is searching inside a directory the agent is already confined to and already
+ * permitted to search.
+ *
+ * The practical consequence is narrow but real: a confinement that omitted `search` would not
+ * actually be enforced here. Both current roles allow it, so nothing is wrong today. If that
+ * ever changes, the SDK's own shadowing warning names the fix — a PreToolUse hook is the
+ * documented way to gate every call.
  */
 export function decideTool(confinement: AgentConfinement, toolName: string): ToolDecision {
   const intent = intentOf(toolName);

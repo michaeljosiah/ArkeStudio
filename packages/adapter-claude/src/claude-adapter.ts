@@ -27,9 +27,11 @@ import { decideTool } from "./tool-intents.js";
  * and `dispose()` is the only thing standing between an abandoned adapter and a live subprocess.
  *
  * Everything the agent may do comes from {@link confinementFor} and is enforced in `canUseTool`
- * — a callback we own, rather than a config file the harness is trusted to honour. That is the
- * one place this harness is stronger than OpenCode, and it is also the one that has to be
- * verified per binary rather than assumed (see `confinement-probe.ts`).
+ * — a callback we own, rather than a config file the harness is trusted to honour. That is
+ * stronger than OpenCode where it applies, and it has to be verified per binary rather than
+ * assumed (see `confinement-probe.ts`). It is not total: side-effect-free work inside the
+ * working directory is auto-approved without reaching the callback, which `tool-intents.ts`
+ * records in full along with the audit that bounded it.
  */
 
 export interface ClaudeAdapterOptions {
