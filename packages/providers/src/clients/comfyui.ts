@@ -165,6 +165,16 @@ export class ComfyUiClient implements ProviderClient {
      * optional because progress is the one thing a dispatch works perfectly well without.
      */
     private readonly openSocket?: (url: string) => ProgressSocket,
+    /**
+     * How much of the graphics card is free RIGHT NOW, in MB, or null where that cannot be asked
+     * (SPEC-022 §2.6).
+     *
+     * Deliberately not ComfyUI's own `/system_stats`: it reports what torch has allocated, so it
+     * answered "8.86 GB free" on a card with 6.77 GB actually free — it cannot see the browser or
+     * the game holding the other 3 GB. Asking the device is the only honest answer, and the
+     * device is the host's to ask.
+     */
+    private readonly freeVramMb?: () => Promise<number | null>,
   ) {}
 
   /** Latest step count per prompt, fed by the engine's socket and read by `poll`. */
@@ -399,6 +409,39 @@ export class ComfyUiClient implements ProviderClient {
     return answered?.subfolder ? `${answered.subfolder}/${uploaded}` : uploaded;
   }
 
+  /**
+   * Make room, or say plainly that there is none (SPEC-022 §2.6).
+   *
+   * The start-up probe reads the card's TOTAL size from the registry, so a machine passes the
+   * floor and then runs out anyway because something else already had the card. This is the same
+   * question asked at the moment it matters, of the device rather than of the engine.
+   *
+   * When it is short, the engine is asked to put down whatever it is still holding — a video
+   * model from an earlier job, most likely — and the card is measured again. That is worth doing
+   * only when short: `/free` throws away the model cache, so calling it before every dispatch
+   * would buy a cold start on every line.
+   */
+  private async ensureRoomOnTheCard(base: string, recipe: ComfyUiRecipe): Promise<void> {
+    const need = recipe.hardware.minVramMb;
+    if (!this.freeVramMb || need <= 0) return;
+    const first = await this.freeVramMb().catch(() => null);
+    // Unknown stays unknown and dispatches (SPEC-021 D15): a card this build cannot measure is
+    // not a card this build may refuse.
+    if (first === null || first >= need) return;
+    await this.fetchImpl(`${base}/free`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ unload_models: true, free_memory: true }),
+    }).catch(() => undefined);
+    const after = await this.freeVramMb().catch(() => null);
+    if (after === null || after >= need) return;
+    const gb = (mb: number): string => `${(mb / 1024).toFixed(1)} GB`;
+    throw new ProviderRequestRejectedError(
+      `comfyui: ${recipe.displayName} needs ${gb(need)} of free graphics memory and this machine has ${gb(after)} free. ` +
+        `The engine has already put down what it was holding — close other programs using the graphics card, then try again.`,
+    );
+  }
+
   async submit(_key: string, request: SubmitRequest, _context?: ProviderCallContext): Promise<SubmitResult> {
     const recipe = comfyUiRecipeById(request.model);
     if (!recipe) throw new Error(`comfyui: "${request.model}" is not a shipped recipe`);
@@ -431,6 +474,7 @@ export class ComfyUiClient implements ProviderClient {
     const verified = await this.preflight(recipe.id);
     if (!verified.ok) throw new ProviderRequestRejectedError(verified.reason);
     const base = this.require();
+    await this.ensureRoomOnTheCard(base, recipe);
     // The clip becomes a name the engine knows. Done after preflight so a job that was going to
     // be refused never puts a file on the engine, and before the graph is built because the
     // uploaded name IS the graph value.

@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Cloned voices in Arke Studio: record or choose a clip, and a character can speak in that voice on your own machine, with no per-line cost. What you need, how to set it up, how to use it, and what works today."
+    />
+    <title>Arke Studio - Cloned voices</title>
+    <style>
+      :root {
+        --paper: #f4f1ea;
+        --ink: #171715;
+        --ink-soft: #5f5b53;
+        --line: rgba(23, 23, 21, 0.14);
+        --card: #fffefa;
+        --coral: #ec6a4a;
+        --teal: #2d7b7a;
+        --amber: #c88d32;
+        --red: #b9483d;
+        --green: #3e7455;
+        --sans: "Segoe UI Variable Text", "Aptos", "Segoe UI", system-ui, sans-serif;
+        --display: "Segoe UI Variable Display", "Aptos Display", "Segoe UI", system-ui, sans-serif;
+        --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+        --shadow: 0 10px 30px rgba(28, 24, 18, 0.09);
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 14% 0%, rgba(45, 123, 122, 0.11), transparent 27rem),
+          radial-gradient(circle at 86% 6%, rgba(236, 106, 74, 0.1), transparent 30rem),
+          var(--paper);
+        font-family: var(--sans);
+        line-height: 1.62;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: inherit; }
+      .shell { width: min(980px, calc(100% - 40px)); margin: 0 auto; }
+      .topbar {
+        position: sticky; top: 0; z-index: 50;
+        display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+        min-height: 58px; padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(244, 241, 234, 0.92);
+        backdrop-filter: blur(18px);
+      }
+      .brand { display: flex; align-items: baseline; gap: 10px; font-family: var(--display); }
+      .brand span { font-size: 12.5px; color: var(--ink-soft); }
+      .toc { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--ink-soft); }
+      .toc a { text-decoration: none; }
+      .toc a:hover { color: var(--coral); }
+
+      h1 { font-family: var(--display); font-size: clamp(30px, 5vw, 44px); line-height: 1.12; margin: 0 0 14px; letter-spacing: -0.01em; }
+      h2 { font-family: var(--display); font-size: 25px; margin: 0 0 12px; letter-spacing: -0.01em; }
+      h3 { font-size: 16px; margin: 0 0 6px; }
+      p { margin: 0 0 14px; }
+      section { padding: 44px 0; border-bottom: 1px solid var(--line); }
+      section:last-of-type { border-bottom: none; }
+      .eyebrow { font: 600 11.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--teal); margin-bottom: 10px; }
+      .lede { font-size: 18px; color: var(--ink-soft); }
+
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; box-shadow: var(--shadow); }
+      .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+      .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+      .steps li { counter-increment: s; position: relative; padding: 14px 18px 14px 54px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+      .steps li::before {
+        content: counter(s); position: absolute; left: 16px; top: 14px;
+        width: 26px; height: 26px; border-radius: 50%;
+        background: var(--ink); color: var(--paper);
+        display: grid; place-items: center; font: 600 13px var(--mono);
+      }
+      table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+      th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { font: 600 11.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+      code { font-family: var(--mono); font-size: 0.92em; background: rgba(23, 23, 21, 0.06); padding: 1px 5px; border-radius: 4px; }
+      .pill { display: inline-block; font: 600 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 99px; }
+      .pill--yes { background: rgba(62, 116, 85, 0.14); color: var(--green); }
+      .pill--no { background: rgba(185, 72, 61, 0.13); color: var(--red); }
+      .pill--part { background: rgba(200, 141, 50, 0.16); color: var(--amber); }
+      .note { border-left: 3px solid var(--amber); padding: 4px 0 4px 16px; color: var(--ink-soft); }
+      .foot { padding: 30px 0 60px; font-size: 13px; color: var(--ink-soft); }
+      .scroller { overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="brand"><strong>Arke Studio</strong><span>feature guide</span></div>
+        <nav class="toc">
+          <a href="#what">What it is</a>
+          <a href="#need">What you need</a>
+          <a href="#setup">Setting it up</a>
+          <a href="#use">Using it</a>
+          <a href="#rules">The rules</a>
+          <a href="#behind">Behind the scenes</a>
+          <a href="#status">What works today</a>
+        </nav>
+      </div>
+
+      <section id="what">
+        <div class="eyebrow">Cloned voices</div>
+        <h1>Give a character somebody's voice.</h1>
+        <p class="lede">
+          Record a few seconds of speech, or pick an audio file you already have. Arke turns it into
+          a voice your characters can use. It runs on your own computer, so it costs nothing per
+          line and nothing leaves the machine.
+        </p>
+        <p>
+          Arke already had voices: six built-in ones that always work, and ElevenLabs' library if you
+          have an account. Both are catalogues you pick from. This is different — it is a voice that
+          did not exist until you made it.
+        </p>
+      </section>
+
+      <section id="need">
+        <h2>What you need before you start</h2>
+        <div class="grid">
+          <div class="card">
+            <h3>ComfyUI</h3>
+            <p>
+              A free program that runs AI models on your own machine. Arke does not install it for
+              you — you install it once, and Arke talks to it. Image and video generation use the
+              same program, so if you have set that up you are already done.
+            </p>
+          </div>
+          <div class="card">
+            <h3>One add-on inside it</h3>
+            <p>
+              ComfyUI needs the <code>TTS-Audio-Suite</code> add-on, which is what actually does the
+              speaking. Arke checks it is there and refuses politely if it is not.
+            </p>
+          </div>
+          <div class="card">
+            <h3>A reasonably big graphics card</h3>
+            <p>
+              <strong>8&nbsp;GB of video memory minimum, 12&nbsp;GB recommended.</strong> Below that
+              Arke tells you the figure and offers ElevenLabs instead, rather than letting you wait
+              for something that will not finish.
+            </p>
+          </div>
+          <div class="card">
+            <h3>A recording</h3>
+            <p>
+              A <code>.wav</code> or <code>.mp3</code> file of <strong>at least three seconds</strong>
+              of one person speaking. You can also record it on the spot with your microphone.
+            </p>
+          </div>
+        </div>
+        <p class="note" style="margin-top: 18px">
+          You also need the right to use the voice. Arke asks you to confirm that the person speaking
+          agreed to be cloned, and will not go a step further until you tick it.
+        </p>
+      </section>
+
+      <section id="setup">
+        <h2>Setting it up, once</h2>
+        <ol class="steps">
+          <li>
+            <h3>Open Settings, then Local runtime</h3>
+            <p>You will see a section for ComfyUI listing what Arke can and cannot see.</p>
+          </li>
+          <li>
+            <h3>Point Arke at ComfyUI</h3>
+            <p>
+              If it is already running, Arke usually finds it and offers <strong>Use this install</strong>.
+              Otherwise paste its address — normally <code>http://127.0.0.1:8188</code> — and press
+              <strong>Use this URL</strong>. <em>Restart Arke afterwards</em>; the connection is only
+              picked up on start-up.
+            </p>
+          </li>
+          <li>
+            <h3>Point it at ComfyUI's models folder</h3>
+            <p>
+              Press <strong>Map a folder</strong> and choose the <code>models</code> folder inside your
+              ComfyUI install. Arke needs this to check the add-on is the version it expects.
+            </p>
+          </li>
+          <li>
+            <h3>Check the recipe says ready</h3>
+            <p>
+              Under <strong>Recipes</strong> you should see <em>Local · Cloned Voice</em>. If it is
+              switched off it tells you exactly why — a missing add-on, an unmapped folder, or a card
+              that is too small.
+            </p>
+          </li>
+        </ol>
+      </section>
+
+      <section id="use">
+        <h2>Making a voice</h2>
+        <ol class="steps">
+          <li>
+            <h3>Open a character and press Change voice</h3>
+            <p>You get the list of every voice available to this world.</p>
+          </li>
+          <li>
+            <h3>Press Clone a voice</h3>
+            <p>
+              Then either <strong>Record</strong> and speak into your microphone, or
+              <strong>Choose a file</strong> and pick an audio file. Arke shows the clip's name and how
+              long it is, and refuses it there and then if it is too short or the wrong format — before
+              you have typed anything.
+            </p>
+          </li>
+          <li>
+            <h3>Tick the consent box</h3>
+            <p>
+              <em>"The person speaking agreed to have their voice cloned."</em> Nothing proceeds until
+              this is ticked. It is asked once, here, and never nagged again.
+            </p>
+          </li>
+          <li>
+            <h3>Give it a name and a description</h3>
+            <p>
+              The description is not decoration. Words like <em>low, dry, unhurried, coastal</em> are
+              what Arke matches against a character's written voice when it ranks the list — a voice
+              with no description sinks to the bottom. You will see the words it picked out as you type.
+            </p>
+          </li>
+          <li>
+            <h3>Save</h3>
+            <p>
+              The voice joins the list straight away, marked <em>cloned — on this machine</em>. Press
+              <strong>Assign</strong> to give it to the character, or <strong>Preview</strong> to hear
+              it read a line first.
+            </p>
+          </li>
+        </ol>
+      </section>
+
+      <section id="rules">
+        <h2>The rules worth knowing</h2>
+        <div class="scroller">
+          <table>
+            <tr>
+              <th>Rule</th>
+              <th>Why</th>
+            </tr>
+            <tr>
+              <td><strong>The voice belongs to the world, not the character</strong></td>
+              <td>
+                Clone one while casting Maren and every character in that world can use it afterwards.
+                The recording is filed against the character you made it for, but only as a record of
+                where it came from.
+              </td>
+            </tr>
+            <tr>
+              <td><strong>A description is required</strong></td>
+              <td>A voice with no words to match on is ranked last, which makes it useless in practice.</td>
+            </tr>
+            <tr>
+              <td><strong>Consent is required</strong></td>
+              <td>
+                Neither Arke nor the model can tell whether the speaker agreed. Only you know, so only
+                you can say — and the request literally cannot be sent without it.
+              </td>
+            </tr>
+            <tr>
+              <td><strong>WAV and MP3 only</strong></td>
+              <td>
+                M4A — the format iPhone voice memos use — was tried and dropped: it saved fine and then
+                failed every time the voice was actually used. Convert it first.
+              </td>
+            </tr>
+            <tr>
+              <td><strong>About 400 characters a line</strong></td>
+              <td>
+                Past that the model starts a whole second pass, which costs far more than the extra
+                words are worth. A line that long is really two lines.
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Nothing is uploaded to the internet</strong></td>
+              <td>
+                The recording is copied into your world folder and handed to ComfyUI on your own
+                machine. No account, no per-line charge.
+              </td>
+            </tr>
+          </table>
+        </div>
+      </section>
+
+      <section id="behind">
+        <h2>What happens behind the scenes</h2>
+        <p>Four steps, none of which you have to think about:</p>
+        <div class="grid">
+          <div class="card">
+            <h3>1 · The clip is checked</h3>
+            <p>
+              Arke reads the actual contents, not just the file name, so a file renamed to
+              <code>.wav</code> is caught immediately rather than becoming a voice that cannot speak.
+            </p>
+          </div>
+          <div class="card">
+            <h3>2 · It is copied into your world</h3>
+            <p>
+              The clip lives in the world folder and is filed as an artifact, so the voice and its
+              provenance are the same bytes. Deleting the original changes nothing.
+            </p>
+          </div>
+          <div class="card">
+            <h3>3 · It is handed to ComfyUI</h3>
+            <p>
+              When a line is spoken, Arke sends the clip to ComfyUI along with the words, and asks for
+              the line back in that voice.
+            </p>
+          </div>
+          <div class="card">
+            <h3>4 · You can see it working</h3>
+            <p>
+              While it runs, the button says what the engine is actually doing — for example
+              <em>speaking · step 20 of 25</em> — rather than a spinner that tells you nothing.
+            </p>
+          </div>
+        </div>
+        <p style="margin-top: 18px">
+          Everything lives under your world folder: the clip in <code>voices/</code>, the list of
+          voices in <code>voices/voices.json</code>, and a copy filed in <code>artifacts/</code>.
+          They are ordinary files you can look at.
+        </p>
+      </section>
+
+      <section id="status">
+        <h2>What works today, honestly</h2>
+        <div class="scroller">
+          <table>
+            <tr>
+              <th>Part</th>
+              <th>State</th>
+              <th>Detail</th>
+            </tr>
+            <tr>
+              <td>Making a voice from a file or recording</td>
+              <td><span class="pill pill--yes">Working</span></td>
+              <td>Tested end to end in the installed app. The voice is created, saved, and still there after a restart.</td>
+            </tr>
+            <tr>
+              <td>Seeing it in the list, assigning it</td>
+              <td><span class="pill pill--yes">Working</span></td>
+              <td>It appears alongside the built-in and ElevenLabs voices, ranked against the character's written voice.</td>
+            </tr>
+            <tr>
+              <td>Progress while it runs</td>
+              <td><span class="pill pill--yes">Working</span></td>
+              <td>The engine's own step count, shown on the button.</td>
+            </tr>
+            <tr>
+              <td>Actually speaking a line</td>
+              <td><span class="pill pill--part">Retuned, not yet re-tested</span></td>
+              <td>
+                On the 10&nbsp;GB card this was built against, the first attempt ran out of video memory
+                part-way and ground to a halt. Two settings carried over from the add-on's defaults were
+                the likely cause and have been changed — beam search off, and a lower ceiling on how much
+                audio one pass may make. Both are what the published guidance recommends for cards this
+                size. Not yet confirmed on hardware.
+              </td>
+            </tr>
+            <tr>
+              <td>Recording with a microphone</td>
+              <td><span class="pill pill--part">Untested by hand</span></td>
+              <td>
+                The path is built and tested automatically, but has not yet been tried with a real
+                microphone by a person.
+              </td>
+            </tr>
+          </table>
+        </div>
+        <p class="note" style="margin-top: 18px">
+          <strong>If the card is busy, Arke now says so before you wait.</strong> Just before speaking a
+          line it asks the graphics card how much memory is actually free — not how big it is. If there
+          is not enough, it first tells ComfyUI to put down anything it is still holding, such as a video
+          model from an earlier job, and measures again. Only if it is still short does it stop, and then
+          it names both figures: <em>needs 7.8&nbsp;GB free, this machine has 3.0&nbsp;GB free</em>, and
+          suggests closing other programs using the card.
+        </p>
+      </section>
+
+      <div class="foot">
+        Arke Studio &middot; cloned voices &middot; SPEC-022, with SPEC-021 for the local engine.
+        Written 19 August 2026.
+      </div>
+    </div>
+  </body>
+</html>

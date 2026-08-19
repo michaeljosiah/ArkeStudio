@@ -337,9 +337,27 @@ const CLONED_VOICE: ComfyUiRecipe = {
         top_k: 30,
         do_sample: true,
         length_penalty: 0.0,
-        num_beams: 3,
+        /*
+         * One beam, not the node's default of three.
+         *
+         * Beam search keeps every candidate sequence alive through decoding, so three beams is
+         * roughly three times the decoder's memory — spent during exactly the stage that ran the
+         * reference machine out of card. It is also the slowest of the decoding strategies the
+         * engine offers. With `do_sample` on, beams were doing very little for a single spoken
+         * line anyway: sampling is what gives the delivery its variation, and the seed is what
+         * makes it repeatable.
+         */
+        num_beams: 1,
         repetition_penalty: 10.0,
-        max_mel_tokens: 1500,
+        /*
+         * 1000, not the node's default of 1500. This is the ceiling on how much audio one pass
+         * may generate, and it costs memory and time in proportion. The published guidance for
+         * cards at or below 10 GB is 1000, and 1000 mel tokens is far more speech than the 400
+         * characters `text` now admits.
+         */
+        max_mel_tokens: 1000,
+        // Half precision on CUDA: about half the memory of fp32 for a very small quality cost,
+        // and the engine's own default on this hardware.
         use_fp16: true,
         use_deepspeed: false,
       },

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { appendFileSync, createReadStream, existsSync } from "node:fs";
@@ -558,6 +558,22 @@ async function initialize(): Promise<{ port: number }> {
       // The engine says what it is doing only on its socket (SPEC-021 D16). Node's own
       // WebSocket, adapted to the two handlers the client needs — nothing here should hold a
       // dependency on a socket library for one optional figure.
+      // The device's own answer, not the engine's: ComfyUI reports what torch allocated and
+      // cannot see the browser holding 3 GB of the same card (SPEC-022 §2.6). NVIDIA-only, and
+      // null everywhere else — an unmeasurable card dispatches rather than being refused (D15).
+      freeVramMb: () =>
+        new Promise((resolve) => {
+          execFile(
+            "nvidia-smi",
+            ["--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            { timeout: 5_000, windowsHide: true },
+            (err, stdout) => {
+              if (err) return resolve(null);
+              const mb = Number.parseInt(String(stdout).trim().split(/\r?\n/)[0] ?? "", 10);
+              resolve(Number.isFinite(mb) && mb >= 0 ? mb : null);
+            },
+          );
+        }),
       openSocket: (url) => {
         const socket = new WebSocket(url);
         const adapter = {

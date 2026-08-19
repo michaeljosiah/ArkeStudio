@@ -1140,3 +1140,66 @@ describe("progress from the engine's socket", () => {
     assert.equal((await client.poll("", "p-1")).state, "running");
   });
 });
+
+/**
+ * Room on the card, asked at the moment it matters (SPEC-022 §2.6).
+ *
+ * The start-up probe reads the card's TOTAL size, so a machine clears the floor and then runs out
+ * because something else already had the card. These cover the question being asked again at
+ * dispatch, the engine being told to put things down, and the refusal naming both figures.
+ */
+describe("making room on the graphics card", () => {
+  const VOICE = {
+    model: "comfyui-cloned-voice" as const,
+    capability: "voice-tts" as const,
+    params: { voiceId: "v", text: "A line.", speakerFile: "c.wav" },
+  };
+  const ROUTES = [
+    { match: /\/free$/, status: 200, body: {} },
+    { match: /\/upload\/image$/, status: 200, body: { name: "c.wav", subfolder: "" } },
+    { match: /\/prompt$/, status: 200, body: { prompt_id: "p-1", node_errors: {} } },
+  ];
+  const clip = async (): Promise<Uint8Array> => new Uint8Array([1]);
+  const client = (free: () => Promise<number | null>, fetch: FetchLike) =>
+    new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, clip, undefined, free);
+
+  it("dispatches when the card cannot be measured", async () => {
+    // D15: unknown stays unknown and dispatches. A card this build cannot read is not a card it
+    // may refuse — that would disable local voice forever on any machine without nvidia-smi.
+    const { fetch, calls } = engineFake(ROUTES);
+    await client(async () => null, fetch).submit("", VOICE);
+    assert.equal(calls.some((c) => c.url.endsWith("/free")), false, "nothing to free when nothing is known");
+  });
+
+  it("leaves the engine's model cache alone when there is already room", async () => {
+    // `/free` throws away the loaded models, so calling it before every dispatch buys a cold
+    // start on every line. It is worth doing only when the card is actually short.
+    const { fetch, calls } = engineFake(ROUTES);
+    await client(async () => 12_000, fetch).submit("", VOICE);
+    assert.equal(calls.some((c) => c.url.endsWith("/free")), false);
+  });
+
+  it("asks the engine to put things down when the card is short, then goes ahead", async () => {
+    const { fetch, calls } = engineFake(ROUTES);
+    let asked = 0;
+    await client(async () => (++asked === 1 ? 3000 : 9000), fetch).submit("", VOICE);
+    assert.equal(calls.some((c) => c.url.endsWith("/free") && c.method === "POST"), true);
+    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true, "it should proceed once there is room");
+  });
+
+  it("names both figures when there is still not enough, and does not dispatch", async () => {
+    // The whole point: say so before the wait, not after half an hour of paging to disk.
+    const { fetch, calls } = engineFake(ROUTES);
+    await assert.rejects(
+      client(async () => 3072, fetch).submit("", VOICE),
+      (err: Error) => {
+        assert.match(err.message, /needs 7\.8 GB of free graphics memory/);
+        assert.match(err.message, /this machine has 3\.0 GB free/);
+        assert.match(err.message, /close other programs/);
+        return true;
+      },
+    );
+    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
+    assert.equal(calls.some((c) => c.url.endsWith("/upload/image")), false, "no clip left on the engine");
+  });
+});

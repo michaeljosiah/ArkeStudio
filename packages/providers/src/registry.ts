@@ -36,6 +36,8 @@ export interface ProviderClientDeps {
     readClip?: (path: string) => Promise<Uint8Array>;
     /** Opens the engine's progress socket (SPEC-021 D16); omitted, jobs simply report no figure. */
     openSocket?: (url: string) => ProgressSocket;
+    /** Free graphics memory right now, in MB, or null where the device cannot be asked. */
+    freeVramMb?: () => Promise<number | null>;
   };
   capture?: ProviderCallCapture;
 }
@@ -94,6 +96,7 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
                 deps.comfyui!.preflight,
                 deps.comfyui!.readClip,
                 deps.comfyui!.openSocket,
+                deps.comfyui!.freeVramMb,
               ),
             fetchImpl,
             capture,
