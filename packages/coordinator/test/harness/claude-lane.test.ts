@@ -9,8 +9,8 @@ import { assembleHarness } from "../../src/harness/v2-launch.js";
  * why it is opt-in rather than something every boot pays for.
  */
 
-const verified = async () => ({ gateInvokedFor: ["Bash"], deniedActionHappened: false, version: "2.1.235" });
-const broken = async () => ({ gateInvokedFor: ["Bash"], deniedActionHappened: true, version: "2.1.235" });
+const verified = async () => ({ gateInvokedFor: ["Bash"], deniedActionHappened: false, version: "2.1.235", apiKeySource: "none" });
+const broken = async () => ({ gateInvokedFor: ["Bash"], deniedActionHappened: true, version: "2.1.235", apiKeySource: "none" });
 
 /** Answers `where`/`which` and `--version` so discovery resolves without a real binary. */
 const runCommand = (version: string | null) => async (command: string, args: string[]) => {
@@ -46,6 +46,18 @@ describe("the bring-your-own Claude lane (SPEC-005 R-1, R-4)", () => {
     assert.equal(wiring.harnessInfo?.beta, false, "beta is a v2-generation concept");
     assert.ok(wiring.adapter, "an adapter to author with");
     assert.ok(wiring.logLines.some((l) => l.includes("confinement verified")));
+    assert.ok(
+      wiring.logLines.some((l) => l.includes("your Claude subscription")),
+      "and which credential answered, since the surprising case is the silent one",
+    );
+  });
+
+  it("names an environment key when one outranked the subscription", async () => {
+    const keyed = async () => ({ gateInvokedFor: ["Bash"], deniedActionHappened: false, version: "2.1.235", apiKeySource: "ANTHROPIC_API_KEY" });
+    const wiring = await assemble({ enabled: true, runCommand: runCommand("2.1.235"), runTurn: keyed });
+    const said = wiring.logLines.find((l) => l.includes("Claude Code 2.1.235"));
+    assert.match(said!, /ANTHROPIC_API_KEY/);
+    assert.match(said!, /not your subscription/);
   });
 
   it("carries no credential path, because the user's own login is the whole point", async () => {

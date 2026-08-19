@@ -58,6 +58,7 @@ export function makeSdkProbe(opts: SdkProbeOptions = {}): RunProbeTurn {
     const cwd = await mkdtemp(join(tmpdir(), "arke-claude-probe-"));
     const gateInvokedFor: string[] = [];
     let version: string | null = null;
+    let apiKeySource: string | null = null;
 
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), timeoutMs);
@@ -86,11 +87,13 @@ export function makeSdkProbe(opts: SdkProbeOptions = {}): RunProbeTurn {
 
       for await (const message of turn) {
         if (message.type === "system" && message.subtype === "init") {
-          version = (message as { claude_code_version?: string }).claude_code_version ?? null;
+          const init = message as { claude_code_version?: string; apiKeySource?: string };
+          version = init.claude_code_version ?? null;
+          apiKeySource = init.apiKeySource ?? null;
         }
       }
 
-      return { gateInvokedFor, deniedActionHappened: existsSync(join(cwd, SENTINEL)), version };
+      return { gateInvokedFor, deniedActionHappened: existsSync(join(cwd, SENTINEL)), version, apiKeySource };
     } finally {
       clearTimeout(timer);
       // The verdict is already decided by the sentinel check above; a temp directory that

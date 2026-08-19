@@ -16,7 +16,14 @@ import { ConfinementCache, type RunProbeTurn } from "./confinement-probe.js";
  */
 
 export type ClaudeAvailability =
-  | { available: true; command: string; source: DiscoveredClaude["source"]; version: string | null }
+  | {
+      available: true;
+      command: string;
+      source: DiscoveredClaude["source"];
+      version: string | null;
+      /** Which credential answered — see {@link credentialSummary}. */
+      apiKeySource: string | null;
+    }
   /**
    * `reason` is written to be shown, not logged. "Not installed" is a normal state for a
    * bring-your-own harness, not a failure — the caller decides whether it is even worth
@@ -63,5 +70,6 @@ export async function resolveClaudeHarness(opts: ResolveClaudeOptions): Promise<
     command: found.command,
     source: found.source,
     version: verdict.version ?? found.version,
+    apiKeySource: verdict.apiKeySource,
   };
 }

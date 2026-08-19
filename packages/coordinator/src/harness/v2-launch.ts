@@ -13,6 +13,7 @@ import {
 import {
   ClaudeAdapter,
   ConfinementCache,
+  credentialSummary,
   makeSdkProbe,
   resolveClaudeHarness,
   sdkQuery,
@@ -225,7 +226,13 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
         // Nothing to relaunch and no key to deliver: Claude Code authenticates from the user's
         // own login, which is the whole reason this lane carries no credential path at all.
         relaunchHarness: async () => {},
-        logLines: [`Claude Code ${availability.version ?? "(unknown version)"}: ${availability.source}, confinement verified`],
+        // The credential is named because the surprising case is silent: a stray
+        // ANTHROPIC_API_KEY in somebody's environment outranks their subscription and bills
+        // them per token for work they believed was already paid for.
+        logLines: [
+          `Claude Code ${availability.version ?? "(unknown version)"}: ${availability.source}, ` +
+            `confinement verified, authenticated by ${credentialSummary(availability.apiKeySource)}`,
+        ],
       };
     }
     // Asked for and not usable is a statement, not a silence (SPEC-005 R-4). OpenCode continues

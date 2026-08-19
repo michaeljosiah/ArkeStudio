@@ -23,3 +23,4 @@ export { ClaudeAdapter, type ClaudeAdapterOptions, type RunQuery } from "./claud
 export { createNormalizeState, normalizeClaude, toolSummary, type NormalizeOutcome, type NormalizeState } from "./normalize.js";
 export { decideTool, intentOf, type ToolDecision } from "./tool-intents.js";
 export { sdkQuery } from "./sdk-query.js";
+export { credentialSummary } from "./confinement-probe.js";

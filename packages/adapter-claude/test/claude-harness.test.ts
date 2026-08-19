@@ -8,6 +8,7 @@ import {
   ConfinementCache,
   discoverClaudeCode,
   meetsClaudeFloor,
+  credentialSummary,
   probeConfinement,
   resolveClaudeHarness,
   type ProbeTurnResult,
@@ -45,6 +46,7 @@ const turn = (over: Partial<ProbeTurnResult> = {}): ProbeTurnResult => ({
   gateInvokedFor: ["Bash"],
   deniedActionHappened: false,
   version: "2.1.235",
+  apiKeySource: "none",
   ...over,
 });
 
@@ -277,5 +279,34 @@ describe("whether the harness may be offered at all", () => {
     assert.equal(result.available, true);
     assert.equal(result.available && result.command, "/usr/local/bin/claude");
     assert.equal(result.available && result.version, "2.1.235", "the binary updated after --version was read");
+  });
+});
+
+describe("saying which credential answered", () => {
+  it("reads the subscription case, which Claude Code reports as no key at all", () => {
+    // "none" means no API key was in play because a claude.ai OAuth login answered. Shown raw it
+    // reads like a failure, which is exactly backwards.
+    assert.equal(credentialSummary("none"), "your Claude subscription");
+  });
+
+  it("names an environment key, because that is the case nobody notices", () => {
+    const said = credentialSummary("ANTHROPIC_API_KEY");
+    assert.match(said, /ANTHROPIC_API_KEY/);
+    assert.match(said, /not your subscription/);
+  });
+
+  it("says so for any other key rather than guessing at it", () => {
+    assert.match(credentialSummary("apiKeyHelper"), /not your subscription/);
+    assert.match(credentialSummary("/login managed key"), /not your subscription/);
+  });
+
+  it("does not claim a subscription when it simply does not know", () => {
+    assert.equal(credentialSummary(null), "credential unknown");
+  });
+
+  it("carries the credential out of the probe to whoever offers the harness", async () => {
+    const verdict = await probeConfinement("claude", async () => turn({ apiKeySource: "ANTHROPIC_API_KEY" }));
+    assert.equal(verdict.ok, true);
+    assert.equal(verdict.ok && verdict.apiKeySource, "ANTHROPIC_API_KEY");
   });
 });
