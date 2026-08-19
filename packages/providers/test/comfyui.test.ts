@@ -978,14 +978,26 @@ describe("the cloned-voice recipe on the wire", () => {
     assert.equal(upload.filename, "harbour-glass.wav");
   });
 
-  it("takes the keys a real voice dispatch carries", async () => {
-    // `voiceId` is the job's subject and `speakerFile` is a path, and the allow-list named
-    // neither — so the very first preview died with `"voiceId" is not a parameter`.
+  it("takes every key a real voice dispatch carries", async () => {
+    /*
+     * Copied verbatim from a job the installed app actually built, not invented here. The
+     * allow-list named none of them, and because it refuses one key at a time each rebuild
+     * surfaced exactly one more: `voiceId`, then `requestId`, then whatever came next. The
+     * whole envelope belongs in one test so the next addition fails here and not on a machine.
+     */
     const { fetch } = engineFake(ROUTES);
     await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
       model: "comfyui-cloned-voice",
       capability: "voice-tts",
-      params: { ...VOICE_PARAMS, seed: 42 },
+      params: {
+        ...VOICE_PARAMS,
+        seed: 42,
+        requestId: "01M0D1RN20G5MVYTEKNM0Q51GV",
+        purpose: "candidate-preview",
+        sheetId: "aurora-sabato",
+        sheetVersion: 5,
+        characterCount: 174,
+      },
     });
   });
 

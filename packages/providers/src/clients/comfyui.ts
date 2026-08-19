@@ -70,12 +70,21 @@ export function meetsVersionFloor(version: string, floor: string = COMFYUI_VERSI
  * becomes a terminal failure for work the picker openly offered.
  */
 const INTERNAL_PARAMS = new Set([
-  // A voice dispatch carries the voice it was made from and the clip that is its identity.
-  // Neither is a control the recipe exposes: `voiceId` is the job's own subject, and
-  // `speakerFile` arrives as a path on THIS machine that only becomes a graph value once it has
-  // been uploaded to the engine. Both were missing, so every cloned-voice preview died here.
+  /*
+   * Everything a voice dispatch carries, taken from a real job rather than guessed.
+   *
+   * `voiceId` is the job's own subject and `speakerFile` is a path on THIS machine that only
+   * becomes a graph value once uploaded. The rest — the correlation id, what the line is for,
+   * whose sheet it came from and how long it is — are the coordinator's bookkeeping, the exact
+   * analogue of `provenance` on an image job. Only `text` and `seed` are controls of the recipe.
+   */
   "voiceId",
   "speakerFile",
+  "requestId",
+  "purpose",
+  "sheetId",
+  "sheetVersion",
+  "characterCount",
   "references",
   "referenceRoles",
   "artDirection",
