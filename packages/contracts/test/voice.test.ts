@@ -205,7 +205,9 @@ describe("the clone-voice frame", () => {
     // z.literal(true), not a boolean: there is no shape of this frame that carries false, so a
     // handler cannot forget to check it.
     assert.equal(ClientMessageSchema.safeParse({ ...base, consent: false }).success, false);
-    const { consent, ...noConsent } = base;
+    // Built without the field rather than destructured out of it: an unused binding is a lint
+    // error, and the point here is the SHAPE that omits consent, not a variable holding it.
+    const noConsent = { ...base, consent: undefined };
     assert.equal(ClientMessageSchema.safeParse(noConsent).success, false);
   });
 
