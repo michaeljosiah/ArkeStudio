@@ -2051,8 +2051,8 @@
         <div class="callout">
           <strong>The distinction that keeps the experience coherent.</strong>
           <p>
-            World Chat asks, "What belongs to this world?" Development can move between Series,
-            Season, and Episode scope. Scene chat asks, "What happens in this moment, and how should it be
+            World Chat asks, "What belongs to this world?" Development can move between Series, Season,
+            Episode, and Scene scope; its scene thread asks, "What happens in this moment, and how should it be
             covered?" Generate permits shot-local prompt overrides and explicit dispatch, but it cannot mutate
             Canon, the season architecture, or scene script. The interfaces may share a conversation
             framework, but their scopes and candidate types are different. That shared framework now exists:
@@ -2102,7 +2102,8 @@
                 <td>
                   Issue #70 shipped a durable conversation as an append-only
                   <code>.conversations/&lt;cv&gt;/events.jsonl</code> with a derived, deletable checkpoint,
-                  plus the run driver, leases, retrieval, checkpoint and fold, and wrap-up recovery. The
+                  plus the run driver, leases, retrieval, checkpoint and fold, wrap-up recovery, check
+                  receipts, and a <code>worldbuilding</code> proposal kind staged at wrap-up. The
                   machinery is scope-neutral; only the vocabulary is world-only.
                 </td>
               </tr>
@@ -2202,8 +2203,7 @@
                 <td><span class="chip chip--none">not built</span></td>
                 <td>
                   <code>deriveCut</code> sorts every scene in the production into one timeline; nothing gives
-                  the cut or the exports an episode dimension. The presets themselves are fine — the social
-                  preset is already 1080&times;1920.
+                  the cut or the exports an episode dimension.
                 </td>
               </tr>
               <tr>
@@ -2283,9 +2283,9 @@
           <p>
             Earlier revisions audited platform-wide claims here, and the material aged independently of the
             feature. It now lives in <code>readiness.html</code>, the implementation-readiness audit that
-            travels with <code>vision.html</code> and <code>scope.html</code> in the product document set —
-            re-run against the working tree on 2026-08-19, and re-run rather than annotated. This section
-            keeps only the evidence this feature stands on; two documents holding one ledger is how a status
+            travels with <code>vision.html</code> and <code>scope.html</code> in the product document set,
+            which is kept beside the repository rather than in it — re-run against the working tree on
+            2026-08-19, and re-run rather than annotated. Two documents holding one ledger is how a status
             table drifts.
           </p>
         </div>
@@ -3126,7 +3126,7 @@
           <div class="roadmap">
             <h3>Four programmes</h3>
             <p style="margin: -6px 0 16px; color: var(--ink-soft); font-size: 12px">
-              Fifteen items in one flat list read like an implementation plan, which this document is not.
+              Sixteen items in one flat list read like an implementation plan, which this document is not.
               Grouped, the dependency structure is visible: <b>A</b> repairs the handoff that already exists
               and needs no new entity; <b>B</b> defines the domain that everything after it builds against;
               <b>C</b> is the creative workspace; <b>D</b> completes media execution and ends with a separate
@@ -3134,8 +3134,9 @@
             </p>
             <p style="margin: -6px 0 16px; color: var(--ink-soft); font-size: 12px">
               <b>Designed</b> is a third state, and the ledgers above do not show it &#8212; they record only
-              what the code does. Programme A, the format step of B, and the boards of C are drawn in the
-              design master as turns 43&ndash;48 and clickable in the Prototype. They are unbuilt, but nobody
+              what the code does. A1&ndash;A3, the format step of B, and the boards of C are drawn in the
+              design master as turns 43&ndash;48 and clickable in the Prototype; A4 is a file-layout fix
+              nothing draws. They are unbuilt, but nobody
               has to invent them: the frames, the numbers and the reasoning already exist. Read
               <code>not built</code> above as <em>not built yet</em>, not as <em>not decided</em>.
             </p>
@@ -3214,7 +3215,7 @@
                 >
               </li>
               <li>
-                <b>Make Development, Episode, and Scene threads real.</b
+                <b>Make the production, episode, and scene threads real.</b
                 ><span
                   >Persistent scoped threads with typed candidates against the now-defined production entities
                   and ordinary proposal acceptance, on top of the extension above.</span
@@ -3279,8 +3280,8 @@
                   >Scenes, choices, outcomes, merges, and endings — a separate production family, never an
                   implicit format change and never a graph migration of a linear season. Choices route
                   directly, with no variables, conditions, unlocks, or hidden state. Validation reports named
-                  findings: reachability, dead ends, unintended loops, untraversed edges, and reconverging
-                  branches checked for continuity conflicts.</span
+                  findings: reachability, dead ends, unintended loops, untraversed edges, unvisited routes
+                  named, and reconverging branches checked for continuity conflicts.</span
                 >
               </li>
             </ol>

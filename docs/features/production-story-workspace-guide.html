@@ -450,8 +450,8 @@
           <b>Status</b>
           <p>
             Designed, not built. The pictures below are the real frames from the design master, turns
-            43&ndash;50, so what you see is exactly what was specified &mdash; carrying one recorded rename
-            ahead of the master: the rail item reads Development. The shipping app has the shells &mdash;
+            43&ndash;53, so what you see is exactly what was specified &mdash; including turn 78&#8217;s
+            recorded rename: the rail item reads Development. The shipping app has the shells &mdash;
             a production, a day one, a screen still labelled Story, scenes, dispatch &mdash; but not this. The companion
             <code>production-story-workspace-brief.html</code> tracks what is actually built.
           </p>
@@ -762,7 +762,7 @@
     </div>
     <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--border)">
       <div style="padding:30px 34px 12px;flex:none;animation:fadeUp .6s var(--ease-out) both">
-        <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">STORY &middot; SALTLIGHT</div>
+        <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">DEVELOPMENT &middot; SALTLIGHT</div>
         <h1 style="margin:8px 0 0;font:650 26px/1.1 var(--font-sans);letter-spacing:-0.025em">Find the spine together.</h1>
       </div>
       <div style="flex:1;min-height:0;overflow:hidden;padding:8px 34px;display:flex;flex-direction:column;gap:13px;animation:fadeUp .7s var(--ease-out) .1s both">
@@ -865,7 +865,7 @@
     <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:26px 30px 0;overflow:hidden">
       <div style="display:flex;align-items:flex-end;gap:14px;flex:none">
         <div style="flex:1;min-width:0">
-          <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">STORY &middot; SEASON 1 &middot; EPISODES</div>
+          <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">DEVELOPMENT &middot; SEASON 1 &middot; EPISODES</div>
           <h1 style="margin:8px 0 0;font:650 26px/1.1 var(--font-sans);letter-spacing:-0.025em">Seven nights, and the one she is looking for</h1>
         </div>
         <div style="display:flex;gap:3px">
@@ -971,7 +971,7 @@
     <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:26px 30px 0;overflow:hidden">
       <div style="display:flex;align-items:flex-end;gap:14px;flex:none;animation:fadeUp .6s var(--ease-out) both">
         <div style="flex:1;min-width:0">
-          <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">STORY &middot; SEASON 1 &middot; ARCS</div>
+          <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">DEVELOPMENT &middot; SEASON 1 &middot; ARCS</div>
           <h1 style="margin:8px 0 0;font:650 26px/1.1 var(--font-sans);letter-spacing:-0.025em">Three things that change, and where they change</h1>
         </div>
         <div style="display:flex;gap:3px">
@@ -1741,7 +1741,7 @@ worlds/the-undersong/
         <h3>What this feature adds</h3>
 <pre>
     bell-watch-s1/
-      production.json     <span class="prop">gains a profile and its defaults</span>
+      production.json     <span class="prop">gains a format and its defaults</span>
       story.json          <i>same shape - and finally written by the app</i>
       <span class="prop">season.json</span>         <span class="prop">the season question, ending, direction</span>
       <span class="prop">episodes/</span>           <span class="prop">one file per episode, with its promise</span>
@@ -1751,7 +1751,8 @@ worlds/the-undersong/
 
         <div class="note">
           <b>Decided, with one open detail.</b> Creating the first Microdrama creates its Series, and the
-          Series stays thin &mdash; title, engine, an ordered list of season ids &mdash; with recurring cast
+          Series stays thin &mdash; id, title, the repeatable engine, a world reference, an ordered list of
+          season ids, and only continuity that is not world canon &mdash; with recurring cast
           staying in world sheets. A Series that describes characters becomes a second world, which is the
           drift the model exists to prevent. The one thing still open is where the record lives on disk,
           which the domain specification settles.
@@ -1760,7 +1761,7 @@ worlds/the-undersong/
         <table>
           <thead><tr><th>File</th><th>Written when</th><th>Versioned</th></tr></thead>
           <tbody>
-            <tr><td><code>production.json</code></td><td>Created, or the profile changes</td><td>Change-logged</td></tr>
+            <tr><td><code>production.json</code></td><td>Created, or the format changes</td><td>Change-logged</td></tr>
             <tr><td><code>story.json</code>, <code>season.json</code></td><td>A story overview or season proposal is accepted</td><td>Yes</td></tr>
             <tr><td><code>episodes/*</code></td><td>An episode proposal is accepted</td><td>Yes</td></tr>
             <tr><td><code>scenes/*.json</code></td><td>A scene draft or edit is accepted</td><td>Yes</td></tr>
@@ -1877,13 +1878,13 @@ worlds/the-undersong/
 
       <footer>
         Arke Studio feature guide &middot; the production development workspace. The screens are the real frames from
-        turns 43&ndash;50 of <code>design-system/Arke Studio.dc.html</code>, embedded rather than screenshotted,
+        turns 43&ndash;53 of <code>design-system/Arke Studio.dc.html</code>, embedded rather than screenshotted,
         so they scale and follow the theme. Interactive components are shown as static stand-ins. Filesystem
         paths checked against the coordinator and <code>fixtures/worlds/the-undersong</code> on 2026-08-09.
         Aligned 2026-08-19 with the revised Vision and Scope and revision 5 of the brief: Microdrama loses its
         hyphen, and the workspace layer is named Development while Story remains the production family in the
-        picker &mdash; the embedded frames carry the renamed rail label and kind card ahead of the design
-        master&#8217;s own recorded rename, and the imagery travels with this document under <code>assets/</code>. For
+        picker &mdash; the embedded frames carry the renamed rail label, kind card, and eyebrows, matching the
+        design master&#8217;s recorded rename in turn 78, and the imagery travels with this document under <code>assets/</code>. For
         what is built rather than designed, see <code>production-story-workspace-brief.html</code>.
       </footer>
     </div>
