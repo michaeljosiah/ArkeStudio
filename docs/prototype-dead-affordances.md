@@ -2,18 +2,16 @@
 
 `cursor:pointer` elements: **1408**
 
-- **988 wired**
-- **69 state variants** — the *selected* half of a pair; clicking the row you are on
-  is a no-op, so no handler is correct. Not a defect.
-- **6 leave the application** — Open folder, GitHub, a path picker. A prototype cannot
-  perform these. Not a defect.
-- **345 genuinely unwired**
+- **1000 wired**
+- **69 state variants** — the *selected* half of a pair; no handler is correct.
+- **9 leave the application** — Open folder, GitHub, a path picker, Upload a frame.
+  A prototype cannot perform these; removing their pointer would misrepresent a real control.
+- **330 genuinely unwired**
 
 The test: *an affordance either does something, or stops looking pressable.*
 
 | screen | unwired | the affordances |
 |---|---:|---|
-| 14a Scene shots | 20 | (icon only) x12, Saltlight short film · scene 4, Scenes 5, 1 · Lowtide market, 2 · The dive, 3 · Council chamber |
 | 2b Canon browser | 17 | (icon only) x3, CANON-002 · Tide-calling, CANON-031 · The night the bells sank, Maren · sheet v4, What does the Chorister want?, CANON-021 · The Drowned Quarter |
 | 3c Artifacts | 14 | (icon only) x3, Audio 6, Documents 9, Images 12, Video 3, Made here 4 |
 | 69a Reference picker · world artifacts | 14 | This session 16, Upload, Images 12, Video 3, Audio 6, Documents 9 |
@@ -41,6 +39,7 @@ The test: *an affordance either does something, or stops looking pressable.*
 | 1c World hub minimal | 5 | (icon only) x3, Continue Saltlight Shot 15 of 15 · the board, Grow the canon The Drowned Quarter has three |
 | 57a Location · Reference | 5 | (icon only) x3, Replace, history |
 | 24a The cut | 5 | (icon only) x4, Cut 2:40 |
+| 14a Scene shots | 5 | (icon only) x4, Saltlight short film · scene 4 |
 | 53a Step two · three kinds, and defaults you can see are changeable | 5 | Micro-drama series Episodes with a season ar, 9:16 vertical, 7, 45–75s, Cliffhanger |
 | 41b Proposals | 5 | Maren’s inheritance 2 changes, together, The western lock 1 new rule close to CANON-0, Sideways inheritance 1 new rule, 1 link, The tide gate 1 change, (icon only) |
 | 1a Home | 4 | (icon only) x3, Search worlds ⌘K |
