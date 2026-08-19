@@ -1381,7 +1381,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("clone-voice"),
       worldId: UlidSchema,
-      sourcePath: z.string().min(1),
+      /**
+       * A clip already staged by `stage-voice-clip`, never a path. The renderer has no path to
+       * give: for a chosen file the host owns the dialog and what it returns (SPEC-001 R-9), and
+       * for a recording there was never a file at all. Staging settles both before the name is
+       * typed, which is also the order 74c draws.
+       */
+      clipId: z.string().min(1),
       name: z.string().min(1),
       description: z.string().min(1),
       consent: z.literal(true),
@@ -1389,6 +1395,36 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sheetId: SlugSchema.optional(),
     })
     .strict(),
+  /**
+   * SPEC-022 T-10: choose the clip, before anything is named.
+   *
+   * Two gestures reach the same staging point. `recorded` carries bytes because the renderer
+   * genuinely holds them — the same shape `transcribe-dictation` already sends. `chosen` carries
+   * nothing: the host opens its own picker and keeps the path, and what comes back to the
+   * renderer is a name and a duration it can draw, never somewhere on disk.
+   *
+   * Staging validates the clip on arrival rather than at Save, so 74c can refuse a clip while it
+   * is still the only thing on screen instead of losing a typed name to a refusal.
+   */
+  z
+    .object({
+      kind: z.literal("stage-voice-clip"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      source: z.discriminatedUnion("from", [
+        z.object({ from: z.literal("chosen") }).strict(),
+        z
+          .object({
+            from: z.literal("recorded"),
+            audioBase64: z.string().min(1).max(8_000_000),
+            contentType: z.string().min(1),
+          })
+          .strict(),
+      ]),
+    })
+    .strict(),
+  /** Let a staged clip go: the dialog was cancelled, and the temp file should not outlive it. */
+  z.object({ kind: z.literal("discard-voice-clip"), clipId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("import-folder"), worldId: UlidSchema, sourcePath: z.string().min(1) }).strict(),
   /** SPEC-015 R-12..R-14: stage two — grounded extraction into a pending batch. */
   z

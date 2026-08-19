@@ -190,7 +190,7 @@ describe("the clone-voice frame", () => {
   const base = {
     kind: "clone-voice" as const,
     worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
-    sourcePath: "C:/recordings/harbour.wav",
+    clipId: "clip_01J8F3K2QW9VZX4N7M0RTYB6HD",
     name: "Harbour glass",
     description: "Low, dry, unhurried. Coastal.",
     consent: true as const,
@@ -215,5 +215,45 @@ describe("the clone-voice frame", () => {
     // rankVoices buries an attribute-less candidate, so a voice cloned FOR a character would sink
     // below every preset when ranked against her. Refused at the wire as well as at creation.
     assert.equal(ClientMessageSchema.safeParse({ ...base, description: "" }).success, false);
+  });
+
+  it("takes a staged clip and has no way to name a path", () => {
+    // SPEC-001 R-9: the host owns its file dialog and what it returns. A renderer that could put
+    // a path here could clone from anywhere on the disk without the host ever opening a dialog.
+    assert.equal(ClientMessageSchema.safeParse({ ...base, clipId: "" }).success, false);
+    const { clipId, ...rest } = base;
+    assert.equal(clipId.length > 0, true);
+    assert.equal(ClientMessageSchema.safeParse({ ...rest, sourcePath: "C:/anywhere.wav" }).success, false);
+  });
+});
+
+/** Staging is what gives the dialog a clip to draw without ever learning where it lives. */
+describe("the stage-voice-clip frame", () => {
+  const base = {
+    kind: "stage-voice-clip" as const,
+    worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+    requestId: "stage-1",
+  };
+
+  it("takes either gesture: bytes for a recording, nothing for a chosen file", () => {
+    assert.equal(ClientMessageSchema.safeParse({ ...base, source: { from: "chosen" } }).success, true);
+    assert.equal(
+      ClientMessageSchema.safeParse({
+        ...base,
+        source: { from: "recorded", audioBase64: "UklGRg==", contentType: "audio/wav" },
+      }).success,
+      true,
+    );
+  });
+
+  it("refuses a chosen clip that smuggles a path, and a recording with no bytes", () => {
+    assert.equal(
+      ClientMessageSchema.safeParse({ ...base, source: { from: "chosen", path: "C:/anywhere.wav" } }).success,
+      false,
+    );
+    assert.equal(
+      ClientMessageSchema.safeParse({ ...base, source: { from: "recorded", contentType: "audio/wav" } }).success,
+      false,
+    );
   });
 });

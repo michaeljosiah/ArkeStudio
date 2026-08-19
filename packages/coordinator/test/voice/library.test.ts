@@ -4,7 +4,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tempDir } from "../tmp.js";
 import { WorldStore } from "../../src/world/store.js";
-import { cloneVoice, clipFor } from "../../src/voice/library.js";
+import { cloneVoice, clipFor, wavSeconds } from "../../src/voice/library.js";
 import { toExtendedLength } from "../../src/world/paths.js";
 import { makeTempWorld } from "../world/helpers.js";
 
@@ -217,5 +217,41 @@ describe("cloning a voice into a world", () => {
         "appending never clobbers what was already there",
       );
     });
+  });
+});
+
+/**
+ * How long a clip runs, from its own header (SPEC-022 T-10). Staging refuses a clip that is too
+ * short to clone from, and this is the only reading it gets to make that call on.
+ */
+describe("reading a WAV's length", () => {
+  /** A real header: `fmt ` with a byte rate, then a `data` chunk of the requested length. */
+  function wav({ byteRate, dataBytes, extraChunk = false }: { byteRate: number; dataBytes: number; extraChunk?: boolean }): Uint8Array {
+    const parts: number[] = [];
+    const ascii = (text: string): number[] => [...text].map((c) => c.charCodeAt(0));
+    const u32 = (n: number): number[] => [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff];
+    parts.push(...ascii("RIFF"), ...u32(0), ...ascii("WAVE"));
+    // A LIST chunk of odd length, to prove the walk honours the pad byte that follows one.
+    if (extraChunk) parts.push(...ascii("LIST"), ...u32(3), 1, 2, 3, 0);
+    parts.push(...ascii("fmt "), ...u32(16), 1, 0, 1, 0, ...u32(44100), ...u32(byteRate), 2, 0, 16, 0);
+    parts.push(...ascii("data"), ...u32(dataBytes));
+    return Uint8Array.from(parts);
+  }
+
+  it("divides the data chunk by the byte rate", () => {
+    assert.equal(wavSeconds(wav({ byteRate: 88200, dataBytes: 882000 })), 10);
+  });
+
+  it("finds fmt and data behind a chunk of odd length", () => {
+    // An odd-sized chunk is followed by a pad byte that is not counted in its size. Missing it
+    // walks into the middle of the next chunk header and reads a length out of audio.
+    assert.equal(wavSeconds(wav({ byteRate: 88200, dataBytes: 441000, extraChunk: true })), 5);
+  });
+
+  it("says nothing rather than guessing", () => {
+    // Not a WAV at all, and a WAV whose chunks never arrive: both are unknown, not zero. A zero
+    // would read as "too short" and refuse a clip that was never measured.
+    assert.equal(wavSeconds(Uint8Array.from([0x49, 0x44, 0x33, 4, 0, 0])), null);
+    assert.equal(wavSeconds(Uint8Array.from([...[0x52, 0x49, 0x46, 0x46], 8, 0, 0, 0, ...[0x57, 0x41, 0x56, 0x45], ...Array.from({ length: 64 }, () => 7)])), null);
   });
 });

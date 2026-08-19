@@ -115,7 +115,14 @@ import {
   type SidecarLike,
   voiceLineRequest,
 } from "./voice/service.js";
-import { clipFor, cloneVoice } from "./voice/library.js";
+import {
+  AUDIO_EXTENSIONS as CLONEABLE_AUDIO_EXTENSIONS,
+  audioBytesLookRight,
+  clipFor,
+  cloneVoice,
+  MIN_CLONE_SECONDS,
+  wavSeconds,
+} from "./voice/library.js";
 import { atomicWriteFile } from "./world/atomic.js";
 import { applyTurnBibleEdits, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
@@ -533,8 +540,68 @@ export class Coordinator {
   private readonly carrying = new Map<string, Promise<void>>();
   /** Documents being read for facts right now, so the reading can be stopped (SPEC-015 §2). */
   private readonly reading = new Map<string, AbortController>();
+  /**
+   * Clips chosen or recorded for a clone, held between 74c and 74d (SPEC-022 T-10).
+   *
+   * The path lives here rather than travelling to the renderer and back, which is what lets the
+   * host keep ownership of its own file dialog (SPEC-001 R-9). Bounded because a dialog opened
+   * and abandoned ten times should not accumulate ten temp files: staging past the cap discards
+   * the oldest, and cancelling discards its own.
+   */
+  private readonly stagedClips = new Map<string, { path: string; fileName: string }>();
+
+  /** How many staged clips a dialog may leave behind before the oldest is dropped. */
+  private static readonly MAX_STAGED_CLIPS = 8;
   /** Session config builder with the user's agent settings folded in. */
   private readonly buildConfig: ((input: { worldQueryUrl?: string }) => Record<string, unknown>) | undefined;
+
+  /**
+   * Put a clip somewhere the clone can read it, and say what is wrong with it if anything is.
+   *
+   * The checks are deliberately the ones that can be made from the bytes alone. `cloneVoice` runs
+   * the same magic-byte check again when it writes the clip into the world — this is not that
+   * check moved, it is that check brought forward, so 74c can refuse before a name is typed.
+   */
+  private async stageClip(
+    bytes: Uint8Array,
+    fileName: string,
+    extension: string,
+  ): Promise<{ ok: true; clipId: string; seconds: number | null } | { ok: false; reason: string }> {
+    if (!CLONEABLE_AUDIO_EXTENSIONS.has(extension)) {
+      return { ok: false, reason: `${fileName} is not audio this can clone — use ${[...CLONEABLE_AUDIO_EXTENSIONS].join(" or ")}` };
+    }
+    if (!audioBytesLookRight(bytes, extension)) {
+      return { ok: false, reason: `that file is named .${extension} but its contents are not ${extension} audio` };
+    }
+    const seconds = wavSeconds(bytes);
+    // Only WAV states its own length cheaply, so this is the clip whose length can be checked.
+    // An MP3 goes through with `seconds: null` rather than being refused on a guess — the format
+    // hint on 74c asks for three seconds, and what cannot be read is not enforced as if it were.
+    if (seconds !== null && seconds < MIN_CLONE_SECONDS) {
+      return { ok: false, reason: `that clip is ${seconds.toFixed(1)}s — a voice needs ${MIN_CLONE_SECONDS} seconds or more to clone from` };
+    }
+    const clipId = `clip_${ulid()}`;
+    const dir = join(tmpdir(), "arke-voice-clips");
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, `${clipId}.${extension}`);
+    await atomicWriteFile(path, bytes);
+    // Oldest first: a Map iterates in insertion order, so the abandoned dialogs go before this one.
+    while (this.stagedClips.size >= Coordinator.MAX_STAGED_CLIPS) {
+      const oldest = this.stagedClips.keys().next();
+      if (oldest.done) break;
+      await this.dropStagedClip(oldest.value);
+    }
+    this.stagedClips.set(clipId, { path, fileName });
+    return { ok: true, clipId, seconds };
+  }
+
+  /** Forget a staged clip and take its temp file with it. Silent about a clip already gone. */
+  private async dropStagedClip(clipId: string): Promise<void> {
+    const clip = this.stagedClips.get(clipId);
+    if (!clip) return;
+    this.stagedClips.delete(clipId);
+    await rm(clip.path, { force: true }).catch(() => {});
+  }
 
   /**
    * The authoring skill for a purpose, chosen by the family of the model that would actually do
@@ -4079,6 +4146,79 @@ export class Coordinator {
         if (this.opts.appRoot) this.opts.openPath?.(this.opts.appRoot);
         return;
       }
+      case "stage-voice-clip": {
+        // 74c refuses a clip while it is still the only thing on screen, so everything that can
+        // be known about the bytes is settled here rather than at Save — where a refusal would
+        // cost the name and description already typed.
+        const refuse = (reason: string): void =>
+          this.emit({
+            at: this.nowIso(),
+            type: "voice.clip-staged",
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            clipId: null,
+            fileName: null,
+            seconds: null,
+            reason,
+          });
+        let bytes: Uint8Array;
+        let fileName: string;
+        if (msg.source.from === "recorded") {
+          bytes = Uint8Array.from(Buffer.from(msg.source.audioBase64, "base64"));
+          // The renderer encodes to WAV before sending precisely so this holds; anything else
+          // reaching here is a bug there, and is named rather than written out and refused later.
+          if (!/^audio\/(wav|x-wav|wave)$/.test(msg.source.contentType)) {
+            refuse(`a recording arrived as ${msg.source.contentType}, which is not audio this can clone`);
+            return;
+          }
+          fileName = "recording.wav";
+        } else {
+          const pick = this.opts.pickFiles;
+          if (!pick) {
+            refuse("choosing a file needs the desktop app — a browser session cannot open the file picker");
+            return;
+          }
+          const paths = await pick({ accept: [...CLONEABLE_AUDIO_EXTENSIONS] }).catch(() => [] as readonly string[]);
+          const chosen = paths[0];
+          // Cancelling the host dialog is not a refusal to report: the dialog is simply still
+          // sitting on 74c with nothing chosen, which is where it already was.
+          if (chosen === undefined) {
+            this.emit({
+              at: this.nowIso(), type: "voice.clip-staged", worldId: msg.worldId, requestId: msg.requestId,
+              clipId: null, fileName: null, seconds: null, reason: null,
+            });
+            return;
+          }
+          fileName = basename(chosen);
+          try {
+            bytes = await readFile(chosen);
+          } catch {
+            refuse("that file could not be read");
+            return;
+          }
+        }
+        const extension = extname(fileName).slice(1).toLowerCase();
+        const staged = await this.stageClip(bytes, fileName, extension);
+        if (!staged.ok) {
+          refuse(staged.reason);
+          return;
+        }
+        this.emit({
+          at: this.nowIso(),
+          type: "voice.clip-staged",
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          clipId: staged.clipId,
+          fileName,
+          seconds: staged.seconds,
+          reason: null,
+        });
+        return;
+      }
+      case "discard-voice-clip": {
+        await this.dropStagedClip(msg.clipId);
+        return;
+      }
       case "clone-voice": {
         // The clip becomes a voice, or the reason it did not. Both are events rather than a
         // throw: the clone dialog states the refusal in the words newClonedVoice chose, and the
@@ -4095,8 +4235,20 @@ export class Coordinator {
           });
           return;
         }
+        const clip = this.stagedClips.get(msg.clipId);
+        if (!clip) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.cloned",
+            worldId: msg.worldId,
+            voiceId: null,
+            label: null,
+            reason: "That recording is no longer staged — choose it again.",
+          });
+          return;
+        }
         const made = await cloneVoice(store, store.getBundle().clonedVoices, {
-          sourcePath: msg.sourcePath,
+          sourcePath: clip.path,
           name: msg.name,
           description: msg.description,
           consent: msg.consent,
@@ -4110,6 +4262,9 @@ export class Coordinator {
           label: made.ok ? made.voice.name : null,
           reason: made.ok ? null : made.reason,
         });
+        // Released either way: the clip is inside the world now, and a refused clone gets a fresh
+        // staging rather than a second attempt against a temp file that may since have gone.
+        await this.dropStagedClip(msg.clipId);
         // The library is in the bundle, so the picker sees the new voice on the next snapshot.
         if (made.ok) await this.refreshWorldSnapshot(msg.worldId);
         return;
