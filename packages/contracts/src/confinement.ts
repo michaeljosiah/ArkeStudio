@@ -15,8 +15,14 @@ import { z } from "zod";
  * ALLOWLIST, deliberately. A denylist is wrong here for a reason that was measured rather than
  * assumed: deny `Bash` and an agent reaches for `PowerShell` to do the same thing, and a harness
  * that auto-updates grows tools we have never heard of (a Claude Code build gained five between
- * two runs of the same spike). An intent absent from `allow` is refused, and a tool absent from the
- * adapter's table is not silently refused — see {@link ToolIntent} on why that case asks instead.
+ * two runs of the same spike). An intent absent from `allow` is refused.
+ *
+ * What happens to a tool absent from an adapter's TABLE is the adapter's call, and the two answer
+ * differently on purpose. OpenCode lets it fall to the harness's ask default (R-16), which is
+ * tolerable because its tool set is small and known. Claude Code's is neither — a real install
+ * advertises thirty-odd tools including schedulers and workflow launchers — so its adapter refuses
+ * outright rather than parking an unattended turn on a prompt, and declares that it offers no
+ * `permissions` capability so a host knows not to expect one.
  */
 
 export const ToolIntent = z.enum([

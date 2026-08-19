@@ -40,6 +40,9 @@ async function collect(adapter: ClaudeAdapter, run: () => Promise<unknown>): Pro
   return events;
 }
 
+/** Any path will do — runQuery is faked throughout; what matters is that one is chosen. */
+const CWD = "/tmp/arke-claude-test";
+
 describe("the confinement, enforced per tool call", () => {
   const authoring = confinementFor({ readOnly: false });
   const readOnly = confinementFor({ readOnly: true });
@@ -73,7 +76,7 @@ describe("the confinement, enforced per tool call", () => {
   it("is the gate the adapter actually installs, not a table it keeps beside one", async () => {
     const fake = fakeQuery([result()]);
     const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
-    const { sessionId } = await adapter.createSession({ purpose: "authoring", agent: "sheet-editor" });
+    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
     await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
     const gate = fake.options()["canUseTool"] as (n: string, i: Record<string, unknown>) => Promise<{ behavior: string }>;
     assert.equal((await gate("Edit", {})).behavior, "allow");
@@ -104,7 +107,7 @@ describe("the options a session is opened with", () => {
       runQuery: fake.run,
       agents: { "sheet-editor": { brief: "Do whatever you like." } },
     });
-    const { sessionId } = await adapter.createSession({ purpose: "authoring", agent: "sheet-editor" });
+    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
     await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
     const prompt = String(fake.options()["systemPrompt"]);
     assert.ok(prompt.includes("Do whatever you like."), "the brief is honoured");
@@ -116,7 +119,7 @@ describe("the options a session is opened with", () => {
   it("registers the world tool only when a world is open", async () => {
     const withWorld = fakeQuery([result()]);
     const a = new ClaudeAdapter({ command: "claude", runQuery: withWorld.run, worldQueryUrl: "http://127.0.0.1:9/mcp" });
-    const s1 = await a.createSession({ purpose: "authoring", agent: "sheet-editor" });
+    const s1 = await a.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
     await a.sendMessage({ sessionId: s1.sessionId, parts: [{ type: "text", text: "go" }] });
     // The shape is measured, not guessed: against the real WorldQueryServer, `http` connects and
     // exposes the tools as mcp__arke-world__*, `sse` reports failed, and a bare url is not
@@ -128,7 +131,7 @@ describe("the options a session is opened with", () => {
 
     const without = fakeQuery([result()]);
     const b = new ClaudeAdapter({ command: "claude", runQuery: without.run });
-    const s2 = await b.createSession({ purpose: "authoring", agent: "sheet-editor" });
+    const s2 = await b.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
     await b.sendMessage({ sessionId: s2.sessionId, parts: [{ type: "text", text: "go" }] });
     assert.equal("mcpServers" in without.options(), false);
     await b.dispose();
@@ -136,7 +139,7 @@ describe("the options a session is opened with", () => {
 
   it("refuses a session for an agent that is not on the roster", async () => {
     const adapter = new ClaudeAdapter({ command: "claude", runQuery: fakeQuery([]).run });
-    await assert.rejects(() => adapter.createSession({ purpose: "authoring", agent: "not-an-agent" }), /no roster agent/);
+    await assert.rejects(() => adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "not-an-agent" }), /no roster agent/);
     await adapter.dispose();
   });
 });
@@ -199,7 +202,7 @@ describe("the session lifecycle", () => {
     const fake = fakeQuery([assistant([{ type: "text", text: "drafted" }]), result({ result: "drafted" })]);
     const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
     const events = await collect(adapter, async () => {
-      const { sessionId } = await adapter.createSession({ purpose: "authoring", agent: "sheet-editor" });
+      const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
       await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "draft it" }] });
     });
     assert.deepEqual(
@@ -223,7 +226,7 @@ describe("the session lifecycle", () => {
       })();
 
     const adapter = new ClaudeAdapter({ command: "claude", runQuery: run });
-    const { sessionId } = await adapter.createSession({ purpose: "authoring", agent: "sheet-editor" });
+    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
 
     // dispatchAsync must not block while the turn runs.
     const dispatched = await adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: "go" }] });
@@ -244,7 +247,7 @@ describe("the session lifecycle", () => {
 
   it("returns the caller's correlation id, and invents one when there is none", async () => {
     const adapter = new ClaudeAdapter({ command: "claude", runQuery: fakeQuery([result()]).run });
-    const { sessionId } = await adapter.createSession({ purpose: "authoring", agent: "sheet-editor" });
+    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
     const mine = await adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: "a" }], correlationId: "c-1" });
     assert.equal(mine.correlationId, "c-1");
     const theirs = await adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: "b" }] });
@@ -276,7 +279,7 @@ describe("the session lifecycle", () => {
     });
     const adapter = new ClaudeAdapter({ command: "claude", runQuery: run });
     const events = await collect(adapter, async () => {
-      const { sessionId } = await adapter.createSession({ purpose: "authoring", agent: "sheet-editor" });
+      const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
       await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] }).catch(() => {});
     });
     assert.ok(events.some((e) => e.type === "session.error"));
@@ -286,12 +289,23 @@ describe("the session lifecycle", () => {
   it("stops what it started when disposed", async () => {
     const fake = fakeQuery([result()]);
     const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
-    const { sessionId } = await adapter.createSession({ purpose: "authoring", agent: "sheet-editor" });
+    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
     await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
     await adapter.dispose();
     await assert.rejects(
       () => adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: "again" }] }),
       /unknown session/,
     );
+  });
+
+  it("refuses a session with no cwd rather than confining it to wherever the app was launched", async () => {
+    // The boundary must be chosen, not inherited. process.cwd() in a packaged app is arbitrary,
+    // and silently widening the confinement to it is worse than refusing to start.
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fakeQuery([]).run });
+    await assert.rejects(
+      () => adapter.createSession({ purpose: "drafting", agent: "sheet-editor" }),
+      /confinement boundary/,
+    );
+    await adapter.dispose();
   });
 });

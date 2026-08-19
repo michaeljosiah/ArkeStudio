@@ -157,9 +157,20 @@ export class ClaudeAdapter implements HarnessAdapter {
     if (!member) throw new Error(`no roster agent named ${agentName}`);
     const override = this.opts.agents?.[agentName];
     const skill = skillForAgent(agentName, this.opts.skillFamily);
+    /*
+     * No default for `cwd`, though the contract makes it optional.
+     *
+     * On the OpenCode adapters it names where work happens. Here it is also the confinement
+     * boundary — the audit that bounded `canUseTool` found reads OUTSIDE the working directory
+     * reaching the gate and being refused, and reads inside it auto-approved without ever being
+     * offered. So `process.cwd()` is not a harmless fallback: in a packaged app it is wherever
+     * the user happened to launch from, and quietly substituting it would widen the boundary to
+     * a directory nobody chose. Every caller passes one; a caller that forgets should be told.
+     */
+    if (!input.cwd) throw new Error("a Claude session needs an explicit cwd — it is the confinement boundary");
     const session: ClaudeSession = {
       id: `claude_${randomUUID()}`,
-      cwd: input.cwd ?? process.cwd(),
+      cwd: input.cwd,
       agentName,
       confinement: confinementFor(member),
       systemPrompt: agentPromptFor({
@@ -198,6 +209,16 @@ export class ClaudeAdapter implements HarnessAdapter {
     // The rejection is always consumed by sendMessage or by the drain loop; attaching a no-op
     // here keeps a dispatchAsync nobody awaits from becoming an unhandled rejection.
     settled.catch(() => {});
+    /*
+     * A turn already in flight is replaced, not silently dropped.
+     *
+     * Messages queue on one inbox and the SDK answers them in order, so the displaced turn's
+     * `session.ended` would settle its SUCCESSOR and leave its own promise pending for good —
+     * and `sendMessage` awaits exactly that promise. The result would be a caller hung with no
+     * error and no event, which is the worst shape a failure can take here. No caller dispatches
+     * concurrently today; this makes sure that if one ever does, it is told.
+     */
+    session.turn?.settle(new Error("superseded by a later message on the same session"));
     session.turn = { correlationId, settle, settled };
 
     session.inbox.push({
