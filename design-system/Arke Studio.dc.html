@@ -414,7 +414,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
           </div>
           <span style="font:400 11px var(--font-mono);color:var(--neutral-400);flex:none">0:09</span>
         </div>
-        <div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:12px">wav &middot; mp3 &middot; m4a &middot; 3 seconds or more</div>
+        <div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:12px">wav &middot; mp3 &middot; 3 seconds or more</div>
       </div>
       <div style="border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-top:14px;background:var(--muted)">
         <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
@@ -482,6 +482,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 <p class="dv-rule"><b>Binding.</b> <b>The description is data, not decoration.</b> A cloned clip arrives with no provider metadata, and <code>rankVoices</code> ranks a candidate with no attributes last &#8212; so a voice cloned for a character would sink below every preset when ranked against that same character. The description field is the fix and is therefore required: its words are lexically extracted into the attributes the picker matches. The screen states what it is for as data on the label (<code>ranked against written voice</code>), never as a sentence.</p>
 <p class="dv-rule"><b>Binding.</b> <b>IndexTTS ships with no voices, and the empty source says so with a count.</b> Every other source arrives populated &#8212; Kokoro with six presets, ElevenLabs with the account's library &#8212; and this one is empty until somebody clones something. The header count reads <code>no voices</code> and <code>Assign</code> is disabled; there is no illustration and no explanatory sentence. This is the only catalogue state in the app where the source is working correctly and still lists nothing.</p>
 <p class="dv-rule"><b>Binding.</b> <b>Consent is a checkbox, not a paragraph.</b> The model cannot tell whether the speaker in a clip agreed to be cloned, and neither can the app. One line, one required tick, on the screen where the clip is chosen: <code>The person speaking agreed to have their voice cloned.</code> It is not repeated on the picker, on the bench, or on the take.</p>
+<p class="dv-rule"><b>Binding.</b> <b>The formats are what the engine can speak from, and nothing wider.</b> <code>wav</code> and <code>mp3</code>. This screen drew <code>m4a</code> as well &#8212; the iOS voice-memo default, and the obvious thing to accept &#8212; and it was wrong: capture succeeded and every dispatch against that voice then failed at the engine, which is exactly the mid-take failure &#167;1.3 exists to prevent. A memo recorded on a phone is still a filed artifact and 69a still lists it; it is not a clip this can clone from. Transcoding is the way to widen this, and pretending is not.</p>
 <p class="dv-next">The engine row, the bench read and the path from a kept recording back to a sheet are 74e&#8211;74g. Measured on an RTX 3080: <code>39s</code> to load plus <code>41s</code> to compile before the first line, which does not amortise across launches, and a steady <code>RTF 1.1</code> &#8212; a line takes about as long as it plays. Peak <code>5.4 GB</code> VRAM against a stated <code>6 GB</code> floor.</p>
 </section>
 
