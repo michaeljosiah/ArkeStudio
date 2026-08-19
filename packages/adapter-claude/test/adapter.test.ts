@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { confinementFor, type HarnessEvent } from "@arke-studio/contracts";
+import { confinementFor, type HarnessAdapter, type HarnessEvent } from "@arke-studio/contracts";
 import {
   ClaudeAdapter,
   createNormalizeState,
@@ -262,7 +262,9 @@ describe("the session lifecycle", () => {
     // The reason `sessionFiles` exists at all. OpenCode reads its confinement from a config file
     // beside the work; this takes the same confinement as query options, so a proposal directory
     // it ran in is indistinguishable from one it never touched.
-    const adapter = new ClaudeAdapter({ command: "claude" });
+    // Read through the interface: the method is optional there, and not being on the concrete
+    // class is precisely the claim.
+    const adapter: HarnessAdapter = new ClaudeAdapter({ command: "claude" });
     assert.equal(adapter.sessionFiles, undefined);
   });
 

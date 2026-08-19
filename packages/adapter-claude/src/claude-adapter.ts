@@ -225,6 +225,20 @@ export class ClaudeAdapter implements HarnessAdapter {
           // Never inherit the user's own config: omitting this loads their settings AND connects
           // their MCP servers, which an authoring session has no business touching.
           settingSources: [],
+          // No `env` override, and specifically no CLAUDE_CONFIG_DIR redirect, though the SDK
+          // takes one. It looks like the analogue of OpenCode's `v2ProfileEnv` and is its
+          // opposite: that redirect exists to cut the user's own login OFF, and here the user's
+          // own login is the entire point. Measured — pointing CLAUDE_CONFIG_DIR at an Arke
+          // directory moves the session's data as intended AND fails the same turn with "Not
+          // logged in", because the subscription credential lives at
+          // `<CLAUDE_CONFIG_DIR>/.credentials.json`. Copying it across would mean owning a second
+          // copy of somebody's OAuth token and its refresh lifetime.
+          //
+          // What that leaves behind is one transcript per working directory under
+          // `~/.claude/projects/`. Untidy rather than unsafe: the user's own machine, their own
+          // Claude Code data, their own world content. The auto-memory it also names is NOT
+          // written — a turn asked outright to remember something for next time wrote nothing,
+          // across every session tried.
           systemPrompt: session.systemPrompt,
           cwd: session.cwd,
           abortController: session.abort,
