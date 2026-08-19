@@ -229,6 +229,7 @@
           <div class="hero__fact"><strong>0</strong><span>extra cost if you have a subscription</span></div>
           <div class="hero__fact"><strong>0</strong><span>API keys to paste</span></div>
           <div class="hero__fact"><strong>1</strong><span>test turn, once per version</span></div>
+          <div class="hero__fact"><strong>1</strong><span>switch: Settings &rsaquo; Harness</span></div>
           <div class="hero__fact"><strong>OpenCode</strong><span>still the default, always</span></div>
         </div>
       </section>
@@ -321,30 +322,66 @@
       <section class="section" id="on">
         <div class="section__head">
           <div class="eyebrow">Switching it on</div>
-          <h2>How to actually turn it on</h2>
+          <h2>How to turn it on</h2>
           <p class="lede">
-            Be aware of what this is today: there is <b>no button in Settings yet</b>. The switch is an
-            environment variable, which means it is currently a developer-facing option rather than
-            something for everyday use.
+            Settings &rsaquo; Harness. It lists every engine the app knows about, one per row, with
+            its own panel — the same shape as Local runtime, so there is room for more engines and
+            more settings without the page turning into a wall of switches.
           </p>
         </div>
 
-        <p>Start the Studio with <code>ARKE_HARNESS</code> set to <code>claude</code>:</p>
+        <div class="steps">
+          <div class="step">
+            <div class="step__time">Step one</div>
+            <h4>Open Settings &rsaquo; Harness</h4>
+            <p>
+              Opening the page is what starts the search for Claude Code. Nothing is looked for
+              before that, because most people will never open it.
+            </p>
+          </div>
+          <div class="step">
+            <div class="step__time">Step two</div>
+            <h4>Pick the engine</h4>
+            <p>
+              Each row says what it is: <b>in use</b>, <b>available</b>, or <b>not here</b>. Open a
+              row and press <b>Use this</b>. There is also <b>Check again</b>, for when you have just
+              installed or updated Claude Code and do not want to restart to be seen.
+            </p>
+          </div>
+          <div class="step">
+            <div class="step__time">Step three</div>
+            <h4>Restart</h4>
+            <p>
+              The engine is chosen when the Studio starts, so the change takes effect next launch.
+              The panel says so rather than pretending it is instant.
+            </p>
+          </div>
+        </div>
 
-<pre><i># PowerShell</i>
-$env:ARKE_HARNESS = <b>"claude"</b>
-<i># then start Arke Studio as usual</i></pre>
-
-        <p>
-          Anything else — unset, empty, or any other value — means OpenCode, which is why doing
-          nothing keeps everything exactly as it was.
-        </p>
+        <div class="rule">
+          <p>
+            <b>You cannot switch on something you do not have.</b> If Claude Code is not on the
+            machine, or is too old, <b>Use this</b> is unavailable and the row says which of the two
+            it is — with both version numbers when that is the problem, so it is something you can
+            act on rather than a dead end.
+          </p>
+          <p>
+            The refusal is not only the greyed-out button. The Studio checks again when the choice is
+            actually made, so uninstalling Claude Code with Settings still open cannot leave you with
+            an engine that will not start.
+          </p>
+        </div>
 
         <div class="note">
           <p>
-            <b>What is still to come.</b> A proper Settings toggle, and a line on the Settings screen
-            naming which engine is in use. The information already exists inside the app; it simply is
-            not shown yet. Until then, the startup log is where the answer lives.
+            <b>If you chose it and then removed it</b>, the Studio quietly runs on OpenCode and the
+            page says OpenCode is in use — because it is. Your choice stays saved, so reinstalling
+            Claude Code brings it back rather than making you decide again.
+          </p>
+          <p>
+            There is also an <code>ARKE_HARNESS=claude</code> environment variable. It is a
+            developer override for trying a build without touching real settings, and it wins where
+            both are set.
           </p>
         </div>
       </section>
@@ -477,6 +514,7 @@ $env:ARKE_HARNESS = <b>"claude"</b>
           </thead>
           <tbody>
             <tr><td>You never switched it on</td><td>Uses OpenCode without mentioning Claude Code at all. Not switching it on is the normal case, not a problem to report.</td></tr>
+            <tr><td>You chose it, then removed it</td><td>Runs on OpenCode and says so. Your choice stays saved, so reinstalling restores it.</td></tr>
             <tr><td>Not installed</td><td>Says so plainly, and uses OpenCode.</td></tr>
             <tr><td>Installed but too old</td><td>Names the version you have and the version needed, so the message is something you can act on.</td></tr>
             <tr><td>Fails the test turn</td><td>Not used. A version that cannot be verified is treated as unusable rather than given the benefit of the doubt.</td></tr>
@@ -551,7 +589,7 @@ $env:ARKE_HARNESS = <b>"claude"</b>
         <a href="https://github.com/michaeljosiah/ArkeStudio/pull/380">PR #380</a> on 2026-08-19
         &middot; behaviour described here was checked against the code and against real runs of Claude
         Code <code>2.1.227</code>, <code>2.1.229</code> and <code>2.1.235</code> &middot; the switch is
-        <code>ARKE_HARNESS=claude</code> and there is no Settings toggle yet.
+        Settings &rsaquo; Harness, with <code>ARKE_HARNESS=claude</code> kept as a developer override.
       </footer>
     </div>
   </body>

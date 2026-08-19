@@ -7,6 +7,7 @@ import {
   type BenchPreset,
   type Capability,
   type ComfyUiSettings,
+  type HarnessEngine,
   type ModelManifest,
   type RoutingFault,
   type ThemePreference,
@@ -114,6 +115,17 @@ export class AppSettingsFile {
   async setBackgroundNotifications(preference: BackgroundNotificationPreference): Promise<AppSettings> {
     const current = await this.load();
     const next: AppSettings = { ...current, backgroundNotifications: preference };
+    await this.persist(next);
+    return next;
+  }
+
+  /**
+   * Which engine runs authoring work. The caller checks availability first — this only records
+   * the choice, and a harness that vanishes later is caught at launch rather than here.
+   */
+  async setHarnessEngine(engine: HarnessEngine): Promise<AppSettings> {
+    const current = await this.load();
+    const next: AppSettings = { ...current, harness: { engine } };
     await this.persist(next);
     return next;
   }

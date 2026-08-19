@@ -130,6 +130,7 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
         narrator: null,
         appearance: { theme: "system" },
         runtime: null,
+        harness: null,
         comfyui: null,
         voiceRuntime: null,
         drift: [],

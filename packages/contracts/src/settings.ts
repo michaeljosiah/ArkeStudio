@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BenchPresetSchema } from "./bench.js";
+import { HarnessEngineSchema } from "./harness.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 
 /**
@@ -40,6 +41,18 @@ export type BackgroundNotificationPreference = z.infer<typeof BackgroundNotifica
 
 export const ThemePreferenceSchema = z.enum(["system", "light", "dark"]);
 export type ThemePreference = z.infer<typeof ThemePreferenceSchema>;
+
+/**
+ * Which harness runs the work. Only ever set to a harness the coordinator confirmed is on the
+ * machine — see `HarnessAvailability`. Defaults to the one inside the installer, so doing
+ * nothing keeps the behaviour every existing install already has.
+ */
+export const HarnessSettingsSchema = z
+  .object({
+    engine: HarnessEngineSchema.default("opencode"),
+  })
+  .strict();
+export type HarnessSettings = z.infer<typeof HarnessSettingsSchema>;
 
 export const AppearanceSettingsSchema = z
   .object({
@@ -169,6 +182,18 @@ const AppSettingsObjectSchema = z
         NarratorSettingsSchema,
       )
       .default(null),
+    /**
+     * Which engine runs authoring work. Guarded and defaulted: a settings file written before
+     * there was a choice has no `harness` key at all, and a strict parse that threw over it
+     * would hand the user back a default file, losing their routing and spend choices to a
+     * feature they never used.
+     */
+    harness: z
+      .preprocess(
+        (value) => (HarnessSettingsSchema.safeParse(value).success ? value : { engine: "opencode" }),
+        HarnessSettingsSchema,
+      )
+      .default({ engine: "opencode" }),
     /** Per-agent overrides, keyed by roster name. */
     agents: z.record(z.string().min(1), AgentSettingsSchema).default({}),
     /**

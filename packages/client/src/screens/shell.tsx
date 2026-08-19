@@ -31,6 +31,7 @@ import {
   genesisChat,
   genesisDiscard,
   hostCanAttach,
+  detectHarnesses,
   detectRuntimes,
   chooseComfyUiPath,
   chooseComfyUiModelsDir,
@@ -61,6 +62,7 @@ import {
   setBackgroundNotifications,
   setModelEnabled,
   setRoutingDefault,
+  setHarnessEngine,
   setSpendThreshold,
   installSampleWorld,
   useSampleWorld,
@@ -101,6 +103,9 @@ import {
   spendSummary,
   type Capability,
   type ComponentHealth,
+  type HarnessAvailability,
+  type HarnessEngine,
+  OPENCODE_AVAILABILITY,
   type ComfyUiEngineStatus,
   type LocalRuntimeStatus,
   type NarratorSettings,
@@ -1182,6 +1187,7 @@ export function SettingsLayout() {
                     ["appearance", "Appearance"],
                     ["notifications", "Notifications"],
                     ["local-runtime", "Local runtime"],
+                    ["harness", "Harness"],
                     ["who-does-what", "Who does what"],
                     ["sample-world", "Sample world"],
                     ["about", "About"],
@@ -2386,6 +2392,121 @@ function HarnessDetail({ health }: { health: ComponentHealth | undefined }) {
           <div className="fy-set__caps">{health?.reason ?? "supervised by Arke Studio"}</div>
         </div>
         <HealthDot label="OpenCode (authoring harness)" health={health} />
+      </div>
+    </>
+  );
+}
+
+/**
+ * Settings · Harness (SPEC-005 R-1). Master and detail, like Local runtime, because there will be
+ * more than two engines and more than one setting each — a flat list of radio buttons would have
+ * nowhere to put the second Claude Code option when it arrives.
+ *
+ * The rule this screen exists to enforce: a harness that is not on this machine cannot be
+ * selected. Availability is detected rather than assumed, the control for an absent harness is
+ * unavailable rather than merely ineffective, and the pane says which case it is — "not found"
+ * and "too old" want different things from the reader. The coordinator refuses the same choice
+ * independently, so this is the courtesy and not the guarantee.
+ */
+export function SettingsHarnessScreen() {
+  const { state } = useStore();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const harness = state?.app.harness ?? null;
+
+  useEffect(() => {
+    // Detection costs a subprocess, so it happens when the screen is opened rather than at boot.
+    if (!harness) detectHarnesses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const harnesses = harness?.harnesses ?? [OPENCODE_AVAILABILITY];
+  const engine = harness?.engine ?? "opencode";
+  const asked = searchParams.get("harness");
+  const current = harnesses.some((h) => h.id === asked) ? asked! : harnesses[0]!.id;
+  const chosen = harnesses.find((h) => h.id === current) ?? harnesses[0]!;
+
+  return (
+    <div data-screen="settings-harness" className="fy-set fy-set--runtime">
+      <div className="fy-rt">
+        <div className="fy-rt__rail" role="tablist" aria-label="Harnesses">
+          {harnesses.map((h) => (
+            <button
+              type="button"
+              key={h.id}
+              role="tab"
+              aria-selected={h.id === current}
+              className={cx("fy-rt__railitem", h.id === current && "is-current")}
+              onClick={() => setSearchParams({ harness: h.id }, { replace: true })}
+            >
+              <span className={cx("fy-set__dot", TONE_CLASS[h.id === engine ? "ok" : h.installed ? "idle" : "warn"])} />
+              <span>{h.label}</span>
+              <span style={{ flex: 1 }} />
+              <span className="fy-rt__count">
+                {h.id === engine ? "in use" : h.installed ? "available" : "not here"}
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="fy-rt__pane">
+          <HarnessPane harness={chosen} engine={engine} detected={harness !== null} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HarnessPane({
+  harness,
+  engine,
+  detected,
+}: {
+  harness: HarnessAvailability;
+  engine: HarnessEngine;
+  detected: boolean;
+}) {
+  const inUse = harness.id === engine;
+  return (
+    <>
+      <RuntimeHead
+        title={harness.label}
+        caps={harness.bundled ? "BUNDLED" : "YOUR INSTALLATION"}
+        tone={inUse ? "ok" : harness.installed ? "idle" : "warn"}
+        state={inUse ? "in use" : harness.installed ? "available" : "not here"}
+      />
+      <RuntimeSection label="ON THIS MACHINE" />
+      <div className="fy-set__row">
+        <div className="fy-set__name fy-set__name--wide">
+          <div className="fy-set__title">{harness.bundled ? "Ships with Arke Studio" : "Found on this machine"}</div>
+          <div className="fy-set__caps">
+            {/* The refusal, in the words the coordinator sent — not a re-derived summary. */}
+            {harness.blocked ?? (harness.version ? `version ${harness.version}` : "installed")}
+          </div>
+        </div>
+        {!harness.bundled && (
+          <Button variant="ghost" onClick={() => detectHarnesses()}>
+            Check again
+          </Button>
+        )}
+      </div>
+      <RuntimeSection label="USE FOR AUTHORING" />
+      <div className="fy-set__row">
+        <div className="fy-set__name fy-set__name--wide">
+          <div className="fy-set__title">{inUse ? "Runs the authoring work" : "Not in use"}</div>
+          <div className="fy-set__caps">
+            {inUse
+              ? "takes effect on the next restart"
+              : harness.installed
+                ? "switching takes effect on the next restart"
+                : "unavailable until it is installed"}
+          </div>
+        </div>
+        <Button
+          variant={inUse ? "secondary" : "primary"}
+          disabled={inUse || !harness.installed || !detected}
+          onClick={() => setHarnessEngine(harness.id)}
+        >
+          {inUse ? "In use" : "Use this"}
+        </Button>
       </div>
     </>
   );

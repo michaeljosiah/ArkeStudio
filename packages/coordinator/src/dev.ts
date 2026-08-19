@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { agentForPurpose, skillFor, ROSTER } from "@arke-studio/contracts";
 import { createProviderClients, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { KOKORO_PRESETS, localCandidates } from "@arke-studio/voice";
+import { describeClaudeAvailability } from "@arke-studio/adapter-claude";
+import { AppSettingsFile } from "./app-settings.js";
 import { ChildLedger } from "./child-ledger.js";
 import { Coordinator } from "./coordinator.js";
 import { devCipher } from "./credentials/dev-cipher.js";
@@ -69,12 +71,17 @@ if (swept.reaped.length > 0) {
 // Real authoring in dev when either OpenCode generation is installed; honest degradation
 // when neither is. One seam builds the whole launch (issue 327 §3–§4) — v2 preferred, v1
 // the escape hatch — so dev and desktop cannot drift.
+// Read before assembly: the stored choice decides which lane launches.
+const chosenHarness =
+  (await new AppSettingsFile(join(devRoot, "settings.json")).load().catch(() => null))?.harness.engine ?? "opencode";
+
 const wiring = await assembleHarness({
   appRoot: devRoot,
   deps: { ledger },
   preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
   claude: {
-    enabled: process.env["ARKE_HARNESS"] === "claude",
+    // Settings decides; ARKE_HARNESS remains a developer override and wins where both are set.
+    enabled: process.env["ARKE_HARNESS"] === "claude" || chosenHarness === "claude",
     ...(process.env["ARKE_CLAUDE_CMD"] ? { configuredPath: process.env["ARKE_CLAUDE_CMD"] } : {}),
   },
   onTrace: harnessTrace(devRoot),
@@ -118,6 +125,12 @@ const coordinator = new Coordinator({
   validators: providerClients,
   dispatchClients: providerClients,
   manifest: SHIPPED_MANIFEST,
+  // Only the harnesses that can be absent — OpenCode ships beside the app.
+  detectHarnesses: async () => [
+    await describeClaudeAvailability(
+      process.env["ARKE_CLAUDE_CMD"] ? { configuredPath: process.env["ARKE_CLAUDE_CMD"] } : {},
+    ),
+  ],
   changeLogPath: join(devRoot, "logs", "coordinator.jsonl"),
   appVersion: "0.1.0-dev",
   jobsSeedPath: join(devRoot, "queue", "jobs.jsonl"),

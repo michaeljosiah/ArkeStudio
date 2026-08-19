@@ -44,6 +44,7 @@ function stateWithAConversation(): ClientState {
       backgroundNotifications: "issues-only",
       appearance: { theme: "system" },
       runtime: null,
+      harness: null,
       voiceRuntime: null,
       drift: [],
       agents: [],

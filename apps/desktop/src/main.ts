@@ -5,6 +5,7 @@ import { appendFileSync, createReadStream, existsSync } from "node:fs";
 import { readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
+import { describeClaudeAvailability } from "@arke-studio/adapter-claude";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, safeStorage, shell } from "electron";
 import electronUpdater from "electron-updater";
 import {
@@ -430,6 +431,13 @@ async function initialize(): Promise<{ port: number }> {
   // profile, adapter, config writer — so dev and desktop cannot drift. Absent → authoring
   // degrades with the reason stated (R-4). The trace file answers "what did the app hear,
   // and when" whenever a chat sticks, without a debugger.
+  /*
+   * Read before the harness is assembled, because the stored choice decides which lane launches.
+   * The same file the coordinator writes through, so Settings and launch cannot disagree.
+   */
+  const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
+  const chosenHarness = (await hostSettings.load().catch(() => null))?.harness.engine ?? "opencode";
+
   const wiring = await assembleHarness({
     appRoot,
     deps: { ledger: childLedger },
@@ -445,7 +453,9 @@ async function initialize(): Promise<{ port: number }> {
     // Bring-your-own, opt-in: OpenCode ships in the installer and stays the default. Selecting
     // Claude Code is what pays for its confinement probe, which spends a live turn.
     claude: {
-      enabled: process.env["ARKE_HARNESS"] === "claude",
+      // Settings is the way in. ARKE_HARNESS stays as a developer override so a branch can be
+      // tried without writing to somebody's real settings file, and it wins where both are set.
+      enabled: process.env["ARKE_HARNESS"] === "claude" || chosenHarness === "claude",
       ...(process.env["ARKE_CLAUDE_CMD"] ? { configuredPath: process.env["ARKE_CLAUDE_CMD"] } : {}),
     },
     onTrace: harnessTrace(appRoot),
@@ -566,7 +576,6 @@ async function initialize(): Promise<{ port: number }> {
 
   // Voxa discovery is environment -> configured -> bundled -> absent. Configured paths stay
   // in the main process; renderer state receives only source, basename, and safe categories.
-  const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
   let voxaSettings = (await hostSettings.load()).voxa;
   const expectedArchitecture = windowsArchitecture();
   const discoverVoxa = (settings: VoxaSettings) =>
@@ -815,6 +824,12 @@ async function initialize(): Promise<{ port: number }> {
     },
     manifest: SHIPPED_MANIFEST,
     probeRuntime: () => probeRuntime(appRoot),
+    // Only the harnesses that can be absent — OpenCode is in the installer beside this process.
+    detectHarnesses: async () => [
+      await describeClaudeAvailability(
+        process.env["ARKE_CLAUDE_CMD"] ? { configuredPath: process.env["ARKE_CLAUDE_CMD"] } : {},
+      ),
+    ],
     dispatchClients: providerClients,
     // Exports encode locally (SPEC-013 R-19): the bundled ffmpeg in a packaged build
     // (SPEC-016 R-8, invoked as a subprocess, never linked — D6), else ARKE_FFMPEG; its

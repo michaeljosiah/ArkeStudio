@@ -38,6 +38,7 @@ export class ReadModel {
         narrator: null,
         appearance: { theme: "system" },
         runtime: null,
+        harness: null,
         comfyui: null,
         voiceRuntime: null,
         drift: [],
@@ -250,6 +251,10 @@ export class ReadModel {
       }
       case "runtime.status": {
         this.state = { ...this.state, app: { ...this.state.app, runtime: event.runtime } };
+        return;
+      }
+      case "harness.status": {
+        this.state = { ...this.state, app: { ...this.state.app, harness: event.harness } };
         return;
       }
       case "comfyui.status": {

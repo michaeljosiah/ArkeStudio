@@ -10,8 +10,10 @@ import {
   imageConstraintSuffix,
   stagedReferenceKey,
   LedgerEntrySchema,
-  type ClientMessage,
+  OPENCODE_AVAILABILITY,
   type Capability,
+  type ClientMessage,
+  type HarnessAvailability,
   type ClientState,
   type DomainEvent,
   type HarnessAdapter,
@@ -408,6 +410,16 @@ export interface CoordinatorOptions {
   manifest?: ModelManifest;
   /** SPEC-008: local runtime probing, injected so tests measure nothing. */
   probeRuntime?: () => Promise<RuntimeProbes>;
+  /**
+   * Which bring-your-own harnesses this machine has (SPEC-005 R-1). Injected because it spawns
+   * subprocesses, and because the coordinator has no business knowing how a Claude Code install
+   * is recognised. Returns only the harnesses that can be absent — the bundled one is constant.
+   *
+   * Discovery only. The confinement probe spends a live turn against the user's own
+   * subscription, which is fine at launch when they have asked for the harness and wrong when
+   * they have merely opened Settings.
+   */
+  detectHarnesses?: () => Promise<HarnessAvailability[]>;
   /**
    * The ComfyUI engine (SPEC-021): the service that discovers, supervises and verifies it,
    * plus the host's own directory pickers — selected paths go straight to settings and never
@@ -6108,6 +6120,31 @@ export class Coordinator {
         this.jobQueue?.resume(msg.provider);
         return;
       }
+      case "detect-harnesses": {
+        await this.emitHarnessStatus();
+        return;
+      }
+      case "set-harness-engine": {
+        if (!this.appSettings) return;
+        const harnesses = await this.harnessAvailability();
+        const chosen = harnesses.find((h) => h.id === msg.engine);
+        /*
+         * The refusal lives here, not only on the screen.
+         *
+         * A disabled control is a courtesy to the reader; it is not a guarantee, because the
+         * availability it was drawn from can be minutes old — a user can uninstall Claude Code
+         * with Settings still open. Enabling a harness that is not there would replace working
+         * authoring with a lane that cannot start, so the answer is no, and the screen is sent
+         * the current truth so it stops showing the choice it thought it had.
+         */
+        if (!chosen?.installed) {
+          await this.emitHarnessStatus(harnesses);
+          return;
+        }
+        await this.appSettings.setHarnessEngine(msg.engine);
+        await this.emitHarnessStatus(harnesses);
+        return;
+      }
       case "detect-runtimes": {
         if (!this.opts.manifest || !this.opts.probeRuntime) return;
         try {
@@ -6768,6 +6805,34 @@ export class Coordinator {
    * change what a *card* shows need this — it walks the worlds directory, so calling it on
    * every snapshot refresh would put a directory scan behind every button in the app.
    */
+  /**
+   * Every harness the app knows about: the bundled one, which is a constant, plus whatever the
+   * host's detector found. A host with no detector wired still gets a coherent answer — one
+   * harness, always available — rather than an empty list a screen would have to explain.
+   */
+  private async harnessAvailability(): Promise<HarnessAvailability[]> {
+    const detected = this.opts.detectHarnesses
+      ? await this.opts.detectHarnesses().catch(() => [])
+      : [];
+    return [OPENCODE_AVAILABILITY, ...detected];
+  }
+
+  /**
+   * The list and the current choice, sent together (see `HarnessStatus`).
+   *
+   * The stored engine is reported only if it is still available. A user who chose Claude Code
+   * and then uninstalled it is running on OpenCode — the launch path already fell back — and a
+   * screen still showing Claude Code selected would be describing a session that does not
+   * exist. The setting on disk is left alone: reinstalling should restore their choice, not
+   * find it quietly erased.
+   */
+  private async emitHarnessStatus(known?: HarnessAvailability[]): Promise<void> {
+    const harnesses = known ?? (await this.harnessAvailability());
+    const stored = (await this.appSettings?.load())?.harness.engine ?? "opencode";
+    const engine = harnesses.find((h) => h.id === stored)?.installed ? stored : "opencode";
+    this.emit({ at: new Date().toISOString(), type: "harness.status", harness: { engine, harnesses } });
+  }
+
   private async refreshWorldList(): Promise<void> {
     try {
       this.readModel.setWorlds(await this.opts.provider.listWorlds());
