@@ -350,14 +350,20 @@
             </tr>
             <tr>
               <td>Actually speaking a line</td>
-              <td><span class="pill pill--part">Retuned, not yet re-tested</span></td>
+              <td><span class="pill pill--no">Not on a 10&nbsp;GB card</span></td>
               <td>
-                On the 10&nbsp;GB card this was built against, the first attempt ran out of video memory
-                part-way and ground to a halt. Two settings carried over from the add-on's defaults were
-                the likely cause and have been changed — beam search off, and a lower ceiling on how much
-                audio one pass may make. Both are what the published guidance recommends for cards this
-                size. Not yet confirmed on hardware.
+                On the card this was built against it does not finish. The model wants more video memory
+                than is free, so it spills onto the hard disk and slows to a crawl. Two settings were
+                retuned to try to bring it down — beam search off, and a lower ceiling on how much audio
+                one pass makes, both as the published guidance recommends — and measuring afterwards
+                showed <strong>no improvement</strong>: still 9.5&nbsp;GB, still grinding. It needs a
+                bigger card, or a card with less on it.
               </td>
+            </tr>
+            <tr>
+              <td>Warning you when the card is full</td>
+              <td><span class="pill pill--yes">Working</span></td>
+              <td>Verified on hardware: measures free memory, asks ComfyUI to unload first, then refuses with both figures.</td>
             </tr>
             <tr>
               <td>Recording with a microphone</td>
@@ -370,12 +376,13 @@
           </table>
         </div>
         <p class="note" style="margin-top: 18px">
-          <strong>If the card is busy, Arke now says so before you wait.</strong> Just before speaking a
-          line it asks the graphics card how much memory is actually free — not how big it is. If there
-          is not enough, it first tells ComfyUI to put down anything it is still holding, such as a video
-          model from an earlier job, and measures again. Only if it is still short does it stop, and then
-          it names both figures: <em>needs 7.8&nbsp;GB free, this machine has 3.0&nbsp;GB free</em>, and
-          suggests closing other programs using the card.
+          <strong>If the card is busy, Arke says so before you wait.</strong> Just before speaking a line
+          it asks the graphics card how much memory is actually free — not how big it is. If there is not
+          enough, it first tells ComfyUI to put down anything it is still holding, such as a video model
+          from an earlier job, and measures again. Only if it is still short does it stop, and then it
+          names both figures and what to do. Confirmed on a busy machine: it refused in a quarter of a
+          second with <em>"needs 7.8&nbsp;GB of free graphics memory and this machine has 0.7&nbsp;GB
+          free"</em>, rather than starting work that could not finish.
         </p>
       </section>
 
