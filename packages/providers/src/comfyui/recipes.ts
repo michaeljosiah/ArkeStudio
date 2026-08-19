@@ -277,7 +277,16 @@ const CLONED_VOICE: ComfyUiRecipe = {
     // The words, verbatim — a line to speak, never a prompt describing a performance
     // (SPEC-011 turn 70). The cap is ours: the node chunks longer text, and a scene line that
     // needs chunking is a line that should have been two.
-    text: { kind: "string", required: true, maxChars: 2000, bind: [["4", "text"]] },
+    /*
+     * One segment's worth, and no more.
+     *
+     * 2000 was this recipe's own guess at "long enough to be someone else's problem", and it was
+     * wrong in the direction that matters: at 300 tokens a segment the engine takes roughly 400
+     * characters, and anything past that is a second full pass over the model rather than a
+     * little more audio. The recipe already held that a line needing chunking is a line that
+     * should have been two; this is that belief with the arithmetic done.
+     */
+    text: { kind: "string", required: true, maxChars: 400, bind: [["4", "text"]] },
     // The uploaded clip's filename on the engine, resolved from the voice library before dispatch.
     // Internal because the user picks a VOICE, never a filename.
     speakerFile: { kind: "string", internal: true, required: true, maxChars: 260, bind: [["1", "audio"]] },
@@ -313,7 +322,15 @@ const CLONED_VOICE: ComfyUiRecipe = {
         device: "auto",
         emotion_alpha: 1.0,
         use_random: false,
-        max_text_tokens_per_segment: 120,
+        // The node's ceiling, not its default of 120 (SPEC-022 §2.6).
+        //
+        // Chunking is not a cost that scales: each segment is a full pass over the model, and on
+        // a 10 GB card the second one thrashes. Measured on the reference machine, a 174-character
+        // line split at 120 and the passes ran 25 steps in 7m49s and then 678s PER STEP — the card
+        // 92% full and ~9 GB of the process paged to disk. One pass is the difference between a
+        // preview that lands and one that never does, so the segment is as large as the node
+        // allows and `text` is capped to fit inside it.
+        max_text_tokens_per_segment: 300,
         interval_silence: 200,
         temperature: 0.8,
         top_p: 0.8,
