@@ -2,14 +2,15 @@
 
 `cursor:pointer` elements: **1408**
 
-- **957 wired** — carry an `onClick`
-- **69 state variants** — the *selected* half of a selected/unselected pair. Correctly
-  handler-less: clicking the row you are already on is a no-op. Not a defect.
-- **9 leave the application** — Open folder, GitHub, a path picker. A prototype cannot
-  do these, and removing their pointer would misrepresent a control that is real. Not a defect.
-- **373 genuinely unwired** — the number worth working down.
+- **972 wired**
+- **69 state variants** — the *selected* half of a pair. Clicking the row you are on
+  is a no-op, so no handler is correct. Not a defect.
+- **6 leave the application** — Open folder, GitHub, a path picker. A prototype cannot
+  perform these, and removing their pointer would misrepresent a control that is real in the
+  app. Not a defect.
+- **361 genuinely unwired**
 
-The test for the last group: *an affordance either does something, or stops looking pressable.*
+The test: *an affordance either does something, or stops looking pressable.*
 
 | screen | unwired | the affordances |
 |---|---:|---|
@@ -17,7 +18,6 @@ The test for the last group: *an affordance either does something, or stops look
 | 14a Scene shots | 20 | (icon only) x12, Saltlight short film · scene 4, Scenes 5, 1 · Lowtide market, 2 · The dive, 3 · Council chamber |
 | 2b Canon browser | 17 | (icon only) x3, CANON-002 · Tide-calling, CANON-031 · The night the bells sank, Maren · sheet v4, What does the Chorister want?, CANON-021 · The Drowned Quarter |
 | 3c Artifacts | 14 | (icon only) x3, Audio 6, Documents 9, Images 12, Video 3, Made here 4 |
-| 22a Settings | 14 | Brief x6, (icon only), Restart, Repair models, Re-verify, Refresh |
 | 69a Reference picker · world artifacts | 14 | This session 16, Upload, Images 12, Video 3, Audio 6, Documents 9 |
 | 10a New location | 13 | (icon only) x7, Harbourside, The Vigil headland, + new region, Bray Half-Hitch, The Ebb Council |
 | 11b Generate workspace | 12 | (icon only) x6, Scene, END · OPTIONAL, Reset, 3, 2 |
@@ -43,6 +43,7 @@ The test for the last group: *an affordance either does something, or stops look
 | 57a Location · Reference | 5 | (icon only) x3, Replace, history |
 | 24a The cut | 5 | (icon only) x4, Cut 2:40 |
 | 53a Step two · three kinds, and defaults you can see are changeable | 5 | Micro-drama series Episodes with a season ar, 9:16 vertical, 7, 45–75s, Cliffhanger |
+| 41b Proposals | 5 | Maren’s inheritance 2 changes, together, The western lock 1 new rule close to CANON-0, Sideways inheritance 1 new rule, 1 link, The tide gate 1 change, (icon only) |
 | 1a Home | 4 | (icon only) x3, Search worlds ⌘K |
 | 18a Canon draft in context | 4 | (icon only) x4 |
 | 19b Canon entry detail | 4 | (icon only) x3, Full history · 6 versions |
@@ -50,7 +51,6 @@ The test for the last group: *an affordance either does something, or stops look
 | 9a New scene | 4 | (icon only) x4 |
 | 45b Episode board · as the surface | 4 | (icon only) x2, Story v1, Add an episode |
 | 48b Arcs · lanes across the season | 4 | (icon only) x2, Story v1, Add a lane |
-| 41b Proposals | 4 | Maren’s inheritance 2 changes, together, The western lock 1 new rule close to CANON-0, Sideways inheritance 1 new rule, 1 link, (icon only) |
 | 1d Cast ledger | 3 | (icon only) x3 |
 | 4a Main photo + character sheet | 3 | (icon only) x3 |
 | 23b Location detail | 3 | (icon only) x3 |
@@ -70,6 +70,7 @@ The test for the last group: *an affordance either does something, or stops look
 | 53e The board at rest · the whole scene, priced, nothing selected | 2 | (icon only) x2 |
 | 38c Change look, presets and custom | 1 | (icon only) |
 | 38b Preset seeds the words | 1 | (icon only) |
+| 22a Settings | 1 | (icon only) |
 | 6a New production | 1 | Story Prose and scripts, drafted inside the  |
 | 55a Generate · the contact-sheet lens | 1 | Scene |
 | 49b Coverage · blocks against shots | 1 | 11 · The answer from inside |
