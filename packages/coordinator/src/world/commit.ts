@@ -62,6 +62,13 @@ export interface CommitInput {
   files: CommitFileInput[];
   /** Reserve this many canon ids in the same transaction (world.json nextCanonId). */
   allocateCanonIds?: number;
+  /**
+   * Raise world.json.schemaVersion to this value in the same transaction (SPEC-023 R-23,
+   * issue #403). Only ever raises — a world already at or above the requested version is left
+   * alone — so the first feature write that needs the newer boundary carries it, and a retry
+   * is a no-op.
+   */
+  raiseSchemaVersion?: number;
 }
 
 export interface CommitResult {
@@ -359,10 +366,27 @@ export class Committer {
       });
     }
 
-    // ---- world.json: revision, allocation, updated -------------------------
+    // ---- world.json: revision, allocation, schema version, updated ---------
     const allocatedCanonIds: string[] = [];
     const worldUpdates: Record<string, unknown> = { updated: at };
     if (touchesCanon) worldUpdates["canonRevision"] = revisionTo;
+    if (input.raiseSchemaVersion !== undefined) {
+      const current = (worldDoc.value["schemaVersion"] as number) ?? 1;
+      if (input.raiseSchemaVersion > current) {
+        worldUpdates["schemaVersion"] = input.raiseSchemaVersion;
+        // The audit trail names the boundary crossing: older builds refuse this world from
+        // here on, and the log is where "since when?" gets answered.
+        changes.push({
+          ts: at,
+          commitId,
+          entity: "world",
+          fieldsChanged: ["schemaVersion"],
+          fromVersion: current,
+          toVersion: input.raiseSchemaVersion,
+          source: input.source,
+        });
+      }
+    }
     if (input.allocateCanonIds && input.allocateCanonIds > 0) {
       const next = worldDoc.value["nextCanonId"] as number;
       for (let i = 0; i < input.allocateCanonIds; i++) {

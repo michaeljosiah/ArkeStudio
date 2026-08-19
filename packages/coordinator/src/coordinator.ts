@@ -2389,6 +2389,10 @@ export class Coordinator {
       case "world-chat-create": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
+        // The first conversation crosses the schema boundary (#70 §4.1, issue #403): older
+        // builds must refuse this world rather than export `.conversations` they do not know
+        // to exclude. The raise is durable before the conversation directory exists.
+        await store.ensureSchemaVersion(2, "world-chat");
         const service = new WorldChatService(store.dir);
         const row = await service.create({
           title: msg.title,

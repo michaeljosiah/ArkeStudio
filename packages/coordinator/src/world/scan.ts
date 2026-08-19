@@ -55,7 +55,16 @@ import { readChanges } from "./change-writer.js";
  * closed-world reconciliation compares against (R-28).
  */
 
-export const SUPPORTED_SCHEMA_VERSION = 1;
+/**
+ * The newest world schema this build understands (SPEC-023 R-23, issue #403). Version 2 marks
+ * a world that may contain durable conversations (`.conversations`, #70 §4.1) or the new-model
+ * production entities (`medium`/`kind`, `series/`, `season.json`, `episodes/`, scene scripts).
+ * Worlds are born at 1 and raised lazily by the first write that needs the boundary, so a
+ * world that never uses those features stays openable by older builds; a build older than the
+ * boundary refuses a version-2 world by name instead of silently dropping strict-parse
+ * failures or exporting private conversation state.
+ */
+export const SUPPORTED_SCHEMA_VERSION = 2;
 
 export class WorldOpenError extends Error {
   constructor(

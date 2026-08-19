@@ -16,7 +16,7 @@ import { atomicWriteFile } from "./atomic.js";
 import { appendChanges } from "./change-writer.js";
 import { checkPathBudget, fromPortable, toExtendedLength, type PathBudget } from "./paths.js";
 import { installSampleWorld } from "./sample-world.js";
-import { findKeyArt, readWorldMeta, scanWorld, WorldOpenError, SUPPORTED_SCHEMA_VERSION } from "./scan.js";
+import { findKeyArt, readWorldMeta, scanWorld, WorldOpenError } from "./scan.js";
 import { uniqueSlug } from "./slug.js";
 import { WorldStore } from "./store.js";
 
@@ -236,7 +236,10 @@ export class FsWorldProvider implements WorldProvider {
     const meta = {
       worldId,
       slug,
-      schemaVersion: SUPPORTED_SCHEMA_VERSION,
+      // Worlds are born at the oldest schema they satisfy, not the newest this build knows
+      // (SPEC-023 R-23): a fresh world has no conversations and no new-model entities, so
+      // older builds may open it; the first write that needs the boundary raises it.
+      schemaVersion: 1,
       name: input.name,
       ...(input.logline ? { logline: input.logline } : {}),
       ...(input.tone ? { tone: input.tone } : {}),
