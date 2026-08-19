@@ -18,7 +18,8 @@ import type { Node as PmNode } from "@tiptap/pm/model";
  * so untouched lines keep breaking exactly where they always did.
  *
  * Hard breaks the author actually meant — two trailing spaces, or a backslash — parse as their own
- * node and never appear as text, so nothing here can reach them.
+ * node and never appear as text, so nothing here can reach them. Code is exempt for a blunter
+ * reason: inside a fence a newline is not where the text editor wrapped, it is the program.
  */
 /**
  * Nodes whose markdown is a marker and nothing else, so an empty one writes down as a line that
@@ -35,11 +36,19 @@ const MARKER_ONLY_BLOCKS = new Set(["blockquote", "heading"]);
  * A block somebody made and moved on from is not content, and treating it as content lets one
  * stray keystroke stop a bible saving with no sign that anything is wrong.
  *
- * The one the caret is inside is left exactly where it is. That block is not stranded, it is being
- * written; deleting it out from under the cursor would be the app refusing to let anyone make a
- * quote at all. The commit holds for as long as that lasts, which is until the next character.
+ * The one the caret is inside is left exactly where it is, while somebody is typing. That block is
+ * not stranded, it is being written; deleting it out from under the cursor would be the app
+ * refusing to let anyone make a quote at all. The commit holds for as long as that lasts, which is
+ * until the next character.
+ *
+ * `keepAtSelection: false` is for the flush that runs on blur and on unmount, where there is no
+ * "still being written" left to protect: the caret is about to stop existing, and holding on its
+ * account would mean throwing away whatever was typed before it.
  */
-export function dropStrandedEmptyBlocks(editor: Editor): void {
+export function dropStrandedEmptyBlocks(
+  editor: Editor,
+  { keepAtSelection = true }: { keepAtSelection?: boolean } = {},
+): void {
   const { doc, selection, tr } = editor.view.state;
   const stranded: { from: number; to: number }[] = [];
 
@@ -48,7 +57,7 @@ export function dropStrandedEmptyBlocks(editor: Editor): void {
     if (node.textContent.trim() !== "" || hasLeafContent(node)) return true;
     // `from`/`to` rather than a containment test on the head alone, so a selection spanning the
     // block also counts as being in it.
-    if (selection.from <= pos + node.nodeSize && selection.to >= pos) return false;
+    if (keepAtSelection && selection.from <= pos + node.nodeSize && selection.to >= pos) return false;
     stranded.push({ from: pos, to: pos + node.nodeSize });
     return false;
   });
@@ -75,7 +84,11 @@ export function normalizeSoftBreaks(editor: Editor): void {
   const { doc, tr } = editor.view.state;
   const replacements: { from: number; to: number; node: PmNode }[] = [];
 
-  doc.descendants((node, pos) => {
+  doc.descendants((node, pos, parent) => {
+    // A fenced block's whole body is one text node full of newlines, and every one of them is the
+    // author's. Reflowing there would put a program on a single line, and — because the headless
+    // serialiser reflows identically — the commit's proof would agree and write it out.
+    if (parent?.type.spec.code) return false;
     if (!node.isText || !node.text?.includes("\n")) return true;
     // Collapse the whitespace either side of the break too, so a line the author ended with a single
     // trailing space does not reflow into a double one.

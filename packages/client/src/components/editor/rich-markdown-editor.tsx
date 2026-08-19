@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { commitMarkdown, type ReconcileBaselines } from "./commit.js";
@@ -106,17 +106,32 @@ export function RichMarkdownEditor({
     if (!timer.current) return;
     clearTimeout(timer.current);
     timer.current = null;
+    /*
+     * Without `keepAtSelection: false` this is where a pending edit goes to die. The caret sitting
+     * inside an empty quote makes the document un-writable, the commit holds, and on unmount there
+     * is no next keystroke to ask again — so whatever was typed before the quote is simply lost.
+     * At blur and unmount the caret is not "still writing" anything; it is leaving.
+     */
+    if (editorRef.current) dropStrandedEmptyBlocks(editorRef.current, { keepAtSelection: false });
     commit();
   }, [commit]);
 
-  const editor = useEditor({
-    immediatelyRender: false,
-    content: value,
-    contentType: "markdown",
-    extensions: markdownExtensions({ placeholder }),
-    editorProps: {
+  /*
+   * `useEditor` compares its options on every render and calls `setOptions` when any differ — and it
+   * compares `extensions` by the identity of each entry. A fresh array of fresh instances every
+   * render therefore meant `view.setProps` and `view.updateState` on every keystroke, which is both
+   * wasted work and the documented way to disturb an IME composition mid-character.
+   *
+   * `content` is pinned to what the editor mounted with for the same reason: it is read once at
+   * creation and never again, so letting the live value through would defeat the comparison for no
+   * benefit. Later documents arrive by adoption, below.
+   */
+  const extensions = useMemo(() => markdownExtensions({ placeholder }), [placeholder]);
+  const mountContent = useRef(value).current;
+  const editorProps = useMemo(
+    () => ({
       attributes: { class: "fy-rme__doc", "aria-label": ariaLabel, spellcheck: "true" },
-      handleKeyDown: (_view, event) => {
+      handleKeyDown: (_view: unknown, event: KeyboardEvent) => {
         const open = menuRef.current;
         if (!open) return false;
 
@@ -145,7 +160,16 @@ export function RichMarkdownEditor({
         }
         return false;
       },
-    },
+    }),
+    [ariaLabel],
+  );
+
+  const editor = useEditor({
+    immediatelyRender: false,
+    content: mountContent,
+    contentType: "markdown",
+    extensions,
+    editorProps,
     onCreate: ({ editor: instance }) => {
       editorRef.current = instance;
       normalizeSoftBreaks(instance);

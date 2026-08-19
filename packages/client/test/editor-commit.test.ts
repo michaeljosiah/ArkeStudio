@@ -112,6 +112,30 @@ describe("committing a document", () => {
     editor.destroy();
   });
 
+  it("leaves the newlines inside a code block alone", () => {
+    /*
+     * The regression this exists for. A fenced block's whole body is one text node full of
+     * newlines, and the soft-break reflow rewrote every one of them — putting a program on a single
+     * line. The commit's proof did not catch it, because the headless serialiser reflows the same
+     * way and so agreed with the corruption. Verified against the two failure surfaces separately:
+     * the document as loaded, and the bytes a commit would write.
+     */
+    const source = "## Notes\n\n```js\nconst a = 1\nconst b = 2\nreturn a + b\n```\n\nAnd prose after.\n";
+    const { editor, baselines } = open(source);
+
+    assert.match(
+      documentMarkdown(editor),
+      /```js\nconst a = 1\nconst b = 2\nreturn a \+ b\n```/,
+      "three lines of code are still three lines",
+    );
+    assert.equal(serializeMarkdown(source), documentMarkdown(editor), "and the proof agrees");
+
+    editor.view.dispatch(editor.state.tr.insertText(" Truly.", editor.state.doc.content.size - 1));
+    const result = commit(editor, baselines);
+    assert.equal(result.changed, true);
+    assert.match(result.markdown, /const a = 1\nconst b = 2\nreturn a \+ b/, "and a save keeps them");
+  });
+
   it("writes nothing while the document cannot be read back", () => {
     /*
      * Ask for a quote and leave it empty. Markdown writes an empty blockquote as a bare `>`, and a
@@ -161,6 +185,33 @@ describe("committing a document", () => {
     assert.ok(!/>/.test(result.markdown), "the abandoned quote is gone");
     assert.match(result.markdown, /It keeps two ledgers\./, "and what was typed is there");
     assert.match(result.markdown, /^\* salt in the rigging$/m, "with the author's formatting intact");
+    editor.destroy();
+  });
+
+  it("drops the block under the caret too, once the caret is leaving", () => {
+    /*
+     * The regression this exists for. `dropStrandedEmptyBlocks` runs on every update, but a flush
+     * fires from blur and unmount — where no update follows and there is no next keystroke to ask
+     * again. A caret parked in an empty quote made the document un-writable, the commit held, and
+     * everything typed before the quote was never written.
+     */
+    const { editor, baselines } = open(HAND_WRITTEN);
+    const paragraphEnd = editor.state.doc.child(0).nodeSize + editor.state.doc.child(1).nodeSize - 1;
+    editor.view.dispatch(editor.state.tr.insertText(" It keeps two ledgers.", paragraphEnd));
+
+    const end = editor.state.doc.content.size;
+    editor.view.dispatch(editor.state.tr.insert(end, editor.state.schema.nodes.paragraph!.create()));
+    editor.commands.setTextSelection(editor.state.doc.content.size - 1);
+    editor.commands.toggleBlockquote();
+
+    dropStrandedEmptyBlocks(editor);
+    assert.equal(commit(editor, baselines).changed, false, "while typing, the caret's quote holds");
+
+    dropStrandedEmptyBlocks(editor, { keepAtSelection: false });
+    const flushed = commit(editor, baselines);
+    assert.equal(flushed.changed, true, "on the way out, it does not");
+    assert.match(flushed.markdown, /It keeps two ledgers\./, "so the sentence is not lost");
+    assert.ok(!/>/.test(flushed.markdown), "and the empty quote is not written");
     editor.destroy();
   });
 

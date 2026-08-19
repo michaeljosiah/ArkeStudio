@@ -43,6 +43,11 @@ interface LossyShape {
 }
 
 /*
+ * The `{0,3}` on the two definition patterns is not decoration: CommonMark lets a definition be
+ * indented by up to three spaces before it stops being one, and a definition indented by two used
+ * to read as ordinary prose here — so the gate allowed the document and the editor inlined every
+ * link in it.
+ *
  * Each of these was confirmed to lose content through this extension set, not inferred:
  *   "text with <br> break"          → "text with &lt;br&gt; break"
  *   "text[^1]\n\n[^1]: note"        → "text[^1](note)"
@@ -59,13 +64,13 @@ const LOSSY_SHAPES: LossyShape[] = [
   {
     reason: "footnotes",
     message: "This bible uses footnotes, which the rich editor cannot hold. Editing as source.",
-    pattern: /^\[\^[^\]]+\]:\s+/m,
+    pattern: /^ {0,3}\[\^[^\]]+\]:\s+/m,
   },
   {
     reason: "reference-links",
     message:
       "This bible uses reference-style links, which the rich editor would inline. Editing as source.",
-    pattern: /^\[[^\]^]+\]:\s+\S+/m,
+    pattern: /^ {0,3}\[[^\]^]+\]:\s+\S+/m,
   },
 ];
 
@@ -103,6 +108,39 @@ export function describeRichModeRefusal(
   }
 
   return null;
+}
+
+export interface RichModeGate {
+  /** The text this verdict was reached about. */
+  text: string;
+  verdict: RichModeVerdict | null;
+}
+
+/**
+ * Decide the gate for a document that has just arrived, reusing the last verdict where it is safe.
+ *
+ * Evaluating costs a full markdown parse, and a screen that re-evaluated on every save echo would
+ * pay it once a keystroke-pause — so a document the *rich editor* wrote is deliberately not
+ * re-examined. That is sound in both directions: rich output is a serialisation of a document that
+ * already passed, and it escapes anything that would look like markup, so re-reading it could only
+ * produce a spurious refusal over an author's literal `\<br\>`.
+ *
+ * `richWrite` is what the rich editor last wrote, or null when the last write came from the source
+ * editor. That distinction is the whole point. The source editor is a text area: somebody can type
+ * HTML, a footnote, a link definition — the exact shapes this gate exists to refuse — and if their
+ * own text were waved through as "not a new document", toggling back to rich would hand the editor
+ * a document it is known to damage.
+ */
+export function updateRichModeGate(
+  previous: RichModeGate | null,
+  live: string,
+  richWrite: string | null,
+  evaluate: (text: string) => RichModeVerdict | null = describeRichModeRefusal,
+): RichModeGate {
+  if (previous === null) return { text: live, verdict: evaluate(live) };
+  if (live === previous.text) return previous;
+  if (live === richWrite) return { text: live, verdict: previous.verdict };
+  return { text: live, verdict: evaluate(live) };
 }
 
 /**

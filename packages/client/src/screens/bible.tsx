@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 import { bibleSize, splitBible } from "@arke-studio/contracts";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
-import { describeRichModeRefusal, type RichModeVerdict } from "../components/editor/rich-mode.js";
+import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
 import { Button, Callout, cx } from "../components/ui.js";
 import { restoreBible, saveBible, useStore } from "../lib/store.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
@@ -82,10 +82,25 @@ export function BibleScreen() {
     [],
   );
 
-  const written = useRef<string | null>(null);
+  /*
+   * Which editor owns this bible.
+   *
+   * Deciding costs a full markdown parse, so `updateRichModeGate` reuses the last verdict for a
+   * document the rich editor itself wrote, and re-reads anything else — including text typed in the
+   * source editor, which is a text area somebody can put HTML into. `richWrite` is what carries
+   * that distinction: it holds the last text only while the rich editor was the one that produced
+   * it, and is cleared the moment the source editor writes.
+   */
+  const richWrite = useRef<string | null>(null);
+  const gate = useRef<RichModeGate | null>(null);
+  gate.current = updateRichModeGate(gate.current, live, richWrite.current);
+  const richRefusal = gate.current.verdict;
+  const [preferSource, setPreferSource] = useState(false);
+  const richMode = richRefusal === null && !preferSource;
+
   const onChange = (value: string) => {
     if (draft === null) draftedFrom.current = live;
-    written.current = value;
+    richWrite.current = richMode ? value : null;
     setDraft(value);
     setSaving(true);
     if (timer.current) clearTimeout(timer.current);
@@ -95,25 +110,6 @@ export function BibleScreen() {
       setSaving(false);
     }, AUTOSAVE_MS);
   };
-
-  /*
-   * Which editor owns this bible.
-   *
-   * Deciding costs a full markdown parse (see `describeRichModeRefusal`), so it happens once per
-   * document that arrives from somewhere else, and never while somebody is typing. Our own text
-   * coming back through the store is explicitly not a new document: the mode has to be sticky, or a
-   * bible could swap editors mid-sentence — which is worse than either of the two it is choosing
-   * between, and would take the caret with it.
-   */
-  const gate = useRef<{ text: string; verdict: RichModeVerdict | null } | null>(null);
-  if (gate.current === null || (live !== gate.current.text && live !== written.current)) {
-    gate.current = { text: live, verdict: describeRichModeRefusal(live) };
-  } else if (live !== gate.current.text) {
-    gate.current = { text: live, verdict: gate.current.verdict };
-  }
-  const richRefusal = gate.current.verdict;
-  const [preferSource, setPreferSource] = useState(false);
-  const richMode = richRefusal === null && !preferSource;
 
   const size = useMemo(() => bibleSize(text), [text]);
   const outline = useMemo(() => splitBible(text), [text]);

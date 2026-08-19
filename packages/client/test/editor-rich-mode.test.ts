@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   describeRichModeRefusal,
   RICH_MODE_MAX_CHARACTERS,
+  updateRichModeGate,
 } from "../src/components/editor/rich-mode.js";
 import { serializeMarkdown } from "../src/components/editor/round-trip.js";
 
@@ -67,6 +68,34 @@ The tide is the world's clock and its accountant.
     );
   });
 
+  it("refuses a definition the author indented, which is still a definition", () => {
+    /*
+     * CommonMark allows up to three spaces before a link reference or footnote definition. Anchoring
+     * these patterns flush to the line start let an indented one read as ordinary prose: the gate
+     * allowed the document and the editor inlined every link in it, dropping the definition list.
+     */
+    for (const indent of ["", " ", "  ", "   "]) {
+      const bible = `see [the charter][c]\n\n${indent}[c]: https://example.com\n`;
+      assert.equal(
+        describeRichModeRefusal(bible)?.reason,
+        "reference-links",
+        `${indent.length} spaces of indent is still a definition`,
+      );
+      assert.equal(
+        serializeMarkdown(bible),
+        "see [the charter](https://example.com)",
+        "which the editor would otherwise inline",
+      );
+    }
+    assert.equal(
+      describeRichModeRefusal("a note[^1]\n\n  [^1]: indented\n")?.reason,
+      "footnotes",
+      "footnote definitions indent the same way",
+    );
+    // Four spaces is an indented code block, not a definition, so the gate must not read it as one.
+    assert.equal(describeRichModeRefusal("prose\n\n    [c]: https://example.com\n"), null);
+  });
+
   it("refuses a bible too long to parse inside a keystroke", () => {
     const long = "word ".repeat(RICH_MODE_MAX_CHARACTERS / 5 + 1);
     assert.ok(long.length > RICH_MODE_MAX_CHARACTERS);
@@ -78,6 +107,35 @@ The tide is the world's clock and its accountant.
       describeRichModeRefusal("ordinary prose", () => null)?.reason,
       "will-not-round-trip",
     );
+  });
+
+  it("waves through what the rich editor wrote, and re-reads everything else", () => {
+    /*
+     * The regression this exists for. Skipping our own save echo is what keeps the gate off the
+     * typing path — but the source editor is a text area, and treating what somebody typed there as
+     * "not a new document" meant HTML could be entered in source mode and then handed to the rich
+     * editor by the toggle, which escapes it into visible `&lt;br&gt;`.
+     */
+    const clean = "## The tides\n\nProse.\n";
+    const withHtml = `${clean}\nwritten <br> like this\n`;
+
+    const opened = updateRichModeGate(null, clean, null);
+    assert.equal(opened.verdict, null, "a clean bible opens rich");
+
+    // The rich editor saved; its echo must not cost another parse.
+    let evaluated = 0;
+    const counting = (text: string) => {
+      evaluated += 1;
+      return describeRichModeRefusal(text);
+    };
+    const echoed = updateRichModeGate(opened, clean + "More.", clean + "More.", counting);
+    assert.equal(evaluated, 0, "the rich editor's own output is not re-read");
+    assert.equal(echoed.verdict, null);
+
+    // The source editor saved. `richWrite` is null, so this is a new document as far as the gate
+    // is concerned — which is the only reason the HTML is caught before the toggle can hand it over.
+    const typed = updateRichModeGate(echoed, withHtml, null);
+    assert.equal(typed.verdict?.reason, "html");
   });
 
   it("says what is true rather than what to do about it", () => {
