@@ -68,6 +68,7 @@ export const QueueCommandSchema = z.enum([
   "bench-dispatch",
   "bench-rerun",
   "bench-upload-references",
+  "upload-artifacts",
 ]);
 export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 

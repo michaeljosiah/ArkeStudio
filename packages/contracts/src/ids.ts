@@ -67,6 +67,8 @@ export const ID_PREFIXES = {
   draftOperation: "dop",
   /** One section or lyric marker on a production's spine (#253). */
   marker: "mk",
+  /** One artifact placed over the picture at a time the author chose (82a). */
+  overlay: "ov",
 } as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];

@@ -69,7 +69,7 @@ const COMMAND_NOUN: Record<string, [one: string, many: string]> = {
  * Uploads never reach the queue: nothing was enqueued and nothing spends, so an Activity button
  * would send the user to a screen with no row on it (the existing `inActivity: false` case).
  */
-const NEVER_QUEUES = new Set(["upload-master-look", "upload-world-image", "pick-staged-reference"]);
+const NEVER_QUEUES = new Set(["upload-master-look", "upload-world-image", "upload-artifacts", "pick-staged-reference"]);
 
 function noun(kind: string, count: number): string {
   const pair = NOUN[kind];

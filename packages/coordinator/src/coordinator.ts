@@ -19,6 +19,7 @@ import {
   type HarnessAdapter,
   type HealthComponent,
   buildExportPlan,
+  exportOverlays,
   buildFfmpegArgs,
   buildSpineExportPlan,
   buildSpineFfmpegArgs,
@@ -107,7 +108,16 @@ import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/p
 const BENCH_POSTER_BACKFILL_MS = 5_000;
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { measureMediaInfo, type MediaProbe } from "./media/probe.js";
-import { acceptTake, audioDesignFor, rejectTake, saveAudioTracks } from "./takes/review.js";
+import {
+  acceptTake,
+  audioDesignFor,
+  moveOverlay,
+  placeOverlay,
+  rejectTake,
+  removeOverlay,
+  saveAudioTracks,
+  setTrim,
+} from "./takes/review.js";
 import {
   normalizeSpeechText,
   authoritativeSheetSpeech,
@@ -3461,6 +3471,79 @@ export class Coordinator {
         }
         return;
       }
+      case "set-trim": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+        if (!production) return;
+        try {
+          await setTrim(store, production, { shotId: msg.shotId, trimInSec: msg.trimInSec });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "selection.changed",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            shotId: msg.shotId,
+            // Read back rather than assembled here, for the same reason accept-take reads it
+            // back: both read models replace the whole selection with this payload, so a value
+            // guessed at here would contradict the file until the next snapshot.
+            selection: store.getBundle().productions.find((p) => p.meta.id === msg.productionId)
+              ?.selections[msg.shotId] ?? { acceptedTakeId: null, trimInSec: msg.trimInSec },
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch (err) {
+          // A refused trim is the one thing a screen owes an explanation for, and swallowing it
+          // whole leaves the control looking broken. The cause goes where turn failures go.
+          const reason = err instanceof Error ? err.message : String(err);
+          void this.appLog?.append({
+            kind: "trim.refused",
+            reason,
+            detail: { productionId: msg.productionId, shotId: msg.shotId, trimInSec: msg.trimInSec },
+          });
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      /*
+       * Overlays (82a). One handler for three verbs because they are one act — where a thing sits
+       * — and the refusals are identical. A refused placement says why in the app log for the same
+       * reason a refused trim does: it is the one thing a screen owes an explanation for.
+       */
+      case "place-overlay":
+      case "move-overlay":
+      case "remove-overlay": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+        if (!production) return;
+        try {
+          if (msg.kind === "place-overlay") {
+            await placeOverlay(store, msg.productionId, {
+              artifactId: msg.artifactId,
+              startSec: msg.startSec,
+              endSec: msg.endSec,
+            });
+          } else if (msg.kind === "move-overlay") {
+            await moveOverlay(store, msg.productionId, {
+              overlayId: msg.overlayId,
+              startSec: msg.startSec,
+              endSec: msg.endSec,
+            });
+          } else {
+            await removeOverlay(store, msg.productionId, msg.overlayId);
+          }
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          void this.appLog?.append({
+            kind: "overlay.refused",
+            reason,
+            detail: { productionId: msg.productionId, verb: msg.kind },
+          });
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
       case "save-audio-tracks": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -3609,7 +3692,11 @@ export class Coordinator {
             );
             return;
           }
-          const plan = buildExportPlan(deriveCut(production), msg.preset);
+          // Overlays reach the export or they are decoration (82a binding 4). Resolved against
+          // the world's artifacts, so one citing something filed since — or something that is not
+          // picture at all — is dropped rather than rendered as an absence.
+          const overlays = exportOverlays(production.cut.overlays, store.getBundle().artifacts);
+          const plan = buildExportPlan(deriveCut(production), msg.preset, overlays);
           buildArgs = (stage) => buildFfmpegArgs(plan, store.dir, stage);
         }
         const stamp = new Date()
@@ -4896,6 +4983,53 @@ export class Coordinator {
           msg.kind,
           requests.map((request) => ({ ...request, params: { ...request.params, prompt: words } })),
         );
+        return;
+      }
+      /*
+       * Artifacts, from the panel beside the cut (82a).
+       *
+       * `fileArtifact` already owns everything hard about this — dedup by hash, the large-file
+       * consent gate, the sidecar, and measuring audio and video as the bytes are copied — so this
+       * picks files and reports what happened to each. Nothing is placed: a placement needs a time
+       * and only the lane knows one.
+       */
+      case "upload-artifacts": {
+        const store = this.opts.provider.openStore?.();
+        const pick = this.opts.pickFiles;
+        if (!store || store.worldId !== msg.worldId || !pick) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Filing artifacts is unavailable.");
+          return;
+        }
+        const chosen = await pick({ accept: [...ATTACHABLE_EXTENSIONS] }).catch(() => []);
+        // A closed dialog is not a failure. Nothing was filed and nothing is said.
+        if (chosen.length === 0) {
+          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+          return;
+        }
+        const failures: Array<{ index: number; reason: string }> = [];
+        let filed = 0;
+        for (const [index, sourcePath] of chosen.entries()) {
+          if (!this.stillOpen(store)) return;
+          const outcome = await fileArtifact(store, {
+            sourcePath,
+            // Measured as it is filed (#283): an artifact is immutable, so its length and whether
+            // it carries audio are true once and true forever.
+            ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
+            abandoned: () => !this.stillOpen(store) || this.stopping,
+            // The world's shelf, explicitly. An artifact laid over one production's cut is still
+            // the world's, which is what the panel beside the cut is showing.
+            production: null,
+          }).catch((err: unknown) => ({
+            outcome: "refused" as const,
+            reason: err instanceof Error ? err.message : String(err),
+          }));
+          if (outcome.outcome === "filed" || outcome.outcome === "deduplicated") filed += 1;
+          else if (outcome.outcome === "needs-consent") {
+            failures.push({ index, reason: `${sourcePath}: ${outcome.reason}` });
+          } else failures.push({ index, reason: `${sourcePath}: ${outcome.reason}` });
+        }
+        this.emitEnqueueResult(msg.requestId, msg.kind, chosen.length, [], failures, filed === 0);
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "upload-world-image": {

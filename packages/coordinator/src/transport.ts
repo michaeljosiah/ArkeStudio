@@ -1,5 +1,6 @@
 import { once } from "node:events";
 import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
@@ -36,6 +37,35 @@ export interface TransportOptions {
   serveFile?: (urlPath: string) => Promise<{ path: string; contentType: string } | null>;
 }
 
+/**
+ * `Range: bytes=…` against a known size.
+ *
+ * Returns null for "no range asked, send it whole", `"unsatisfiable"` for a 416, or the inclusive
+ * byte window. Only the single-range forms a media element actually sends are honoured — the
+ * multipart form exists in the RFC and no browser uses it for video.
+ */
+export function parseByteRange(
+  header: string | undefined,
+  size: number,
+): { start: number; end: number } | "unsatisfiable" | null {
+  if (header === undefined) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (match === null) return null;
+  const [, rawStart, rawEnd] = match;
+  if (rawStart === "" && rawEnd === "") return null;
+  // `bytes=-N` is the LAST n bytes, not "from zero to n" — the one form that reads backwards.
+  if (rawStart === "") {
+    const wanted = Number(rawEnd);
+    if (wanted <= 0) return "unsatisfiable";
+    return { start: Math.max(0, size - wanted), end: size - 1 };
+  }
+  const start = Number(rawStart);
+  if (start >= size) return "unsatisfiable";
+  const end = rawEnd === "" ? size - 1 : Math.min(Number(rawEnd), size - 1);
+  if (end < start) return "unsatisfiable";
+  return { start, end };
+}
+
 export class Transport {
   private wss: WebSocketServer | null = null;
   private http: Server | null = null;
@@ -60,9 +90,33 @@ export class Transport {
             res.writeHead(404).end();
             return;
           }
+          /*
+           * Ranges, because a `<video>` cannot seek without them (SPEC-013 R-14's cut is watched
+           * here). Served whole, the element reports `seekable` as empty and silently refuses
+           * every `currentTime` assignment — playback works, scrubbing does not, and nothing
+           * anywhere says why.
+           */
+          const size = (await stat(hit.path)).size;
           // Kit grids and boards are overwritten in place on recompile — never cache.
-          res.writeHead(200, { "Content-Type": hit.contentType, "Cache-Control": "no-store" });
-          const stream = createReadStream(hit.path);
+          const headers: Record<string, string> = {
+            "Content-Type": hit.contentType,
+            "Cache-Control": "no-store",
+            "Accept-Ranges": "bytes",
+          };
+          const asked = parseByteRange(req.headers.range, size);
+          if (asked === "unsatisfiable") {
+            res.writeHead(416, { ...headers, "Content-Range": `bytes */${size}` }).end();
+            return;
+          }
+          const stream =
+            asked === null
+              ? (res.writeHead(200, { ...headers, "Content-Length": String(size) }), createReadStream(hit.path))
+              : (res.writeHead(206, {
+                  ...headers,
+                  "Content-Range": `bytes ${asked.start}-${asked.end}/${size}`,
+                  "Content-Length": String(asked.end - asked.start + 1),
+                }),
+                createReadStream(hit.path, { start: asked.start, end: asked.end }));
           stream.on("error", () => res.destroy());
           stream.pipe(res);
         } catch {

@@ -2,10 +2,16 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   CutFileSchema,
+  CutOverlaySchema,
+  newId,
+  trimCeilingSec,
   type AudioDesign,
   type ProductionBundle,
   type ReviewDecision,
   type Selections,
+  type CutFile,
+  type CutOverlay,
+  type ShotSelection,
 } from "@arke-studio/contracts";
 import { supersededBy } from "../productions/continuation.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -116,6 +122,59 @@ export async function acceptTake(
 }
 
 /**
+ * Set where a shot starts inside its selected media (R-8, #253) — the one authored edit the cut
+ * offers, and the only writer of `trimInSec` there is.
+ *
+ * Operational like the selection it sits on: no proposal, no scene version, no review decision.
+ * A trim is not an opinion about the take, so nothing is appended to reviews.jsonl; it is a
+ * statement about which part of chosen footage is in the picture, and the take itself is never
+ * touched (R-1).
+ *
+ * It refuses in two ways. A shot with no accepted take has no footage to measure against, so a
+ * number stored there would be waiting to apply itself to whatever is selected next — exactly
+ * the bug acceptTake's reset exists to prevent. And a trim that consumes everything leaves a
+ * shot that is silently all slate; the ceiling is asked of the same predicate the cut derives
+ * from, so a refusal and the picture cannot disagree.
+ */
+export async function setTrim(
+  store: WorldStore,
+  production: ProductionBundle,
+  input: { shotId: string; trimInSec: number },
+): Promise<ShotSelection> {
+  const selectionsPath = `productions/${production.meta.id}/selections.json`;
+  const selections = await readOr(store, selectionsPath, "{}");
+  const map = JSON.parse(selections.raw) as Selections;
+  const current = map[input.shotId];
+  const takeId = current?.acceptedTakeId;
+  if (!takeId) throw new Error(`shot ${input.shotId} has no accepted take to trim`);
+
+  const ceiling = trimCeilingSec(production, input.shotId, takeId);
+  if (!ceiling.ok) throw new Error(`shot ${input.shotId} cannot be trimmed: ${ceiling.reason}`);
+  // Absent is "not measured", never "measured zero" (R-5a). Refusing every trim on an unprobed
+  // file would disable the control on a machine without ffmpeg, which is a supported way to run.
+  if (ceiling.ceilingSec !== undefined && input.trimInSec >= ceiling.ceilingSec) {
+    throw new Error(
+      `trim of ${input.trimInSec}s leaves nothing of ${ceiling.ceilingSec.toFixed(3)}s of material`,
+    );
+  }
+
+  const next: Selections = { ...map, [input.shotId]: { ...current, trimInSec: input.trimInSec } };
+  await store.commit({
+    kind: "shot-trim",
+    source: "review:user",
+    files: [
+      {
+        path: selectionsPath,
+        action: selections.existed ? "replace" : "create",
+        content: JSON.stringify(next, null, 2) + "\n",
+        baseHash: selections.existed ? sha256(selections.raw) : null,
+      },
+    ],
+  });
+  return next[input.shotId]!;
+}
+
+/**
  * Reject: a cited sheet and field are REQUIRED (R-10) — the durable corpus a future
  * "rejections teach the shot" reads. The selection is untouched; the take is untouched.
  */
@@ -172,6 +231,89 @@ export async function audioDesignFor(store: WorldStore, productionId: string): P
 }
 
 /** Save the audio tracks — the only thing cut.json holds (R-16, R-17). */
+/**
+ * Overlays (82a): the one stored position on the cut, filed beside the audio placement cut.json
+ * already holds.
+ *
+ * Read through `CutFileSchema` rather than merged blind, so a cut.json written before overlays
+ * existed comes back with an empty list instead of an undefined one — and so a hand-edited file
+ * that no longer parses fails here, loudly, rather than losing a production's audio on write.
+ */
+async function editOverlays(
+  store: WorldStore,
+  productionId: string,
+  edit: (current: CutOverlay[]) => CutOverlay[],
+): Promise<CutFile> {
+  const path = `productions/${productionId}/cut.json`;
+  const existing = await readOr(store, path, "{}");
+  const cut = CutFileSchema.parse(JSON.parse(existing.raw));
+  const next: CutFile = { ...cut, overlays: edit(cut.overlays) };
+  await store.commit({
+    kind: "cut-overlays",
+    source: "form",
+    files: [
+      {
+        path,
+        action: existing.existed ? "replace" : "create",
+        content: JSON.stringify(next, null, 2) + "\n",
+        baseHash: existing.existed ? sha256(existing.raw) : null,
+      },
+    ],
+  });
+  return next;
+}
+
+/** Lay an artifact over the picture for a window (82a). Returns the overlay as filed. */
+export async function placeOverlay(
+  store: WorldStore,
+  productionId: string,
+  input: { artifactId: string; startSec: number; endSec: number },
+): Promise<CutOverlay> {
+  if (input.endSec <= input.startSec) {
+    throw new Error(`an overlay ending at ${input.endSec}s cannot start at ${input.startSec}s`);
+  }
+  // An overlay cites an artifact; citing one the world does not have would file a placement
+  // pointing at nothing, which the cut would then have to render as an absence it cannot explain.
+  const known = store.getBundle().artifacts.some((a) => a.id === input.artifactId);
+  if (!known) throw new Error(`artifact ${input.artifactId} is not in this world`);
+
+  const overlay = CutOverlaySchema.parse({
+    id: newId("ov"),
+    artifactId: input.artifactId,
+    startSec: input.startSec,
+    endSec: input.endSec,
+  });
+  await editOverlays(store, productionId, (current) => [...current, overlay]);
+  return overlay;
+}
+
+/** Move one that is already placed — the same act as placing it, against the same bounds. */
+export async function moveOverlay(
+  store: WorldStore,
+  productionId: string,
+  input: { overlayId: string; startSec: number; endSec: number },
+): Promise<CutOverlay> {
+  if (input.endSec <= input.startSec) {
+    throw new Error(`an overlay ending at ${input.endSec}s cannot start at ${input.startSec}s`);
+  }
+  let moved: CutOverlay | null = null;
+  await editOverlays(store, productionId, (current) => {
+    const found = current.find((o) => o.id === input.overlayId);
+    if (found === undefined) throw new Error(`overlay ${input.overlayId} is not on this cut`);
+    moved = { ...found, startSec: input.startSec, endSec: input.endSec };
+    return current.map((o) => (o.id === input.overlayId ? moved! : o));
+  });
+  return moved!;
+}
+
+/** Remove the placement. The artifact is untouched: it was only ever cited (82a). */
+export async function removeOverlay(store: WorldStore, productionId: string, overlayId: string): Promise<void> {
+  await editOverlays(store, productionId, (current) => {
+    if (!current.some((o) => o.id === overlayId)) throw new Error(`overlay ${overlayId} is not on this cut`);
+    return current.filter((o) => o.id !== overlayId);
+  });
+}
+
 export async function saveAudioTracks(store: WorldStore, productionId: string, cutJson: string): Promise<void> {
   const path = `productions/${productionId}/cut.json`;
   const existing = await readOr(store, path, "");

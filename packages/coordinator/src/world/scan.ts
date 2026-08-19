@@ -517,10 +517,14 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     // cut.json keeps owning dialogue, score and ambience placement; the spine owns the master
     // track alone. Loading it here is what lets the two be mixed in one graph at export.
     const cut = (await exists(join(pdir, "cut.json")))
-      ? ((await tryParse(`productions/${id}/cut.json`, (raw) => CutFileSchema.parse(JSON.parse(raw)))) ?? {
+      ? // Both fallbacks carry every field the schema does: a production with no cut.json — or
+        // one whose cut.json no longer parses — must still answer `overlays` with an empty list
+        // rather than `undefined`, or every reader crashes on the productions that have none.
+        ((await tryParse(`productions/${id}/cut.json`, (raw) => CutFileSchema.parse(JSON.parse(raw)))) ?? {
           audio: [],
+          overlays: [],
         })
-      : { audio: [] };
+      : { audio: [], overlays: [] };
 
     productions.push({
       meta: metaDoc,

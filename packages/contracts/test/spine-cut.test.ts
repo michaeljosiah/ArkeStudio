@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { deriveSpineCut } from "../src/spine-cut.js";
+import { deriveSpineCut, trimCeilingSec } from "../src/spine-cut.js";
 import type { ProductionBundle } from "../src/client-state.js";
 import type { ProductionSpine } from "../src/spine.js";
 import type { Take } from "../src/take.js";
@@ -62,6 +62,61 @@ const SHOTS = [
   { id: SH1, number: 1, title: "Wide" },
   { id: SH2, number: 2, title: "Close" },
 ];
+
+describe("trimCeilingSec", () => {
+  it("is the measured duration when the file has been probed", () => {
+    const b = bundle({ shots: SHOTS, takes: [take(TK1, { media: "clip.mp4" })], takeMediaInfo: { [TK1]: 30 } });
+    assert.deepEqual(trimCeilingSec(b, SH1, TK1), { ok: true, ceilingSec: 30 });
+  });
+
+  it("is undefined when nothing bounds the material — absent is not measured, never measured zero", () => {
+    // Refusing every trim on an unprobed file would disable the control on a machine without
+    // ffmpeg, which SPEC-013 R-5a keeps as a supported way to run.
+    const b = bundle({ shots: SHOTS, takes: [take(TK1, { media: "clip.mp4" })] });
+    assert.deepEqual(trimCeilingSec(b, SH1, TK1), { ok: true, ceilingSec: undefined });
+  });
+
+  it("a planned segment boundary bounds an unmeasured file", () => {
+    const b = bundle({
+      shots: SHOTS,
+      takes: [
+        take(TKP, { media: "pass.mp4", coversShots: [SH1, SH2] }),
+        take(TKS, { segment: { passTakeId: TKP, inSec: 6, outSec: 12 } }),
+      ],
+    });
+    assert.deepEqual(trimCeilingSec(b, SH1, TKS), { ok: true, ceilingSec: 6 });
+  });
+
+  it("the tighter of measurement and boundary wins", () => {
+    // The provider returned 9s against a plan that plays this segment from 6s: 3s survive.
+    const b = bundle({
+      shots: SHOTS,
+      takes: [
+        take(TKP, { media: "pass.mp4", coversShots: [SH1, SH2] }),
+        take(TKS, { segment: { passTakeId: TKP, inSec: 6, outSec: 12 } }),
+      ],
+      takeMediaInfo: { [TKP]: 9 },
+    });
+    assert.deepEqual(trimCeilingSec(b, SH1, TKS), { ok: true, ceilingSec: 3 });
+  });
+
+  it("refuses whatever the cut refuses, with the same reason", () => {
+    const backing = bundle({ shots: SHOTS, takes: [take(TKP, { media: "pass.mp4", coversShots: [SH1, SH2] })] });
+    assert.deepEqual(trimCeilingSec(backing, SH1, TKP), { ok: false, reason: "backing-pass" });
+
+    const other = bundle({ shots: SHOTS, takes: [take(TK1, { media: "clip.mp4", coversShots: [SH2] })] });
+    assert.deepEqual(trimCeilingSec(other, SH1, TK1), { ok: false, reason: "other-shot" });
+
+    const still = bundle({ shots: SHOTS, takes: [take(TK1, { media: "frame.png", kind: "frame" })] });
+    assert.deepEqual(trimCeilingSec(still, SH1, TK1), { ok: false, reason: "static" });
+
+    const empty = bundle({ shots: SHOTS, takes: [take(TK1)] });
+    assert.deepEqual(trimCeilingSec(empty, SH1, TK1), { ok: false, reason: "no-media" });
+
+    const missing = bundle({ shots: SHOTS, takes: [] });
+    assert.deepEqual(trimCeilingSec(missing, SH1, TK2), { ok: false, reason: "no-media" });
+  });
+});
 
 describe("deriveSpineCut", () => {
   it("covers the whole track with contiguous segments and nothing else", () => {

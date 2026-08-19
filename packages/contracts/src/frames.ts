@@ -2,7 +2,7 @@ import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { ConversationIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema } from "./ids.js";
+import { ArtifactIdSchema, ConversationIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
@@ -1314,6 +1314,22 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         .strict(),
     })
     .strict(),
+  /**
+   * SPEC-013 R-8, #253: where a shot starts inside its selected media.
+   *
+   * The only authored edit the cut offers. It writes the selection, never the take (R-1) and
+   * never the anchor — the take is immutable and the anchor is the window on the track.
+   */
+  z
+    .object({
+      kind: z.literal("set-trim"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      shotId: ShotIdSchema,
+      /** Seconds from the material's own start. Trim is from the in-point only; there is no out. */
+      trimInSec: z.number().min(0).finite(),
+    })
+    .strict(),
   /** SPEC-013 R-16/R-17: cut.json holds audio tracks and placement only. */
   z
     .object({
@@ -1321,6 +1337,50 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       cut: z.unknown(),
+    })
+    .strict(),
+  /**
+   * 82a: file new artifacts into the world from the artifact panel.
+   *
+   * The host opens the picker and the renderer never sees the bytes, the same arrangement key art
+   * has. They land on the **world's** shelf, not the production's: an artifact laid over one cut
+   * is still the world's, and the panel says so by being the world's.
+   */
+  z.object({ kind: z.literal("upload-artifacts"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  /**
+   * 82a: place an artifact over the picture for a window.
+   *
+   * The only stored position on the cut. It amends turn 80's third binding for this lane alone —
+   * a shot still cannot be dragged, because where a shot sits is the story's answer or the song's.
+   */
+  z
+    .object({
+      kind: z.literal("place-overlay"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      artifactId: ArtifactIdSchema,
+      startSec: z.number().min(0).finite(),
+      endSec: z.number().positive().finite(),
+    })
+    .strict(),
+  /** 82a: move an overlay already placed, which is the same act as placing it. */
+  z
+    .object({
+      kind: z.literal("move-overlay"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      overlayId: prefixedIdSchema("ov"),
+      startSec: z.number().min(0).finite(),
+      endSec: z.number().positive().finite(),
+    })
+    .strict(),
+  /** 82a: remove the placement. The artifact is untouched — it was only ever cited. */
+  z
+    .object({
+      kind: z.literal("remove-overlay"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      overlayId: prefixedIdSchema("ov"),
     })
     .strict(),
   /** SPEC-013 R-19..R-21: local render of the derived cut; gaps become labelled slates. */

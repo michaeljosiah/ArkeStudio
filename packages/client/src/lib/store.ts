@@ -2213,6 +2213,36 @@ export function acceptTake(worldId: string, productionId: string, takeId: string
   send({ kind: "accept-take", worldId, productionId, takeId, shotId });
 }
 
+/**
+ * Where a shot starts inside its selected media (R-8, issue 253) — the only authored edit the cut
+ * offers, and trim-from-the-in-point only. The coordinator refuses a shot with no accepted take
+ * and a trim that would leave nothing; the refusal lands in the app log, not on the wire.
+ */
+export function setShotTrim(worldId: string, productionId: string, shotId: string, trimInSec: number): void {
+  send({ kind: "set-trim", worldId, productionId, shotId, trimInSec });
+}
+
+/** File new artifacts into the world: the host picks, the renderer never sees the bytes (82a). */
+export function uploadArtifacts(worldId: string): void {
+  send({ kind: "upload-artifacts", worldId, requestId: queueRequest("upload-artifacts") });
+}
+
+/**
+ * Overlays (82a): the one stored position on the cut. Placing, moving and removing are one act —
+ * where a thing sits — and none of them touch the artifact, which is only ever cited.
+ */
+export function placeOverlay(worldId: string, productionId: string, artifactId: string, startSec: number, endSec: number): void {
+  send({ kind: "place-overlay", worldId, productionId, artifactId, startSec, endSec });
+}
+
+export function moveOverlay(worldId: string, productionId: string, overlayId: string, startSec: number, endSec: number): void {
+  send({ kind: "move-overlay", worldId, productionId, overlayId, startSec, endSec });
+}
+
+export function removeOverlay(worldId: string, productionId: string, overlayId: string): void {
+  send({ kind: "remove-overlay", worldId, productionId, overlayId });
+}
+
 /** A rejection requires the cited sheet and field (R-10). */
 export function rejectTake(
   worldId: string,
