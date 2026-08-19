@@ -2,16 +2,13 @@
 
 `cursor:pointer` elements: **1408**
 
-- **1031 wired**
-- **69 state variants** — the *selected* half of a pair; no handler is correct.
+- **1033 wired**
+- **69 state variants** — the *selected* half of an exclusive pair. Clicking the row
+  you are already on is a no-op, so no handler is correct. NOTE: this does not apply to a
+  TOGGLE — a picked reference still needs a handler, because unpicking it is a real action.
 - **11 leave the application** — a file or folder picker, an external link.
-- **158 icon-only** — no text, no `title`. Out of scope: the markup does not say what
-  they do, and guessing reads as a bug in the design rather than an unbuilt control.
-- **139 labelled and unwired** — the list worth working down.
-
-Two shapes cover most of what remains: a list row selects (one at a time), an output chip
-cycles its own value. A picker is the exception — its tiles TOGGLE, because a picker carries
-several references at once.
+- **158 icon-only** — no text, no `title`; the markup does not say what they do.
+- **137 labelled and unwired**
 
 | screen | unwired | the affordances |
 |---|---:|---|
@@ -43,7 +40,6 @@ several references at once.
 | 54a Story production dashboard | 2 | Dashboard, All 24 chapters |
 | 45b Episode board · as the surface | 2 | Story v1, Add an episode |
 | 48b Arcs · lanes across the season | 2 | Story v1, Add a lane |
-| 69a Reference picker · world artifacts | 2 | Audio 2 Maren · voice memo m4a · 0:41 · Mare, already Audio 1 Tide survey · room tone wav  |
 | 1a Home | 1 | Search worlds ⌘K |
 | 19b Canon entry detail | 1 | Full history · 6 versions |
 | 24a The cut | 1 | Cut 2:40 |
