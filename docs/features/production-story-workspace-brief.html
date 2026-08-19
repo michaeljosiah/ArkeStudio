@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="A visual feature brief for production-scoped conversation, micro-drama profiles, episode boards, and progressive story graphs in Arke Studio, checked claim by claim against the codebase."
+      content="A visual feature brief for production-scoped conversation, the Microdrama format, episode boards, and the Development workspace in Arke Studio, checked claim by claim against the codebase."
     />
-    <title>Arke Studio - Production Story Workspace (brief)</title>
+    <title>Arke Studio - Production Development Workspace (brief)</title>
     <style>
       :root {
         --paper: #f4f1ea;
@@ -1966,19 +1966,19 @@
         <a href="#create">Create</a>
         <a href="#day-one">Day one</a>
         <a href="#hierarchy">Series to episode</a>
-        <a href="#workspace">Story workspace</a>
+        <a href="#workspace">Development</a>
         <a href="#scene-pipeline">Scene to video</a>
-        <a href="#graph">Graph</a>
+        <a href="#graph">Branch map</a>
         <a href="#architecture">Architecture</a>
       </nav>
-      <div class="topmeta">feature brief / production story workspace / rev 4 / 2026-08-09</div>
+      <div class="topmeta">feature brief / production development workspace / rev 5 / 2026-08-19</div>
     </header>
 
     <main class="shell">
       <section class="hero fade" id="top">
         <img
           class="hero__image"
-          src="../../design-system/assets/banner-video.png"
+          src="assets/banner-video.png"
           alt="A film camera on a storm-dark pier"
         />
         <div class="hero__copy">
@@ -1987,10 +1987,11 @@
           <p class="hero__lede">
             World Chat explores what may belong in the world; explicit review and the accept gate decide what
             becomes true. It shipped, and it is world-scoped by construction — its folder table says
-            <code>productions/ unchanged</code>. The production Story workspace explores what this film,
-            series, or micro-drama does with accepted world truth. Conversation stays close to the work
-            without becoming another source of truth. The conversation and candidate layer now exists; what
-            it does not have is a vocabulary for a production, and that is what this feature adds.
+            <code>productions/ unchanged</code>. Development — the production workspace — explores what this
+            film, series, or Microdrama does with accepted world truth: the story is developed there before
+            it is directed. Conversation stays close to the work without becoming another source of truth.
+            The conversation and candidate layer now exists; what it does not have is a vocabulary for a
+            production, and that is what this feature adds.
           </p>
           <div class="hero__rule" aria-label="Core source-of-truth hierarchy">
             <div><b>World</b><span>Canon, sheets, art direction</span></div>
@@ -2012,7 +2013,7 @@
             story in a conversation beside a structured draft, then draft scenes through chat. The current
             application implements the shells, but the authoring bridge is incomplete — and in two places it is
             thinner than it looks, which the code check below sets out claim by claim. This feature connects
-            those approved ideas and extends them carefully for serial video and micro-drama work.
+            those approved ideas and extends them carefully for serial video and Microdrama work.
           </p>
         </div>
 
@@ -2039,9 +2040,10 @@
             <span class="number">03 / AGREED EXTENSION</span>
             <h3>Series, seasons, and progressive detail.</h3>
             <p>
-              Micro-drama remains a Video profile. One Series can hold several Season productions; users begin
-              with Season 1 and see only the episode board until later seasons or genuine branches make deeper
-              structure useful.
+              Microdrama remains a Video format. Creating the first Microdrama creates a deliberately thin
+              Series with Season 1 — a decision this revision records. Users begin with Season 1 and see only
+              the episode board; Series management surfaces when Season 2 exists, and a branch map never
+              does — branching belongs to Interactive video.
             </p>
           </article>
         </div>
@@ -2049,8 +2051,8 @@
         <div class="callout">
           <strong>The distinction that keeps the experience coherent.</strong>
           <p>
-            World Chat asks, "What belongs to this world?" The Story workspace can move between Series,
-            Season, and Episode scope. Scene chat asks, "What happens in this moment, and how should it be
+            World Chat asks, "What belongs to this world?" Development can move between Series, Season,
+            Episode, and Scene scope; its scene thread asks, "What happens in this moment, and how should it be
             covered?" Generate permits shot-local prompt overrides and explicit dispatch, but it cannot mutate
             Canon, the season architecture, or scene script. The interfaces may share a conversation
             framework, but their scopes and candidate types are different. That shared framework now exists:
@@ -2070,16 +2072,16 @@
             <h2>What is actually there today.</h2>
           </div>
           <p>
-            Every claim this brief makes about "current code" was read back against <code>main</code> on
-            2026-08-07, and before that on 2026-08-05. Paths and symbol names are given rather than line
-            numbers, which rot. Two rows have flipped since the last revision, one was taken up as an issue
-            and half-answered, and one claim this brief itself made was wrong. All four are set out after the
-            table, and the corrections are made in place throughout the document rather than appended.
+            Every claim below was read back against <code>main</code> on 2026-08-07, and before that on
+            2026-08-05. Paths and symbol names are given rather than line numbers, which rot. This section
+            keeps only the evidence this feature stands on, grouped the way a planner needs it: foundations
+            that exist, foundations that are missing, and defects that block. The platform-wide audit moved
+            to the Readiness document — see the note at the end of this section.
           </p>
         </div>
 
         <div class="ledger">
-          <h3>Claim ledger</h3>
+          <h3>Existing foundations</h3>
           <table>
             <thead>
               <tr>
@@ -2095,71 +2097,15 @@
                 <td><code>client/screens/production.tsx</code> dashboard; <code>isDayOne</code> in <code>client/lib/selectors.ts</code></td>
               </tr>
               <tr>
-                <td>Creating a production lands on Day One</td>
-                <td><span class="chip chip--none">not built</span></td>
+                <td>The conversation machinery is reusable</td>
+                <td><span class="chip chip--built">built, world-scoped</span></td>
                 <td>
-                  <code>NewProductionScreen</code> navigates to the productions list. <code>create-production</code>
-                  carries no request id, and the coordinator discards the slug <code>createProduction</code>
-                  already returns — so this fix needs a protocol change, not just a route change.
+                  Issue #70 shipped a durable conversation as an append-only
+                  <code>.conversations/&lt;cv&gt;/events.jsonl</code> with a derived, deletable checkpoint,
+                  plus the run driver, leases, retrieval, checkpoint and fold, wrap-up recovery, check
+                  receipts, and a <code>worldbuilding</code> proposal kind staged at wrap-up. The
+                  machinery is scope-neutral; only the vocabulary is world-only.
                 </td>
-              </tr>
-              <tr>
-                <td>The Story overview can be authored</td>
-                <td><span class="chip chip--none">not built</span></td>
-                <td>
-                  <code>story.json</code> is read by <code>world/scan.ts</code> and written by nothing.
-                  <code>"story-overview"</code> is in <code>ProposalKindSchema</code> and never staged. The
-                  composer on the Story screen is a static element with no input.
-                </td>
-              </tr>
-              <tr>
-                <td>Conversation persists across sessions</td>
-                <td><span class="chip chip--partial">two mechanisms</span></td>
-                <td>
-                  A World Chat conversation is durable: <code>.conversations/&lt;cv&gt;/events.jsonl</code> with
-                  a derived, deletable checkpoint. The older entity chats on a canon thread or a sheet still
-                  keep their transcript in the client store keyed by proposal id, and still lose it on reload.
-                </td>
-              </tr>
-              <tr>
-                <td>Scenes are drafted in conversation</td>
-                <td><span class="chip chip--partial">partial</span></td>
-                <td><code>NewSceneScreen</code> is one brief, one agent run, one proposal. There is no turn loop for scenes.</td>
-              </tr>
-              <tr>
-                <td>Day One seeds include other productions' uncovered work (SPEC-012 R-3)</td>
-                <td><span class="chip chip--partial">partial</span></td>
-                <td>The dashboard renders open canon threads only. The second seed source is specified and unimplemented.</td>
-              </tr>
-              <tr>
-                <td>World Chat exists</td>
-                <td><span class="chip chip--built">built</span></td>
-                <td>
-                  Shipped across five phases plus a hardening pass. A world nav item beside Productions, a
-                  durable conversation, candidates carrying evidence, check receipts, settledness and
-                  grouping, and a <code>worldbuilding</code> proposal kind staged at wrap-up. Reworked
-                  mid-flight from per-change staging to continuous review with batched approval.
-                </td>
-              </tr>
-              <tr>
-                <td>That conversation layer can talk about a production</td>
-                <td><span class="chip chip--none">not built</span></td>
-                <td>
-                  A conversation's context is world, canon question, canon entry, sheet, or attachment. A
-                  proposition is about the world, canon, or a sheet, and is classified as canon, sheet,
-                  relationship, or image opportunity. There is no production in any of those three
-                  vocabularies.
-                </td>
-              </tr>
-              <tr>
-                <td>Series, Season, Episode, and profile</td>
-                <td><span class="chip chip--none">not built</span></td>
-                <td><code>ProductionSchema</code> holds id, format, title, logline, status, style override, timestamps. Format is a three-value enum.</td>
-              </tr>
-              <tr>
-                <td>A scene script layer</td>
-                <td><span class="chip chip--none">not built</span></td>
-                <td><code>SceneSchema</code> holds shots. There are no stable action or dialogue blocks for a shot to cite.</td>
               </tr>
               <tr>
                 <td>Greedy, order-preserving pass packing with oversize detection</td>
@@ -2172,9 +2118,102 @@
                 <td><code>planScene</code> warnings; the dispatch dialog renders each one naming its entity</td>
               </tr>
               <tr>
-                <td>Pass dependency and chained authorization</td>
+                <td>Output size travels with the request</td>
+                <td><span class="chip chip--built">built</span></td>
+                <td>
+                  Video sends the route's own resolution word; image sends real dimensions, because the image
+                  clients ignore a bare resolution string. The estimate is recomputed at the size and the
+                  length the job actually runs at.
+                </td>
+              </tr>
+              <tr>
+                <td>A pass is asked for at a length the route offers</td>
+                <td><span class="chip chip--built">built</span></td>
+                <td>
+                  A video route takes one of a fixed few lengths as its own word, not a number of seconds.
+                  Dispatch rounds up to the nearest offered length, refuses by name anything longer than the
+                  longest, and stretches the shot plan to cover the clip that was actually asked for.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="ledger">
+          <h3>Missing foundations</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Claim</th>
+                <th>State</th>
+                <th>Where</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>That conversation layer can talk about a production</td>
                 <td><span class="chip chip--none">not built</span></td>
-                <td><code>JobSchema</code> has no dependency field, and every pass of a whole-scene dispatch is enqueued at once.</td>
+                <td>
+                  A conversation's context is world, canon question, canon entry, sheet, or attachment. A
+                  proposition is about the world, canon, or a sheet, and is classified as canon, sheet,
+                  relationship, or image opportunity. There is no production in any of those three
+                  vocabularies. The older entity chats on a canon thread or a sheet still keep their
+                  transcript in the client store and lose it on reload; the durable record exists only for
+                  World Chat.
+                </td>
+              </tr>
+              <tr>
+                <td>The Story overview can be authored</td>
+                <td><span class="chip chip--none">not built</span></td>
+                <td>
+                  <code>story.json</code> is read by <code>world/scan.ts</code> and written by nothing.
+                  <code>"story-overview"</code> is in <code>ProposalKindSchema</code> and never staged. The
+                  composer on the Story screen is a static element with no input. The read side already
+                  distinguishes structured overview from <code>story.md</code> treatment prose; the master
+                  specification's folder layout still lists only <code>story.md</code>, so this is a writer
+                  and a documentation fix, not a model decision.
+                </td>
+              </tr>
+              <tr>
+                <td>Series, Season, Episode, and format</td>
+                <td><span class="chip chip--none">not built</span></td>
+                <td>
+                  <code>ProductionSchema</code> holds id, format, title, logline, status, style override,
+                  timestamps. <code>ProductionFormatSchema</code> is a three-value enum that models the
+                  medium; remodelling it is the Readiness audit's first conflict.
+                </td>
+              </tr>
+              <tr>
+                <td>A scene script layer</td>
+                <td><span class="chip chip--none">not built</span></td>
+                <td><code>SceneSchema</code> holds shots. There are no stable action or dialogue blocks for a shot to cite.</td>
+              </tr>
+              <tr>
+                <td>Scenes are drafted in conversation</td>
+                <td><span class="chip chip--partial">partial</span></td>
+                <td><code>NewSceneScreen</code> is one brief, one agent run, one proposal. There is no turn loop for scenes.</td>
+              </tr>
+              <tr>
+                <td>Day One seeds include other productions' uncovered work (SPEC-012 R-3)</td>
+                <td><span class="chip chip--partial">partial</span></td>
+                <td>The dashboard renders open canon threads only. The second seed source is specified and unimplemented.</td>
+              </tr>
+              <tr>
+                <td>Episode-aware cuts and exports</td>
+                <td><span class="chip chip--none">not built</span></td>
+                <td>
+                  <code>deriveCut</code> sorts every scene in the production into one timeline; nothing gives
+                  the cut or the exports an episode dimension.
+                </td>
+              </tr>
+              <tr>
+                <td>Vertical <em>generation</em></td>
+                <td><span class="chip chip--none">not built</span></td>
+                <td>
+                  <code>limits.aspects</code> is declared per model — seedance lists <code>9:16</code> — and is
+                  read by nothing. A scene still is hard-coded landscape. Vertical <em>export</em> already
+                  works: the social preset is 1080&times;1920.
+                </td>
               </tr>
               <tr>
                 <td>A start frame travels with the request</td>
@@ -2188,30 +2227,41 @@
                 </td>
               </tr>
               <tr>
-                <td>Output size travels with the request</td>
-                <td><span class="chip chip--built">built</span></td>
-                <td>
-                  Video sends the route's own resolution word; image sends real dimensions, because the image
-                  clients ignore a bare resolution string. The estimate is recomputed at the size and the
-                  length the job actually runs at.
-                </td>
+                <td>Pass dependency and chained authorization</td>
+                <td><span class="chip chip--none">not built</span></td>
+                <td><code>JobSchema</code> has no dependency field, and every pass of a whole-scene dispatch is enqueued at once.</td>
               </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="ledger">
+          <h3>Blocking defects</h3>
+          <table>
+            <thead>
               <tr>
-                <td>Vertical <em>generation</em></td>
+                <th>Claim</th>
+                <th>State</th>
+                <th>Where</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Creating a production lands on Day One</td>
                 <td><span class="chip chip--none">not built</span></td>
                 <td>
-                  <code>limits.aspects</code> is declared per model — seedance lists <code>9:16</code> — and is
-                  read by nothing. A scene still is hard-coded landscape. Vertical <em>export</em> already
-                  works: the social preset is 1080&times;1920.
+                  <code>NewProductionScreen</code> navigates to the productions list. <code>create-production</code>
+                  carries no request id, and the coordinator discards the slug <code>createProduction</code>
+                  already returns — so this fix needs a protocol change, not just a route change.
                 </td>
               </tr>
               <tr>
-                <td>A pass is asked for at a length the route offers</td>
-                <td><span class="chip chip--built">built</span></td>
+                <td>Order derives from <code>Scene.number</code></td>
+                <td><span class="chip chip--partial">built, with a defect</span></td>
                 <td>
-                  A video route takes one of a fixed few lengths as its own word, not a number of seconds.
-                  Dispatch rounds up to the nearest offered length, refuses by name anything longer than the
-                  longest, and stretches the shot plan to cover the clip that was actually asked for.
+                  <code>deriveCut</code> sorts by scene number, and the scene file name embeds that number — so
+                  renumbering renames the file and moves its <code>.history/</code> path. Chapters avoided this
+                  by putting order in frontmatter (SPEC-012 D3); scenes never got the same treatment.
                 </td>
               </tr>
               <tr>
@@ -2224,49 +2274,20 @@
                   then refuses at dispatch.
                 </td>
               </tr>
-              <tr>
-                <td>Order derives from <code>Scene.number</code></td>
-                <td><span class="chip chip--partial">built, with a defect</span></td>
-                <td>
-                  <code>deriveCut</code> sorts by scene number, and the scene file name embeds that number — so
-                  renumbering renames the file and moves its <code>.history/</code> path. Chapters avoided this
-                  by putting order in frontmatter (SPEC-012 D3); scenes never got the same treatment.
-                </td>
-              </tr>
             </tbody>
           </table>
         </div>
 
-        <div class="thesis">
-          <article class="thesis__card">
-            <span class="number">CHANGED / REV 2 TO REV 3</span>
-            <h3>The dependency changed shape rather than disappearing.</h3>
-            <p>
-              Revision 2 said this feature waits on a conversation layer that did not exist. It exists now,
-              and it is smaller than the wait implied: the machinery is general and the vocabulary is
-              world-only. "Land issue #70's layer" becomes "extend it to production scope" — a real piece of
-              work, but a bounded one, and no longer a blocking unknown.
-            </p>
-          </article>
-          <article class="thesis__card">
-            <span class="number">STILL TRUE</span>
-            <h3>Story authority is nearly settled already.</h3>
-            <p>
-              The scanner already treats <code>story.json</code> as the structured overview and
-              <code>story.md</code> as optional treatment prose. What is unsettled is the master
-              specification's folder layout, which still lists only <code>story.md</code>, and the absence of
-              any writer. That is a documentation correction plus a gate path, not a model decision.
-            </p>
-          </article>
-          <article class="thesis__card">
-            <span class="number">RETRACTED</span>
-            <h3>Vertical export already worked.</h3>
-            <p>
-              Revision 2 said the export presets were landscape-only and used that to size the profile work.
-              They were not: a 1080&times;1920 social preset has been there all along. What is missing is
-              vertical <em>generation</em>, which is a narrower job than the one the last revision described.
-            </p>
-          </article>
+        <div class="superseded">
+          <span class="eyebrow">Moved &middot; the platform audit lives elsewhere</span>
+          <p>
+            Earlier revisions audited platform-wide claims here, and the material aged independently of the
+            feature. It now lives in <code>readiness.html</code>, the implementation-readiness audit that
+            travels with <code>vision.html</code> and <code>scope.html</code> in the product document set,
+            which is kept beside the repository rather than in it — re-run against the working tree on
+            2026-08-19, and re-run rather than annotated. Two documents holding one ledger is how a status
+            table drifts.
+          </p>
         </div>
       </section>
 
@@ -2290,14 +2311,14 @@
             ><span>Characters, places, Canon, look</span>
           </div>
           <div class="flowstep">
-            <span class="number">CREATE</span><b>Choose output</b><span>Video + micro-drama profile</span>
+            <span class="number">CREATE</span><b>Choose output</b><span>Video + Microdrama format</span>
           </div>
           <div class="flowstep flowstep--accent">
             <span class="number">DAY ONE</span><b>Inherit the world</b
             ><span>Seeds, cast, tone, first move</span>
           </div>
           <div class="flowstep flowstep--accent">
-            <span class="number">STORY</span><b>Shape the season</b><span>Engine, arcs, episode cards</span>
+            <span class="number">DEVELOP</span><b>Shape the season</b><span>Engine, arcs, episode cards</span>
           </div>
           <div class="flowstep">
             <span class="number">EPISODE</span><b>Break the episode</b
@@ -2327,8 +2348,8 @@
           </article>
           <div class="arrow">&rarr;</div>
           <article class="scope-card">
-            <span class="eyebrow">Production scope</span>
-            <h3>Series / Season story</h3>
+            <span class="eyebrow">Production scope &middot; Development</span>
+            <h3>Production conversation</h3>
             <p>Explores and proposes:</p>
             <ul>
               <li>Series engine and recurring continuity</li>
@@ -2338,7 +2359,7 @@
           </article>
           <div class="arrow">&rarr;</div>
           <article class="scope-card">
-            <span class="eyebrow">Scene scope</span>
+            <span class="eyebrow">Scene scope &middot; Development</span>
             <h3>Episode / Scene thread</h3>
             <p>Explores and proposes:</p>
             <ul>
@@ -2369,9 +2390,11 @@
             <h2>Create the right kind of production.</h2>
           </div>
           <p>
-            Format remains the major output family. Profile sits beneath it and tunes defaults without
-            creating parallel models. A micro-drama is still Video: it uses the same scenes, shots, takes,
-            queue, and cut as a short film.
+            The Scope's three-level model — medium, format, delivery — maps onto this dialog. The medium
+            stays step one, and the code's <code>ProductionFormatSchema</code> models it today. A named
+            format like Microdrama is step two and tunes defaults without creating parallel models: a
+            Microdrama is still Video, with the same scenes, shots, takes, queue, and cut as a short film,
+            and vertical is its delivery profile, not its definition.
           </p>
         </div>
 
@@ -2395,7 +2418,7 @@
           <p>
             This is directly grounded in prototype frame 33a and the current dashboard. A new production
             should open here, not return to the productions list and not drop the creator into an empty graph.
-            The world arrives first; the profile adds production-specific next actions.
+            The world arrives first; the format adds production-specific next actions.
           </p>
         </div>
 
@@ -2419,8 +2442,8 @@
           <p>
             Arke stores the hierarchy that makes a long-running series coherent, but the user mainly moves
             through three creative workspaces: Season board, Episode workspace, and Scene workspace. Creating
-            the first micro-drama creates the Series and Season 1 together. Series management becomes
-            prominent only when Season 2 exists.
+            the first Microdrama creates the Series and Season 1 together — a decision recorded below, with
+            the Series kept thin. Series management becomes prominent only when Season 2 exists.
           </p>
         </div>
 
@@ -2438,7 +2461,7 @@
           <article class="hierarchy-card active">
             <span class="number">SEASON 1 / PRODUCTION</span>
             <h3>What changes this season</h3>
-            <p>The main production and Story workspace scope.</p>
+            <p>The main production and Development scope.</p>
             <ul>
               <li>season question and ending state</li>
               <li>arc lanes and reversals</li>
@@ -2481,9 +2504,10 @@
           <strong>The hierarchy is not a folder tree.</strong>
           <p>
             Character arcs, storylines, setups, and payoffs cross episode boundaries. Beats may be realized by
-            several scenes. In micro-drama, a release episode may even cut through one continuous production
-            scene. Arke stores stable links and derives views instead of forcing every creative idea into one
-            parent-child container.
+            several scenes. A scene, though, belongs to exactly one episode: when a continuous dramatic moment
+            crosses a release boundary, it is written as two linked scenes — a closing and an opening — never
+            as an episode cutting through a scene. Arke stores stable links and derives views instead of
+            forcing every creative idea into one parent-child container.
           </p>
         </div>
 
@@ -2499,33 +2523,36 @@
 
         <div class="thesis">
           <article class="thesis__card">
-            <span class="number">OPEN / MUST SETTLE FIRST</span>
-            <h3>Where does a Series live on disk?</h3>
+            <span class="number">DECIDED / SERIES IS CREATED WITH SEASON 1</span>
+            <h3>A Series exists, and it is thin.</h3>
             <p>
-              The world layout puts <code>productions/&lt;slug&gt;/</code> flat under the world root. A Series
-              is a new durable owner between world and production, and the folder is the only durable truth.
-              The recommendation: keep it a thin joining record — id, title, engine prose, ordered season
-              production ids — and leave recurring cast in world sheets. A Series that describes characters
-              becomes a second place a character exists, which is the drift SPEC-012 D1 exists to prevent.
+              The first Microdrama season creates its Series, so future seasons and the repeatable engine
+              always have a home. The Series stays extremely thin — id, title, the repeatable premise or
+              story engine, a world reference, ordered season production references, and only continuity that
+              is genuinely not world canon. Recurring characters remain world entities: a Series that
+              describes characters becomes a second place a character exists, which is the drift SPEC-012 D1
+              exists to prevent. Where the record lives on disk is settled in the domain specification.
             </p>
           </article>
           <article class="thesis__card">
-            <span class="number">OPEN / DOWNSTREAM</span>
+            <span class="number">DECIDED / EPISODES OWN COMPLETE SCENES</span>
             <h3>Seven episodes are seven deliverables.</h3>
             <p>
-              The cut is derived by sorting every scene in the production into one timeline. If an episode is
-              a range over scenes, then the cut and the exports need an episode dimension — one cut and one
-              export per release unit, not one per production. The presets themselves are fine: a vertical
-              social preset already exists. That is SPEC-013 work this brief implies and must name.
+              Every scene belongs to one episode; a dramatic moment continues across episodes through linked
+              closing and opening scenes. That keeps authoring, validation, and export simple — no
+              editorial-segment model and no timeline in/out points in the domain. The cut still derives one
+              timeline from every scene, so episode membership needs an episode cut and an episode export —
+              one per release unit. The presets themselves are fine: a vertical social preset already exists.
+              That is SPEC-013 work this brief names.
             </p>
           </article>
           <article class="thesis__card">
-            <span class="number">OPEN / CHEAP NOW, EXPENSIVE LATER</span>
+            <span class="number">DEFECT / FIX BEFORE EPISODES</span>
             <h3>Scene order is in the file name.</h3>
             <p>
               Inserting an episode before another episode renumbers scenes, and a scene's number is part of
               its file name — so a renumber renames the file and moves its history path. Chapters solved this
-              by putting order in frontmatter. Scenes should be fixed before episodes reference scene ranges,
+              by putting order in frontmatter. Scenes should be fixed before episodes reference scenes,
               not after.
             </p>
           </article>
@@ -2536,13 +2563,26 @@
         <div class="section__head">
           <div>
             <div class="eyebrow">Step three</div>
-            <h2>The Story screen becomes the production workspace.</h2>
+            <h2>The Story screen becomes Development.</h2>
           </div>
           <p>
             No separate floating "Director" product is required. The prototype's existing Story conversation
-            is the right home. It evolves from overview-only into a scoped workspace whose rail can show the
-            overview, production direction, episodes, and eventually the graph. Conversation proposes;
-            accepted production files govern.
+            is the right home. It evolves from overview-only into a scoped workspace — Development — whose
+            rail can show the premise, the story architecture, the season, episodes, and scenes, each beside
+            the conversation. Linear seasons never grow a graph view; the branch map belongs to Interactive
+            video. Conversation proposes; accepted production files govern.
+          </p>
+        </div>
+
+        <div class="superseded">
+          <span class="eyebrow">Decided &middot; vocabulary</span>
+          <p>
+            Story is a production family — novels, scripts, and other written work — and stays one in the
+            picker. The narrative-development layer inside every production is <b>Development</b>, and the
+            workflow reads Development &rarr; Production &rarr; Release. Earlier revisions called this layer
+            the production Story workspace; one word doing both jobs is how a picker and a tab end up
+            claiming each other, so the screen the application today labels Story takes the new name with
+            the feature.
           </p>
         </div>
 
@@ -2550,7 +2590,7 @@
           <span class="eyebrow">Superseded &middot; now drawn in the design master</span>
           <p>
             The concept screen that stood here has been replaced by turn <b>44 and 45</b>, which draws
-            the Story workspace and the season board in the application&#8217;s own tokens and records the numbers it binds. A sketch in this
+            the production workspace &#8212; drawn before it took the name Development &#8212; and the season board in the application&#8217;s own tokens and records the numbers it binds. A sketch in this
             document&#8217;s visual language argued the shape; the turn decides it, and two drawings of one screen
             is how a design drifts. See <code>design-system/Arke Studio.dc.html</code><a href="#t44"></a>.
           </p>
@@ -2561,7 +2601,7 @@
           <p>
             The current accepted sources remain <code>production.json</code>, <code>story.json</code>,
             optional treatment prose, and scene files. This brief proposes versioned production-direction and
-            graph entities; their final filenames and schemas must be specified before implementation. The
+            episode entities; their final filenames and schemas must be specified before implementation. The
             workspace may propose several production changes in one conversation, but none becomes
             authoritative until staged and accepted. Two things this screen needs before it can behave as
             drawn: a writer for <code>story.json</code> through the existing gate — the
@@ -2655,7 +2695,7 @@
                 <article class="shot-card">
                   <div class="shot-frame">
                     <img
-                      src="../../design-system/assets/drowned-quarter.png"
+                      src="assets/drowned-quarter.png"
                       alt="Wide market atmosphere reference"
                     />
                   </div>
@@ -2668,7 +2708,7 @@
                 <article class="shot-card">
                   <div class="shot-frame">
                     <img
-                      src="../../design-system/assets/char-maren.png"
+                      src="assets/char-maren.png"
                       alt="Character close coverage reference"
                     />
                   </div>
@@ -2681,7 +2721,7 @@
                 <article class="shot-card">
                   <div class="shot-frame">
                     <img
-                      src="../../design-system/assets/board-scene4-a.png"
+                      src="assets/board-scene4-a.png"
                       alt="Action coverage reference"
                     />
                   </div>
@@ -2693,7 +2733,7 @@
                 </article>
                 <article class="shot-card">
                   <div class="shot-frame">
-                    <img src="../../design-system/assets/scene4-shot14b.png" alt="Insert detail reference" />
+                    <img src="assets/scene4-shot14b.png" alt="Insert detail reference" />
                   </div>
                   <div class="shot-card__body">
                     <b>Shot 4 / pocket empty</b>
@@ -2797,24 +2837,24 @@
                 <div class="pass-panels">
                   <div class="pass-panel">
                     <img
-                      src="../../design-system/assets/drowned-quarter.png"
+                      src="assets/drowned-quarter.png"
                       alt="Storyboard panel one"
                     /><span>SH 1 / 4s</span>
                   </div>
                   <div class="pass-panel">
-                    <img src="../../design-system/assets/char-maren.png" alt="Storyboard panel two" /><span
+                    <img src="assets/char-maren.png" alt="Storyboard panel two" /><span
                       >SH 2 / 6s</span
                     >
                   </div>
                   <div class="pass-panel">
                     <img
-                      src="../../design-system/assets/board-scene4-a.png"
+                      src="assets/board-scene4-a.png"
                       alt="Storyboard panel three"
                     /><span>SH 3 / 3s</span>
                   </div>
                   <div class="pass-panel">
                     <img
-                      src="../../design-system/assets/scene4-shot14b.png"
+                      src="assets/scene4-shot14b.png"
                       alt="Context-only boundary panel"
                     /><span>TAIL CONTEXT</span>
                   </div>
@@ -2831,12 +2871,12 @@
                 <div class="pass-panels">
                   <div class="pass-panel">
                     <img
-                      src="../../design-system/assets/scene4-shot14b.png"
+                      src="assets/scene4-shot14b.png"
                       alt="Boundary start frame"
                     /><span>START / PASS 1</span>
                   </div>
                   <div class="pass-panel">
-                    <img src="../../design-system/assets/char-maren.png" alt="Storyboard final shot" /><span
+                    <img src="assets/char-maren.png" alt="Storyboard final shot" /><span
                       >SH 4 / 4s</span
                     >
                   </div>
@@ -2884,18 +2924,19 @@
         <div class="section__head">
           <div>
             <div class="eyebrow">Progressive structure</div>
-            <h2>An episode board first. A real graph when needed.</h2>
+            <h2>An episode board always. A branch map when authored.</h2>
           </div>
           <p>
-            The game prototype proves the graph language: scene, choice, outcome, merge, ending, placeholder,
-            state, and health. That should not be copied wholesale into a linear video on day one. Micro-drama
-            starts with a readable episode board. New graph-native seasons may reveal branches directly;
-            legacy productions require an explicit accepted migration before graph order replaces
-            <code>Scene.number</code>.
+            The retired game prototype proved the branch language that survives — scene, choice, outcome,
+            merge, ending, placeholder — and the Scope draws the boundary: a choice selects the next scene
+            and does nothing else. No variables, no conditions, no unlocks, no hidden state, no health score.
+            Linear seasons remain board-based and explicitly ordered; they are never migrated to graph
+            authority. Interactive video productions add a branch map over scenes only when direct audience
+            choices are authored.
           </p>
         </div>
 
-        <div class="graph-wrap" aria-label="Progressive story graph illustration">
+        <div class="graph-wrap" aria-label="Interactive video branch map illustration">
           <p class="graph-summary">
             Episode one, The manual, flows to episode two, The peculiar jacket, then to a turn called Who
             returns. Route A reaches The wrong return and ends with Eddie opening the wrong gate. Route B is a
@@ -2909,7 +2950,7 @@
             <svg
               viewBox="0 0 1050 620"
               role="img"
-              aria-label="Story graph with linear episodes opening into two alternate routes"
+              aria-label="Branch map with linear episodes opening into two alternate routes"
             >
               <defs>
                 <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
@@ -2970,26 +3011,29 @@
         <div class="thesis">
           <article class="thesis__card">
             <span class="number">LINEAR</span>
-            <h3>One route is still a graph.</h3>
+            <h3>Linear stays a board.</h3>
             <p>
-              Episode order, hooks, cliffhangers, and payoffs can be analyzed without showing nodes and edges
-              to the user.
+              Ordered episodes, ordered scenes, episode cards, setups and payoffs, stable links — explicit
+              structures a board can show. A linear season is not stored or authored as a graph, and hooks,
+              cliffhangers, and payoffs are analyzed without one.
             </p>
           </article>
           <article class="thesis__card">
             <span class="number">BRANCHING</span>
-            <h3>Complexity appears honestly.</h3>
+            <h3>Choices route. Nothing else.</h3>
             <p>
-              Choices, conditions, merges, and endings become visible only when authored. The graph answers
-              what can happen, not what media is selected.
+              A choice selects the next scene. It sets no variable, evaluates no condition, unlocks nothing,
+              and changes no later choice. Choices, outcomes, merges, and endings appear only when authored —
+              in an Interactive video production.
             </p>
           </article>
           <article class="thesis__card">
-            <span class="number">HEALTH</span>
-            <h3>Structure, never taste.</h3>
+            <span class="number">FINDINGS</span>
+            <h3>Findings, never a score.</h3>
             <p>
-              Reachability, dead ends, missing payoffs, route coverage, duration, and budget are computed.
-              Arke never scores whether the story is good.
+              Reachability, dead ends, unintended loops, untraversed edges, unvisited routes named, and
+              reconverging branches checked for continuity conflicts — each reported as a concrete finding.
+              No percentage, no state model, and Arke never scores whether the story is good.
             </p>
           </article>
         </div>
@@ -3004,7 +3048,8 @@
           <p>
             The feature works only if it refuses to collapse distinct records into one graph or one
             conversation. This table is the implementation boundary: each question has one durable owner,
-            while dashboards, graphs, health, budgets, and cuts are derived views over those owners.
+            while dashboards, boards, branch maps, findings, budgets, and cuts are derived views over those
+            owners.
           </p>
         </div>
 
@@ -3026,9 +3071,10 @@
                 <tr>
                   <td>What makes this premise repeat across seasons?</td>
                   <td>
-                    Proposed Series foundation entity; created with Season 1, mostly hidden until another
-                    season exists. Recommended shape: a thin joining record only. Recurring cast stays in
-                    world sheets, or a Series becomes a second world.
+                    Series foundation entity — decided: created with Season 1, mostly hidden until another
+                    season exists, and kept thin — id, title, engine prose, world reference, ordered season
+                    references, series-only continuity. Recurring cast stays in world sheets, or a Series
+                    becomes a second world.
                   </td>
                 </tr>
                 <tr>
@@ -3041,8 +3087,9 @@
                 <tr>
                   <td>What is each audience release unit?</td>
                   <td>
-                    Proposed Episode cards and boundary map. They reference story/scene ranges rather than
-                    forcing every scene into one episode.
+                    Proposed Episode cards — decided: every scene belongs to exactly one episode, and a
+                    moment that crosses a release boundary is two linked scenes. Arcs, setups, and payoffs
+                    still cross episodes as links.
                   </td>
                 </tr>
                 <tr>
@@ -3063,9 +3110,10 @@
                 <tr>
                   <td>What can happen, and in what order?</td>
                   <td>
-                    Legacy: <code>Scene.number</code> — which is also part of the scene's file name, so
-                    renumbering moves history and must be fixed first. Proposed graph-native season after
-                    explicit authority choice or migration.
+                    Linear: explicit scene order — today <code>Scene.number</code>, which is also part of the
+                    scene's file name, so renumbering moves history and must be fixed first. Interactive
+                    video: a branch map over scenes, direct routing only. The branch map never becomes the
+                    order authority for a linear season.
                   </td>
                 </tr>
                 <tr>
@@ -3076,19 +3124,23 @@
             </table>
           </div>
           <div class="roadmap">
-            <h3>Build in this order</h3>
+            <h3>Four programmes</h3>
             <p style="margin: -6px 0 16px; color: var(--ink-soft); font-size: 12px">
-              Items 1 to 3 ship against the architecture as it stands today and need no new entity. Item 4 was
-              a blocking unknown in the last revision and is now a bounded extension: the conversation layer
-              landed, world-scoped.
+              Sixteen items in one flat list read like an implementation plan, which this document is not.
+              Grouped, the dependency structure is visible: <b>A</b> repairs the handoff that already exists
+              and needs no new entity; <b>B</b> defines the domain that everything after it builds against;
+              <b>C</b> is the creative workspace; <b>D</b> completes media execution and ends with a separate
+              production family.
             </p>
             <p style="margin: -6px 0 16px; color: var(--ink-soft); font-size: 12px">
-              <b>Designed</b> is a third state, and the ledger above does not show it &#8212; it records only
-              what the code does. Items <b>1, 2, 3, 6 and 7</b> are drawn in the design master as turns
-              43&ndash;48 and clickable in the Prototype. They are unbuilt, but nobody has to invent them:
-              the frames, the numbers and the reasoning already exist. Read <code>not built</code> in the
-              ledger as <em>not built yet</em>, not as <em>not decided</em>.
+              <b>Designed</b> is a third state, and the ledgers above do not show it &#8212; they record only
+              what the code does. A1&ndash;A3, the format step of B, and the boards of C are drawn in the
+              design master as turns 43&ndash;48 and clickable in the Prototype; A4 is a file-layout fix
+              nothing draws. They are unbuilt, but nobody
+              has to invent them: the frames, the numbers and the reasoning already exist. Read
+              <code>not built</code> above as <em>not built yet</em>, not as <em>not decided</em>.
             </p>
+            <p style="margin: 4px 0 10px; font-size: 14px"><b>A &middot; Repair the existing production handoff</b></p>
             <ol>
               <li>
                 <b>Ship the creation handoff.</b
@@ -3099,7 +3151,7 @@
                 >
               </li>
               <li>
-                <b>Let Story author its own overview.</b
+                <b>Let the overview be authored through the gate.</b
                 ><span
                   >Write <code>story.json</code> through the existing gate using the reserved
                   <code>story-overview</code> proposal kind, and correct the master layout, which still lists
@@ -3115,6 +3167,44 @@
                 >
               </li>
               <li>
+                <b>Move scene order out of the file name.</b
+                ><span
+                  >Order in the file, stable name, as chapters already do. Inserting an episode renumbers
+                  scenes, and today a renumber renames files and moves history paths. Fix before anything
+                  references a scene by its place in the season.</span
+                >
+              </li>
+            </ol>
+            <p style="margin: 20px 0 10px; font-size: 14px"><b>B &middot; Establish the narrative domain</b></p>
+            <ol>
+              <li>
+                <b>Specify the production entities.</b
+                ><span
+                  >Define the thin Series foundation, Season production direction, Episode cards, and the
+                  Scene extensions, carrying the two decisions this brief records: a Series is created with
+                  Season 1, and every scene belongs to exactly one episode. Define proposal materialization,
+                  rebase, and ripples before building candidate types, and settle where a Series lives on
+                  disk.</span
+                >
+              </li>
+              <li>
+                <b>Add formats and delivery profiles beneath the medium.</b
+                ><span
+                  >Microdrama defaults tune episode duration, hook window, cliffhanger checks, and the export
+                  preset — one create step and no second entity, as turn 47 draws it.</span
+                >
+              </li>
+              <li>
+                <b>Add the missing Scene script layer.</b
+                ><span
+                  >Extend Scene with stable action/dialogue blocks, let shots cite covered blocks, and derive
+                  coverage/staleness before generation.</span
+                >
+              </li>
+            </ol>
+            <p style="margin: 20px 0 10px; font-size: 14px"><b>C &middot; Build the creative workspace</b></p>
+            <ol>
+              <li>
                 <b>Extend issue #70's layer to production scope.</b
                 ><span
                   >The durable conversation, the running understanding, and batched approval at wrap-up all
@@ -3125,49 +3215,37 @@
                 >
               </li>
               <li>
-                <b>Move scene order out of the file name.</b
-                ><span
-                  >Order in the file, stable name, as chapters already do. Inserting an episode renumbers
-                  scenes, and today a renumber renames files and moves history paths.</span
-                >
-              </li>
-              <li>
-                <b>Specify production entities.</b
-                ><span
-                  >Define Series foundation, Season Production profile/direction, Episode cards, episode
-                  boundaries, graph, proposal materialization, rebase, and ripples before building candidate
-                  types. Settle where a Series lives on disk first.</span
-                >
-              </li>
-              <li>
-                <b>Add profile beneath format, and read the aspect already declared.</b
-                ><span
-                  >Micro-drama defaults tune duration, hook window, cliffhanger checks, and export preset.
-                  Aspect is the only genuinely missing piece and it is small: models already declare which
-                  aspects they take, size already reaches the provider, vertical export already works, and a
-                  scene still is hard-coded landscape.</span
-                >
-              </li>
-              <li>
-                <b>Add the missing Scene script layer.</b
-                ><span
-                  >Extend Scene with stable action/dialogue blocks, let shots cite covered blocks, and derive
-                  coverage/staleness before generation.</span
-                >
-              </li>
-              <li>
-                <b>Make Story, Episode, and Scene conversations real.</b
+                <b>Make the production, episode, and scene threads real.</b
                 ><span
                   >Persistent scoped threads with typed candidates against the now-defined production entities
-                  and ordinary proposal acceptance, on top of item 4.</span
+                  and ordinary proposal acceptance, on top of the extension above.</span
+                >
+              </li>
+              <li>
+                <b>Build the season and episode boards.</b
+                ><span
+                  >The Development views turns 44&ndash;48 draw — season, episodes, arcs, direction — over the
+                  entities B defines, with the episode board as the first surface a Microdrama creator
+                  sees.</span
                 >
               </li>
               <li>
                 <b>Make the cut and exports episode-aware.</b
                 ><span
                   >Seven episodes are seven deliverables. The cut derives one timeline from every scene in the
-                  production; an episode range needs its own cut and its own export. The presets already
-                  cover the shapes.</span
+                  production; an episode needs its own cut and its own export. The presets already cover the
+                  shapes.</span
+                >
+              </li>
+            </ol>
+            <p style="margin: 20px 0 10px; font-size: 14px"><b>D &middot; Complete media execution</b></p>
+            <ol>
+              <li>
+                <b>Read the aspect already declared; add vertical generation.</b
+                ><span
+                  >Aspect is the only genuinely missing piece and it is small: models already declare which
+                  aspects they take, size already reaches the provider, vertical export already works, and a
+                  scene still is hard-coded landscape. One field and one picker.</span
                 >
               </li>
               <li>
@@ -3197,18 +3275,13 @@
                 >
               </li>
               <li>
-                <b>Migrate linear order deliberately.</b
+                <b>Add direct-choice Interactive video deliberately.</b
                 ><span
-                  >Legacy productions continue to derive order from <code>Scene.number</code>. A graph-enabled
-                  production switches authority only through an accepted migration proposal; cuts then
-                  traverse the graph route rather than sort scene numbers.</span
-                >
-              </li>
-              <li>
-                <b>Add branching deliberately.</b
-                ><span
-                  >Choice, outcome, merge, ending, typed state, playtests, route health, and branch budget.
-                  Branching Video remains a future profile decision, not an implicit v1 format change.</span
+                  >Scenes, choices, outcomes, merges, and endings — a separate production family, never an
+                  implicit format change and never a graph migration of a linear season. Choices route
+                  directly, with no variables, conditions, unlocks, or hidden state. Validation reports named
+                  findings: reachability, dead ends, unintended loops, untraversed edges, unvisited routes
+                  named, and reconverging branches checked for continuity conflicts.</span
                 >
               </li>
             </ol>
@@ -3217,7 +3290,7 @@
 
         <div class="reference">
           <figure>
-            <img src="../../design-system/assets/site-loop2.png" alt="Arke production workflow visual" />
+            <img src="assets/site-loop2.png" alt="Arke production workflow visual" />
             <figcaption>
               Research translated into Arke's visual language: natural-language storyboarding,
               hook/cliffhanger discipline, iterative casting and voice direction, and creator focus on taste
@@ -3226,7 +3299,7 @@
           </figure>
           <figure>
             <img
-              src="../../design-system/assets/board-scene4-a.png"
+              src="assets/board-scene4-a.png"
               alt="Accepted Arke scene board imagery"
             />
             <figcaption>
@@ -3242,8 +3315,9 @@
             Do not make World Chat the universal front door — it now has a door, in the world rail, directly
             beside Productions, and the asymmetry this brief was written to fix has widened rather than
             closed. Do not create a second disconnected Director app.
-            Keep Day One as Season Production home, evolve Story into a scope-aware Series / Season / Episode
-            workspace, keep scene chat contextual, and reveal graph complexity progressively. Script answers
+            Keep Day One as Season Production home, evolve Story into Development — a scope-aware Series /
+            Season / Episode workspace — keep scene chat contextual, keep linear seasons board-based, and let
+            the branch map appear only where direct choices are authored. Script answers
             what happens; shots answer how it is filmed; the editorial board shows the complete shot plan;
             model capability compiles one or more generation storyboards. The shared framework is conversation
             + candidates + proposals; explicit dispatch remains the only spend boundary.
@@ -3251,10 +3325,12 @@
           <p style="margin-top: 18px">
             And a decision about this document. It is a brief, not a specification: no frontmatter, no
             numbered requirements, no acceptance criteria, no testing section — nothing here is estimable yet.
-            It should become three things. Items 1 to 3 of the roadmap are ordinary issues that can be written
-            today. Items 4 and 6 to 9 belong in one specification for production entities and production-scoped
-            conversation, which is now an extension of something real rather than a bet on something
-            proposed. Item 13 belongs in a specification of its own, gated behind issue #154.
+            It should become three things. Programme A's items are ordinary issues that can be written today.
+            Programme B and the conversation extension that opens C belong in one specification for production
+            entities and production-scoped conversation, which is now an extension of something real rather
+            than a bet on something proposed. D4 belongs in a specification of its own, gated behind issue
+            #154 — and D5, Interactive video, is a family that earns its own brief before its own
+            specification.
           </p>
           <p style="margin-top: 18px">
             The companion brief for issue #70 is
@@ -3269,17 +3345,24 @@
     </main>
 
     <footer class="footer shell">
-      Arke Studio feature brief, revision 4. Grounded in the current production routes, SPEC-012, issue #70's
+      Arke Studio feature brief, revision 5. Grounded in the current production routes, SPEC-012, issue #70's
       shipped conversation architecture, prototype frames 6a / 33a / 10b / 9a / 34e / 35c, and the
-      micro-drama research transcript. This document proposes the connective experience; it does not claim
-      the Series, Season, Episode, Scene script, profile, graph, or generation-storyboard models are
+      Microdrama research transcript. This document proposes the connective experience; it does not claim
+      the Series, Season, Episode, Scene script, format, branch-map, or generation-storyboard models are
       implemented today. Every "current code" claim was read back against <code>main</code> on 2026-08-07 and
-      is recorded in the claim ledger. Revision 2 corrected three claims about existing code; revision 3
+      is recorded in the ledgers. Revision 2 corrected three claims about existing code; revision 3
       records two rows that flipped, one issue that took up a finding, and one claim of its own — that
       vertical export was missing — that was simply wrong. Corrections are made in the text rather than
       appended as notes, because a brief that keeps its errors at the end stops being read from the front.
       Revision 4 removes four concept screens that turns 43&ndash;48 have since drawn properly: a sketch and a
-      frame competing to specify one screen is how a design drifts, and the frame wins. This document argues
+      frame competing to specify one screen is how a design drifts, and the frame wins. Revision 5
+      (2026-08-19) aligns the brief with the revised Vision and Scope: Microdrama loses its hyphen; the
+      workspace layer takes the name Development while Story remains a production family; the Series decision
+      &#8212; thin, created with Season 1 &#8212; and the episode rule &#8212; every scene belongs to exactly
+      one episode &#8212; are recorded as decided; branching narrows to direct-choice Interactive video with
+      named findings and no variables, conditions, unlocks, state, or score, and no graph migration of a
+      linear season; the platform audit moves to <code>readiness.html</code>; the roadmap regroups into four
+      programmes; and the imagery now travels with the document under <code>assets/</code>. This document argues
       and audits; <code>production-story-workspace-guide.html</code> is the companion that explains how the feature works, what
       it writes to disk, and what a morning of using it looks like.
     </footer>
