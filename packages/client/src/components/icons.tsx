@@ -321,3 +321,50 @@ export const GraduationCap = icon(
     <path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5" />
   </>,
 );
+
+/*
+ * Block art for the bible editor's `/` menu — the same Lucide transcriptions as everything above,
+ * kept here rather than beside the editor so the house icon set stays one file.
+ */
+export const TextMark = icon(
+  <>
+    <path d="M17 6.1H3" />
+    <path d="M21 12.1H3" />
+    <path d="M15.1 18H3" />
+  </>,
+);
+export const Heading = icon(<path d="M6 4v16M18 4v16M6 12h12" />);
+export const ListBullet = icon(
+  <>
+    <path d="M8 6h13M8 12h13M8 18h13" />
+    <path d="M3 6h.01M3 12h.01M3 18h.01" />
+  </>,
+);
+export const ListOrdered = icon(
+  <>
+    <path d="M10 6h11M10 12h11M10 18h11" />
+    <path d="M4 6h1v4M4 10h2" />
+    <path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1" />
+  </>,
+);
+export const ListCheck = icon(
+  <>
+    <path d="M10 6h11M10 12h11M10 18h11" />
+    <path d="m3 5 1.5 1.5L7 4" />
+    <path d="m3 17 1.5 1.5L7 16" />
+  </>,
+);
+export const Quote = icon(
+  <>
+    <path d="M10 11H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v8a4 4 0 0 1-4 4" />
+    <path d="M20 11h-4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v8a4 4 0 0 1-4 4" />
+  </>,
+);
+export const CodeMark = icon(<path d="m16 18 6-6-6-6M8 6l-6 6 6 6" />);
+export const TableMark = icon(
+  <>
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="M3 9h18M3 15h18M9 3v18" />
+  </>,
+);
+export const Divider = icon(<path d="M5 12h14" />);

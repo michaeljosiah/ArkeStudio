@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 import { bibleSize, splitBible } from "@arke-studio/contracts";
+import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
+import { describeRichModeRefusal, type RichModeVerdict } from "../components/editor/rich-mode.js";
 import { Button, Callout, cx } from "../components/ui.js";
 import { restoreBible, saveBible, useStore } from "../lib/store.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
@@ -25,6 +27,10 @@ const AUTOSAVE_MS = 1200;
  * is a different thing from the size at which it is wrong. Roughly 4,000 words.
  */
 const NOTABLE_CHARACTERS = 24_000;
+
+/** What an empty bible says. The source editor appends an example; the rich one cannot show one. */
+const PLACEHOLDER =
+  "Write anything here — what this world is about, how it should feel, what you have not decided yet.";
 
 export function BibleScreen() {
   const { worldId } = useParams();
@@ -54,6 +60,21 @@ export function BibleScreen() {
     if (draft === null) base.current = bible?.version ?? 1;
   }, [bible?.version, draft]);
 
+  /*
+   * The draft lives until the store speaks again, and not one render longer.
+   *
+   * It used to be cleared the moment the save was dispatched, which left a window showing `live` —
+   * still the pre-save text until the coordinator's snapshot arrives — as the authoritative
+   * document. A text area only flickered; the rich editor reads that as the file having moved
+   * underneath it and reloads, taking the caret with it. Dropping the draft on the *next* snapshot
+   * covers both writers: our own echo (identical text, nothing happens) and somebody else's edit
+   * (different text, adopted). It cannot stick, because any snapshot at all releases it.
+   */
+  const draftedFrom = useRef<string | null>(null);
+  useEffect(() => {
+    if (draft !== null && live !== draftedFrom.current) setDraft(null);
+  }, [live, draft]);
+
   useEffect(
     () => () => {
       if (timer.current) clearTimeout(timer.current);
@@ -61,7 +82,10 @@ export function BibleScreen() {
     [],
   );
 
+  const written = useRef<string | null>(null);
   const onChange = (value: string) => {
+    if (draft === null) draftedFrom.current = live;
+    written.current = value;
     setDraft(value);
     setSaving(true);
     if (timer.current) clearTimeout(timer.current);
@@ -69,12 +93,27 @@ export function BibleScreen() {
       if (!worldId) return;
       saveBible(worldId, value, base.current ?? undefined);
       setSaving(false);
-      // Cleared so the next snapshot from the coordinator becomes the live text again. Keeping
-      // the draft would leave the editor showing its own copy forever, and a Studio edit landing
-      // in the same document would never appear.
-      setDraft(null);
     }, AUTOSAVE_MS);
   };
+
+  /*
+   * Which editor owns this bible.
+   *
+   * Deciding costs a full markdown parse (see `describeRichModeRefusal`), so it happens once per
+   * document that arrives from somewhere else, and never while somebody is typing. Our own text
+   * coming back through the store is explicitly not a new document: the mode has to be sticky, or a
+   * bible could swap editors mid-sentence — which is worse than either of the two it is choosing
+   * between, and would take the caret with it.
+   */
+  const gate = useRef<{ text: string; verdict: RichModeVerdict | null } | null>(null);
+  if (gate.current === null || (live !== gate.current.text && live !== written.current)) {
+    gate.current = { text: live, verdict: describeRichModeRefusal(live) };
+  } else if (live !== gate.current.text) {
+    gate.current = { text: live, verdict: gate.current.verdict };
+  }
+  const richRefusal = gate.current.verdict;
+  const [preferSource, setPreferSource] = useState(false);
+  const richMode = richRefusal === null && !preferSource;
 
   const size = useMemo(() => bibleSize(text), [text]);
   const outline = useMemo(() => splitBible(text), [text]);
@@ -103,16 +142,26 @@ export function BibleScreen() {
 
       <div className="fy-biblegrid">
         <div className="fy-biblegrid__main">
-          <textarea
-            className="fy-bible__editor"
-            value={text}
-            onChange={(e) => onChange(e.target.value)}
-            spellCheck
-            placeholder={
-              "Write anything here — what this world is about, how it should feel, what you have not decided yet.\n\n## The tides\n\nThe tide is the world's clock and its accountant."
-            }
-            aria-label="The world bible"
-          />
+          {richMode ? (
+            <RichMarkdownEditor
+              // Remounting on the world is what re-reads the document from the store; without it a
+              // second bible would open into the first one's editor, holding the first one's text.
+              key={worldId}
+              value={text}
+              onChange={onChange}
+              placeholder={PLACEHOLDER}
+              ariaLabel="The world bible"
+            />
+          ) : (
+            <textarea
+              className="fy-bible__editor"
+              value={text}
+              onChange={(e) => onChange(e.target.value)}
+              spellCheck
+              placeholder={`${PLACEHOLDER}\n\n## The tides\n\nThe tide is the world's clock and its accountant.`}
+              aria-label="The world bible"
+            />
+          )}
           <div className="fy-bible__foot">
             <span className="fy-mono">
               {saving ? "Saving…" : bible?.present ? `Saved · v${bible.version}` : "Not saved yet"}
@@ -121,6 +170,13 @@ export function BibleScreen() {
               {size.words.toLocaleString()} words · ~{size.approxTokens.toLocaleString()} tokens a
               turn
             </span>
+            {richRefusal ? (
+              <span className="fy-mono">{richRefusal.message}</span>
+            ) : (
+              <Button variant="ghost" onClick={() => setPreferSource((source) => !source)}>
+                {preferSource ? "Rich text" : "Markdown source"}
+              </Button>
+            )}
           </div>
           {size.characters > NOTABLE_CHARACTERS && (
             <Callout tone="warning" title="This is a long bible now">
