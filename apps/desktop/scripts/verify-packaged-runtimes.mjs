@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
 
@@ -88,14 +88,53 @@ export default async function verifyPackagedRuntimes(context) {
     throw new Error(`resources/opencode2 was staged for a different architecture than ${arch}`);
   }
 
-  const forbidden = new Set(["kokoro-82m", "whisper-base-en", "model_quantized.onnx", "ggml-base.en.bin"]);
+  /*
+   * `claude.exe` joins the model weights for a different reason: not size, licence.
+   *
+   * The Claude Agent SDK pulls a per-platform optionalDependency carrying the entire ~312MB
+   * Claude Code runtime, under "© Anthropic PBC. All rights reserved". electron-builder copies
+   * production dependencies on its own, so the exclusion in electron-builder.yml is the only
+   * thing standing between depending on that SDK and shipping a proprietary binary in our
+   * installer. An exclusion pattern that stops matching — a hoist that moves the path, a
+   * rename upstream — fails silently and looks exactly like a normal build.
+   */
+  const forbidden = new Set([
+    "kokoro-82m", "whisper-base-en", "model_quantized.onnx", "ggml-base.en.bin", "claude.exe",
+  ]);
   const inspect = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (forbidden.has(entry.name)) throw new Error(`model weight ${entry.name} entered the installer`);
+      if (forbidden.has(entry.name)) {
+        throw new Error(
+          entry.name === "claude.exe"
+            ? "the Claude Code runtime entered the installer — it is proprietary and bring-your-own; check the " +
+              "@anthropic-ai/claude-agent-sdk-* exclusion in electron-builder.yml"
+            : `model weight ${entry.name} entered the installer`,
+        );
+      }
       if (entry.isDirectory()) inspect(join(dir, entry.name));
     }
   }
   inspect(resources);
+  /*
+   * The name walk above only sees loose files, and `claude.exe` is not a `.node`, so an
+   * excluded-then-un-excluded binary would be packed INSIDE app.asar where readdirSync sees a
+   * single opaque file. Checked by size rather than by reading the archive: the threshold is
+   * derived from the thing being excluded rather than guessed — the runtime is ~312MB, so an
+   * app.asar over 300MB is carrying something the size of a Claude Code, and a normal build of
+   * bundled JS is three orders of magnitude under it. Parsing the asar header would be exact,
+   * but a subtly wrong parse breaks every build, and this cannot.
+   */
+  const asar = join(resources, "app.asar");
+  if (existsSync(asar)) {
+    const bytes = statSync(asar).size;
+    if (bytes > 300 * 1024 * 1024) {
+      throw new Error(
+        `app.asar is ${Math.round(bytes / 1024 / 1024)}MB — far past anything this app bundles. The likely ` +
+          `cause is the Claude Agent SDK's per-platform binary escaping the exclusion in electron-builder.yml, ` +
+          `which would ship a proprietary runtime we have no right to redistribute.`,
+      );
+    }
+  }
   if (readdirSync(voxa).some((name) => name === "x64" || name === "arm64")) {
     throw new Error("packaged Voxa contains architecture staging directories");
   }
