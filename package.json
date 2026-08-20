@@ -3,7 +3,7 @@
   "version": "0.5.22",
   "private": true,
   "description": "Arke Studio — a local-first worldbuilding and production studio. The world lives in a folder; the app is a lens over it.",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "https://github.com/michaeljosiah/ArkeStudio.git"

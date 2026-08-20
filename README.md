@@ -8,7 +8,7 @@ because they share it.
 
 [![CI](https://github.com/michaeljosiah/ArkeStudio/actions/workflows/ci.yml/badge.svg)](https://github.com/michaeljosiah/ArkeStudio/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/michaeljosiah/ArkeStudio?label=release)](https://github.com/michaeljosiah/ArkeStudio/releases/latest)
-[![Licence](https://img.shields.io/badge/licence-MIT-black)](LICENSE)
+[![Licence](https://img.shields.io/badge/licence-AGPL--3.0-black)](LICENSE)
 
 </div>
 
@@ -148,4 +148,4 @@ This repository holds the code, the specifications and the design system.
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE).
+AGPL-3.0. See [LICENSE](LICENSE).
