@@ -349,7 +349,13 @@ export class ProposalManager {
         draftRevision: 1,
         ...(input.worldChatOrigins ? { worldChatOrigins: input.worldChatOrigins } : {}),
         ...(input.openChoices ? { openChoices: input.openChoices } : {}),
-        ...(input.skill ? { skill: input.skill } : {}),
+        // Exactly the provenance triple, never the caller's object. The registry's Skill carries
+        // its whole guidance body, and TypeScript's structural typing lets it arrive here under
+        // the narrow type — spread into the manifest it fails the strict ProposalSkillSchema
+        // AFTER the targets are on disk, orphaning an invisible proposal.
+        ...(input.skill
+          ? { skill: { id: input.skill.id, version: input.skill.version, family: input.skill.family } }
+          : {}),
       };
       await this.writeManifest(proposal);
       await this.refreshPreview(proposal);

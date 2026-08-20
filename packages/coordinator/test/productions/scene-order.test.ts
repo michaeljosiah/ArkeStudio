@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { deriveCut, deriveSpineCut, SceneSchema, type ProductionSpine } from "@arke-studio/contracts";
+import { deriveCut, deriveSpineCut, SceneSchema, skillFor, type ProductionSpine } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { draftSceneSkeleton, reorderScenes } from "../../src/productions/ops.js";
 import { scanWorld } from "../../src/world/scan.js";
@@ -47,6 +47,28 @@ describe("scene identity and explicit order (issue 387)", () => {
       second.path,
       "productions/saltlight/scenes/the-bell-answers-itself-2.json",
       "a second identical brief takes the next stem, never the same one",
+    );
+  });
+
+  it("a draft shaped by a registry skill stages a readable manifest, recording only the triple", async () => {
+    // The desktop wires the contracts registry's skillFor straight into the coordinator, so at
+    // runtime the "triple" arriving here is the full Skill — purpose and the whole guidance body
+    // riding along under the narrow type. The strict manifest schema used to reject that AFTER
+    // the target file was written: an invisible orphaned proposal, and Draft scene silently dead
+    // in every packaged build whose routed video model has a shipped skill.
+    const { store, gate } = await open();
+    const registrySkill = skillFor("scene-drafting", "seedance");
+    assert.ok(registrySkill, "the seedance drafting skill ships with the app");
+    const draft = await draftSceneSkeleton(store, gate, {
+      productionId: "saltlight",
+      brief: "One lantern answers another across the water.",
+      skill: registrySkill,
+    });
+    const manifest = await gate.readManifest(draft.proposalId);
+    assert.deepEqual(
+      manifest.skill,
+      { id: registrySkill.id, version: registrySkill.version, family: registrySkill.family },
+      "the manifest records exactly the provenance triple, never the guidance body",
     );
   });
 
