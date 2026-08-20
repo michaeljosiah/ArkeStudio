@@ -67,6 +67,7 @@ import {
   StoryScreen,
   VoiceLineDialogScreen,
 } from "./screens/production.js";
+import { BranchMapScreen } from "./screens/branch-map.js";
 import { Navigate } from "react-router";
 import { QueueToaster } from "./components/queue-toaster.js";
 import { PlayerDock } from "./components/player.js";
@@ -178,6 +179,8 @@ export function App() {
           <Route path="scenes" element={<ScenesScreen />} />
           <Route path="scenes/new" element={<NewSceneScreen />} />
           <Route path="scenes/:sceneId" element={<SceneDetailScreen />} />
+          {/* Interactive video's structural authority (epic 401) — linear seasons never route here. */}
+          <Route path="branch-map" element={<BranchMapScreen />} />
           <Route path="generate" element={<GenerateScreen />} />
           <Route path="generate/dispatch" element={<DispatchDialogScreen />} />
           <Route path="generate/voice-line" element={<VoiceLineDialogScreen />} />

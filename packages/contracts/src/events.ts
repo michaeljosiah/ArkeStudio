@@ -156,6 +156,30 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /** Interactive video's named findings (epic 401, brief §4) — evidence, never a score. */
+  z
+    .object({
+      ...base,
+      type: z.literal("production.routing-findings"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      findings: z.array(z.custom<import("./routing.js").RoutingFinding>()),
+    })
+    .strict(),
+
+  /** The self-hostable export finished, or refused in the blockers' words (epic 401, brief §6). */
+  z
+    .object({
+      ...base,
+      type: z.literal("production.interactive-export-result"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      disposition: z.enum(["exported", "refused"]),
+      dir: z.string().min(1).optional(),
+      blockers: z.array(z.string()).optional(),
+    })
+    .strict(),
+
   /** The world canon revision advanced (accepting any canon change increments once, §2.4). */
   z
     .object({

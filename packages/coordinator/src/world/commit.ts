@@ -132,6 +132,7 @@ type Classified =
   | { track: "scene"; production: string; file: string }
   | { track: "chapter"; production: string; file: string }
   | { track: "story"; production: string }
+  | { track: "routing"; production: string }
   | { track: "season"; production: string }
   | { track: "episode"; production: string; file: string }
   | { track: "series"; id: string }
@@ -152,6 +153,8 @@ export function classify(path: string): Classified {
   if (m) return { track: "chapter", production: m[1]!, file: m[2]! };
   m = /^productions\/([a-z0-9-]+)\/story\.json$/.exec(path);
   if (m) return { track: "story", production: m[1]! };
+  m = /^productions\/([a-z0-9-]+)\/routing\.json$/.exec(path);
+  if (m) return { track: "routing", production: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/season\.json$/.exec(path);
   if (m) return { track: "season", production: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/episodes\/([^/]+)\.json$/.exec(path);
@@ -290,6 +293,7 @@ export class Committer {
       } else if (
         kind.track === "scene" ||
         kind.track === "story" ||
+        kind.track === "routing" ||
         kind.track === "season" ||
         kind.track === "episode" ||
         kind.track === "series"

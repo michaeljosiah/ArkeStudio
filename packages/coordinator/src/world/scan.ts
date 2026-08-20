@@ -34,6 +34,7 @@ import {
   TakeMediaInfoRecordSchema,
   type TakeMediaInfoRecord,
   SheetSchema,
+  RoutingSchema,
   StoryOverviewSchema,
   TakeSchema,
   WorldMetaSchema,
@@ -410,6 +411,9 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     const story = (await exists(join(pdir, "story.json")))
       ? await tryParse(`productions/${id}/story.json`, (raw) => StoryOverviewSchema.parse(JSON.parse(raw)))
       : null;
+    const routing = (await exists(join(pdir, "routing.json")))
+      ? await tryParse(`productions/${id}/routing.json`, (raw) => RoutingSchema.parse(JSON.parse(raw)))
+      : null;
     const treatment = (await exists(join(pdir, "story.md")))
       ? (await read(join(pdir, "story.md"))).replace(/\r\n/g, "\n")
       : null;
@@ -605,6 +609,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       meta: metaDoc,
       story,
       season,
+      routing,
       treatment,
       chapters,
       scenes,

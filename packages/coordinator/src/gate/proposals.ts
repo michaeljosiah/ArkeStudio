@@ -13,6 +13,7 @@ import {
   RipplePreviewSchema,
   SeasonSchema,
   SeriesSchema,
+  RoutingSchema,
   StoryOverviewSchema,
   type Proposal,
   type ProposalConflict,
@@ -48,6 +49,7 @@ import { applyJsonResolution, applyResolution, mergeJson, mergeMarkdown } from "
  */
 const JSON_TRACK_SCHEMAS: Partial<Record<ReturnType<typeof classify>["track"], { parse: (v: unknown) => unknown }>> = {
   story: StoryOverviewSchema,
+  routing: RoutingSchema,
   season: SeasonSchema,
   episode: EpisodeSchema,
   series: SeriesSchema,
@@ -56,6 +58,7 @@ const JSON_TRACK_SCHEMAS: Partial<Record<ReturnType<typeof classify>["track"], {
 /** The refusal names the record in a person's words, not the commit track's. */
 const JSON_TRACK_LABELS: Partial<Record<ReturnType<typeof classify>["track"], string>> = {
   story: "story overview",
+  routing: "routing",
   season: "season",
   episode: "episode",
   series: "series record",

@@ -313,6 +313,19 @@ export type PlanResult = Extract<DomainEvent, { type: "production.plan-result" }
 export type PlanStateEvent = Extract<DomainEvent, { type: "production.plan-state" }>;
 const planResultListeners = new Set<(result: PlanResult) => void>();
 const planStateListeners = new Set<(event: PlanStateEvent) => void>();
+
+export type RoutingFindingsEvent = Extract<DomainEvent, { type: "production.routing-findings" }>;
+export type InteractiveExportEvent = Extract<DomainEvent, { type: "production.interactive-export-result" }>;
+const routingFindingsListeners = new Set<(event: RoutingFindingsEvent) => void>();
+const interactiveExportListeners = new Set<(event: InteractiveExportEvent) => void>();
+export function subscribeRoutingFindings(listener: (event: RoutingFindingsEvent) => void): () => void {
+  routingFindingsListeners.add(listener);
+  return () => routingFindingsListeners.delete(listener);
+}
+export function subscribeInteractiveExports(listener: (event: InteractiveExportEvent) => void): () => void {
+  interactiveExportListeners.add(listener);
+  return () => interactiveExportListeners.delete(listener);
+}
 export function subscribePlanResults(listener: (result: PlanResult) => void): () => void {
   planResultListeners.add(listener);
   return () => planResultListeners.delete(listener);
@@ -589,6 +602,12 @@ function handleFrame(json: string): void {
     }
     if (event.type === "production.plan-state") {
       for (const listener of planStateListeners) listener(event);
+    }
+    if (event.type === "production.routing-findings") {
+      for (const listener of routingFindingsListeners) listener(event);
+    }
+    if (event.type === "production.interactive-export-result") {
+      for (const listener of interactiveExportListeners) listener(event);
     }
     if (event.type === "bench.brief-enhanced") {
       for (const listener of briefEnhancedListeners) listener(event);
@@ -2328,6 +2347,45 @@ export function planCancel(worldId: string, productionId: string, planId: string
 /** Ask for the folded states of a production's plans — also the restart reconciliation. */
 export function listPlans(worldId: string, productionId: string): void {
   send({ kind: "list-plans", worldId, productionId });
+}
+
+/** Save the routing record (epic 401): the strict parse server-side is the no-state gate. */
+export function saveRouting(worldId: string, productionId: string, routing: unknown): void {
+  send({ kind: "save-routing", worldId, productionId, routing });
+}
+
+/** One preview traversal, appended durably (epic 401, brief §4). */
+export function recordTraversal(
+  worldId: string,
+  productionId: string,
+  choiceId: string,
+  from: string,
+  to: string,
+  route: string[],
+): void {
+  send({ kind: "record-traversal", worldId, productionId, choiceId, from, to, route });
+}
+
+/** Ask for the named routing findings (epic 401) — evidence, never a score. */
+export function listRoutingFindings(worldId: string, productionId: string): void {
+  send({ kind: "list-routing-findings", worldId, productionId });
+}
+
+/** Promote a branch outcome to canon — explicit, gated, with the route named (brief §7). */
+export function proposeBranchCanon(
+  worldId: string,
+  productionId: string,
+  sceneId: string,
+  route: string[],
+  title: string,
+  body: string,
+): void {
+  send({ kind: "propose-branch-canon", worldId, productionId, sceneId, route, title, body });
+}
+
+/** Export the self-hostable package (brief §6); refused while blocking findings stand. */
+export function exportInteractive(worldId: string, productionId: string): void {
+  send({ kind: "export-interactive", worldId, productionId });
 }
 
 export function setPromptOverride(

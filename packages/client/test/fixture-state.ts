@@ -330,6 +330,7 @@ const state: ClientState = {
         },
         story: null,
         season: null,
+        routing: null,
         sceneFiles: { sc_04: "04-the-verse-rises" },
         episodes: [],
         episodeFiles: {},

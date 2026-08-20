@@ -1414,6 +1414,55 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
     })
     .strict(),
+  /** Epic 401 (brief §2): save the routing record — strict parse IS the no-state import gate. */
+  z
+    .object({
+      kind: z.literal("save-routing"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      routing: z.unknown(),
+    })
+    .strict(),
+  /** Epic 401 (brief §4/§5): one preview traversal, appended durably. */
+  z
+    .object({
+      kind: z.literal("record-traversal"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      choiceId: z.string().min(1),
+      from: SceneIdSchema,
+      to: SceneIdSchema,
+      route: z.array(SceneIdSchema),
+    })
+    .strict(),
+  /** Epic 401 (brief §4): ask for the named findings. */
+  z
+    .object({
+      kind: z.literal("list-routing-findings"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+    })
+    .strict(),
+  /** Epic 401 (brief §7): promote a branch outcome to canon — explicit, gated, route named. */
+  z
+    .object({
+      kind: z.literal("propose-branch-canon"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneId: SceneIdSchema,
+      route: z.array(SceneIdSchema),
+      title: z.string().min(1).max(200),
+      body: z.string().min(1).max(4000),
+    })
+    .strict(),
+  /** Epic 401 (brief §6): export the self-hostable package; refused while blockers stand. */
+  z
+    .object({
+      kind: z.literal("export-interactive"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+    })
+    .strict(),
   /** SPEC-012 R-15/R-16: an edited prompt is an override on the shot; null resets. */
   z
     .object({

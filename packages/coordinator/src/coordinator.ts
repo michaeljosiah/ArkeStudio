@@ -102,6 +102,14 @@ import {
   planState,
   type PlanDriverDeps,
 } from "./productions/plans.js";
+import {
+  appendTraversal,
+  exportInteractive,
+  interactiveFindings,
+  proposeBranchCanon,
+  saveRouting,
+  type InteractiveExportResult,
+} from "./productions/interactive.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
 import { ProviderToolService, type ToolProbe } from "./providers/tool.js";
 import { ProviderCallStore } from "./providers/call-store.js";
@@ -3660,6 +3668,86 @@ export class Coordinator {
         await this.emitPlanStates(store, msg.worldId, msg.productionId);
         return;
       }
+      case "save-routing": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        try {
+          // The strict parse IS the no-state import gate (brief §1): a condition key fails here
+          // with the key named, before anything touches disk.
+          await saveRouting(store, msg.productionId, msg.routing);
+          await this.refreshWorldSnapshot(msg.worldId);
+          await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
+        } catch (err) {
+          void this.appLog?.append({
+            kind: "routing.refused",
+            reason: err instanceof Error ? err.message : String(err),
+            detail: { productionId: msg.productionId },
+          });
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "record-traversal": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+        if (!production || production.routing === null) return;
+        await appendTraversal(store, msg.productionId, {
+          ts: new Date().toISOString(),
+          routingVersion: production.routing.version,
+          choiceId: msg.choiceId,
+          from: msg.from,
+          to: msg.to,
+          route: msg.route,
+        }).catch(() => {});
+        await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
+        return;
+      }
+      case "list-routing-findings": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
+        return;
+      }
+      case "propose-branch-canon": {
+        const store = this.opts.provider.openStore?.();
+        const gate = this.opts.provider.gate?.();
+        if (!store || !gate) return;
+        try {
+          await proposeBranchCanon(store, gate, {
+            productionId: msg.productionId,
+            sceneId: msg.sceneId,
+            route: msg.route,
+            title: msg.title,
+            body: msg.body,
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "export-interactive": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+        if (!production) return;
+        const result = await exportInteractive(store, production, () => new Date().toISOString()).catch(
+          (err): InteractiveExportResult => ({
+            ok: false,
+            blockers: [err instanceof Error ? err.message : String(err)],
+          }),
+        );
+        this.emit({
+          at: new Date().toISOString(),
+          type: "production.interactive-export-result",
+          worldId: msg.worldId,
+          productionId: msg.productionId,
+          disposition: result.ok ? "exported" : "refused",
+          ...(result.ok ? { dir: result.dir } : { blockers: result.blockers }),
+        });
+        return;
+      }
       case "set-production-aspect": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -6938,6 +7026,20 @@ export class Coordinator {
         void this.appLog?.append({ kind: "plan.enqueue-refused", planId, reason });
       },
     };
+  }
+
+  /** The named routing findings, pushed as one event (epic 401, brief §4) — never a score. */
+  private async emitRoutingFindings(store: WorldStore, worldId: string, productionId: string): Promise<void> {
+    const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+    if (!production) return;
+    const findings = await interactiveFindings(store, production).catch(() => []);
+    this.emit({
+      at: new Date().toISOString(),
+      type: "production.routing-findings",
+      worldId,
+      productionId,
+      findings,
+    });
   }
 
   /** The folded states of a production's plans, pushed as one event — disk truth, no timer. */

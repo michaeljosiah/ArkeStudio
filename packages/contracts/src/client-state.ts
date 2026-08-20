@@ -30,6 +30,7 @@ import {
 } from "./settings.js";
 import { SetupStatusSchema } from "./setup.js";
 import { ReferenceKitSchema } from "./reference.js";
+import { RoutingSchema } from "./routing.js";
 import { SceneSchema, SelectionsSchema } from "./scene.js";
 import { EpisodeIdSchema, SceneIdSchema } from "./ids.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
@@ -120,6 +121,8 @@ export const ProductionBundleSchema = z
     story: StoryOverviewSchema.nullable(),
     /** season.json — the season beside its production, or null when none (SPEC-023 R-10). */
     season: SeasonSchema.nullable().default(null),
+    /** routing.json — Interactive video's one graph authority, or null (epic #401, brief §2). */
+    routing: RoutingSchema.nullable().default(null),
     /** story.md — freeform treatment / script prose, per format (§2.2). */
     treatment: z.string().nullable(),
     chapters: z.array(ChapterSummarySchema),

@@ -14,6 +14,7 @@ export * from "./events.js";
 export * from "./client-state.js";
 export * from "./pass-compiler.js";
 export * from "./dispatch-plan.js";
+export * from "./routing.js";
 export * from "./frames.js";
 export * from "./world-chat.js";
 export * from "./adapter.js";

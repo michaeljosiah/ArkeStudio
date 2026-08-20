@@ -136,6 +136,15 @@ export {
   type TakePosterUnavailableReason,
 } from "./takes/poster.js";
 export {
+  appendTraversal,
+  exportInteractive,
+  interactiveFindings,
+  proposeBranchCanon,
+  readTraversal,
+  saveRouting,
+  type InteractiveExportResult,
+} from "./productions/interactive.js";
+export {
   advanceAllPlans,
   advancePlan,
   appendPlanEvents,

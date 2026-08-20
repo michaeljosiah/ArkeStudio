@@ -266,6 +266,9 @@ export function ProductionLayout() {
                   The route keeps its name — the rename is display text, never wiring. */}
               {item("story", "Development", production?.story ? `v${production.story.version}` : "—")}
               {item("scenes", "Scenes", String(production?.scenes.length ?? 0))}
+              {/* Interactive video's structural authority (epic 401): only this medium routes here. */}
+              {shape?.isBranching &&
+                item("branch-map", "Branch map", String(production?.routing?.choices.length ?? 0))}
               <NavLink to={`${base}/scenes/new`} className="fy-prodrail__sub">
                 <Plus size={12} />
                 New scene

@@ -45,6 +45,7 @@ function production(over: Partial<ProductionBundle>): ProductionBundle {
     },
     story: null,
     season: null,
+    routing: null,
     treatment: null,
     chapters: [],
     scenes: [],
