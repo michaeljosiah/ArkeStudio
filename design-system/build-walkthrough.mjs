@@ -184,7 +184,14 @@ const STATUS_LABEL = { built: "Built · matches", drifted: "Built · drifted", m
 
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-const railHtml = STEPS.map((s, i) => `
+const railHtml = `
+      <button class="rail__item" data-goto="map" type="button">
+        <span class="rail__n">·</span>
+        <span class="rail__body">
+          <span class="rail__step">The shape of it</span>
+          <span class="rail__id">map</span>
+        </span>
+      </button>` + STEPS.map((s, i) => `
       <button class="rail__item" data-goto="${s.id}" type="button">
         <span class="rail__n">${String(i + 1).padStart(2, "0")}</span>
         <span class="rail__body">
@@ -193,6 +200,135 @@ const railHtml = STEPS.map((s, i) => `
         </span>
         <span class="dot dot--${s.built.status}" title="${STATUS_LABEL[s.built.status]}"></span>
       </button>`).join("");
+
+const mapHtml = `
+    <section class="screen" data-frame="map" hidden>
+<section class="map" id="map">
+  <div class="map__head">
+    <h2>How a season becomes a film</h2>
+    <p>
+      Three levels, each with its own conversation. The season decides what the thing is; an episode
+      decides what happens in it and <b>makes the scenes it needs</b>; a scene decides how it is shot.
+      Nothing below a level exists until the level above has said what it needs — which is why the
+      arrows only point one way.
+    </p>
+  </div>
+
+  <div class="map__grid">
+
+    <!-- LEVEL 1 -->
+    <div class="lvl">
+      <div class="lvl__spine">
+        <span class="lvl__n">1</span>
+        <span class="lvl__thread">the production thread</span>
+      </div>
+      <div class="lvl__body">
+        <div class="lvl__title">The season · what this whole thing is</div>
+        <div class="cards">
+          <div class="card is-built" data-goto="48a">
+            <div class="card__k">Season</div>
+            <div class="card__d">The question it answers, and how it ends.</div>
+            <div class="card__f">season.json</div>
+          </div>
+          <div class="card is-part" data-goto="45b">
+            <div class="card__k">Episodes</div>
+            <div class="card__d">Every episode at once — <b>seven dashed tiles the day the season is made</b>, because the shape is a thing to see before it is a thing to fill.</div>
+            <div class="card__f">episodes/*.json</div>
+          </div>
+          <div class="card is-built" data-goto="48b">
+            <div class="card__k">Arcs</div>
+            <div class="card__d">What changes across the season. Needs episodes first — a lane names the episode it lands in.</div>
+            <div class="card__f">season.json</div>
+          </div>
+          <div class="card is-built" data-goto="48c">
+            <div class="card__k">Direction</div>
+            <div class="card__d">How it looks. Narrows the world's look, never replaces it.</div>
+            <div class="card__f">season.json</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow"><span>open an episode</span></div>
+
+    <!-- LEVEL 2 -->
+    <div class="lvl">
+      <div class="lvl__spine">
+        <span class="lvl__n">2</span>
+        <span class="lvl__thread">this episode's thread</span>
+      </div>
+      <div class="lvl__body">
+        <div class="lvl__title">One episode · what happens in it</div>
+        <div class="cards">
+          <div class="card is-built" data-goto="53c">
+            <div class="card__k">The promise</div>
+            <div class="card__d">How it opens, where it turns, how it closes.</div>
+            <div class="card__f">episodes/03-*.json</div>
+          </div>
+          <div class="card is-todo">
+            <div class="card__k">…and the scenes it needs</div>
+            <div class="card__d"><b>The cascade.</b> Talking through the episode stages its promise <i>and</i> its scenes, in order, together. Today scenes are drafted elsewhere and adopted from a pool — the arrow runs backwards.</div>
+            <div class="card__f">scenes/*.json</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow"><span>open a scene</span></div>
+
+    <!-- LEVEL 3 -->
+    <div class="lvl">
+      <div class="lvl__spine">
+        <span class="lvl__n">3</span>
+        <span class="lvl__thread">this scene's thread</span>
+      </div>
+      <div class="lvl__body">
+        <div class="lvl__title">One scene · how it is shot</div>
+        <div class="cards">
+          <div class="card is-todo" data-goto="49a">
+            <div class="card__k">Script</div>
+            <div class="card__d">Written first, in blocks that keep their ids.</div>
+            <div class="card__f">scenes/*.json</div>
+          </div>
+          <div class="card is-todo" data-goto="49b">
+            <div class="card__k">Coverage</div>
+            <div class="card__d">Which shot covers which block — and which blocks nothing covers.</div>
+            <div class="card__f">scenes/*.json</div>
+          </div>
+          <div class="card is-todo" data-goto="53e">
+            <div class="card__k">Board</div>
+            <div class="card__d">Every shot, priced, before a penny moves.</div>
+            <div class="card__f">boards/</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow"><span>dispatch · money moves here</span></div>
+
+    <!-- MAKE -->
+    <div class="lvl lvl--flat">
+      <div class="lvl__spine"><span class="lvl__n">→</span><span class="lvl__thread">no conversation</span></div>
+      <div class="lvl__body">
+        <div class="lvl__title">Making it</div>
+        <div class="cards">
+          <div class="card is-built" data-goto="11b"><div class="card__k">Generate</div><div class="card__d">Takes come back; accepting one locks it into the cut.</div><div class="card__f">takes/ · selections.json</div></div>
+          <div class="card is-built" data-goto="81a"><div class="card__k">Cut</div><div class="card__d">A projection over accepted takes. Nothing to assemble.</div><div class="card__f">cut.json</div></div>
+          <div class="card is-built" data-goto="25b"><div class="card__k">Exports</div><div class="card__d">A render of the cut. Local, no provider call.</div><div class="card__f">exports/*.mp4</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="map__key">
+    <span><i class="dot dot--built"></i> built</span>
+    <span><i class="dot dot--drifted"></i> partly built</span>
+    <span><i class="dot dot--missing"></i> not built yet</span>
+    <span class="map__hint">click any card to jump to its frame</span>
+  </div>
+</section>
+
+    </section>`;
 
 const framesHtml = STEPS.map((s) => {
   const f = frames[s.id];
@@ -299,6 +435,36 @@ ${tokens}
       .nav button[disabled] { opacity: .4; cursor: default; }
       .nav .is-primary { background: #1b1a17; color: #fff; border-color: #1b1a17; }
 
+
+      /* ---- the map: the shape of the work, before any one screen ---- */
+      .map { max-width: 1180px; }
+      .map__head h2 { font: 600 20px/1.3 inherit; margin: 0 0 6px; }
+      .map__head p { margin: 0 0 22px; font-size: 13.5px; line-height: 1.65; color: var(--wt-soft); max-width: 78ch; }
+      .map__grid { display: grid; gap: 0; }
+      .lvl { display: grid; grid-template-columns: 132px 1fr; gap: 18px; align-items: start;
+             border: 1px solid var(--wt-line); border-radius: 14px; background: var(--wt-card); padding: 16px 18px; }
+      .lvl--flat { background: transparent; }
+      .lvl__spine { display: grid; gap: 4px; }
+      .lvl__n { font: 600 22px var(--font-mono, monospace); color: var(--wt-ink); }
+      .lvl__thread { font: 400 10.5px var(--font-mono, monospace); color: var(--wt-soft); line-height: 1.4; }
+      .lvl__title { font: 600 14px inherit; margin-bottom: 10px; }
+      .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); gap: 10px; }
+      .card { border: 1px solid var(--wt-line); border-left: 3px solid var(--wt-ok); border-radius: 10px;
+              padding: 11px 13px; background: #fff; cursor: default; }
+      .card[data-goto] { cursor: pointer; }
+      .card[data-goto]:hover { box-shadow: 0 6px 18px rgba(28,24,18,.10); transform: translateY(-1px); }
+      .card.is-part { border-left-color: var(--wt-warn); }
+      .card.is-todo { border-left-color: var(--wt-bad); }
+      .card__k { font: 600 13px inherit; }
+      .card__d { font-size: 12px; line-height: 1.55; color: var(--wt-soft); margin-top: 4px; }
+      .card__f { font: 400 10px var(--font-mono, monospace); color: var(--wt-soft); margin-top: 8px; opacity: .8; }
+      .arrow { display: flex; align-items: center; gap: 10px; padding: 9px 0 9px 60px; }
+      .arrow::before { content: "↓"; font-size: 15px; color: var(--wt-soft); }
+      .arrow span { font: 400 11px var(--font-mono, monospace); color: var(--wt-soft); }
+      .map__key { display: flex; gap: 16px; align-items: center; margin-top: 18px; font-size: 11.5px; color: var(--wt-soft); }
+      .map__key span { display: inline-flex; align-items: center; gap: 6px; }
+      .map__hint { margin-left: auto; font-style: italic; }
+
       /* A wired control inside a frame. Outlined always — a prototype whose hotspots are invisible
          gets read as broken — and lifted on hover. */
       .hotspot { outline: 1.5px dashed rgba(45,123,122,.85); outline-offset: 3px; border-radius: 6px;
@@ -330,6 +496,7 @@ ${tokens}
           <span><i class="dot dot--drifted"></i> drifted</span>
           <span><i class="dot dot--missing"></i> not built</span>
         </div>
+        ${mapHtml}
         ${framesHtml}
       </main>
     </div>
@@ -341,7 +508,7 @@ ${tokens}
 
     <script>
       const STEPS = ${JSON.stringify(STEPS.map((s) => ({ id: s.id, actions: s.actions })))};
-      const order = STEPS.map((s) => s.id);
+      const order = ["map", ...STEPS.map((s) => s.id)];
       const screens = new Map([...document.querySelectorAll(".screen")].map((el) => [el.dataset.frame, el]));
       const railItems = new Map([...document.querySelectorAll(".rail__item")].map((el) => [el.dataset.goto, el]));
       const hint = document.getElementById("hint");
@@ -358,8 +525,16 @@ ${tokens}
 
       function wire(id) {
         const screen = screens.get(id);
-        const step = STEPS.find((s) => s.id === id);
         if (!screen || screen.dataset.wired === "1") return;
+        if (id === "map") {
+          // The map's cards are shortcuts into the frames they describe.
+          for (const card of screen.querySelectorAll("[data-goto]")) {
+            card.addEventListener("click", () => show(card.dataset.goto));
+          }
+          screen.dataset.wired = "1";
+          return;
+        }
+        const step = STEPS.find((s) => s.id === id);
         for (const a of step.actions) {
           const el = findControl(screen, a.match);
           if (!el) { console.warn("no control for", a.match, "in", id); continue; }
@@ -378,6 +553,7 @@ ${tokens}
         const screen = screens.get(order[at]);
         if (!screen) return;
         const stage = screen.querySelector(".stage");
+        if (!stage) return;
         const scale = screen.querySelector(".shot__scale");
         const s = Math.min(1, (stage.clientWidth || 1000) / 1360);
         scale.style.transform = "scale(" + s + ")";
