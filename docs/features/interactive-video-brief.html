@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="The feature brief for Interactive video in Arke Studio: direct routing, a branch map, named findings, a local player, and self-hostable delivery."
+    />
+    <title>Arke Studio - Interactive Video (brief)</title>
+    <style>
+      :root {
+        --paper: #f4f1ea;
+        --ink: #171715;
+        --ink-soft: #5f5b53;
+        --line: rgba(23, 23, 21, 0.14);
+        --line-strong: rgba(23, 23, 21, 0.28);
+        --card: #fffefa;
+        --coral: #ec6a4a;
+        --teal: #2d7b7a;
+        --amber: #c88d32;
+        --red: #b9483d;
+        --green: #3e7455;
+        --sans: "Segoe UI Variable Text", "Aptos", "Segoe UI", system-ui, sans-serif;
+        --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0 auto; max-width: 60rem; padding: 3rem 1.5rem 6rem;
+        color: var(--ink); background: var(--paper); font-family: var(--sans); line-height: 1.6;
+      }
+      h1 { font-size: 2rem; line-height: 1.15; margin: 0.4rem 0 0.6rem; }
+      h2 { font-size: 1.25rem; margin: 2.6rem 0 0.6rem; border-top: 1px solid var(--line-strong); padding-top: 1.4rem; }
+      h3 { font-size: 1rem; margin: 1.6rem 0 0.4rem; }
+      p, li { color: var(--ink); }
+      .eyebrow { font: 600 0.72rem var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--teal); }
+      .meta { color: var(--ink-soft); font-size: 0.9rem; }
+      code { font-family: var(--mono); font-size: 0.85em; background: rgba(23,23,21,0.06); padding: 0.05em 0.35em; border-radius: 4px; }
+      pre { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem 1.1rem; overflow-x: auto; font-family: var(--mono); font-size: 0.8rem; line-height: 1.55; }
+      table { border-collapse: collapse; width: 100%; margin: 0.8rem 0; font-size: 0.92rem; }
+      th, td { text-align: left; border-bottom: 1px solid var(--line); padding: 0.45rem 0.7rem 0.45rem 0; vertical-align: top; }
+      th { font: 600 0.72rem var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-soft); }
+      .rule { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--coral); border-radius: 8px; padding: 0.7rem 1rem; margin: 0.8rem 0; }
+      .rule b:first-child { color: var(--coral); }
+      .blocks { color: var(--red); font: 600 0.75rem var(--mono); }
+      .warns { color: var(--amber); font: 600 0.75rem var(--mono); }
+    </style>
+  </head>
+  <body>
+    <div class="eyebrow">Arke Studio · feature brief · revision 1</div>
+    <h1>Interactive video — direct routing, a branch map, and named findings</h1>
+    <p class="meta">
+      The implementation authority for epic #401, accepted through issue #392. Sources: the revised Scope
+      §01, §03, §11; design turn 78; SPEC-023 (the narrative domain); SPEC-012/019 (scenes, dispatch).
+      Revision 1, 2026-08-20. Nothing here is implemented because it appears here — this is the decision
+      record #401's issues build against.
+    </p>
+
+    <h2 id="boundary">1 · The bound boundary, restated as schema law</h2>
+    <div class="rule"><b>Binding.</b> <b>A choice selects the next scene and does nothing else.</b>
+      No variables, conditions, unlocks, inventory, statistics, relationships, or hidden author logic —
+      not as disabled features but as fields that do not exist. Every routing schema is
+      <code>strict()</code>: an imported document carrying a <code>condition</code> key fails parse with
+      the key named, which is what "unrepresentable" means in this codebase.</div>
+    <div class="rule"><b>Binding.</b> <b>Playback state belongs to the player.</b> Current scene, position,
+      selected route and resume progress live in the player's local store (preview: the app's session
+      state; export: <code>localStorage</code> of the self-hosted page), are never written into the world,
+      and are never readable by authored content.</div>
+    <div class="rule"><b>Binding.</b> <b>Interactive video is a medium, not a Video mutation.</b>
+      <code>medium: "interactive-video"</code> under SPEC-023's resolve-on-read model; created from the
+      picker's third card; never a migration of a linear season, whose boards and explicit order remain
+      their only structural authority. The branch map draws for this medium alone.</div>
+    <div class="rule"><b>Binding.</b> <b>Findings, never a score.</b> Validation reports named findings
+      with evidence; no percentage, no health number, no aggregate grade exists anywhere in the medium.</div>
+
+    <h2 id="domain">2 · Domain: files, IDs, schemas</h2>
+    <p>
+      Scenes are ordinary SPEC-012 scenes — same files, same shots, same dispatch. What Interactive video
+      adds is one routing record per production, the single graph authority (the same one-authority shape
+      as SPEC-023's <code>episode.scenes</code>):
+    </p>
+    <pre>productions/&lt;slug&gt;/routing.json         · versioned track "routing", gated field-by-field
+{
+  "version": 3,
+  "start": "sc_01",                        · exactly one start scene
+  "choices": [                             · the complete edge list, in authored order
+    { "id": "ch_dawn-or-dark", "from": "sc_01", "label": "Wait for dawn", "to": "sc_02" }
+  ],
+  "endings": [ { "sceneId": "sc_09", "title": "The bell answers" } ],
+  "excluded": [ { "sceneId": "sc_07", "reason": "held for a later season" } ],
+  "groups":  [ { "id": "grp_act-1", "title": "Act I", "scenes": ["sc_01","sc_02"] } ]
+}</pre>
+    <ul>
+      <li><b>Choice</b>: <code>ch_&lt;slug&gt;</code>, exactly <code>{ id, from, label, to }</code>, strict.
+        Ids survive edits and reorders; labels are the words the player reads.</li>
+      <li><b>Ending</b>: a designation of an existing scene, never a second scene kind. A scene listed in
+        <code>endings</code> offers no choices; one listed with outgoing choices is a named finding.</li>
+      <li><b>Deliberate exclusion</b>: the durable record that makes "unreachable" an author's decision
+        rather than a validator's guess. Carries its reason; surfaces in the map, dimmed.</li>
+      <li><b>Groups</b>: optional, non-logical, presentation-only. A scene may appear in one group.
+        Groups carry no routing, no gates, no logic — a group with any other field fails parse.</li>
+      <li><b>Publication state</b> lives on the production (<code>status</code>, change-logged) plus the
+        export record (§6); routing.json stays the graph and nothing else.</li>
+      <li><b>Provenance</b>: routing.json is versioned and gated, so every change is a proposal or a
+        direct edit with a change line — the same audit trail every other track has.</li>
+    </ul>
+    <h3>Episodes, reconciled with SPEC-023</h3>
+    <p>
+      Interactive video v1 ships one kind, <code>interactive</code>, which is <b>not episodic</b>:
+      SPEC-023 R-11's "every scene in exactly one episode" applies to episodic kinds only
+      (<code>EPISODIC_KINDS</code>) and Interactive video does not join that set. If a future episodic
+      Interactive kind arrives, Episode is a <b>release grouping over publications</b> — which routes ship
+      together — never scene ownership, because a reconverging scene belongs to every route that reaches
+      it. That decision is recorded here so #393's unqualified rule is never inherited by accident.
+    </p>
+
+    <h2 id="map">3 · The branch map</h2>
+    <p>
+      The structural view for this medium only (design turn 78 third binding; reassigned frame 34e).
+      Deterministic layered layout, no dependency: longest-path layering from the start scene, stable
+      in-layer order by authored choice order then scene id — the same graph always draws the same
+      picture, and no force simulation ever jiggles an author's mental map. No external layout library:
+      the graphs this medium allows (hundreds of nodes, not millions) do not justify a licensing surface.
+    </p>
+    <ul>
+      <li><b>Editing</b>: choices are created by drawing from a scene's out-port to a scene, renamed
+        inline, retargeted by dragging the arrowhead, deleted with confirmation naming what breaks.
+        Every edit is a routing.json commit through the gate.</li>
+      <li><b>Keyboard and focus</b>: every node and edge reachable by Tab/arrows in layout order; Enter
+        opens, Delete removes with the same named confirmation; the map is a listbox to a screen reader,
+        each node announced as "scene title, N choices in, M out".</li>
+      <li><b>Zoom/pan</b>: wheel and keyboard (+/−/0), fit-to-view default; large maps virtualise by
+        layer and offer a minimap past 60 nodes; reconvergence draws as edges joining an existing node,
+        never a duplicated node.</li>
+      <li><b>States</b>: start (ringed), ending (flagged), excluded (dimmed with reason on hover/focus),
+        unreachable (finding badge), empty map (one card: "Draw the first choice from the start scene").</li>
+      <li><b>Narrow windows</b>: below 900px the map lists layers vertically, edges as "goes to" rows —
+        the same data, no horizontal scroll of the page.</li>
+      <li><b>Threads</b>: the production's Development thread (SPEC-023) gains routing candidates —
+        a proposed choice/edge materialises into routing.json through the same gate as everything else.</li>
+    </ul>
+
+    <h2 id="validation">4 · Validation and preview evidence</h2>
+    <table>
+      <tr><th>Finding</th><th>Evidence named</th><th>Publication</th></tr>
+      <tr><td>Scene unreachable and not excluded</td><td>the scene, the nearest reachable ancestor</td><td class="blocks">blocks</td></tr>
+      <tr><td>Choice with an invalid destination</td><td>the choice id, its label, the missing scene id</td><td class="blocks">blocks</td></tr>
+      <tr><td>Non-ending scene that cannot reach an ending</td><td>the scene, the terminal cycle or dead end trapping it</td><td class="blocks">blocks</td></tr>
+      <tr><td>Unintended loop (a cycle no ending escapes)</td><td>the cycle's scene ids, in route order</td><td class="blocks">blocks</td></tr>
+      <tr><td>Published edge never traversed in preview</td><td>the choice id and a route that would traverse it</td><td class="blocks">blocks</td></tr>
+      <tr><td>Unvisited route (a start→ending path with untraversed edges)</td><td>the route's scene ids</td><td class="warns">warns</td></tr>
+      <tr><td>Reconvergence continuity conflict</td><td>the reconverging scene, both inbound routes, the conflicting facts</td><td class="warns">warns</td></tr>
+      <tr><td>Ending scene with outgoing choices</td><td>the scene, the choices</td><td class="blocks">blocks</td></tr>
+    </table>
+    <ul>
+      <li><b>Traversal evidence</b> is durable: the preview player appends
+        <code>productions/&lt;slug&gt;/routing-evidence.jsonl</code> lines
+        <code>{ ts, routingVersion, choiceId, route }</code>. Evidence is version-scoped: a line recorded
+        at routing v3 counts only while the choice it names still exists with the same
+        <code>from</code>/<code>to</code>; a retargeted edge sheds its old evidence at once.</li>
+      <li><b>Stale findings</b>: findings are derived, never stored — the fold of routing.json +
+        evidence + scene list, recomputed on read, so a graph edit can never leave a finding lying about
+        a shape that no longer exists (the SPEC-023 script-digest pattern).</li>
+      <li><b>Reconvergence continuity</b> is checked with the canon Arke holds: both inbound routes'
+        scenes are compared for contradictory establishment (a death on one route, a survival on the
+        other, feeding one continuation) — flagged with both routes named, resolved by neutralising the
+        shared scene or splitting continuations. Warns, because only the author knows what the
+        shared scene actually assumes.</li>
+    </ul>
+
+    <h2 id="player">5 · The player</h2>
+    <ul>
+      <li><b>Local preview</b> runs in the app: plays the current cut of each scene, presents choices at
+        scene end, records traversal evidence, and offers route-so-far and restart controls.
+        Resume/route state is playback state (§1) — kept per production in app-local state,
+        never in the world folder.</li>
+      <li><b>Playback state schema</b> (player-owned, both preview and export):
+        <code>{ sceneId, positionSec, route: choiceId[], updatedAt }</code>. Nothing else exists to
+        persist, by construction.</li>
+      <li><b>Accessibility</b>: choices are buttons with labels, keyboard-first, with a configurable
+        choice timer default OFF (an untimed choice is the accessible default; a timed one is a
+        per-production option with a stated default action). Subtitles ride WebVTT tracks per scene cut.</li>
+    </ul>
+
+    <h2 id="delivery">6 · Delivery: exportable first</h2>
+    <ul>
+      <li><b>The export is a folder</b>: <code>player.html</code> (self-contained, inline CSS/JS, no
+        network), <code>manifest.json</code> (routing snapshot + media map + version + provenance:
+        production, routing version, export stamp, content hashes), and <code>media/</code> (one file per
+        published scene, plus VTT). Relative paths only; it plays from <code>file://</code> or any static
+        host; offline by construction.</li>
+      <li><b>Deterministic export validation</b>: the exporter re-reads its own output, verifies every
+        manifest hash against the copied bytes and every choice destination against the shipped scene
+        set, and refuses (naming the file) rather than shipping a package that cannot play.</li>
+      <li><b>Publication gate</b>: export refuses while any blocking finding stands (§4), in the
+        findings' own words.</li>
+      <li><b>Managed hosting</b> (an Arke URL) is a later paid convenience and never the only route —
+        exportability is the local-first promise kept.</li>
+      <li><b>Privacy</b>: the exported player stores playback state in the viewer's
+        <code>localStorage</code>, sends nothing anywhere, and carries no telemetry of any kind.</li>
+    </ul>
+
+    <h2 id="canon">7 · Canon promotion</h2>
+    <p>
+      A branch outcome never becomes world canon by implication. Promotion is an explicit proposal
+      through the existing gate, whose draft records the source — production, ending or outcome scene,
+      and the route that reaches it — so the canon entry's provenance names the branch it came from, and
+      the gate's ripple view shows what the promotion touches before anyone accepts it.
+    </p>
+
+    <h2 id="cleanup">8 · Design cleanup — Scope §11, mapped to implementation</h2>
+    <table>
+      <tr><th>Screen</th><th>Disposition</th><th>Implementation home</th></tr>
+      <tr><td>34a Game type</td><td>Replace</td><td>Picker's third card is Interactive video (shipped with SPEC-023's create dialog)</td></tr>
+      <tr><td>34b Game day one</td><td>Replace</td><td>Interactive-video day one: start scene + first choice card (#401 client issue)</td></tr>
+      <tr><td>34c Game story overview</td><td>Reassign</td><td>Branch summary atop the branch map (#401 client issue)</td></tr>
+      <tr><td>34d Game dashboard</td><td>Reassign</td><td>Reusables folded into the production dashboard; season board already shipped</td></tr>
+      <tr><td>34e Chapter graph</td><td>Reassign</td><td>The branch map (§3) — no variables, conditions, or unlocks</td></tr>
+      <tr><td>34f State and scopes</td><td>Remove</td><td>Nothing replaces it; the schema is the removal</td></tr>
+      <tr><td>34g Chapter health</td><td>Replace</td><td>The named-findings panel (§4); no percentage</td></tr>
+      <tr><td>34h Talk it through repair</td><td>Keep</td><td>Development thread candidates (§3)</td></tr>
+      <tr><td>34i Canon promotion warning</td><td>Keep</td><td>The promotion proposal (§7)</td></tr>
+      <tr><td>34j Manual playthrough</td><td>Reassign</td><td>Route preview + edge traversal (§5)</td></tr>
+      <tr><td>35a Dual-layer graph</td><td>Remove initially</td><td>Deferred with Interact</td></tr>
+      <tr><td>35b–35e Interaction editor</td><td>Hold</td><td>Revisit only if Interact returns</td></tr>
+    </table>
+    <p class="meta">
+      Assets: a new Interactive-video picker banner is required (ms-interact.png stays held with deferred
+      Interact); ms-watch.png and ms-choose.png keep. Recorded as one pass in design turn 84 — no retired
+      screen is edited piecemeal.
+    </p>
+
+    <h2 id="decomposition">9 · Epic #401, decomposed</h2>
+    <table>
+      <tr><th>Issue</th><th>Owns</th><th>Named tests</th></tr>
+      <tr><td>Contracts &amp; migration</td><td>RoutingSchema and friends (§2), findings derivation, no-state strictness, kind registration</td>
+        <td>IV-C1 strict-refusal of condition/state keys · IV-C2 findings fold per §4 row · IV-C3 evidence version-scoping · IV-C4 no episodic ownership for the interactive kind</td></tr>
+      <tr><td>Coordinator</td><td>routing track in scan/commit/gate, evidence appends, promotion proposal source</td>
+        <td>IV-K1 routing gate round-trip · IV-K2 stale-evidence shed on retarget · IV-K3 promotion draft carries route provenance</td></tr>
+      <tr><td>Branch map (client)</td><td>§3 layout, editing, keyboard, states</td>
+        <td>IV-M1 deterministic layout snapshot · IV-M2 keyboard traversal order · IV-M3 excluded/ending/start states render</td></tr>
+      <tr><td>Player &amp; preview (client)</td><td>§5 playback, choices, evidence recording, resume</td>
+        <td>IV-P1 choice advances scene and appends evidence · IV-P2 resume restores playback state only · IV-P3 untimed default</td></tr>
+      <tr><td>Export &amp; delivery</td><td>§6 package, manifest, deterministic validation, publication gate</td>
+        <td>IV-E1 export refused on blocking finding · IV-E2 manifest hashes verify · IV-E3 package plays offline with relative paths</td></tr>
+    </table>
+    <p class="meta">Filed as linked issues on the repository; #401 tracks them.</p>
+  </body>
+</html>
