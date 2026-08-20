@@ -11,6 +11,7 @@ import {
   newId,
   ProposalSchema,
   RipplePreviewSchema,
+  SceneSchema,
   SeasonSchema,
   SeriesSchema,
   RoutingSchema,
@@ -43,9 +44,12 @@ import { applyJsonResolution, applyResolution, mergeJson, mergeMarkdown } from "
 /**
  * The schema each JSON track's whole file must satisfy (SPEC-023 R-17): checked at staging so a
  * malformed record never reaches review, and again at accept so review edits and conflict
- * resolutions cannot smuggle one out. Scenes are validated by their own staging paths and are
- * deliberately absent here — SceneSchema is the read path, and the gate refusing a legacy shape
- * the scanner tolerates would strand an old scene behind its own Accept button.
+ * resolutions cannot smuggle one out. Scenes belong here too: the scanner reads them with this
+ * exact schema and silently drops what fails, so a scene this gate would refuse is a scene that
+ * stops existing the moment it is accepted — the drafting agent edits its proposal target with
+ * raw file tools, and this is the only fence between those edits and the commit. (An earlier
+ * note here feared stranding a legacy shape the scanner tolerates; the scanner tolerates
+ * nothing SceneSchema refuses, so there is no such shape.)
  */
 const JSON_TRACK_SCHEMAS: Partial<Record<ReturnType<typeof classify>["track"], { parse: (v: unknown) => unknown }>> = {
   story: StoryOverviewSchema,
@@ -53,6 +57,7 @@ const JSON_TRACK_SCHEMAS: Partial<Record<ReturnType<typeof classify>["track"], {
   season: SeasonSchema,
   episode: EpisodeSchema,
   series: SeriesSchema,
+  scene: SceneSchema,
 };
 
 /** The refusal names the record in a person's words, not the commit track's. */
@@ -62,6 +67,7 @@ const JSON_TRACK_LABELS: Partial<Record<ReturnType<typeof classify>["track"], st
   season: "season",
   episode: "episode",
   series: "series record",
+  scene: "scene",
 };
 
 /**
@@ -349,7 +355,13 @@ export class ProposalManager {
         draftRevision: 1,
         ...(input.worldChatOrigins ? { worldChatOrigins: input.worldChatOrigins } : {}),
         ...(input.openChoices ? { openChoices: input.openChoices } : {}),
-        ...(input.skill ? { skill: input.skill } : {}),
+        // Exactly the provenance triple, never the caller's object. The registry's Skill carries
+        // its whole guidance body, and TypeScript's structural typing lets it arrive here under
+        // the narrow type — spread into the manifest it fails the strict ProposalSkillSchema
+        // AFTER the targets are on disk, orphaning an invisible proposal.
+        ...(input.skill
+          ? { skill: { id: input.skill.id, version: input.skill.version, family: input.skill.family } }
+          : {}),
       };
       await this.writeManifest(proposal);
       await this.refreshPreview(proposal);
