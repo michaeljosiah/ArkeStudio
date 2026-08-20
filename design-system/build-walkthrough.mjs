@@ -59,14 +59,14 @@ const STEPS = [
               "A Story production keeps its own day one (frame 54a) — this frame is drawn for a Video production and only that branch changed."] },
   },
   {
-    id: "44a", step: "Development · the overview",
+    id: "44a", step: "Production Chat · the conversation",
     actions: [{ match: "Turn this into a proposal", to: "48a", hint: "stage the draft" }],
     built: { status: "built", route: "#/w/:worldId/p/:prodId/story",
-      notes: ["<b>Built to the drawing (turn 86).</b> The conversation holds the left column and the 470px rail carries the draft, as 44a draws it — the transcript, the composer, the receipt line, and the context pills naming what is in reach.",
-              "<b>The form editor is gone, and so is the door to another screen.</b> The build had grown a second way in — <code>Start the overview</code> beside a <code>Talk it through</code> button that opened the thread in World Chat — and two ways into one file is how a person ends up asking what the conversation is for.",
-              "The rail marks each field a staged proposal would change with <code>would change</code> and the accepted text beneath, derived from the proposal's own field-by-field review, so the screen cannot promise a change the gate would not make.",
-              "The transcript is one component shared with World Chat rather than a second rendering of the same turns.",
-              "Ships as <b>Development</b> on rail and screen ✓ (turn 78's rename), route still <code>story</code>."] },
+      notes: ["<b>Built, and then rethought twice (turns 86, 88, 89).</b> The frame draws a conversation with a draft rail beside it. What ships is the same split with a different rail: the transcript and composer on the left, and <b>what the conversation understood so far</b> on the right — points grouped by subject, marked settled or still a maybe.",
+              "<b>It is called Production Chat.</b> &#8220;Development&#8221; named a phase of filmmaking rather than a thing on a screen. This is World Chat with a production for a subject — same transcript, same points, same wrap-up, same gate — and the name says so.",
+              "<b>The details moved out.</b> What the conversation settles is read next door, on <code>Season</code> or <code>Overview</code>, which is its own rail item. Every screen used to be half a place to make something and half a place to read it, and a person could not tell which they were doing.",
+              "<b>The two rails are different things.</b> Beside a conversation: what it currently understands, soft, changed by saying more. Beside a details screen: what is staged and waiting on a yes.",
+              "The form editor behind <code>Start the overview</code> is gone, and so is the button that used to send you to World Chat."] },
   },
   {
     id: "48a", step: "Season · the question and the engine",
@@ -74,7 +74,7 @@ const STEPS = [
     built: { status: "drifted", route: "#/w/:worldId/p/:prodId/story (Season tab)",
       notes: ["Read-only Series engine card ships, and states what it governs ✓ (binding met).",
               "Unasked state says so in words: <code>THE SEASON QUESTION · Not asked yet.</code>",
-              "Now built to the drawing (turn 86): the conversation is in the view, the eyebrow and question-shaped h1 are back (<code>What is this season about?</code>), and the form editor behind <code>Start the season</code> is retired.",
+              "Built as a <b>details</b> screen (turn 88): the form editor behind <code>Start the season</code> is retired and so is the conversation column — one thread lives in Production Chat, and hanging a composer on each of four views made one conversation wear four costumes. This screen shows what was settled and what is staged against it.",
               "Built without a frame: the defaults pill row, a <code>New episode · name it</code> card, and a season <b>Findings</b> panel."] },
   },
   {
@@ -100,7 +100,7 @@ const STEPS = [
     actions: [{ match: "Turn this into a proposal", to: "53c", hint: "propose the direction" }],
     built: { status: "built", route: "Development → Direction tab",
       notes: ["<b>Turn 48's binding is now met (turn 86).</b> The world's master look is shown first, marked inherited; then the lines this season narrows against it; then a block stating plainly that the world look is unchanged and no other production moves.",
-              "The conversation holds the left column, and the form editor behind <code>Edit the direction</code> is retired.",
+              "The form editor behind <code>Edit the direction</code> is retired, and the conversation lives in Production Chat rather than in this view (turn 88).",
               "What is still not built: the drawn <i>3 lines · would change</i> badge on the narrowing, which needs a staged season proposal to mark against."] },
   },
   {
@@ -207,10 +207,12 @@ const mapHtml = `
   <div class="map__head">
     <h2>How a season becomes a film</h2>
     <p>
-      Three levels, each with its own conversation. The season decides what the thing is; an episode
-      decides what happens in it and <b>makes the scenes it needs</b>; a scene decides how it is shot.
-      Nothing below a level exists until the level above has said what it needs — which is why the
-      arrows only point one way.
+      One pattern, three times: <b>a chat that makes it, and a screen that shows what it made.</b> The
+      season decides what the thing is; an episode decides what happens in it and <b>makes the scenes it
+      needs</b>; a scene decides how it is shot. Nothing below a level exists until the level above has
+      said what it needs, which is why the arrows only point one way. Beside every chat is what it
+      understood so far; beside every details screen is what is staged and waiting on a yes — two
+      different things, never drawn as one.
     </p>
   </div>
 
@@ -220,10 +222,34 @@ const mapHtml = `
     <div class="lvl">
       <div class="lvl__spine">
         <span class="lvl__n">1</span>
-        <span class="lvl__thread">the production thread</span>
+        <span class="lvl__thread">Production Chat</span>
       </div>
       <div class="lvl__body">
-        <div class="lvl__title">The season · what this whole thing is</div>
+        <div class="lvl__title">Talk it out · what this whole thing is</div>
+        <div class="cards">
+          <div class="card is-built" data-goto="44a">
+            <div class="card__k">Production Chat</div>
+            <div class="card__d">World Chat with a production for a subject. One thread. <b>Beside it: what it understood so far</b> — the season question, each episode, each arc — still soft, changed by saying more.</div>
+            <div class="card__f">.conversations/cv_*</div>
+          </div>
+          <div class="card is-built">
+            <div class="card__k">Wrap-up</div>
+            <div class="card__d">What one conversation produced is staged together and accepted as one thing, at the gate.</div>
+            <div class="card__f">.proposals/pr_*</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow"><span>what it settled lands next door</span></div>
+
+    <div class="lvl">
+      <div class="lvl__spine">
+        <span class="lvl__n">1b</span>
+        <span class="lvl__thread">no conversation</span>
+      </div>
+      <div class="lvl__body">
+        <div class="lvl__title">Season · read it and work with it</div>
         <div class="cards">
           <div class="card is-built" data-goto="48a">
             <div class="card__k">Season</div>
@@ -255,7 +281,7 @@ const mapHtml = `
     <div class="lvl">
       <div class="lvl__spine">
         <span class="lvl__n">2</span>
-        <span class="lvl__thread">this episode's thread</span>
+        <span class="lvl__thread">Episode Chat + details</span>
       </div>
       <div class="lvl__body">
         <div class="lvl__title">One episode · what happens in it</div>
@@ -280,7 +306,7 @@ const mapHtml = `
     <div class="lvl">
       <div class="lvl__spine">
         <span class="lvl__n">3</span>
-        <span class="lvl__thread">this scene's thread</span>
+        <span class="lvl__thread">Scene Chat + details</span>
       </div>
       <div class="lvl__body">
         <div class="lvl__title">One scene · how it is shot</div>
