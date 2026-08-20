@@ -53,11 +53,11 @@ import {
   Waveform,
 } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
+import { Composer } from "../components/composer.js";
 import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { ClipPlayButton, clock } from "../components/player.js";
 import { mediaUrl } from "../lib/media.js";
-import { CanonEntryRow } from "../domain/domain.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
 import { useTalkItThrough } from "../lib/talk-it-through.js";
@@ -71,6 +71,10 @@ import {
   cancelExport,
   compileSceneBoard,
   createSheetFromSentence,
+  createWorldChat,
+  attachHostFiles,
+  attachHostText,
+  hostCanAttach,
   dispatchScene,
   draftScene,
   exportCut,
@@ -605,7 +609,6 @@ export function ProductionDashboardScreen() {
   const pending = production.takes.filter((t) => decisions[t.id] === "pending");
   const shots = production.scenes.flatMap((s) => s.shots);
   const acceptedShots = shots.filter((s) => acceptedTakeId(production, s.id)).length;
-  const threads = world.canon.filter((c) => c.status === "open");
   const nextGap = production.scenes
     .flatMap((scene) => scene.shots.map((shot) => ({ scene, shot })))
     .find(({ shot }) => !acceptedTakeId(production, shot.id));
@@ -616,63 +619,32 @@ export function ProductionDashboardScreen() {
 
   return (
     <div className="fy-prodmain" data-screen="production-dashboard">
+      {/* Day one is the production's own name and nothing else (turn 53b): the world it came from
+          is on the rail, and saying so again here is the announcement that screen deliberately
+          dropped. */}
       <div className="fy-h1row">
-        <h1 className="fy-h1">{dayOne ? "Day one. The world walked in with you." : "Here's where you left off."}</h1>
-        <span className="fy-h1row__meta">
-          {dayOne
-            ? `${world.sheets.length} sheets · ${world.canon.length} canon entries · tone came along`
-            : `${acceptedShots} of ${shots.length} shots covered · ${pending.length} need you`}
-        </span>
-      </div>
-      {/* The one editable delivery-profile field (issue 389): validated and normalized
-          server-side, refused per route at dispatch, and every planning surface reads it. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span className="fy-mono">Delivery</span>
-        <select
-          aria-label="Delivery aspect"
-          value={productionAspect(production.meta)}
-          onChange={(e) => worldId && prodId && setProductionAspect(worldId, prodId, e.target.value)}
-          style={{
-            font: "500 12px var(--font-sans)",
-            padding: "4px 8px",
-            borderRadius: 8,
-            border: "1px solid var(--border)",
-            background: "var(--background)",
-            color: "inherit",
-          }}
-        >
-          {STANDARD_ASPECTS.map((a) => (
-            <option key={a} value={a}>
-              {a}
-            </option>
-          ))}
-        </select>
-        {production.meta.aspect === undefined && <span className="fy-mono">default</span>}
+        <h1 className="fy-h1">{dayOne ? production.meta.title : "Here's where you left off."}</h1>
+        {!dayOne && (
+          <span className="fy-h1row__meta">
+            {acceptedShots} of {shots.length} shots covered · {pending.length} need you
+          </span>
+        )}
       </div>
       {dayOne ? (
         <>
-          <div className="fy-threadcard" style={{ flex: "none" }}>
-            <div className="fy-threadcard__head">
-              <span className="fy-threadcard__label">EVERYTHING {world.meta.name.toUpperCase()} KNOWS IS ALREADY HERE</span>
-            </div>
-            <div className="fy-threadcard__sub">
-              Start from a seed below — an open thread worth pulling — or go straight to Scenes and draft the first one.
-            </div>
-            <div className="fy-threadcard__actions">
-              <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/new`)}>
-                Draft the first scene
-              </Button>
-            </div>
-          </div>
-          <div>
-            <div className="fy-listhead">Seeds — open threads and loose ends</div>
-            {threads.map((t) => (
-              <CanonEntryRow key={t.id} entry={t} onOpen={() => navigate(`/w/${worldId}/canon/${t.id}/thread`)} />
-            ))}
-          </div>
+          <DayOne
+            worldId={worldId!}
+            prodId={prodId!}
+            onOpen={(path) => navigate(`/w/${worldId}/p/${prodId}${path}`)}
+          />
+          {/* Below the frame's content, not above it: 53b opens on the production's own name and
+              a box to type in. Delivery postdates that drawing and is the app's own (issue 389),
+              so it sits where it cannot interrupt the opening. */}
+          <DeliveryAspect production={production} worldId={worldId} prodId={prodId} />
         </>
       ) : (
         <>
+          <DeliveryAspect production={production} worldId={worldId} prodId={prodId} />
           <div className="fy-dashrow">
             <div className="fy-threadcard">
               <div className="fy-threadcard__head">
@@ -773,6 +745,127 @@ export function ProductionDashboardScreen() {
   );
 }
 
+/**
+ * The one editable delivery-profile field (issue 389): validated and normalized server-side,
+ * refused per route at dispatch, and every planning surface reads it.
+ */
+function DeliveryAspect({
+  production,
+  worldId,
+  prodId,
+}: {
+  production: { meta: { aspect?: string } };
+  worldId: string | undefined;
+  prodId: string | undefined;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span className="fy-mono">Delivery</span>
+      <select
+        aria-label="Delivery aspect"
+        value={productionAspect(production.meta)}
+        onChange={(e) => worldId && prodId && setProductionAspect(worldId, prodId, e.target.value)}
+        style={{
+          font: "500 12px var(--font-sans)",
+          padding: "4px 8px",
+          borderRadius: 8,
+          border: "1px solid var(--border)",
+          background: "var(--background)",
+          color: "inherit",
+        }}
+      >
+        {STANDARD_ASPECTS.map((a) => (
+          <option key={a} value={a}>
+            {a}
+          </option>
+        ))}
+      </select>
+      {production.meta.aspect === undefined && <span className="fy-mono">default</span>}
+    </div>
+  );
+}
+
+/**
+ * Day one (design turn 53b).
+ *
+ * A production that has nothing in it yet has one job: start writing. What stood here before was
+ * frame 43b — the world's inventory read back, and a rail of canon seeds — which turn 53 cut and
+ * turn 83 superseded in whole. The inventory announced what the rail already says, and the seeds
+ * guessed at a way of working nobody had done; turn 83 leaves them a way back, but only once the
+ * plain path has been used and found wanting.
+ *
+ * So: a heading, a box to type in, and two ways in. Typing changes nothing — the line beneath the
+ * composer is the promise, and sending it opens the Development thread rather than writing a word.
+ */
+function DayOne({
+  worldId,
+  prodId,
+  onOpen,
+}: {
+  worldId: string;
+  prodId: string;
+  onOpen: (path: string) => void;
+}) {
+  const [message, setMessage] = useState("");
+  // Nothing is being said to yet, so what is dropped here is filed as the production's own
+  // artifact rather than attached to a conversation that does not exist.
+  const attachTarget = { kind: "file-artifact", worldId, production: prodId } as const;
+  const send = () => {
+    const text = message.trim();
+    if (!text) return;
+    /*
+     * The first thing said about a production is the opening line of its Development thread, not
+     * a note that lands nowhere. It is created here and read on Development, which is where the
+     * conversation belongs and where this send lands.
+     */
+    createWorldChat(worldId, text, crypto.randomUUID(), { kind: "production", productionId: prodId });
+    setMessage("");
+    onOpen("/story");
+  };
+  return (
+    <>
+      <div style={{ font: "400 14px/1.6 var(--font-sans)", color: "var(--muted-foreground)", maxWidth: 560 }}>
+        Nothing written yet. Say what happens, and the first scene takes shape here.
+      </div>
+      <div style={{ maxWidth: 640 }}>
+        <Composer
+          value={message}
+          onChange={setMessage}
+          onSubmit={send}
+          placeholder="Someone finds the thing they were not meant to find…"
+          agentLabel="story author"
+          onAttach={() => uploadArtifacts(worldId)}
+          onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
+          {...(hostCanAttach()
+            ? {
+                onAttachFiles: (files: readonly File[]) => attachHostFiles(attachTarget, files),
+                onAttachText: (text: string) => attachHostText(attachTarget, text, "pasted-note.txt"),
+              }
+            : {})}
+          autoFocus
+        />
+        <div className="fy-mono" style={{ marginTop: 8 }}>
+          talking writes nothing · you accept what you keep
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 12, maxWidth: 640 }}>
+        <button type="button" className="fy-radio" style={{ flex: 1 }} onClick={() => onOpen("/scenes/new")}>
+          <div style={{ font: "600 13px var(--font-sans)" }}>Write the first scene</div>
+          <div style={{ font: "400 11.5px/1.5 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 4 }}>
+            Straight to a scene you can shoot.
+          </div>
+        </button>
+        <button type="button" className="fy-radio" style={{ flex: 1 }} onClick={() => onOpen("/story")}>
+          <div style={{ font: "600 13px var(--font-sans)" }}>Shape the whole thing first</div>
+          <div style={{ font: "400 11.5px/1.5 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 4 }}>
+            Decide what it is before writing any of it.
+          </div>
+        </button>
+      </div>
+    </>
+  );
+}
+
 // ---- Story (10b) -----------------------------------------------------------
 
 export function StoryScreen() {
@@ -802,6 +895,10 @@ function OverviewStoryScreen() {
   // What drafting can actually reach: the world's cast plus this production's guests, and not
   // another production's one-offs (SPEC-020 R-7).
   const cast = pickableSheets(world?.sheets ?? [], prodId).filter((s) => s.type === "character").length;
+  // This production's own Development thread (issue 400), newest first — the one day one opens.
+  const thread = [...(world?.conversations ?? [])]
+    .filter((c) => c.entryContext?.kind === "production" && c.entryContext.productionId === prodId)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   return (
     <div className="fy-story" data-screen="story-overview">
       <div className="fy-story__chat">
@@ -812,6 +909,19 @@ function OverviewStoryScreen() {
           <h1 className="fy-story__h1">Find the spine together.</h1>
         </div>
         <div className="fy-story__log">
+          {/* What was said on day one arrived here as the thread's opening line, so it is shown
+              here — a send that lands on a screen with no trace of it reads as a lost message. */}
+          {thread && (
+            <button
+              type="button"
+              className="fy-bubble--user"
+              style={{ textAlign: "left", cursor: "pointer", border: 0, font: "inherit" }}
+              onClick={() => navigate(`/w/${worldId}/chat/${thread.id}`)}
+            >
+              {thread.title}
+              <div className="fy-bubble__note">the Development thread · open to keep going</div>
+            </button>
+          )}
           {production?.treatment ? (
             <div className="fy-bubble--gate" style={{ whiteSpace: "pre-wrap" }}>
               {production.treatment}
