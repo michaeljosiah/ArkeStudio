@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import type { WorldChatWorkspace } from "@arke-studio/contracts";
+import type { WorldChatPoint, WorldChatWorkspace } from "@arke-studio/contracts";
 import { Composer } from "./composer.js";
 import {
   cancelWorldChat,
   createWorldChat,
+  rejectWorldChatPoint,
+  saveWorldChatPoint,
   openWorldChat,
   retryWorldChatTurn,
   sendWorldChat,
@@ -141,6 +143,7 @@ export function ProductionConversation({
   heading,
   emptyLine,
   footer,
+  pointsEmpty,
 }: {
   worldId: string | undefined;
   productionId: string | undefined;
@@ -150,6 +153,8 @@ export function ProductionConversation({
   /** What stands where the transcript will be, before anything has been said. */
   emptyLine: string;
   footer?: React.ReactNode;
+  /** What the understanding rail says before there is any. */
+  pointsEmpty?: string;
 }) {
   const { state } = useStore();
   const [message, setMessage] = useState("");
@@ -185,7 +190,8 @@ export function ProductionConversation({
     sendWorldChat(worldId, conversationId, text);
   };
 
-  return (
+  const points = loaded?.points ?? [];
+  const pane = (
     <div className="fy-story__chat">
       {(eyebrow || heading) && (
         <div className="fy-story__chathead">
@@ -234,4 +240,125 @@ export function ProductionConversation({
       </div>
     </div>
   );
+
+  if (pointsEmpty === undefined) return pane;
+  return (
+    <>
+      {pane}
+      <div className="fy-story__side">
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div style={{ font: "600 15px var(--font-sans)" }}>What it understood</div>
+          <span className="fy-mono">{points.length > 0 ? `${points.length} so far` : "nothing yet"}</span>
+        </div>
+        <ConversationPoints
+          points={points}
+          empty={pointsEmpty}
+          {...(worldId && conversationId
+            ? {
+                onSave: (point: WorldChatPoint) =>
+                  saveWorldChatPoint(worldId, conversationId, point.id, point.revision),
+                onReject: (point: WorldChatPoint) =>
+                  rejectWorldChatPoint(worldId, conversationId, point.id, point.revision),
+              }
+            : {})}
+        />
+        <div className="fy-mono" style={{ marginTop: 10 }}>
+          still soft · saying more changes them · wrap-up is what stages them
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * What the conversation understood, as it understands it (design turn 89).
+ *
+ * Grouped by the subject each point is about, so a season being broken into episodes is watched
+ * happening rather than discovered at wrap-up. These are soft: a point is thinking, not a
+ * decision at the door — the staged-proposal rail beside a *details* screen is the other thing,
+ * and the two must never be drawn as one.
+ */
+export function ConversationPoints({
+  points,
+  empty,
+  onSave,
+  onReject,
+  busyId,
+}: {
+  points: readonly WorldChatPoint[];
+  empty: string;
+  onSave?: (point: WorldChatPoint) => void;
+  onReject?: (point: WorldChatPoint) => void;
+  busyId?: string | null;
+}) {
+  const groups = groupPointsBySubject(points);
+  const open = points.filter((p) => p.kind === "question");
+  if (groups.length === 0 && open.length === 0) {
+    return (
+      <div className="fy-panel">
+        <div className="fy-emptycard">
+          <div style={{ font: "400 13px/1.7 var(--font-sans)" }}>{empty}</div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="fy-panel">
+      {groups.map((group) => (
+        <div key={group.subject} className="fy-panel__group">
+          <div className="fy-panel__grouphead">
+            <span className="fy-panel__subject">{group.subject}</span>
+            <span className="fy-mono">{group.kind}</span>
+          </div>
+          {group.items.map((point) => (
+            <div key={point.id} className="fy-panel__point">
+              <div className="fy-panel__pointtext">{point.text}</div>
+              <div className="fy-panel__pointacts">
+                {point.settled ? (
+                  <Button variant="ghost" size="sm" disabled={busyId === point.id} onClick={() => onSave?.(point)}>
+                    {busyId === point.id ? "Saving…" : "Save"}
+                  </Button>
+                ) : (
+                  <span className="fy-panel__pointwhy">still a maybe</span>
+                )}
+                {onReject && (
+                  <Button variant="ghost" size="sm" disabled={busyId === point.id} onClick={() => onReject(point)}>
+                    Reject
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+      {/* A question is not a claim about the production, so it is listed apart from what is. */}
+      {open.length > 0 && (
+        <div className="fy-panel__group">
+          <div className="fy-panel__grouphead">
+            <span className="fy-panel__subject">Still open</span>
+            <span className="fy-mono">{open.length} question{open.length === 1 ? "" : "s"}</span>
+          </div>
+          {open.map((point) => (
+            <div key={point.id} className="fy-panel__point">
+              <div className="fy-panel__pointtext">{point.text}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Points under the thing each is about; questions are pulled out and listed on their own. */
+export function groupPointsBySubject<P extends { kind: string; subject: string; subjectKind: string }>(
+  points: readonly P[],
+): Array<{ subject: string; kind: string; items: P[] }> {
+  const groups: Array<{ subject: string; kind: string; items: P[] }> = [];
+  for (const point of points) {
+    if (point.kind === "question") continue;
+    const existing = groups.find((g) => g.subject === point.subject);
+    if (existing) existing.items.push(point);
+    else groups.push({ subject: point.subject, kind: point.subjectKind, items: [point] });
+  }
+  return groups;
 }

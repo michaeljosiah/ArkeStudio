@@ -64,7 +64,7 @@ import {
   ProductionLayout,
   SceneDetailScreen,
   ScenesScreen,
-  DevelopmentChatScreen,
+  ProductionChatScreen,
   StoryScreen,
   VoiceLineDialogScreen,
 } from "./screens/production.js";
@@ -177,7 +177,7 @@ export function App() {
           {/* Talking and looking are two screens (turn 88): `story` is the conversation that sets
               the foundations up, and the details it produced are read next door — `season` for an
               episodic production, `overview` for one without a season. */}
-          <Route path="story" element={<DevelopmentChatScreen />} />
+          <Route path="story" element={<ProductionChatScreen />} />
           <Route path="season" element={<StoryScreen />} />
           <Route path="overview" element={<StoryScreen />} />
           <Route path="story/episodes/:episodeId" element={<EpisodeDetailScreen />} />

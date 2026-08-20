@@ -259,9 +259,10 @@ export function ProductionLayout() {
           {item("cast", "Cast", String(guestCount))}
           {isStory ? (
             <>
-              {/* Development is the conversation; the details it sets up are their own item
-                  (turn 88). Development ends where Chapters begins, so they never light together. */}
-              {item("story", "Development", "chat", true)}
+              {/* World Chat with a production for a subject (turn 89) — the name teaches the
+                  model. Its details are their own item (turn 88), and it ends where Chapters
+                  begins so the two never light together. */}
+              {item("story", "Production Chat", "chat", true)}
               {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
               {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
               {item("audio", "Audio", String(audioCount))}
@@ -269,10 +270,10 @@ export function ProductionLayout() {
             </>
           ) : (
             <>
-              {/* Development is the conversation and nothing else (turn 88); what it sets up is
-                  read next door. The rail item reads Development; Story stays a family in the
-                  picker (turn 78), and the route keeps its name — a rename is display, not wiring. */}
-              {item("story", "Development", "chat", true)}
+              {/* World Chat with a production for a subject (turn 89): the same transcript, the
+                  same points, the same wrap-up. What it sets up is read next door (turn 88), and
+                  the route keeps its name — a rename is display, never wiring. */}
+              {item("story", "Production Chat", "chat", true)}
               {shape?.isEpisodic
                 ? item("season", "Season", production?.season ? `v${production.season.version}` : "—")
                 : item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
@@ -873,26 +874,25 @@ function DayOne({
 }
 
 /**
- * Development: the conversation, and nothing else (design turn 88).
+ * Production Chat: World Chat with a production for a subject (design turns 88, 89).
  *
  * Turn 48 hung a conversation on each of four views, so one thread — R-20 says a production has
  * exactly one — wore four costumes, and every screen was half a place to make something and half
  * a place to read it. This screen is only the first half. What it sets up is read next door, on
  * Season or Overview, which is the other thing a person does and now has its own name on the rail.
  */
-export function DevelopmentChatScreen() {
+export function ProductionChatScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const shape = production ? productionShape(production.meta) : null;
   const cast = pickableSheets(world?.sheets ?? [], prodId).filter((s) => s.type === "character").length;
   const details = shape?.isEpisodic ? "Season" : "Overview";
   return (
-    <div className="fy-prodmain" data-screen="development-chat">
-      <div style={{ display: "grid", gridTemplateRows: "1fr", height: "100%", minHeight: 0 }}>
-        <ProductionConversation
+    <div className="fy-story" data-screen="production-chat">
+      <ProductionConversation
           worldId={worldId}
           productionId={prodId}
-          eyebrow={`DEVELOPMENT · ${shape ? shape.displayLabel.toLowerCase() : ""}`}
+          eyebrow={`PRODUCTION CHAT · ${shape ? shape.displayLabel.toLowerCase() : ""}`}
           heading={shape?.isEpisodic ? "What is this season?" : "Find the spine together."}
           placeholder="Say what this is — what happens, who it costs, how it ends…"
           emptyLine={
@@ -915,8 +915,8 @@ export function DevelopmentChatScreen() {
               </NavLink>
             </div>
           }
+          pointsEmpty="Nothing understood yet. As you talk, what the studio takes from it appears here — the season question, each episode, each arc — so you can see it thinking rather than wait for the end."
         />
-      </div>
     </div>
   );
 }
