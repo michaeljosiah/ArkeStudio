@@ -34,7 +34,8 @@ const STEPS = [
       notes: ["Third card is <b>Interactive video</b>, not <b>Stills</b> — Stills became a lens on Generate. (Turn 84 binding, never drawn.)",
               "Button reads <code>Create production</code>, or <code>Create Series and Season 1</code> for a Microdrama. The drawn <code>Create and open day one</code> and its caption <i>nothing generates · nothing is copied out of the world</i> are absent.",
               "<b>Turn 83 binding unmet:</b> the primary should read <code>Continue · what kind of video?</code> and route to step two. That string does not exist.",
-              "Video kinds line reads <code>short film · Microdrama · series</code> ✓ (turn 78)."] },
+              "Video kinds line reads <code>short film · Microdrama · series</code> ✓ (turn 78).",
+              "<b>Structure differs:</b> the drawing is a modal floating over the world's key art, blurred back. The app renders a card on an ordinary page with the world nav still overhead — so the moment reads as another screen rather than as a decision lifted out of the world."] },
   },
   {
     id: "53a", step: "Step two · what kind of video?",
@@ -42,7 +43,9 @@ const STEPS = [
     built: { status: "drifted", route: "same screen — no second step",
       notes: ["<b>There is no second screen.</b> No <code>What kind of video?</code> heading, no <code>step 2 of 2</code>, no <code>Back</code>: choosing Video reveals the kinds inline.",
               "<b>Music video is not built</b> as a kind — only Short film and Microdrama series — although turns 60 and 80 draw a whole music-video Cut and Spine around it.",
-              "The four defaults are chip rows, not dropdowns, and <b><code>EPISODE LENGTH</code> is missing entirely</b> (45–75s is hard-coded into the season record).",
+              "<b>Three dropdowns where the drawing has four.</b> frame, episodes and ending ship as real <code>&lt;select&gt;</code> controls — the drawing's point, that a number you cannot tell is editable is a number nobody edits, is honoured. <b><code>EPISODE LENGTH</code> is missing entirely</b>: 45–75s is hard-coded into the season record and only ever shown, read-only, on Development.",
+              "Labels are lower-case (<code>frame</code> / <code>episodes</code> / <code>ending</code>) where the drawing sets them in mono caps.",
+              "Built beyond the drawing: a <code>Series name · … — Season 1 is created with it</code> field, which 53a has no equivalent of and which is genuinely needed once a Series is being made.",
               "The bound banner images (<i>“the choice is made by looking rather than by reading”</i>) are not there; the kind cards are text only."] },
   },
   {
