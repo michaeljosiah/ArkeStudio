@@ -135,6 +135,39 @@ export {
   type TakePosterMaker,
   type TakePosterUnavailableReason,
 } from "./takes/poster.js";
+export {
+  appendTraversal,
+  exportInteractive,
+  interactiveFindings,
+  proposeBranchCanon,
+  readTraversal,
+  saveRouting,
+  type InteractiveExportResult,
+} from "./productions/interactive.js";
+export {
+  advanceAllPlans,
+  advancePlan,
+  appendPlanEvents,
+  createDispatchPlan,
+  listPlans,
+  planState,
+  readPlanEvents,
+  type CreatePlanInput,
+  type PlanDriverDeps,
+} from "./productions/plans.js";
+export {
+  boundaryFrameArgs,
+  chainBoundaryFrame,
+  createBoundaryFrameMaker,
+  extractBoundaryArtifact,
+  type BoundaryExtractResult,
+  BOUNDARY_MAX_OUTPUT_BYTES,
+  BOUNDARY_METHOD,
+  BOUNDARY_TIMEOUT_MS,
+  type BoundaryChainResult,
+  type BoundaryFrameMaker,
+  type BoundaryFrameUnavailableReason,
+} from "./takes/boundary.js";
 export { exportWorld, runExport, WORLD_EXPORT_EXCLUDED, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 export { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
 export {

@@ -20,6 +20,9 @@ import {
   type HealthComponent,
   buildExportPlan,
   exportOverlays,
+  deriveEpisodeCut,
+  episodeExportRefusals,
+  sortScenes,
   buildFfmpegArgs,
   buildSpineExportPlan,
   buildSpineFfmpegArgs,
@@ -78,10 +81,35 @@ import {
   draftSceneSkeleton,
   exportBoard,
   landBoard,
+  overviewSteer,
+  productionCreatedBy,
+  proposeEpisode,
+  proposeSeason,
+  proposeStoryOverview,
   reorderChapters,
+  reorderEpisodes,
+  reorderScenes,
   saveChapter,
+  setProductionAspect,
   setPromptOverride,
 } from "./productions/ops.js";
+import {
+  advancePlan,
+  advanceAllPlans,
+  appendPlanEvents,
+  createDispatchPlan,
+  listPlans,
+  planState,
+  type PlanDriverDeps,
+} from "./productions/plans.js";
+import {
+  appendTraversal,
+  exportInteractive,
+  interactiveFindings,
+  proposeBranchCanon,
+  saveRouting,
+  type InteractiveExportResult,
+} from "./productions/interactive.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
 import { ProviderToolService, type ToolProbe } from "./providers/tool.js";
 import { ProviderCallStore } from "./providers/call-store.js";
@@ -100,6 +128,7 @@ import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
+import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 
 /**
  * How long an opening bench session may spend drawing pictures it should already have. Long
@@ -382,6 +411,12 @@ export interface CoordinatorOptions {
   takeQcAnalyzer?: TakeQcAnalyzer;
   takePosterMaker?: TakePosterMaker;
   /**
+   * Boundary-frame extraction (issue 154), on the same terms as the poster maker: wired only
+   * where an ffmpeg binary resolves. Absent means accepting a take chains only the legacy
+   * steering pointer, and the reason is logged rather than silent.
+   */
+  boundaryFrameMaker?: BoundaryFrameMaker;
+  /**
    * The credential file's name inside the app root. Only dev overrides it, and only because its
    * cipher is not safeStorage: `ARKE_STUDIO_ROOT` can point the dev coordinator at a real app
    * root, and two ciphers sharing one file would leave whichever wrote last unreadable by the
@@ -654,6 +689,10 @@ export class Coordinator {
   private started = false;
   private stopping = false;
   private stopPromise: Promise<void> | null = null;
+  /** Request ids whose create-production is still running — redelivery waits, never doubles (#384). */
+  private readonly creatingProductions = new Set<string>();
+  /** In-flight dispatch-scene-planned requestIds (SPEC-024 R-12): the same redelivery guard. */
+  private readonly creatingPlans = new Set<string>();
   private readonly activeMessages = new Set<Promise<void>>();
   private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
@@ -708,7 +747,19 @@ export class Coordinator {
             clients: opts.dispatchClients,
             getKey: async (provider) =>
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
-            emit: (event) => this.emit(event),
+            emit: (event) => {
+              this.emit(event);
+              // A plan job settling is what unblocks its dependents (SPEC-024 R-18): advance is
+              // a fold plus one durable act, so firing it here costs nothing when nothing moved.
+              if (
+                event.type === "job.updated" &&
+                (event.job.status === "succeeded" ||
+                  event.job.status === "failed" ||
+                  event.job.status === "cancelled")
+              ) {
+                void this.advancePlansForJob(event.job).catch(() => {});
+              }
+            },
             ledger: {
               readJobIds: () => this.ledger!.readJobIds(),
               has: async (jobId) => (await this.ledger!.readAll()).some((e) => e.jobId === jobId),
@@ -2389,6 +2440,10 @@ export class Coordinator {
       case "world-chat-create": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
+        // The first conversation crosses the schema boundary (#70 §4.1, issue #403): older
+        // builds must refuse this world rather than export `.conversations` they do not know
+        // to exclude. The raise is durable before the conversation directory exists.
+        await store.ensureSchemaVersion(2, "world-chat");
         const service = new WorldChatService(store.dir);
         const row = await service.create({
           title: msg.title,
@@ -2454,6 +2509,18 @@ export class Coordinator {
           await this.attachToWorldChat(store, msg.conversationId, sourcePath);
         }
         await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "world-chat-set-initiative": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await new WorldChatService(store.dir).setInitiative(msg.conversationId, msg.initiative);
+        await this.refreshConversations(store);
+        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
+          await this.openWorldChat(store, msg.conversationId);
+        } else {
+          this.transport.broadcastSnapshot();
+        }
         return;
       }
       case "world-chat-archive":
@@ -3149,15 +3216,65 @@ export class Coordinator {
       case "create-production": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
+        const requestId = msg.requestId;
+        const answer = (result: { disposition: "created"; slug: string } | { disposition: "failed"; reason: string }) => {
+          // Only a correlated request gets a correlated answer; a legacy frame keeps the old
+          // snapshot-only contract.
+          if (!requestId) return;
+          this.emit({
+            at: new Date().toISOString(),
+            type: "production.create-result",
+            requestId,
+            worldId: msg.worldId,
+            ...result,
+          });
+        };
+        // The frame names a medium or the legacy format (SPEC-023 R-1); one that names neither
+        // is malformed — refused with its correlated answer, never dropped into a dialog that
+        // waits forever.
+        if (msg.medium === undefined && msg.format === undefined) {
+          answer({ disposition: "failed", reason: "the request names neither a medium nor a format" });
+          return;
+        }
+        if (requestId) {
+          // Redelivery of a request that is still running: its result will broadcast once.
+          // Marked BEFORE any await — frames are handled concurrently, and a check-then-add
+          // across the change-log read let two deliveries of one requestId both create.
+          if (this.creatingProductions.has(requestId)) return;
+          this.creatingProductions.add(requestId);
+          // Redelivery of a request whose commit already landed: same slug, no second
+          // production, no title-2 (#384). The whole change log is consulted, not the
+          // bundle's windowed tail, so the answer survives restart and later work.
+          const prior = await productionCreatedBy(store.dir, requestId).catch(() => null);
+          if (prior) {
+            this.creatingProductions.delete(requestId);
+            answer({ disposition: "created", slug: prior });
+            return;
+          }
+        }
         try {
-          await createProduction(store, {
+          const slug = await createProduction(store, {
             title: msg.title,
-            format: msg.format,
+            ...(msg.format !== undefined ? { format: msg.format } : {}),
+            ...(msg.medium !== undefined ? { medium: msg.medium } : {}),
+            ...(msg.productionKind !== undefined ? { productionKind: msg.productionKind } : {}),
+            ...(msg.seriesTitle !== undefined ? { seriesTitle: msg.seriesTitle } : {}),
+            ...(msg.aspect !== undefined ? { aspect: msg.aspect } : {}),
+            ...(msg.defaults !== undefined ? { defaults: msg.defaults } : {}),
             ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
+            ...(requestId !== undefined ? { requestId } : {}),
           });
           await this.refreshWorldSnapshot(msg.worldId);
-        } catch {
+          // Acknowledged only after the commit is durable and the snapshot carries it.
+          answer({ disposition: "created", slug });
+        } catch (err) {
           this.transport.broadcastSnapshot();
+          answer({
+            disposition: "failed",
+            reason: err instanceof Error ? err.message.slice(0, 300) : "the production could not be created",
+          });
+        } finally {
+          if (requestId) this.creatingProductions.delete(requestId);
         }
         return;
       }
@@ -3258,6 +3375,125 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "propose-story-overview": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        try {
+          const { proposalId } = await proposeStoryOverview(store, gate, {
+            productionId: msg.productionId,
+            source: "form",
+            overview: {
+              ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
+              ...(msg.spine !== undefined ? { spine: msg.spine } : {}),
+              ...(msg.targetLength !== undefined ? { targetLength: msg.targetLength } : {}),
+              ...(msg.acts !== undefined ? { acts: msg.acts } : {}),
+            },
+          });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.staged",
+            worldId: msg.worldId,
+            proposalId,
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "propose-season": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        try {
+          const { proposalId } = await proposeSeason(store, gate, {
+            productionId: msg.productionId,
+            source: "form",
+            season: {
+              ...(msg.question !== undefined ? { question: msg.question } : {}),
+              ...(msg.ending !== undefined ? { ending: msg.ending } : {}),
+              ...(msg.direction !== undefined ? { direction: msg.direction } : {}),
+              ...(msg.arcs !== undefined ? { arcs: msg.arcs } : {}),
+            },
+          });
+          this.emit({ at: new Date().toISOString(), type: "proposal.staged", worldId: msg.worldId, proposalId });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "propose-episode": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store) return;
+        try {
+          const { proposalId } = await proposeEpisode(store, gate, {
+            productionId: msg.productionId,
+            source: "form",
+            ...(msg.episodeId !== undefined ? { episodeId: msg.episodeId } : {}),
+            episode: {
+              ...(msg.title !== undefined ? { title: msg.title } : {}),
+              ...(msg.order !== undefined ? { order: msg.order } : {}),
+              ...(msg.promise !== undefined ? { promise: msg.promise } : {}),
+              ...(msg.scenes !== undefined ? { scenes: msg.scenes } : {}),
+            },
+          });
+          this.emit({ at: new Date().toISOString(), type: "proposal.staged", worldId: msg.worldId, proposalId });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "reorder-episodes": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await reorderEpisodes(store, msg.productionId, msg.orderedIds).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "draft-story-overview": {
+        const gate = this.opts.provider.gate?.();
+        const store = this.opts.provider.openStore?.();
+        if (!gate || !store || !this.authoring || !this.opts.adapter?.readiness().ready) return;
+        try {
+          const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+          const { proposalId, path } = await proposeStoryOverview(store, gate, {
+            productionId: msg.productionId,
+            source: "chat:studio",
+            // The agent drafts over the live overview (or a bare one); nothing writes live.
+            overview: production?.story ? { ...production.story } : {},
+          });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.staged",
+            worldId: msg.worldId,
+            proposalId,
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+          const worldQueryUrl = await this.worldQuery.start();
+          this.trackBackground(
+            this.authoring
+              .run(
+                store,
+                gate,
+                {
+                  worldId: msg.worldId,
+                  proposalId,
+                  purpose: "drafting",
+                  instruction: `Write the story overview in ${path}. ${msg.instruction}. The file is one JSON document: keep the version field untouched and fill logline (one sentence), spine (the shape of the whole story), acts (an array of { title, summary }), and targetLength. Anything the overview implies about the world — a new name, a rule, a place — must NOT be written into world files; note such facts in the spine text as open questions for separate proposal. Do not touch any other file.`,
+                },
+                worldQueryUrl,
+              )
+              .then(() => this.refreshWorldSnapshot(msg.worldId)),
+          );
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
       case "draft-chapter": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
@@ -3285,7 +3521,9 @@ export class Coordinator {
                 worldId: msg.worldId,
                 proposalId: staged.id,
                 purpose: "drafting",
-                instruction: `Draft the chapter prose in ${path}. ${msg.instruction}. Anything the prose implies about the world — a new name, a rule, a place — must NOT be written into world files; list such facts at the end of the chapter under a "## Surfaced facts" heading for separate proposal.`,
+                instruction: `Draft the chapter prose in ${path}. ${msg.instruction}.${overviewSteer(
+                  store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.story,
+                )} Anything the prose implies about the world — a new name, a rule, a place — must NOT be written into world files; list such facts at the end of the chapter under a "## Surfaced facts" heading for separate proposal.`,
               },
               worldQueryUrl,
             )
@@ -3299,6 +3537,260 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         await reorderChapters(store, msg.productionId, msg.orderedFiles).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "reorder-scenes": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await reorderScenes(store, msg.productionId, msg.orderedIds).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "dispatch-scene-planned": {
+        const fail = (reason: string): void =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "production.plan-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            disposition: "failed",
+            reason,
+          });
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.opts.manifest) {
+          fail("The scene could not be prepared for a plan.");
+          return;
+        }
+        const bundle = store.getBundle();
+        const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
+        const scene = production?.scenes.find((s) => production.sceneFiles[s.id] === msg.sceneFile);
+        const model = this.opts.manifest.models.find((m) => m.id === msg.modelId);
+        if (!production || !scene || !model) {
+          fail("The scene or selected model is no longer available.");
+          return;
+        }
+        const audioDesign = await audioDesignFor(store, production.meta.id);
+        // The same plan the dialog reviewed, recomputed server-side — then compiled and made
+        // durable BEFORE any pass may reach a provider (SPEC-024 R-12).
+        const scenePlan = planScene(
+          {
+            world: bundle.meta,
+            artDirection: bundle.artDirection,
+            productionId: production.meta.id,
+            production: {
+              ...(production.meta.musicPolicy !== undefined ? { musicPolicy: production.meta.musicPolicy } : {}),
+              failureModes: production.meta.failureModes,
+            },
+            sheets: bundle.sheets,
+            kits: bundle.referenceKits,
+            scene,
+            selections: production.selections,
+            model,
+            audioDesign,
+            artifacts: bundle.artifacts,
+            ...(production.meta.aspect !== undefined ? { aspect: production.meta.aspect } : {}),
+            ...(msg.resolution !== undefined ? { resolution: msg.resolution } : {}),
+            ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
+          },
+          msg.mode,
+        );
+        // In-flight guard, marked before any await (#384's lesson): frames are handled
+        // concurrently, and a redelivered requestId racing the directory-scan idempotency check
+        // in createDispatchPlan would authorize the same scene twice.
+        if (this.creatingPlans.has(msg.requestId)) return;
+        this.creatingPlans.add(msg.requestId);
+        try {
+          const aggregate = await createDispatchPlan(store, {
+            worldId: msg.worldId,
+            productionId: production.meta.id,
+            scene,
+            plan: scenePlan,
+            model,
+            world: bundle,
+            policy: msg.policy,
+            requestId: msg.requestId,
+            clock: () => new Date().toISOString(),
+          });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "production.plan-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: production.meta.id,
+            disposition: "created",
+            planId: aggregate.planId,
+          });
+          // The plan is durably created — a hiccup advancing it is a log line and a later
+          // trigger's job, never a second, contradictory result for the same requestId.
+          try {
+            await advancePlan(store, production, bundle, aggregate, this.planDriverDeps());
+            await this.emitPlanStates(store, msg.worldId, production.meta.id);
+          } catch (err) {
+            void this.appLog?.append({
+              kind: "plan.advance-failed",
+              planId: aggregate.planId,
+              reason: err instanceof Error ? err.message : String(err),
+            });
+          }
+        } catch (err) {
+          fail(err instanceof Error ? err.message : String(err));
+        } finally {
+          this.creatingPlans.delete(msg.requestId);
+        }
+        return;
+      }
+      case "plan-continue":
+      case "plan-reconfirm": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const bundle = store.getBundle();
+        const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
+        const plan = (await listPlans(store, msg.productionId)).find((p) => p.planId === msg.planId);
+        if (!production || !plan) return;
+        // The visible act, recorded before anything moves (SPEC-024 R-16/R-17). Appending twice
+        // is harmless — the fold reads presence, not count.
+        await appendPlanEvents(store, msg.productionId, msg.planId, [
+          {
+            kind: msg.kind === "plan-continue" ? "continue-approved" : "reconfirmed",
+            ts: new Date().toISOString(),
+            planId: msg.planId,
+            passIndex: msg.passIndex,
+          },
+        ]);
+        await advancePlan(store, production, bundle, plan, this.planDriverDeps()).catch(() => {});
+        await this.emitPlanStates(store, msg.worldId, msg.productionId);
+        return;
+      }
+      case "plan-cancel": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const plan = (await listPlans(store, msg.productionId)).find((p) => p.planId === msg.planId);
+        if (!plan) return;
+        // The mark first, durably — then the fold: cancelling from a pre-cancel snapshot missed
+        // any job a racing advance enqueued in the gap, and every non-terminal job deserves the
+        // ask, waiting-reconciliation included.
+        await appendPlanEvents(store, msg.productionId, msg.planId, [
+          { kind: "cancelled", ts: new Date().toISOString(), planId: msg.planId },
+        ]);
+        const state = await planState(store, plan, this.planDriverDeps());
+        // Future spend stops here; in-flight jobs are asked to stop through SPEC-009, which
+        // owes no promise about work already running at a provider (R-25).
+        for (const pass of state.passes) {
+          if (pass.jobId !== undefined && pass.state !== "succeeded" && pass.state !== "failed") {
+            await this.jobQueue?.cancel(pass.jobId).catch(() => {});
+          }
+        }
+        await this.emitPlanStates(store, msg.worldId, msg.productionId);
+        return;
+      }
+      case "list-plans": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const bundle = store.getBundle();
+        const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
+        if (!production) return;
+        // Recovery on request (T-19): advancing is a fold plus at most one durable act per pass,
+        // so the first screen that asks after a restart is the reconciliation.
+        await advanceAllPlans(store, production, bundle, this.planDriverDeps()).catch(() => {});
+        await this.emitPlanStates(store, msg.worldId, msg.productionId);
+        return;
+      }
+      case "save-routing": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        try {
+          // The strict parse IS the no-state import gate (brief §1): a condition key fails here
+          // with the key named, before anything touches disk.
+          await saveRouting(store, msg.productionId, msg.routing);
+          await this.refreshWorldSnapshot(msg.worldId);
+          await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
+        } catch (err) {
+          void this.appLog?.append({
+            kind: "routing.refused",
+            reason: err instanceof Error ? err.message : String(err),
+            detail: { productionId: msg.productionId },
+          });
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "record-traversal": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+        if (!production || production.routing === null) return;
+        await appendTraversal(store, msg.productionId, {
+          ts: new Date().toISOString(),
+          routingVersion: production.routing.version,
+          choiceId: msg.choiceId,
+          from: msg.from,
+          to: msg.to,
+          route: msg.route,
+        }).catch(() => {});
+        await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
+        return;
+      }
+      case "list-routing-findings": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
+        return;
+      }
+      case "propose-branch-canon": {
+        const store = this.opts.provider.openStore?.();
+        const gate = this.opts.provider.gate?.();
+        if (!store || !gate) return;
+        try {
+          await proposeBranchCanon(store, gate, {
+            productionId: msg.productionId,
+            sceneId: msg.sceneId,
+            route: msg.route,
+            title: msg.title,
+            body: msg.body,
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "export-interactive": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+        if (!production) return;
+        const result = await exportInteractive(store, production, () => new Date().toISOString()).catch(
+          (err): InteractiveExportResult => ({
+            ok: false,
+            blockers: [err instanceof Error ? err.message : String(err)],
+          }),
+        );
+        this.emit({
+          at: new Date().toISOString(),
+          type: "production.interactive-export-result",
+          worldId: msg.worldId,
+          productionId: msg.productionId,
+          disposition: result.ok ? "exported" : "refused",
+          ...(result.ok ? { dir: result.dir } : { blockers: result.blockers }),
+        });
+        return;
+      }
+      case "set-production-aspect": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        try {
+          await setProductionAspect(store, msg.productionId, msg.aspect);
+        } catch (err) {
+          // A malformed shape is refused by name (issue 389) — logged rather than stored, and
+          // the snapshot below shows the production unchanged.
+          void this.appLog?.append({
+            kind: "production-edit.refused",
+            reason: err instanceof Error ? err.message : String(err),
+            detail: { productionId: msg.productionId, aspect: msg.aspect },
+          });
+        }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -3320,12 +3812,12 @@ export class Coordinator {
         if (!store) return;
         const bundle = store.getBundle();
         const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
-        const scene = production?.scenes.find(
-          (s) => `${String(s.number).padStart(2, "0")}-${s.slug}` === msg.sceneFile,
-        );
+        // The stem captured at scan is the address (issue #387) — never a reconstruction, so a
+        // file named off-pattern stays reachable.
+        const scene = production?.scenes.find((s) => production.sceneFiles[s.id] === msg.sceneFile);
         if (!production || !scene) return;
         try {
-          const png = await compileBoard(store, production, scene);
+          const png = await compileBoard(store, production, scene, bundle.artifacts);
           if (msg.kind === "compile-scene-board") {
             await landBoard(store, msg.productionId, msg.sceneFile, png, () => new Date().toISOString());
           } else {
@@ -3349,9 +3841,7 @@ export class Coordinator {
         }
         const bundle = store.getBundle();
         const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
-        const scene = production?.scenes.find(
-          (s) => `${String(s.number).padStart(2, "0")}-${s.slug}` === msg.sceneFile,
-        );
+        const scene = production?.scenes.find((s) => production.sceneFiles[s.id] === msg.sceneFile);
         const model = this.opts.manifest.models.find((m) => m.id === msg.modelId);
         if (!production || !scene || !model) {
           this.rejectEnqueue(msg.requestId, msg.kind, "The scene or selected model is no longer available.");
@@ -3378,6 +3868,11 @@ export class Coordinator {
             selections: production.selections,
             model,
             audioDesign,
+            // The world's shelf, for resolving durable boundary frames (issue 154).
+            artifacts: bundle.artifacts,
+            // The production's delivery aspect (issue 389): stills shape to it, video routes
+            // receive it, and an impossible shape is refused by composition below.
+            ...(production.meta.aspect !== undefined ? { aspect: production.meta.aspect } : {}),
             ...(msg.resolution !== undefined ? { resolution: msg.resolution } : {}),
             ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
           },
@@ -3440,6 +3935,32 @@ export class Coordinator {
             selection: store.getBundle().productions.find((p) => p.meta.id === msg.productionId)
               ?.selections[msg.shotId] ?? { acceptedTakeId: msg.takeId as never, trimInSec: 0 },
           });
+          // Continuity's durable half (issue 154): the accept promised the following shot a
+          // start frame — cut the actual picture, file it with provenance, and point the
+          // selection at it. Total and best-effort: a build without ffmpeg logs why and the
+          // accept stands exactly as it did before boundary frames existed.
+          const fresh = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+          const acceptedTake = fresh?.takes.find((t) => t.id === msg.takeId);
+          if (fresh !== undefined && acceptedTake !== undefined) {
+            const ordered = sortScenes(fresh.scenes).flatMap((s) => s.shots);
+            const index = ordered.findIndex((s) => s.id === msg.shotId);
+            const following = index >= 0 ? ordered[index + 1] : undefined;
+            if (following !== undefined) {
+              const chained = await chainBoundaryFrame(store, fresh, {
+                take: acceptedTake,
+                followingShotId: following.id,
+                maker: this.opts.boundaryFrameMaker,
+                clock: () => new Date().toISOString(),
+              });
+              if (!chained.ok) {
+                void this.appLog?.append({
+                  kind: "boundary-frame.unavailable",
+                  reason: chained.reason,
+                  detail: { takeId: msg.takeId, shotId: following.id },
+                });
+              }
+            }
+          }
           await this.refreshWorldSnapshot(msg.worldId);
         } catch {
           this.transport.broadcastSnapshot();
@@ -3571,8 +4092,10 @@ export class Coordinator {
          */
         // Keyed by world too: a production id is a slug inside its world, not a global name, so
         // two worlds with the same directory slug would have shared one lock and the second
-        // world's export would have been dropped as a duplicate (Codex round 4).
-        const exportKey = `${msg.worldId}:${msg.productionId}`;
+        // world's export would have been dropped as a duplicate (Codex round 4). Keyed by
+        // episode as well (issue #396): seven episodes are seven deliverables, and a season
+        // batch encodes them side by side — one episode's claim must not drop its neighbour's.
+        const exportKey = `${msg.worldId}:${msg.productionId}:${msg.episodeId ?? "production"}`;
         if (this.exportsInFlight.has(exportKey)) return;
         this.exportsInFlight.add(exportKey);
         let started = false;
@@ -3590,6 +4113,7 @@ export class Coordinator {
             type: "export.progress",
             worldId: msg.worldId,
             productionId: msg.productionId,
+            ...(msg.episodeId !== undefined ? { episodeId: msg.episodeId } : {}),
             exportId,
             status,
             percent,
@@ -3666,6 +4190,50 @@ export class Coordinator {
         }
         if (spine && trackInfo !== null && !trackInfo.hasAudio) {
           emitProgress(attemptId, "failed", 0, null, "the master track has no audio stream — assign a track that does");
+          return;
+        }
+
+        /*
+         * One episode's deliverable (SPEC-023 R-24, issue #396): the refusal is said before the
+         * encode, by name — an empty episode, a contradictory membership, or a spine production
+         * (which is cut against its track, and no episode-to-spine range authority exists yet).
+         * Gaps do not refuse: they become labelled slates, exactly as the production-wide cut
+         * treats them, so one episode's gaps never misreport another's.
+         */
+        if (msg.episodeId !== undefined) {
+          const refusal = episodeExportRefusals(production, msg.episodeId);
+          if (refusal) {
+            emitProgress(attemptId, "failed", 0, null, `episode export refused: ${refusal.detail}`);
+            return;
+          }
+          const episode = production.episodes.find((e) => e.id === msg.episodeId)!;
+          const plan = buildExportPlan(deriveEpisodeCut(production, msg.episodeId), msg.preset);
+          const stamp = new Date()
+            .toISOString()
+            .replace(/[-:TZ.]/g, "")
+            .slice(0, 14);
+          const stem = production.episodeFiles[episode.id] ?? episode.id;
+          const handle = runExport(
+            store.dir,
+            (stage) => buildFfmpegArgs(plan, store.dir, stage),
+            // The episode stem keeps filenames collision-free across episodes; the stamp keeps
+            // retries from overwriting what a person may already have sent on.
+            `${msg.productionId}-${stem}-${msg.preset}-${stamp}.mp4`,
+            runner,
+            (percent) => emitProgress(handle.id, "running", percent, null, null),
+          );
+          this.exports.set(handle.id, handle);
+          emitProgress(handle.id, "running", 0, null, null);
+          started = true;
+          this.trackBackground(
+            handle.done.then((result) => {
+              this.exports.delete(handle.id);
+              this.exportsInFlight.delete(exportKey);
+              if (result.status === "done") emitProgress(handle.id, "done", 100, result.output, null);
+              else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
+              else emitProgress(handle.id, "failed", 0, null, result.error);
+            }),
+          );
           return;
         }
 
@@ -6466,6 +7034,80 @@ export class Coordinator {
 
   private nowIso(): string {
     return new Date().toISOString();
+  }
+
+  /** What a plan driver needs (SPEC-024): the queue, the queue's facts, and the extractor. */
+  private planDriverDeps(): PlanDriverDeps {
+    return {
+      enqueue: (input) => {
+        if (!this.jobQueue) throw new Error("the queue is not available");
+        return this.jobQueue.enqueue(input);
+      },
+      jobFacts: (jobIds) => {
+        const wanted = new Set(jobIds);
+        return (this.jobQueue?.listJobs() ?? [])
+          .filter((job) => wanted.has(job.id))
+          .map((job) => ({ id: job.id, status: job.status }));
+      },
+      boundaryFrameMaker: this.opts.boundaryFrameMaker,
+      clock: () => new Date().toISOString(),
+      onRefused: (planId, reason) => {
+        void this.appLog?.append({ kind: "plan.enqueue-refused", planId, reason });
+      },
+      // Freshness per loop (SPEC-024 R-24): the driver re-checks sources against the store's
+      // current bundle rather than the snapshot its caller happened to hold. World-checked —
+      // a world switched mid-advance must never be compared against another plan's sources.
+      fresh: (worldId) => {
+        const store = this.opts.provider.openStore?.();
+        return store && store.worldId === worldId ? store.getBundle() : undefined;
+      },
+    };
+  }
+
+  /** The named routing findings, pushed as one event (epic 401, brief §4) — never a score. */
+  private async emitRoutingFindings(store: WorldStore, worldId: string, productionId: string): Promise<void> {
+    const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+    if (!production) return;
+    const findings = await interactiveFindings(store, production).catch(() => []);
+    this.emit({
+      at: new Date().toISOString(),
+      type: "production.routing-findings",
+      worldId,
+      productionId,
+      findings,
+    });
+  }
+
+  /** The folded states of a production's plans, pushed as one event — disk truth, no timer. */
+  private async emitPlanStates(store: WorldStore, worldId: string, productionId: string): Promise<void> {
+    const plans = await listPlans(store, productionId);
+    const deps = this.planDriverDeps();
+    const states = [];
+    for (const plan of plans) states.push(await planState(store, plan, deps));
+    this.emit({
+      at: new Date().toISOString(),
+      type: "production.plan-state",
+      worldId,
+      productionId,
+      states,
+    });
+  }
+
+  /** A settled plan job unblocks its dependents (SPEC-024 R-18): refresh, advance, push state. */
+  private async advancePlansForJob(job: Job): Promise<void> {
+    const planId = job.params["planId"];
+    if (typeof planId !== "string" || job.productionId === undefined) return;
+    const store = this.opts.provider.openStore?.();
+    if (!store || store.worldId !== job.worldId) return;
+    // The landed take must be visible to the bundle before extraction can find it.
+    await this.refreshWorldSnapshot(job.worldId).catch(() => {});
+    const bundle = store.getBundle();
+    const production = bundle.productions.find((p) => p.meta.id === job.productionId);
+    if (!production) return;
+    const plan = (await listPlans(store, job.productionId)).find((p) => p.planId === planId);
+    if (!plan) return;
+    await advancePlan(store, production, bundle, plan, this.planDriverDeps()).catch(() => {});
+    await this.emitPlanStates(store, job.worldId, job.productionId).catch(() => {});
   }
 
   /** The open world's bench session by id, or null — a closed world answers no bench command. */

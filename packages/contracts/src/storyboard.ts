@@ -122,7 +122,7 @@ export function planStoryboard(input: {
  * it stands: an edited shot description beside an unredrawn panel is exactly the contradiction
  * R-24 exists to make unrepresentable, reintroduced by time rather than by authorship.
  */
-export function storyboardUsable(scene: Scene): { usable: boolean; reason: string | null } {
+export function storyboardUsable(scene: Scene, aspect?: string): { usable: boolean; reason: string | null } {
   const board = scene.storyboard;
   if (board === undefined) return { usable: false, reason: "no storyboard has been drawn for this scene" };
   if (!board.accepted) return { usable: false, reason: "the storyboard has not been accepted yet" };
@@ -130,6 +130,16 @@ export function storyboardUsable(scene: Scene): { usable: boolean; reason: strin
     return {
       usable: false,
       reason: `the storyboard was drawn from v${board.sceneVersion} and the scene is at v${scene.version} — redraw it`,
+    };
+  }
+  // The shape gate (issue 389): a landscape board steering a vertical production frames every
+  // panel the wrong way round. Boards from before aspect reached storyboards were always drawn
+  // landscape, so they compare as 16:9 rather than escaping the check.
+  const drawnAt = board.aspect ?? "16:9";
+  if (aspect !== undefined && drawnAt !== aspect) {
+    return {
+      usable: false,
+      reason: `the storyboard was drawn at ${drawnAt} and this production delivers ${aspect} — redraw it`,
     };
   }
   return { usable: true, reason: null };
@@ -177,9 +187,11 @@ export function chooseReferenceSteering(input: {
   shots?: Shot[];
   selections: Selections;
   model: ManifestModel;
+  /** The production's delivery aspect (issue 389), gating a board drawn for another shape. */
+  aspect?: string;
 }): ReferenceSteering {
   const shots = input.shots ?? input.scene.shots;
-  const board = storyboardUsable(input.scene);
+  const board = storyboardUsable(input.scene, input.aspect);
   const boardFile = input.scene.storyboard?.file ?? null;
   const fallback = (why: string): ReferenceSteering =>
     board.usable && boardFile !== null

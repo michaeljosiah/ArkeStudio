@@ -93,6 +93,13 @@ export interface EnqueueInput {
   recipe?: RecipeIdentity;
   /** Frozen engine identity — source kind and opaque instance digest, never a path. */
   engine?: JobEngineIdentity;
+  /**
+   * A pre-allocated idempotency key (SPEC-024 D2). A dispatch-plan pass mints its key at plan
+   * creation so the crash window between materialisation and enqueue has nothing to invent —
+   * re-enqueueing the same key returns the existing job rather than journalling a second spend.
+   * Absent means the queue mints one, exactly as before.
+   */
+  idempotencyKey?: string;
 }
 
 export interface JobQueueOptions {
@@ -335,6 +342,27 @@ export class JobQueue {
   /** Durable before any network call (R-1): the returned job is already journalled. */
   async enqueue(input: EnqueueInput): Promise<Job> {
     if (!this.accepting) throw new Error("the queue is not accepting work yet (recovery first, R-18)");
+    // A pre-allocated key that already journalled a job is a redelivery, not a request
+    // (SPEC-024 R-19): the crash between a plan's materialised event and this call must land on
+    // the same job, never a second spend. Serialised per key — the map check alone was
+    // check-then-act across the admit and journal awaits, so two concurrent enqueues with one
+    // key both missed it and both journalled.
+    if (input.idempotencyKey !== undefined) {
+      const key = input.idempotencyKey;
+      const existing = [...this.jobs.values()].find((job) => job.idempotencyKey === key);
+      if (existing !== undefined) return existing;
+      const inFlight = this.enqueueingByKey.get(key);
+      if (inFlight !== undefined) return inFlight;
+      const promise = this.enqueueNew(input).finally(() => this.enqueueingByKey.delete(key));
+      this.enqueueingByKey.set(key, promise);
+      return promise;
+    }
+    return this.enqueueNew(input);
+  }
+
+  private readonly enqueueingByKey = new Map<string, Promise<Job>>();
+
+  private async enqueueNew(input: EnqueueInput): Promise<Job> {
     // Admission before durability (SPEC-021 R-16): a dispatch the coordinator knows cannot run
     // is refused with the readiness reason, and nothing is journalled for it.
     const admitted = await this.opts.admit?.(input);
@@ -342,7 +370,7 @@ export class JobQueue {
     const now = this.clock();
     const job: Job = {
       id: `jb_${ulid()}`,
-      idempotencyKey: ulid(), // generated and persisted before submission (R-2)
+      idempotencyKey: input.idempotencyKey ?? ulid(), // persisted before submission (R-2)
       worldId: input.worldId,
       ...(input.productionId !== undefined ? { productionId: input.productionId } : {}),
       target: input.target,

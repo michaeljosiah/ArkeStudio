@@ -40,8 +40,11 @@ async function readSceneById(
 ): Promise<{ scene: Scene; raw: string; path: string } | null> {
   const production = store.getBundle().productions.find((entry) => entry.meta.id === productionId);
   const known = production?.scenes.find((entry) => entry.id === sceneId);
-  if (!known) return null;
-  const path = `productions/${productionId}/scenes/${String(known.number).padStart(2, "0")}-${known.slug}.json`;
+  // The stem captured at scan is the address (issue #387) — a reconstruction would go blind the
+  // moment a file's name stopped matching its number and slug.
+  const stem = known ? production?.sceneFiles[known.id] : undefined;
+  if (!known || stem === undefined) return null;
+  const path = `productions/${productionId}/scenes/${stem}.json`;
   try {
     const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
     return { scene: SceneSchema.parse(JSON.parse(raw)), raw, path };
@@ -103,7 +106,10 @@ export function storyboardRequest(
         : null,
     )}`,
   };
-  const output = sceneImageOutput(drawnBy);
+  // Drawn in the shape it will steer (issue 389): a landscape board read by a 9:16 dispatch
+  // frames every panel the wrong way round, and the estimate prices the pixels actually asked.
+  const aspect = production?.aspect;
+  const output = sceneImageOutput(drawnBy, undefined, aspect);
   const estimatedMicroUsd = estimateMicroUsd(drawnBy, {
     images: 1,
     referenceImages: 0,
@@ -134,6 +140,9 @@ export function storyboardRequest(
           sceneId: scene.id,
           sceneVersion: scene.version,
           panels: plan.panels.map((panel) => panel.shotId),
+          // The shape the panels were drawn at (issue 389), frozen with the rest so the landed
+          // record can say it and staleness against a changed aspect is computable.
+          ...(aspect !== undefined ? { aspect } : {}),
         },
       },
       estimatedMicroUsd,
@@ -160,12 +169,13 @@ export async function recordStoryboard(
   const sceneId = job.target.id;
   if (!landed || !sceneId) return null;
   const frozen = job.params["provenance"] as
-    | { sceneVersion?: number; panels?: string[] }
+    | { sceneVersion?: number; panels?: string[]; aspect?: string }
     | undefined;
   // Captured, not re-read: the narrowing does not survive into the async callback below, and a
   // board filed against the wrong version is a staleness check that silently never fires.
   const sceneVersion = frozen?.sceneVersion;
   const panels = frozen?.panels ?? [];
+  const drawnAspect = frozen?.aspect;
   if (sceneVersion === undefined) return null;
 
   return store.gateOp(async () => {
@@ -180,6 +190,8 @@ export async function recordStoryboard(
       file: `storyboards/${file}`,
       sceneVersion,
       panels: panels as SceneStoryboard["panels"],
+      // The delivery aspect the panels were drawn at (issue 389), from the frozen provenance.
+      ...(drawnAspect !== undefined ? { aspect: drawnAspect } : {}),
       drawnAt: store.now(),
       sourceJobId: job.id,
       // Never true here. Landing is not approval, and the one thing this record gates is whether

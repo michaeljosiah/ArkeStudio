@@ -1,5 +1,7 @@
 export * from "./ids.js";
 export * from "./world.js";
+export * from "./production-shape.js";
+export * from "./season-findings.js";
 export * from "./bible.js";
 export * from "./scene.js";
 export * from "./take.js";
@@ -10,6 +12,9 @@ export * from "./job.js";
 export * from "./change.js";
 export * from "./events.js";
 export * from "./client-state.js";
+export * from "./pass-compiler.js";
+export * from "./dispatch-plan.js";
+export * from "./routing.js";
 export * from "./frames.js";
 export * from "./world-chat.js";
 export * from "./adapter.js";

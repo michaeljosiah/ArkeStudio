@@ -329,6 +329,11 @@ const state: ClientState = {
           updated: AT,
         },
         story: null,
+        season: null,
+        routing: null,
+        sceneFiles: { sc_04: "04-the-verse-rises" },
+        episodes: [],
+        episodeFiles: {},
         treatment: "A short film. One night's watch on the Vigil, told at the pace of the water.",
         chapters: [],
         scenes: [
@@ -419,6 +424,7 @@ const state: ClientState = {
         takeMediaInfo: {},
       },
     ],
+    series: [],
     proposals: [
       {
         proposal: {

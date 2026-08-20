@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CanonIdSchema, IsoDateSchema, IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
+import { CanonIdSchema, EpisodeIdSchema, IsoDateSchema, IsoDateTimeSchema, SceneIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 // The same bound the world's list uses, shared rather than restated: two copies of one
 // constraint is how a list and its copy come to disagree (issue 243's finalization bug).
 import { FailureModesSchema } from "./art-direction.js";
@@ -194,11 +194,32 @@ export type CanonEntry = z.infer<typeof CanonEntrySchema>;
 export const ProductionFormatSchema = z.enum(["story", "video", "stills"]);
 export type ProductionFormat = z.infer<typeof ProductionFormatSchema>;
 
+/** The audience-facing classification (SPEC-023 R-1): what the audience receives. */
+export const ProductionMediumSchema = z.enum(["story", "video", "interactive-video"]);
+export type ProductionMedium = z.infer<typeof ProductionMediumSchema>;
+
 export const ProductionSchema = z
   .object({
     /** The production's directory slug within the world. */
     id: SlugSchema,
+    /**
+     * The legacy discriminator, frozen (SPEC-023 R-1): always written, set to the value the
+     * medium maps back to, so a reader that predates `medium` is never lied to. It is only
+     * consulted when `medium` is absent.
+     */
     format: ProductionFormatSchema,
+    /**
+     * Optional on read and resolved from `format` when absent (`story → story`,
+     * `video → video`, `stills → video`); written only when it differs from that resolve, so
+     * a plain creation keeps the world openable by older builds (SPEC-023 R-1/R-23).
+     */
+    medium: ProductionMediumSchema.optional(),
+    /**
+     * The named format beneath the medium (SPEC-023 R-2), e.g. `microdrama`. Free on read —
+     * an unknown kind resolves to the medium's default behaviour rather than deleting the
+     * production; the create dialog is where the vocabulary is enforced.
+     */
+    kind: z.string().min(1).optional(),
     title: z.string().min(1),
     logline: z.string().optional(),
     /** Display vocabulary ("in-progress", "cutting", …) — unversioned, change-logged only (§2.4.1). */
@@ -206,12 +227,13 @@ export const ProductionSchema = z
     /** Optional production-specific visual language; the world surface names this exception. */
     styleOverride: z.string().min(1).optional(),
     /**
-     * The aspect this production delivers in, e.g. "16:9" (SPEC-019 R-36, D29).
+     * The aspect this production delivers in, e.g. "16:9" (SPEC-019 R-36, D29; issue 389).
      *
      * On the production and not on art direction, which is one world-level record: a world
      * routinely holds a 16:9 film and a 9:16 cut of the same material, and a world-scoped aspect
-     * cannot express both without one production silently changing the other's. Absent means the
-     * world's default applies.
+     * cannot express both without one production silently changing the other's. Absent means
+     * DEFAULT_PRODUCTION_ASPECT (16:9 — the landscape every pre-aspect production actually
+     * rendered); there is deliberately no world-level default. Normalized W:H at every write.
      */
     aspect: z.string().min(1).optional(),
     /**
@@ -232,6 +254,124 @@ export const ProductionSchema = z
   .strict();
 export type Production = z.infer<typeof ProductionSchema>;
 
+/**
+ * series/<slug>.json — the thin Series record (SPEC-023 R-9). Thin means thin: a Series that
+ * describes characters becomes a second place a character exists, which is the drift SPEC-012
+ * D1 exists to prevent. Living inside the world folder is the world reference. Versioned on
+ * the `series` track.
+ */
+export const SeriesSchema = z
+  .object({
+    id: SlugSchema,
+    version: z.number().int().min(1),
+    title: z.string().min(1),
+    /** The repeatable premise or story engine — prose, authored later if not at creation. */
+    engine: z.string().optional(),
+    /** Ordered season production slugs; a dangling slug is a named world problem. */
+    seasons: z.array(SlugSchema),
+    /** Only continuity that is genuinely not world canon. */
+    continuity: z.string().optional(),
+    created: IsoDateTimeSchema,
+    updated: IsoDateTimeSchema,
+  })
+  .strict();
+export type Series = z.infer<typeof SeriesSchema>;
+
+/**
+ * productions/<p>/season.json — the season beside its production (SPEC-023 R-10). Top-level
+ * `ending` is the season's own authored resolution; `defaults.episodeEnding` is the
+ * per-episode ending policy — two facts, two fields. Arc lanes live here; a missing payoff is
+ * worked out at render, not stored. Versioned on the `season` track.
+ */
+export const SeasonSchema = z
+  .object({
+    version: z.number().int().min(1),
+    question: z.string().optional(),
+    ending: z.string().optional(),
+    direction: z.string().optional(),
+    arcs: z
+      .array(
+        z
+          .object({
+            id: SlugSchema,
+            title: z.string().min(1),
+            note: z.string().optional(),
+            /**
+             * The three cells an arc lane marks (turn 48: SETUP, TURN, PAYOFF — in words as
+             * well as colour). Each names the episode where it lands; a lane with no payoff is
+             * called out at render, worked out rather than stored.
+             */
+            setup: EpisodeIdSchema.optional(),
+            turn: EpisodeIdSchema.optional(),
+            payoff: EpisodeIdSchema.optional(),
+          })
+          .strict(),
+      )
+      .optional(),
+    /** Editable defaults, never invariants (SPEC-023 R-16). */
+    defaults: z
+      .object({
+        episodeCount: z.number().int().min(1).optional(),
+        episodeSecondsMin: z.number().positive().optional(),
+        episodeSecondsMax: z.number().positive().optional(),
+        hookWindowSec: z.number().positive().optional(),
+        episodeEnding: z.string().min(1).optional(),
+        exportPreset: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type Season = z.infer<typeof SeasonSchema>;
+
+/**
+ * productions/<p>/episodes/<stem>.json — one file per episode (SPEC-023 R-12). The stem and id
+ * are stable at creation; `order` alone places the episode, and the ordered `scenes` array is
+ * the single membership and within-episode order authority — scene files carry no episode
+ * field, so membership can never disagree with itself. Versioned on the `episode` track.
+ */
+export const EpisodeSchema = z
+  .object({
+    id: EpisodeIdSchema,
+    version: z.number().int().min(1),
+    order: z.number().int().min(1),
+    title: z.string().min(1),
+    /** Turn 53: an episode is its promise and its scenes — how it opens, where it turns, how it closes. */
+    promise: z
+      .object({
+        opens: z.string().optional(),
+        turn: z.string().optional(),
+        closes: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+    scenes: z.array(SceneIdSchema),
+    /** A boundary-crossing moment is two linked scenes; this records the pairing (SPEC-023 R-12). */
+    linked: z
+      .object({
+        closesInto: EpisodeIdSchema.optional(),
+        opensFrom: EpisodeIdSchema.optional(),
+      })
+      .strict()
+      .optional(),
+    /** The release record an episode deliverable owns (SPEC-023 R-15); export work is #396. */
+    release: z
+      .object({
+        title: z.string().optional(),
+        description: z.string().optional(),
+        thumbnailTakeId: z.string().optional(),
+        tags: z.array(z.string().min(1)).optional(),
+        recap: z.string().optional(),
+        teaser: z.string().optional(),
+        crops: z.array(z.object({ label: z.string().min(1), aspect: z.string().min(1) }).strict()).optional(),
+        metadata: z.record(z.string(), z.string()).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type Episode = z.infer<typeof EpisodeSchema>;
+
 /** story.json — the authored overview a story production drafts against (§8.3). Versioned. */
 export const StoryOverviewSchema = z
   .object({
@@ -244,11 +384,48 @@ export const StoryOverviewSchema = z
   .strict();
 export type StoryOverview = z.infer<typeof StoryOverviewSchema>;
 
-/** A chapter's frontmatter (§8.3); prose is the body and is not carried on the summary. */
+/**
+ * A chapter's frontmatter as read off disk (§8.3; SPEC-012 R-4/D3). `order` is the one order
+ * authority; `number` is the legacy shipped shape, read only when `order` is absent. Neither is
+ * required — a chapter whose order cannot be resolved still parses and falls back to filename
+ * order at scan, deterministically, rather than vanishing from the bundle. The committer stamps
+ * `version` and `updated` on every chapter write, and creation stamps `created`, so all three are
+ * legal keys here even though only `version` is required.
+ */
+export const ChapterFrontmatterSchema = z
+  .object({
+    id: SlugSchema,
+    order: z.number().optional(),
+    number: z.number().optional(),
+    title: z.string().min(1),
+    status: z.string().min(1).optional(),
+    version: z.number().int().min(1),
+    words: z.number().int().min(0).optional(),
+    draws: z
+      .object({
+        sheets: z.array(SlugSchema),
+        canon: z.array(CanonIdSchema),
+      })
+      .strict()
+      .optional(),
+    created: z.string().optional(),
+    updated: z.string().optional(),
+  })
+  .strict();
+export type ChapterFrontmatter = z.infer<typeof ChapterFrontmatterSchema>;
+
+/**
+ * What the bundle carries per chapter. `order` is the resolved dense sequence (1..n) after the
+ * scan sort — display surfaces read it and nothing else. `file` is the filename stem the
+ * save/draft/reorder commands address the chapter file by; `id` is authored frontmatter and does
+ * not have to match it (fixture chapters are `01-neap.md` with `id: neap`). Prose is the body and
+ * is not carried on the summary.
+ */
 export const ChapterSummarySchema = z
   .object({
     id: SlugSchema,
-    number: z.number().int().min(1),
+    file: z.string().min(1),
+    order: z.number().int().min(1),
     title: z.string().min(1),
     status: z.string().min(1),
     version: z.number().int().min(1),

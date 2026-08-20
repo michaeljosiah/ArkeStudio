@@ -451,6 +451,20 @@ export function parseAspect(aspect: string): number | null {
   return width > 0 && height > 0 ? width / height : null;
 }
 
+/**
+ * The one spelling an aspect is stored and compared in (issue 389): the two numbers around a
+ * colon, no whitespace. Everything that writes an aspect normalizes through here, so " 9 : 16 "
+ * and "9:16" cannot become two different productions' shapes. Null is a refusal — the caller
+ * names the input rather than storing something no route will ever match.
+ */
+export function normalizeAspect(aspect: string): string | null {
+  const parts = /^\s*([0-9]+(?:\.[0-9]+)?)\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*$/.exec(aspect);
+  if (!parts) return null;
+  const width = Number.parseFloat(parts[1]!);
+  const height = Number.parseFloat(parts[2]!);
+  return width > 0 && height > 0 ? `${parts[1]!}:${parts[2]!}` : null;
+}
+
 /** Which way round the work wants to be, for the workflows whose shape is not the author's. */
 export function isLandscapeWorkflow(workflow: CharacterImageWorkflow): boolean {
   return workflow === "character-sheet" || workflow === "location-view";
@@ -536,13 +550,68 @@ export function aspectOffered(model: ManifestModel, aspect: string): boolean {
 }
 
 /**
- * A still frame from a scene: landscape, and sized by the same tier vocabulary. Scene dispatch
- * needs this because the image clients size a request from `output.width`/`height` and ignore a
- * bare resolution string — a tier that never became dimensions moved the control and nothing
- * else.
+ * A row that curates nothing and declares no range has no opinion about shape (issue 389): the
+ * routes behind it take real dimensions, and treating silence as refusal would unshape a
+ * production's stills on exactly the models that could honour them. An unverified row is not
+ * opinion-less — it has not earned a guess.
  */
-export function sceneImageOutput(model: ManifestModel, tier?: SizeTier): ImageOutputSpec {
-  return imageOutputFor(model, { landscape: true, ...(tier !== undefined ? { tier } : {}) });
+function aspectOpinionless(model: ManifestModel): boolean {
+  const enumerated = model.limits.aspects;
+  return (
+    (enumerated === undefined || enumerated.length === 0) &&
+    model.aspectRange === undefined &&
+    model.unverified !== true
+  );
+}
+
+/**
+ * Whether this model's selected route can deliver that shape, and what it offers instead
+ * (issue 389). Three vocabularies, kept apart: a curated `limits.aspects` list is the offer, a
+ * continuous `aspectRange` is a capability, and a row declaring neither has no opinion — which
+ * is a pass, not a refusal, because refusing on silence would block routes that take anything.
+ * The verdict is computed before enqueue so an impossible shape is a named refusal, never a
+ * provider failure after the estimate was accepted.
+ */
+export function aspectSupport(
+  model: ManifestModel,
+  aspect: string,
+): { ok: true } | { ok: false; supported: readonly string[] } {
+  const canonical = normalizeAspect(aspect);
+  const enumerated = model.limits.aspects;
+  const offers = enumerated !== undefined && enumerated.length > 0 ? enumerated : STANDARD_ASPECTS;
+  if (canonical === null) return { ok: false, supported: offers };
+  if (enumerated !== undefined && enumerated.length > 0) {
+    return enumerated.includes(canonical) ? { ok: true } : { ok: false, supported: enumerated };
+  }
+  const range = model.aspectRange;
+  if (range) {
+    const ratio = parseAspect(canonical)!;
+    return ratio >= range.min && ratio <= range.max
+      ? { ok: true }
+      : { ok: false, supported: STANDARD_ASPECTS.filter((a) => aspectAllowed(model, parseAspect(a)!)) };
+  }
+  // An unverified row's silence is not an opinion — it has not earned a guess (the same rule
+  // aspectOpinionless applies to stills). Passing here would put a shape on a route nobody
+  // checked, fal would silently ignore the field, and the user would pay for default-shape
+  // footage a reviewed 9:16 plan never mentioned.
+  if (model.unverified === true) return { ok: false, supported: [] };
+  return { ok: true };
+}
+
+/**
+ * A still frame from a scene, shaped by the production's delivery aspect (issue 389) — and by
+ * the old landscape habit where no aspect was ever chosen, which is the documented default for
+ * every production created before aspect existed. Scene dispatch needs this because the image
+ * clients size a request from `output.width`/`height` and ignore a bare resolution string — a
+ * tier that never became dimensions moved the control and nothing else.
+ */
+export function sceneImageOutput(model: ManifestModel, tier?: SizeTier, aspect?: string): ImageOutputSpec {
+  const ratio = aspect !== undefined ? parseAspect(aspect) : null;
+  return imageOutputFor(model, {
+    landscape: ratio === null ? true : ratio >= 1,
+    ...(tier !== undefined ? { tier } : {}),
+    ...(aspect !== undefined ? { aspect } : {}),
+  });
 }
 
 /**
@@ -563,8 +632,14 @@ export function imageOutputFor(
 ): ImageOutputSpec {
   const landscape = options.landscape ?? false;
   const tier = options.tier;
+  // Offered, or asked of a row with no opinion to refuse with (issue 389) — either way the
+  // shape is one the request can carry, because these routes size from real dimensions.
   const chosen =
-    options.aspect !== undefined && aspectOffered(model, options.aspect) ? options.aspect : undefined;
+    options.aspect !== undefined &&
+    (aspectOffered(model, options.aspect) ||
+      (aspectOpinionless(model) && parseAspect(options.aspect) !== null))
+      ? options.aspect
+      : undefined;
   const dimensions =
     model.provider === "openai"
       ? landscape
@@ -757,8 +832,15 @@ export function modelCapabilityCopy(model: ManifestModel): string {
   const parts: string[] = [];
   if (model.accepts.referenceImages > 0) parts.push(`refs ×${model.accepts.referenceImages}`);
   else parts.push("no refs");
-  if (model.accepts.startFrame && model.accepts.endFrame) parts.push("frames");
-  else if (model.accepts.startFrame) parts.push("start frame");
+  // Frames read from the same authority the dispatch uses (issue 154): a task-mode route that
+  // takes them, or the legacy accepts flags where a row still claims them without one. The old
+  // flags-only read printed nothing for every fal video row that genuinely dispatches a first
+  // frame through its image-to-video sibling.
+  if (frameDispatchFor(model, 2) !== null || (model.accepts.startFrame && model.accepts.endFrame)) {
+    parts.push("frames");
+  } else if (frameDispatchFor(model, 1) !== null || model.accepts.startFrame) {
+    parts.push("start frame");
+  }
   if (model.limits.maxDurationSec !== undefined) parts.push(`${model.limits.maxDurationSec}s`);
   return parts.join(" · ");
 }
@@ -915,4 +997,46 @@ export function aspectAllowed(model: ManifestModel, ratio: number): boolean {
   const range = model.aspectRange;
   if (range) return ratio >= range.min && ratio <= range.max;
   return model.limits.aspects === undefined || model.limits.aspects.length === 0;
+}
+
+// ---------------------------------------------------------------------------
+// Boundary-frame capability (issue 154): one query, one answer, every consumer
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything a frame-carrying dispatch needs to know, decided in one place.
+ *
+ * The catalogue speaks two vocabularies about frames. `accepts.startFrame`/`endFrame` are the
+ * legacy per-row booleans — false on every shipped fal video row, pinned false by test, because
+ * the row's default route has no image input at all. Task modes are where frame capability
+ * really lives: `first-frame` and `first-and-last-frame` name the image-to-video sibling route
+ * and what it locks. Planning, the picker, the estimate and the dispatch all consult THIS
+ * projection rather than reading either vocabulary directly, so they cannot disagree about
+ * whether a frame travels or where it lands.
+ */
+export interface FrameDispatch {
+  mode: Extract<TaskMode, "first-frame" | "first-and-last-frame">;
+  /** The provider route, or null when the mode runs on the model's default endpoint. */
+  route: string | null;
+  /** The route's own field names — what the transport actually writes (SPEC-019 T-1). */
+  fields: { start: string; end: string | null };
+  locked: LockedParameter[];
+}
+
+/**
+ * How this model takes `frames` boundary images, or null when it cannot.
+ *
+ * Null is a refusal the caller must honour before submit: composing a frame dispatch for a
+ * model this returns null for is asking a text route to read an image field it does not have.
+ */
+export function frameDispatchFor(model: ManifestModel, frames: 1 | 2): FrameDispatch | null {
+  const mode = frames === 1 ? ("first-frame" as const) : ("first-and-last-frame" as const);
+  const spec = modeSpec(model, mode);
+  if (spec === null) return null;
+  return {
+    mode,
+    route: spec.route ?? null,
+    fields: { start: "image_url", end: frames === 2 ? "end_image_url" : null },
+    locked: spec.locked,
+  };
 }

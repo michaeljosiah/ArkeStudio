@@ -9,6 +9,7 @@ import {
   mainPhotoFor,
   pendingSheets,
   pendingWorldSheets,
+  productionShape,
   worldSheets,
   type CanonEntry,
   type Job,
@@ -40,6 +41,7 @@ import {
   askCanon,
   assignVoice,
   createProduction,
+  subscribeProductionCreateResults,
   createSheetFromSentence,
   attachFiles,
   stopExtraction,
@@ -560,12 +562,12 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
                 type="button"
                 className="fy-prodtile"
                 onClick={() => navigate(`/w/${worldId}/p/${p.meta.id}`)}
-                aria-label={`${p.meta.title}, ${p.meta.format}. Open the workspace.`}
+                aria-label={`${p.meta.title}, ${productionShape(p.meta).displayLabel}. Open the workspace.`}
               >
                 <div className="fy-prodtile__frame">
                   <Portrait worldSlug={world.meta.slug} path={art} label={`${p.meta.title}: frame`} radius={7} />
                 </div>
-                <div className="fy-prodtile__eyebrow">{p.meta.format}</div>
+                <div className="fy-prodtile__eyebrow">{productionShape(p.meta).displayLabel}</div>
                 <div className="fy-prodtile__name">{p.meta.title}</div>
                 <div className="fy-prodtile__foot">
                   <span className="fy-prodtile__meta">
@@ -595,6 +597,9 @@ const PROPOSAL_WHY: Record<string, string> = {
   "canon-settle": "a thread to settle",
   "chapter-draft": "drafted chapter",
   "story-overview": "story overview",
+  "season-edit": "season change",
+  "episode-edit": "episode change",
+  "series-edit": "series change",
   "scene-draft": "drafted scene",
   "scene-edit": "edit to a scene",
   extraction: "extracted from an artifact",
@@ -3658,7 +3663,7 @@ export function ProductionsScreen() {
                 </div>
                 <div className="fy-prodcard__body">
                   <div className="fy-prodcard__meta">
-                    <Badge tone="outline">{p.meta.format}</Badge>
+                    <Badge tone="outline">{productionShape(p.meta).displayLabel}</Badge>
                     {active && <span className="fy-dot fy-dot--warn" />}
                     <span style={{ marginLeft: "auto" }} className="fy-mono">
                       {shots.length > 0 ? `${covered} of ${shots.length} shots` : `${p.takes.length} takes`}
@@ -3691,7 +3696,8 @@ export function ProductionsScreen() {
   );
 }
 
-const FORMAT_CHOICES = [
+/** The picker offers the three audience mediums (Scope §01; SPEC-023 R-5). */
+const MEDIUM_CHOICES = [
   {
     id: "story",
     label: "Story",
@@ -3702,40 +3708,81 @@ const FORMAT_CHOICES = [
     id: "video",
     label: "Video",
     body: "Boards and shots, dispatched to video models with references attached.",
-    kinds: "short film · music video · series",
+    kinds: "short film · Microdrama · series",
   },
   {
-    id: "stills",
-    label: "Stills",
-    body: "Frames judged as a set — a visual album, key art, a lookbook.",
-    kinds: "visual album · key art",
+    id: "interactive-video",
+    label: "Interactive video",
+    body: "Branching video the viewer routes through — every choice picks the next scene.",
+    kinds: "direct choices · named findings",
   },
 ] as const;
+
+/**
+ * Step two: which kind, and the handful of numbers that differ between them (turn 53). Where a
+ * medium has one kind, the step does not render — a question with one answer is a toll.
+ */
+const VIDEO_KIND_CHOICES = [
+  { id: "film", label: "Short film", body: "One cut, one deliverable — the plain Video production." },
+  { id: "microdrama", label: "Microdrama series", body: "Creates a Series and its Season 1 together." },
+] as const;
+
+const MICRODRAMA_DEFAULTS = {
+  episodeCount: 7,
+  episodeSecondsMin: 45,
+  episodeSecondsMax: 75,
+  hookWindowSec: 3,
+  episodeEnding: "cliffhanger",
+  exportPreset: "social-1080x1920",
+};
 
 export function NewProductionScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
-  const [format, setFormat] = useState<"story" | "video" | "stills">("video");
+  const [medium, setMedium] = useState<"story" | "video" | "interactive-video">("video");
+  const [videoKind, setVideoKind] = useState<"film" | "microdrama">("film");
   const [title, setTitle] = useState("");
+  const [seriesTitle, setSeriesTitle] = useState("");
+  const [aspect, setAspect] = useState("9:16");
+  const [episodeCount, setEpisodeCount] = useState(MICRODRAMA_DEFAULTS.episodeCount);
+  const [episodeEnding, setEpisodeEnding] = useState(MICRODRAMA_DEFAULTS.episodeEnding);
+  // Pending until the correlated result arrives (issue 384): success opens the created production
+  // at its own workspace — never back to the list — and failure names itself in place, with
+  // everything entered still here.
+  const [pendingRequest, setPendingRequest] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pendingRequest) return;
+    return subscribeProductionCreateResults((result) => {
+      if (result.requestId !== pendingRequest) return;
+      if (result.disposition === "created" && result.slug) {
+        navigate(`/w/${worldId}/p/${result.slug}`);
+      } else {
+        setPendingRequest(null);
+        setFailure(result.reason ?? "The production could not be created.");
+      }
+    });
+  }, [pendingRequest, worldId, navigate]);
   const characters = world?.sheets.filter((s) => s.type === "character").length ?? 0;
+  const isMicrodrama = medium === "video" && videoKind === "microdrama";
   return (
     <div className="fy-dialogwrap" data-screen="new-production">
       <div className="fy-dialog" style={{ maxWidth: 780 }}>
         <div>
           <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>New production</div>
           <div style={{ font: "400 13px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 6 }}>
-            Pick a format. Whichever you choose, it draws from the same world: cast, canon and tone come along
-            automatically.
+            Pick what the audience receives. Whichever you choose, it draws from the same world: cast, canon and
+            tone come along automatically.
           </div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>
-          {FORMAT_CHOICES.map((f) => (
+          {MEDIUM_CHOICES.map((f) => (
             <button
               key={f.id}
               type="button"
-              className={cx("fy-radio", format === f.id && "fy-radio--on")}
-              onClick={() => setFormat(f.id)}
+              className={cx("fy-radio", medium === f.id && "fy-radio--on")}
+              onClick={() => setMedium(f.id)}
             >
               <div className="fy-radio__head">
                 <span className="fy-radio__dot" />
@@ -3748,7 +3795,70 @@ export function NewProductionScreen() {
             </button>
           ))}
         </div>
+        {medium === "video" && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
+            {VIDEO_KIND_CHOICES.map((k) => (
+              <button
+                key={k.id}
+                type="button"
+                className={cx("fy-radio", videoKind === k.id && "fy-radio--on")}
+                onClick={() => setVideoKind(k.id)}
+              >
+                <div className="fy-radio__head">
+                  <span className="fy-radio__dot" />
+                  {k.label}
+                </div>
+                <div style={{ font: "400 12px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 7 }}>{k.body}</div>
+              </button>
+            ))}
+          </div>
+        )}
         <Input placeholder="Name it · working titles are fine" value={title} onChange={(e) => setTitle(e.target.value)} />
+        {isMicrodrama && (
+          <div style={{ display: "grid", gap: 10 }}>
+            <Input
+              placeholder={`Series name · ${title.trim() || "defaults to the title"} — Season 1 is created with it`}
+              value={seriesTitle}
+              onChange={(e) => setSeriesTitle(e.target.value)}
+            />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+              <label className="fy-mono" style={{ display: "grid", gap: 4 }}>
+                frame
+                <select style={{ font: "400 13px var(--font-sans)", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--background)", color: "var(--foreground)" }} value={aspect} onChange={(e) => setAspect(e.target.value)}>
+                  <option value="9:16">9:16 vertical</option>
+                  <option value="16:9">16:9 landscape</option>
+                </select>
+              </label>
+              <label className="fy-mono" style={{ display: "grid", gap: 4 }}>
+                episodes
+                <select
+                  style={{ font: "400 13px var(--font-sans)", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--background)", color: "var(--foreground)" }}
+                  value={String(episodeCount)}
+                  onChange={(e) => setEpisodeCount(Number(e.target.value))}
+                >
+                  {[5, 6, 7, 8, 10, 12].map((n) => (
+                    <option key={n} value={String(n)}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="fy-mono" style={{ display: "grid", gap: 4 }}>
+                ending
+                <select style={{ font: "400 13px var(--font-sans)", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--background)", color: "var(--foreground)" }} value={episodeEnding} onChange={(e) => setEpisodeEnding(e.target.value)}>
+                  <option value="cliffhanger">Cliffhanger</option>
+                  <option value="resolved">Resolved</option>
+                </select>
+              </label>
+            </div>
+            <span className="fy-mono">defaults · change them here or later</span>
+          </div>
+        )}
+        {failure && (
+          <Callout tone="danger" title="Not created">
+            {failure}
+          </Callout>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <span className="fy-mono">
             joins {world?.meta.name ?? "the world"} · shares all {characters} characters, every location and the whole
@@ -3760,15 +3870,28 @@ export function NewProductionScreen() {
           </Button>
           <Button
             variant="primary"
-            disabled={title.trim().length === 0}
+            disabled={title.trim().length === 0 || pendingRequest !== null}
             onClick={() => {
-              if (worldId) {
-                createProduction(worldId, title.trim(), format);
-                navigate(`/w/${worldId}/productions`);
+              if (worldId && !pendingRequest) {
+                setFailure(null);
+                setPendingRequest(
+                  createProduction(worldId, {
+                    title: title.trim(),
+                    medium,
+                    ...(medium === "video" && videoKind !== "film" ? { productionKind: videoKind } : {}),
+                    ...(isMicrodrama
+                      ? {
+                          seriesTitle: seriesTitle.trim() || title.trim(),
+                          aspect,
+                          defaults: { ...MICRODRAMA_DEFAULTS, episodeCount, episodeEnding },
+                        }
+                      : {}),
+                  }),
+                );
               }
             }}
           >
-            Create production
+            {pendingRequest ? "Creating…" : isMicrodrama ? "Create Series and Season 1" : "Create production"}
           </Button>
         </div>
       </div>

@@ -62,6 +62,19 @@ export interface CommitInput {
   files: CommitFileInput[];
   /** Reserve this many canon ids in the same transaction (world.json nextCanonId). */
   allocateCanonIds?: number;
+  /**
+   * Raise world.json.schemaVersion to this value in the same transaction (SPEC-023 R-23,
+   * issue #403). Only ever raises — a world already at or above the requested version is left
+   * alone — so the first feature write that needs the newer boundary carries it, and a retry
+   * is a no-op.
+   */
+  raiseSchemaVersion?: number;
+  /**
+   * The client request this commit answers (issue #384). Stamped on the change lines so a
+   * redelivered request can find the commit that already served it and return the same result
+   * instead of creating a second entity.
+   */
+  requestId?: string;
 }
 
 export interface CommitResult {
@@ -119,6 +132,10 @@ type Classified =
   | { track: "scene"; production: string; file: string }
   | { track: "chapter"; production: string; file: string }
   | { track: "story"; production: string }
+  | { track: "routing"; production: string }
+  | { track: "season"; production: string }
+  | { track: "episode"; production: string; file: string }
+  | { track: "series"; id: string }
   | { track: "production-meta"; production: string }
   | { track: "art-direction" }
   | { track: "bible" }
@@ -136,6 +153,14 @@ export function classify(path: string): Classified {
   if (m) return { track: "chapter", production: m[1]!, file: m[2]! };
   m = /^productions\/([a-z0-9-]+)\/story\.json$/.exec(path);
   if (m) return { track: "story", production: m[1]! };
+  m = /^productions\/([a-z0-9-]+)\/routing\.json$/.exec(path);
+  if (m) return { track: "routing", production: m[1]! };
+  m = /^productions\/([a-z0-9-]+)\/season\.json$/.exec(path);
+  if (m) return { track: "season", production: m[1]! };
+  m = /^productions\/([a-z0-9-]+)\/episodes\/([^/]+)\.json$/.exec(path);
+  if (m) return { track: "episode", production: m[1]!, file: m[2]! };
+  m = /^series\/([a-z0-9-]+)\.json$/.exec(path);
+  if (m) return { track: "series", id: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/production\.json$/.exec(path);
   if (m) return { track: "production-meta", production: m[1]! };
   if (path === ART_DIRECTION_PATH) return { track: "art-direction" };
@@ -265,9 +290,26 @@ export class Committer {
           fieldsChanged = baseDoc ? diffMarkdown(baseDoc, doc) : undefined;
         }
         if (baseDoc) historyPrev = `${dirPath}/v${canonStamp(baseDoc.data)}.md`;
-      } else if (kind.track === "scene" || kind.track === "story") {
-        const idPart = kind.track === "scene" ? `scenes/${kind.file}` : "story";
-        const dirPath = `.history/productions/${kind.production}/${idPart}`;
+      } else if (
+        kind.track === "scene" ||
+        kind.track === "story" ||
+        kind.track === "routing" ||
+        kind.track === "season" ||
+        kind.track === "episode" ||
+        kind.track === "series"
+      ) {
+        // Season, episode, and series ride the same JSON version/history machinery the story
+        // track proved (SPEC-023 R-17): the committer stamps `version`, snapshots whole files.
+        const dirPath =
+          kind.track === "series"
+            ? `.history/series/${kind.id}`
+            : `.history/productions/${kind.production}/${
+                kind.track === "scene"
+                  ? `scenes/${kind.file}`
+                  : kind.track === "episode"
+                    ? `episodes/${kind.file}`
+                    : kind.track
+              }`;
         const baseDoc = live !== null ? JsonFile.parse(live) : null;
         fromVersion = baseDoc ? ((baseDoc.value["version"] as number) ?? 1) : null;
         if (f.action !== "delete") {
@@ -333,6 +375,22 @@ export class Committer {
         versions[f.path] = toVersion;
       }
       // production-meta and unversioned: change-logged only, no history, no stamps (§2.4.1).
+      // production.json is unversioned, so the change line IS its entire history — it has to
+      // say which fields moved (issue 389), or an edited aspect leaves an audit line that
+      // records only that something happened. `updated` is excluded: every edit moves it, and
+      // a field that always changes says nothing.
+      if (kind.track === "production-meta" && f.action === "replace" && live !== null && newContent !== null) {
+        try {
+          const before = JSON.parse(live) as Record<string, unknown>;
+          const after = JSON.parse(newContent) as Record<string, unknown>;
+          const moved = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(
+            (key) => key !== "updated" && JSON.stringify(before[key]) !== JSON.stringify(after[key]),
+          );
+          if (moved.length > 0) fieldsChanged = moved;
+        } catch {
+          /* an unparseable side leaves the line fieldless, as before */
+        }
+      }
 
       changes.push({
         ts: at,
@@ -345,6 +403,7 @@ export class Committer {
         source: input.source,
         canonRevisionAfter: revisionTo,
         ...(input.proposalId ? { proposalId: input.proposalId } : {}),
+        ...(input.requestId ? { requestId: input.requestId } : {}),
       });
 
       files.push({
@@ -359,10 +418,27 @@ export class Committer {
       });
     }
 
-    // ---- world.json: revision, allocation, updated -------------------------
+    // ---- world.json: revision, allocation, schema version, updated ---------
     const allocatedCanonIds: string[] = [];
     const worldUpdates: Record<string, unknown> = { updated: at };
     if (touchesCanon) worldUpdates["canonRevision"] = revisionTo;
+    if (input.raiseSchemaVersion !== undefined) {
+      const current = (worldDoc.value["schemaVersion"] as number) ?? 1;
+      if (input.raiseSchemaVersion > current) {
+        worldUpdates["schemaVersion"] = input.raiseSchemaVersion;
+        // The audit trail names the boundary crossing: older builds refuse this world from
+        // here on, and the log is where "since when?" gets answered.
+        changes.push({
+          ts: at,
+          commitId,
+          entity: "world",
+          fieldsChanged: ["schemaVersion"],
+          fromVersion: current,
+          toVersion: input.raiseSchemaVersion,
+          source: input.source,
+        });
+      }
+    }
     if (input.allocateCanonIds && input.allocateCanonIds > 0) {
       const next = worldDoc.value["nextCanonId"] as number;
       for (let i = 0; i < input.allocateCanonIds; i++) {

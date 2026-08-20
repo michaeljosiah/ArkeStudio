@@ -301,6 +301,40 @@ export function subscribeQueueResults(listener: (result: QueueEnqueueResult) => 
   return () => queueResultListeners.delete(listener);
 }
 
+/** The correlated answer to one create-production request (issue 384), by requestId. */
+export type ProductionCreateResult = Extract<DomainEvent, { type: "production.create-result" }>;
+const productionCreateListeners = new Set<(result: ProductionCreateResult) => void>();
+export function subscribeProductionCreateResults(listener: (result: ProductionCreateResult) => void): () => void {
+  productionCreateListeners.add(listener);
+  return () => productionCreateListeners.delete(listener);
+}
+
+export type PlanResult = Extract<DomainEvent, { type: "production.plan-result" }>;
+export type PlanStateEvent = Extract<DomainEvent, { type: "production.plan-state" }>;
+const planResultListeners = new Set<(result: PlanResult) => void>();
+const planStateListeners = new Set<(event: PlanStateEvent) => void>();
+
+export type RoutingFindingsEvent = Extract<DomainEvent, { type: "production.routing-findings" }>;
+export type InteractiveExportEvent = Extract<DomainEvent, { type: "production.interactive-export-result" }>;
+const routingFindingsListeners = new Set<(event: RoutingFindingsEvent) => void>();
+const interactiveExportListeners = new Set<(event: InteractiveExportEvent) => void>();
+export function subscribeRoutingFindings(listener: (event: RoutingFindingsEvent) => void): () => void {
+  routingFindingsListeners.add(listener);
+  return () => routingFindingsListeners.delete(listener);
+}
+export function subscribeInteractiveExports(listener: (event: InteractiveExportEvent) => void): () => void {
+  interactiveExportListeners.add(listener);
+  return () => interactiveExportListeners.delete(listener);
+}
+export function subscribePlanResults(listener: (result: PlanResult) => void): () => void {
+  planResultListeners.add(listener);
+  return () => planResultListeners.delete(listener);
+}
+export function subscribePlanStates(listener: (event: PlanStateEvent) => void): () => void {
+  planStateListeners.add(listener);
+  return () => planStateListeners.delete(listener);
+}
+
 export function subscribeJobReady(listener: (job: Job) => void): () => void {
   jobReadyListeners.add(listener);
   return () => jobReadyListeners.delete(listener);
@@ -559,6 +593,21 @@ function handleFrame(json: string): void {
     }
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
+    }
+    if (event.type === "production.create-result") {
+      for (const listener of productionCreateListeners) listener(event);
+    }
+    if (event.type === "production.plan-result") {
+      for (const listener of planResultListeners) listener(event);
+    }
+    if (event.type === "production.plan-state") {
+      for (const listener of planStateListeners) listener(event);
+    }
+    if (event.type === "production.routing-findings") {
+      for (const listener of routingFindingsListeners) listener(event);
+    }
+    if (event.type === "production.interactive-export-result") {
+      for (const listener of interactiveExportListeners) listener(event);
     }
     if (event.type === "bench.brief-enhanced") {
       for (const listener of briefEnhancedListeners) listener(event);
@@ -867,6 +916,7 @@ function handleFrame(json: string): void {
         ...exportsState,
         [event.exportId]: {
           productionId: event.productionId,
+          ...(event.episodeId !== undefined ? { episodeId: event.episodeId } : {}),
           status: event.status,
           percent: event.percent,
           output: event.output,
@@ -2109,11 +2159,83 @@ export function useDictation(): Record<string, { text: string | null; error: str
 
 export function createProduction(
   worldId: string,
-  title: string,
-  format: "story" | "video" | "stills",
-  logline?: string,
+  input: {
+    title: string;
+    /** The audience-facing medium (SPEC-023 R-1) — step one of the dialog. */
+    medium: "story" | "video" | "interactive-video";
+    /** The named format beneath it (SPEC-023 R-2), sent only when it says something. */
+    productionKind?: string;
+    seriesTitle?: string;
+    aspect?: string;
+    defaults?: {
+      episodeCount?: number;
+      episodeSecondsMin?: number;
+      episodeSecondsMax?: number;
+      hookWindowSec?: number;
+      episodeEnding?: string;
+      exportPreset?: string;
+    };
+    logline?: string;
+  },
+): string {
+  // Returns the requestId so the dialog can correlate the production.create-result: pending
+  // until it arrives, navigating only on success, showing the named failure in place (issue 384).
+  const requestId = ulid();
+  send({ kind: "create-production", worldId, requestId, ...input });
+  return requestId;
+}
+
+/** Stage the structured overview through the gate — nothing is written live (issue 385). */
+export function proposeStoryOverview(
+  worldId: string,
+  productionId: string,
+  overview: {
+    logline?: string;
+    spine?: string;
+    targetLength?: string;
+    acts?: Array<{ title: string; summary?: string }>;
+  },
 ): void {
-  send({ kind: "create-production", worldId, title, format, ...(logline !== undefined ? { logline } : {}) });
+  send({ kind: "propose-story-overview", worldId, productionId, ...overview });
+}
+
+/** Have the studio draft the overview into a staged proposal (issue 385). */
+export function draftStoryOverview(worldId: string, productionId: string, instruction: string): void {
+  send({ kind: "draft-story-overview", worldId, productionId, instruction });
+}
+
+/** Stage the season record through the gate — nothing is written live (issue 397). */
+export function proposeSeason(
+  worldId: string,
+  productionId: string,
+  season: {
+    question?: string;
+    ending?: string;
+    direction?: string;
+    arcs?: Array<{ id: string; title: string; note?: string; setup?: string; turn?: string; payoff?: string }>;
+  },
+): void {
+  send({ kind: "propose-season", worldId, productionId, ...season });
+}
+
+/** Stage one episode — a create mints identity from the title; an amend names its id (issue 397). */
+export function proposeEpisode(
+  worldId: string,
+  productionId: string,
+  episode: {
+    episodeId?: string;
+    title?: string;
+    order?: number;
+    promise?: { opens?: string; turn?: string; closes?: string };
+    scenes?: string[];
+  },
+): void {
+  send({ kind: "propose-episode", worldId, productionId, ...episode });
+}
+
+/** Reorder episodes by stable id — order fields rewrite, nothing renames (issue 397). */
+export function reorderEpisodes(worldId: string, productionId: string, orderedIds: string[]): void {
+  send({ kind: "reorder-episodes", worldId, productionId, orderedIds });
 }
 
 export function draftScene(worldId: string, productionId: string, brief: string): void {
@@ -2165,6 +2287,105 @@ export function draftChapter(
 
 export function reorderChapters(worldId: string, productionId: string, orderedFiles: string[]): void {
   send({ kind: "reorder-chapters", worldId, productionId, orderedFiles });
+}
+
+/** Reorder scenes by stable id — order fields rewrite, nothing renames (issue 387). */
+export function reorderScenes(worldId: string, productionId: string, orderedIds: string[]): void {
+  send({ kind: "reorder-scenes", worldId, productionId, orderedIds });
+}
+
+/** Change the aspect a production delivers in (issue 389) — validated and normalized server-side. */
+export function setProductionAspect(worldId: string, productionId: string, aspect: string): void {
+  send({ kind: "set-production-aspect", worldId, productionId, aspect });
+}
+
+/**
+ * Dispatch a scene under a durable plan (SPEC-024): the aggregate is written and authorized
+ * before any pass reaches a provider. Returns the requestId the plan-result answers to.
+ */
+export function dispatchScenePlanned(
+  worldId: string,
+  productionId: string,
+  sceneFile: string,
+  mode: "per-shot" | "whole-scene",
+  modelId: string,
+  policy: "review-gated" | "pre-authorized",
+  resolution?: string,
+  tier?: SizeTier,
+): string {
+  const requestId = ulid();
+  send({
+    kind: "dispatch-scene-planned",
+    requestId,
+    worldId,
+    productionId,
+    sceneFile,
+    mode,
+    modelId,
+    policy,
+    ...(resolution !== undefined ? { resolution } : {}),
+    ...(tier !== undefined ? { tier } : {}),
+  });
+  return requestId;
+}
+
+/** The visible act a review-gated plan requires before its next pass (SPEC-024 R-16). */
+export function planContinue(worldId: string, productionId: string, planId: string, passIndex: number): void {
+  send({ kind: "plan-continue", worldId, productionId, planId, passIndex });
+}
+
+/** The fresh act that covers an estimate the authorization did not (SPEC-024 R-17). */
+export function planReconfirm(worldId: string, productionId: string, planId: string, passIndex: number): void {
+  send({ kind: "plan-reconfirm", worldId, productionId, planId, passIndex });
+}
+
+/** Stop all future materialisation; landed work is untouched (SPEC-024 R-25). */
+export function planCancel(worldId: string, productionId: string, planId: string): void {
+  send({ kind: "plan-cancel", worldId, productionId, planId });
+}
+
+/** Ask for the folded states of a production's plans — also the restart reconciliation. */
+export function listPlans(worldId: string, productionId: string): void {
+  send({ kind: "list-plans", worldId, productionId });
+}
+
+/** Save the routing record (epic 401): the strict parse server-side is the no-state gate. */
+export function saveRouting(worldId: string, productionId: string, routing: unknown): void {
+  send({ kind: "save-routing", worldId, productionId, routing });
+}
+
+/** One preview traversal, appended durably (epic 401, brief §4). */
+export function recordTraversal(
+  worldId: string,
+  productionId: string,
+  choiceId: string,
+  from: string,
+  to: string,
+  route: string[],
+): void {
+  send({ kind: "record-traversal", worldId, productionId, choiceId, from, to, route });
+}
+
+/** Ask for the named routing findings (epic 401) — evidence, never a score. */
+export function listRoutingFindings(worldId: string, productionId: string): void {
+  send({ kind: "list-routing-findings", worldId, productionId });
+}
+
+/** Promote a branch outcome to canon — explicit, gated, with the route named (brief §7). */
+export function proposeBranchCanon(
+  worldId: string,
+  productionId: string,
+  sceneId: string,
+  route: string[],
+  title: string,
+  body: string,
+): void {
+  send({ kind: "propose-branch-canon", worldId, productionId, sceneId, route, title, body });
+}
+
+/** Export the self-hostable package (brief §6); refused while blocking findings stand. */
+export function exportInteractive(worldId: string, productionId: string): void {
+  send({ kind: "export-interactive", worldId, productionId });
 }
 
 export function setPromptOverride(
@@ -2269,8 +2490,9 @@ export function exportCut(
   worldId: string,
   productionId: string,
   preset: "review-cut" | "master" | "social-excerpt",
+  episodeId?: string,
 ): void {
-  send({ kind: "export-cut", worldId, productionId, preset });
+  send({ kind: "export-cut", worldId, productionId, preset, ...(episodeId !== undefined ? { episodeId } : {}) });
 }
 
 export function cancelExport(worldId: string, exportId: string): void {
@@ -2283,6 +2505,8 @@ export function exportWorld(worldId: string): void {
 
 export interface ExportState {
   productionId: string;
+  /** Set when the export is one episode's deliverable (issue 396). */
+  episodeId?: string;
   status: "running" | "done" | "cancelled" | "failed";
   percent: number;
   output: string | null;
@@ -2742,6 +2966,15 @@ export function useWorldChatProgress(
 }
 
 /** Shelve a conversation. Reversible, and loses nothing. */
+/** The mode changes initiative, never acceptance authority (SPEC-023 R-21). */
+export function setWorldChatInitiative(
+  worldId: string,
+  conversationId: string,
+  initiative: "assist" | "collaborate" | "develop",
+): void {
+  send({ kind: "world-chat-set-initiative", worldId, conversationId, initiative });
+}
+
 export function archiveWorldChat(worldId: string, conversationId: string): void {
   send({ kind: "world-chat-archive", worldId, conversationId });
 }

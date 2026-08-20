@@ -9,6 +9,7 @@ import { ChevronDown, ChevronRight, More, PanelLeft, Plus } from "../components/
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import {
   archiveWorldChat,
+  setWorldChatInitiative,
   attachHostFiles,
   attachHostText,
   cancelWorldChat,
@@ -648,6 +649,26 @@ export function WorldChatScreen() {
             {row?.entryContext && row.entryContext.kind !== "world" && (
               <div className="fy-chat__about">{aboutLabel(row.entryContext)}</div>
             )}
+            {/* The mode changes initiative, never acceptance authority (SPEC-023 R-21). */}
+            {loaded && conversationId && worldId && (
+              <button
+                type="button"
+                className="fy-pill"
+                style={{ cursor: "pointer", marginLeft: "auto" }}
+                title="How eagerly the studio proposes. Nothing lands without your acceptance either way."
+                onClick={() => {
+                  const next =
+                    loaded.initiative === "assist"
+                      ? "collaborate"
+                      : loaded.initiative === "collaborate"
+                        ? "develop"
+                        : "assist";
+                  setWorldChatInitiative(worldId, conversationId, next);
+                }}
+              >
+                {loaded.initiative === "assist" ? "Assist" : loaded.initiative === "develop" ? "Develop" : "Collaborate"}
+              </button>
+            )}
           </div>
 
           <div className="fy-gate__body">
@@ -940,6 +961,12 @@ function aboutLabel(context: NonNullable<WorldChatSummary["entryContext"]>): str
       return `about ${context.sheetId}`;
     case "attachment":
       return "about an attachment";
+    case "production":
+      return `Development · ${context.productionId}`;
+    case "episode":
+      return `episode · ${context.episodeId}`;
+    case "scene":
+      return `scene · ${context.sceneId}`;
     default:
       return "";
   }

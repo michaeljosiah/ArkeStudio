@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ArtifactIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, prefixedIdSchema } from "./ids.js";
 import type { ProductionBundle } from "./client-state.js";
+import { sortScenes } from "./scene.js";
 import type { Shot } from "./scene.js";
 import type { Take } from "./take.js";
 
@@ -112,9 +113,68 @@ export interface DerivedCut {
 const DEFAULT_SHOT_SEC = 4;
 
 export function deriveCut(production: ProductionBundle): DerivedCut {
+  // Explicit scene order, with the birth number as the legacy fallback (issue #387): the
+  // ordinary cut follows the same sequence every display shows.
+  return deriveCutOver(production, sortScenes(production.scenes));
+}
+
+/**
+ * One episode's cut (SPEC-023 R-24, issue #396): the same pure derivation, narrowed to the
+ * episode's ordered `scenes` array — which is the membership and within-episode order authority
+ * (R-12), so the deliverable and the board can never disagree. Ids the production does not know
+ * are skipped here; they are named findings, and `episodeExportRefusals` blocks the encode.
+ */
+export function deriveEpisodeCut(production: ProductionBundle, episodeId: string): DerivedCut {
+  const episode = production.episodes.find((e) => e.id === episodeId);
+  const scenesById = new Map(production.scenes.map((s) => [s.id, s]));
+  const scenes = (episode?.scenes ?? []).map((id) => scenesById.get(id)).filter((s) => s !== undefined);
+  return deriveCutOver(production, scenes);
+}
+
+/**
+ * Why one episode cannot export yet, or null when it can (SPEC-023 R-24): named refusals,
+ * never a score. Gaps do not refuse — they become labelled slates, exactly as the
+ * production-wide cut treats them — but an episode whose membership is contradictory must not
+ * encode, because the file would silently disagree with the board that promised it.
+ */
+export function episodeExportRefusals(
+  production: ProductionBundle,
+  episodeId: string,
+): { detail: string } | null {
+  const episode = production.episodes.find((e) => e.id === episodeId);
+  if (!episode) return { detail: `${episodeId} is not an episode of this production` };
+  if (production.spine) {
+    return {
+      detail:
+        "a spine production is cut against its track, and no episode-to-spine range authority exists yet — export the production-wide cut instead",
+    };
+  }
+  if (episode.scenes.length === 0) return { detail: `${episode.title} has no scenes yet` };
+  // A scene listed twice inside ONE episode passed every other refusal and rendered twice in
+  // the encoded file — the same double-ownership problem wearing a single episode's name.
+  const doubled = episode.scenes.find((id, index) => episode.scenes.indexOf(id) !== index);
+  if (doubled !== undefined) {
+    return { detail: `${episode.title} lists ${doubled} more than once; a scene is listed exactly once` };
+  }
+  const known = new Set(production.scenes.map((s) => s.id));
+  const dangling = episode.scenes.filter((id) => !known.has(id));
+  if (dangling.length > 0) {
+    return { detail: `${episode.title} lists ${dangling.join(", ")}, which ${dangling.length === 1 ? "is not a scene" : "are not scenes"} in this production` };
+  }
+  for (const other of production.episodes) {
+    if (other.id === episode.id) continue;
+    const shared = episode.scenes.filter((id) => other.scenes.includes(id));
+    if (shared.length > 0) {
+      return { detail: `${shared.join(", ")} also belong${shared.length === 1 ? "s" : ""} to ${other.title}; a scene belongs to exactly one episode` };
+    }
+  }
+  return null;
+}
+
+function deriveCutOver(production: ProductionBundle, scenes: readonly ProductionBundle["scenes"][number][]): DerivedCut {
   const takesById = new Map(production.takes.map((t) => [t.id, t]));
   const entries: CutEntry[] = [];
-  for (const scene of [...production.scenes].sort((a, b) => a.number - b.number)) {
+  for (const scene of scenes) {
     for (const shot of scene.shots) {
       const takeId = production.selections[shot.id]?.acceptedTakeId ?? null;
       const take = takeId !== null ? (takesById.get(takeId) ?? null) : null;

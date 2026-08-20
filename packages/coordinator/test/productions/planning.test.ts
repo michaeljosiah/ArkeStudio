@@ -522,7 +522,7 @@ describe("whole-scene reference budgeting", () => {
     );
     // Named before anyone presses...
     assert.deepEqual(plan.warnings.overlongShots, [
-      { shotId: "sh_97", number: 97, durationSec: 22, longestSec: 8 },
+      { shotId: "sh_97", number: 97, durationSec: 22, longestSec: 8, becauseReferences: false },
     ]);
     // ...and refused if a frame arrives anyway. An 8s clip billed against a 22s shot is money
     // spent on footage that cannot cover it.

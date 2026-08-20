@@ -317,14 +317,13 @@ describe("payload, measurement and aspect reach the surfaces that need them (T-2
     await store.close();
   });
 
-  it("takes the aspect from the production, with the world only as a default", async () => {
+  it("takes the aspect from the production, with the documented default only when unset", async () => {
     const store = await open();
     const production = store.getBundle().productions[0]!;
-    // One world routinely holds a 16:9 film and a 9:16 cut; a world-scoped aspect cannot express
-    // both without one production silently changing the other's (D29).
-    assert.equal(productionAspect(production, "16:9"), "16:9", "the world default applies when unset");
-    const vertical = { ...production, meta: { ...production.meta, aspect: "9:16" } };
-    assert.equal(productionAspect(vertical, "16:9"), "9:16", "the production wins over the world");
+    // One world routinely holds a 16:9 film and a 9:16 cut; the fallback is the stated
+    // DEFAULT_PRODUCTION_ASPECT, never a hidden world-level value (issue 389).
+    assert.equal(productionAspect(production.meta), "16:9", "the documented default applies when unset");
+    assert.equal(productionAspect({ ...production.meta, aspect: "9:16" }), "9:16", "the production wins");
     await store.close();
   });
 });

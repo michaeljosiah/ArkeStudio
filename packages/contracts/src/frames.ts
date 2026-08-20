@@ -2,15 +2,15 @@ import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { ArtifactIdSchema, ConversationIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
+import { ArtifactIdSchema, ConversationIdSchema, EpisodeIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
 import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
-import { CHARACTER_ROLE_MAX } from "./world.js";
-import { WorldChatContextSchema } from "./world-chat.js";
+import { CHARACTER_ROLE_MAX, ProductionFormatSchema, ProductionMediumSchema } from "./world.js";
+import { WorldChatContextSchema, WorldChatInitiativeSchema } from "./world-chat.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then `event` frames, sequence
@@ -461,6 +461,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * anything: proposals from its wrap-up outlive it and hold deletion open until they are
    * decided. No `requestId` — appending the same lifecycle event twice folds to the same status.
    */
+  z
+    .object({
+      kind: z.literal("world-chat-set-initiative"),
+      worldId: UlidSchema,
+      conversationId: ConversationIdSchema,
+      initiative: WorldChatInitiativeSchema,
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("world-chat-archive"),
@@ -1140,14 +1148,121 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       contentType: z.string().min(1),
     })
     .strict(),
-  /** SPEC-012 R-1/R-2: a production is a lens over the world — nothing is copied. */
+  /**
+   * SPEC-012 R-1/R-2: a production is a lens over the world — nothing is copied.
+   * SPEC-023 R-1/R-2/R-5: `medium` is step one of the dialog; `productionKind` the named
+   * format beneath it; the Microdrama path also names its Series and its editable defaults.
+   * `format` stays for compatibility and is only consulted when `medium` is absent.
+   */
   z
     .object({
       kind: z.literal("create-production"),
       worldId: UlidSchema,
+      /** Correlates the production.create-result event; redelivery is idempotent (#384). */
+      requestId: UlidSchema.optional(),
       title: z.string().min(1).max(200),
-      format: z.enum(["story", "video", "stills"]),
+      format: ProductionFormatSchema.optional(),
+      medium: ProductionMediumSchema.optional(),
+      productionKind: z.string().min(1).max(80).optional(),
+      seriesTitle: z.string().min(1).max(200).optional(),
+      aspect: z.string().min(1).max(20).optional(),
+      defaults: z
+        .object({
+          episodeCount: z.number().int().min(1).optional(),
+          episodeSecondsMin: z.number().positive().optional(),
+          episodeSecondsMax: z.number().positive().optional(),
+          hookWindowSec: z.number().positive().optional(),
+          episodeEnding: z.string().min(1).optional(),
+          exportPreset: z.string().min(1).optional(),
+        })
+        .strict()
+        .optional(),
       logline: z.string().max(500).optional(),
+    })
+    .strict(),
+  /**
+   * issue #385: the structured overview is authored through the gate. Direct editing stages a
+   * story-overview proposal from named fields; nothing is written live before acceptance.
+   */
+  z
+    .object({
+      kind: z.literal("propose-story-overview"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      logline: z.string().min(1).max(500).optional(),
+      spine: z.string().min(1).max(4000).optional(),
+      targetLength: z.string().min(1).max(120).optional(),
+      acts: z
+        .array(z.object({ title: z.string().min(1).max(200), summary: z.string().max(1000).optional() }).strict())
+        .max(12)
+        .optional(),
+    })
+    .strict(),
+  /** issue #385: AI drafting of the overview — stages the same proposal kind, writes nothing live. */
+  z
+    .object({
+      kind: z.literal("draft-story-overview"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      instruction: z.string().min(1).max(2000),
+    })
+    .strict(),
+  /** issue #397: the season record, staged through the gate from named fields. */
+  z
+    .object({
+      kind: z.literal("propose-season"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      question: z.string().min(1).max(500).optional(),
+      ending: z.string().min(1).max(1000).optional(),
+      direction: z.string().min(1).max(2000).optional(),
+      arcs: z
+        .array(
+          z
+            .object({
+              id: SlugSchema,
+              title: z.string().min(1).max(200),
+              note: z.string().max(500).optional(),
+              // Episode ids, as SeasonSchema requires (ep_<slug>): a free string here parsed at
+              // the transport and then failed the gate's season lane — refused far from the
+              // field that caused it. The frame now speaks the schema's own vocabulary.
+              setup: EpisodeIdSchema.optional(),
+              turn: EpisodeIdSchema.optional(),
+              payoff: EpisodeIdSchema.optional(),
+            })
+            .strict(),
+        )
+        .max(20)
+        .optional(),
+    })
+    .strict(),
+  /** issue #397: one episode — a create mints identity from the title; an amend names its id. */
+  z
+    .object({
+      kind: z.literal("propose-episode"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      episodeId: z.string().optional(),
+      title: z.string().min(1).max(200).optional(),
+      order: z.number().int().min(1).optional(),
+      promise: z
+        .object({
+          opens: z.string().max(500).optional(),
+          turn: z.string().max(500).optional(),
+          closes: z.string().max(500).optional(),
+        })
+        .strict()
+        .optional(),
+      scenes: z.array(SceneIdSchema).optional(),
+    })
+    .strict(),
+  /** issue #397: reorder episodes by stable id — order fields rewrite, nothing renames. */
+  z
+    .object({
+      kind: z.literal("reorder-episodes"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      orderedIds: z.array(z.string().min(1)).min(1),
     })
     .strict(),
   /** SPEC-012 R-7: draft a scene in conversation; accepting creates shots, dispatches nothing. */
@@ -1230,6 +1345,125 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       orderedFiles: z.array(z.string().min(1)).min(1),
+    })
+    .strict(),
+  /** issue #387: reorder scenes by stable id — order fields rewrite, nothing renames. */
+  z
+    .object({
+      kind: z.literal("reorder-scenes"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      orderedIds: z.array(SceneIdSchema).min(1),
+    })
+    .strict(),
+  /** issue 389: change the aspect a production delivers in — normalized and refused by name. */
+  z
+    .object({
+      kind: z.literal("set-production-aspect"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      aspect: z.string().min(1).max(20),
+    })
+    .strict(),
+  /** SPEC-024 R-12: create a durable dispatch plan — idempotent by requestId, durable before spend. */
+  z
+    .object({
+      kind: z.literal("dispatch-scene-planned"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneFile: z.string().min(1),
+      mode: z.enum(["per-shot", "whole-scene"]),
+      modelId: z.string().min(1),
+      policy: z.enum(["review-gated", "pre-authorized"]),
+      resolution: z.string().min(1).optional(),
+      tier: SizeTierSchema.optional(),
+    })
+    .strict(),
+  /** SPEC-024 R-16: the visible act a review-gated plan requires before its next pass. */
+  z
+    .object({
+      kind: z.literal("plan-continue"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      planId: z.string().min(1),
+      passIndex: z.number().int().min(0),
+    })
+    .strict(),
+  /** SPEC-024 R-17: the fresh act that covers an estimate the authorization did not. */
+  z
+    .object({
+      kind: z.literal("plan-reconfirm"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      planId: z.string().min(1),
+      passIndex: z.number().int().min(0),
+    })
+    .strict(),
+  /** SPEC-024 R-25: stop all future materialisation; landed work is untouched. */
+  z
+    .object({
+      kind: z.literal("plan-cancel"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      planId: z.string().min(1),
+    })
+    .strict(),
+  /** SPEC-024 R-10: ask for the folded states of a production's plans. */
+  z
+    .object({
+      kind: z.literal("list-plans"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+    })
+    .strict(),
+  /** Epic 401 (brief §2): save the routing record — strict parse IS the no-state import gate. */
+  z
+    .object({
+      kind: z.literal("save-routing"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      routing: z.unknown(),
+    })
+    .strict(),
+  /** Epic 401 (brief §4/§5): one preview traversal, appended durably. */
+  z
+    .object({
+      kind: z.literal("record-traversal"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      choiceId: z.string().min(1),
+      from: SceneIdSchema,
+      to: SceneIdSchema,
+      route: z.array(SceneIdSchema),
+    })
+    .strict(),
+  /** Epic 401 (brief §4): ask for the named findings. */
+  z
+    .object({
+      kind: z.literal("list-routing-findings"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+    })
+    .strict(),
+  /** Epic 401 (brief §7): promote a branch outcome to canon — explicit, gated, route named. */
+  z
+    .object({
+      kind: z.literal("propose-branch-canon"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneId: SceneIdSchema,
+      route: z.array(SceneIdSchema),
+      title: z.string().min(1).max(200),
+      body: z.string().min(1).max(4000),
+    })
+    .strict(),
+  /** Epic 401 (brief §6): export the self-hostable package; refused while blockers stand. */
+  z
+    .object({
+      kind: z.literal("export-interactive"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
     })
     .strict(),
   /** SPEC-012 R-15/R-16: an edited prompt is an override on the shot; null resets. */
@@ -1389,6 +1623,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("export-cut"),
       worldId: UlidSchema,
       productionId: SlugSchema,
+      /** One episode's deliverable (issue #396); absent exports the production-wide cut. */
+      episodeId: z.string().optional(),
       preset: z.enum(["review-cut", "master", "social-excerpt"]),
     })
     .strict(),

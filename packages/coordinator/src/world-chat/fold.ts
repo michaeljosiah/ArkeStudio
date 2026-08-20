@@ -53,6 +53,7 @@ export function foldConversation(
   let status: WorldChatStatus = "open";
   let notCarried: WorldChatLoaded["notCarried"] = [];
   let entryContext: WorldChatLoaded["entryContext"];
+  let initiative: WorldChatLoaded["initiative"];
   let updatedAt = createdAt;
   let summary: string | undefined;
   let reopened = false;
@@ -103,6 +104,7 @@ export function foldConversation(
       case "conversation.metadata-updated":
         if (e.title !== undefined) title = e.title;
         if (e.entryContext !== undefined) entryContext = e.entryContext;
+        if (e.initiative !== undefined) initiative = e.initiative;
         break;
       case "conversation.archived":
         status = "archived";
@@ -307,6 +309,7 @@ export function foldConversation(
     createdAt,
     updatedAt,
     ...(entryContext ? { entryContext } : {}),
+    ...(initiative ? { initiative } : {}),
     seq,
     ...(reopened ? { reopened: true } : {}),
     messages: shown,

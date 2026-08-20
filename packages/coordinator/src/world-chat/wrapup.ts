@@ -68,6 +68,18 @@ export class WrapUpError extends Error {
 const MAX_PROPOSALS = 40;
 
 /**
+ * The proposal kind each Development classification stages as (SPEC-023 R-17/R-20): the kind is
+ * not a label — the gate picks review projection, JSON merge lane, and validation from it.
+ */
+const DEVELOPMENT_PROPOSAL_KIND: Partial<Record<string, "story-overview" | "season-edit" | "episode-edit" | "scene-edit" | "series-edit">> = {
+  "development.overview": "story-overview",
+  "development.season": "season-edit",
+  "development.episode": "episode-edit",
+  "development.scene-script": "scene-edit",
+  "development.series": "series-edit",
+};
+
+/**
  * The question a Canon create carries when the coordinator genuinely cannot decide (§6.2).
  *
  * In practice this is the only such question: a create that looks like an existing entry may be a
@@ -177,9 +189,12 @@ async function buildAndStage(input: {
   // Everything is built and validated before a single proposal directory exists, so a malformed
   // candidate fails without leaving one behind (§11.2).
   const built = [];
+  // Sibling identities, shared across the batch: the scanned bundle cannot see what this same
+  // wrap-up is about to create (issue #400 round 2).
+  const claimed = { episodeIds: new Set<string>(), episodeStems: new Set<string>(), episodeOrders: new Set<number>() };
   try {
     for (const candidate of carried) {
-      built.push(materialiseCandidate(candidate, identities, bundle, at));
+      built.push(materialiseCandidate(candidate, identities, bundle, at, claimed));
     }
   } catch (err) {
     // Nothing was staged yet — this fails before the first gate call — so there is nothing that
@@ -255,6 +270,29 @@ async function buildAndStage(input: {
           "A change to the world look cannot land together with other changes. Decide the look on its own, then the rest.",
         );
       }
+      /*
+       * A production change travels alone too (SPEC-023 R-20; the guide's fourth gate rule).
+       *
+       * The proposal takes one kind and the gate reviews one entity's fields — and "world facts
+       * cross over separately" is the boundary the whole Development layer stands on: a season
+       * edit that smuggled a canon entry would put a world change behind a production review.
+       */
+      const development = bucket.items.filter((i) => i.candidate.classification.startsWith("development."));
+      if (development.length > 0) {
+        if (development.length !== bucket.items.length) {
+          throw new WrapUpError(
+            "materialise",
+            "A production change cannot land together with world changes. World facts cross over separately.",
+          );
+        }
+        const kinds = new Set(development.map((i) => i.candidate.classification));
+        if (kinds.size > 1) {
+          throw new WrapUpError(
+            "materialise",
+            "Two different production records cannot land as one change. Decide them one at a time.",
+          );
+        }
+      }
 
       const paths = bucket.items.flatMap((item) => item.targets.map((t) => t.path));
       const collision = paths.find((path, index) => paths.indexOf(path) !== index);
@@ -278,7 +316,7 @@ async function buildAndStage(input: {
          */
         kind: bucket.items.some((i) => i.candidate.classification === "art-direction.change")
           ? "art-direction"
-          : "worldbuilding",
+          : (DEVELOPMENT_PROPOSAL_KIND[lead.candidate.classification] ?? "worldbuilding"),
         summary: bucket.items.length === 1 ? lead.candidate.title : `${lead.candidate.title} (+${bucket.items.length - 1})`,
         source: `world-chat:${input.conversationId}`,
         targets: bucket.items.flatMap((item) => item.targets),

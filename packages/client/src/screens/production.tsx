@@ -3,19 +3,28 @@ import { NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams }
 import {
   assemblePrompt,
   deriveCut,
+  deriveEpisodeCut,
   deriveSpineCut,
+  episodeExportRefusals,
   spineExportRefusals,
   trimCeilingSec,
   guestsOf,
   pendingGuestsOf,
   pendingSheets,
+  frameDispatchFor,
   modelCapabilityCopy,
   nativeResolution,
   overrideStaleAgainst,
   pickableSheets,
+  compilePasses,
   planScene,
   PRESETS,
+  productionAspect,
+  productionShape,
   promptFor,
+  STANDARD_ASPECTS,
+  type CompiledPass,
+  type PlanState,
   worldSheets,
   type Scene,
   type Sheet,
@@ -51,6 +60,8 @@ import { mediaUrl } from "../lib/media.js";
 import { CanonEntryRow } from "../domain/domain.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
+import { useTalkItThrough } from "../lib/talk-it-through.js";
+import { DevelopmentWorkspace } from "./development.js";
 import { posterize, posterNameFor } from "../lib/poster.js";
 import { useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
@@ -65,12 +76,21 @@ import {
   exportCut,
   exportSceneBoard,
   exportWorld,
+  proposeStoryOverview,
   rejectTake,
   placeOverlay,
   removeOverlay,
   uploadArtifacts,
+  dispatchScenePlanned,
+  listPlans,
+  planCancel,
+  planContinue,
+  planReconfirm,
+  setProductionAspect,
   setPromptOverride,
   setShotTrim,
+  subscribePlanResults,
+  subscribePlanStates,
   useExports,
   useStore,
   useWorld,
@@ -133,8 +153,13 @@ function takeMediaPath(prodId: string, take: { id: string; media?: string }): st
   return `productions/${prodId}/takes/${take.id}/${posterNameFor(take.media)}`;
 }
 
-function sceneFileOf(scene: Scene): string {
-  return `${String(scene.number).padStart(2, "0")}-${scene.slug}`;
+/**
+ * The scene's on-disk stem, from the bundle's scan-captured record (issue 387) — never a
+ * reconstruction from number and slug, which goes blind the moment a file's name stops
+ * matching. Null means the bundle predates the record; the senders skip rather than guess.
+ */
+function sceneFileOf(production: { sceneFiles: Record<string, string> } | null | undefined, scene: Scene): string | null {
+  return production?.sceneFiles[scene.id] ?? null;
 }
 
 function decisionTone(decision: string | undefined): "ok" | "warn" | "sketch" {
@@ -153,7 +178,8 @@ export function ProductionLayout() {
   const exportsState = useExports();
   // The rail is the format's (design 54a): a surface the format cannot use is not present,
   // not greyed. A story production has nothing to dispatch, so its rail never says so.
-  const isStory = production?.meta.format === "story";
+  const shape = production ? productionShape(production.meta) : null;
+  const isStory = shape?.hasChapters === true;
   const cut = production ? deriveCut(production) : null;
   const audioCount =
     (artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio").length ?? 0) +
@@ -201,15 +227,15 @@ export function ProductionLayout() {
   // The switch card counts what the format counts: seconds of cut for video, chapters for story.
   const switchSub = production
     ? isStory
-      ? `story · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
-      : `${production.meta.format}${cut ? ` · ${seconds(cut.totalSec - cut.uncoveredSec)} cut` : ""}`
+      ? `${shape!.displayLabel.toLowerCase()} · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
+      : `${shape!.displayLabel.toLowerCase()}${cut ? ` · ${seconds(cut.totalSec - cut.uncoveredSec)} cut` : ""}`
     : "";
   return (
     <div className="fy-app">
       <AppChrome
         back={{ label: "World", to: `/w/${worldId}` }}
         context={{
-          label: production ? `${production.meta.title} · ${production.meta.format}` : "…",
+          label: production && shape ? `${production.meta.title} · ${shape.displayLabel.toLowerCase()}` : "…",
           to: `/w/${worldId}/productions`,
         }}
       />
@@ -229,16 +255,21 @@ export function ProductionLayout() {
           {item("cast", "Cast", String(guestCount))}
           {isStory ? (
             <>
-              {/* Story ends where Chapters begins, so the two never light together. */}
-              {item("story", "Story", production?.story ? `v${production.story.version}` : "—", true)}
+              {/* Development ends where Chapters begins, so the two never light together. */}
+              {item("story", "Development", production?.story ? `v${production.story.version}` : "—", true)}
               {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
               {item("audio", "Audio", String(audioCount))}
               {item("exports", "Exports", String(exportCount))}
             </>
           ) : (
             <>
-              {item("story", "Story", production?.story ? `v${production.story.version}` : "—")}
+              {/* The rail item reads Development; Story stays a family in the picker (turn 78).
+                  The route keeps its name — the rename is display text, never wiring. */}
+              {item("story", "Development", production?.story ? `v${production.story.version}` : "—")}
               {item("scenes", "Scenes", String(production?.scenes.length ?? 0))}
+              {/* Interactive video's structural authority (epic 401): only this medium routes here. */}
+              {shape?.isBranching &&
+                item("branch-map", "Branch map", String(production?.routing?.choices.length ?? 0))}
               <NavLink to={`${base}/scenes/new`} className="fy-prodrail__sub">
                 <Plus size={12} />
                 New scene
@@ -493,7 +524,7 @@ export function ProductionDashboardScreen() {
   }
   // The dashboard resumes the format's unit of work (design 54a). For story that is the
   // chapter, and nothing here mentions shots, takes, clips or dispatch.
-  if (production.meta.format === "story") {
+  if (productionShape(production.meta).hasChapters) {
     const chapters = production.chapters;
     const drafted = chapters.filter((c) => (c.words ?? 0) > 0);
     const totalWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
@@ -512,7 +543,7 @@ export function ProductionDashboardScreen() {
             {chapters.length === 0
               ? "the spine comes first"
               : `${drafted.length} chapter${drafted.length === 1 ? "" : "s"} drafted${
-                  inHand ? ` · chapter ${String(inHand.number).padStart(2, "0")} in hand` : ""
+                  inHand ? ` · chapter ${String(inHand.order).padStart(2, "0")} in hand` : ""
                 } · ${totalWords.toLocaleString()} words`}
           </span>
         </div>
@@ -522,7 +553,7 @@ export function ProductionDashboardScreen() {
               {chapters.length === 0
                 ? "THE SPINE COMES FIRST"
                 : inHand
-                  ? `IN HAND · CHAPTER ${inHand.number} OF ${chapters.length}`
+                  ? `IN HAND · CHAPTER ${inHand.order} OF ${chapters.length}`
                   : `ALL ${chapters.length} CHAPTERS DRAFTED`}
             </span>
           </div>
@@ -538,7 +569,7 @@ export function ProductionDashboardScreen() {
           </div>
           <div className="fy-threadcard__actions">
             <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story`)}>
-              {chapters.length === 0 ? "Open Story" : "Continue in Story"}
+              {chapters.length === 0 ? "Open Development" : "Continue in Development"}
             </Button>
           </div>
         </div>
@@ -556,7 +587,7 @@ export function ProductionDashboardScreen() {
             </div>
             {nearby.map((c) => (
               <div key={c.id} className="fy-listrow">
-                <span className="fy-mono">{String(c.number).padStart(2, "0")}</span>
+                <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
                 <span className="fy-listrow__text" style={{ font: "600 13px var(--font-sans)" }}>
                   {c.title}
                 </span>
@@ -592,6 +623,31 @@ export function ProductionDashboardScreen() {
             ? `${world.sheets.length} sheets · ${world.canon.length} canon entries · tone came along`
             : `${acceptedShots} of ${shots.length} shots covered · ${pending.length} need you`}
         </span>
+      </div>
+      {/* The one editable delivery-profile field (issue 389): validated and normalized
+          server-side, refused per route at dispatch, and every planning surface reads it. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span className="fy-mono">Delivery</span>
+        <select
+          aria-label="Delivery aspect"
+          value={productionAspect(production.meta)}
+          onChange={(e) => worldId && prodId && setProductionAspect(worldId, prodId, e.target.value)}
+          style={{
+            font: "500 12px var(--font-sans)",
+            padding: "4px 8px",
+            borderRadius: 8,
+            border: "1px solid var(--border)",
+            background: "var(--background)",
+            color: "inherit",
+          }}
+        >
+          {STANDARD_ASPECTS.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+        </select>
+        {production.meta.aspect === undefined && <span className="fy-mono">default</span>}
       </div>
       {dayOne ? (
         <>
@@ -721,9 +777,27 @@ export function ProductionDashboardScreen() {
 
 export function StoryScreen() {
   const { worldId, prodId } = useParams();
+  const { production } = useProduction(worldId, prodId);
+  // An episodic production's Development is the four-view workspace (turn 48; issue 397); a
+  // non-episodic one keeps the single overview — no fake episode or season controls. The
+  // branch is a component boundary, not an early return: returning before the overview's own
+  // hooks broke the Rules of Hooks the moment a production's shape settled after first render.
+  if (production && productionShape(production.meta).isEpisodic) return <DevelopmentWorkspace />;
+  return <OverviewStoryScreen />;
+}
+
+function OverviewStoryScreen() {
+  const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
+  const { talk, starting: talkStarting } = useTalkItThrough(worldId);
   const story = production?.story ?? null;
+  // The direct overview editor (issue 385): fields staged through the gate, never written live.
+  const [editing, setEditing] = useState(false);
+  const [logline, setLogline] = useState("");
+  const [spine, setSpine] = useState("");
+  const [targetLength, setTargetLength] = useState("");
+  const [actsText, setActsText] = useState("");
   const spineLines = (story?.spine ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
   // What drafting can actually reach: the world's cast plus this production's guests, and not
   // another production's one-offs (SPEC-020 R-7).
@@ -732,7 +806,9 @@ export function StoryScreen() {
     <div className="fy-story" data-screen="story-overview">
       <div className="fy-story__chat">
         <div className="fy-story__chathead">
-          <div className="fy-eyebrow-sm">STORY OVERVIEW · {production?.meta.format ?? ""}</div>
+          <div className="fy-eyebrow-sm">
+            DEVELOPMENT · {production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}
+          </div>
           <h1 className="fy-story__h1">Find the spine together.</h1>
         </div>
         <div className="fy-story__log">
@@ -743,7 +819,7 @@ export function StoryScreen() {
           ) : story ? (
             <div className="fy-bubble--gate">
               {story.logline}
-              <div className="fy-bubble__note">the overview steers scene drafting and packing — it never overwrites a scene you've locked</div>
+              <div className="fy-bubble__note">the overview steers scene and chapter drafting — it never overwrites a scene you've locked</div>
             </div>
           ) : (
             <div className="fy-bubble--gate">
@@ -753,10 +829,15 @@ export function StoryScreen() {
           )}
         </div>
         <div style={{ flex: "none", padding: "14px 36px 22px" }}>
-          <div className="fy-composer">
-            <span className="fy-composer__hint">Keep shaping the story… · authored through the gate</span>
-            <span className="fy-mono">↵ send</span>
-          </div>
+          {/* The durable Development thread (SPEC-023 R-20, issue 400): one continuous
+              conversation over the production, with the same wrap-up gate as world chat. */}
+          <Button
+            variant="primary"
+            disabled={talkStarting || !prodId}
+            onClick={() => prodId && talk(`Development · ${production?.meta.title ?? prodId}`, { kind: "production", productionId: prodId })}
+          >
+            {talkStarting ? "Opening the thread…" : "Talk it through · the Development thread"}
+          </Button>
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
             <span className="fy-mono">in context:</span>
             <span className="fy-pill">
@@ -774,30 +855,99 @@ export function StoryScreen() {
             {story ? `v${story.version}` : "not started"}
           </span>
         </div>
-        {story && (
-          <div className="fy-draftcard">
-            <div className="fy-draftcard__logline">“{story.logline}”</div>
-            {spineLines.length > 0 && (
-              <div style={{ marginTop: 14 }}>
-                {spineLines.map((line, i) => (
-                  <div key={i} className="fy-actrow">
-                    <span className="fy-actrow__label">{spineLines.length > 1 ? `ACT ${"I".repeat(Math.min(i + 1, 3))}` : "SPINE"}</span>
-                    <span className="fy-actrow__text">{line}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+        {editing ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            <Input placeholder="Logline · one sentence" value={logline} onChange={(e) => setLogline(e.target.value)} />
+            <Textarea
+              placeholder="Spine · the shape of the whole story"
+              value={spine}
+              onChange={(e) => setSpine(e.target.value)}
+              rows={4}
+            />
+            <Textarea
+              placeholder={"Acts · one per line, as Title: summary"}
+              value={actsText}
+              onChange={(e) => setActsText(e.target.value)}
+              rows={3}
+            />
+            <Input
+              placeholder="Target length · e.g. 90k words, 7 episodes"
+              value={targetLength}
+              onChange={(e) => setTargetLength(e.target.value)}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button variant="ghost" onClick={() => setEditing(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                disabled={!logline.trim() && !spine.trim() && !actsText.trim() && !targetLength.trim()}
+                onClick={() => {
+                  if (!worldId || !prodId) return;
+                  const acts = actsText
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .filter((line) => line.length > 0)
+                    .map((line) => {
+                      const split = line.indexOf(":");
+                      const title = (split >= 0 ? line.slice(0, split) : line).trim();
+                      const summary = split >= 0 ? line.slice(split + 1).trim() : "";
+                      return { title: title || line, ...(summary ? { summary } : {}) };
+                    });
+                  proposeStoryOverview(worldId, prodId, {
+                    ...(logline.trim() ? { logline: logline.trim() } : {}),
+                    ...(spine.trim() ? { spine: spine.trim() } : {}),
+                    ...(targetLength.trim() ? { targetLength: targetLength.trim() } : {}),
+                    ...(acts.length > 0 ? { acts } : {}),
+                  });
+                  setEditing(false);
+                }}
+              >
+                Propose overview
+              </Button>
+            </div>
+            <div className="fy-mono">stages a proposal · nothing is written until you accept</div>
           </div>
+        ) : (
+          story && (
+            <div className="fy-draftcard">
+              <div className="fy-draftcard__logline">“{story.logline}”</div>
+              {spineLines.length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  {spineLines.map((line, i) => (
+                    <div key={i} className="fy-actrow">
+                      <span className="fy-actrow__label">{spineLines.length > 1 ? `ACT ${"I".repeat(Math.min(i + 1, 3))}` : "SPINE"}</span>
+                      <span className="fy-actrow__text">{line}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
         )}
         <div style={{ flex: 1 }} />
         <div style={{ display: "grid", gap: 8 }}>
-          {production?.meta.format === "story" && (
+          {!editing && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setLogline(story?.logline ?? "");
+                setSpine(story?.spine ?? "");
+                setTargetLength(story?.targetLength ?? "");
+                setActsText((story?.acts ?? []).map((a) => `${a.title}${a.summary ? `: ${a.summary}` : ""}`).join("\n"));
+                setEditing(true);
+              }}
+            >
+              {story ? "Edit the overview" : "Start the overview"}
+            </Button>
+          )}
+          {production && productionShape(production.meta).hasChapters && (
             <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)}>
               Chapter tree · {production.chapters.length}
             </Button>
           )}
           <div style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center" }}>
-            The overview steers scene drafting and packing. It never overwrites a scene you've locked.
+            The overview steers scene and chapter drafting. It never overwrites a scene you've locked.
           </div>
         </div>
       </div>
@@ -818,7 +968,7 @@ export function ChapterTreeScreen() {
         <div>
           {production.chapters.map((c) => (
             <div key={c.id} className="fy-listrow">
-              <span className="fy-mono">{String(c.number).padStart(2, "0")}</span>
+              <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
               <span className="fy-listrow__text" style={{ font: "600 13px var(--font-sans)" }}>
                 {c.title}
               </span>
@@ -829,11 +979,15 @@ export function ChapterTreeScreen() {
         </div>
       ) : (
         <EmptyState
-          title={production?.meta.format === "story" ? "No chapters yet" : "Chapters belong to story productions"}
+          title={
+            production && productionShape(production.meta).hasChapters
+              ? "No chapters yet"
+              : "Chapters belong to Story productions"
+          }
           hint={
-            production?.meta.format === "story"
+            production && productionShape(production.meta).hasChapters
               ? "Chapters hang beneath the overview and are drafted through the gate."
-              : "This is a video production — its structure lives in Scenes."
+              : "This production's structure lives in Scenes."
           }
         />
       )}
@@ -915,6 +1069,7 @@ export function SceneDetailScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const { state } = useStore();
   const navigate = useNavigate();
+  const { talk, starting: talkStarting } = useTalkItThrough(worldId);
   const [tab, setTab] = useState<"shots" | "board">("shots");
   const scene = production?.scenes.find((s) => s.id === sceneId);
   if (!production || !scene) {
@@ -941,6 +1096,15 @@ export function SceneDetailScreen() {
             {scene.shots.length} shots · {seconds(totalSec)}
           </span>
           <span className="fy-h1row__push" />
+          {/* The durable scene thread (SPEC-023 R-20, issue 400): script blocks are proposed
+              here and land through the same gate as everything else. */}
+          <Button
+            variant="ghost"
+            disabled={talkStarting || !prodId}
+            onClick={() => prodId && talk(`Scene · ${scene.title}`, { kind: "scene", productionId: prodId, sceneId: scene.id })}
+          >
+            {talkStarting ? "Opening…" : "Talk it through"}
+          </Button>
           <span className="fy-seg">
             <button type="button" className={cx("fy-seg__item", tab === "shots" && "fy-seg__item--active")} onClick={() => setTab("shots")}>
               Shots
@@ -1069,13 +1233,21 @@ export function SceneDetailScreen() {
               </div>
             </div>
             <div style={{ display: "grid", gap: 8 }}>
-              <Button onClick={() => worldId && prodId && compileSceneBoard(worldId, prodId, sceneFileOf(scene))}>
+              <Button
+                onClick={() => {
+                  const stem = sceneFileOf(production, scene);
+                  if (worldId && prodId && stem) compileSceneBoard(worldId, prodId, stem);
+                }}
+              >
                 Recompile · free, local
               </Button>
               <Button
                 variant="ghost"
                 disabled={!scene.board}
-                onClick={() => worldId && prodId && exportSceneBoard(worldId, prodId, sceneFileOf(scene))}
+                onClick={() => {
+                  const stem = sceneFileOf(production, scene);
+                  if (worldId && prodId && stem) exportSceneBoard(worldId, prodId, stem);
+                }}
               >
                 Export sheet · PNG
               </Button>
@@ -1170,6 +1342,15 @@ export function GenerateScreen() {
   })();
   const prevAccepted = prevShot && production ? production.takes.find((t) => t.id === acceptedTakeId(production, prevShot.id)) : null;
   const prevFrame = prevAccepted && production ? takeMediaPath(production.meta.id, prevAccepted) : null;
+  // Strict frame behaviour is promised exactly where the route supports and receives it (issue
+  // 154): the model's first-frame route, and the shot's durable boundary still. Anything less is
+  // steering, and the copy says so instead of promising what the dispatch cannot send.
+  const frameRoute = model ? frameDispatchFor(model, 1) : null;
+  const boundaryFrame = (() => {
+    if (!shot || !production || !world) return null;
+    const id = production.selections[shot.id]?.startFrameArtifactId ?? null;
+    return id !== null ? (world.artifacts.find((a) => a.id === id) ?? null) : null;
+  })();
 
   const citedSheets = (() => {
     if (!shot || !world) return [];
@@ -1254,7 +1435,10 @@ export function GenerateScreen() {
           {shot ? `${shot.id.replace("sh_", "shot ")}${citedSheets.length > 0 ? ` · ${citedSheets.map((s) => `${s.name} model sheet v${s.version}`).join(" · ")}` : ""}` : ""}
         </div>
         <div className="fy-gen__label" style={{ marginTop: 16 }}>
-          Frames <span className="fy-mono">start required · end optional</span>
+          Frames{" "}
+          <span className="fy-mono">
+            {frameRoute !== null ? "start travels on the first-frame route" : "steering only · no frame route on this model"}
+          </span>
         </div>
         {world && (
           <div className="fy-worldlook-line">
@@ -1263,10 +1447,15 @@ export function GenerateScreen() {
           </div>
         )}
         <div className="fy-framerow">
-          {prevFrame ? (
+          {boundaryFrame ? (
+            <div className="fy-frame">
+              <Portrait worldSlug={slug} path={`artifacts/${boundaryFrame.file}`} label="Start frame" radius={0} />
+              <span className="fy-frame__tag">START · BOUNDARY FRAME{frameRoute !== null ? "" : " (STEERS ONLY)"}</span>
+            </div>
+          ) : prevFrame ? (
             <div className="fy-frame">
               <Portrait worldSlug={slug} path={prevFrame} label="Start frame" radius={0} />
-              <span className="fy-frame__tag">START · {prevShot!.id.replace("sh_", "SHOT ")}, LAST FRAME</span>
+              <span className="fy-frame__tag">START · {prevShot!.id.replace("sh_", "SHOT ")}, LAST FRAME (PREVIEW)</span>
             </div>
           ) : (
             <div className="fy-frame fy-frame--empty">START · FROM THE BOARD</div>
@@ -1277,10 +1466,11 @@ export function GenerateScreen() {
           <GeneratePromptEditor world={world} production={production} scene={scene} shot={shot} worldId={worldId!} prodId={prodId!} />
         )}
         <div className="fy-paramrow">
-          <span className="fy-param">16:9</span>
+          {/* The production's delivery aspect (issue 389), never a hard-coded landscape. */}
+          <span className="fy-param">{production ? productionAspect(production.meta) : "16:9"}</span>
           <span className="fy-param">720p</span>
           {shot && <span className="fy-param">{seconds(shot.durationSec)}</span>}
-          {prevShot && prevFrame && <span className="fy-param">opens on {prevShot.id.replace("sh_", "shot ")}'s last frame</span>}
+          {frameRoute !== null && boundaryFrame && <span className="fy-param">opens on its boundary frame</span>}
         </div>
         <div className="fy-gen__cta">
           {model && (
@@ -1375,6 +1565,7 @@ export function GenerateScreen() {
 
 function GeneratePromptEditor({
   world,
+  production,
   scene,
   shot,
   worldId,
@@ -1400,7 +1591,9 @@ function GeneratePromptEditor({
         <span
           style={{ marginLeft: "auto", font: "400 11px var(--font-sans)", color: "var(--muted-foreground)", cursor: "pointer" }}
           onClick={() => {
-            setPromptOverride(worldId, prodId, sceneFileOf(scene), shot.id, null);
+            const stem = sceneFileOf(production, scene);
+            if (!stem) return;
+            setPromptOverride(worldId, prodId, stem, shot.id, null);
             setDraft(null);
           }}
         >
@@ -1457,7 +1650,9 @@ function GeneratePromptEditor({
         <Button
           disabled={value.trim() === assembled || value.trim().length === 0}
           onClick={() => {
-            setPromptOverride(worldId, prodId, sceneFileOf(scene), shot.id, value.trim());
+            const stem = sceneFileOf(production, scene);
+            if (!stem) return;
+            setPromptOverride(worldId, prodId, stem, shot.id, value.trim());
             setDraft(null);
           }}
         >
@@ -1470,12 +1665,103 @@ function GeneratePromptEditor({
 
 // ---- Dispatch + voice-line dialogs ----------------------------------------
 
+/**
+ * The production's durable dispatch plans (SPEC-024): folded server-side from disk and the
+ * queue, requested on mount and refreshed by push — never a timer. Blocked and awaiting states
+ * are named, and the awaits are buttons, because they are the user's acts by definition.
+ */
+function PlansPanel({ worldId, prodId }: { worldId: string; prodId: string }) {
+  const [states, setStates] = useState<PlanState[] | null>(null);
+  const [refused, setRefused] = useState<string | null>(null);
+  useEffect(() => {
+    // A fresh production starts from nothing — keeping the previous production's states showed
+    // A's plans gating B until B's first event arrived.
+    setStates(null);
+    setRefused(null);
+    const offStates = subscribePlanStates((event) => {
+      if (event.productionId === prodId) setStates(event.states);
+    });
+    // A refused plan creation must be visible where the buttons live: the coordinator answers
+    // with production.plan-result, and a failure nobody renders is a button that fails silently.
+    const offResults = subscribePlanResults((event) => {
+      if (event.productionId !== prodId) return;
+      // A later successful creation clears the warning — a refusal callout standing over a
+      // live, healthy plan asserts two contradictory things at once.
+      setRefused(event.disposition === "failed" ? (event.reason ?? "the plan could not be created") : null);
+    });
+    listPlans(worldId, prodId);
+    return () => {
+      offStates();
+      offResults();
+    };
+  }, [worldId, prodId]);
+  if ((!states || states.length === 0) && refused === null) return null;
+  const passLine = (state: PlanState, pass: PlanState["passes"][number]): string => {
+    const label = `pass ${pass.passIndex}`;
+    if (pass.state === "blocked") return `${label} · blocked — ${pass.reason ?? "extraction failed"}`;
+    if (pass.state === "failed") return `${label} · failed — ${pass.reason ?? "the job failed"}`;
+    if (pass.state === "halted") return `${label} · will not run — ${pass.reason ?? state.haltReason ?? ""}`;
+    return `${label} · ${pass.state}`;
+  };
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="fy-listhead">Plans</div>
+      {refused !== null && (
+        <Callout tone="warning" title="Plan refused">
+          {refused}
+        </Callout>
+      )}
+      {(states ?? []).map((state) => (
+        <div key={state.planId} className="fy-boardcard" style={{ marginTop: 8 }}>
+          <div className="fy-boardcard__head">
+            {state.policy === "review-gated" ? "Review-gated" : "Pre-authorized"} · {state.status} · cap{" "}
+            {usd(state.capMicroUsd)}
+          </div>
+          <div className="fy-boardcard__mono">
+            {state.passes.map((pass) => (
+              <span key={pass.passIndex}>
+                {passLine(state, pass)}
+                {"\n"}
+              </span>
+            ))}
+            {state.haltReason !== undefined && `halted: ${state.haltReason}`}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            {state.next.kind === "await-continue" && (
+              <Button
+                variant="primary"
+                onClick={() => planContinue(worldId, prodId, state.planId, (state.next as { passIndex: number }).passIndex)}
+              >
+                Continue · pass {state.next.passIndex} ·{" "}
+                {usd(state.passes[state.next.passIndex]?.estimatedMicroUsd ?? 0)}
+              </Button>
+            )}
+            {state.next.kind === "await-reconfirm" && (
+              <Button
+                variant="primary"
+                onClick={() => planReconfirm(worldId, prodId, state.planId, (state.next as { passIndex: number }).passIndex)}
+              >
+                Reconfirm · pass {state.next.passIndex} runs past the {usd(state.capMicroUsd)} cap
+              </Button>
+            )}
+            {state.status !== "completed" && state.status !== "cancelled" && (
+              <Button variant="ghost" onClick={() => planCancel(worldId, prodId, state.planId)}>
+                Cancel plan
+              </Button>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function DispatchDialogScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const { state } = useStore();
   const navigate = useNavigate();
-  const capability = production?.meta.format === "stills" ? "image" : "video";
+  const capability = production ? productionShape(production.meta).dispatchCapability : "video";
   const [sceneIdx, setSceneIdx] = useState(0);
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier; resolution?: string }>({});
   const scene = production?.scenes[sceneIdx] ?? null;
@@ -1510,21 +1796,82 @@ export function DispatchDialogScreen() {
       scene,
       selections: production.selections,
       model,
+      // The world's shelf, so a durable boundary frame resolves here exactly as it will at the
+      // coordinator (issue 154) — the dialog's claim is that it runs the same function.
+      artifacts: world.artifacts,
+      // The production's delivery aspect (issue 389), on the same same-function claim.
+      ...(production.meta.aspect !== undefined ? { aspect: production.meta.aspect } : {}),
       ...(resolution !== undefined ? { resolution } : {}),
       ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
     };
     return { perShot: planScene(input, "per-shot"), wholeScene: planScene(input, "whole-scene") };
   }, [world, production, scene, model, resolution, choice.tier]);
 
-  const sceneFile = scene ? sceneFileOf(scene) : null;
+  // The compiled passes (issue 398): the same object the coordinator maps into queue requests,
+  // so the rows below ARE the dispatch — route, length, references, estimate — not a summary
+  // that can drift from it. Compilation refuses what dispatch would refuse; the warning rows
+  // already say why, so a refusal here just leaves no rows to show.
+  const compiled = useMemo(() => {
+    if (!world || !production || !scene || !model || !plans) return null;
+    const compile = (plan: typeof plans.perShot, chainWholeSceneFrames = false) => {
+      try {
+        return compilePasses({ productionId: production.meta.id, scene, plan, model, world, chainWholeSceneFrames });
+      } catch {
+        return null;
+      }
+    };
+    return {
+      perShot: compile(plans.perShot),
+      wholeScene: compile(plans.wholeScene),
+      // What the durable plan will actually authorize (SPEC-024): the server compiles the
+      // continuity chain, so the plan buttons must price the chained passes, not the plain ones.
+      chained: compile(plans.wholeScene, true),
+    };
+  }, [world, production, scene, model, plans]);
+  const passRow = (pass: CompiledPass): string => {
+    const route =
+      pass.route.kind === "frame"
+        ? "first-frame route"
+        : pass.route.kind === "reference"
+          ? `reference route · refs ×${pass.references.length}`
+          : "text route";
+    const length = pass.askedSec !== undefined ? ` · ${seconds(pass.askedSec)}` : "";
+    return `${route}${length} · ${usd(pass.estimatedMicroUsd)}`;
+  };
+
+  const sceneFile = scene ? sceneFileOf(production, scene) : null;
   const warnings = plans?.perShot.warnings ?? null;
   // A shot no route can cover blocks rather than warns: the dispatch would be refused anyway,
   // and finding that out after pressing a priced button is the failure this dialog exists to
   // prevent. Named per shot, with the length that would fit.
   const overlong = plans?.perShot.warnings.overlongShots ?? [];
+  const overlongPasses = plans?.wholeScene.warnings.overlongPasses ?? [];
   const warningRows: Array<{ key: string; text: string }> = [];
   if (warnings) {
     for (const s of warnings.shotsWithoutFrame) warningRows.push({ key: `nf-${s.shotId}`, text: `shot ${s.number} has no accepted frame` });
+    // Issue 154: strict frame behaviour is promised exactly where the route receives it — the
+    // shot opens on its durable boundary still, and the references that stepped aside are named.
+    for (const f of warnings.framedShots)
+      warningRows.push({
+        key: `bf-${f.shotId}`,
+        text: `shot ${f.number} opens on its boundary frame${
+          f.setAside.length > 0 ? ` — ${f.setAside.join(", ")} step aside, the frame route takes one image` : ""
+        }`,
+      });
+    for (const f of warnings.staleFrames)
+      warningRows.push({
+        key: `sf-${f.shotId}`,
+        text: `shot ${f.number}'s start frame is unusable: ${f.detail} — this blocks dispatch`,
+      });
+    // Issue 389: an impossible delivery shape refuses, consistently — composition throws the
+    // same refusal server-side, so this row is the dialog saying it first.
+    if (warnings.aspectUnsupported) {
+      const a = warnings.aspectUnsupported;
+      warningRows.push({
+        key: "aspect",
+        text: `${a.model} cannot deliver ${a.aspect} — it offers ${a.supported.join(", ")} — this blocks dispatch`,
+      });
+    }
     for (const name of warnings.sketchCitations) warningRows.push({ key: `sk-${name}`, text: `${name} is a sketch — dispatch cites an unlocked sheet` });
     for (const d of warnings.droppedReferences) {
       warningRows.push({
@@ -1637,13 +1984,22 @@ export function DispatchDialogScreen() {
           choice={choice}
           onChoice={setChoice}
         />
-        {overlong.length > 0 && (
+        {(overlong.length > 0 || overlongPasses.length > 0) && (
           <Callout tone="warning" title="Too long for this model">
             <ul style={{ margin: 0, paddingLeft: "1.2em" }}>
               {overlong.map((shot) => (
                 <li key={shot.shotId}>
                   shot {shot.number} runs {seconds(shot.durationSec)} — {model?.displayName ?? "this model"} makes at
-                  most {seconds(shot.longestSec)}. Shorten the shot, split it, or pick another model.
+                  most {seconds(shot.longestSec)}
+                  {shot.becauseReferences ? " on the reference route this shot will take" : ""}. Shorten the shot,
+                  split it, or pick another model.
+                </li>
+              ))}
+              {overlongPasses.map((pass) => (
+                <li key={`pass-${pass.passIndex}`}>
+                  scene pass {pass.passIndex} runs {seconds(pass.durationSec)} — the longest this route makes is{" "}
+                  {seconds(pass.longestSec)}
+                  {pass.becauseReferences ? ", because the pass carries references" : ""}.
                 </li>
               ))}
             </ul>
@@ -1675,7 +2031,16 @@ export function DispatchDialogScreen() {
               <div className="fy-boardcard__body">
                 One clip per shot, each seeded by its own frame. Any shot retries alone; cast stays pinned per shot.
               </div>
-              <div className="fy-boardcard__mono">est. {usd(plans.perShot.totalEstimatedMicroUsd)}</div>
+              <div className="fy-boardcard__mono">
+                est. {usd(plans.perShot.totalEstimatedMicroUsd)}
+                {compiled?.perShot?.map((pass) => (
+                  <span key={pass.target.coversShots.join("-")}>
+                    {"\n"}
+                    {pass.target.kind === "shot" ? `shot ${pass.target.coversShots[0]!.replace("sh_", "")}` : "pass"} ·{" "}
+                    {passRow(pass)}
+                  </span>
+                ))}
+              </div>
               <div style={{ marginTop: 12 }}>
                 <Button
                   variant="primary"
@@ -1693,18 +2058,26 @@ export function DispatchDialogScreen() {
             <div className="fy-boardcard" style={{ flex: 1 }}>
               <div className="fy-boardcard__head">Whole scene</div>
               <div className="fy-boardcard__body">Best motion continuity — but a retry re-runs its whole pass.</div>
-              {plans.wholeScene.pack.ok ? (
+              {plans.wholeScene.pack.ok && overlongPasses.length > 0 ? (
+                <div className="fy-boardcard__body" style={{ color: "var(--destructive)" }}>
+                  pass {overlongPasses[0]!.passIndex} runs {seconds(overlongPasses[0]!.durationSec)} — the longest this
+                  route makes is {seconds(overlongPasses[0]!.longestSec)}
+                  {overlongPasses[0]!.becauseReferences ? ", because the pass carries references" : ""}. Shorten a
+                  shot or pick another model.
+                </div>
+              ) : plans.wholeScene.pack.ok ? (
                 <>
                   <div className="fy-boardcard__mono">
                     {plans.wholeScene.pack.passes.length} pass{plans.wholeScene.pack.passes.length === 1 ? "" : "es"} under the{" "}
                     {model!.limits.maxDurationSec ?? "∞"}s cap
-                    {plans.wholeScene.pack.passes.map((p) => (
+                    {plans.wholeScene.pack.passes.map((p, i) => (
                       <span key={p.index}>
-                        {"\n"}pass {p.index} · {seconds(p.durationSec)} · shots {p.plan.map((e) => e.number).join(", ")}
+                        {"\n"}pass {p.index} · shots {p.plan.map((e) => e.number).join(", ")}
+                        {compiled?.wholeScene?.[i] ? ` · ${passRow(compiled.wholeScene[i]!)}` : ` · ${seconds(p.durationSec)}`}
                       </span>
                     ))}
                   </div>
-                  <div style={{ marginTop: 12 }}>
+                  <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                     <Button
                       variant="primary"
                       onClick={() => {
@@ -1716,6 +2089,41 @@ export function DispatchDialogScreen() {
                     >
                       Dispatch whole scene · {usd(plans.wholeScene.totalEstimatedMicroUsd)}
                     </Button>
+                    {/* SPEC-024: a plan chains each pass behind the previous pass's boundary
+                        frame — offered exactly where a route exists to receive one, priced from
+                        the CHAINED compile, because that is what the plan authorizes. */}
+                    {model && frameDispatchFor(model, 1) !== null && plans.wholeScene.pack.passes.length > 1 && compiled?.chained && (
+                      <>
+                        <div className="fy-boardcard__mono">
+                          {compiled.chained.map((pass, i) => (
+                            <span key={pass.target.coversShots.join("-")}>
+                              {"\n"}plan pass {i} · {passRow(pass)}
+                            </span>
+                          ))}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          onClick={() => {
+                            if (worldId && prodId && sceneFile && model) {
+                              dispatchScenePlanned(worldId, prodId, sceneFile, "whole-scene", model.id, "review-gated", resolution, choice.tier);
+                            }
+                          }}
+                        >
+                          Plan · continuity chain · ask before each pass
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => {
+                            if (worldId && prodId && sceneFile && model) {
+                              dispatchScenePlanned(worldId, prodId, sceneFile, "whole-scene", model.id, "pre-authorized", resolution, choice.tier);
+                            }
+                          }}
+                        >
+                          Plan · continuity chain · pre-authorize{" "}
+                          {usd(compiled.chained.reduce((sum, pass) => sum + pass.estimatedMicroUsd, 0))}
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </>
               ) : (
@@ -1727,6 +2135,7 @@ export function DispatchDialogScreen() {
             </div>
           </div>
         )}
+        {worldId && prodId && <PlansPanel worldId={worldId} prodId={prodId} />}
       </div>
     </div>
   );
@@ -2585,7 +2994,7 @@ export function AudioScreen() {
   // Spoken lines live on shots and their Generate is the voice-line dispatch — a video affair.
   // A story production keeps this pane for its audio artifacts alone (design 54a: nothing on a
   // story screen mentions shots or dispatch); narration comes later, as its own design.
-  const isStory = production?.meta.format === "story";
+  const isStory = production ? productionShape(production.meta).hasChapters : false;
   const linked = artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio");
   const voLines = isStory
     ? []
@@ -2781,7 +3190,7 @@ export function ExportsScreen() {
   // A story has no cut to render, and a manuscript exporter does not exist yet — so this pane
   // offers neither rather than a zero-length video (design 54a). It stays on the story rail
   // because the world folder export lives here, and the chapters travel whole inside it.
-  const isStory = production?.meta.format === "story";
+  const isStory = production ? productionShape(production.meta).hasChapters : false;
   const cut = production ? deriveCut(production) : null;
   const view = exportViewFor(world, production);
   const mine = Object.entries(exportsState).filter(([, e]) => e.productionId === prodId);
@@ -2821,6 +3230,57 @@ export function ExportsScreen() {
             : "renders of the cut · the cut itself stays the source"}
         </span>
       </div>
+      {!isStory && production && productionShape(production.meta).isEpisodic && (
+        <div>
+          <div className="fy-listhead">
+            Episodes · each its own deliverable
+            <Button
+              variant="secondary"
+              onClick={() => {
+                // The season batch is one send per episode (issue 396): each encode is its own
+                // export with its own progress and retry, so one failure never re-encodes the
+                // rest. Refused episodes are skipped here and say why on their row.
+                if (!worldId || !prodId) return;
+                for (const episode of production.episodes) {
+                  if (episodeExportRefusals(production, episode.id) === null) {
+                    exportCut(worldId, prodId, preset, episode.id);
+                  }
+                }
+              }}
+            >
+              Export the season · {preset}
+            </Button>
+          </div>
+          {production.episodes.map((episode) => {
+            const episodeCut = deriveEpisodeCut(production, episode.id);
+            const episodeRefusal = episodeExportRefusals(production, episode.id);
+            return (
+              <div key={episode.id} className="fy-listrow">
+                <span className="fy-mono">{String(episode.order).padStart(2, "0")}</span>
+                <span className="fy-listrow__text" style={{ font: "600 13px var(--font-sans)" }}>
+                  {episode.release?.title ?? episode.title}
+                </span>
+                <span className="fy-mono">
+                  {seconds(episodeCut.totalSec)} · {episodeCut.covered} of {episodeCut.entries.length} covered
+                  {episodeCut.gaps > 0 ? ` · ${episodeCut.gaps} gap${episodeCut.gaps === 1 ? "" : "s"} as slates` : ""}
+                </span>
+                {episodeRefusal ? (
+                  <span className="fy-mono" style={{ color: "var(--destructive)" }}>
+                    {episodeRefusal.detail}
+                  </span>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    onClick={() => worldId && prodId && exportCut(worldId, prodId, preset, episode.id)}
+                  >
+                    Export episode
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
       {!isStory && (
       <>
       <div>
@@ -2840,7 +3300,11 @@ export function ExportsScreen() {
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-exportrow__title">
-                {production?.meta.title} · render {id.slice(0, 8)}
+                {production?.meta.title}
+                {e.episodeId !== undefined
+                  ? ` · ${production?.episodes.find((ep) => ep.id === e.episodeId)?.title ?? e.episodeId}`
+                  : ""}{" "}
+                · render {id.slice(0, 8)}
               </div>
               <div className="fy-exportrow__sub">
                 {e.status}

@@ -1,5 +1,21 @@
 import { z } from "zod";
-import { IsoDateTimeSchema, SceneIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { ArtifactIdSchema, IsoDateTimeSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+
+/**
+ * A scene-script block (SPEC-023 R-13): the smallest stable thing a shot can cite. Block ids
+ * survive edits and reorders; a shot cites the digest of the text it covered, so staleness is a
+ * pure derivation and no stored flag can lie.
+ */
+export const ScriptBlockSchema = z
+  .object({
+    id: z.string().regex(/^blk_[a-z0-9-]+$/, "expected blk_<slug>"),
+    kind: z.enum(["action", "dialogue"]),
+    /** Dialogue names its speaker by sheet slug; action has none. */
+    speaker: SlugSchema.optional(),
+    text: z.string().min(1),
+  })
+  .strict();
+export type ScriptBlock = z.infer<typeof ScriptBlockSchema>;
 
 /**
  * Scenes and shots (master spec §2.3.4, §9).
@@ -30,6 +46,14 @@ export const ShotSchema = z
     camera: z.string().optional(),
     audio: ShotAudioSchema.optional(),
     durationSec: z.number().positive().optional(),
+    /**
+     * Script coverage (SPEC-023 R-13): the block ids this shot covers, each with the sha256 of
+     * the block text at citation time. A digest mismatch derives "covers text that changed"; a
+     * missing block derives "covers nothing" — derived, never stored as status.
+     */
+    covers: z
+      .array(z.object({ blockId: z.string().min(1), textDigest: Sha256Schema }).strict())
+      .optional(),
     /**
      * An edited prompt, stored as an override, never a replacement (SPEC-012 R-15, D6): the
      * assembled form stays derivable, Reset stays possible, and the recorded sheet versions
@@ -75,6 +99,12 @@ export const SceneStoryboardSchema = z
     sceneVersion: z.number().int().min(1),
     /** The shots this board actually covers, in order — the excess over the cap is not drawn. */
     panels: z.array(ShotIdSchema),
+    /**
+     * The delivery aspect the panels were drawn at (issue 389). Absent means drawn before
+     * aspect reached storyboards — which was always landscape, so staleness against a vertical
+     * production is computable for those boards too.
+     */
+    aspect: z.string().min(1).optional(),
     drawnAt: IsoDateTimeSchema,
     /** The job that drew it, so its cost is findable in the ledger (R-25). */
     sourceJobId: z.string().min(1),
@@ -92,7 +122,18 @@ export type SceneStoryboard = z.infer<typeof SceneStoryboardSchema>;
 export const SceneSchema = z
   .object({
     id: SceneIdSchema,
+    /**
+     * The scene's stable birth number — identity, not position (issue #387). It names the scene
+     * ("Scene 4"), keys its board image, and joins cut entries to lanes; it is never rewritten,
+     * so nothing that embeds it ever moves. Display and cut sequence come from `order`.
+     */
     number: z.number().int().min(1),
+    /**
+     * Explicit display order (issue #387; SPEC-012 D3's rule applied to scenes): mutable,
+     * rewritten by reorder alone. Read through `sceneOrderValue` — absent falls back to the
+     * birth number, so legacy scenes sort exactly as they always did.
+     */
+    order: z.number().int().min(1).optional(),
     slug: SlugSchema,
     title: z.string().min(1),
     /** Scene lifecycle vocabulary is owned by SPEC-012; the shape validates, the value displays. */
@@ -129,10 +170,36 @@ export const SceneSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * The scene script (SPEC-023 R-13): ordered blocks with stable ids that shots cite by
+     * digest. Optional — a script-less scene is an ordinary scene, and the board still works.
+     */
+    script: z
+      .object({
+        blocks: z.array(ScriptBlockSchema),
+      })
+      .strict()
+      .optional(),
     shots: z.array(ShotSchema),
   })
   .strict();
 export type Scene = z.infer<typeof SceneSchema>;
+
+/**
+ * The one place a scene's effective order is read (issue #387): explicit `order` wins, the
+ * stable birth `number` is the legacy fallback, and ties break by id so the sort is total and
+ * deterministic everywhere it runs.
+ */
+export function sceneOrderValue(scene: Pick<Scene, "number" | "order">): number {
+  return scene.order ?? scene.number;
+}
+
+/** Scenes in display/cut order — never by filename, never by mutating the input. */
+export function sortScenes<T extends Pick<Scene, "number" | "order" | "id">>(scenes: readonly T[]): T[] {
+  return [...scenes].sort(
+    (a, b) => sceneOrderValue(a) - sceneOrderValue(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Shot selection — productions/<p>/selections.json (§2.3.7). Operational, mutable.
@@ -142,6 +209,14 @@ export const ShotSelectionSchema = z
   .object({
     acceptedTakeId: TakeIdSchema.nullable().optional(),
     startFrameTakeId: TakeIdSchema.nullable().optional(),
+    /**
+     * The durable boundary still this shot opens on (issue 154): an image artifact cut from the
+     * previous shot's accepted footage, with its own bytes, hash and extraction provenance.
+     * `startFrameTakeId` above names footage and can only steer; this names a picture the
+     * dispatch can actually send. Optional and nullable so every selections.json written before
+     * boundary frames existed parses unchanged.
+     */
+    startFrameArtifactId: ArtifactIdSchema.nullable().optional(),
     /**
      * Where this shot starts inside its selected media (#253). Operational selection state, not
      * an edit to the take: the take is immutable and this says which part of it is being used.

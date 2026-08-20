@@ -1,7 +1,9 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import {
+  createBoundaryFrameMaker,
   createTakePosterMaker,
   createTakeQcAnalyzer,
+  type BoundaryFrameMaker,
   type MediaProbeRunner,
   type TakePosterMaker,
   type TakeQcAnalyzer,
@@ -87,4 +89,17 @@ export function takePosterOptions(
 ): { takePosterMaker?: TakePosterMaker } {
   if (ffmpeg === null) return {};
   return { takePosterMaker: createTakePosterMaker(createFfmpegProbeRunner(ffmpeg, spawn)) };
+}
+
+/**
+ * The boundary-frame maker (issue 154), third consumer of the same bounded runner: cutting the
+ * still an accepted clip seeds the next shot with is one more "write a frame to a file" job,
+ * and it earns a spawn path of its own no more than the poster did.
+ */
+export function boundaryFrameOptions(
+  ffmpeg: string | null,
+  spawn: SpawnLike = nodeSpawn,
+): { boundaryFrameMaker?: BoundaryFrameMaker } {
+  if (ffmpeg === null) return {};
+  return { boundaryFrameMaker: createBoundaryFrameMaker(createFfmpegProbeRunner(ffmpeg, spawn)) };
 }

@@ -14,19 +14,27 @@ import {
   ArtifactSidecarSchema,
   CanonEntrySchema,
   ChangeRecordSchema,
-  ChapterSummarySchema,
+  ChapterFrontmatterSchema,
+  type ChapterFrontmatter,
+  EpisodeSchema,
+  type Episode,
   ProductionSchema,
   ProposalSchema,
   ReferenceKitSchema,
   ReviewDecisionSchema,
   RipplePreviewSchema,
   SceneSchema,
+  SeasonSchema,
+  SeriesSchema,
+  sortScenes,
+  type Scene,
   SelectionsSchema,
   ProductionSpineSchema,
   CutFileSchema,
   TakeMediaInfoRecordSchema,
   type TakeMediaInfoRecord,
   SheetSchema,
+  RoutingSchema,
   StoryOverviewSchema,
   TakeSchema,
   WorldMetaSchema,
@@ -54,7 +62,16 @@ import { readChanges } from "./change-writer.js";
  * closed-world reconciliation compares against (R-28).
  */
 
-export const SUPPORTED_SCHEMA_VERSION = 1;
+/**
+ * The newest world schema this build understands (SPEC-023 R-23, issue #403). Version 2 marks
+ * a world that may contain durable conversations (`.conversations`, #70 §4.1) or the new-model
+ * production entities (`medium`/`kind`, `series/`, `season.json`, `episodes/`, scene scripts).
+ * Worlds are born at 1 and raised lazily by the first write that needs the boundary, so a
+ * world that never uses those features stays openable by older builds; a build older than the
+ * boundary refuses a version-2 world by name instead of silently dropping strict-parse
+ * failures or exporting private conversation state.
+ */
+export const SUPPORTED_SCHEMA_VERSION = 2;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -394,23 +411,80 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     const story = (await exists(join(pdir, "story.json")))
       ? await tryParse(`productions/${id}/story.json`, (raw) => StoryOverviewSchema.parse(JSON.parse(raw)))
       : null;
+    const routing = (await exists(join(pdir, "routing.json")))
+      ? await tryParse(`productions/${id}/routing.json`, (raw) => RoutingSchema.parse(JSON.parse(raw)))
+      : null;
     const treatment = (await exists(join(pdir, "story.md")))
       ? (await read(join(pdir, "story.md"))).replace(/\r\n/g, "\n")
       : null;
 
-    const chapters = [];
+    // Chapter order (SPEC-012 D3): `order` is the authority, legacy `number` is read when it is
+    // absent, and anything unresolvable — a tie, a missing value, a value that is not a positive
+    // integer — falls back to filename order. The summary carries the resolved dense sequence, so
+    // no display surface has to reapply this rule.
+    const chapterEntries: Array<{ file: string; fm: ChapterFrontmatter }> = [];
     for (const file of (await listDir(join(pdir, "chapters"))).filter((f) => f.endsWith(".md")).sort()) {
-      const chapter = await tryParse(`productions/${id}/chapters/${file}`, (raw) =>
-        ChapterSummarySchema.parse(MarkdownFile.parse(raw).data),
+      const fm = await tryParse(`productions/${id}/chapters/${file}`, (raw) =>
+        ChapterFrontmatterSchema.parse(MarkdownFile.parse(raw).data),
       );
-      if (chapter) chapters.push(chapter);
+      if (fm) chapterEntries.push({ file: file.slice(0, -".md".length), fm });
     }
+    const chapterRank = (fm: ChapterFrontmatter): number => {
+      const v = fm.order ?? fm.number;
+      return typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : Infinity;
+    };
+    chapterEntries.sort((a, b) => chapterRank(a.fm) - chapterRank(b.fm) || (a.file < b.file ? -1 : 1));
+    const chapters = chapterEntries.map(({ file, fm }, i) => ({
+      id: fm.id,
+      file,
+      order: i + 1,
+      title: fm.title,
+      status: fm.status ?? "planned",
+      version: fm.version,
+      ...(fm.words !== undefined ? { words: fm.words } : {}),
+      ...(fm.draws !== undefined ? { draws: fm.draws } : {}),
+    }));
 
-    const scenes = [];
+    // Scene order (issue #387): explicit `order` wins, the birth number is the fallback, ties
+    // break by id — never by filename. The actual on-disk stem is captured beside each scene so
+    // no consumer ever reconstructs a path from number and slug.
+    const sceneEntries: Array<{ file: string; scene: Scene }> = [];
+    const sceneFiles: Record<string, string> = {};
     for (const file of (await listDir(join(pdir, "scenes"))).filter((f) => f.endsWith(".json")).sort()) {
       const scene = await tryParse(`productions/${id}/scenes/${file}`, (raw) => SceneSchema.parse(JSON.parse(raw)));
-      if (scene) scenes.push(scene);
+      if (!scene) continue;
+      const stem = file.slice(0, -".json".length);
+      if (sceneFiles[scene.id] !== undefined) {
+        problems.push({
+          path: toPortable(`productions/${id}/scenes/${file}`),
+          message: `duplicate scene id ${scene.id} — already carried by ${sceneFiles[scene.id]}.json`,
+        });
+        continue;
+      }
+      sceneFiles[scene.id] = stem;
+      sceneEntries.push({ file: stem, scene });
     }
+    const scenes = sortScenes(sceneEntries.map((e) => e.scene));
+
+    // Episodes (SPEC-023 R-12): explicit order with stem tie-break; stems captured like scenes'.
+    const episodeEntries: Array<{ file: string; episode: Episode }> = [];
+    const episodeFiles: Record<string, string> = {};
+    for (const file of (await listDir(join(pdir, "episodes"))).filter((f) => f.endsWith(".json")).sort()) {
+      const episode = await tryParse(`productions/${id}/episodes/${file}`, (raw) => EpisodeSchema.parse(JSON.parse(raw)));
+      if (!episode) continue;
+      const stem = file.slice(0, -".json".length);
+      if (episodeFiles[episode.id] !== undefined) {
+        problems.push({
+          path: toPortable(`productions/${id}/episodes/${file}`),
+          message: `duplicate episode id ${episode.id} — already carried by ${episodeFiles[episode.id]}.json`,
+        });
+        continue;
+      }
+      episodeFiles[episode.id] = stem;
+      episodeEntries.push({ file: stem, episode });
+    }
+    episodeEntries.sort((a, b) => a.episode.order - b.episode.order || (a.file < b.file ? -1 : 1));
+    const episodes = episodeEntries.map((e) => e.episode);
 
     const takes = [];
     const takeMediaInfo: ProductionBundle["takeMediaInfo"] = {};
@@ -526,12 +600,22 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
         })
       : { audio: [], overlays: [] };
 
+    // season.json — the season beside its production (SPEC-023 R-10); null when none.
+    const season = (await exists(join(pdir, "season.json")))
+      ? await tryParse(`productions/${id}/season.json`, (raw) => SeasonSchema.parse(JSON.parse(raw)))
+      : null;
+
     productions.push({
       meta: metaDoc,
       story,
+      season,
+      routing,
       treatment,
       chapters,
       scenes,
+      sceneFiles,
+      episodes,
+      episodeFiles,
       takes,
       reviews,
       selections,
@@ -539,6 +623,19 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       cut,
       takeMediaInfo,
     });
+  }
+
+  // series/<slug>.json — thin Series records (SPEC-023 R-9). A file that fails to parse is a
+  // named problem and the row is dropped; the seasons it referenced remain ordinary productions.
+  const series = [];
+  for (const file of (await listDir(join(dir, "series"))).filter((f) => f.endsWith(".json")).sort()) {
+    const record = await tryParse(`series/${file}`, (raw) => {
+      const value = SeriesSchema.parse(JSON.parse(raw));
+      const stem = file.slice(0, -".json".length);
+      if (value.id !== stem) throw new Error(`series id "${value.id}" does not match file "${stem}"`);
+      return value;
+    });
+    if (record) series.push(record);
   }
 
   let referenceReviews: WorldBundle["referenceReviews"] = [];
@@ -724,6 +821,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     artifacts,
     clonedVoices,
     productions,
+    series,
     proposals,
     // Rows only. discoverConversations reads summaries, never transcripts.
     conversations: (await discoverConversations(dir)).summaries,

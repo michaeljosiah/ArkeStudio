@@ -53,6 +53,10 @@ function targetExists(candidate: WorldChangeCandidate, bundle: WorldBundle): boo
   const target = (candidate as unknown as Record<string, unknown>)["target"] as
     | { kind: "canon"; entryId: string }
     | { kind: "sheet"; sheetId: string }
+    | { kind: "production"; productionId: string }
+    | { kind: "episode"; productionId: string; episodeId?: string }
+    | { kind: "scene"; productionId: string; sceneId: string }
+    | { kind: "series"; seriesId: string }
     | undefined;
   if (!target) return true;
 
@@ -60,6 +64,24 @@ function targetExists(candidate: WorldChangeCandidate, bundle: WorldBundle): boo
     const entry = bundle.canon.find((c) => c.id === target.entryId);
     // A retired entry resolves for old citations but must not be amended into the present.
     return entry !== undefined && entry.retired !== true;
+  }
+  // The production targets (SPEC-023 R-20): a proposition against a production, episode, scene
+  // or series that is not in this world stays in the conversation as target-missing — named,
+  // never a crash, and never a proposal against nothing.
+  if (target.kind === "production") {
+    return bundle.productions.some((p) => p.meta.id === target.productionId);
+  }
+  if (target.kind === "episode") {
+    const production = bundle.productions.find((p) => p.meta.id === target.productionId);
+    if (!production) return false;
+    return target.episodeId === undefined || production.episodes.some((e) => e.id === target.episodeId);
+  }
+  if (target.kind === "scene") {
+    const production = bundle.productions.find((p) => p.meta.id === target.productionId);
+    return production !== undefined && production.scenes.some((s) => s.id === target.sceneId);
+  }
+  if (target.kind === "series") {
+    return bundle.series.some((s) => s.id === target.seriesId);
   }
   const sheet = bundle.sheets.find((s) => s.id === target.sheetId);
   return sheet !== undefined && sheet.retired !== true;

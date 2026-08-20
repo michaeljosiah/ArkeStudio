@@ -177,6 +177,17 @@ export class WorldStore {
     return this.scan.meta.worldId;
   }
 
+  /**
+   * Raise world.json.schemaVersion to `version` if the world is still below it (SPEC-023
+   * R-23, issue #403). A no-op when the world already crossed the boundary, so every feature
+   * that needs it can call it unconditionally before its first write.
+   */
+  async ensureSchemaVersion(version: number, source: string): Promise<void> {
+    const current = this.scan.meta.schemaVersion;
+    if (current >= version) return;
+    await this.commit({ kind: "world-schema-upgrade", source, files: [], raiseSchemaVersion: version });
+  }
+
   /** Serialised commit through the one primitive (D1). Rescans so the bundle stays honest. */
   async commit(input: CommitInput, hooks?: CommitHooks): Promise<CommitResult> {
     return this.serialise(async () => {

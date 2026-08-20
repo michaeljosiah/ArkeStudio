@@ -221,10 +221,22 @@ export class FalClient implements ProviderClient {
       "taskMode",
       "route",
       "framesField",
+      // Ours, not fal's: the durable identity of a boundary frame (issue 154) — the picture
+      // itself already travelled as the mode's image field.
+      "startFrame",
+      "frameArtifact",
+      // Ours, not fal's: which authorization spent this (SPEC-024 R-26) — recorded on the take,
+      // never sent to a provider.
+      "planId",
+      "passIndex",
       // Ours, not fal's: the routes that offer the choice spell it `generate_audio`.
       "sound",
       // Ours, not fal's: the length goes as `duration`, in this route's own vocabulary.
       "durationSec",
+      // Ours, not fal's: the video routes spell the shape `aspect_ratio` (issue 389). Passed
+      // through bare it was a field no route ever declared, which fal silently ignored — the
+      // chosen ratio never reached the model at all.
+      "aspect",
     ]);
     const { output, ...params } = Object.fromEntries(
       Object.entries(request.params).filter(([key]) => !internal.has(key)),
@@ -248,6 +260,12 @@ export class FalClient implements ProviderClient {
         ...params,
         ...(typeof request.params["sound"] === "boolean" ? { generate_audio: request.params["sound"] } : {}),
         ...durationParam(request.model, request.params),
+        // The shape, in the video routes' own vocabulary (issue 389). Image requests carry
+        // theirs inside `output` above; a mode that locks the ratio never sends one here,
+        // because the planner already dropped it.
+        ...(request.capability === "video" && typeof request.params["aspect"] === "string"
+          ? { aspect_ratio: request.params["aspect"] }
+          : {}),
         ...imageOutput,
         ...imagePayload,
       }),

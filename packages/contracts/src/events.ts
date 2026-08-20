@@ -114,6 +114,72 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .object({ ...base, type: z.literal("entity.changed"), worldId: UlidSchema, change: ChangeRecordSchema })
     .strict(),
 
+  /**
+   * The correlated answer to one create-production request (issue #384): success carries the
+   * actual slug only after the commit is durable; failure names its reason and navigates
+   * nowhere. A redelivered request id receives the same slug it got the first time.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("production.create-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      disposition: z.enum(["created", "failed"]),
+      slug: SlugSchema.optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+
+  /** A durable dispatch plan was created — or refused, in the compiler's words (SPEC-024 R-12). */
+  z
+    .object({
+      ...base,
+      type: z.literal("production.plan-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      disposition: z.enum(["created", "failed"]),
+      planId: z.string().min(1).optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+
+  /** The folded states of a production's dispatch plans (SPEC-024 R-10) — disk truth, no timer. */
+  z
+    .object({
+      ...base,
+      type: z.literal("production.plan-state"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      states: z.array(z.custom<import("./dispatch-plan.js").PlanState>()),
+    })
+    .strict(),
+
+  /** Interactive video's named findings (epic 401, brief §4) — evidence, never a score. */
+  z
+    .object({
+      ...base,
+      type: z.literal("production.routing-findings"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      findings: z.array(z.custom<import("./routing.js").RoutingFinding>()),
+    })
+    .strict(),
+
+  /** The self-hostable export finished, or refused in the blockers' words (epic 401, brief §6). */
+  z
+    .object({
+      ...base,
+      type: z.literal("production.interactive-export-result"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      disposition: z.enum(["exported", "refused"]),
+      dir: z.string().min(1).optional(),
+      blockers: z.array(z.string()).optional(),
+    })
+    .strict(),
+
   /** The world canon revision advanced (accepting any canon change increments once, §2.4). */
   z
     .object({
@@ -614,6 +680,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("export.progress"),
       worldId: UlidSchema,
       productionId: SlugSchema,
+      /** Set when this export is one episode's deliverable (SPEC-023 R-24, issue #396). */
+      episodeId: z.string().optional(),
       exportId: z.string().min(1),
       status: z.enum(["running", "done", "cancelled", "failed"]),
       percent: z.number().min(0).max(100),

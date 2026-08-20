@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import {
   admitReference,
+  aspectSupport,
   benchSessionSummary,
   deliveryParams,
   benchSourceKey,
@@ -617,7 +618,12 @@ export function planBenchDispatch(
             ? {
                 ...sizeParamsFor(model, frame.mode, {
                   ...(params.resolution !== undefined ? { resolution: params.resolution } : {}),
-                  ...(params.aspect !== undefined ? { aspect: params.aspect } : {}),
+                  // Gated like sound below (issue 389): a preset's shape carried across models
+                  // must not put a ratio on a route that never offered it — fal now maps
+                  // `aspect` onto the wire, so an unvetted value stopped being harmless.
+                  ...(params.aspect !== undefined && aspectSupport(model, params.aspect).ok
+                    ? { aspect: params.aspect }
+                    : {}),
                 }),
                 taskMode: frame.mode,
                 ...(frame.route !== null ? { route: frame.route } : {}),
@@ -626,7 +632,9 @@ export function planBenchDispatch(
               }
             : {
                 ...(params.resolution !== undefined ? { resolution: params.resolution } : {}),
-                ...(params.aspect !== undefined ? { aspect: params.aspect } : {}),
+                ...(params.aspect !== undefined && aspectSupport(model, params.aspect).ok
+                  ? { aspect: params.aspect }
+                  : {}),
                 ...(referencePaths.length > 0 ? { references: referencePaths } : {}),
               }),
           // Only where the route publishes the choice. A preset carries the params it was saved

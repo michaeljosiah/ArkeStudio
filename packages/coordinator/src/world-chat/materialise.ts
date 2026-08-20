@@ -2,7 +2,12 @@ import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
   CanonEntrySchema,
+  EpisodeSchema,
+  SceneSchema,
+  SeasonSchema,
+  SeriesSchema,
   SheetSchema,
+  StoryOverviewSchema,
   type Sheet,
   type WorldBundle,
   type WorldChangeCandidate,
@@ -11,7 +16,7 @@ import {
 import { ZodError } from "zod";
 import { entryContent } from "../canon/authoring.js";
 import { buildSheetContent, editSheetContent } from "../sheets/authoring.js";
-import { uniqueSlug } from "../world/slug.js";
+import { slugify, uniqueSlug } from "../world/slug.js";
 import { MarkdownFile } from "../world/text-files.js";
 
 /**
@@ -225,6 +230,12 @@ export function materialiseCandidate(
   bundle: WorldBundle,
   /** The whole instant, not the day: the world-look record stamps a full timestamp. */
   at: string,
+  /**
+   * Identities already claimed by SIBLING candidates in this same wrap-up (issue #400 round 2):
+   * the scanned bundle cannot see them, so two new episodes in one batch would otherwise take
+   * one stem and one order between them.
+   */
+  claimed?: { episodeIds: Set<string>; episodeStems: Set<string>; episodeOrders: Set<number> },
 ): Materialised {
   /** The id planned for this entry, so nothing depends on the order materialise is walked in. */
   const nextCanonId = (): string => {
@@ -431,10 +442,149 @@ export function materialiseCandidate(
       };
     }
 
+    /*
+     * The Development classifications (SPEC-023 R-20, issue #400): each writes its whole JSON
+     * record — the draft merged onto what is live — validated against the domain schema before
+     * any proposal directory exists, exactly like a malformed sheet. The JSON gate lane owns
+     * rebase and conflicts from here.
+     */
+    case "development.overview": {
+      const production = bundle.productions.find((p) => p.meta.id === candidate.target.productionId);
+      if (!production) throw new MaterialiseError(candidate.id, `production ${candidate.target.productionId} is not in this world`);
+      const live = production.story ?? { version: 1 };
+      const content = jsonContent(candidate.id, StoryOverviewSchema, { ...live, ...candidate.draft });
+      return {
+        candidate,
+        targets: [{ path: `productions/${production.meta.id}/story.json`, content }],
+        fields: Object.keys(candidate.draft),
+        reservedCanonIds: [],
+      };
+    }
+
+    case "development.season": {
+      const production = bundle.productions.find((p) => p.meta.id === candidate.target.productionId);
+      if (!production) throw new MaterialiseError(candidate.id, `production ${candidate.target.productionId} is not in this world`);
+      const live = production.season ?? { version: 1 };
+      // Arcs merge by id, not wholesale (issue #397 round 2): a conversational draft restating
+      // an arc's note must not silently delete the setup/turn/payoff placements the board
+      // authored — a lane the draft does not mention is a lane it did not change.
+      const liveArcs = "arcs" in live ? (live.arcs ?? []) : [];
+      const draftArcs = candidate.draft.arcs;
+      const mergedArcs =
+        draftArcs !== undefined
+          ? draftArcs.map((arc) => ({ ...liveArcs.find((existing) => existing.id === arc.id), ...arc }))
+          : undefined;
+      const content = jsonContent(candidate.id, SeasonSchema, {
+        ...live,
+        ...candidate.draft,
+        ...(mergedArcs !== undefined ? { arcs: mergedArcs } : {}),
+      });
+      return {
+        candidate,
+        targets: [{ path: `productions/${production.meta.id}/season.json`, content }],
+        fields: Object.keys(candidate.draft),
+        reservedCanonIds: [],
+      };
+    }
+
+    case "development.episode": {
+      const production = bundle.productions.find((p) => p.meta.id === candidate.target.productionId);
+      if (!production) throw new MaterialiseError(candidate.id, `production ${candidate.target.productionId} is not in this world`);
+      const episodeId = candidate.target.episodeId;
+      if (episodeId !== undefined) {
+        const live = production.episodes.find((e) => e.id === episodeId);
+        const stem = production.episodeFiles[episodeId];
+        if (!live || stem === undefined) {
+          throw new MaterialiseError(candidate.id, `episode ${episodeId} is not in ${production.meta.id}`);
+        }
+        const content = jsonContent(candidate.id, EpisodeSchema, { ...live, ...candidate.draft });
+        return {
+          candidate,
+          targets: [{ path: `productions/${production.meta.id}/episodes/${stem}.json`, content }],
+          fields: Object.keys(candidate.draft),
+          reservedCanonIds: [],
+        };
+      }
+      // Creation: identity is stable at birth — id and stem from the title's slug, deduplicated,
+      // never from position (SPEC-023 R-12; the chapters-and-scenes lesson applied from day one).
+      const title = candidate.draft.title;
+      if (title === undefined) throw new MaterialiseError(candidate.id, "a new episode needs a title");
+      const slug = slugify(title).slice(0, 60) || "episode";
+      const takenIds = new Set([...production.episodes.map((e) => e.id), ...(claimed?.episodeIds ?? [])]);
+      const takenStems = new Set([...Object.values(production.episodeFiles), ...(claimed?.episodeStems ?? [])]);
+      let id = `ep_${slug}`;
+      let stem = slug;
+      for (let n = 2; takenIds.has(id) || takenStems.has(stem); n++) {
+        id = `ep_${slug}-${n}`;
+        stem = `${slug}-${n}`;
+      }
+      const takenOrders = new Set([...production.episodes.map((e) => e.order), ...(claimed?.episodeOrders ?? [])]);
+      let order = candidate.draft.order ?? production.episodes.length + 1;
+      while (candidate.draft.order === undefined && takenOrders.has(order)) order += 1;
+      claimed?.episodeIds.add(id);
+      claimed?.episodeStems.add(stem);
+      claimed?.episodeOrders.add(order);
+      const content = jsonContent(candidate.id, EpisodeSchema, {
+        id,
+        version: 1,
+        order,
+        title,
+        ...(candidate.draft.promise !== undefined ? { promise: candidate.draft.promise } : {}),
+        scenes: candidate.draft.scenes ?? [],
+      });
+      return {
+        candidate,
+        targets: [{ path: `productions/${production.meta.id}/episodes/${stem}.json`, content }],
+        fields: Object.keys(candidate.draft),
+        reservedCanonIds: [],
+      };
+    }
+
+    case "development.scene-script": {
+      const production = bundle.productions.find((p) => p.meta.id === candidate.target.productionId);
+      if (!production) throw new MaterialiseError(candidate.id, `production ${candidate.target.productionId} is not in this world`);
+      const scene = production.scenes.find((s) => s.id === candidate.target.sceneId);
+      const stem = production.sceneFiles[candidate.target.sceneId];
+      if (!scene || stem === undefined) {
+        throw new MaterialiseError(candidate.id, `scene ${candidate.target.sceneId} is not in ${production.meta.id}`);
+      }
+      const content = jsonContent(candidate.id, SceneSchema, { ...scene, script: { blocks: candidate.draft.blocks } });
+      return {
+        candidate,
+        targets: [{ path: `productions/${production.meta.id}/scenes/${stem}.json`, content }],
+        fields: ["script"],
+        reservedCanonIds: [],
+      };
+    }
+
+    case "development.series": {
+      const live = bundle.series.find((s) => s.id === candidate.target.seriesId);
+      if (!live) {
+        // A Series is created with its first season, never from a conversation (SPEC-023 R-9).
+        throw new MaterialiseError(candidate.id, `series ${candidate.target.seriesId} is not in this world`);
+      }
+      const content = jsonContent(candidate.id, SeriesSchema, { ...live, ...candidate.draft });
+      return {
+        candidate,
+        targets: [{ path: `series/${live.id}.json`, content }],
+        fields: Object.keys(candidate.draft),
+        reservedCanonIds: [],
+      };
+    }
+
     default:
       // Media opportunities and undecided propositions never reach here — readiness holds them
       // back — and a new classification arriving without a case is a mistake worth failing on.
       throw new MaterialiseError(candidate.id, `${candidate.classification} cannot become a proposal`);
+  }
+}
+
+/** A whole JSON record, schema-validated before any proposal directory exists. */
+function jsonContent(candidateId: string, schema: { parse: (v: unknown) => unknown }, value: unknown): string {
+  try {
+    return `${JSON.stringify(schema.parse(value), null, 2)}\n`;
+  } catch (err) {
+    throw new MaterialiseError(candidateId, err instanceof Error ? err.message.slice(0, 300) : "does not satisfy its schema");
   }
 }
 

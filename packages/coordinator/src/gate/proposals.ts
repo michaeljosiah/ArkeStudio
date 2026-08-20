@@ -7,9 +7,14 @@ import {
   DEFAULT_AUDIO_POLICY,
   type AudioPolicy,
   CHARACTER_ROLE_MAX,
+  EpisodeSchema,
   newId,
   ProposalSchema,
   RipplePreviewSchema,
+  SeasonSchema,
+  SeriesSchema,
+  RoutingSchema,
+  StoryOverviewSchema,
   type Proposal,
   type ProposalConflict,
   type ProposalOpenChoice,
@@ -33,7 +38,31 @@ import {
   type DraftOperation,
 } from "./draft-journal.js";
 import { applyFieldEdit, safeFieldEditMessage } from "./field-edit.js";
-import { applyResolution, mergeMarkdown } from "./merge.js";
+import { applyJsonResolution, applyResolution, mergeJson, mergeMarkdown } from "./merge.js";
+
+/**
+ * The schema each JSON track's whole file must satisfy (SPEC-023 R-17): checked at staging so a
+ * malformed record never reaches review, and again at accept so review edits and conflict
+ * resolutions cannot smuggle one out. Scenes are validated by their own staging paths and are
+ * deliberately absent here — SceneSchema is the read path, and the gate refusing a legacy shape
+ * the scanner tolerates would strand an old scene behind its own Accept button.
+ */
+const JSON_TRACK_SCHEMAS: Partial<Record<ReturnType<typeof classify>["track"], { parse: (v: unknown) => unknown }>> = {
+  story: StoryOverviewSchema,
+  routing: RoutingSchema,
+  season: SeasonSchema,
+  episode: EpisodeSchema,
+  series: SeriesSchema,
+};
+
+/** The refusal names the record in a person's words, not the commit track's. */
+const JSON_TRACK_LABELS: Partial<Record<ReturnType<typeof classify>["track"], string>> = {
+  story: "story overview",
+  routing: "routing",
+  season: "season",
+  episode: "episode",
+  series: "series record",
+};
 
 /**
  * The accept gate (SPEC-004): one path into the world. A proposal is materialised with its
@@ -254,6 +283,21 @@ export class ProposalManager {
         const open = this.store.getBundle().proposals.find((p) => p.proposal.kind === "art-direction");
         if (open) {
           throw new LookAlreadyProposedError(open.proposal.id);
+        }
+      }
+      // Malformed structured JSON is refused before a proposal directory exists (issues #385,
+      // #400): nothing should reach review that the scanner would then drop from the bundle.
+      for (const target of input.targets) {
+        if (target.content === undefined) continue;
+        const track = classify(target.path).track;
+        const schema = JSON_TRACK_SCHEMAS[track];
+        if (!schema) continue;
+        try {
+          schema.parse(JSON.parse(target.content));
+        } catch (err) {
+          throw new Error(
+            `${target.path} is not a ${JSON_TRACK_LABELS[track] ?? track}: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`,
+          );
         }
       }
       const id = newId("pr");
@@ -618,12 +662,32 @@ export class ProposalManager {
         return { status: "needs-reconfirm", authoritative, signature };
       }
 
+      // Any accepted new-model entity crosses the schema boundary (SPEC-023 R-23): a season,
+      // episode, series or routing record landing in a version-1 world must fence it, or an
+      // older build opens the world and silently drops what was just accepted. Scenes cross it
+      // too when their accepted content carries the new fields (script, explicit order).
+      const crossesBoundary = files.some((file) => {
+        const track = classify(file.path).track;
+        if (track === "season" || track === "episode" || track === "series" || track === "routing" || track === "story") {
+          return true;
+        }
+        if (track === "scene" && file.content !== undefined) {
+          try {
+            const scene = JSON.parse(file.content) as Record<string, unknown>;
+            return scene["script"] !== undefined || scene["order"] !== undefined;
+          } catch {
+            return false;
+          }
+        }
+        return false;
+      });
       // Exactly one commit (R-11); versions derive inside the primitive (R-12, D7).
       const result = await this.store.commitUnserialised({
         kind: proposal.kind,
         source: proposal.source,
         proposalId: proposal.id,
         files,
+        ...(crossesBoundary ? { raiseSchemaVersion: 2 } : {}),
       });
       await rm(toExtendedLength(this.proposalDir(proposalId)), { recursive: true, force: true });
       return { status: "accepted", result };
@@ -649,6 +713,20 @@ export class ProposalManager {
     const problems: Array<{ path: string; message: string }> = [];
     for (const file of files) {
       // A delete carries no content and cannot introduce a role.
+      const jsonSchema = file.content !== undefined ? JSON_TRACK_SCHEMAS[classify(file.path).track] : undefined;
+      if (file.content !== undefined && jsonSchema) {
+        // Structured JSON is refused before acceptance when it is malformed or out of scope
+        // (issues #385, #400): a reviewer cannot be handed JSON the scanner would then drop.
+        try {
+          jsonSchema.parse(JSON.parse(file.content));
+        } catch (err) {
+          problems.push({
+            path: file.path,
+            message: `not a ${JSON_TRACK_LABELS[classify(file.path).track] ?? "valid record"}: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`,
+          });
+        }
+        continue;
+      }
       if (!file.path.startsWith("characters/") || file.content === undefined) continue;
       const role = roleOf(file.content);
       if (role === null || role.length <= CHARACTER_ROLE_MAX) continue;
@@ -751,8 +829,23 @@ export class ProposalManager {
           continue;
         }
 
+        if (base === null && target.baseHash === null) {
+          // This proposal CREATES the file — and someone else created it first. Refreshing the
+          // base hash here would let accept overwrite their file wholesale with a draft written
+          // against nothing; that is a conflict a person resolves, not bookkeeping.
+          conflicts.push({
+            path: target.path,
+            field: "whole file",
+            base: "",
+            mine,
+            theirs: live,
+          });
+          targets.push({ path: target.path, baseVersion: readVersion(target.path, live), baseHash: sha256(live) });
+          continue;
+        }
         if (base === null || sha256(live) === target.baseHash) {
-          // Created by this proposal, or not stale: rebase just refreshes the base record.
+          // Not stale (or the base snapshot is missing, which only the create case above can
+          // make meaningful): rebase just refreshes the base record.
           targets.push({
             path: target.path,
             baseVersion: readVersion(target.path, live),
@@ -761,7 +854,19 @@ export class ProposalManager {
           continue;
         }
 
-        const merge = mergeMarkdown(target.path, base, mine, live);
+        // JSON tracks merge in the JSON lane (SPEC-023 R-18): mergeMarkdown would re-serialise
+        // them with frontmatter fences, leaving files that no longer parse.
+        const track = classify(target.path).track;
+        const jsonTrack =
+          track === "scene" ||
+          track === "story" ||
+          track === "routing" ||
+          track === "season" ||
+          track === "episode" ||
+          track === "series";
+        const merge = jsonTrack
+          ? mergeJson(target.path, base, mine, live)
+          : mergeMarkdown(target.path, base, mine, live);
         conflicts.push(...merge.conflicts);
         await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(target.path)), merge.merged);
         await atomicWriteFile(join(this.proposalDir(proposalId), "_base", fromPortable(target.path)), live);
@@ -840,8 +945,22 @@ export class ProposalManager {
           );
         }
         resolved = chosen;
+      } else if (conflict.field === "whole file") {
+        // The create-vs-create conflict is all-or-nothing: mine keeps the staged draft, theirs
+        // takes the live file wholesale. Feeding it to the field appliers nested one document
+        // inside the other under a literal "whole file" key.
+        resolved = choice === "mine" ? current : (conflict.theirs ?? current);
       } else {
-        resolved = applyResolution(path, current, conflict, choice);
+        const track = classify(path).track;
+        resolved =
+          track === "scene" ||
+          track === "story" ||
+          track === "routing" ||
+          track === "season" ||
+          track === "episode" ||
+          track === "series"
+            ? applyJsonResolution(current, conflict, choice)
+            : applyResolution(path, current, conflict, choice);
       }
       await atomicWriteFile(join(this.proposalDir(proposalId), fromPortable(path)), resolved);
       const conflicts = (proposal.conflicts ?? []).map((c) =>
@@ -1043,7 +1162,14 @@ function readVersion(path: string, raw: string): number | null {
         (data["amendedAt"] as number | undefined) ?? 0,
       );
     }
-    if (kind.track === "scene" || kind.track === "story") {
+    if (
+      kind.track === "scene" ||
+      kind.track === "story" ||
+      kind.track === "routing" ||
+      kind.track === "season" ||
+      kind.track === "episode" ||
+      kind.track === "series"
+    ) {
       return ((JSON.parse(raw) as { version?: number }).version ?? 1);
     }
     if (kind.track === "art-direction") return ArtDirectionRecordSchema.parse(JSON.parse(raw)).version;

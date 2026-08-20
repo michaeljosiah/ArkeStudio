@@ -69,6 +69,8 @@ export const ID_PREFIXES = {
   marker: "mk",
   /** One artifact placed over the picture at a time the author chose (82a). */
   overlay: "ov",
+  /** One durable scene-dispatch plan (SPEC-024 R-1). */
+  dispatchPlan: "pl",
 } as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
@@ -82,6 +84,7 @@ export function prefixedIdSchema(prefix: IdPrefix): z.ZodString {
 }
 
 export const TakeIdSchema = prefixedIdSchema("tk");
+export const PlanIdSchema = prefixedIdSchema("pl");
 export const JobIdSchema = prefixedIdSchema("jb");
 export const PassIdSchema = prefixedIdSchema("ps");
 export const ProposalIdSchema = prefixedIdSchema("pr");
@@ -137,6 +140,8 @@ export const CanonIdSchema = z.string().regex(/^CANON-\d{3,}$/, "expected CANON-
 /** Scene / shot ids are human-numbered within their production: sc_04, sh_12. */
 export const SceneIdSchema = z.string().regex(/^sc_[a-z0-9-]+$/, "expected sc_<n>");
 export const ShotIdSchema = z.string().regex(/^sh_[a-z0-9-]+$/, "expected sh_<n>");
+/** Episode ids are slug-derived and stable at creation (SPEC-023 R-12): ep_the-missing-night. */
+export const EpisodeIdSchema = z.string().regex(/^ep_[a-z0-9-]+$/, "expected ep_<slug>");
 
 export const Sha256Schema = z.string().regex(/^sha256:[0-9a-f]{8,64}$/, "expected sha256:<hex>");
 

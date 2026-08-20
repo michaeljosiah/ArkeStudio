@@ -2,7 +2,12 @@ import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
   CanonEntrySchema,
+  EpisodeSchema,
+  RoutingSchema,
+  SeasonSchema,
+  SeriesSchema,
   SheetSchema,
+  StoryOverviewSchema,
   type Proposal,
 } from "@arke-studio/contracts";
 import { MarkdownFile } from "../world/text-files.js";
@@ -59,6 +64,97 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
       if (record.masterLook) fields.set("Master look", record.masterLook);
       policyFields(fields, record);
       return { label: `World look v${record.version}`, kind: "art direction", fields };
+    } catch {
+      return null;
+    }
+  }
+
+  /*
+   * The structured overview is JSON too (issue #385): without this branch a reviewer would be
+   * asked to accept a story overview shown as a bare path — not one field of the thing that
+   * steers drafting. Every schema field is projected; a malformed file returns null and the
+   * accept gate refuses it separately.
+   */
+  const storyMatch = /^productions\/[a-z0-9-]+\/story\.json$/.exec(path);
+  if (storyMatch) {
+    try {
+      const overview = StoryOverviewSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>();
+      if (overview.logline !== undefined) fields.set("Logline", overview.logline);
+      if (overview.spine !== undefined) fields.set("Spine", overview.spine);
+      for (const [i, act] of (overview.acts ?? []).entries()) {
+        fields.set(`Act ${i + 1} · ${act.title}`, act.summary ?? "—");
+      }
+      if (overview.targetLength !== undefined) fields.set("Target length", overview.targetLength);
+      return { label: `Story overview v${overview.version}`, kind: "story overview", fields };
+    } catch {
+      return null;
+    }
+  }
+
+  // The remaining narrative-domain JSON tracks (SPEC-023 R-18, issue #400): every field a
+  // reviewer would otherwise accept unseen.
+  if (/^productions\/[a-z0-9-]+\/season\.json$/.test(path)) {
+    try {
+      const season = SeasonSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>();
+      if (season.question !== undefined) fields.set("Question", season.question);
+      if (season.ending !== undefined) fields.set("Ending", season.ending);
+      if (season.direction !== undefined) fields.set("Direction", season.direction);
+      // Lanes included: an arc's setup/turn/payoff placements are exactly what a bad merge
+      // loses, and a review that omits them cannot show the loss it exists to catch.
+      for (const arc of season.arcs ?? []) {
+        const lanes = [
+          arc.setup !== undefined ? `setup ${arc.setup}` : null,
+          arc.turn !== undefined ? `turn ${arc.turn}` : null,
+          arc.payoff !== undefined ? `payoff ${arc.payoff}` : null,
+        ].filter((lane): lane is string => lane !== null);
+        fields.set(`Arc · ${arc.title}`, [arc.note, ...lanes].filter(Boolean).join(" · ") || "—");
+      }
+      if (season.defaults !== undefined) fields.set("Defaults", JSON.stringify(season.defaults));
+      return { label: `Season v${season.version}`, kind: "season", fields };
+    } catch {
+      return null;
+    }
+  }
+  if (/^productions\/[a-z0-9-]+\/episodes\/[^/]+\.json$/.test(path)) {
+    try {
+      const episode = EpisodeSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>();
+      fields.set("Title", episode.title);
+      fields.set("Order", String(episode.order));
+      if (episode.promise?.opens !== undefined) fields.set("Opens", episode.promise.opens);
+      if (episode.promise?.turn !== undefined) fields.set("Turn", episode.promise.turn);
+      if (episode.promise?.closes !== undefined) fields.set("Closes", episode.promise.closes);
+      fields.set("Scenes", episode.scenes.length > 0 ? episode.scenes.join(", ") : "none yet");
+      if (episode.release !== undefined) fields.set("Release", JSON.stringify(episode.release));
+      return { label: `${episode.title} (${episode.id})`, kind: `episode · v${episode.version}`, fields };
+    } catch {
+      return null;
+    }
+  }
+  if (/^productions\/[a-z0-9-]+\/routing\.json$/.test(path)) {
+    try {
+      const routing = RoutingSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>();
+      fields.set("Start", routing.start);
+      for (const choice of routing.choices) fields.set(`Choice · ${choice.id}`, `${choice.from} → "${choice.label}" → ${choice.to}`);
+      for (const ending of routing.endings) fields.set(`Ending · ${ending.sceneId}`, ending.title);
+      for (const entry of routing.excluded) fields.set(`Excluded · ${entry.sceneId}`, entry.reason);
+      return { label: `Routing v${routing.version}`, kind: "routing", fields };
+    } catch {
+      return null;
+    }
+  }
+  if (/^series\/[a-z0-9-]+\.json$/.test(path)) {
+    try {
+      const series = SeriesSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>();
+      fields.set("Title", series.title);
+      if (series.engine !== undefined) fields.set("Engine", series.engine);
+      if (series.continuity !== undefined) fields.set("Continuity", series.continuity);
+      fields.set("Seasons", series.seasons.join(", ") || "none yet");
+      return { label: `${series.title} (series)`, kind: `series · v${series.version}`, fields };
     } catch {
       return null;
     }

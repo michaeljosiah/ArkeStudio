@@ -30,7 +30,9 @@ import {
 } from "./settings.js";
 import { SetupStatusSchema } from "./setup.js";
 import { ReferenceKitSchema } from "./reference.js";
+import { RoutingSchema } from "./routing.js";
 import { SceneSchema, SelectionsSchema } from "./scene.js";
+import { EpisodeIdSchema, SceneIdSchema } from "./ids.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
 import { ClonedVoiceSchema, VoiceRuntimeStatusSchema } from "./voice.js";
 import { IDLE_UPDATE_STATE, UpdateStateSchema } from "./update.js";
@@ -38,7 +40,10 @@ import { sheetDir } from "./sheet-shapes.js";
 import {
   CanonEntrySchema,
   ChapterSummarySchema,
+  EpisodeSchema,
   ProductionSchema,
+  SeasonSchema,
+  SeriesSchema,
   SheetSchema,
   StoryOverviewSchema,
   WorldMetaSchema,
@@ -114,10 +119,25 @@ export const ProductionBundleSchema = z
   .object({
     meta: ProductionSchema,
     story: StoryOverviewSchema.nullable(),
+    /** season.json — the season beside its production, or null when none (SPEC-023 R-10). */
+    season: SeasonSchema.nullable().default(null),
+    /** routing.json — Interactive video's one graph authority, or null (epic #401, brief §2). */
+    routing: RoutingSchema.nullable().default(null),
     /** story.md — freeform treatment / script prose, per format (§2.2). */
     treatment: z.string().nullable(),
     chapters: z.array(ChapterSummarySchema),
     scenes: z.array(SceneSchema),
+    /**
+     * Scene id → the actual on-disk file stem (issue #387). Captured at scan so no consumer
+     * ever reconstructs a path from number and slug — the stem is the address the save, board,
+     * override, and dispatch commands use, and a file named off-pattern stays reachable.
+     * Defaulted: a read path, and bundles from before it existed must still parse.
+     */
+    sceneFiles: z.record(SceneIdSchema, z.string().min(1)).default({}),
+    /** Episodes in explicit order (SPEC-023 R-12); empty for non-episodic productions. */
+    episodes: z.array(EpisodeSchema).default([]),
+    /** Episode id → on-disk file stem, captured at scan like sceneFiles. */
+    episodeFiles: z.record(EpisodeIdSchema, z.string().min(1)).default({}),
     takes: z.array(TakeSchema),
     reviews: z.array(ReviewDecisionSchema),
     selections: SelectionsSchema,
@@ -226,6 +246,11 @@ export const WorldBundleSchema = z
      */
     clonedVoices: z.array(ClonedVoiceSchema).default([]),
     productions: z.array(ProductionBundleSchema),
+    /**
+     * series/<slug>.json records (SPEC-023 R-9). Defaulted: this schema is a read path, and
+     * every world created before Series existed must still parse.
+     */
+    series: z.array(SeriesSchema).default([]),
     proposals: z.array(StagedProposalSchema),
     /**
      * Conversation rows only — never transcripts. Opening a world must not cost every
