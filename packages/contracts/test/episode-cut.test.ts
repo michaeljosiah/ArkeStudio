@@ -55,7 +55,7 @@ function production(over: Partial<ProductionBundle>): ProductionBundle {
     reviews: [],
     selections: {},
     spine: null,
-    cut: { audio: [] },
+    cut: { audio: [], overlays: [] },
     takeMediaInfo: {},
     ...over,
   };
