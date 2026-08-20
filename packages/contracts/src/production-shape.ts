@@ -47,6 +47,8 @@ const KIND_LABEL: Record<string, string> = {
   series: "Series",
   microdrama: "Microdrama",
   "promotional-short": "Promotional short",
+  // A kind of Video, not a medium of its own (turn 53): same scenes, shots, takes and cut.
+  "music-video": "Music video",
   stills: "Stills",
   interactive: "Interactive",
 };
