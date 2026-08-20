@@ -60,64 +60,58 @@ const STEPS = [
   },
   {
     id: "89a", step: "Production Chat · the conversation",
-    actions: [{ match: "Wrap up", to: "88a", hint: "stage what is settled" }],
+    actions: [{ match: "Wrap up · stage what is settled", to: "91a", hint: "stage what is settled, and land on the season" }],
     built: { status: "built", route: "#/w/:worldId/p/:prodId/story",
       notes: ["<b>Newly drawn (turn 89).</b> Frame 44a drew this screen with a staged-proposal rail; three turns of argument later the rail beside a <i>conversation</i> holds what it understood, not what it staged. This is the frame for what ships — 44a stands as the drawing it replaced.",
               "<b>It is called Production Chat.</b> &#8220;Development&#8221; named a phase of filmmaking rather than a thing on a screen. This is World Chat with a production for a subject — same transcript, same points, same wrap-up, same gate — and the name says so.",
               "<b>The details moved out.</b> What the conversation settles is read next door, on <code>Season</code> or <code>Overview</code>, which is its own rail item. Every screen used to be half a place to make something and half a place to read it, and a person could not tell which they were doing.",
-              "<b>The two rails are different things.</b> Beside a conversation: what it currently understands, soft, changed by saying more. Beside a details screen: what is staged and waiting on a yes.",
+              "<b>Turn 91 amends this frame on one point.</b> The rail's two states belong to two <i>moments</i>, not two screens: while talking it holds these points, and at wrap-up the same rail becomes the staged proposal under <code>Accept Proposal</code> — drawn one level down on 91b, and the same at every level. Accepting lands you on the season.",
               "The form editor behind <code>Start the overview</code> is gone, and so is the button that used to send you to World Chat."] },
   },
   {
-    id: "88a", step: "Season · the details",
-    actions: [{ match: "Episodes", to: "45b", hint: "open the episode board" }],
-    built: { status: "drifted", route: "#/w/:worldId/p/:prodId/story (Season tab)",
-      notes: ["<b>Newly drawn (turn 88).</b> 48a drew a conversation column beside the season; this is the same screen with the conversation gone, because one thread lives in Production Chat and hanging a composer on each of four views made one conversation wear four costumes.",
-              "Read-only Series engine card ships, and states what it governs ✓ (binding met).",
-              "Unasked state says so in words: <code>THE SEASON QUESTION · Not asked yet.</code>",
-              "Built as a <b>details</b> screen (turn 88): the form editor behind <code>Start the season</code> is retired and so is the conversation column — one thread lives in Production Chat, and hanging a composer on each of four views made one conversation wear four costumes. This screen shows what was settled and what is staged against it.",
-              "Built without a frame: the defaults pill row, a <code>New episode · name it</code> card, and a season <b>Findings</b> panel."] },
-  },
-  {
-    id: "45b", step: "Episodes · the whole season at once",
-    actions: [{ match: "Turn this into proposals", to: "48b", hint: "propose the episodes" }],
-    built: { status: "drifted", route: "Season → Episodes tab",
-      notes: ["The tab appears only when episodes exist ✓ — the rule is honoured in code, not by greying a tab.",
-              "Cards ship with <code>HOOK ·</code> / <code>CLIFF ·</code> and the <code>NO ENDING YET</code> wording ✓.",
-              "Missing: per-episode <b>runtime seconds</b>, the logline line, the dashed unwritten tile, and the composer row.",
-              "<b>The <code>Add an episode</code> tile is not in the grid</b> — creation lives on the Season tab, which breaks 45b's rule that <i>making one happens where the others already are</i>.",
-              "Built without a frame: <code>Move earlier</code> / <code>Move later</code> reorder buttons."] },
+    id: "91a", step: "Season · the overview",
+    actions: [{ match: "Her mother\u2019s hour", to: "91b", hint: "open an episode" },
+              { match: "Arcs \u00b7 4", to: "48b", hint: "the season's other tab" }],
+    built: { status: "missing", route: "#/w/:worldId/p/:prodId/season",
+      notes: ["<b>Newly drawn (turn 91), and this is the piece the walk was missing.</b> A production is exactly one season, so there is nothing to navigate between and no Season tab whose job was to say which one you are in. What the season <i>is</i> — the question, the ending, the counts, the inherited Series engine — sits in the page's own header, and the tabs are the two things that are plural: Episodes and Arcs.",
+              "<b>Replaces three frames.</b> 88a (the season details), 45b (the episode board) and 48c (Direction) were three screens for one page. 88a's content is this header; 45b's grid is the Episodes tab; Direction keeps its field and loses its tab until somebody can say what it decides.",
+              "<b>Dashed tiles ship the day the season does</b> (turn 87): seven promised, three written, four <code>OPEN TO START IT</code>. Making an episode happens in the grid, not on another tab.",
+              "What the build has today: a four-tab strip (Season · Episodes · Arcs · Direction) with the counts and Series card behind the first tab, and the Episodes tab hidden entirely until an episode exists."] },
   },
   {
     id: "48b", step: "Arcs · lanes across the season",
-    actions: [{ match: "Turn this into proposals", to: "48c", hint: "propose the arcs" }],
-    built: { status: "drifted", route: "Season → Arcs tab",
-      notes: ["The stalled-lane callout ships (<code>\"{arc}\" has no payoff</code>) ✓.",
-              "Cells print the literal words <code>SETUP</code> / <code>TURN</code> / <code>PAYOFF</code> and <code>—</code>, where the drawing holds a phrase per cell (<i>rings alone</i>, <i>shows Odile</i>) with the markers alongside.",
+    actions: [{ match: "Episodes", to: "91a", hint: "back to the episodes" }],
+    built: { status: "drifted", route: "Season \u2192 Arcs tab",
+      notes: ["<b>Read the strip around this one as retired.</b> This is the old drawing, so it still shows four tabs including Direction; turn 91 leaves the Arcs grid itself untouched and replaces everything around it with 91a.",
+              "The stalled-lane callout ships (<code>\"{arc}\" has no payoff</code>) \u2713.",
+              "Cells print the literal words <code>SETUP</code> / <code>TURN</code> / <code>PAYOFF</code> and <code>\u2014</code>, where the drawing holds a phrase per cell (<i>rings alone</i>, <i>shows Odile</i>) with the markers alongside.",
               "<code>Add a lane</code> and the composer row are absent."] },
   },
   {
-    id: "48c", step: "Direction · the season against the world look",
-    actions: [{ match: "Turn this into a proposal", to: "53c", hint: "propose the direction" }],
-    built: { status: "built", route: "Season → Direction tab",
-      notes: ["<b>Turn 48's binding is now met (turn 86).</b> The world's master look is shown first, marked inherited; then the lines this season narrows against it; then a block stating plainly that the world look is unchanged and no other production moves.",
-              "The form editor behind <code>Edit the direction</code> is retired, and the conversation lives in Production Chat rather than in this view (turn 88).",
-              "What is still not built: the drawn <i>3 lines · would change</i> badge on the narrowing, which needs a staged season proposal to mark against."] },
+    id: "91b", step: "Episode Chat · and the proposal it ends in",
+    actions: [{ match: "Accept Proposal", to: "91c", hint: "accept what the conversation settled" }],
+    built: { status: "missing", route: "#/w/:worldId/p/:prodId/story/episodes/:id (chat)",
+      notes: ["<b>Newly drawn (turn 91); supersedes 53c.</b> 53c drew an episode as a conversation and a promise editor sharing one surface — the same half-and-half screen turn 88 broke apart at season level. Here the episode is talked through, and the rail is what the talking settled.",
+              "<b>The rail has two states and this is the second.</b> While talking it holds turn 89's points, soft and changed by saying more; at the end it holds the staged proposal, every field with what it was and what it would become, under one action.",
+              "<b><code>Turn this into a proposal</code> is retired.</b> By the time a person reads what the conversation settled, it already is one — the button says <code>Accept Proposal</code> because accepting is the decision being made.",
+              "<b>The scenes are part of the episode's proposal</b> (turn 87's cascade), not adopted afterwards from a pool of unassigned ones.",
+              "What the build has today: a form. Three inputs behind <code>Edit the promise</code>, and scenes added one at a time from an <code>UNASSIGNED SCENES</code> band. There is no episode conversation at all."] },
   },
   {
-    id: "53c", step: "The episode · promise, then scenes",
-    actions: [{ match: "The answer from inside", to: "49a", hint: "open a scene with no script" }],
-    built: { status: "drifted", route: "#/w/:worldId/p/:prodId/episodes/:id",
-      notes: ["Ships with <code>OPENS</code> / <code>TURN</code> / <code>CLOSES</code> and scenes in order ✓.",
-              "The conversation column is replaced by read cards plus <code>Edit the promise</code>; the drawn <code>Turn this into a proposal</code> / <i>one episode, one proposal</i> foot is absent.",
-              "Beats are correctly gone ✓ (turn 53 retired 46a/46b, and the code has no beat layer).",
-              "Built without a frame: the <code>UNASSIGNED SCENES</code> band."] },
+    id: "91c", step: "The episode · summary, then scenes",
+    actions: [{ match: "The hour found", to: "49a", hint: "open a scene with no script" }],
+    built: { status: "missing", route: "#/w/:worldId/p/:prodId/story/episodes/:id",
+      notes: ["<b>Newly drawn (turn 91).</b> The same shape as the season page, one level down: what this episode is in its header, and the one plural thing below it as a tab.",
+              "<b>Accepting lands you here</b>, and the header carries <code>Talk it through</code> back into this episode's own thread. An accept is not the end of a subject — a page that cannot be talked to again turns it into a one-way door.",
+              "<code>\u2190 Season</code> is the way back up, so the pattern is navigable in both directions: down through a tab, up through a link that names the level above.",
+              "What the build has today: this and 91b are one screen, and it is a form."] },
   },
   {
     id: "49a", step: "The script",
     actions: [{ match: "Turn this into a proposal", to: "49b", hint: "accept the script" }],
     built: { status: "missing", route: "— no screen —",
-      notes: ["<b>Not built.</b> There is no script surface: no block ids in the margin, no <code>S01</code> / <code>A01</code> / <code>D01</code>, no <code>accepting writes the script and creates no shots</code>.",
+      notes: ["<b>Read <code>Turn this into a proposal</code> here as retired</b> (turn 91). The scene frames still carry the old wording because they have not been redrawn; the button is <code>Accept Proposal</code> at every level, since by the time a person reads what a conversation settled it already is one.",
+              "<b>Not built.</b> There is no script surface: no block ids in the margin, no <code>S01</code> / <code>A01</code> / <code>D01</code>, no <code>accepting writes the script and creates no shots</code>.",
               "The scene screen ships a two-item strip — <code>Shots</code> and <code>Board</code> — where the drawing has four: <code>Script · Coverage · Board · Takes</code>.",
               "The <i>data model</i> is ahead of the screens: scene records carry script blocks, and a shot can cite blocks with a digest of the text at citation time."] },
   },
@@ -153,7 +147,7 @@ const STEPS = [
   },
   {
     id: "11b", step: "Generate · review the takes",
-    actions: [{ match: "Accept", to: "81a", hint: "accept a take into the cut" }],
+    actions: [{ match: "Accept take", to: "81a", hint: "accept a take into the cut" }],
     built: { status: "built", route: "#/w/:worldId/p/:prodId/generate",
       notes: ["Three columns ship as drawn: composer left with <code>Reset</code>, viewer centre, takes rail right ✓.",
               "The seg reads <code>Shot · Scene · Contact sheet</code> — turn 55a's binding, met verbatim ✓.",
@@ -218,103 +212,76 @@ const mapHtml = `
   </div>
 
   <div class="map__grid">
-
-    <!-- LEVEL 1 -->
     <div class="lvl">
       <div class="lvl__spine">
         <span class="lvl__n">1</span>
         <span class="lvl__thread">Production Chat</span>
       </div>
       <div class="lvl__body">
-        <div class="lvl__title">Talk it out · what this whole thing is</div>
+        <div class="lvl__title">The season · what this whole thing is</div>
         <div class="cards">
-          <div class="card is-built" data-goto="44a">
-            <div class="card__k">Production Chat</div>
-            <div class="card__d">World Chat with a production for a subject. One thread. <b>Beside it: what it understood so far</b> — the season question, each episode, each arc — still soft, changed by saying more.</div>
+          <div class="card is-built" data-goto="89a">
+            <div class="card__k">Talk</div>
+            <div class="card__d">One thread for the production. <b>Beside it: what it understood so far</b> — the season question, each episode, each arc — still soft, changed by saying more.</div>
             <div class="card__f">.conversations/cv_*</div>
           </div>
-          <div class="card is-built">
-            <div class="card__k">Wrap-up</div>
-            <div class="card__d">What one conversation produced is staged together and accepted as one thing, at the gate.</div>
+          <div class="card is-missing">
+            <div class="card__k">Accept</div>
+            <div class="card__d">At the end the same rail becomes <b>the staged proposal</b>, every field with what it was and what it would become, under one action. <b>Accept Proposal</b>, not <i>turn this into a proposal</i>.</div>
             <div class="card__f">.proposals/pr_*</div>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="arrow"><span>what it settled lands next door</span></div>
-
-    <div class="lvl">
-      <div class="lvl__spine">
-        <span class="lvl__n">1b</span>
-        <span class="lvl__thread">no conversation</span>
-      </div>
-      <div class="lvl__body">
-        <div class="lvl__title">Season · read it and work with it</div>
-        <div class="cards">
-          <div class="card is-built" data-goto="48a">
-            <div class="card__k">Season</div>
-            <div class="card__d">The question it answers, and how it ends.</div>
+          <div class="card is-missing" data-goto="91a">
+            <div class="card__k">The season page</div>
+            <div class="card__d">What it is, in the header. What is plural, as tabs: <b>Episodes</b> and <b>Arcs</b>. One season per production — another season is another production.</div>
             <div class="card__f">season.json</div>
           </div>
-          <div class="card is-part" data-goto="45b">
-            <div class="card__k">Episodes</div>
-            <div class="card__d">Every episode at once — <b>seven dashed tiles the day the season is made</b>, because the shape is a thing to see before it is a thing to fill.</div>
-            <div class="card__f">episodes/*.json</div>
-          </div>
-          <div class="card is-built" data-goto="48b">
+          <div class="card is-drifted" data-goto="48b">
             <div class="card__k">Arcs</div>
             <div class="card__d">What changes across the season. Needs episodes first — a lane names the episode it lands in.</div>
             <div class="card__f">season.json</div>
           </div>
-          <div class="card is-built" data-goto="48c">
-            <div class="card__k">Direction</div>
-            <div class="card__d">How it looks. Narrows the world's look, never replaces it.</div>
-            <div class="card__f">season.json</div>
-          </div>
         </div>
       </div>
     </div>
-
     <div class="arrow"><span>open an episode</span></div>
-
-    <!-- LEVEL 2 -->
     <div class="lvl">
       <div class="lvl__spine">
         <span class="lvl__n">2</span>
-        <span class="lvl__thread">Episode Chat + details</span>
+        <span class="lvl__thread">Episode Chat</span>
       </div>
       <div class="lvl__body">
         <div class="lvl__title">One episode · what happens in it</div>
         <div class="cards">
-          <div class="card is-built" data-goto="53c">
-            <div class="card__k">The promise</div>
-            <div class="card__d">How it opens, where it turns, how it closes.</div>
-            <div class="card__f">episodes/03-*.json</div>
+          <div class="card is-missing" data-goto="91b">
+            <div class="card__k">Talk, then accept</div>
+            <div class="card__d">The same two states, one level down. <b>The scenes it needs are part of its proposal</b> — turn 87's cascade — rather than drafted elsewhere and adopted from a pool.</div>
+            <div class="card__f">episodes/03-*.json · scenes/*.json</div>
           </div>
-          <div class="card is-todo">
-            <div class="card__k">…and the scenes it needs</div>
-            <div class="card__d"><b>The cascade.</b> Talking through the episode stages its promise <i>and</i> its scenes, in order, together. Today scenes are drafted elsewhere and adopted from a pool — the arrow runs backwards.</div>
-            <div class="card__f">scenes/*.json</div>
+          <div class="card is-missing" data-goto="91c">
+            <div class="card__k">The episode page</div>
+            <div class="card__d">Its promise in the header; <b>Scenes</b> as the tab. <code>Talk it through</code> goes back into this episode's own thread, because an accept is not the end of a subject.</div>
+            <div class="card__f">episodes/03-*.json</div>
           </div>
         </div>
       </div>
     </div>
-
     <div class="arrow"><span>open a scene</span></div>
-
-    <!-- LEVEL 3 -->
     <div class="lvl">
       <div class="lvl__spine">
         <span class="lvl__n">3</span>
-        <span class="lvl__thread">Scene Chat + details</span>
+        <span class="lvl__thread">Scene Chat</span>
       </div>
       <div class="lvl__body">
         <div class="lvl__title">One scene · how it is shot</div>
         <div class="cards">
+          <div class="card is-todo">
+            <div class="card__k">Talk, then accept</div>
+            <div class="card__d">Not drawn separately, and deliberately: it is the same two screens again with a smaller subject.</div>
+            <div class="card__f"></div>
+          </div>
           <div class="card is-todo" data-goto="49a">
             <div class="card__k">Script</div>
-            <div class="card__d">Written first, in blocks that keep their ids.</div>
+            <div class="card__d">Written first, in blocks that keep their ids. A script belongs to a scene and to nothing above it.</div>
             <div class="card__f">scenes/*.json</div>
           </div>
           <div class="card is-todo" data-goto="49b">
@@ -330,10 +297,7 @@ const mapHtml = `
         </div>
       </div>
     </div>
-
     <div class="arrow"><span>dispatch · money moves here</span></div>
-
-    <!-- MAKE -->
     <div class="lvl lvl--flat">
       <div class="lvl__spine"><span class="lvl__n">→</span><span class="lvl__thread">no conversation</span></div>
       <div class="lvl__body">
@@ -492,6 +456,31 @@ ${tokens}
       .map__key span { display: inline-flex; align-items: center; gap: 6px; }
       .map__hint { margin-left: auto; font-style: italic; }
 
+      /* The master writes its controls as <x-import>, resolved by the design tool and by nothing
+         else — so copied out of it, every button in every frame rendered as bare inline text. The
+         page exists to answer "does this button work", and a control that does not look like one
+         answers no before it is clicked. These rules are the design system's Button and Badge
+         restated in plain CSS, keyed off the attributes the master already carries. */
+      x-import { display: inline-flex; align-items: center; justify-content: center; text-align: center;
+                 box-sizing: border-box; }
+      x-import[component-from-global-scope$="Button"] {
+        height: 36px; padding: 0 15px; border-radius: var(--radius-md); cursor: pointer;
+        background: var(--primary); color: var(--primary-foreground);
+        font: 500 13px var(--font-sans); box-shadow: var(--shadow-xs); border: 1px solid transparent; }
+      x-import[component-from-global-scope$="Button"][size="lg"] { height: 40px; font-size: 13.5px; }
+      x-import[component-from-global-scope$="Button"][size="sm"] { height: 32px; font-size: 12.5px; padding: 0 12px; }
+      x-import[component-from-global-scope$="Button"][variant="secondary"] {
+        background: var(--secondary); color: var(--foreground); }
+      x-import[component-from-global-scope$="Button"][variant="outline"],
+      x-import[component-from-global-scope$="Button"][variant="ghost"] {
+        background: transparent; color: var(--foreground); box-shadow: none; }
+      x-import[component-from-global-scope$="Button"][variant="outline"] { border-color: var(--border); }
+      x-import[component-from-global-scope$="Badge"] {
+        height: 22px; padding: 0 9px; border-radius: 99px; border: 1px solid var(--border);
+        font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+      /* hint-size is the master's own width note; only the full-width case changes layout. */
+      x-import[hint-size^="100%"] { width: 100%; }
+
       /* A wired control inside a frame. Outlined always — a prototype whose hotspots are invisible
          gets read as broken — and lifted on hover. */
       .hotspot { outline: 1.5px dashed rgba(45,123,122,.85); outline-offset: 3px; border-radius: 6px;
@@ -562,8 +551,12 @@ ${tokens}
           return;
         }
         const step = STEPS.find((s) => s.id === id);
+        // Only the drawing. A screen is the frame *and* the built-notes beneath it, and the notes
+        // quote control labels in <code> — so searching the whole screen wired the annotation
+        // instead of the button, and the walk still passed because the annotation was clickable.
+        const art = screen.querySelector(".shot__scale") || screen;
         for (const a of step.actions) {
-          const el = findControl(screen, a.match);
+          const el = findControl(art, a.match);
           if (!el) { console.warn("no control for", a.match, "in", id); continue; }
           el.classList.add("hotspot");
           el.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); show(a.to); });

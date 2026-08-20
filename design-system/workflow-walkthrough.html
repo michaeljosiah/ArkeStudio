@@ -398,6 +398,31 @@
       .map__key span { display: inline-flex; align-items: center; gap: 6px; }
       .map__hint { margin-left: auto; font-style: italic; }
 
+      /* The master writes its controls as <x-import>, resolved by the design tool and by nothing
+         else — so copied out of it, every button in every frame rendered as bare inline text. The
+         page exists to answer "does this button work", and a control that does not look like one
+         answers no before it is clicked. These rules are the design system's Button and Badge
+         restated in plain CSS, keyed off the attributes the master already carries. */
+      x-import { display: inline-flex; align-items: center; justify-content: center; text-align: center;
+                 box-sizing: border-box; }
+      x-import[component-from-global-scope$="Button"] {
+        height: 36px; padding: 0 15px; border-radius: var(--radius-md); cursor: pointer;
+        background: var(--primary); color: var(--primary-foreground);
+        font: 500 13px var(--font-sans); box-shadow: var(--shadow-xs); border: 1px solid transparent; }
+      x-import[component-from-global-scope$="Button"][size="lg"] { height: 40px; font-size: 13.5px; }
+      x-import[component-from-global-scope$="Button"][size="sm"] { height: 32px; font-size: 12.5px; padding: 0 12px; }
+      x-import[component-from-global-scope$="Button"][variant="secondary"] {
+        background: var(--secondary); color: var(--foreground); }
+      x-import[component-from-global-scope$="Button"][variant="outline"],
+      x-import[component-from-global-scope$="Button"][variant="ghost"] {
+        background: transparent; color: var(--foreground); box-shadow: none; }
+      x-import[component-from-global-scope$="Button"][variant="outline"] { border-color: var(--border); }
+      x-import[component-from-global-scope$="Badge"] {
+        height: 22px; padding: 0 9px; border-radius: 99px; border: 1px solid var(--border);
+        font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+      /* hint-size is the master's own width note; only the full-width case changes layout. */
+      x-import[hint-size^="100%"] { width: 100%; }
+
       /* A wired control inside a frame. Outlined always — a prototype whose hotspots are invisible
          gets read as broken — and lifted on hover. */
       .hotspot { outline: 1.5px dashed rgba(45,123,122,.85); outline-offset: 3px; border-radius: 6px;
@@ -469,48 +494,40 @@
         </span>
         <span class="dot dot--built" title="Built · matches"></span>
       </button>
-      <button class="rail__item" data-goto="88a" type="button">
+      <button class="rail__item" data-goto="91a" type="button">
         <span class="rail__n">07</span>
         <span class="rail__body">
-          <span class="rail__step">Season · the details</span>
-          <span class="rail__id">88a</span>
+          <span class="rail__step">Season · the overview</span>
+          <span class="rail__id">91a</span>
         </span>
-        <span class="dot dot--drifted" title="Built · drifted"></span>
-      </button>
-      <button class="rail__item" data-goto="45b" type="button">
-        <span class="rail__n">08</span>
-        <span class="rail__body">
-          <span class="rail__step">Episodes · the whole season at once</span>
-          <span class="rail__id">45b</span>
-        </span>
-        <span class="dot dot--drifted" title="Built · drifted"></span>
+        <span class="dot dot--missing" title="Not built"></span>
       </button>
       <button class="rail__item" data-goto="48b" type="button">
-        <span class="rail__n">09</span>
+        <span class="rail__n">08</span>
         <span class="rail__body">
           <span class="rail__step">Arcs · lanes across the season</span>
           <span class="rail__id">48b</span>
         </span>
         <span class="dot dot--drifted" title="Built · drifted"></span>
       </button>
-      <button class="rail__item" data-goto="48c" type="button">
+      <button class="rail__item" data-goto="91b" type="button">
+        <span class="rail__n">09</span>
+        <span class="rail__body">
+          <span class="rail__step">Episode Chat · and the proposal it ends in</span>
+          <span class="rail__id">91b</span>
+        </span>
+        <span class="dot dot--missing" title="Not built"></span>
+      </button>
+      <button class="rail__item" data-goto="91c" type="button">
         <span class="rail__n">10</span>
         <span class="rail__body">
-          <span class="rail__step">Direction · the season against the world look</span>
-          <span class="rail__id">48c</span>
+          <span class="rail__step">The episode · summary, then scenes</span>
+          <span class="rail__id">91c</span>
         </span>
-        <span class="dot dot--built" title="Built · matches"></span>
-      </button>
-      <button class="rail__item" data-goto="53c" type="button">
-        <span class="rail__n">11</span>
-        <span class="rail__body">
-          <span class="rail__step">The episode · promise, then scenes</span>
-          <span class="rail__id">53c</span>
-        </span>
-        <span class="dot dot--drifted" title="Built · drifted"></span>
+        <span class="dot dot--missing" title="Not built"></span>
       </button>
       <button class="rail__item" data-goto="49a" type="button">
-        <span class="rail__n">12</span>
+        <span class="rail__n">11</span>
         <span class="rail__body">
           <span class="rail__step">The script</span>
           <span class="rail__id">49a</span>
@@ -518,7 +535,7 @@
         <span class="dot dot--missing" title="Not built"></span>
       </button>
       <button class="rail__item" data-goto="49b" type="button">
-        <span class="rail__n">13</span>
+        <span class="rail__n">12</span>
         <span class="rail__body">
           <span class="rail__step">Coverage · blocks against shots</span>
           <span class="rail__id">49b</span>
@@ -526,7 +543,7 @@
         <span class="dot dot--missing" title="Not built"></span>
       </button>
       <button class="rail__item" data-goto="53e" type="button">
-        <span class="rail__n">14</span>
+        <span class="rail__n">13</span>
         <span class="rail__body">
           <span class="rail__step">The board · priced, nothing sent</span>
           <span class="rail__id">53e</span>
@@ -534,7 +551,7 @@
         <span class="dot dot--missing" title="Not built"></span>
       </button>
       <button class="rail__item" data-goto="53d" type="button">
-        <span class="rail__n">15</span>
+        <span class="rail__n">14</span>
         <span class="rail__body">
           <span class="rail__step">One panel selected</span>
           <span class="rail__id">53d</span>
@@ -542,7 +559,7 @@
         <span class="dot dot--missing" title="Not built"></span>
       </button>
       <button class="rail__item" data-goto="79a" type="button">
-        <span class="rail__n">16</span>
+        <span class="rail__n">15</span>
         <span class="rail__body">
           <span class="rail__step">Dispatched · what the notification says</span>
           <span class="rail__id">79a</span>
@@ -550,7 +567,7 @@
         <span class="dot dot--built" title="Built · matches"></span>
       </button>
       <button class="rail__item" data-goto="11b" type="button">
-        <span class="rail__n">17</span>
+        <span class="rail__n">16</span>
         <span class="rail__body">
           <span class="rail__step">Generate · review the takes</span>
           <span class="rail__id">11b</span>
@@ -558,7 +575,7 @@
         <span class="dot dot--built" title="Built · matches"></span>
       </button>
       <button class="rail__item" data-goto="81a" type="button">
-        <span class="rail__n">18</span>
+        <span class="rail__n">17</span>
         <span class="rail__body">
           <span class="rail__step">The cut</span>
           <span class="rail__id">81a</span>
@@ -566,7 +583,7 @@
         <span class="dot dot--built" title="Built · matches"></span>
       </button>
       <button class="rail__item" data-goto="25b" type="button">
-        <span class="rail__n">19</span>
+        <span class="rail__n">18</span>
         <span class="rail__body">
           <span class="rail__step">Exports · the deliverable</span>
           <span class="rail__id">25b</span>
@@ -604,103 +621,76 @@
   </div>
 
   <div class="map__grid">
-
-    <!-- LEVEL 1 -->
     <div class="lvl">
       <div class="lvl__spine">
         <span class="lvl__n">1</span>
         <span class="lvl__thread">Production Chat</span>
       </div>
       <div class="lvl__body">
-        <div class="lvl__title">Talk it out · what this whole thing is</div>
+        <div class="lvl__title">The season · what this whole thing is</div>
         <div class="cards">
-          <div class="card is-built" data-goto="44a">
-            <div class="card__k">Production Chat</div>
-            <div class="card__d">World Chat with a production for a subject. One thread. <b>Beside it: what it understood so far</b> — the season question, each episode, each arc — still soft, changed by saying more.</div>
+          <div class="card is-built" data-goto="89a">
+            <div class="card__k">Talk</div>
+            <div class="card__d">One thread for the production. <b>Beside it: what it understood so far</b> — the season question, each episode, each arc — still soft, changed by saying more.</div>
             <div class="card__f">.conversations/cv_*</div>
           </div>
-          <div class="card is-built">
-            <div class="card__k">Wrap-up</div>
-            <div class="card__d">What one conversation produced is staged together and accepted as one thing, at the gate.</div>
+          <div class="card is-missing">
+            <div class="card__k">Accept</div>
+            <div class="card__d">At the end the same rail becomes <b>the staged proposal</b>, every field with what it was and what it would become, under one action. <b>Accept Proposal</b>, not <i>turn this into a proposal</i>.</div>
             <div class="card__f">.proposals/pr_*</div>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="arrow"><span>what it settled lands next door</span></div>
-
-    <div class="lvl">
-      <div class="lvl__spine">
-        <span class="lvl__n">1b</span>
-        <span class="lvl__thread">no conversation</span>
-      </div>
-      <div class="lvl__body">
-        <div class="lvl__title">Season · read it and work with it</div>
-        <div class="cards">
-          <div class="card is-built" data-goto="48a">
-            <div class="card__k">Season</div>
-            <div class="card__d">The question it answers, and how it ends.</div>
+          <div class="card is-missing" data-goto="91a">
+            <div class="card__k">The season page</div>
+            <div class="card__d">What it is, in the header. What is plural, as tabs: <b>Episodes</b> and <b>Arcs</b>. One season per production — another season is another production.</div>
             <div class="card__f">season.json</div>
           </div>
-          <div class="card is-part" data-goto="45b">
-            <div class="card__k">Episodes</div>
-            <div class="card__d">Every episode at once — <b>seven dashed tiles the day the season is made</b>, because the shape is a thing to see before it is a thing to fill.</div>
-            <div class="card__f">episodes/*.json</div>
-          </div>
-          <div class="card is-built" data-goto="48b">
+          <div class="card is-drifted" data-goto="48b">
             <div class="card__k">Arcs</div>
             <div class="card__d">What changes across the season. Needs episodes first — a lane names the episode it lands in.</div>
             <div class="card__f">season.json</div>
           </div>
-          <div class="card is-built" data-goto="48c">
-            <div class="card__k">Direction</div>
-            <div class="card__d">How it looks. Narrows the world's look, never replaces it.</div>
-            <div class="card__f">season.json</div>
-          </div>
         </div>
       </div>
     </div>
-
     <div class="arrow"><span>open an episode</span></div>
-
-    <!-- LEVEL 2 -->
     <div class="lvl">
       <div class="lvl__spine">
         <span class="lvl__n">2</span>
-        <span class="lvl__thread">Episode Chat + details</span>
+        <span class="lvl__thread">Episode Chat</span>
       </div>
       <div class="lvl__body">
         <div class="lvl__title">One episode · what happens in it</div>
         <div class="cards">
-          <div class="card is-built" data-goto="53c">
-            <div class="card__k">The promise</div>
-            <div class="card__d">How it opens, where it turns, how it closes.</div>
-            <div class="card__f">episodes/03-*.json</div>
+          <div class="card is-missing" data-goto="91b">
+            <div class="card__k">Talk, then accept</div>
+            <div class="card__d">The same two states, one level down. <b>The scenes it needs are part of its proposal</b> — turn 87's cascade — rather than drafted elsewhere and adopted from a pool.</div>
+            <div class="card__f">episodes/03-*.json · scenes/*.json</div>
           </div>
-          <div class="card is-todo">
-            <div class="card__k">…and the scenes it needs</div>
-            <div class="card__d"><b>The cascade.</b> Talking through the episode stages its promise <i>and</i> its scenes, in order, together. Today scenes are drafted elsewhere and adopted from a pool — the arrow runs backwards.</div>
-            <div class="card__f">scenes/*.json</div>
+          <div class="card is-missing" data-goto="91c">
+            <div class="card__k">The episode page</div>
+            <div class="card__d">Its promise in the header; <b>Scenes</b> as the tab. <code>Talk it through</code> goes back into this episode's own thread, because an accept is not the end of a subject.</div>
+            <div class="card__f">episodes/03-*.json</div>
           </div>
         </div>
       </div>
     </div>
-
     <div class="arrow"><span>open a scene</span></div>
-
-    <!-- LEVEL 3 -->
     <div class="lvl">
       <div class="lvl__spine">
         <span class="lvl__n">3</span>
-        <span class="lvl__thread">Scene Chat + details</span>
+        <span class="lvl__thread">Scene Chat</span>
       </div>
       <div class="lvl__body">
         <div class="lvl__title">One scene · how it is shot</div>
         <div class="cards">
+          <div class="card is-todo">
+            <div class="card__k">Talk, then accept</div>
+            <div class="card__d">Not drawn separately, and deliberately: it is the same two screens again with a smaller subject.</div>
+            <div class="card__f"></div>
+          </div>
           <div class="card is-todo" data-goto="49a">
             <div class="card__k">Script</div>
-            <div class="card__d">Written first, in blocks that keep their ids.</div>
+            <div class="card__d">Written first, in blocks that keep their ids. A script belongs to a scene and to nothing above it.</div>
             <div class="card__f">scenes/*.json</div>
           </div>
           <div class="card is-todo" data-goto="49b">
@@ -716,10 +706,7 @@
         </div>
       </div>
     </div>
-
     <div class="arrow"><span>dispatch · money moves here</span></div>
-
-    <!-- MAKE -->
     <div class="lvl lvl--flat">
       <div class="lvl__spine"><span class="lvl__n">→</span><span class="lvl__thread">no conversation</span></div>
       <div class="lvl__body">
@@ -1102,7 +1089,7 @@
           <div class="screen__step">Production Chat · the conversation</div>
           <div class="screen__label">89a Production Chat &middot; the transcript, and what it understood</div>
         </div>
-        <div class="screen__acts"><b>Working here:</b> <code>Wrap up</code> &rarr; stage what is settled</div>
+        <div class="screen__acts"><b>Working here:</b> <code>Wrap up · stage what is settled</code> &rarr; stage what is settled, and land on the season</div>
       </div>
       <div class="stage"><div class="shot__scale"><div data-screen-label="89a Production Chat &middot; the transcript, and what it understood" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
   <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
@@ -1169,216 +1156,28 @@
           <span class="tag tag--built">Built · matches</span>
           <code class="built__route">#/w/:worldId/p/:prodId/story</code>
         </div>
-        <ul><li><b>Newly drawn (turn 89).</b> Frame 44a drew this screen with a staged-proposal rail; three turns of argument later the rail beside a <i>conversation</i> holds what it understood, not what it staged. This is the frame for what ships — 44a stands as the drawing it replaced.</li><li><b>It is called Production Chat.</b> &#8220;Development&#8221; named a phase of filmmaking rather than a thing on a screen. This is World Chat with a production for a subject — same transcript, same points, same wrap-up, same gate — and the name says so.</li><li><b>The details moved out.</b> What the conversation settles is read next door, on <code>Season</code> or <code>Overview</code>, which is its own rail item. Every screen used to be half a place to make something and half a place to read it, and a person could not tell which they were doing.</li><li><b>The two rails are different things.</b> Beside a conversation: what it currently understands, soft, changed by saying more. Beside a details screen: what is staged and waiting on a yes.</li><li>The form editor behind <code>Start the overview</code> is gone, and so is the button that used to send you to World Chat.</li></ul>
+        <ul><li><b>Newly drawn (turn 89).</b> Frame 44a drew this screen with a staged-proposal rail; three turns of argument later the rail beside a <i>conversation</i> holds what it understood, not what it staged. This is the frame for what ships — 44a stands as the drawing it replaced.</li><li><b>It is called Production Chat.</b> &#8220;Development&#8221; named a phase of filmmaking rather than a thing on a screen. This is World Chat with a production for a subject — same transcript, same points, same wrap-up, same gate — and the name says so.</li><li><b>The details moved out.</b> What the conversation settles is read next door, on <code>Season</code> or <code>Overview</code>, which is its own rail item. Every screen used to be half a place to make something and half a place to read it, and a person could not tell which they were doing.</li><li><b>Turn 91 amends this frame on one point.</b> The rail's two states belong to two <i>moments</i>, not two screens: while talking it holds these points, and at wrap-up the same rail becomes the staged proposal under <code>Accept Proposal</code> — drawn one level down on 91b, and the same at every level. Accepting lands you on the season.</li><li>The form editor behind <code>Start the overview</code> is gone, and so is the button that used to send you to World Chat.</li></ul>
       </div>
     </section>
-    <section class="screen" data-frame="88a" hidden>
+    <section class="screen" data-frame="91a" hidden>
       <div class="screen__head">
         <div>
-          <div class="screen__step">Season · the details</div>
-          <div class="screen__label">88a Season &middot; the details, with no conversation on them</div>
+          <div class="screen__step">Season · the overview</div>
+          <div class="screen__label">91a Season &middot; the overview, with Episodes and Arcs</div>
         </div>
-        <div class="screen__acts"><b>Working here:</b> <code>Episodes</code> &rarr; open the episode board</div>
+        <div class="screen__acts"><b>Working here:</b> <code>Her mother’s hour</code> &rarr; open an episode &nbsp;·&nbsp; <code>Arcs · 4</code> &rarr; the season's other tab</div>
       </div>
-      <div class="stage"><div class="shot__scale"><div data-screen-label="88a Season &middot; the details, with no conversation on them" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
-  <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
-    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Bell Watch &middot; season 1</span></div>
+      <div class="stage"><div class="shot__scale"><div data-screen-label="91a Season &middot; the overview, with Episodes and Arcs" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden"><div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
+    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Bell Watch &middot; season</span></div>
     <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;padding:0 6px"><span style="font:650 15px var(--font-sans);letter-spacing:-.02em">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
     <div style="flex:1;min-width:0;text-align:right"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span></div>
-  </div>
-  <div style="display:flex;flex:1;min-height:0">
-    <div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px">
-      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)">
-        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Bell Watch</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">season 1 &middot; 7 episodes</div></div>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
-      </div>
-      <div style="height:14px"></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cast<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">chat</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:00</span></div>
-      <div style="flex:1"></div>
-      <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
-    </div>
-    <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:26px 34px 0;overflow:hidden;animation:fadeUp .6s var(--ease-out) both">
-      <div style="flex:none">
-        <div style="font:500 10px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">SEASON 1</div>
-        <div style="font:650 26px var(--font-sans);letter-spacing:-.02em;margin-top:5px">The season, as it stands</div>
-        <div style="font:400 12.5px/1.6 var(--font-sans);color:var(--muted-foreground);margin-top:7px">What Production Chat settled. Nothing on this screen writes &#8212; changing it is done where it was decided.</div>
-      </div>
-      <div style="flex:1;min-height:0;display:flex;flex-direction:column;gap:12px;margin-top:20px">
-        <div style="box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:12px;padding:16px 19px;box-shadow:var(--shadow-xs)">
-          <div style="font:500 10px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">THE SEASON QUESTION</div>
-          <div style="font:400 14px/1.7 var(--font-sans);margin-top:7px">Who is answering the bells, and why do they know her mother&#8217;s hour?</div>
-          <div style="font:500 10px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground);margin-top:18px">HOW IT ENDS</div>
-          <div style="font:400 14px/1.7 var(--font-sans);margin-top:7px">She stops ringing to be answered and starts ringing to be found.</div>
-        </div>
-        <div style="box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:12px;padding:16px 19px;box-shadow:var(--shadow-xs)">
-          <div style="display:flex;align-items:baseline;gap:8px">
-            <span style="font:500 10px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground);flex:1">SERIES ENGINE</span>
-            <span style="font:400 10px var(--font-mono);color:var(--neutral-400)">read-only &middot; inherited</span>
-          </div>
-          <div style="font:400 13px/1.7 var(--font-sans);margin-top:8px">Every night one bell answers a bell that was never rung.</div>
-          <div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:10px">governs 1 season &middot; editing it is the Series&#8217; own accept</div>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <span style="padding:5px 11px;border-radius:99px;border:1px solid var(--border);font:400 11px var(--font-mono);color:var(--muted-foreground)">7 episodes</span>
-          <span style="padding:5px 11px;border-radius:99px;border:1px solid var(--border);font:400 11px var(--font-mono);color:var(--muted-foreground)">45&ndash;75s each</span>
-          <span style="padding:5px 11px;border-radius:99px;border:1px solid var(--border);font:400 11px var(--font-mono);color:var(--muted-foreground)">hook in 3s</span>
-          <span style="padding:5px 11px;border-radius:99px;border:1px solid var(--border);font:400 11px var(--font-mono);color:var(--muted-foreground)">cliffhanger</span>
-        </div>
-      </div>
-      <div style="flex:none;padding:16px 0 20px;font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#8592; Production Chat is where this was decided</div>
-    </div>
-    <div style="width:470px;box-sizing:border-box;flex:none;padding:22px 28px 0;background:var(--muted);display:flex;flex-direction:column;overflow:hidden;animation:fadeUp .7s var(--ease-out) .15s both">
-      <div style="display:flex;gap:3px;flex:none">
-        <span style="padding:5px 10px;border-radius:7px;background:var(--background);border:1px solid var(--border);font:500 11.5px var(--font-sans)">Season</span>
-        <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Episodes</span>
-        <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Arcs</span>
-        <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Direction</span>
-      </div>
-      <div style="display:flex;align-items:baseline;gap:10px;margin-top:14px"><div style="font:600 15px var(--font-sans)">Season 1, as it stands</div><span style="font:400 10px var(--font-mono);color:var(--warning)">1 change</span></div>
-      <div style="box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow-xs);margin-top:12px">
-        <div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 12.5px var(--font-sans);flex:1">The season question</span><span style="font:400 10px var(--font-mono);color:var(--warning)">would change</span></div>
-        <div style="font:400 12.5px/1.6 var(--font-sans);margin-top:6px">Who is answering the bells, and why do they know her mother&#8217;s hour?</div>
-        <div style="font:400 11.5px/1.6 var(--font-sans);color:var(--neutral-400);margin-top:6px">Accepted: &#8220;Is her mother still out there?&#8221;</div>
-      </div>
-      <div style="box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow-xs);margin-top:10px">
-        <div style="font:600 12.5px var(--font-sans)">Ending state</div>
-        <div style="font:400 12.5px/1.6 var(--font-sans);margin-top:6px">She stops ringing to be answered and starts ringing to be found.</div>
-      </div>
-      <div style="box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow-xs);margin-top:10px">
-        <div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 12.5px var(--font-sans);flex:1">The engine</span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">series &middot; not this season&#8217;s</span></div>
-        <div style="font:400 12.5px/1.6 var(--font-sans);color:var(--muted-foreground);margin-top:6px">Every night she rings, and something answers that should not.</div>
-        <div style="font:400 11px/1.55 var(--font-sans);color:var(--neutral-400);margin-top:7px">Inherited from Bell Watch &middot; editing opens the Series.</div>
-      </div>
-      <div style="flex:1"></div>
-      <div style="flex:none;padding:12px 0 14px;border-top:1px solid var(--border);margin-top:12px">
-        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="100%,40px">Review in Proposals</x-import>
-        <div style="font:400 10.5px/1.5 var(--font-mono);color:var(--neutral-400);margin-top:9px;text-align:center">staged by the conversation &middot; the gate writes it</div>
-      </div>
-    </div>
-  </div>
-</div></div></div>
-      <div class="built built--drifted">
+  </div><div style="display:flex;flex:1;min-height:0"><div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px"><div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)"><div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Bell Watch</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">microdrama &middot; 7 episodes</div></div><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg></div><div style="height:14px"></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cast<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">4</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">chat</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Season<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v3</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">12</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:00</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Audio<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Exports<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div><div style="flex:1"></div><div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div></div><div style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden"><div style="padding:30px 34px 0;flex:none;animation:fadeUp .6s var(--ease-out) both"><div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">SEASON</div><h1 style="margin:8px 0 0;font:650 26px/1.1 var(--font-sans);letter-spacing:-0.025em">Bell Watch</h1><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px"><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">7 episodes</span><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">3 written</span><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">14 scenes</span><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">45&#8211;75s each</span><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">hook in 3s</span><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">cliffhanger</span></div><div style="display:flex;gap:26px;margin-top:18px;max-width:900px"><div style="flex:1;min-width:0"><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">THE QUESTION IT ANSWERS</div><div style="font:400 13px/1.6 var(--font-sans);margin-top:5px">Whether she stops looking for her mother and starts looking for who is answering.</div></div><div style="flex:1;min-width:0"><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">HOW IT ENDS</div><div style="font:400 13px/1.6 var(--font-sans);margin-top:5px">She rings to be found rather than to be answered.</div></div><div style="width:220px;flex:none"><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">SERIES ENGINE &middot; READ-ONLY</div><div style="font:400 12.5px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:5px">Every season, someone the harbour gave up on answers back.</div></div></div><div style="margin-top:20px"><div style="display:flex;gap:4px;border-bottom:1px solid var(--border);padding-bottom:10px"><div style="padding:7px 14px;border-radius:8px;cursor:pointer;background:var(--secondary);font:500 12.5px var(--font-sans)">Episodes &middot; 7</div><div style="padding:7px 14px;border-radius:8px;cursor:pointer;font:400 12.5px var(--font-sans);color:var(--muted-foreground)">Arcs &middot; 4</div></div></div></div><div style="flex:1;min-height:0;overflow:hidden;padding:16px 34px 0;animation:fadeUp .7s var(--ease-out) .1s both"><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px"><div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:13px 15px;box-shadow:var(--shadow-xs);cursor:pointer;background:var(--background)" style-hover="background:var(--accent)"><div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">01</span><span style="font:600 13.5px var(--font-sans);flex:1;min-width:0">The bell that answers</span></div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:9px">HOOK &middot; A bell rings back on a dead line.</div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">CLIFF &middot; The ledger has a night missing.</div><div style="margin-top:10px"><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">5 scenes</span></div></div><div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:13px 15px;box-shadow:var(--shadow-xs);cursor:pointer;background:var(--background)" style-hover="background:var(--accent)"><div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">02</span><span style="font:600 13.5px var(--font-sans);flex:1;min-width:0">What the ledger skips</span></div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:9px">HOOK &middot; Odile counts the hours nobody kept.</div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">CLIFF &middot; Someone rebuilt the street around the gap.</div><div style="margin-top:10px"><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">4 scenes</span></div></div><div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:13px 15px;box-shadow:var(--shadow-xs);cursor:pointer;background:var(--background)" style-hover="background:var(--accent)"><div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">03</span><span style="font:600 13.5px var(--font-sans);flex:1;min-width:0">Her mother&#8217;s hour</span></div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:9px">HOOK &middot; The answering bell keeps an hour only one person rang.</div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:3px">CLIFF &middot; She rings it herself.</div><div style="margin-top:10px"><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">5 scenes</span></div></div><div style="box-sizing:border-box;border:1px dashed var(--border);border-radius:12px;padding:13px 15px;cursor:pointer;display:flex;flex-direction:column;min-height:118px" style-hover="background:var(--accent)"><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">04</div><div style="font:400 12.5px var(--font-sans);color:var(--muted-foreground);margin-top:8px">Not written yet.</div><div style="flex:1"></div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">OPEN TO START IT</div></div><div style="box-sizing:border-box;border:1px dashed var(--border);border-radius:12px;padding:13px 15px;cursor:pointer;display:flex;flex-direction:column;min-height:118px" style-hover="background:var(--accent)"><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">05</div><div style="font:400 12.5px var(--font-sans);color:var(--muted-foreground);margin-top:8px">Not written yet.</div><div style="flex:1"></div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">OPEN TO START IT</div></div><div style="box-sizing:border-box;border:1px dashed var(--border);border-radius:12px;padding:13px 15px;cursor:pointer;display:flex;flex-direction:column;min-height:118px" style-hover="background:var(--accent)"><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">06</div><div style="font:400 12.5px var(--font-sans);color:var(--muted-foreground);margin-top:8px">Not written yet.</div><div style="flex:1"></div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">OPEN TO START IT</div></div><div style="box-sizing:border-box;border:1px dashed var(--border);border-radius:12px;padding:13px 15px;cursor:pointer;display:flex;flex-direction:column;min-height:118px" style-hover="background:var(--accent)"><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">07</div><div style="font:400 12.5px var(--font-sans);color:var(--muted-foreground);margin-top:8px">Not written yet.</div><div style="flex:1"></div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">OPEN TO START IT</div></div></div></div><div style="flex:none;padding:14px 34px 20px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400);flex:1">opening an episode opens its own chat &middot; the season was decided in Production Chat</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">nothing here writes &#8212; every change is a proposal</span></div></div></div></div></div></div>
+      <div class="built built--missing">
         <div class="built__head">
-          <span class="tag tag--drifted">Built · drifted</span>
-          <code class="built__route">#/w/:worldId/p/:prodId/story (Season tab)</code>
+          <span class="tag tag--missing">Not built</span>
+          <code class="built__route">#/w/:worldId/p/:prodId/season</code>
         </div>
-        <ul><li><b>Newly drawn (turn 88).</b> 48a drew a conversation column beside the season; this is the same screen with the conversation gone, because one thread lives in Production Chat and hanging a composer on each of four views made one conversation wear four costumes.</li><li>Read-only Series engine card ships, and states what it governs ✓ (binding met).</li><li>Unasked state says so in words: <code>THE SEASON QUESTION · Not asked yet.</code></li><li>Built as a <b>details</b> screen (turn 88): the form editor behind <code>Start the season</code> is retired and so is the conversation column — one thread lives in Production Chat, and hanging a composer on each of four views made one conversation wear four costumes. This screen shows what was settled and what is staged against it.</li><li>Built without a frame: the defaults pill row, a <code>New episode · name it</code> card, and a season <b>Findings</b> panel.</li></ul>
-      </div>
-    </section>
-    <section class="screen" data-frame="45b" hidden>
-      <div class="screen__head">
-        <div>
-          <div class="screen__step">Episodes · the whole season at once</div>
-          <div class="screen__label">45b As the surface &middot; every episode at once</div>
-        </div>
-        <div class="screen__acts"><b>Working here:</b> <code>Turn this into proposals</code> &rarr; propose the episodes</div>
-      </div>
-      <div class="stage"><div class="shot__scale"><div data-screen-label="45b As the surface &middot; every episode at once" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
-  <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
-    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Bell Watch &middot; season 1 &middot; development</span></div>
-    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;padding:0 6px"><span style="font:650 15px var(--font-sans);letter-spacing:-.02em">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
-    <div style="flex:1;min-width:0;text-align:right"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span></div>
-  </div>
-  <div style="display:flex;flex:1;min-height:0">
-    <div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px">
-      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)">
-        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Bell Watch</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">season 1 &middot; 7 episodes</div></div>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
-      </div>
-      <div style="height:14px"></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cast<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:00</span></div>
-      <div style="flex:1"></div>
-      <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
-    </div>
-    <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:26px 30px 0;overflow:hidden">
-      <div style="display:flex;align-items:flex-end;gap:14px;flex:none">
-        <div style="flex:1;min-width:0">
-          <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">DEVELOPMENT &middot; SEASON 1 &middot; EPISODES</div>
-          <h1 style="margin:8px 0 0;font:650 26px/1.1 var(--font-sans);letter-spacing:-0.025em">Seven nights, and the one she is looking for</h1>
-        </div>
-        <div style="display:flex;gap:3px">
-          <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Season</span>
-          <span style="padding:5px 10px;border-radius:7px;background:var(--secondary);font:500 11.5px var(--font-sans)">Episodes</span>
-          <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Arcs</span>
-          <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Direction</span>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:12px;margin-top:20px;flex:none">
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:13px 15px;box-shadow:var(--shadow-xs);background:var(--background)">
-          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">EP 01</span><span style="flex:1"></span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">58s</span></div>
-          <div style="font:600 13.5px var(--font-sans);margin-top:6px">The first answer</div>
-          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:5px">She rings the late watch alone. Something rings back, one bell late.</div>
-          <div style="font:400 10px/1.6 var(--font-mono);color:var(--neutral-400);margin-top:9px">HOOK &middot; one bell late</div>
-          <div style="font:400 10px/1.6 var(--font-mono);color:var(--warning)">CLIFF &middot; it knows her name</div>
-        </div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:13px 15px;box-shadow:var(--shadow-xs);background:var(--background)">
-          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">EP 02</span><span style="flex:1"></span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">61s</span></div>
-          <div style="font:600 13.5px var(--font-sans);margin-top:6px">Who else is awake</div>
-          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:5px">Odile has heard it too, and has been writing the times down for a year.</div>
-          <div style="font:400 10px/1.6 var(--font-mono);color:var(--neutral-400);margin-top:9px">HOOK &middot; the ledger</div>
-          <div style="font:400 10px/1.6 var(--font-mono);color:var(--warning)">CLIFF &middot; a night is missing</div>
-        </div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:13px 15px;box-shadow:var(--shadow-xs);background:var(--background)">
-          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">EP 03</span><span style="flex:1"></span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">57s</span></div>
-          <div style="font:600 13.5px var(--font-sans);margin-top:6px">The missing night</div>
-          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:5px">They go back to it. The Quarter has been quietly rebuilt around the gap.</div>
-          <div style="font:400 10px/1.6 var(--font-mono);color:var(--neutral-400);margin-top:9px">HOOK &middot; the wrong street</div>
-          <div style="font:400 10px/1.6 var(--font-mono);color:var(--destructive)">NO ENDING YET</div>
-        </div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:13px 15px;box-shadow:var(--shadow-xs);background:var(--background)">
-          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">EP 04</span><span style="flex:1"></span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">60s</span></div>
-          <div style="font:600 13.5px var(--font-sans);margin-top:6px">Her mother&#8217;s hour</div>
-          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:5px">One of the answering bells keeps a time only one person ever rang.</div>
-          <div style="font:400 10px/1.6 var(--font-mono);color:var(--neutral-400);margin-top:9px">HOOK &middot; the hour itself</div>
-          <div style="font:400 10px/1.6 var(--font-mono);color:var(--warning)">CLIFF &middot; she rings it back</div>
-        </div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:13px 15px;box-shadow:var(--shadow-xs);background:var(--background)">
-          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">EP 05</span><span style="flex:1"></span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">&mdash;</span></div>
-          <div style="font:600 13.5px var(--font-sans);margin-top:6px">The Council notices</div>
-          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:5px">A watch that answers is a salvage claim nobody filed.</div>
-          <div style="font:400 10px/1.6 var(--font-mono);color:var(--destructive);margin-top:9px">NO HOOK, NO ENDING</div>
-        </div>
-        <div style="box-sizing:border-box;border:1px dashed var(--border);border-radius:12px;padding:13px 15px;display:flex;flex-direction:column;justify-content:center">
-          <div style="font:400 10px var(--font-mono);color:var(--neutral-400)">EP 06</div>
-          <div style="font:400 12px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:6px">A title and nothing else.</div>
-        </div>
-        <div style="box-sizing:border-box;border:1px dashed var(--border);border-radius:12px;padding:13px 15px;display:flex;flex-direction:column;justify-content:center">
-          <div style="font:400 10px var(--font-mono);color:var(--neutral-400)">EP 07 &middot; FINALE</div>
-          <div style="font:400 12px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:6px">Seven episodes, chosen at creation.</div>
-        </div>
-        <div style="box-sizing:border-box;border:1px dashed var(--border);border-radius:12px;padding:13px 15px;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;color:var(--muted-foreground)" style-hover="border-color:var(--neutral-400);color:var(--foreground)">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg><span style="font:400 12px var(--font-sans)">Add an episode</span>
-        </div>
-      </div>
-      <div style="flex:1;min-height:0"></div>
-      <div style="flex:none;border-top:1px solid var(--border);padding:12px 0;display:flex;align-items:center;gap:12px">
-        <div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:11px 15px;box-shadow:var(--shadow-xs);cursor:text" style-hover="border-color:var(--neutral-400)">
-          <span style="flex:1;font:400 13px var(--font-sans);color:var(--text-placeholder)">Episode 5 needs a reason to exist&hellip;</span>
-          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></span>
-          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span>
-          <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#8629; send</span>
-        </div>
-        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="190px,40px">Turn this into proposals</x-import>
-      </div>
-    </div>
-  </div>
-</div></div></div>
-      <div class="built built--drifted">
-        <div class="built__head">
-          <span class="tag tag--drifted">Built · drifted</span>
-          <code class="built__route">Season → Episodes tab</code>
-        </div>
-        <ul><li>The tab appears only when episodes exist ✓ — the rule is honoured in code, not by greying a tab.</li><li>Cards ship with <code>HOOK ·</code> / <code>CLIFF ·</code> and the <code>NO ENDING YET</code> wording ✓.</li><li>Missing: per-episode <b>runtime seconds</b>, the logline line, the dashed unwritten tile, and the composer row.</li><li><b>The <code>Add an episode</code> tile is not in the grid</b> — creation lives on the Season tab, which breaks 45b's rule that <i>making one happens where the others already are</i>.</li><li>Built without a frame: <code>Move earlier</code> / <code>Move later</code> reorder buttons.</li></ul>
+        <ul><li><b>Newly drawn (turn 91), and this is the piece the walk was missing.</b> A production is exactly one season, so there is nothing to navigate between and no Season tab whose job was to say which one you are in. What the season <i>is</i> — the question, the ending, the counts, the inherited Series engine — sits in the page's own header, and the tabs are the two things that are plural: Episodes and Arcs.</li><li><b>Replaces three frames.</b> 88a (the season details), 45b (the episode board) and 48c (Direction) were three screens for one page. 88a's content is this header; 45b's grid is the Episodes tab; Direction keeps its field and loses its tab until somebody can say what it decides.</li><li><b>Dashed tiles ship the day the season does</b> (turn 87): seven promised, three written, four <code>OPEN TO START IT</code>. Making an episode happens in the grid, not on another tab.</li><li>What the build has today: a four-tab strip (Season · Episodes · Arcs · Direction) with the counts and Series card behind the first tab, and the Episodes tab hidden entirely until an episode exists.</li></ul>
       </div>
     </section>
     <section class="screen" data-frame="48b" hidden>
@@ -1387,7 +1186,7 @@
           <div class="screen__step">Arcs · lanes across the season</div>
           <div class="screen__label">48b Arcs &middot; lanes across the season</div>
         </div>
-        <div class="screen__acts"><b>Working here:</b> <code>Turn this into proposals</code> &rarr; propose the arcs</div>
+        <div class="screen__acts"><b>Working here:</b> <code>Episodes</code> &rarr; back to the episodes</div>
       </div>
       <div class="stage"><div class="shot__scale"><div data-screen-label="48b Arcs &middot; lanes across the season" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
   <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
@@ -1496,216 +1295,49 @@
           <span class="tag tag--drifted">Built · drifted</span>
           <code class="built__route">Season → Arcs tab</code>
         </div>
-        <ul><li>The stalled-lane callout ships (<code>"{arc}" has no payoff</code>) ✓.</li><li>Cells print the literal words <code>SETUP</code> / <code>TURN</code> / <code>PAYOFF</code> and <code>—</code>, where the drawing holds a phrase per cell (<i>rings alone</i>, <i>shows Odile</i>) with the markers alongside.</li><li><code>Add a lane</code> and the composer row are absent.</li></ul>
+        <ul><li><b>Read the strip around this one as retired.</b> This is the old drawing, so it still shows four tabs including Direction; turn 91 leaves the Arcs grid itself untouched and replaces everything around it with 91a.</li><li>The stalled-lane callout ships (<code>"{arc}" has no payoff</code>) ✓.</li><li>Cells print the literal words <code>SETUP</code> / <code>TURN</code> / <code>PAYOFF</code> and <code>—</code>, where the drawing holds a phrase per cell (<i>rings alone</i>, <i>shows Odile</i>) with the markers alongside.</li><li><code>Add a lane</code> and the composer row are absent.</li></ul>
       </div>
     </section>
-    <section class="screen" data-frame="48c" hidden>
+    <section class="screen" data-frame="91b" hidden>
       <div class="screen__head">
         <div>
-          <div class="screen__step">Direction · the season against the world look</div>
-          <div class="screen__label">48c Direction &middot; the season against the world look</div>
+          <div class="screen__step">Episode Chat · and the proposal it ends in</div>
+          <div class="screen__label">91b Episode Chat &middot; the conversation, and the proposal it ends in</div>
         </div>
-        <div class="screen__acts"><b>Working here:</b> <code>Turn this into a proposal</code> &rarr; propose the direction</div>
+        <div class="screen__acts"><b>Working here:</b> <code>Accept Proposal</code> &rarr; accept what the conversation settled</div>
       </div>
-      <div class="stage"><div class="shot__scale"><div data-screen-label="48c Direction &middot; the season against the world look" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
-  <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
-    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Bell Watch &middot; season 1 &middot; direction</span></div>
+      <div class="stage"><div class="shot__scale"><div data-screen-label="91b Episode Chat &middot; the conversation, and the proposal it ends in" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden"><div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
+    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Bell Watch &middot; episode 3 &middot; chat</span></div>
     <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;padding:0 6px"><span style="font:650 15px var(--font-sans);letter-spacing:-.02em">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
     <div style="flex:1;min-width:0;text-align:right"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span></div>
-  </div>
-  <div style="display:flex;flex:1;min-height:0">
-    <div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px">
-      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)">
-        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Bell Watch</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">season 1 &middot; 7 episodes</div></div>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
-      </div>
-      <div style="height:14px"></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cast<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
-      <div style="flex:1"></div>
-      <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
-    </div>
-    <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--border)">
-      <div style="padding:26px 34px 10px;flex:none;animation:fadeUp .6s var(--ease-out) both">
-        <div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">DEVELOPMENT &middot; SEASON 1 &middot; DIRECTION</div>
-        <h1 style="margin:8px 0 0;font:650 26px/1.1 var(--font-sans);letter-spacing:-0.025em">What this season does differently.</h1>
-      </div>
-      <div style="flex:1;min-height:0;overflow:hidden;padding:8px 34px;display:flex;flex-direction:column;gap:13px;animation:fadeUp .7s var(--ease-out) .1s both">
-        <div style="align-self:flex-end;max-width:380px;background:var(--primary);color:var(--primary-foreground);border-radius:14px 14px 4px 14px;padding:11px 15px;font:400 13px/1.55 var(--font-sans)">Vertical and at night, so it has to read at arm&#8217;s length. Less fog than the world wants.</div>
-        <div style="align-self:flex-start;max-width:450px;background:var(--secondary);border-radius:14px 14px 14px 4px;padding:12px 15px;font:400 13px/1.6 var(--font-sans)">Then this season narrows the world look rather than replacing it: same palette and brushwork, closer framing, and fog pulled back so faces survive a phone screen. I have written it as three lines against The Undersong&#8217;s v3.<div style="margin-top:8px;font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#10003; read art direction v3 &middot; world look unchanged &middot; nothing written</div>
-        </div>
-      </div>
-      <div style="flex:none;padding:12px 34px 20px">
-        <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:12px 16px;box-shadow:var(--shadow-xs);cursor:text" style-hover="border-color:var(--neutral-400)">
-          <span style="flex:1;font:400 13.5px var(--font-sans);color:var(--text-placeholder)">Keep shaping the direction&hellip;</span>
-          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></span>
-          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span>
-          <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#8629; send</span>
-        </div>
-      </div>
-    </div>
-    <div style="width:470px;box-sizing:border-box;flex:none;padding:22px 28px 0;background:var(--muted);display:flex;flex-direction:column;overflow:hidden;animation:fadeUp .7s var(--ease-out) .15s both">
-      <div style="display:flex;gap:3px;flex:none">
-        <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Season</span>
-        <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Episodes</span>
-        <span style="padding:5px 10px;border-radius:7px;font:400 11.5px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Arcs</span>
-        <span style="padding:5px 10px;border-radius:7px;background:var(--background);border:1px solid var(--border);font:500 11.5px var(--font-sans)">Direction</span>
-      </div>
-      <div style="box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:12px;padding:0;box-shadow:var(--shadow-xs);margin-top:14px;overflow:hidden">
-        <div style="height:120px"><img src="assets/art-direction-world.png" alt="The Undersong master look v3" style="display:block;width:100%;height:100%;object-fit:cover"></div>
-        <div style="padding:11px 15px">
-          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 12.5px var(--font-sans);flex:1">The Undersong &middot; master look</span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">v3 &middot; inherited</span></div>
-          <div style="font:400 11.5px/1.55 var(--font-sans);color:var(--muted-foreground);margin-top:5px">Painterly, tidal, restrained. Slate and sea-glass, one warm practical light, fog with real depth.</div>
-        </div>
-      </div>
-      <div style="display:flex;align-items:baseline;gap:8px;margin-top:16px"><span style="font:600 12.5px var(--font-sans)">This season narrows it</span><span style="font:400 10px var(--font-mono);color:var(--warning);flex:1">3 lines &middot; would change</span></div>
-      <div style="box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow-xs);margin-top:9px">
-        <div style="font:400 12.5px/1.6 var(--font-sans);border-left:2px solid var(--warning);padding-left:11px">Framing sits closer. A face fills more of a vertical frame than it would of a wide one.</div>
-        <div style="font:400 12.5px/1.6 var(--font-sans);border-left:2px solid var(--warning);padding-left:11px;margin-top:9px">Fog is pulled back one stop. It reads as depth on a cinema screen and as mud on a phone.</div>
-        <div style="font:400 12.5px/1.6 var(--font-sans);border-left:2px solid var(--warning);padding-left:11px;margin-top:9px">Night is lit by one practical, never ambient blue.</div>
-      </div>
-      <div style="box-sizing:border-box;border:1px dashed var(--border);border-radius:12px;padding:12px 15px;margin-top:10px">
-        <div style="font:400 10px var(--font-mono);color:var(--neutral-400)">WHAT THIS DOES NOT DO</div>
-        <div style="font:400 12px/1.6 var(--font-sans);color:var(--muted-foreground);margin-top:5px">The Undersong&#8217;s look is unchanged.</div>
-      </div>
-      <div style="flex:1"></div>
-      <div style="flex:none;padding:12px 0 14px;border-top:1px solid var(--border);margin-top:12px">
-        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="100%,40px">Turn this into a proposal</x-import>
-        <div style="font:400 10.5px/1.5 var(--font-mono);color:var(--neutral-400);margin-top:9px;text-align:center">a production override &middot; the world look keeps its own accept</div>
-      </div>
-    </div>
-  </div>
-</div></div></div>
-      <div class="built built--built">
+  </div><div style="display:flex;flex:1;min-height:0"><div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px"><div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)"><div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Bell Watch</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">microdrama &middot; 7 episodes</div></div><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg></div><div style="height:14px"></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cast<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">4</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">chat</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Season<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v3</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">12</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:00</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Audio<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Exports<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div><div style="flex:1"></div><div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div></div><div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--border)"><div style="padding:30px 34px 12px;flex:none;animation:fadeUp .6s var(--ease-out) both"><div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">EPISODE CHAT &middot; 03</div><h1 style="margin:8px 0 0;font:650 26px/1.1 var(--font-sans);letter-spacing:-0.025em">What happens in this one?</h1></div><div style="flex:1;min-height:0;overflow:hidden;padding:8px 34px;display:flex;flex-direction:column;gap:13px;animation:fadeUp .7s var(--ease-out) .1s both"><div style="align-self:flex-end;max-width:380px;background:var(--primary);color:var(--primary-foreground);border-radius:14px 14px 4px 14px;padding:11px 15px;font:400 13px/1.55 var(--font-sans)">This is the one where she finds the hour. It should end with her ringing it herself.</div><div style="align-self:flex-start;max-width:440px;background:var(--secondary);border-radius:14px 14px 14px 4px;padding:12px 15px;font:400 13px/1.6 var(--font-sans)">Then the middle has to make ringing it cost her something, or the ending is just a gesture. Episode 2 left the street rebuilt around the gap, so the cost can be that ringing it tells whoever did the rebuilding exactly where she is.<div style="margin-top:8px;font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#10003; read the season &middot; read episodes 1&#8211;2 &middot; nothing written</div></div><div style="align-self:flex-end;max-width:380px;background:var(--primary);color:var(--primary-foreground);border-radius:14px 14px 4px 14px;padding:11px 15px;font:400 13px/1.55 var(--font-sans)">Yes. And she does it anyway.</div><div style="align-self:flex-start;max-width:440px;background:var(--secondary);border-radius:14px 14px 14px 4px;padding:12px 15px;font:400 13px/1.6 var(--font-sans)">That gives me five scenes: the hour found, the warning, the argument she loses, the walk to the bell, the ring. Four of them are in places you already have.<div style="margin-top:8px;font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#10003; searched 41 canon entries &middot; matched 3 locations &middot; nothing written</div></div></div><div style="flex:none;padding:12px 34px 20px"><div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:12px 16px;box-shadow:var(--shadow-xs);cursor:text"><span style="flex:1;font:400 13.5px var(--font-sans);color:var(--text-placeholder)">Keep shaping the episode&hellip;</span><span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></span><span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#8629; send</span></div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:9px">story author &middot; cloud &middot; in context: the season, 4 cast sheets, episodes 1&#8211;2 &middot; talking changes nothing</div></div></div><div style="width:470px;box-sizing:border-box;flex:none;padding:22px 30px 0;background:var(--muted);display:flex;flex-direction:column;overflow:hidden;animation:fadeUp .7s var(--ease-out) .15s both"><div style="display:flex;align-items:baseline;gap:10px"><div style="font:600 15px var(--font-sans)">Ready to accept</div><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">episode 03</span></div><div style="font:400 11.5px/1.6 var(--font-sans);color:var(--muted-foreground);margin-top:7px">This is the proposal. Nothing above it has been written.</div><div style="box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:12px;padding:12px 15px;box-shadow:var(--shadow-xs);margin-top:10px"><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">OPENS</div><div style="font:400 12.5px/1.6 var(--font-sans);color:var(--neutral-400);text-decoration:line-through;margin-top:6px">&#8212;</div><div style="font:400 12.5px/1.65 var(--font-sans);margin-top:4px">The answering bell keeps an hour only her mother ever rang.</div></div><div style="box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:12px;padding:12px 15px;box-shadow:var(--shadow-xs);margin-top:10px"><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">TURN</div><div style="font:400 12.5px/1.6 var(--font-sans);color:var(--neutral-400);text-decoration:line-through;margin-top:6px">&#8212;</div><div style="font:400 12.5px/1.65 var(--font-sans);margin-top:4px">Ringing it tells whoever rebuilt the street where she is.</div></div><div style="box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:12px;padding:12px 15px;box-shadow:var(--shadow-xs);margin-top:10px"><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">CLOSES</div><div style="font:400 12.5px/1.6 var(--font-sans);color:var(--neutral-400);text-decoration:line-through;margin-top:6px">&#8212;</div><div style="font:400 12.5px/1.65 var(--font-sans);margin-top:4px">She rings it anyway.</div></div><div style="box-sizing:border-box;background:var(--background);border:1px solid var(--border);border-radius:12px;padding:12px 15px;box-shadow:var(--shadow-xs);margin-top:10px"><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">SCENES &middot; 5 NEW</div><div style="display:flex;gap:8px;align-items:baseline;padding:5px 0;border-top:1px solid var(--border)"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">01</span><span style="font:400 12.5px var(--font-sans);flex:1;min-width:0">The hour found</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">new</span></div><div style="display:flex;gap:8px;align-items:baseline;padding:5px 0;border-top:1px solid var(--border)"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">02</span><span style="font:400 12.5px var(--font-sans);flex:1;min-width:0">The warning</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">new</span></div><div style="display:flex;gap:8px;align-items:baseline;padding:5px 0;border-top:1px solid var(--border)"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">03</span><span style="font:400 12.5px var(--font-sans);flex:1;min-width:0">The argument she loses</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">new</span></div><div style="display:flex;gap:8px;align-items:baseline;padding:5px 0;border-top:1px solid var(--border)"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">04</span><span style="font:400 12.5px var(--font-sans);flex:1;min-width:0">The walk to the bell</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">new</span></div><div style="display:flex;gap:8px;align-items:baseline;padding:5px 0;border-top:1px solid var(--border)"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">05</span><span style="font:400 12.5px var(--font-sans);flex:1;min-width:0">The ring</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">new</span></div></div><div style="flex:none;padding:12px 0 14px;border-top:1px solid var(--border);margin-top:14px"><x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="100%,40px">Accept Proposal</x-import><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:9px;text-align:center;line-height:1.5">writes episode 03 and 5 scene files &middot; nothing else moves</div></div></div></div></div></div></div>
+      <div class="built built--missing">
         <div class="built__head">
-          <span class="tag tag--built">Built · matches</span>
-          <code class="built__route">Season → Direction tab</code>
+          <span class="tag tag--missing">Not built</span>
+          <code class="built__route">#/w/:worldId/p/:prodId/story/episodes/:id (chat)</code>
         </div>
-        <ul><li><b>Turn 48's binding is now met (turn 86).</b> The world's master look is shown first, marked inherited; then the lines this season narrows against it; then a block stating plainly that the world look is unchanged and no other production moves.</li><li>The form editor behind <code>Edit the direction</code> is retired, and the conversation lives in Production Chat rather than in this view (turn 88).</li><li>What is still not built: the drawn <i>3 lines · would change</i> badge on the narrowing, which needs a staged season proposal to mark against.</li></ul>
+        <ul><li><b>Newly drawn (turn 91); supersedes 53c.</b> 53c drew an episode as a conversation and a promise editor sharing one surface — the same half-and-half screen turn 88 broke apart at season level. Here the episode is talked through, and the rail is what the talking settled.</li><li><b>The rail has two states and this is the second.</b> While talking it holds turn 89's points, soft and changed by saying more; at the end it holds the staged proposal, every field with what it was and what it would become, under one action.</li><li><b><code>Turn this into a proposal</code> is retired.</b> By the time a person reads what the conversation settled, it already is one — the button says <code>Accept Proposal</code> because accepting is the decision being made.</li><li><b>The scenes are part of the episode's proposal</b> (turn 87's cascade), not adopted afterwards from a pool of unassigned ones.</li><li>What the build has today: a form. Three inputs behind <code>Edit the promise</code>, and scenes added one at a time from an <code>UNASSIGNED SCENES</code> band. There is no episode conversation at all.</li></ul>
       </div>
     </section>
-    <section class="screen" data-frame="53c" hidden>
+    <section class="screen" data-frame="91c" hidden>
       <div class="screen__head">
         <div>
-          <div class="screen__step">The episode · promise, then scenes</div>
-          <div class="screen__label">53c The episode &middot; its promise, then its scenes</div>
+          <div class="screen__step">The episode · summary, then scenes</div>
+          <div class="screen__label">91c The episode &middot; its summary, and its scenes</div>
         </div>
-        <div class="screen__acts"><b>Working here:</b> <code>The answer from inside</code> &rarr; open a scene with no script</div>
+        <div class="screen__acts"><b>Working here:</b> <code>The hour found</code> &rarr; open a scene with no script</div>
       </div>
-      <div class="stage"><div class="shot__scale"><div data-screen-label="53c The episode &middot; its promise, then its scenes" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
-  <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
-    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Bell Watch &middot; season 1 &middot; episode 3</span></div>
+      <div class="stage"><div class="shot__scale"><div data-screen-label="91c The episode &middot; its summary, and its scenes" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden"><div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
+    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px">Bell Watch &middot; episode 3</span></div>
     <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;padding:0 6px"><span style="font:650 15px var(--font-sans);letter-spacing:-.02em">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
     <div style="flex:1;min-width:0;text-align:right"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span></div>
-  </div>
-  <div style="display:flex;flex:1;min-height:0">
-    <div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px">
-      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)">
-        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Bell Watch</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">season 1 &middot; 7 episodes</div></div>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
-      </div>
-      <div style="height:14px"></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cast<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Season 1</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Episode 3</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">5</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:00</span></div>
-      <div style="flex:1"></div>
-      <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)" style-hover="color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
-    </div>
-    <div style="width:654px;box-sizing:border-box;flex:none;min-width:0;display:flex;flex-direction:column;padding:24px 26px 0;overflow:hidden">
-      <div style="flex:none;animation:fadeUp .6s var(--ease-out) both">
-        <div style="display:flex;align-items:baseline;gap:8px">
-          <span style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">SEASON 1</span>
-          <span style="font:400 10px var(--font-mono);color:var(--neutral-400)">&middot; EPISODE 3 OF 7</span>
-        </div>
-        <h1 style="margin:7px 0 0;font:650 25px/1.1 var(--font-sans);letter-spacing:-0.025em">The missing night</h1>
-      </div>
-      <div style="flex:1;min-height:0;overflow:hidden;margin-top:18px;display:flex;flex-direction:column;gap:14px">
-        <div style="animation:fadeUp .7s var(--ease-out) .05s both">
-          <div style="font:400 13.5px/1.65 var(--font-sans)">This one opens well and stops. They reach the street the ledger says is missing, and then the episode has nowhere to leave the audience.</div>
-          <div style="font:400 10px var(--font-mono);color:var(--neutral-400);margin-top:7px">&#10003; read episode 2 &middot; read 3 accepted scenes &middot; nothing written</div>
-        </div>
-        <div style="display:flex;justify-content:flex-end;animation:fadeUp .7s var(--ease-out) .12s both"><div style="max-width:430px;box-sizing:border-box;background:var(--secondary);border-radius:13px;padding:11px 14px;font:400 13px/1.6 var(--font-sans)">The street is there. It is the houses that are wrong &mdash; numbers that skip.</div></div>
-        <div style="animation:fadeUp .7s var(--ease-out) .2s both">
-          <div style="font:400 13.5px/1.65 var(--font-sans)">Then the closing state is that the Quarter has been edited, not that a night went missing. That pays off the ledger in episode 2, and it needs two scenes you do not have: the answer from inside the door, and the count coming out right when it should not.</div>
-          <div style="font:400 10px var(--font-mono);color:var(--neutral-400);margin-top:7px">&#10003; checked CANON-018 &middot; no world fact changed &middot; nothing written</div>
-        </div>
-      </div>
-      <div style="flex:none;border-top:1px solid var(--border);padding:11px 0;display:flex;align-items:center;gap:12px">
-<div style="flex:1;min-width:0;display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:11px 15px;box-shadow:var(--shadow-xs);cursor:text" style-hover="border-color:var(--neutral-400)">
-          <span style="flex:1;font:400 13px var(--font-sans);color:var(--text-placeholder)">Keep breaking episode 3&hellip;</span>
-          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></span>
-          <span style="width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;flex:none;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></span>
-          <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">&#8629; send</span>
-        </div>
-      </div>
-      <div style="flex:none;font:400 10px var(--font-mono);color:var(--neutral-400);padding-bottom:9px">story author &middot; in context: season 1, episodes 2 and 4, 5 scenes &middot; talking changes nothing</div>
-    </div>
-    <div style="width:470px;box-sizing:border-box;flex:none;border-left:1px solid var(--border);background:var(--muted);display:flex;flex-direction:column;padding:22px 22px 0;overflow:hidden">
-      <div style="flex:none;display:flex;align-items:baseline;gap:9px">
-        <div style="font:600 14px var(--font-sans)">Episode 3, as it stands</div>
-        <span style="flex:1"></span>
-        <span style="font:400 9.5px var(--font-mono);color:var(--success)">2 changes</span>
-      </div>
-      <div style="flex:none;box-sizing:border-box;border:1px solid var(--border);border-radius:11px;background:var(--background);padding:12px 14px;margin-top:12px;box-shadow:var(--shadow-xs)">
-        <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);letter-spacing:.08em">THE PROMISE</div>
-        <div style="display:flex;gap:9px;margin-top:9px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);width:44px;flex:none;padding-top:2px">OPENS</span><span style="font:400 12px/1.55 var(--font-sans);flex:1;min-width:0">They go back to the night the ledger skips.</span></div>
-        <div style="display:flex;gap:9px;margin-top:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);width:44px;flex:none;padding-top:2px">TURN</span><span style="font:400 12px/1.55 var(--font-sans);flex:1;min-width:0">The street is there and the house numbers are not.<span style="font:400 9px var(--font-mono);color:var(--success);margin-left:6px">new</span></span></div>
-        <div style="display:flex;gap:9px;margin-top:7px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400);width:44px;flex:none;padding-top:2px">CLOSES</span><span style="font:400 12px/1.55 var(--font-sans);flex:1;min-width:0">The Quarter has been edited, and someone did it.<span style="font:400 9px var(--font-mono);color:var(--success);margin-left:6px">new</span></span></div>
-      </div>
-      <div style="flex:none;display:flex;align-items:baseline;gap:8px;margin-top:16px">
-        <span style="font:600 12.5px var(--font-sans)">Scenes</span>
-        <span style="font:400 10px var(--font-mono);color:var(--neutral-400)">in order</span>
-        <span style="flex:1"></span>
-        <span style="font:400 10px var(--font-mono);color:var(--neutral-400)">5</span>
-      </div>
-      <div style="flex:1;min-height:0;overflow:hidden;margin-top:9px;display:flex;flex-direction:column;gap:7px">
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--background);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
-          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SC 07</span><span style="font:600 12.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">The wrong street</span></div>
-          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Odile counts the houses aloud and gets it wrong twice.</div>
-          <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:6px">accepted &middot; 4 shots</div>
-        </div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--background);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
-          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SC 08</span><span style="font:600 12.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">The blank door</span></div>
-          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:4px">They find the door that has no number at all.</div>
-          <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:6px">accepted &middot; 3 shots</div>
-        </div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--background);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
-          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SC 09</span><span style="font:600 12.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">What the door was for</span></div>
-          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Odile reads the ledger out and it does not match the street.</div>
-          <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);margin-top:6px">accepted &middot; 2 shots</div>
-        </div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--background);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
-          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SC 11</span><span style="font:600 12.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">The answer from inside</span><span style="font:400 9px var(--font-mono);color:var(--success)">new</span></div>
-          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:4px">Maren rings, and the answer comes from inside it.</div>
-          <div style="font:400 9.5px var(--font-mono);color:var(--warning);margin-top:6px">no script yet</div>
-        </div>
-        <div style="box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--background);cursor:pointer;transition:var(--transition-control)" style-hover="border-color:var(--neutral-400)">
-          <div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 9.5px var(--font-mono);color:var(--neutral-400)">SC 12</span><span style="font:600 12.5px var(--font-sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">The count, again</span><span style="font:400 9px var(--font-mono);color:var(--success)">new</span></div>
-          <div style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground);margin-top:4px">The count comes out right, and it should not.</div>
-          <div style="font:400 9.5px var(--font-mono);color:var(--warning);margin-top:6px">no script yet</div>
-        </div>
-      </div>
-      <div style="flex:none;border-top:1px solid var(--border);padding:12px 0 14px;display:flex;align-items:center;gap:10px">
-        <span style="font:400 10px var(--font-mono);color:var(--neutral-400);flex:1;min-width:0">one episode, one proposal</span>
-        <x-import component-from-global-scope="SpecOneDesignSystem_b87656.Button" size="lg" hint-size="210px,40px">Turn this into a proposal</x-import>
-      </div>
-    </div>
-  </div>
-</div></div></div>
-      <div class="built built--drifted">
+  </div><div style="display:flex;flex:1;min-height:0"><div style="width:236px;box-sizing:border-box;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px"><div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)"><div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Bell Watch</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">microdrama &middot; 7 episodes</div></div><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg></div><div style="height:14px"></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cast<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">4</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">chat</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Season<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v3</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">12</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:00</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Audio<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div><div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Exports<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div><div style="flex:1"></div><div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div></div><div style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden"><div style="padding:30px 34px 0;flex:none;animation:fadeUp .6s var(--ease-out) both"><div style="display:flex;align-items:baseline;gap:12px"><div style="font:500 11px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground);flex:1">EPISODE 03 &middot; BELL WATCH</div><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400);cursor:pointer">&#8592; Season</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400);cursor:pointer">Talk it through</span></div><h1 style="margin:8px 0 0;font:650 26px/1.1 var(--font-sans);letter-spacing:-0.025em">Her mother&#8217;s hour</h1><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px"><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">5 scenes</span><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">0 shot</span><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">3:40 planned</span><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">v1</span></div><div style="max-width:900px;margin-top:14px"><div style="display:flex;gap:14px;padding:11px 0;border-top:1px solid var(--border)"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400);width:64px;flex:none">OPENS</span><span style="font:400 13px/1.6 var(--font-sans);flex:1;min-width:0">The answering bell keeps an hour only her mother ever rang.</span></div><div style="display:flex;gap:14px;padding:11px 0;border-top:1px solid var(--border)"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400);width:64px;flex:none">TURN</span><span style="font:400 13px/1.6 var(--font-sans);flex:1;min-width:0">Ringing it tells whoever rebuilt the street where she is.</span></div><div style="display:flex;gap:14px;padding:11px 0;border-top:1px solid var(--border)"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400);width:64px;flex:none">CLOSES</span><span style="font:400 13px/1.6 var(--font-sans);flex:1;min-width:0">She rings it anyway.</span></div></div><div style="margin-top:20px"><div style="display:flex;align-items:baseline;gap:10px;border-bottom:1px solid var(--border);padding-bottom:10px"><div style="font:600 15px var(--font-sans)">Scenes</div><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">5 &middot; in order</span></div></div></div><div style="flex:1;min-height:0;overflow:hidden;padding:16px 34px 0;animation:fadeUp .7s var(--ease-out) .1s both"><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px"><div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:12px 15px;box-shadow:var(--shadow-xs);cursor:pointer;background:var(--background)" style-hover="background:var(--accent)"><div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">01</span><span style="font:600 13px var(--font-sans);flex:1;min-width:0">The hour found</span></div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:8px">THE LEDGER ROOM &middot; NIGHT</div><div style="margin-top:9px"><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">no script yet</span></div></div><div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:12px 15px;box-shadow:var(--shadow-xs);cursor:pointer;background:var(--background)" style-hover="background:var(--accent)"><div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">02</span><span style="font:600 13px var(--font-sans);flex:1;min-width:0">The warning</span></div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:8px">HARBOUR STEPS &middot; NIGHT</div><div style="margin-top:9px"><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">no script yet</span></div></div><div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:12px 15px;box-shadow:var(--shadow-xs);cursor:pointer;background:var(--background)" style-hover="background:var(--accent)"><div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">03</span><span style="font:600 13px var(--font-sans);flex:1;min-width:0">The argument she loses</span></div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:8px">ODILE&#8217;S KITCHEN &middot; NIGHT</div><div style="margin-top:9px"><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">no script yet</span></div></div><div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:12px 15px;box-shadow:var(--shadow-xs);cursor:pointer;background:var(--background)" style-hover="background:var(--accent)"><div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">04</span><span style="font:600 13px var(--font-sans);flex:1;min-width:0">The walk to the bell</span></div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:8px">THE REBUILT STREET &middot; NIGHT</div><div style="margin-top:9px"><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">no script yet</span></div></div><div style="box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:12px 15px;box-shadow:var(--shadow-xs);cursor:pointer;background:var(--background)" style-hover="background:var(--accent)"><div style="display:flex;align-items:baseline;gap:8px"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">05</span><span style="font:600 13px var(--font-sans);flex:1;min-width:0">The ring</span></div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:8px">BELL TOWER &middot; DAWN</div><div style="margin-top:9px"><span style="display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--border);border-radius:99px;font:400 11px var(--font-mono);color:var(--muted-foreground)">no script yet</span></div></div></div></div><div style="flex:none;padding:14px 34px 20px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px"><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400);flex:1">opening a scene opens its own chat &middot; a script belongs to a scene</span><span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">every change is a proposal</span></div></div></div></div></div></div>
+      <div class="built built--missing">
         <div class="built__head">
-          <span class="tag tag--drifted">Built · drifted</span>
-          <code class="built__route">#/w/:worldId/p/:prodId/episodes/:id</code>
+          <span class="tag tag--missing">Not built</span>
+          <code class="built__route">#/w/:worldId/p/:prodId/story/episodes/:id</code>
         </div>
-        <ul><li>Ships with <code>OPENS</code> / <code>TURN</code> / <code>CLOSES</code> and scenes in order ✓.</li><li>The conversation column is replaced by read cards plus <code>Edit the promise</code>; the drawn <code>Turn this into a proposal</code> / <i>one episode, one proposal</i> foot is absent.</li><li>Beats are correctly gone ✓ (turn 53 retired 46a/46b, and the code has no beat layer).</li><li>Built without a frame: the <code>UNASSIGNED SCENES</code> band.</li></ul>
+        <ul><li><b>Newly drawn (turn 91).</b> The same shape as the season page, one level down: what this episode is in its header, and the one plural thing below it as a tab.</li><li><b>Accepting lands you here</b>, and the header carries <code>Talk it through</code> back into this episode's own thread. An accept is not the end of a subject — a page that cannot be talked to again turns it into a one-way door.</li><li><code>← Season</code> is the way back up, so the pattern is navigable in both directions: down through a tab, up through a link that names the level above.</li><li>What the build has today: this and 91b are one screen, and it is a form.</li></ul>
       </div>
     </section>
     <section class="screen" data-frame="49a" hidden>
@@ -1794,7 +1426,7 @@
           <span class="tag tag--missing">Not built</span>
           <code class="built__route">— no screen —</code>
         </div>
-        <ul><li><b>Not built.</b> There is no script surface: no block ids in the margin, no <code>S01</code> / <code>A01</code> / <code>D01</code>, no <code>accepting writes the script and creates no shots</code>.</li><li>The scene screen ships a two-item strip — <code>Shots</code> and <code>Board</code> — where the drawing has four: <code>Script · Coverage · Board · Takes</code>.</li><li>The <i>data model</i> is ahead of the screens: scene records carry script blocks, and a shot can cite blocks with a digest of the text at citation time.</li></ul>
+        <ul><li><b>Read <code>Turn this into a proposal</code> here as retired</b> (turn 91). The scene frames still carry the old wording because they have not been redrawn; the button is <code>Accept Proposal</code> at every level, since by the time a person reads what a conversation settled it already is one.</li><li><b>Not built.</b> There is no script surface: no block ids in the margin, no <code>S01</code> / <code>A01</code> / <code>D01</code>, no <code>accepting writes the script and creates no shots</code>.</li><li>The scene screen ships a two-item strip — <code>Shots</code> and <code>Board</code> — where the drawing has four: <code>Script · Coverage · Board · Takes</code>.</li><li>The <i>data model</i> is ahead of the screens: scene records carry script blocks, and a shot can cite blocks with a digest of the text at citation time.</li></ul>
       </div>
     </section>
     <section class="screen" data-frame="49b" hidden>
@@ -2279,7 +1911,7 @@
           <div class="screen__step">Generate · review the takes</div>
           <div class="screen__label">11b Generate workspace</div>
         </div>
-        <div class="screen__acts"><b>Working here:</b> <code>Accept</code> &rarr; accept a take into the cut</div>
+        <div class="screen__acts"><b>Working here:</b> <code>Accept take</code> &rarr; accept a take into the cut</div>
       </div>
       <div class="stage"><div class="shot__scale"><div data-screen-label="11b Generate workspace" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
   <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
@@ -2575,7 +2207,7 @@
     <div class="hint" id="hint"></div>
 
     <script>
-      const STEPS = [{"id":"1a","actions":[{"match":"The Undersong","to":"2c","hint":"open the world"}]},{"id":"2c","actions":[{"match":"New production","to":"43a","hint":"start a production"}]},{"id":"43a","actions":[{"match":"Create and open day one","to":"53a","hint":"the drawing's primary action"}]},{"id":"53a","actions":[{"match":"Create and open it","to":"53b","hint":"create the production"}]},{"id":"53b","actions":[{"match":"Write the first scene","to":"49a","hint":"straight to a scene"},{"match":"Shape the whole thing first","to":"89a","hint":"decide what it is first"}]},{"id":"89a","actions":[{"match":"Wrap up","to":"88a","hint":"stage what is settled"}]},{"id":"88a","actions":[{"match":"Episodes","to":"45b","hint":"open the episode board"}]},{"id":"45b","actions":[{"match":"Turn this into proposals","to":"48b","hint":"propose the episodes"}]},{"id":"48b","actions":[{"match":"Turn this into proposals","to":"48c","hint":"propose the arcs"}]},{"id":"48c","actions":[{"match":"Turn this into a proposal","to":"53c","hint":"propose the direction"}]},{"id":"53c","actions":[{"match":"The answer from inside","to":"49a","hint":"open a scene with no script"}]},{"id":"49a","actions":[{"match":"Turn this into a proposal","to":"49b","hint":"accept the script"}]},{"id":"49b","actions":[{"match":"Turn this into proposals","to":"53e","hint":"accept the coverage"}]},{"id":"53e","actions":[{"match":"Two-shot at the door","to":"53d","hint":"click a panel to change it"}]},{"id":"53d","actions":[{"match":"Generate this shot","to":"79a","hint":"spend on one shot"}]},{"id":"79a","actions":[{"match":"Generate","to":"11b","hint":"watch it come back"}]},{"id":"11b","actions":[{"match":"Accept","to":"81a","hint":"accept a take into the cut"}]},{"id":"81a","actions":[{"match":"Export cut","to":"25b","hint":"render a deliverable"}]},{"id":"25b","actions":[]}];
+      const STEPS = [{"id":"1a","actions":[{"match":"The Undersong","to":"2c","hint":"open the world"}]},{"id":"2c","actions":[{"match":"New production","to":"43a","hint":"start a production"}]},{"id":"43a","actions":[{"match":"Create and open day one","to":"53a","hint":"the drawing's primary action"}]},{"id":"53a","actions":[{"match":"Create and open it","to":"53b","hint":"create the production"}]},{"id":"53b","actions":[{"match":"Write the first scene","to":"49a","hint":"straight to a scene"},{"match":"Shape the whole thing first","to":"89a","hint":"decide what it is first"}]},{"id":"89a","actions":[{"match":"Wrap up · stage what is settled","to":"91a","hint":"stage what is settled, and land on the season"}]},{"id":"91a","actions":[{"match":"Her mother’s hour","to":"91b","hint":"open an episode"},{"match":"Arcs · 4","to":"48b","hint":"the season's other tab"}]},{"id":"48b","actions":[{"match":"Episodes","to":"91a","hint":"back to the episodes"}]},{"id":"91b","actions":[{"match":"Accept Proposal","to":"91c","hint":"accept what the conversation settled"}]},{"id":"91c","actions":[{"match":"The hour found","to":"49a","hint":"open a scene with no script"}]},{"id":"49a","actions":[{"match":"Turn this into a proposal","to":"49b","hint":"accept the script"}]},{"id":"49b","actions":[{"match":"Turn this into proposals","to":"53e","hint":"accept the coverage"}]},{"id":"53e","actions":[{"match":"Two-shot at the door","to":"53d","hint":"click a panel to change it"}]},{"id":"53d","actions":[{"match":"Generate this shot","to":"79a","hint":"spend on one shot"}]},{"id":"79a","actions":[{"match":"Generate","to":"11b","hint":"watch it come back"}]},{"id":"11b","actions":[{"match":"Accept take","to":"81a","hint":"accept a take into the cut"}]},{"id":"81a","actions":[{"match":"Export cut","to":"25b","hint":"render a deliverable"}]},{"id":"25b","actions":[]}];
       const order = ["map", ...STEPS.map((s) => s.id)];
       const screens = new Map([...document.querySelectorAll(".screen")].map((el) => [el.dataset.frame, el]));
       const railItems = new Map([...document.querySelectorAll(".rail__item")].map((el) => [el.dataset.goto, el]));
@@ -2603,8 +2235,12 @@
           return;
         }
         const step = STEPS.find((s) => s.id === id);
+        // Only the drawing. A screen is the frame *and* the built-notes beneath it, and the notes
+        // quote control labels in <code> — so searching the whole screen wired the annotation
+        // instead of the button, and the walk still passed because the annotation was clickable.
+        const art = screen.querySelector(".shot__scale") || screen;
         for (const a of step.actions) {
-          const el = findControl(screen, a.match);
+          const el = findControl(art, a.match);
           if (!el) { console.warn("no control for", a.match, "in", id); continue; }
           el.classList.add("hotspot");
           el.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); show(a.to); });

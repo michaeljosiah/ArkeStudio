@@ -53,13 +53,18 @@ const steps = await ev(`JSON.stringify(STEPS)`);
 const plan = JSON.parse(steps);
 console.log("steps:", plan.length);
 
-// 1. Every configured action must have found a control.
+// 1. Every configured action must have found a control — inside the drawing.
+//    A screen is the frame plus the built-notes under it, and the notes quote control labels in
+//    <code>. Searching the whole screen once wired an annotation instead of the button it was
+//    describing, and the walk still passed green because the annotation was clickable. So the
+//    hotspot must be found inside `.shot__scale`, which is the drawing and nothing else.
 const unwired = await ev(`(() => {
   const bad = [];
   for (const s of STEPS) {
     const screen = document.querySelector('[data-frame="' + s.id + '"]');
+    const art = screen.querySelector('.shot__scale');
     for (const a of s.actions) {
-      const hits = [...screen.querySelectorAll('.hotspot')].filter(el => {
+      const hits = [...art.querySelectorAll('.hotspot')].filter(el => {
         const t = (el.textContent||'').trim();
         return t === a.match || t.startsWith(a.match);
       });
@@ -70,6 +75,20 @@ const unwired = await ev(`(() => {
 })()`);
 console.log("unwired actions:", unwired);
 
+// 1b. And nothing outside the drawing may be wired at all.
+const strays = await ev(`(() => {
+  const bad = [];
+  for (const s of STEPS) {
+    const screen = document.querySelector('[data-frame="' + s.id + '"]');
+    show(s.id);
+    for (const el of screen.querySelectorAll('.hotspot')) {
+      if (!el.closest('.shot__scale')) bad.push(s.id + ' :: ' + (el.textContent||'').trim().slice(0, 40));
+    }
+  }
+  return JSON.stringify(bad);
+})()`);
+console.log("hotspots outside the drawing:", strays);
+
 // 2. Click through the path, asserting the landing frame each time.
 const results = [];
 for (const s of plan) {
@@ -78,7 +97,7 @@ for (const s of plan) {
   const landed = await ev(`(() => {
     show(${JSON.stringify(s.id)});
     const screen = document.querySelector('[data-frame="' + ${JSON.stringify(s.id)} + '"]');
-    const el = [...screen.querySelectorAll('.hotspot')].find(e => {
+    const el = [...screen.querySelectorAll('.shot__scale .hotspot')].find(e => {
       const t = (e.textContent||'').trim();
       return t === ${JSON.stringify(a.match)} || t.startsWith(${JSON.stringify(a.match)});
     });
