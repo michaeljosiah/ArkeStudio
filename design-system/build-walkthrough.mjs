@@ -61,11 +61,12 @@ const STEPS = [
   {
     id: "44a", step: "Development · the overview",
     actions: [{ match: "Turn this into a proposal", to: "48a", hint: "stage the draft" }],
-    built: { status: "drifted", route: "#/w/:worldId/p/:prodId/story",
-      notes: ["Ships as <b>Development</b> on both rail and screen ✓ (turn 78 rename is real, route still <code>story</code>).",
-              "The conversation column and the <code>Turn this into a proposal</code> composer are gone: the left column is a form/read card, and the action reads <code>Propose overview</code>.",
-              "The rail shows <code>Overview draft</code> / <code>v{n}</code> — the drawn <i>would change</i> badges with the accepted text beneath them are not built.",
-              "44b's dashed empty-state cards (<code>OR SKIP IT</code> / <i>Draft a scene first and let the spine catch up</i>) are not built."] },
+    built: { status: "built", route: "#/w/:worldId/p/:prodId/story",
+      notes: ["<b>Built to the drawing (turn 86).</b> The conversation holds the left column and the 470px rail carries the draft, as 44a draws it — the transcript, the composer, the receipt line, and the context pills naming what is in reach.",
+              "<b>The form editor is gone, and so is the door to another screen.</b> The build had grown a second way in — <code>Start the overview</code> beside a <code>Talk it through</code> button that opened the thread in World Chat — and two ways into one file is how a person ends up asking what the conversation is for.",
+              "The rail marks each field a staged proposal would change with <code>would change</code> and the accepted text beneath, derived from the proposal's own field-by-field review, so the screen cannot promise a change the gate would not make.",
+              "The transcript is one component shared with World Chat rather than a second rendering of the same turns.",
+              "Ships as <b>Development</b> on rail and screen ✓ (turn 78's rename), route still <code>story</code>."] },
   },
   {
     id: "48a", step: "Season · the question and the engine",
@@ -73,7 +74,7 @@ const STEPS = [
     built: { status: "drifted", route: "#/w/:worldId/p/:prodId/story (Season tab)",
       notes: ["Read-only Series engine card ships, and states what it governs ✓ (binding met).",
               "Unasked state says so in words: <code>THE SEASON QUESTION · Not asked yet.</code>",
-              "Every drawn view has an eyebrow and a question-shaped h1; the app has one static <code>Development</code> heading for all four tabs.",
+              "Now built to the drawing (turn 86): the conversation is in the view, the eyebrow and question-shaped h1 are back (<code>What is this season about?</code>), and the form editor behind <code>Start the season</code> is retired.",
               "Built without a frame: the defaults pill row, a <code>New episode · name it</code> card, and a season <b>Findings</b> panel."] },
   },
   {
@@ -97,10 +98,10 @@ const STEPS = [
   {
     id: "48c", step: "Direction · the season against the world look",
     actions: [{ match: "Turn this into a proposal", to: "53c", hint: "propose the direction" }],
-    built: { status: "missing", route: "Development → Direction tab",
-      notes: ["<b>Turn 48's binding is unmet.</b> Direction must show <i>the world look first</i>, then the lines this season narrows against it, and <i>state in a dashed block that no other production moves</i>.",
-              "Ships as a single card with the direction text or <code>Not written yet.</code> The world-look card is missing and the <code>WHAT THIS DOES NOT DO</code> block is missing.",
-              "The right-hand column is literally an empty <code>&lt;div /&gt;</code>."] },
+    built: { status: "built", route: "Development → Direction tab",
+      notes: ["<b>Turn 48's binding is now met (turn 86).</b> The world's master look is shown first, marked inherited; then the lines this season narrows against it; then a block stating plainly that the world look is unchanged and no other production moves.",
+              "The conversation holds the left column, and the form editor behind <code>Edit the direction</code> is retired.",
+              "What is still not built: the drawn <i>3 lines · would change</i> badge on the narrowing, which needs a staged season proposal to mark against."] },
   },
   {
     id: "53c", step: "The episode · promise, then scenes",

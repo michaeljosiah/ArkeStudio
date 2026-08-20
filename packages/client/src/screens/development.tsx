@@ -2,10 +2,11 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { seasonFindings, sortScenes, type Episode, type SeasonFinding } from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
-import { Badge, Button, Input, Textarea, cx } from "../components/ui.js";
+import { ProductionConversation } from "../components/conversation.js";
+import { Badge, Button, Input, cx } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
 import { useTalkItThrough } from "../lib/talk-it-through.js";
-import { proposeEpisode, proposeSeason, reorderEpisodes } from "../lib/store.js";
+import { proposeEpisode, reorderEpisodes } from "../lib/store.js";
 
 /**
  * The Development workspace for an episodic production (turns 48, 53, 78; SPEC-023; issue 397).
@@ -72,80 +73,19 @@ export function DevelopmentWorkspace() {
 function SeasonView() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
-  const { talk, starting } = useTalkItThrough(worldId);
-  const [editing, setEditing] = useState(false);
-  const [question, setQuestion] = useState("");
-  const [ending, setEnding] = useState("");
   const season = production?.season ?? null;
   const series = world?.series.find((s) => prodId !== undefined && s.seasons.includes(prodId)) ?? null;
   const defaults = season?.defaults;
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 470px", gap: 24 }}>
-      <div style={{ display: "grid", gap: 14, alignContent: "start" }}>
-        {editing ? (
-          <>
-            <Input placeholder="The season question" value={question} onChange={(e) => setQuestion(e.target.value)} />
-            <Textarea
-              placeholder="How the season ends"
-              value={ending}
-              onChange={(e) => setEnding(e.target.value)}
-              rows={3}
-            />
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button variant="ghost" onClick={() => setEditing(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                disabled={!question.trim() && !ending.trim()}
-                onClick={() => {
-                  if (!worldId || !prodId) return;
-                  proposeSeason(worldId, prodId, {
-                    ...(question.trim() ? { question: question.trim() } : {}),
-                    ...(ending.trim() ? { ending: ending.trim() } : {}),
-                  });
-                  setEditing(false);
-                }}
-              >
-                Propose season change
-              </Button>
-            </div>
-            <span className="fy-mono">stages a proposal · nothing is written until you accept</span>
-          </>
-        ) : (
-          <>
-            <div className="fy-draftcard">
-              <div className="fy-eyebrow-sm">THE SEASON QUESTION</div>
-              <div className="fy-draftcard__logline">{season?.question ?? "Not asked yet."}</div>
-              <div className="fy-eyebrow-sm" style={{ marginTop: 14 }}>
-                HOW IT ENDS
-              </div>
-              <div style={{ font: "400 13px/1.6 var(--font-sans)" }}>{season?.ending ?? "Not decided yet."}</div>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setQuestion(season?.question ?? "");
-                  setEnding(season?.ending ?? "");
-                  setEditing(true);
-                }}
-              >
-                {season?.question || season?.ending ? "Edit the season" : "Start the season"}
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={starting || !prodId}
-                onClick={() =>
-                  prodId && talk(`Development · ${production?.meta.title ?? prodId}`, { kind: "production", productionId: prodId })
-                }
-              >
-                {starting ? "Opening…" : "Talk it through"}
-              </Button>
-            </div>
-          </>
-        )}
-      </div>
+      <ProductionConversation
+        worldId={worldId}
+        productionId={prodId}
+        eyebrow="DEVELOPMENT · SEASON"
+        heading="What is this season about?"
+        placeholder="Keep shaping the season…"
+        emptyLine="Nothing decided yet. Say what this season is about and how it ends, and the draft builds beside this."
+      />
       <div style={{ display: "grid", gap: 12, alignContent: "start" }}>
         {/* Inheritance is shown, not hidden (turn 48): the Series engine is read-only here, and
             editing it is the Series' own accept — never a side effect of a season edit. */}
@@ -262,6 +202,13 @@ function EpisodesBoard() {
         ))}
       </div>
       <FindingsPanel findings={findings} />
+      {/* A comparison keeps the surface; the conversation becomes a row at its foot (turn 48). */}
+      <ProductionConversation
+        worldId={worldId}
+        productionId={prodId}
+        placeholder="This episode needs a reason to exist…"
+        emptyLine="No episodes yet. Say what the season breaks into and the tiles build beside it."
+      />
     </div>
   );
 }
@@ -349,65 +296,59 @@ function ArcsView() {
           </table>
         </div>
       )}
+      {/* A comparison keeps the surface; the conversation becomes a row at its foot (turn 48). */}
+      <ProductionConversation
+        worldId={worldId}
+        productionId={prodId}
+        placeholder="A lane needs to land somewhere…"
+        emptyLine="No lanes yet. Say what changes across this season and the grid builds beside it."
+      />
     </div>
   );
 }
 
 function DirectionView() {
   const { worldId, prodId } = useParams();
-  const { production } = useProduction(worldId, prodId);
-  const [editing, setEditing] = useState(false);
-  const [direction, setDirection] = useState("");
+  const { world, production } = useProduction(worldId, prodId);
   const season = production?.season ?? null;
+  const look = world?.artDirection ?? null;
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 470px", gap: 24 }}>
+      <ProductionConversation
+        worldId={worldId}
+        productionId={prodId}
+        eyebrow="DEVELOPMENT · DIRECTION"
+        heading="What this season does differently."
+        placeholder="Keep shaping the direction…"
+        emptyLine="Nothing narrowed yet. This season inherits the world's look; say what it does differently and the lines build beside this."
+      />
       <div style={{ display: "grid", gap: 12, alignContent: "start" }}>
-        {editing ? (
-          <>
-            <Textarea
-              placeholder="The season's direction — cast size, places, the sound of it"
-              value={direction}
-              onChange={(e) => setDirection(e.target.value)}
-              rows={6}
-            />
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button variant="ghost" onClick={() => setEditing(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                disabled={direction.trim().length === 0}
-                onClick={() => {
-                  if (!worldId || !prodId) return;
-                  proposeSeason(worldId, prodId, { direction: direction.trim() });
-                  setEditing(false);
-                }}
-              >
-                Propose direction
-              </Button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="fy-draftcard">
-              <div className="fy-eyebrow-sm">DIRECTION</div>
-              <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 6 }}>
-                {season?.direction ?? "Not written yet."}
-              </div>
-            </div>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setDirection(season?.direction ?? "");
-                setEditing(true);
-              }}
-            >
-              {season?.direction ? "Edit the direction" : "Write the direction"}
-            </Button>
-          </>
-        )}
+        {/* The world look first, always (turn 48): a season narrows it and never replaces it, so
+            what is being narrowed has to be on the screen doing the narrowing. */}
+        <div className="fy-draftcard">
+          <div className="fy-draftcard__head">
+            <span className="fy-eyebrow-sm">{world?.meta.name ?? "The world"} · master look</span>
+            <Badge tone="neutral">inherited</Badge>
+          </div>
+          <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 6 }}>
+            {look?.description ?? "This world has no look written yet."}
+          </div>
+        </div>
+        <div className="fy-draftcard">
+          <div className="fy-eyebrow-sm">THIS SEASON NARROWS IT</div>
+          <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 6 }}>
+            {season?.direction ?? "Not written yet."}
+          </div>
+        </div>
+        {/* Stated, not implied: the reach of this decision is one season, and a person about to
+            write it needs to know that before they do. */}
+        <div className="fy-emptycard">
+          <div className="fy-eyebrow-sm">WHAT THIS DOES NOT DO</div>
+          <div style={{ font: "400 12.5px/1.6 var(--font-sans)", marginTop: 6 }}>
+            {world?.meta.name ?? "The world"}’s look is unchanged, and no other production moves.
+          </div>
+        </div>
       </div>
-      <div />
     </div>
   );
 }

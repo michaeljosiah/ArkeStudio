@@ -114,6 +114,7 @@ describe("what was said on day one is visible where it lands", () => {
       /A salvage crew finds something the water left behind\./,
       "a send that lands on a screen with no trace of it reads as a lost message",
     );
-    assert.match(html, /the Development thread · open to keep going/);
+    // Until the workspace loads, the opening line is what the summary already knows.
+    assert.match(html, /the Development thread · opening…/);
   });
 });

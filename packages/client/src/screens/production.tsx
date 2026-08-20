@@ -54,6 +54,7 @@ import {
 } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { Composer } from "../components/composer.js";
+import { ProductionConversation } from "../components/conversation.js";
 import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { ClipPlayButton, clock } from "../components/player.js";
@@ -80,7 +81,6 @@ import {
   exportCut,
   exportSceneBoard,
   exportWorld,
-  proposeStoryOverview,
   rejectTake,
   placeOverlay,
   removeOverlay,
@@ -882,72 +882,37 @@ export function StoryScreen() {
 function OverviewStoryScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
-  const navigate = useNavigate();
-  const { talk, starting: talkStarting } = useTalkItThrough(worldId);
   const story = production?.story ?? null;
-  // The direct overview editor (issue 385): fields staged through the gate, never written live.
-  const [editing, setEditing] = useState(false);
-  const [logline, setLogline] = useState("");
-  const [spine, setSpine] = useState("");
-  const [targetLength, setTargetLength] = useState("");
-  const [actsText, setActsText] = useState("");
+  /*
+   * What is already waiting on a decision for this production's overview (turn 86).
+   *
+   * The rail marks each field the staged proposal would change, using the proposal's own
+   * field-by-field review — computed from the captured base against the proposed file — so the
+   * screen cannot claim a change the gate would not make.
+   */
+  const staged = (world?.proposals ?? []).find((sp) =>
+    sp.proposal.targets.some((t) => t.path === `productions/${prodId}/story.json`),
+  );
+  /** Every field the staged proposal would change, flattened out of its per-target review. */
+  const stagedFields = staged?.review?.targets.flatMap((t) => t.fields) ?? [];
   const spineLines = (story?.spine ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
   // What drafting can actually reach: the world's cast plus this production's guests, and not
   // another production's one-offs (SPEC-020 R-7).
   const cast = pickableSheets(world?.sheets ?? [], prodId).filter((s) => s.type === "character").length;
-  // This production's own Development thread (issue 400), newest first — the one day one opens.
-  const thread = [...(world?.conversations ?? [])]
-    .filter((c) => c.entryContext?.kind === "production" && c.entryContext.productionId === prodId)
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   return (
     <div className="fy-story" data-screen="story-overview">
-      <div className="fy-story__chat">
-        <div className="fy-story__chathead">
-          <div className="fy-eyebrow-sm">
-            DEVELOPMENT · {production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}
-          </div>
-          <h1 className="fy-story__h1">Find the spine together.</h1>
-        </div>
-        <div className="fy-story__log">
-          {/* What was said on day one arrived here as the thread's opening line, so it is shown
-              here — a send that lands on a screen with no trace of it reads as a lost message. */}
-          {thread && (
-            <button
-              type="button"
-              className="fy-bubble--user"
-              style={{ textAlign: "left", cursor: "pointer", border: 0, font: "inherit" }}
-              onClick={() => navigate(`/w/${worldId}/chat/${thread.id}`)}
-            >
-              {thread.title}
-              <div className="fy-bubble__note">the Development thread · open to keep going</div>
-            </button>
-          )}
-          {production?.treatment ? (
-            <div className="fy-bubble--gate" style={{ whiteSpace: "pre-wrap" }}>
-              {production.treatment}
-            </div>
-          ) : story ? (
-            <div className="fy-bubble--gate">
-              {story.logline}
-              <div className="fy-bubble__note">the overview steers scene and chapter drafting — it never overwrites a scene you've locked</div>
-            </div>
-          ) : (
-            <div className="fy-bubble--gate">
-              No story yet. The overview — spine, acts, gaps — is authored through the chat gate and steers drafting.
-              <div className="fy-bubble__note">start it from a canon thread, or draft a scene and let the spine catch up</div>
-            </div>
-          )}
-        </div>
-        <div style={{ flex: "none", padding: "14px 36px 22px" }}>
-          {/* The durable Development thread (SPEC-023 R-20, issue 400): one continuous
-              conversation over the production, with the same wrap-up gate as world chat. */}
-          <Button
-            variant="primary"
-            disabled={talkStarting || !prodId}
-            onClick={() => prodId && talk(`Development · ${production?.meta.title ?? prodId}`, { kind: "production", productionId: prodId })}
-          >
-            {talkStarting ? "Opening the thread…" : "Talk it through · the Development thread"}
-          </Button>
+      <ProductionConversation
+        worldId={worldId}
+        productionId={prodId}
+        eyebrow={`DEVELOPMENT · ${production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}`}
+        heading="Find the spine together."
+        placeholder="Keep shaping the story…"
+        emptyLine={
+          production?.treatment ??
+          story?.logline ??
+          "No story yet. Say what this is about — the spine, the acts, what it costs — and the overview builds beside this."
+        }
+        footer={
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
             <span className="fy-mono">in context:</span>
             <span className="fy-pill">
@@ -956,109 +921,62 @@ function OverviewStoryScreen() {
             <span className="fy-pill">{cast} cast sheets</span>
             {world?.meta.tone && <span className="fy-pill">Tone · {world.meta.tone}</span>}
           </div>
-        </div>
-      </div>
+        }
+      />
+      {/* The draft rail (turn 86): the accepted overview, with what is staged against it marked
+          on the field it would change and the accepted text beneath. Derived from the staged
+          proposal's own review, never a second copy kept beside it, so what this promises and
+          what the gate would write cannot disagree. */}
       <div className="fy-story__side">
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <div style={{ font: "600 15px var(--font-sans)" }}>Overview draft</div>
-          <span className="fy-mono" style={{ color: story ? "var(--warning)" : undefined }}>
+          <div style={{ font: "600 15px var(--font-sans)" }}>The overview, as it stands</div>
+          <span className="fy-mono" style={{ color: staged ? "var(--warning)" : undefined }}>
             {story ? `v${story.version}` : "not started"}
+            {staged ? ` · ${stagedFields.length} change${stagedFields.length === 1 ? "" : "s"}` : ""}
           </span>
         </div>
-        {editing ? (
-          <div style={{ display: "grid", gap: 10 }}>
-            <Input placeholder="Logline · one sentence" value={logline} onChange={(e) => setLogline(e.target.value)} />
-            <Textarea
-              placeholder="Spine · the shape of the whole story"
-              value={spine}
-              onChange={(e) => setSpine(e.target.value)}
-              rows={4}
-            />
-            <Textarea
-              placeholder={"Acts · one per line, as Title: summary"}
-              value={actsText}
-              onChange={(e) => setActsText(e.target.value)}
-              rows={3}
-            />
-            <Input
-              placeholder="Target length · e.g. 90k words, 7 episodes"
-              value={targetLength}
-              onChange={(e) => setTargetLength(e.target.value)}
-            />
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button variant="ghost" onClick={() => setEditing(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                disabled={!logline.trim() && !spine.trim() && !actsText.trim() && !targetLength.trim()}
-                onClick={() => {
-                  if (!worldId || !prodId) return;
-                  const acts = actsText
-                    .split("\n")
-                    .map((line) => line.trim())
-                    .filter((line) => line.length > 0)
-                    .map((line) => {
-                      const split = line.indexOf(":");
-                      const title = (split >= 0 ? line.slice(0, split) : line).trim();
-                      const summary = split >= 0 ? line.slice(split + 1).trim() : "";
-                      return { title: title || line, ...(summary ? { summary } : {}) };
-                    });
-                  proposeStoryOverview(worldId, prodId, {
-                    ...(logline.trim() ? { logline: logline.trim() } : {}),
-                    ...(spine.trim() ? { spine: spine.trim() } : {}),
-                    ...(targetLength.trim() ? { targetLength: targetLength.trim() } : {}),
-                    ...(acts.length > 0 ? { acts } : {}),
-                  });
-                  setEditing(false);
-                }}
-              >
-                Propose overview
-              </Button>
+        {!story && !staged ? (
+          <div className="fy-emptycard">
+            <div style={{ font: "400 13px/1.7 var(--font-sans)" }}>
+              Nothing accepted yet. Say what this is about in the conversation, and the draft builds here.
             </div>
-            <div className="fy-mono">stages a proposal · nothing is written until you accept</div>
           </div>
         ) : (
-          story && (
-            <div className="fy-draftcard">
-              <div className="fy-draftcard__logline">“{story.logline}”</div>
-              {spineLines.length > 0 && (
-                <div style={{ marginTop: 14 }}>
-                  {spineLines.map((line, i) => (
-                    <div key={i} className="fy-actrow">
-                      <span className="fy-actrow__label">{spineLines.length > 1 ? `ACT ${"I".repeat(Math.min(i + 1, 3))}` : "SPINE"}</span>
-                      <span className="fy-actrow__text">{line}</span>
-                    </div>
-                  ))}
+          <div style={{ display: "grid", gap: 12 }}>
+            {stagedFields.map((field) => (
+              <div key={field.field} className="fy-draftcard">
+                <div className="fy-draftcard__head">
+                  <span className="fy-eyebrow-sm">{field.field}</span>
+                  <Badge tone="warning">would change</Badge>
                 </div>
-              )}
-            </div>
-          )
-        )}
-        <div style={{ flex: 1 }} />
-        <div style={{ display: "grid", gap: 8 }}>
-          {!editing && (
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setLogline(story?.logline ?? "");
-                setSpine(story?.spine ?? "");
-                setTargetLength(story?.targetLength ?? "");
-                setActsText((story?.acts ?? []).map((a) => `${a.title}${a.summary ? `: ${a.summary}` : ""}`).join("\n"));
-                setEditing(true);
-              }}
-            >
-              {story ? "Edit the overview" : "Start the overview"}
-            </Button>
-          )}
-          {production && productionShape(production.meta).hasChapters && (
-            <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)}>
-              Chapter tree · {production.chapters.length}
-            </Button>
-          )}
-          <div style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center" }}>
-            The overview steers scene and chapter drafting. It never overwrites a scene you've locked.
+                <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 6 }}>{field.proposed ?? "(removed)"}</div>
+                {field.before !== null && <div className="fy-draftcard__was">Accepted: “{field.before}”</div>}
+              </div>
+            ))}
+            {story && (
+              <div className="fy-draftcard">
+                <div className="fy-eyebrow-sm">LOGLINE</div>
+                <div className="fy-draftcard__logline">“{story.logline}”</div>
+                {spineLines.length > 0 && (
+                  <>
+                    <div className="fy-eyebrow-sm" style={{ marginTop: 14 }}>
+                      SPINE
+                    </div>
+                    {spineLines.map((line) => (
+                      <div key={line} style={{ font: "400 13px/1.7 var(--font-sans)" }}>
+                        {line}
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
           </div>
+        )}
+        <div className="fy-mono" style={{ marginTop: 12 }}>
+          {staged
+            ? "waiting on you in Proposals · the conversation staged it, the gate writes it"
+            : "the overview steers scene and chapter drafting · it never overwrites a scene you have locked"}
         </div>
       </div>
     </div>
