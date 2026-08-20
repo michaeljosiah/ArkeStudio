@@ -53,7 +53,7 @@ import {
 } from "@arke-studio/voice";
 import { BackgroundNotificationController } from "./background-notifications.js";
 import { launchDesktop, StartupController, type StartupState } from "./startup.js";
-import { takePosterOptions, takeQcOptions } from "./take-qc.js";
+import { boundaryFrameOptions, takePosterOptions, takeQcOptions } from "./take-qc.js";
 import { resolveTheme, themePalette, type ResolvedTheme, type ThemePalette } from "./theme.js";
 import { fileUpdateMarker, UpdateController } from "./updates.js";
 import {
@@ -937,6 +937,7 @@ async function initialize(): Promise<{ port: number }> {
           // without a real ffmpeg on the machine running the tests.
           ...takeQcOptions(ffmpegPath()),
           ...takePosterOptions(ffmpegPath()),
+          ...boundaryFrameOptions(ffmpegPath()),
         }
       : {}),
     // Measuring media (#253): the spine cannot make a clock out of a track whose length is

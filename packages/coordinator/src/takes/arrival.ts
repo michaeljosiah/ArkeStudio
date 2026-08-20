@@ -50,11 +50,12 @@ export interface TakeArrivalOptions {
  * The parts of a dispatch that already have somewhere better to live, and so are not settings.
  *
  * `prompt` and `text` are the take's prompt, `references` its references, `provenance` its
- * provenance, and `shotPlan` describes a pass's segments rather than how it was generated.
- * Everything else — duration, aspect, resolution, sound, seed, voice — describes how to make
- * this again, which is the whole point of keeping it.
+ * provenance, `shotPlan` describes a pass's segments rather than how it was generated, and
+ * `startFrame` is the take's own seeding-frame field (§10.4, issue 154). Everything else —
+ * duration, aspect, resolution, sound, seed, voice — describes how to make this again, which is
+ * the whole point of keeping it.
  */
-const NOT_A_SETTING = new Set(["prompt", "text", "references", "provenance", "shotPlan"]);
+const NOT_A_SETTING = new Set(["prompt", "text", "references", "provenance", "shotPlan", "startFrame"]);
 
 function settingsFrom(params: Job["params"]): Record<string, unknown> {
   const settings: Record<string, unknown> = {};
@@ -162,6 +163,10 @@ export async function recordTakesFromJob(
           ? { prompt: job.params["text"] as string }
           : {}),
       references: (job.params["references"] as string[] | undefined) ?? [],
+      // The seeding frame this clip opened on (§10.4, issue 154), when the dispatch carried one.
+      // The schema declared this field long before anything wrote it; the strict frame dispatch
+      // is its producer.
+      ...(typeof job.params["startFrame"] === "string" ? { startFrame: job.params["startFrame"] as string } : {}),
       // How it was made: everything the dispatch carried that is not already a field of its own.
       //
       // Stated as an exclusion rather than a list of settings to keep. A list would have to be

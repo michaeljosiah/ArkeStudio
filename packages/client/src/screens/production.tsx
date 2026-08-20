@@ -11,6 +11,7 @@ import {
   guestsOf,
   pendingGuestsOf,
   pendingSheets,
+  frameDispatchFor,
   modelCapabilityCopy,
   nativeResolution,
   overrideStaleAgainst,
@@ -1292,6 +1293,15 @@ export function GenerateScreen() {
   })();
   const prevAccepted = prevShot && production ? production.takes.find((t) => t.id === acceptedTakeId(production, prevShot.id)) : null;
   const prevFrame = prevAccepted && production ? takeMediaPath(production.meta.id, prevAccepted) : null;
+  // Strict frame behaviour is promised exactly where the route supports and receives it (issue
+  // 154): the model's first-frame route, and the shot's durable boundary still. Anything less is
+  // steering, and the copy says so instead of promising what the dispatch cannot send.
+  const frameRoute = model ? frameDispatchFor(model, 1) : null;
+  const boundaryFrame = (() => {
+    if (!shot || !production || !world) return null;
+    const id = production.selections[shot.id]?.startFrameArtifactId ?? null;
+    return id !== null ? (world.artifacts.find((a) => a.id === id) ?? null) : null;
+  })();
 
   const citedSheets = (() => {
     if (!shot || !world) return [];
@@ -1376,7 +1386,10 @@ export function GenerateScreen() {
           {shot ? `${shot.id.replace("sh_", "shot ")}${citedSheets.length > 0 ? ` · ${citedSheets.map((s) => `${s.name} model sheet v${s.version}`).join(" · ")}` : ""}` : ""}
         </div>
         <div className="fy-gen__label" style={{ marginTop: 16 }}>
-          Frames <span className="fy-mono">start required · end optional</span>
+          Frames{" "}
+          <span className="fy-mono">
+            {frameRoute !== null ? "start travels on the first-frame route" : "steering only · no frame route on this model"}
+          </span>
         </div>
         {world && (
           <div className="fy-worldlook-line">
@@ -1385,10 +1398,15 @@ export function GenerateScreen() {
           </div>
         )}
         <div className="fy-framerow">
-          {prevFrame ? (
+          {boundaryFrame ? (
+            <div className="fy-frame">
+              <Portrait worldSlug={slug} path={`artifacts/${boundaryFrame.file}`} label="Start frame" radius={0} />
+              <span className="fy-frame__tag">START · BOUNDARY FRAME{frameRoute !== null ? "" : " (STEERS ONLY)"}</span>
+            </div>
+          ) : prevFrame ? (
             <div className="fy-frame">
               <Portrait worldSlug={slug} path={prevFrame} label="Start frame" radius={0} />
-              <span className="fy-frame__tag">START · {prevShot!.id.replace("sh_", "SHOT ")}, LAST FRAME</span>
+              <span className="fy-frame__tag">START · {prevShot!.id.replace("sh_", "SHOT ")}, LAST FRAME (PREVIEW)</span>
             </div>
           ) : (
             <div className="fy-frame fy-frame--empty">START · FROM THE BOARD</div>
@@ -1402,7 +1420,7 @@ export function GenerateScreen() {
           <span className="fy-param">16:9</span>
           <span className="fy-param">720p</span>
           {shot && <span className="fy-param">{seconds(shot.durationSec)}</span>}
-          {prevShot && prevFrame && <span className="fy-param">opens on {prevShot.id.replace("sh_", "shot ")}'s last frame</span>}
+          {frameRoute !== null && boundaryFrame && <span className="fy-param">opens on its boundary frame</span>}
         </div>
         <div className="fy-gen__cta">
           {model && (
@@ -1637,6 +1655,9 @@ export function DispatchDialogScreen() {
       scene,
       selections: production.selections,
       model,
+      // The world's shelf, so a durable boundary frame resolves here exactly as it will at the
+      // coordinator (issue 154) — the dialog's claim is that it runs the same function.
+      artifacts: world.artifacts,
       ...(resolution !== undefined ? { resolution } : {}),
       ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
     };
@@ -1653,6 +1674,20 @@ export function DispatchDialogScreen() {
   const warningRows: Array<{ key: string; text: string }> = [];
   if (warnings) {
     for (const s of warnings.shotsWithoutFrame) warningRows.push({ key: `nf-${s.shotId}`, text: `shot ${s.number} has no accepted frame` });
+    // Issue 154: strict frame behaviour is promised exactly where the route receives it — the
+    // shot opens on its durable boundary still, and the references that stepped aside are named.
+    for (const f of warnings.framedShots)
+      warningRows.push({
+        key: `bf-${f.shotId}`,
+        text: `shot ${f.number} opens on its boundary frame${
+          f.setAside.length > 0 ? ` — ${f.setAside.join(", ")} step aside, the frame route takes one image` : ""
+        }`,
+      });
+    for (const f of warnings.staleFrames)
+      warningRows.push({
+        key: `sf-${f.shotId}`,
+        text: `shot ${f.number}'s start frame is unusable: ${f.detail} — this blocks dispatch`,
+      });
     for (const name of warnings.sketchCitations) warningRows.push({ key: `sk-${name}`, text: `${name} is a sketch — dispatch cites an unlocked sheet` });
     for (const d of warnings.droppedReferences) {
       warningRows.push({

@@ -22,6 +22,7 @@ import {
   exportOverlays,
   deriveEpisodeCut,
   episodeExportRefusals,
+  sortScenes,
   buildFfmpegArgs,
   buildSpineExportPlan,
   buildSpineFfmpegArgs,
@@ -109,6 +110,7 @@ import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
+import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 
 /**
  * How long an opening bench session may spend drawing pictures it should already have. Long
@@ -390,6 +392,12 @@ export interface CoordinatorOptions {
    */
   takeQcAnalyzer?: TakeQcAnalyzer;
   takePosterMaker?: TakePosterMaker;
+  /**
+   * Boundary-frame extraction (issue 154), on the same terms as the poster maker: wired only
+   * where an ffmpeg binary resolves. Absent means accepting a take chains only the legacy
+   * steering pointer, and the reason is logged rather than silent.
+   */
+  boundaryFrameMaker?: BoundaryFrameMaker;
   /**
    * The credential file's name inside the app root. Only dev overrides it, and only because its
    * cipher is not safeStorage: `ARKE_STUDIO_ROOT` can point the dev coordinator at a real app
@@ -3523,7 +3531,7 @@ export class Coordinator {
         const scene = production?.scenes.find((s) => production.sceneFiles[s.id] === msg.sceneFile);
         if (!production || !scene) return;
         try {
-          const png = await compileBoard(store, production, scene);
+          const png = await compileBoard(store, production, scene, bundle.artifacts);
           if (msg.kind === "compile-scene-board") {
             await landBoard(store, msg.productionId, msg.sceneFile, png, () => new Date().toISOString());
           } else {
@@ -3574,6 +3582,8 @@ export class Coordinator {
             selections: production.selections,
             model,
             audioDesign,
+            // The world's shelf, for resolving durable boundary frames (issue 154).
+            artifacts: bundle.artifacts,
             ...(msg.resolution !== undefined ? { resolution: msg.resolution } : {}),
             ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
           },
@@ -3636,6 +3646,32 @@ export class Coordinator {
             selection: store.getBundle().productions.find((p) => p.meta.id === msg.productionId)
               ?.selections[msg.shotId] ?? { acceptedTakeId: msg.takeId as never, trimInSec: 0 },
           });
+          // Continuity's durable half (issue 154): the accept promised the following shot a
+          // start frame — cut the actual picture, file it with provenance, and point the
+          // selection at it. Total and best-effort: a build without ffmpeg logs why and the
+          // accept stands exactly as it did before boundary frames existed.
+          const fresh = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+          const acceptedTake = fresh?.takes.find((t) => t.id === msg.takeId);
+          if (fresh !== undefined && acceptedTake !== undefined) {
+            const ordered = sortScenes(fresh.scenes).flatMap((s) => s.shots);
+            const index = ordered.findIndex((s) => s.id === msg.shotId);
+            const following = index >= 0 ? ordered[index + 1] : undefined;
+            if (following !== undefined) {
+              const chained = await chainBoundaryFrame(store, fresh, {
+                take: acceptedTake,
+                followingShotId: following.id,
+                maker: this.opts.boundaryFrameMaker,
+                clock: () => new Date().toISOString(),
+              });
+              if (!chained.ok) {
+                void this.appLog?.append({
+                  kind: "boundary-frame.unavailable",
+                  reason: chained.reason,
+                  detail: { takeId: msg.takeId, shotId: following.id },
+                });
+              }
+            }
+          }
           await this.refreshWorldSnapshot(msg.worldId);
         } catch {
           this.transport.broadcastSnapshot();

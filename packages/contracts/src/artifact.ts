@@ -74,6 +74,26 @@ export const ArtifactGenerationSchema = z
   .strict();
 export type ArtifactGeneration = z.infer<typeof ArtifactGenerationSchema>;
 
+/**
+ * How a boundary still was cut from footage (issue 154). Like `generation` is for bench takes,
+ * this is part of the asset's identity: the source take, the moment within its media, and the
+ * method that decoded it. A frame that cannot say where it came from cannot be trusted to open
+ * the next shot, and a stale one cannot be detected.
+ */
+export const BoundaryExtractionSchema = z
+  .object({
+    /** The accepted take whose footage the frame closes — a segment take for a pass boundary. */
+    sourceTakeId: TakeIdSchema,
+    /** The take whose media file was actually decoded (the pass, when the source is a segment). */
+    mediaTakeId: TakeIdSchema,
+    /** Seconds into that media; null means the final decoded frame of the clip. */
+    atSec: z.number().min(0).nullable(),
+    /** Extraction method and version, so a better cutter can supersede rather than overwrite. */
+    method: z.string().min(1),
+  })
+  .strict();
+export type BoundaryExtraction = z.infer<typeof BoundaryExtractionSchema>;
+
 export const ArtifactSidecarSchema = z
   .object({
     id: ArtifactIdSchema,
@@ -122,9 +142,17 @@ export const ArtifactSidecarSchema = z
       .optional(),
     /** Present exactly on artifacts a bench take filed. `made here` derives from this + origin. */
     generation: ArtifactGenerationSchema.optional(),
+    /** Present exactly on boundary stills cut from accepted footage (issue 154). */
+    boundaryExtraction: BoundaryExtractionSchema.optional(),
     created: IsoDateTimeSchema,
   })
-  .strict();
+  .strict()
+  // A boundary frame is a picture by definition (issue 154): a video filed with extraction
+  // provenance is a clip pretending to be a frame, which is exactly the confusion the durable
+  // asset exists to end. Enforced at parse so no writer can smuggle one past the read path.
+  .refine((sidecar) => sidecar.boundaryExtraction === undefined || sidecar.kind === "image", {
+    message: "a boundary frame must be an image artifact",
+  });
 export type ArtifactSidecar = z.infer<typeof ArtifactSidecarSchema>;
 
 /**

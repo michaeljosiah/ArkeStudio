@@ -757,8 +757,15 @@ export function modelCapabilityCopy(model: ManifestModel): string {
   const parts: string[] = [];
   if (model.accepts.referenceImages > 0) parts.push(`refs ×${model.accepts.referenceImages}`);
   else parts.push("no refs");
-  if (model.accepts.startFrame && model.accepts.endFrame) parts.push("frames");
-  else if (model.accepts.startFrame) parts.push("start frame");
+  // Frames read from the same authority the dispatch uses (issue 154): a task-mode route that
+  // takes them, or the legacy accepts flags where a row still claims them without one. The old
+  // flags-only read printed nothing for every fal video row that genuinely dispatches a first
+  // frame through its image-to-video sibling.
+  if (frameDispatchFor(model, 2) !== null || (model.accepts.startFrame && model.accepts.endFrame)) {
+    parts.push("frames");
+  } else if (frameDispatchFor(model, 1) !== null || model.accepts.startFrame) {
+    parts.push("start frame");
+  }
   if (model.limits.maxDurationSec !== undefined) parts.push(`${model.limits.maxDurationSec}s`);
   return parts.join(" · ");
 }
@@ -915,4 +922,46 @@ export function aspectAllowed(model: ManifestModel, ratio: number): boolean {
   const range = model.aspectRange;
   if (range) return ratio >= range.min && ratio <= range.max;
   return model.limits.aspects === undefined || model.limits.aspects.length === 0;
+}
+
+// ---------------------------------------------------------------------------
+// Boundary-frame capability (issue 154): one query, one answer, every consumer
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything a frame-carrying dispatch needs to know, decided in one place.
+ *
+ * The catalogue speaks two vocabularies about frames. `accepts.startFrame`/`endFrame` are the
+ * legacy per-row booleans — false on every shipped fal video row, pinned false by test, because
+ * the row's default route has no image input at all. Task modes are where frame capability
+ * really lives: `first-frame` and `first-and-last-frame` name the image-to-video sibling route
+ * and what it locks. Planning, the picker, the estimate and the dispatch all consult THIS
+ * projection rather than reading either vocabulary directly, so they cannot disagree about
+ * whether a frame travels or where it lands.
+ */
+export interface FrameDispatch {
+  mode: Extract<TaskMode, "first-frame" | "first-and-last-frame">;
+  /** The provider route, or null when the mode runs on the model's default endpoint. */
+  route: string | null;
+  /** The route's own field names — what the transport actually writes (SPEC-019 T-1). */
+  fields: { start: string; end: string | null };
+  locked: LockedParameter[];
+}
+
+/**
+ * How this model takes `frames` boundary images, or null when it cannot.
+ *
+ * Null is a refusal the caller must honour before submit: composing a frame dispatch for a
+ * model this returns null for is asking a text route to read an image field it does not have.
+ */
+export function frameDispatchFor(model: ManifestModel, frames: 1 | 2): FrameDispatch | null {
+  const mode = frames === 1 ? ("first-frame" as const) : ("first-and-last-frame" as const);
+  const spec = modeSpec(model, mode);
+  if (spec === null) return null;
+  return {
+    mode,
+    route: spec.route ?? null,
+    fields: { start: "image_url", end: frames === 2 ? "end_image_url" : null },
+    locked: spec.locked,
+  };
 }

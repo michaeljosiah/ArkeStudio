@@ -17,12 +17,14 @@ import {
   dispatchDuration,
   durationOptions,
   estimateMicroUsd,
+  frameDispatchFor,
   pricedDuration,
   sceneImageOutput,
   type DurationChoice,
   type ManifestModel,
   type SizeTier,
 } from "./manifest.js";
+import type { ArtifactSidecar } from "./artifact.js";
 import { chooseReferenceSteering, type ReferenceSteering } from "./storyboard.js";
 import type { Scene, Shot } from "./scene.js";
 import type { Selections } from "./scene.js";
@@ -935,6 +937,20 @@ function locationSheetPanels(kit: ReferenceKit, designated: Compilation): string
 
 export interface DispatchWarnings {
   shotsWithoutFrame: Array<{ shotId: string; number: number }>;
+  /**
+   * Shots whose dispatch opens on a durable boundary frame (issue 154), stated before commit.
+   * The frame route takes exactly one image, so the sheet references that would otherwise ride
+   * along step aside — `setAside` names them, because a subject silently losing its reference
+   * image is a change in what money buys.
+   */
+  framedShots: Array<{ shotId: string; number: number; artifactId: string; setAside: string[] }>;
+  /**
+   * Frame selections that name something a dispatch must not send (issue 154): an artifact
+   * missing from this world, superseded, or not an image at all. Named here and refused at
+   * dispatch — a dangling frame silently dropped is a shot that opens on whatever the model
+   * invents, which is the failure boundary frames exist to prevent.
+   */
+  staleFrames: Array<{ shotId: string; number: number; detail: string }>;
   sketchCitations: string[];
   droppedReferences: BudgetResult["dropped"];
   staleModelSheets: string[];
@@ -1046,6 +1062,21 @@ export interface ScenePlanInput {
   referenceBytes?: Record<string, number>;
   /** The transport's inline ceiling in bytes, when the caller knows it. */
   payloadCeilingBytes?: number;
+  /**
+   * The world's artifacts, for resolving durable boundary frames (issue 154). Planning stays
+   * pure, so the caller hands the shelf in. Absent means frame selections cannot be resolved
+   * here at all — no frame travels and none is called stale, which is what a caller that
+   * predates boundary frames already expects.
+   */
+  artifacts?: readonly ArtifactSidecar[];
+}
+
+/** The durable still a shot's dispatch opens on (issue 154), resolved from its selection. */
+export interface BoundaryFramePlan {
+  artifactId: string;
+  /** World-relative path, the same shape references travel as. */
+  file: string;
+  hash: string;
 }
 
 export interface ShotDispatchPlan {
@@ -1058,6 +1089,13 @@ export interface ShotDispatchPlan {
   parts: PromptParts;
   budget: BudgetResult;
   estimatedMicroUsd: number;
+  /**
+   * Present exactly when this dispatch carries a strict start frame (issue 154): the model
+   * declares a first-frame route and the shot's selection names a valid image artifact. The
+   * frame route takes one image, so a shot that carries this carries no sheet references —
+   * `bound` is empty and the warnings name what stepped aside.
+   */
+  frame?: BoundaryFramePlan;
 }
 
 export interface ScenePlan {
@@ -1139,11 +1177,63 @@ function budgetFor(
   return referenceBudget(candidates, model);
 }
 
+/**
+ * The line a strict start frame replaces the binding preamble with (issue 154). The image-to-
+ * video route takes one picture and treats it as frame one; the words have to say that is what
+ * it is, or the model reads it as loose inspiration and the continuity the frame exists for is
+ * lost.
+ */
+export const START_FRAME_PREAMBLE =
+  "The attached image is this clip's exact first frame. Continue the motion from it.";
+
+/** How each shot's boundary-frame selection resolves against the world's shelf (issue 154). */
+function resolveBoundaryFrames(
+  scene: Scene,
+  selections: Selections,
+  model: ManifestModel,
+  artifacts: readonly ArtifactSidecar[] | undefined,
+  mode: "per-shot" | "whole-scene",
+): Map<string, { frame?: BoundaryFramePlan; stale?: string }> {
+  const states = new Map<string, { frame?: BoundaryFramePlan; stale?: string }>();
+  // Without the shelf nothing can be resolved — no frame travels, none is called stale. The
+  // caller that cannot supply artifacts is the caller that predates them.
+  if (artifacts === undefined) return states;
+  const route = frameDispatchFor(model, 1);
+  for (const shot of scene.shots) {
+    const artifactId = selections[shot.id]?.startFrameArtifactId ?? null;
+    if (artifactId === null) continue;
+    const artifact = artifacts.find((candidate) => candidate.id === artifactId);
+    if (artifact === undefined) {
+      states.set(shot.id, { stale: `${artifactId} is not in this world` });
+      continue;
+    }
+    if (artifact.kind !== "image") {
+      states.set(shot.id, { stale: `${artifactId} is ${artifact.kind}, not an image` });
+      continue;
+    }
+    if (artifacts.some((candidate) => candidate.supersedes === artifactId)) {
+      states.set(shot.id, { stale: `${artifactId} has been superseded` });
+      continue;
+    }
+    // A valid frame only travels where a route exists to receive it, and only per-shot — a
+    // whole-scene pass covers many shots and the route takes one picture (SPEC-019 T-1).
+    if (route !== null && model.capability === "video" && mode === "per-shot") {
+      states.set(shot.id, {
+        frame: { artifactId, file: `artifacts/${artifact.file}`, hash: artifact.hash },
+      });
+    }
+  }
+  return states;
+}
+
 /** The whole plan, computed before a dollar moves (R-17, R-20). Nothing here blocks (D12). */
 export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene"): ScenePlan {
   const { world, sheets, kits, scene, selections, model } = input;
   const { resolved, perShot } = sceneCast(scene, sheets);
   const capSec = model.limits.maxDurationSec ?? Number.POSITIVE_INFINITY;
+  // Boundary frames resolved before anything is bound or priced (issue 154): a shot that opens
+  // on a durable frame takes the first-frame route, which changes what else may travel with it.
+  const boundaryFrames = resolveBoundaryFrames(scene, selections, model, input.artifacts, mode);
 
   // Merged once for the whole plan (#244). Both dispatch shapes are the same clip's constraints,
   // and computing it twice is how the per-shot and whole-scene paths come to disagree about what
@@ -1161,9 +1251,13 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
         { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id },
       ),
     );
+    // A strict start frame displaces the sheet references (issue 154): the first-frame route
+    // takes exactly one image, so nothing else may ride, and the budget's carried set is named
+    // in the warnings as what stepped aside rather than silently thinned.
+    const frame = boundaryFrames.get(shot.id)?.frame;
     // Bound before the duration is priced (issue #390): what actually travels decides which
     // route the provider takes, and the reference route's ceiling can be shorter.
-    const bound = bindReferences(references, sheets);
+    const bound = frame !== undefined ? [] : bindReferences(references, sheets);
     // The length that will actually be asked for. A route takes one of a fixed few lengths, so
     // a 6.5s shot becomes a 7s dispatch — and the estimate has to be the 7, or the figure shown
     // and the figure billed are for two different requests. A shot longer than anything the
@@ -1200,7 +1294,9 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       model.capability,
     );
     const parts: PromptParts = {
-      preamble: bindingPreamble(bound),
+      // A framed shot states what its one image IS (issue 154); a referenced shot numbers its
+      // assets. Never both — the route carries one or the other.
+      preamble: frame !== undefined ? START_FRAME_PREAMBLE : bindingPreamble(bound),
       body: prompt.text,
       negatives: derivedNegatives({
         capability: model.capability,
@@ -1217,6 +1313,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       parts,
       budget,
       estimatedMicroUsd: estimate,
+      ...(frame !== undefined ? { frame } : {}),
     };
   });
 
@@ -1345,15 +1442,36 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       })
     : [];
   const warnings: DispatchWarnings = {
-    // Only where a frame would actually travel. Warning that a shot has no accepted frame, on a
-    // model that cannot take one, tells the user to go and fix something that would change
-    // nothing about the dispatch (#154). It returns of its own accord the day a model declares
-    // it takes a start frame and the dispatch carries it.
-    shotsWithoutFrame: model.accepts.startFrame
-      ? scene.shots
-          .filter((s) => !(selections[s.id]?.startFrameTakeId ?? null))
-          .map((s) => ({ shotId: s.id, number: s.number }))
-      : [],
+    // Only where a frame would actually travel (issue 154). The authority is the same one the
+    // dispatch uses — a first-frame task-mode route — with the legacy accepts flag honoured for
+    // the rows that still claim frames without one. Warning on a model that cannot take a frame
+    // tells the user to fix something that would change nothing about the dispatch.
+    shotsWithoutFrame:
+      frameDispatchFor(model, 1) !== null || model.accepts.startFrame
+        ? scene.shots
+            .filter(
+              (s) => !(selections[s.id]?.startFrameArtifactId ?? selections[s.id]?.startFrameTakeId ?? null),
+            )
+            .map((s) => ({ shotId: s.id, number: s.number }))
+        : [],
+    framedShots: shots.flatMap((entry) =>
+      entry.frame !== undefined
+        ? [
+            {
+              shotId: entry.shot.id,
+              number: entry.shot.number,
+              artifactId: entry.frame.artifactId,
+              // Deduplicated: a subject carrying a primary and a secondary reference stepped
+              // aside once, not once per asset.
+              setAside: [...new Set(entry.budget.carried.map((candidate) => candidate.sheetId))],
+            },
+          ]
+        : [],
+    ),
+    staleFrames: scene.shots.flatMap((shot) => {
+      const stale = boundaryFrames.get(shot.id)?.stale;
+      return stale !== undefined ? [{ shotId: shot.id, number: shot.number, detail: stale }] : [];
+    }),
     sketchCitations: resolved.cast.filter((c) => c.sheet.status === "sketch").map((c) => c.sheet.name),
     droppedReferences,
     staleModelSheets: resolved.cast

@@ -8,6 +8,7 @@ import {
   composePrompt,
   dispatchDuration,
   estimateMicroUsd,
+  frameDispatchFor,
   parseMentions,
   passStructure,
   legacyFormatFor,
@@ -38,6 +39,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
+import { posterNameFor } from "../takes/poster.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { readChanges } from "../world/change-writer.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -629,25 +631,38 @@ const BOARD_CELL = 320;
 const BOARD_GAP = 12;
 
 /** Compile the board image from selected/pinned frames — local, free, repeatable (R-11). */
-export async function compileBoard(store: WorldStore, production: ProductionBundle, scene: Scene): Promise<Uint8Array> {
+export async function compileBoard(
+  store: WorldStore,
+  production: ProductionBundle,
+  scene: Scene,
+  artifacts: readonly ArtifactSidecar[] = [],
+): Promise<Uint8Array> {
   const rows = Math.max(1, Math.ceil(scene.shots.length / BOARD_COLS));
   const width = BOARD_COLS * BOARD_CELL + (BOARD_COLS + 1) * BOARD_GAP;
   const height = rows * BOARD_CELL + (rows + 1) * BOARD_GAP;
   const canvas: RgbaImage = solidImage(width, height, [24, 24, 26, 255]);
   for (const [i, shot] of scene.shots.entries()) {
     const selection = production.selections[shot.id];
-    const takeId = selection?.startFrameTakeId ?? selection?.acceptedTakeId ?? null;
     const col = i % BOARD_COLS;
     const row = Math.floor(i / BOARD_COLS);
     const x = BOARD_GAP + col * (BOARD_CELL + BOARD_GAP);
     const y = BOARD_GAP + row * (BOARD_CELL + BOARD_GAP);
-    if (takeId === null) continue; // an empty slot stays a gap — same discipline as the grid
-    const take = production.takes.find((t) => t.id === takeId);
-    if (!take?.media) continue;
+    // The durable boundary still first (issue 154): it IS a picture, cut for exactly this.
+    const boundary = artifacts.find((candidate) => candidate.id === (selection?.startFrameArtifactId ?? null));
+    // A take's cell never decodes its media blind: video media is decoded through the poster
+    // convention (`frame.png` beside the clip) — handing an .mp4's bytes to the PNG decoder was
+    // how every continuity-chained shot silently became a gap (issue 154).
+    const takeId = selection?.startFrameTakeId ?? selection?.acceptedTakeId ?? null;
+    const take = takeId !== null ? production.takes.find((t) => t.id === takeId) : undefined;
+    const cell =
+      boundary !== undefined
+        ? join(store.dir, "artifacts", boundary.file)
+        : take?.media !== undefined && takeId !== null
+          ? join(store.dir, "productions", production.meta.id, "takes", takeId, posterNameFor(take.media))
+          : null;
+    if (cell === null) continue; // an empty slot stays a gap — same discipline as the grid
     try {
-      const bytes = await readFile(
-        toExtendedLength(join(store.dir, "productions", production.meta.id, "takes", takeId, take.media)),
-      );
+      const bytes = await readFile(toExtendedLength(cell));
       drawScaled(canvas, decodePng(Uint8Array.from(bytes)), x, y, BOARD_CELL, BOARD_CELL);
     } catch {
       /* an unreadable frame stays a gap rather than failing the board */
@@ -837,35 +852,58 @@ export function composeDispatches(
     ),
   });
   if (plan.mode === "per-shot") {
-    return plan.shots.map((entry) => ({
-      worldId,
-      productionId,
-      target: { kind: "shot", id: entry.shot.id, coversShots: [entry.shot.id] },
-      capability: model.capability,
-      provider: model.provider,
-      model: model.id,
-      params: {
-        // Preamble + overridable body + derived negatives (SPEC-019 R-3, R-13). The array below
-        // comes from the same bound records the preamble numbers, so the stated order and the
-        // sent order are one structure rather than two that can drift (R-2, D2).
-        prompt: composePrompt(entry.parts),
-        references: boundFiles(entry.bound),
-        // The length the plan priced, which is the length the route can actually be asked for.
-        // Sending the raw shot seconds meant the job asked for something no route accepts, and
-        // the client then had nothing to translate.
-        ...(entry.shot.durationSec !== undefined
-          ? {
-              durationSec: askedSeconds(model, entry.shot.durationSec, `shot ${entry.shot.number}`, {
-                withReferences: entry.bound.length > 0,
-              }),
-            }
-          : {}),
-        ...sizeParams(model, plan),
-        provenance: provenanceFor(entry.budget.carried.map((c) => c.sheetId)),
-      },
-      estimatedMicroUsd: entry.estimatedMicroUsd,
-      landing: { dir: `productions/${productionId}/incoming/${entry.shot.id}` },
-    }));
+    // A stale frame selection cannot dispatch (issue 154): the plan named it, and composing the
+    // request anyway would send a shot to open on an artifact this world cannot produce.
+    const stale = plan.warnings.staleFrames;
+    if (stale.length > 0) {
+      const worst = stale[0]!;
+      throw new Error(`shot ${worst.number}'s start frame is unusable: ${worst.detail}`);
+    }
+    return plan.shots.map((entry) => {
+      // The strict frame dispatch (issue 154): the boundary still is the one image the
+      // first-frame route takes, resolved by the same authority the plan and the picker read.
+      const frameRoute = entry.frame !== undefined ? frameDispatchFor(model, 1) : null;
+      const framed = entry.frame !== undefined && frameRoute !== null;
+      return {
+        worldId,
+        productionId,
+        target: { kind: "shot" as const, id: entry.shot.id, coversShots: [entry.shot.id] },
+        capability: model.capability,
+        provider: model.provider,
+        model: model.id,
+        params: {
+          // Preamble + overridable body + derived negatives (SPEC-019 R-3, R-13). The array below
+          // comes from the same bound records the preamble numbers, so the stated order and the
+          // sent order are one structure rather than two that can drift (R-2, D2).
+          prompt: composePrompt(entry.parts),
+          references: framed ? [entry.frame!.file] : boundFiles(entry.bound),
+          ...(framed
+            ? {
+                taskMode: frameRoute!.mode,
+                ...(frameRoute!.route !== null ? { route: frameRoute!.route } : {}),
+                // The durable identity of what was sent (issue 154): the take records the frame
+                // it opened on, and the job can be audited against the exact bytes by hash.
+                startFrame: entry.frame!.file,
+                frameArtifact: { id: entry.frame!.artifactId, hash: entry.frame!.hash },
+              }
+            : {}),
+          // The length the plan priced, which is the length the route can actually be asked for.
+          // Sending the raw shot seconds meant the job asked for something no route accepts, and
+          // the client then had nothing to translate.
+          ...(entry.shot.durationSec !== undefined
+            ? {
+                durationSec: askedSeconds(model, entry.shot.durationSec, `shot ${entry.shot.number}`, {
+                  withReferences: entry.bound.length > 0,
+                }),
+              }
+            : {}),
+          ...sizeParams(model, plan),
+          provenance: provenanceFor(entry.budget.carried.map((c) => c.sheetId)),
+        },
+        estimatedMicroUsd: entry.estimatedMicroUsd,
+        landing: { dir: `productions/${productionId}/incoming/${entry.shot.id}` },
+      };
+    });
   }
   if (!plan.pack.ok) return [];
   return plan.pack.passes.map((pass) => {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDateTimeSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { ArtifactIdSchema, IsoDateTimeSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
 
 /**
  * A scene-script block (SPEC-023 R-13): the smallest stable thing a shot can cite. Block ids
@@ -203,6 +203,14 @@ export const ShotSelectionSchema = z
   .object({
     acceptedTakeId: TakeIdSchema.nullable().optional(),
     startFrameTakeId: TakeIdSchema.nullable().optional(),
+    /**
+     * The durable boundary still this shot opens on (issue 154): an image artifact cut from the
+     * previous shot's accepted footage, with its own bytes, hash and extraction provenance.
+     * `startFrameTakeId` above names footage and can only steer; this names a picture the
+     * dispatch can actually send. Optional and nullable so every selections.json written before
+     * boundary frames existed parses unchanged.
+     */
+    startFrameArtifactId: ArtifactIdSchema.nullable().optional(),
     /**
      * Where this shot starts inside its selected media (#253). Operational selection state, not
      * an edit to the take: the take is immutable and this says which part of it is being used.

@@ -221,6 +221,10 @@ export class FalClient implements ProviderClient {
       "taskMode",
       "route",
       "framesField",
+      // Ours, not fal's: the durable identity of a boundary frame (issue 154) — the picture
+      // itself already travelled as the mode's image field.
+      "startFrame",
+      "frameArtifact",
       // Ours, not fal's: the routes that offer the choice spell it `generate_audio`.
       "sound",
       // Ours, not fal's: the length goes as `duration`, in this route's own vocabulary.

@@ -10,6 +10,7 @@ import {
   estimateCharacterImageMicroUsd,
   estimateMicroUsd,
   formatMicroUsd,
+  frameDispatchFor,
   aspectOffered,
   gateLocalRuntimes,
   imageOutputFor,
@@ -67,13 +68,14 @@ describe("the shipped manifest (R-9, §3.2)", () => {
   });
 
   it("capability copy matches the manifest for accepting and refusing models (R-10)", () => {
-    // The refusing side. ltx ships a text route and nothing else, so its row takes no references
-    // — and still names its length, because a video row's length is the other half of the copy.
-    assert.equal(modelCapabilityCopy(model("ltx-2.5-pro")), "no refs · 10s");
-    // The accepting side, on video. These rows read "no refs" for as long as the families were
-    // curated as text-only (#154); the reference-to-video siblings were there the whole time,
-    // and a row that hides a route it has is the same lie as one that claims a route it lacks.
-    assert.equal(modelCapabilityCopy(model("seedance-2.0")), "refs ×9 · 15s");
+    // ltx takes no references — and still says "frames", because its image-to-video sibling
+    // genuinely takes a first frame (issue 154): the copy reads the same task-mode authority the
+    // dispatch does, not the legacy accepts flags.
+    assert.equal(modelCapabilityCopy(model("ltx-2.5-pro")), "no refs · frames · 10s");
+    // The accepting side, on video: references from the edit sibling, frames from the modes.
+    assert.equal(modelCapabilityCopy(model("seedance-2.0")), "refs ×9 · frames · 15s");
+    // A row with neither modes nor accepts flags promises nothing about frames.
+    assert.equal(modelCapabilityCopy(model("veo-3.1")), "no refs · 8s");
     // And on image. This used to be Higgsfield's "halcyon-1.5", whose row claimed both frames —
     // for a model that turned out not to exist in the catalogue under any name (#137). Soul is
     // the real row, and it takes exactly one reference.
@@ -82,10 +84,44 @@ describe("the shipped manifest (R-9, §3.2)", () => {
 
   it("no fal video row claims a frame its route cannot take", () => {
     // The failure this prevents: the picker printing "frames" beside a model, and the dispatch
-    // dialog warning about shots without one, for a route that has no image input at all.
+    // dialog warning about shots without one, for a route that has no image input at all. Frame
+    // capability lives in task modes (issue 154) — the accepts flags stay false because the
+    // row's DEFAULT route still has no image field.
     for (const video of SHIPPED_MANIFEST.models.filter((m) => m.capability === "video" && m.provider === "fal")) {
       assert.equal(video.accepts.startFrame, false, `${video.id} claims no start frame`);
       assert.equal(video.accepts.endFrame, false, `${video.id} claims no end frame`);
+    }
+  });
+
+  it("one query answers frames for every row, and it answers with the dispatchable route (issue 154)", () => {
+    // The two-vocabulary trap this ends: accepts said false while the modes shipped a route, and
+    // production planning read the false half. Every row that declares a first-frame mode must
+    // give the query a route the transport can actually submit to, and every row without one
+    // must refuse — before submit, not at the provider.
+    for (const video of SHIPPED_MANIFEST.models.filter((m) => m.capability === "video" && m.provider === "fal")) {
+      const one = frameDispatchFor(video, 1);
+      const two = frameDispatchFor(video, 2);
+      if (video.modes?.["first-frame"] !== undefined) {
+        assert.ok(one !== null, `${video.id} declares first-frame, so the query must answer`);
+        assert.match(one.route ?? "", /image-to-video/, `${video.id}'s frame route is the i2v sibling`);
+        assert.equal(one.fields.start, "image_url");
+        assert.equal(one.fields.end, null);
+      } else {
+        assert.equal(one, null, `${video.id} declares no first-frame mode, so the query refuses`);
+      }
+      if (video.modes?.["first-and-last-frame"] !== undefined) {
+        assert.ok(two !== null, `${video.id} declares first-and-last, so the query must answer`);
+        assert.equal(two.fields.end, "end_image_url");
+      } else {
+        assert.equal(two, null, `${video.id} declares no first-and-last mode, so the query refuses`);
+      }
+    }
+    // The families the catalogue curates today, pinned by name so a sync that drops one is loud.
+    for (const id of ["seedance-2.0", "seedance-2.0-fast", "minimax-h3", "ltx-2.5-pro", "ltx-2.5-fast", "wan-2.7"]) {
+      assert.ok(frameDispatchFor(model(id), 1) !== null, `${id} takes a first frame`);
+    }
+    for (const id of ["veo-3.1", "veo-3.1-fast", "kling-3-pro", "kling-3-standard"]) {
+      assert.equal(frameDispatchFor(model(id), 1), null, `${id} has no frame route`);
     }
   });
 
